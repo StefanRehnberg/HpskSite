@@ -91,7 +91,17 @@ namespace HpskSite.Controllers
             var member = me > 0 ? _memberService.GetById(me) : null;
             var roster = await _participation.BuildRosterAsync(ctx);
             bool canManage = me > 0 && await _participation.CanManageAsync(ctx, me);
-            var mine = roster.Rows.FirstOrDefault(r => r.MemberId == me);
+            // ⚠️⚠️ `me > 0` OCH `!IsGuest` — BÅDA behövs, och utan dem läcker kortet.
+            // En gästrad bär MemberId = 0. En utloggad besökare har också me = 0. Enbart
+            // `r.MemberId == me` hade alltså matchat FÖRSTA GÄSTEN på evenemanget och visat hens
+            // namn, notering och pris som "din anmälan" för vem som helst som öppnade sidan.
+            var mine = me > 0
+                ? roster.Rows.FirstOrDefault(r => !r.IsGuest && r.MemberId == me)
+                : null;
+
+            // Medlemmens sällskap: hen själv plus de hen tagit med. Summan läses ur radernas
+            // snapshots, aldrig ur dagens prislista.
+            var party = mine != null ? ClubEventParticipationService.BuildParty(roster, me) : null;
 
             // The roster is visible to the owning club's own members (it is their club's event) and
             // to functionaries. Everyone else sees the COUNT — that is what tells a visitor whether
@@ -144,13 +154,40 @@ namespace HpskSite.Controllers
                     cancelled = mine.Cancelled,
                     isReserve = mine.IsReserve,
                     note = mine.Note,
-                    attendanceStatus = mine.AttendanceStatus
+                    attendanceStatus = mine.AttendanceStatus,
+                    // Vad hen valde och vad det kostade DÅ. Snapshot — höjs priset efteråt står
+                    // medlemmen kvar på det hen sa ja till, och kortet ska visa just det.
+                    feePriceId = mine.FeePriceId,
+                    feeLabel = mine.FeeLabel,
+                    feeAmount = mine.FeeAmount
+                },
+                // Sällskapet — medlemmens egna gäster och vad de tillsammans kostar. Bara till den
+                // det gäller: gästernas namn är inte allmän information, och `party` byggs bara när
+                // `mine` finns.
+                party = party == null ? null : new
+                {
+                    people = party.People,
+                    total = party.Total,
+                    missingPrice = party.MissingPrice,
+                    maxGuests = ClubEvents.MaxGuestsPerMember,
+                    guests = party.Guests.Select(g => new
+                    {
+                        id = g.Id,
+                        name = g.Name,
+                        isReserve = g.IsReserve,
+                        feeLabel = g.FeeLabel,
+                        feeAmount = g.FeeAmount
+                    })
                 },
                 roster = showRoster
                     ? roster.Rows.Where(r => !r.Cancelled && !r.IsWalkIn).Select(r => new
                     {
                         memberId = r.MemberId,
                         name = r.Name,
+                        // ⚠️ Gästen ska SYNAS som gäst på listan. Ett namn utan konto bland
+                        // medlemsnamnen ser ut som en medlem vi inte hittar, och funktionären som
+                        // letar efter hen i medlemsregistret letar förgäves.
+                        isGuest = r.IsGuest,
                         isReserve = r.IsReserve,
                         signedUpAt = r.SignedUpAt?.ToString("yyyy-MM-dd HH:mm")
                     })
@@ -270,7 +307,13 @@ namespace HpskSite.Controllers
                         : $"Anmälan är öppen för medlemmar i {ctx.OwnerName}."
                 });
 
-            var (ok, msg, isReserve) = await _participation.SignUpAsync(ctx, me, request?.Note, me);
+            // ⚠️ PRISVALET GRINDAS FORE anmalan skrivs. Har evenemanget flera priser och inget
+            // giltigt valts skulle SignUpAsync satta beloppet till null, och deltagaren stod som
+            // anmald utan att nagon vet vad hen ska betala. Ett halvt atagande ar varre an inget.
+            var priceError = ClubEventParticipationService.PriceChoiceError(ctx, request?.PriceId);
+            if (priceError != null) return Json(new { success = false, message = priceError });
+
+            var (ok, msg, isReserve) = await _participation.SignUpAsync(ctx, me, request?.Note, me, request?.PriceId);
             if (!ok) return Json(new { success = false, message = msg });
 
             // ── Lånevapnet, som en del av SAMMA handling ──────────────────────────────────────
@@ -331,7 +374,7 @@ namespace HpskSite.Controllers
             if (target != me && !canManage)
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
-            var (ok, msg) = await _participation.CancelAsync(ctx.EventId, target, me);
+            var (ok, msg, guestsCancelled) = await _participation.CancelAsync(ctx.EventId, target, me);
             if (!ok) return Json(new { success = false, message = msg });
 
             // ⚠️ AVBOKNINGEN MÅSTE SLÄPPA VAPNET. Anmälan och lånet gjordes som EN handling, och
@@ -339,7 +382,90 @@ namespace HpskSite.Controllers
             // som inte kommer — samtidigt som platsen är tagen från någon som gör det.
             var loanMessage = ReleaseLoanOnCancel(ctx, target, me, canManage);
 
-            return Json(new { success = true, loanMessage, message = "Anmälan avbokad." });
+            // ⚠️ SÄG ATT GÄSTERNA FÖLJDE MED. Avbokningen tar hela sällskapet, och ett blankt
+            // "Anmälan avbokad" hade lämnat Hugo i tron att frun och sonen står kvar på listan.
+            // Det upptäcks i så fall först på plats, av arrangören, med fel antal stolar.
+            var message = guestsCancelled switch
+            {
+                0 => "Anmälan avbokad.",
+                1 => "Anmälan avbokad, och din gäst är avanmäld.",
+                _ => $"Anmälan avbokad, och dina {guestsCancelled} gäster är avanmälda."
+            };
+
+            return Json(new { success = true, loanMessage, message });
+        }
+
+        /// <summary>
+        /// POST /umbraco/surface/ClubEvent/AddGuest — anmäl en anhörig eller gäst utan konto.
+        ///
+        /// <para><b>⚠️ Behörigheten är samma grind som medlemmens egen anmälan</b>, och det är
+        /// avsiktligt: gästen tar en plats på evenemanget precis som medlemmen. Vore grinden lösare
+        /// här kunde en medlem som själv är utestängd ändå fylla lokalen med gäster.</para>
+        ///
+        /// <para>⚠️ <c>IsEligible</c> frågas om MEDLEMMEN, aldrig om gästen. Gästen har per
+        /// definition ingen klubbtillhörighet — det är hela skälet att hen är gäst.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddGuest([FromBody] GuestRequest request)
+        {
+            int me = await CurrentMemberIdAsync();
+            if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad för att anmäla en gäst." });
+
+            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+            if (!ctx.RegistrationRequired) return Json(new { success = false, message = "Det här evenemanget har ingen anmälan." });
+            if (!ClubEventParticipationService.IsSignupOpen(ctx)) return Json(new { success = false, message = "Anmälan är stängd." });
+
+            var member = _memberService.GetById(me);
+            if (!_participation.IsEligible(ctx, member))
+                return Json(new
+                {
+                    success = false,
+                    message = ctx.IsRegionOwned
+                        ? "Anmälan är öppen för medlemmar i kretsens klubbar."
+                        : $"Anmälan är öppen för medlemmar i {ctx.OwnerName}."
+                });
+
+            var (ok, msg, isReserve) = await _participation.AddGuestAsync(
+                ctx, me, request?.Name, request?.PriceId, me);
+            if (!ok) return Json(new { success = false, message = msg });
+
+            var name = request!.Name!.Trim();
+            return Json(new
+            {
+                success = true,
+                isReserve,
+                message = isReserve
+                    ? $"{name} står som reserv — vi hör av oss om en plats blir ledig."
+                    : $"{name} är anmäld."
+            });
+        }
+
+        /// <summary>
+        /// POST /umbraco/surface/ClubEvent/CancelGuest — avboka EN gäst, utan att röra medlemmens
+        /// egen anmälan.
+        ///
+        /// <para>⚠️ Ingen anmälningsfönster-kontroll här. Stängd anmälan får hindra att någon
+        /// <i>tillkommer</i>, aldrig att någon lämnar återbud — en kvarstående plats för någon som
+        /// inte kommer är sämre för arrangören än en sen avbokning.</para>
+        ///
+        /// <para>Ägarskapet prövas i tjänsten, som äger regeln.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CancelGuest([FromBody] GuestRequest request)
+        {
+            int me = await CurrentMemberIdAsync();
+            if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+
+            var (ok, msg) = await _participation.CancelGuestAsync(ctx, request?.ParticipantId ?? 0, me);
+            return Json(ok
+                ? new { success = true, message = "Gästen är avanmäld." }
+                : new { success = false, message = msg ?? "Avbokningen gick inte igenom." });
         }
 
         /// <summary>
@@ -392,7 +518,9 @@ namespace HpskSite.Controllers
             // Lånet hänger på anmälan. Ett vapen bokat av någon som inte står på listan är precis
             // det vapenansvarig inte kan reda ut i valvet.
             var roster = await _participation.BuildRosterAsync(ctx);
-            var mineRow = roster.Rows.FirstOrDefault(r => r.MemberId == me);
+            // ⚠️ !IsGuest — en gästrad bär MemberId = 0, och utan filtret hade en utloggad (me = 0)
+            // kunnat boka lånevapen på första gästens anmälan. Samma fälla som i GetSignupState.
+            var mineRow = roster.Rows.FirstOrDefault(r => !r.IsGuest && r.MemberId == me);
             if (mineRow == null || mineRow.SignedUpAt == null || mineRow.Cancelled)
                 return Json(new { success = false, message = "Anmäl dig först, så kan du boka lånevapen." });
 
@@ -480,7 +608,12 @@ namespace HpskSite.Controllers
                 },
                 rows = roster.Rows.Select(r => new
                 {
+                    // ⚠️ Radens id är avprickningens adress för BÅDA slagen. En gäst har inget
+                    // medlems-id, och en väg per slag hade kunnat glida isär.
+                    id = r.Id,
                     memberId = r.MemberId,
+                    isGuest = r.IsGuest,
+                    guestOfMemberId = r.GuestOfMemberId,
                     name = r.Name,
                     signedUpAt = r.SignedUpAt?.ToString("yyyy-MM-dd HH:mm"),
                     cancelled = r.Cancelled,
@@ -506,8 +639,10 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SetAttendance([FromBody] AttendanceRequest request)
         {
-            if (request == null || request.EventId <= 0 || request.MemberId <= 0)
-                return Json(new { success = false, message = "Ogiltig begäran — evenemang och medlem måste anges." });
+            // ⚠️ ParticipantId ELLER MemberId. En gäst har inget medlems-id att pekas ut med, så
+            // ett krav på MemberId > 0 hade gjort frun och sonen omöjliga att pricka av.
+            if (request == null || request.EventId <= 0 || (request.MemberId <= 0 && request.ParticipantId <= 0))
+                return Json(new { success = false, message = "Ogiltig begäran — evenemang och deltagare måste anges." });
 
             var ctx = _participation.GetEventContext(request.EventId);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
@@ -517,8 +652,15 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
             var status = string.IsNullOrWhiteSpace(request.Status) ? null : request.Status.Trim();
-            var (ok, msg) = await _participation.SetAttendanceAsync(
-                request.EventId, request.MemberId, status, request.Note, me);
+
+            // ⚠️ Radens id vinner när det finns. Uppropet skickar det för VARJE rad, så medlemmar
+            // och gäster prickas av på exakt samma väg — två vägar hade kunnat glida isär, och
+            // avprickningen är på väg att bli underlag till ett Föreningsintyg.
+            var (ok, msg) = request.ParticipantId > 0
+                ? await _participation.SetAttendanceForRowAsync(
+                    request.EventId, request.ParticipantId, status, request.Note, me)
+                : await _participation.SetAttendanceAsync(
+                    request.EventId, request.MemberId, status, request.Note, me);
 
             return Json(new { success = ok, message = msg, label = ClubEvents.AttendanceDisplay(status) });
         }
@@ -793,6 +935,12 @@ namespace HpskSite.Controllers
             /// <summary>Kryssade medlemmen "jag behöver låna klubbvapen"?</summary>
             public bool LoanWeapon { get; set; }
 
+            /// <summary>
+            /// Id på den prisrad medlemmen valde. Tomt när evenemanget saknar avgift eller bara har
+            /// ett pris — ett enda pris väljer sig självt.
+            /// </summary>
+            public string? PriceId { get; set; }
+
             /// <summary>Önskat vapen. <b>0 = vilket som helst</b> — nybörjarens svar.</summary>
             public int LoanFirearmId { get; set; }
 
@@ -801,10 +949,36 @@ namespace HpskSite.Controllers
             public string? Note { get; set; }
         }
 
+        /// <summary>En anhörig eller gäst utan konto, anmäld på den inloggade medlemmens ansvar.</summary>
+        public class GuestRequest
+        {
+            public int EventId { get; set; }
+
+            /// <summary>Gästens namn. Det enda vi lagrar om personen — den ansvariga medlemmen är
+            /// kontaktvägen.</summary>
+            public string? Name { get; set; }
+
+            /// <summary>Prisraden gästen hör till. <b>Krävs när evenemanget har flera priser</b> —
+            /// det är just då "Vuxen / Barn 7-15 / Under 7 år" betyder något.</summary>
+            public string? PriceId { get; set; }
+
+            /// <summary>Radens id vid avbokning av en enskild gäst. Ett namn duger inte: två gäster
+            /// kan heta likadant.</summary>
+            public int ParticipantId { get; set; }
+        }
+
         public class AttendanceRequest
         {
             public int EventId { get; set; }
             public int MemberId { get; set; }
+
+            /// <summary>
+            /// Deltagarradens id. <b>Enda sättet att peka ut en gäst</b>, som inte har något
+            /// medlems-id — och det uppropet skickar för varje rad, så medlemmar och gäster går
+            /// samma väg. Vinner över <see cref="MemberId"/> när det är satt.
+            /// </summary>
+            public int ParticipantId { get; set; }
+
             /// <summary>Present / Absent / Excused, or empty to clear.</summary>
             public string? Status { get; set; }
             public string? Note { get; set; }

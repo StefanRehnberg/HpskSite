@@ -3722,6 +3722,123 @@ Utan egenskapen degraderar ytan namngivet: fältet är avstängt och säger vad 
 att se ut att spara (`SetValue` på en saknad egenskap är en tyst no-op), och `IsSignupOpen` beter sig
 exakt som före. Fildeploy av `KnowledgeBase/docs/club-admin.md`.
 
+#### ⚠️⚠️ EN RAD ÄR EN PERSON — familjen och gästen utan konto (2026-09-18)
+
+Stefans fråga: *"hur hanterar vi en skytt som anmäler sig, som är medlem, han anmäler också sin fru
+och sin son..?"* Frun och sonen hade **ingen representation alls** i modellen:
+`ClubEventParticipant` var nycklad `(EventId, MemberId)` med ett UNIKT index, och båda saknar konto.
+
+**Fyra saker gick sönder samtidigt, och tre av dem tyst:** `maxParticipants` räknar rader, så
+familjen på tre tog EN plats och arrangören trodde att det fanns fler platser kvar än det gjorde;
+prisvalet snapshottar en rad per anmälan, så Hugo stod som skyldig 180 i stället för 450; uppropet
+hade en bock att sätta på tre personer; och inköpslistan läste fel antal.
+
+**⚠️ FAMILJEFRÅGAN OCH ICKE-MEDLEMSFRÅGAN ÄR SAMMA FRÅGA.** Frun, sonen och nybörjaren som vill gå
+Pistolskyttekortet utan att vara medlem är *en deltagare utan konto*, tre gånger. Byggs "anhöriga"
+som ett eget begrepp får man två halva lösningar som inte känner till varandra. Och prisraderna som
+byggdes dagen innan (`Vuxen 180 / Barn 7-15 90 / Under 7 år 0`) är redan exakt familjens kategorier
+— den delen behövde inte röras.
+
+**En gästrad bär `MemberId = 0` (`ClubEvents.GuestMemberId`) och `GuestOfMemberId` = medlemmen.**
+
+- **⚠️⚠️ `GuestOfMemberId` ÄR INTE `SignedUpByMemberId`.** Den senare betyder *vem som utförde
+  anmälan* och kan vara en funktionär i disken; den förra betyder *vem som ansvarar för platsen och
+  avgiften*. De går isär exakt när det kostar pengar — anmäler en funktionär Hugos fru blir
+  `SignedUpBy` funktionären och `GuestOf` Hugo, och **en kolumn för båda hade skickat fakturan till
+  funktionären.** Två kolumner, med flit.
+- **⚠️ 0, INTE null.** Hela kodbasen adresserar rader med `int`, men skälet är större: med `int?`
+  blir `RecordedByMemberId == MemberId` i roster-bygget `null == null` = SANT för varje oregistrerad
+  gäst, alltså **varje gäst visad som självregistrerad** på ett underlag till ett Föreningsintyg.
+  Med 0 är jämförelsen falsk av sig själv. Fråga ändå aldrig på siffran — fråga `IsGuest`.
+- **⚠️⚠️ DET UNIKA INDEXET MÅSTE VARA FILTRERAT** (`WHERE MemberId > 0`). Utan filtret ryms EXAKT
+  EN gäst per evenemang, och fru nummer två avvisas med ett nyckelkrock-fel som inte liknar det
+  problem det är. **NULL löser det inte** — SQL Server behandlar NULL som ett värde i ett unikt
+  index, så även då släpps bara en gäst in. Filtret behåller hela den gamla garantin där den betyder
+  något: en MEDLEM kan fortfarande bara stå en gång.
+
+**⚠️ TVÅ LÄCKOR SOM NOLLAN ÖPPNAR, båda åtgärdade — leta efter fler vid varje ny läsare.**
+En utloggad besökare har också `me = 0`, så `roster.Rows.FirstOrDefault(r => r.MemberId == me)`
+matchade **första gästen på evenemanget** och visade hens namn, notering och pris som "din anmälan"
+för vem som helst som öppnade sidan. Samma form i lånevapensgrinden lät en utloggad boka vapen på
+första gästens anmälan. Varje sådan uppslagning kräver `me > 0` **och** `!IsGuest`.
+
+**⚠️ UPPROPET ADRESSERAR RADENS ID, inte medlemmens.** `SetAttendanceForRowAsync` är enda vägen att
+pricka av en gäst — `SetAttendanceAsync` slår upp på `MemberId` och hade antingen vägrats eller,
+värre, träffat en ANNAN gästs rad. Uppropet skickar `participantId` för **varje** rad, så medlemmar
+och gäster går samma väg; två vägar hade kunnat glida isär, och avprickningen är på väg att bli
+underlag till ett Föreningsintyg.
+
+**Reglerna, och varför de ser ut som de gör:**
+- **Gästen hänger på medlemmens egen anmälan.** Står inte medlemmen själv på listan finns ingen som
+  ansvarar, och kaskaden nedan har inget att utgå från.
+- **⚠️ Avbokar medlemmen sig själv följer HELA sällskapet med** — och beskedet säger det. Ett blankt
+  *"Anmälan avbokad"* hade lämnat Hugo i tron att frun och sonen står kvar, vilket upptäcks på plats,
+  av arrangören, med fel antal stolar. `CancelGuestAsync` avbokar en enskild.
+- **Sällskapet splittras vid platsgränsen** i stället för att blockeras: en splittring syns och kan
+  lösas av arrangören, ett osynligt nej kan den inte. Reserven får veta att hon är reserv.
+- **Tak på 10 gäster per medlem**, så en felklickad knapp inte kan boka bort hela lokalen. Samma namn
+  två gånger vägras — det är nästan alltid en dubbelklickad knapp, och två rader är två platser och
+  dubbel avgift.
+- **⚠️ `ClubEventParty.MissingPrice` frågar EVENEMANGET, inte raden.** På ett GRATIS evenemang är
+  saknat belopp helt rätt och sällskapet fullständigt; på ett med prisrader är det en rad som ännu
+  inte valt. Utan frågan till kontexten hade varje gratis sällskap flaggats som ofullständigt — och
+  en varning som alltid lyser slutar läsas, precis i tid till den gång den betyder något.
+- **⚠️ Gästrader räknas ALDRIG som medlemmens egen aktivitet.** `GetForMemberAsync`s
+  `WHERE MemberId = @0` gör det av sig självt, och det är avsiktligt: att Hugo tog med sin fru säger
+  ingenting om Hugos skytteverksamhet, och det underlaget går till Polismyndigheten.
+
+**GDPR blir MINDRE, inte större.** En gäst bär bara ett namn — ingen e-post, ingen adress, inget
+födelsedatum. **Den ansvariga medlemmen ÄR kontaktvägen.** Öppen anmälan utan konto åt allmänheten
+är en helt annan sak och är medvetet inte byggd.
+
+**Ytor:** anmälningskortet (`_ClubEventSignup`) får ett sällskapsblock under det egna priset — "ni
+är tre och det blir 450" hör ihop med "du betalar 180" — plus *Anmäl en till* med namn och prisval.
+Uppropet (`_ClubEventRoster`) märker ut gästen **och namnger vem hen hör till**, uppslaget bland
+raderna och inte i medlemsregistret. Deltagarlistan på kortet badgar `gäst`, för ett namn utan konto
+bland medlemsnamnen ser ut som en medlem funktionären inte hittar.
+
+**⚠️ AVGIFTEN ÄR FORTFARANDE INTE BYGGD** (se stycket ovan) — raden bär `FeeAmount`-snapshot och en
+tom `InvoiceId`, och sällskapets summa är därmed en VISNING. Den dag fakturan kopplas på är
+`GuestOfMemberId` betalaren.
+
+**Operatörssteg:** kör `Migrations/add-price-choice-to-club-event-participant.sql` — **FÖRE
+deployen.** Den bär både prisvalet och det filtrerade indexet, alltså EN körning. Så snart modellen
+bär `GuestOfMemberId` genererar NPoco `SET … GuestOfMemberId` i varje uppdatering av tabellen, så
+utan kolumnen faller inte bara gästerna utan **varje anmälan, varje avbokning och varje
+avprickning**. Samma fälla som `FaltskyttePatrol.DepartedAt`. Skriptet kontrollerar själv att
+indexet fick `has_filter = 1`. Körd i dev 2026-09-18; **EJ körd i prod.**
+
+Adds C# → **full ombyggnad**. Ingen doctype-egenskap, ingen Umbraco-nod.
+
+Verifierat **9 enhetstest** (`ClubEventPartyTests` — summan, någon annans gäster, nollan som aldrig
+hämtar en gäst som sin egen rad, och båda sidor av `MissingPrice`) och **48/48
+`hpsk-verify/event-guests-verify.mjs`**, som bygger sitt eget evenemang med tre platser och tre
+prisrader och kör hela varvet. **A/B: 5 av 48 faller** när platsdelningen slutar räkna gästrader och
+kaskaden tas bort. ⚠️ `seatsLeft` föll INTE under den mutationen — `roster.Seated` räknar RADER
+medan reservdelningen räknar `seatsTaken`, så påståendet *"gästerna tar VAR SIN plats"* faller mot
+en mutation som slutar SKAPA raderna, inte mot en som räknar dem fel. Två skilda mutationer krävs.
+
+**⚠️ Fälla i sviten som lämnade skräp i dev:** sista navigeringen gick till en ren JSON-endpoint,
+som saknar antiforgery-token, så städningens POST blev ett tomt 400 som `r.text()` svalde — sviten
+rapporterade städning klar och lämnade kvar evenemanget plus tre gästrader. Städningen assertas nu.
+
+**⚠️⚠️ OCH ATT RADERA EVENEMANGSNODEN TAR INTE MED SIG DELTAGARRADERNA.** `ClubEventParticipant` är
+nycklad på `EventId` men har ingen koppling till Umbraco-noden, så `DeleteClubEvent` lämnar raderna
+kvar — osynliga, eftersom varje läsväg går via ett evenemang som inte längre finns. Mätt 2026-09-18:
+tre svitkörningar lämnade 9 föräldralösa rader trots att två av dem raderade sin nod och
+rapporterade lyckat. Sviten måste därför städa i SQL:
+`DELETE FROM dbo.ClubEventParticipant WHERE MemberName LIKE 'ZZG %';`
+**Förbefintligt beteende för hela funktionen, inte infört här** — men det betyder att en klubb som
+raderar en händelse i backoffice lämnar sina anmälningar kvar för alltid. Värd en egen post.
+
+**⚠️ Fynd på vägen, ORELATERAT och FÖRBEFINTLIGT:** dev-appen öppnar en transaktion i en
+`TrainingMatches`-städning några minuter efter start och lämnar den **öppen**
+(`open_transaction_count = 1`, sessionen sovande), vilket blockerar Umbracos egen skrivlåsning —
+`MemberActivityService.UpdateActivityAsync` timeoutar då på `LCK_M_X` och varje sidladdning tar
+minuter. Syns som att sajten hängt sig. Diagnos: `sys.dm_exec_sessions WHERE open_transaction_count
+> 0`; åtgärd tills vidare: starta om appen. Värd en egen titt — det ser ut som samma form som
+[[ambient-scope-flows-into-task-run]].
+
 ### Att beställa och dela ut — klubbens årslista över märken OCH medaljer (2026-08-31)
 
 Klubben måste en gång om året svara på två frågor: *vad beställer vi från förbundet* och *vad delar

@@ -1,4 +1,4 @@
-@*
+﻿@*
     Anmälningskortet för ett klubb- eller kretsevenemang (clubSimpleEvent — båda scopen delar
     doctype). Självständig partial: den bär sin egen antiforgery-token och sitt eget skript, så den
     kan monteras på vilken yta som helst utan att värdsidan behöver förberedas. Samma regel som
@@ -226,6 +226,123 @@
             return dl.toLocaleDateString('sv-SE', { day: 'numeric', month: 'long' });
         }
 
+        function kr(v) { return new Intl.NumberFormat('sv-SE').format(v) + ' kr'; }
+
+        // Prisvalet infor anmalan.
+        //
+        // ETT pris visas som en upplysning, inte som ett val - det finns inget att valja mellan,
+        // och en radioknapp med ett enda alternativ ar en fraga utan innehall.
+        // FLERA priser ar ett riktigt val, och INGET ar forvalt: forvaljer vi det billigaste
+        // anmaler sig halva klubben som barn av bara farten, och forvaljer vi det dyraste
+        // debiterar vi den som inte lasteade. Servern vagrar anmalan utan val.
+        function priceBlock(d) {
+            const p = d.event.prices || [];
+            if (d.event.pricesUnreadable) {
+                return '<div class="alert alert-danger py-2 px-3 mb-2 small">'
+                     + '<i class="bi bi-exclamation-triangle me-1"></i>Evenemangets priser gar inte att lasa. '
+                     + 'Kontakta arrangoren.</div>';
+            }
+            if (!p.length) return '';
+            if (p.length === 1) {
+                return '<div class="mb-2 small"><span class="text-muted">Avgift:</span> '
+                     + `<strong>${p[0].amount === 0 ? 'Gratis' : kr(p[0].amount)}</strong></div>`;
+            }
+            let h = '<div class="mb-2"><div class="form-label small text-muted mb-1">Vilket pris galler for dig?</div>';
+            p.forEach((row, i) => {
+                const id = 'ces-price-' + i;
+                h += '<div class="form-check">'
+                  +  `<input class="form-check-input" type="radio" name="ces-price" id="${id}" value="${esc(row.id)}">`
+                  +  `<label class="form-check-label" for="${id}">`
+                  +  `<strong>${row.amount === 0 ? 'Gratis' : kr(row.amount)}</strong> `
+                  +  `<span class="text-muted">${esc(row.label)}</span></label></div>`;
+            });
+            return h + '</div>';
+        }
+
+        // Priskarta for gastformularet. Samma rader som medlemmens val, samma regel: ett enda pris
+        // ar en upplysning, flera ar ett riktigt val och INGET ar forvalt.
+        function guestPriceField(d) {
+            const p = d.event.prices || [];
+            if (d.event.pricesUnreadable || !p.length) return '';
+            if (p.length === 1) {
+                return '<div class="small text-muted mb-2">Avgift: '
+                     + `<strong>${p[0].amount === 0 ? 'Gratis' : kr(p[0].amount)}</strong></div>`;
+            }
+            let h = '<select class="form-select form-select-sm mb-2" id="ces-guest-price">'
+                  + '<option value="">Valj pris for gasten...</option>';
+            p.forEach(row => {
+                h += `<option value="${esc(row.id)}">${esc(row.label)} — `
+                  +  `${row.amount === 0 ? 'Gratis' : kr(row.amount)}</option>`;
+            });
+            return h + '</select>';
+        }
+
+        // Sallskapet: de hen tagit med, och vad alltihop kostar.
+        //
+        // ⚠️ Totalen ar summan av radernas SNAPSHOTS, given av servern. Rakna aldrig om den mot
+        // d.event.prices har - hojer arrangoren priset efterat skulle kortet visa en annan siffra
+        // an den medlemmen sa ja till, och det ar den siffran hen sedan faktureras efter.
+        function partyBlock(d) {
+            const party = d.party;
+            if (!party) return '';
+
+            let h = '';
+            if (party.guests.length) {
+                h += '<div class="border rounded p-2 mb-2">'
+                  +  `<div class="small text-muted mb-1">Du har med dig ${party.guests.length} `
+                  +  `${party.guests.length === 1 ? 'person' : 'personer'}</div>`;
+                party.guests.forEach(g => {
+                    h += '<div class="d-flex align-items-center justify-content-between border-top py-1">'
+                      +  `<div><span>${esc(g.name)}</span>`
+                      +  (g.isReserve ? ' <span class="badge bg-warning text-dark">reserv</span>' : '')
+                      +  (g.feeLabel ? ` <span class="text-muted small">${esc(g.feeLabel)}</span>` : '')
+                      +  '</div>'
+                      +  '<div class="d-flex align-items-center gap-2">'
+                      +  (g.feeAmount === null || g.feeAmount === undefined
+                            ? ''
+                            : `<span class="small">${g.feeAmount === 0 ? 'Gratis' : kr(g.feeAmount)}</span>`)
+                      +  `<button type="button" class="btn btn-sm btn-link text-danger p-0 ces-guest-drop" `
+                      +  `data-id="${g.id}" title="Avanmal ${esc(g.name)}">Ta bort</button>`
+                      +  '</div></div>';
+                });
+
+                // ⚠️ Totalen visas bara nar den ar HELA sanningen. Saknar nagon i sallskapet belopp
+                // pa ett evenemang som tar avgift vore en summa ett besked som ser fardigt ut och
+                // inte ar det - och det ar pengar.
+                if (party.missingPrice) {
+                    h += '<div class="border-top pt-1 mt-1 small text-warning-emphasis">'
+                      +  '<i class="bi bi-exclamation-triangle me-1"></i>Nagon i sallskapet saknar pris. '
+                      +  'Kontakta arrangoren.</div>';
+                } else {
+                    h += '<div class="border-top pt-1 mt-1 d-flex justify-content-between fw-semibold small">'
+                      +  `<span>Totalt for ${party.people} personer</span>`
+                      +  `<span>${party.total === 0 ? 'Gratis' : kr(party.total)}</span></div>`;
+                }
+                h += '</div>';
+            }
+
+            if (!d.signupOpen) return h;
+
+            if (party.guests.length >= party.maxGuests) {
+                return h + `<div class="small text-muted mb-2">Du har natt taket pa ${party.maxGuests} gaster. `
+                         + 'Kontakta arrangoren om ni ar fler.</div>';
+            }
+
+            h += '<div class="mb-2">'
+              +  '<button type="button" class="btn btn-sm btn-outline-secondary w-100" id="ces-guest-open">'
+              +  '<i class="bi bi-person-plus me-1"></i>Anmal en till</button>'
+              +  '<div class="d-none mt-2" id="ces-guest-form">'
+              +  '<label for="ces-guest-name" class="form-label small text-muted mb-1">'
+              +  'Namn pa den du tar med</label>'
+              +  `<input type="text" class="form-control form-control-sm mb-2" id="ces-guest-name" maxlength="80" `
+              +  'placeholder="For- och efternamn">'
+              +  guestPriceField(d)
+              +  '<button type="button" class="btn btn-sm btn-primary w-100" id="ces-guest-add">Anmal</button>'
+              +  '<div class="form-text">Familj och gaster behover inget konto — du star for anmalan.</div>'
+              +  '</div></div>';
+            return h;
+        }
+
         function render(d) {
             // The card only exists for events that actually take sign-ups. An event with an
             // external registration link keeps that link (the page renders it separately) — we must
@@ -288,7 +405,18 @@
                             ? '<i class="bi bi-hourglass-split me-1"></i>Du står som <strong>reserv</strong>. Blir en plats ledig flyttas du upp automatiskt.'
                             : '<i class="bi bi-check-circle me-1"></i>Du är <strong>anmäld</strong>.')
                      +  '</div>';
+                if (d.me.feeAmount !== null && d.me.feeAmount !== undefined) {
+                    // Vad hen valde och vad det kostade DA. Hojs priset efterat star medlemmen kvar
+                    // pa sitt belopp - snapshotten ar overenskommelsen, inte dagens prislista.
+                    html += '<div class="small mb-2"><span class="text-muted">Ditt pris:</span> '
+                         +  `<strong>${d.me.feeAmount === 0 ? 'Gratis' : kr(d.me.feeAmount)}</strong>`
+                         +  (d.me.feeLabel ? ` <span class="text-muted">${esc(d.me.feeLabel)}</span>` : '')
+                         +  '</div>';
+                }
                 if (d.me.note) html += `<div class="small text-muted mb-2">Din notering: ${esc(d.me.note)}</div>`;
+                // Sallskapet star DIREKT under det egna priset: "du betalar 180" och "ni ar tre och
+                // det blir 450" hor ihop, och ett block langre ner hade last som en annan sak.
+                html += partyBlock(d);
                 html += myLoanBlock(d);
                 // ⚠️ Knappen följer `cancelOpen`, INTE `signupOpen`. Efter sista anmälningsdag är
                 // anmälan stängd men avbokningen öppen till evenemangsdagens slut — den som inte
@@ -299,6 +427,7 @@
             } else if (!d.signupOpen) {
                 html += '<div class="alert alert-light border small mb-0">Anmälan är stängd.</div>';
             } else {
+                html += priceBlock(d);
                 html += loanWeaponBlock(d);
                 html += '<div class="mb-2"><label for="ces-note" class="form-label small text-muted mb-1">Meddelande till arrangören (valfritt)</label>'
                      +  '<textarea class="form-control form-control-sm" id="ces-note" rows="2" maxlength="500"></textarea></div>';
@@ -313,12 +442,17 @@
             if (d.roster && d.roster.length) {
                 const seats = d.roster.filter(r => !r.isReserve);
                 const res = d.roster.filter(r => r.isReserve);
+                // ⚠️ Gästen märks ut. Ett namn utan konto bland medlemsnamnen ser ut som en medlem
+                // vi inte hittar, och funktionären som letar efter hen i medlemsregistret letar
+                // förgäves. Märket säger att det är meningen.
+                const namn = r => esc(r.name)
+                    + (r.isGuest ? ' <span class="badge bg-light text-muted border">gäst</span>' : '');
                 html += '<hr><div class="small fw-semibold mb-1">Anmälda</div><ol class="small mb-0 ps-3">';
-                seats.forEach(r => { html += `<li>${esc(r.name)}</li>`; });
+                seats.forEach(r => { html += `<li>${namn(r)}</li>`; });
                 html += '</ol>';
                 if (res.length) {
                     html += '<div class="small fw-semibold mt-2 mb-1">Reserver</div><ol class="small mb-0 ps-3">';
-                    res.forEach(r => { html += `<li>${esc(r.name)}</li>`; });
+                    res.forEach(r => { html += `<li>${namn(r)}</li>`; });
                     html += '</ol>';
                 }
             }
@@ -340,6 +474,9 @@
                 note: document.getElementById('ces-note')?.value || '',
                 loanWeapon: !!(loanChk && loanChk.checked),
                 loanFirearmId: parseInt(document.getElementById('ces-loan-firearm')?.value || '0', 10),
+                // Tomt nar evenemanget saknar avgift eller bara har ett pris - servern avgor,
+                // och vagrar om ett val kravs men saknas. Klienten forvaljer aldrig at medlemmen.
+                priceId: document.querySelector('input[name="ces-price"]:checked')?.value || '',
             }));
 
             // Lånevapen ändrat i efterhand: väljaren visas först när skytten sagt att hen vill låna.
@@ -365,8 +502,39 @@
 
             const cancelBtn = document.getElementById('ces-cancel');
             if (cancelBtn) cancelBtn.addEventListener('click', () => {
-                if (!confirm('Vill du avboka din anmälan?')) return;
+                // ⚠️ FRÅGAN MÅSTE NÄMNA SÄLLSKAPET. Avbokningen tar med sig gästerna, och "vill du
+                // avboka din anmälan?" är inte den fråga som ställs när svaret också avanmäler
+                // frun och sonen. Den som inte visste det upptäcker det på plats.
+                const n = (d.party && d.party.guests.length) || 0;
+                const fraga = n === 0
+                    ? 'Vill du avboka din anmälan?'
+                    : `Vill du avboka din anmälan? ${n === 1 ? 'Din gäst' : `Dina ${n} gäster`} avanmäls samtidigt.`;
+                if (!confirm(fraga)) return;
                 act(cancelBtn, 'Cancel', { eventId });
+            });
+
+            // ── Gäster ───────────────────────────────────────────────────────────────────────
+            const guestOpen = document.getElementById('ces-guest-open');
+            const guestForm = document.getElementById('ces-guest-form');
+            if (guestOpen && guestForm) guestOpen.addEventListener('click', () => {
+                guestForm.classList.toggle('d-none');
+                if (!guestForm.classList.contains('d-none')) document.getElementById('ces-guest-name')?.focus();
+            });
+
+            const guestAdd = document.getElementById('ces-guest-add');
+            if (guestAdd) guestAdd.addEventListener('click', () => act(guestAdd, 'AddGuest', {
+                eventId,
+                name: document.getElementById('ces-guest-name')?.value || '',
+                priceId: document.getElementById('ces-guest-price')?.value || ''
+            }));
+
+            document.querySelectorAll('.ces-guest-drop').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Namnet står i frågan: "ta bort gästen?" på en lista med tre är ingen fråga.
+                    const namn = btn.getAttribute('title')?.replace(/^Avanmal\s+/, '') || 'gästen';
+                    if (!confirm(`Vill du avanmäla ${namn}?`)) return;
+                    act(btn, 'CancelGuest', { eventId, participantId: parseInt(btn.dataset.id, 10) });
+                });
             });
         }
 

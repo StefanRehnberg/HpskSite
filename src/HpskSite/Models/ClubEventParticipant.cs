@@ -10,6 +10,15 @@ namespace HpskSite.Models
     /// has. Two tables would need an outer join on every read and could disagree about who is on
     /// the list, which is the whole question.
     ///
+    /// <para><b>⚠️⚠️ EN RAD ÄR EN PERSON, inte en anmälan.</b> Hugo som anmäler sig själv, sin fru
+    /// och sin son blir TRE rader. Det är inte en detalj utan hela poängen: platserna räknas per
+    /// rad, priset väljs per rad, och uppropet bockas av per rad. Skulle sällskapet dela en rad
+    /// hade evenemanget trott att tre personer tog en plats, att Hugo var skyldig 180 i stället för
+    /// 450, och funktionären hade haft en bock att sätta på tre personer.</para>
+    ///
+    /// <para>Frun och sonen har inga konton. Deras rader bär <c>MemberId = 0</c> och
+    /// <see cref="GuestOfMemberId"/> = Hugo. Se <see cref="IsGuest"/>.</para>
+    ///
     /// The two acts are told apart by WHICH FIELDS are set, never by a type column:
     /// <list type="bullet">
     /// <item><c>SignedUpAt</c> set, <c>AttendanceStatus</c> null — signed up, roll-call not taken.</item>
@@ -26,14 +35,45 @@ namespace HpskSite.Models
         /// <summary>The <c>clubSimpleEvent</c> node id. Clubs AND regions use that same doctype.</summary>
         public int EventId { get; set; }
 
+        /// <summary>
+        /// Medlemmens id, eller <see cref="ClubEvents.GuestMemberId"/> (0) för en gäst utan konto.
+        ///
+        /// <para><b>⚠️ Fråga aldrig på siffran, fråga <see cref="IsGuest"/>.</b> 0 är ett giltigt
+        /// värde här och betyder "person utan konto" — inte "ofyllt". Samma sak som att avgiften 0
+        /// betyder gratis och inte osatt.</para>
+        /// </summary>
         public int MemberId { get; set; }
 
         /// <summary>Snapshot, same reason as <c>StaffHelpSignup</c>: the list must stay readable
-        /// for someone who changed their name or left the club.</summary>
+        /// for someone who changed their name or left the club. <b>För en gäst är det här det enda
+        /// vi vet om personen</b>, och avsiktligt så — se <see cref="GuestOfMemberId"/>.</summary>
         public string MemberName { get; set; } = "";
+
+        /// <summary>
+        /// För en gästrad: den medlem gästen hör till, och som därmed står för platsen och avgiften.
+        /// Null = raden är en medlem som står för sig själv.
+        ///
+        /// <para><b>⚠️⚠️ FÖRVÄXLA INTE MED <see cref="SignedUpByMemberId"/>.</b> Den säger vem som
+        /// <i>utförde</i> anmälan och kan vara en funktionär i disken. Den här säger vem som
+        /// <i>ansvarar</i>. De går isär exakt när det kostar pengar: anmäler en funktionär Hugos fru
+        /// i disken blir SignedUpBy funktionären och GuestOf Hugo — en enda kolumn för båda hade
+        /// skickat fakturan till funktionären.</para>
+        ///
+        /// <para>Den ansvariga medlemmen <b>är</b> kontaktvägen till gästen. Därför lagras ingen
+        /// e-post, adress eller födelsedatum för en gäst: namnet räcker för uppropet, och allt
+        /// därutöver hade varit personuppgifter om en icke-medlem som vi inte behöver.</para>
+        /// </summary>
+        public int? GuestOfMemberId { get; set; }
+
+        /// <summary>Raden är en person utan konto. <b>Härlett, ingen kolumn</b> — två fält som kan
+        /// säga emot varandra om samma sak är den bugg som aldrig upptäcks.</summary>
+        [Ignore]
+        public bool IsGuest => MemberId <= 0;
 
         // ── Sign-up ──
         public DateTime? SignedUpAt { get; set; }
+
+        /// <summary>Vem som utförde anmälan. <b>Inte</b> vem som betalar — se <see cref="GuestOfMemberId"/>.</summary>
         public int? SignedUpByMemberId { get; set; }
         public string? SignedUpNote { get; set; }
 
@@ -61,6 +101,27 @@ namespace HpskSite.Models
         /// rewrite what somebody already signed up to.</summary>
         public decimal? FeeAmount { get; set; }
 
+        /// <summary>
+        /// Id på den prisrad deltagaren valde, som den såg ut vid anmälan. Null = inget val gjort,
+        /// vilket är giltigt: evenemang utan avgift, och anmälningar gjorda innan priserna fanns.
+        /// </summary>
+        public string? FeePriceId { get; set; }
+
+        /// <summary>
+        /// Vad prisraden HETTE vid anmälan.
+        ///
+        /// <para><b>⚠️⚠️ SNAPSHOT, inte en referens.</b> Prisraderna bor i evenemangets JSON och är
+        /// MUTABLA — arrangören får döpa om, ändra belopp och ta bort rader. Deltagarraden är
+        /// däremot en överenskommelse och ska bära vad personen faktiskt sa ja till. Samma princip
+        /// som verifikationsradens kontonamn och fakturans motpartsnamn.</para>
+        ///
+        /// <para>Följden är avsiktlig: höjs priset från 180 till 200 står de redan anmälda kvar på
+        /// 180. Och tas raden bort helt kan uppslaget mot <c>eventPrices</c> misslyckas medan
+        /// etiketten ändå går att visa — det är hela skälet att etiketten lagras och inte bara
+        /// id:t.</para>
+        /// </summary>
+        public string? FeeLabel { get; set; }
+
         /// <summary>Reserved for the payment step — present now so it can be wired without a migration.</summary>
         public int? InvoiceId { get; set; }
 
@@ -71,6 +132,28 @@ namespace HpskSite.Models
     /// <summary>Constants and the derived rules for club/krets event sign-up and attendance.</summary>
     public static class ClubEvents
     {
+        /// <summary>
+        /// <c>MemberId</c> för en deltagare utan konto. <b>0, inte null</b>: kolumnen är NOT NULL
+        /// och hela kodbasen adresserar rader med <c>int</c>, men skälet är större än så.
+        ///
+        /// <para>⚠️ Med <c>int?</c> hade <c>RecordedByMemberId == MemberId</c> i roster-bygget
+        /// blivit <c>null == null</c> = sant för varje oregistrerad gäst, och varenda gäst hade
+        /// visats som självregistrerad. Med 0 är jämförelsen falsk av sig själv.</para>
+        ///
+        /// <para>Det unika indexet är därför filtrerat på <c>MemberId &gt; 0</c> — annars hade
+        /// evenemanget rymt exakt en gäst.</para>
+        /// </summary>
+        public const int GuestMemberId = 0;
+
+        /// <summary>Taket för en gästs namn. Väl under kolumnens 200 tecken, så gränsen nås här och
+        /// aldrig i databasen: längre namn avvisas med ett besked i stället för att kapas tyst, och
+        /// ett tyst kapat namn är fel person på uppropslistan.</summary>
+        public const int GuestNameMaxLength = 80;
+
+        /// <summary>Hur många gäster en medlem får ta med sig till ett evenemang. Ett tak finns för
+        /// att en felklickad knapp inte ska kunna boka bort hela lokalen.</summary>
+        public const int MaxGuestsPerMember = 10;
+
         public const string AttendancePresent = "Present";
         public const string AttendanceAbsent = "Absent";
         public const string AttendanceExcused = "Excused";

@@ -273,7 +273,10 @@ namespace HpskSite.Services
 
                 roster.Rows.Add(new ClubEventRosterRow
                 {
+                    Id = p.Id,
                     MemberId = p.MemberId,
+                    IsGuest = p.IsGuest,
+                    GuestOfMemberId = p.GuestOfMemberId,
                     Name = p.MemberName,
                     SignedUpAt = p.SignedUpAt,
                     Cancelled = p.CancelledAt != null,
@@ -286,8 +289,16 @@ namespace HpskSite.Services
                     // HARLETT, ingen extra kolumn — och viktigt att kunna se: en QR pa en vagg kan
                     // fotograferas och skickas vidare, sa det ar svagare bevis an en funktionars
                     // upprop nar narvaron sedan ska bara ett Foreningsintyg.
-                    SelfRegistered = p.AttendanceStatus != null && p.RecordedByMemberId == p.MemberId,
-                    FeeAmount = p.FeeAmount
+                    // ⚠️ !IsGuest forst. En gast KAN inte sjalvregistrera sig - hen har inget konto
+                    // att skanna QR-affischen med - sa fragan ar meningslos for gastrader. Skyddet
+                    // ar uttryckligt och inte underforstatt: bar MemberId nagon gang null i stallet
+                    // for 0 blir jamforelsen null == null, alltsa SANT, och varje oregistrerad gast
+                    // hade visats som sjalvregistrerad pa ett underlag till ett Foreningsintyg.
+                    SelfRegistered = !p.IsGuest && p.AttendanceStatus != null
+                                     && p.RecordedByMemberId == p.MemberId,
+                    FeeAmount = p.FeeAmount,
+                    FeePriceId = p.FeePriceId,
+                    FeeLabel = p.FeeLabel
                 });
             }
 
@@ -302,7 +313,12 @@ namespace HpskSite.Services
         }
 
         /// <summary>A member's own event participation, for Min sida and — later — the yearly
-        /// activity summary that a Föreningsintyg is generated from.</summary>
+        /// activity summary that a Föreningsintyg is generated from.
+        ///
+        /// <para><b>⚠️ Gästrader räknas ALDRIG som medlemmens egen aktivitet</b>, och filtret
+        /// <c>MemberId = @0</c> gör det av sig självt eftersom en gäst bär 0. Det är avsiktligt och
+        /// inte en slump: att Hugo tog med sin fru säger ingenting om Hugos egen skytteverksamhet,
+        /// och det här underlaget går till Polismyndigheten.</para></summary>
         public async Task<List<ClubEventParticipant>> GetForMemberAsync(int memberId, int? year = null)
         {
             using var db = _databaseFactory.CreateDatabase();
@@ -326,8 +342,50 @@ namespace HpskSite.Services
         /// index on (EventId, MemberId) makes that the only possible path, which is deliberate:
         /// a second row would give one person two places in the queue.
         /// </summary>
+        /// <summary>
+        /// Vad deltagaren faktiskt valde, eller null nar evenemanget inte tar nagon avgift.
+        ///
+        /// <para><b>Reglerna, i den har ordningen:</b> ingen avgift -> null; EXAKT ETT pris ->
+        /// det priset, oavsett vad som skickades (det valjer sig sjalvt); flera priser -> den rad
+        /// id:t pekar pa.</para>
+        ///
+        /// <para><b>⚠️ PLOCKAR ALDRIG "FORSTA RADEN".</b> Har evenemanget flera priser och inget
+        /// giltigt id kom in returneras null, och anropare MASTE da vagra anmalan. Att gissa hade
+        /// satt ett belopp ingen pekat pa - och beloppet ar en overenskommelse som personen sedan
+        /// debiteras efter.</para>
+        ///
+        /// <para>⚠️ Olasbara prisrader ger null OCH far aldrig lasas som "ingen avgift" - se
+        /// <see cref="EventPriceList"/>. Anroparen skiljer de tva at via <see cref="PriceChoiceError"/>.</para>
+        /// </summary>
+        public static EventPrice? ResolvePriceChoice(ClubEventContext ctx, string? priceId)
+        {
+            var prices = ctx.Prices;
+            if (prices.Unreadable || prices.Rows.Count == 0) return null;
+            if (prices.Rows.Count == 1) return prices.Rows[0];
+            return prices.ById(priceId);
+        }
+
+        /// <summary>
+        /// Felmeddelandet nar ett prisval kravs men saknas, eller null nar anmalan far ga igenom.
+        ///
+        /// <para>⚠️ Skild fran <see cref="ResolvePriceChoice"/> for att "ingen avgift" och "du
+        /// maste valja" bada ger null dar, men betyder motsatta saker for anroparen.</para>
+        /// </summary>
+        public static string? PriceChoiceError(ClubEventContext ctx, string? priceId)
+        {
+            if (ctx.Prices.Unreadable)
+                return "Evenemangets priser gar inte att lasa. Kontakta arrangoren - ingen anmalan gjordes.";
+            if (ctx.Prices.Rows.Count <= 1) return null;
+            if (ResolvePriceChoice(ctx, priceId) != null) return null;
+
+            var val = string.Join(", ", ctx.Prices.Rows.Select(r => r.Label));
+            return string.IsNullOrWhiteSpace(priceId)
+                ? $"Valj vilket pris som galler for dig: {val}."
+                : "Priset du valde finns inte langre pa evenemanget. Ladda om sidan och valj igen.";
+        }
+
         public async Task<(bool Ok, string? Message, bool IsReserve)> SignUpAsync(
-            ClubEventContext ctx, int memberId, string? note, int actingMemberId)
+            ClubEventContext ctx, int memberId, string? note, int actingMemberId, string? priceId = null)
         {
             var member = _memberService.GetById(memberId);
             if (member == null) return (false, "Medlemmen hittades inte.", false);
@@ -357,38 +415,199 @@ namespace HpskSite.Services
             existing.CancelledAt = null;
             existing.CancelledByMemberId = null;
             existing.MemberName = member.Name ?? existing.MemberName;
-            // Snapshot the fee as it stands now, so changing the event later cannot rewrite what
-            // somebody already signed up to.
+            // SNAPSHOTTA VALET. Id, etikett OCH belopp tillsammans - se ClubEventParticipant.FeeLabel
+            // for varfor alla tre. En senare prisandring far aldrig skriva om vad nagon sagt ja till.
             //
-            // Bara nar evenemanget har EXAKT ETT pris. Har det flera ar det deltagaren som valjer,
-            // och valjaren ar inte byggd an - att plocka den forsta raden hade satt ett belopp
-            // ingen pekat pa, och snapshotten ar just det som ska overleva en senare prisandring.
-            // Tills valjaren finns lamnas beloppet null och uppropet visar "ej valt".
-            existing.FeeAmount = ctx.SinglePrice;
+            // Ett enda pris valjer sig sjalvt; flera kraver ett val, och det ar validerat i
+            // ResolvePriceChoice ovanfor. Ingen rad plockas nagonsin "forst i listan".
+            var chosen = ResolvePriceChoice(ctx, priceId);
+            existing.FeePriceId = chosen?.Id;
+            existing.FeeLabel = chosen?.Label;
+            existing.FeeAmount = chosen?.Amount;
             existing.UpdatedDate = now;
 
             if (existing.Id > 0) await db.UpdateAsync(existing);
             else await db.InsertAsync(existing);
 
             var roster = await BuildRosterAsync(ctx);
-            bool reserve = roster.Rows.Any(r => r.MemberId == memberId && r.IsReserve);
+            bool reserve = roster.Rows.Any(r => !r.IsGuest && r.MemberId == memberId && r.IsReserve);
             return (true, null, reserve);
         }
 
-        /// <summary>Withdraw. The row survives — the fee snapshot and the history hang off it.</summary>
-        public async Task<(bool Ok, string? Message)> CancelAsync(int eventId, int memberId, int actingMemberId)
+        /// <summary>
+        /// Anmäl en person utan konto — en anhörig eller en gäst — på en medlems ansvar.
+        ///
+        /// <para><b>En egen rad, inte ett antal på medlemmens rad.</b> Gästen tar en plats, väljer
+        /// sitt eget pris och prickas av för sig. Ett "+2" på medlemmens rad hade gjort alla tre
+        /// sakerna fel samtidigt, och tyst.</para>
+        ///
+        /// <para>⚠️ Prisvalet valideras med exakt samma regler som en medlems: har evenemanget flera
+        /// priser och inget giltigt val kom in <b>vägras anmälan</b>. Det är hela poängen med
+        /// familjepriserna — "Vuxen 180 / Barn 7-15 90 / Under 7 år 0" betyder ingenting om vi
+        /// gissar vilken rad sonen hör till.</para>
+        /// </summary>
+        public async Task<(bool Ok, string? Message, bool IsReserve)> AddGuestAsync(
+            ClubEventContext ctx, int guestOfMemberId, string? name, string? priceId, int actingMemberId)
+        {
+            var host = _memberService.GetById(guestOfMemberId);
+            if (host == null) return (false, "Medlemmen hittades inte.", false);
+
+            name = name?.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+                return (false, "Gästen behöver ett namn — det är det som står på uppropslistan.", false);
+            if (name.Length > ClubEvents.GuestNameMaxLength)
+                return (false, $"Namnet får vara högst {ClubEvents.GuestNameMaxLength} tecken.", false);
+
+            var priceError = PriceChoiceError(ctx, priceId);
+            if (priceError != null) return (false, priceError, false);
+
+            using var db = _databaseFactory.CreateDatabase();
+
+            // ⚠️ Gasten hanger pa medlemmens egen anmalan. Star inte medlemmen sjalv pa listan finns
+            // det ingen som ansvarar for platsen eller avgiften, och avbokningen nedan skulle inte
+            // ha nagot att kaskadera fran.
+            var hostRow = await db.SingleOrDefaultAsync<ClubEventParticipant>(
+                "WHERE EventId = @0 AND MemberId = @1", ctx.EventId, guestOfMemberId);
+            if (hostRow == null || hostRow.SignedUpAt == null || hostRow.CancelledAt != null)
+                return (false, "Anmäl dig själv först — gästen anmäls på din anmälan.", false);
+
+            var mine = await db.FetchAsync<ClubEventParticipant>(
+                "WHERE EventId = @0 AND GuestOfMemberId = @1 AND CancelledAt IS NULL",
+                ctx.EventId, guestOfMemberId);
+            if (mine.Count >= ClubEvents.MaxGuestsPerMember)
+                return (false, $"Du kan ta med högst {ClubEvents.MaxGuestsPerMember} gäster. Kontakta arrangören för fler.", false);
+
+            // ⚠️ Samma namn tva ganger ar nastan alltid en dubbelklickad knapp, och tva rader betyder
+            // tva platser och dubbel avgift. Namnet ar det enda vi har att kanna igen gasten pa.
+            if (mine.Any(g => string.Equals(g.MemberName, name, StringComparison.OrdinalIgnoreCase)))
+                return (false, $"{name} är redan anmäld som din gäst.", false);
+
+            var now = DateTime.Now;
+            var chosen = ResolvePriceChoice(ctx, priceId);
+
+            var row = new ClubEventParticipant
+            {
+                EventId = ctx.EventId,
+                MemberId = ClubEvents.GuestMemberId,
+                MemberName = name,
+                GuestOfMemberId = guestOfMemberId,
+                SignedUpAt = now,
+                SignedUpByMemberId = actingMemberId,
+                // SNAPSHOTTA VALET, samma skal som for en medlem - se ClubEventParticipant.FeeLabel.
+                FeePriceId = chosen?.Id,
+                FeeLabel = chosen?.Label,
+                FeeAmount = chosen?.Amount,
+                CreatedDate = now,
+                UpdatedDate = now
+            };
+            await db.InsertAsync(row);
+
+            var roster = await BuildRosterAsync(ctx);
+            bool reserve = roster.Rows.Any(r => r.Id == row.Id && r.IsReserve);
+            return (true, null, reserve);
+        }
+
+        /// <summary>
+        /// Withdraw. The row survives — the fee snapshot and the history hang off it.
+        ///
+        /// <para><b>⚠️⚠️ AVBOKAR HELA SÄLLSKAPET.</b> Avbokar Hugo sig själv följer frun och sonen
+        /// med. De hänger på hans anmälan och kan inte stå kvar utan den: platserna hade varit
+        /// upptagna av personer ingen ansvarar för, och avgiften hade fakturerats någon som inte
+        /// kommer. Vill han avboka bara sonen finns <see cref="CancelGuestAsync"/>.</para>
+        /// </summary>
+        public async Task<(bool Ok, string? Message, int GuestsCancelled)> CancelAsync(
+            int eventId, int memberId, int actingMemberId)
         {
             using var db = _databaseFactory.CreateDatabase();
             var row = await db.SingleOrDefaultAsync<ClubEventParticipant>(
                 "WHERE EventId = @0 AND MemberId = @1", eventId, memberId);
-            if (row == null || row.SignedUpAt == null) return (false, "Ingen anmälan att avboka.");
-            if (row.CancelledAt != null) return (false, "Anmälan är redan avbokad.");
+            if (row == null || row.SignedUpAt == null) return (false, "Ingen anmälan att avboka.", 0);
+            if (row.CancelledAt != null) return (false, "Anmälan är redan avbokad.", 0);
+
+            var now = DateTime.Now;
+            row.CancelledAt = now;
+            row.CancelledByMemberId = actingMemberId;
+            row.UpdatedDate = now;
+            await db.UpdateAsync(row);
+
+            var guests = await db.FetchAsync<ClubEventParticipant>(
+                "WHERE EventId = @0 AND GuestOfMemberId = @1 AND CancelledAt IS NULL", eventId, memberId);
+            foreach (var g in guests)
+            {
+                g.CancelledAt = now;
+                g.CancelledByMemberId = actingMemberId;
+                g.UpdatedDate = now;
+                await db.UpdateAsync(g);
+            }
+
+            return (true, null, guests.Count);
+        }
+
+        /// <summary>
+        /// Avboka EN gäst utan att röra medlemmens egen anmälan.
+        ///
+        /// <para>⚠️ Adresseras på radens id, inte på ett namn: två gäster kan heta likadant hos
+        /// olika medlemmar, och ett namn är inte en nyckel.</para>
+        ///
+        /// <para>Behörigheten avgörs här och inte i kontrollern: den ansvariga medlemmen, eller
+        /// någon som får administrera evenemanget. En tredje medlem får aldrig avboka någon annans
+        /// gäst.</para>
+        /// </summary>
+        public async Task<(bool Ok, string? Message)> CancelGuestAsync(
+            ClubEventContext ctx, int participantId, int actingMemberId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var row = await db.SingleOrDefaultAsync<ClubEventParticipant>(
+                "WHERE Id = @0 AND EventId = @1", participantId, ctx.EventId);
+            if (row == null) return (false, "Gästen hittades inte.");
+            if (!row.IsGuest) return (false, "Raden är en medlems egen anmälan, inte en gäst.");
+            if (row.CancelledAt != null) return (false, "Gästen är redan avbokad.");
+
+            if (row.GuestOfMemberId != actingMemberId && !await CanManageAsync(ctx, actingMemberId))
+                return (false, "Du kan bara avboka dina egna gäster.");
 
             row.CancelledAt = DateTime.Now;
             row.CancelledByMemberId = actingMemberId;
-            row.UpdatedDate = DateTime.Now;
+            row.UpdatedDate = row.CancelledAt.Value;
             await db.UpdateAsync(row);
             return (true, null);
+        }
+
+        /// <summary>
+        /// Vad en medlem har med sig och vad det kostar — medlemmens egen rad plus gästerna.
+        ///
+        /// <para><b>⚠️ Summan läses ur radernas snapshots</b> (<c>FeeAmount</c>), aldrig ur
+        /// evenemangets nuvarande prisrader. Höjer arrangören priset efteråt ska sällskapet stå
+        /// kvar på det de sa ja till, och en omräkning mot nuläget hade tyst ändrat överenskommelsen
+        /// — samma regel som verifikationsradens belopp.</para>
+        /// </summary>
+        public static ClubEventParty BuildParty(ClubEventRoster roster, int memberId)
+        {
+            var party = new ClubEventParty { MemberId = memberId };
+
+            party.Self = roster.Rows.FirstOrDefault(r => !r.IsGuest && r.MemberId == memberId && !r.Cancelled);
+            party.Guests = roster.Rows
+                .Where(r => r.IsGuest && r.GuestOfMemberId == memberId && !r.Cancelled)
+                .ToList();
+
+            var all = (party.Self != null ? new[] { party.Self } : Array.Empty<ClubEventRosterRow>())
+                .Concat(party.Guests)
+                .ToList();
+
+            party.People = all.Count;
+
+            // ⚠️ Summera bara over rader som FAKTISKT bar ett belopp. Ett null ar inte noll kronor.
+            party.Total = all.Where(r => r.FeeAmount.HasValue).Sum(r => r.FeeAmount!.Value);
+
+            // ⚠️⚠️ ETT SAKNAT BELOPP BETYDER TVA HELT OLIKA SAKER, och skillnaden ar evenemangets,
+            // inte radens: pa ett GRATIS evenemang ar null helt ratt och sallskapet ar fardigt, pa
+            // ett evenemang MED prisrader ar null en rad som annu inte valt och summan ar darmed
+            // inte hela sanningen. Utan fragan till kontexten hade varje gratis evenemang flaggats
+            // som ofullstandigt, och da slutar folk att tro pa flaggan nar den val betyder nagot.
+            var prices = roster.Context.Prices;
+            bool eventCharges = prices.Unreadable || prices.Rows.Count > 0;
+            party.MissingPrice = eventCharges && all.Any(r => !r.FeeAmount.HasValue);
+            return party;
         }
 
         /// <summary>
@@ -429,6 +648,40 @@ namespace HpskSite.Services
 
             if (row.Id > 0) await db.UpdateAsync(row);
             else await db.InsertAsync(row);
+            return (true, null);
+        }
+
+        /// <summary>
+        /// Pricka av EN rad, adresserad på radens id.
+        ///
+        /// <para><b>⚠️⚠️ DEN ENDA VÄGEN ATT PRICKA AV EN GÄST.</b> <see cref="SetAttendanceAsync"/>
+        /// slår upp raden på <c>MemberId</c>, och varje gäst bär
+        /// <see cref="ClubEvents.GuestMemberId"/> (0) — uppslaget hade alltså antingen vägrats eller,
+        /// värre, träffat en annan gästs rad på samma evenemang. Utan den här metoden kan en
+        /// funktionär inte pricka av frun och sonen, och då är hela poängen med att gästerna är egna
+        /// rader borta.</para>
+        ///
+        /// <para>Skapar aldrig en rad: en gäst måste redan vara anmäld av sin medlem. Den som dyker
+        /// upp oanmäld går via <see cref="AddGuestAsync"/>.</para>
+        /// </summary>
+        public async Task<(bool Ok, string? Message)> SetAttendanceForRowAsync(
+            int eventId, int participantId, string? status, string? note, int actingMemberId)
+        {
+            if (status != null && !ClubEvents.IsAttendanceStatus(status))
+                return (false, "Ogiltig närvarostatus.");
+
+            using var db = _databaseFactory.CreateDatabase();
+            var row = await db.SingleOrDefaultAsync<ClubEventParticipant>(
+                "WHERE Id = @0 AND EventId = @1", participantId, eventId);
+            if (row == null) return (false, "Deltagaren hittades inte.");
+
+            var now = DateTime.Now;
+            row.AttendanceStatus = status;
+            row.AttendanceNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+            row.RecordedByMemberId = status == null ? null : actingMemberId;
+            row.RecordedAt = status == null ? null : now;
+            row.UpdatedDate = now;
+            await db.UpdateAsync(row);
             return (true, null);
         }
 
@@ -500,9 +753,51 @@ namespace HpskSite.Services
         public int? SeatsLeft { get; set; }
     }
 
-    public class ClubEventRosterRow
+    /// <summary>
+    /// En medlem och de hen tagit med sig, med vad sällskapet kostar tillsammans.
+    /// <b>En vy, ingen lagring</b> — sanningen är raderna.
+    /// </summary>
+    public class ClubEventParty
     {
         public int MemberId { get; set; }
+
+        /// <summary>Medlemmens egen rad, eller null när hen inte är anmäld (och då kan hen heller
+        /// inte ha gäster — se <c>AddGuestAsync</c>).</summary>
+        public ClubEventRosterRow? Self { get; set; }
+
+        public List<ClubEventRosterRow> Guests { get; set; } = new();
+
+        /// <summary>Antal personer, medlemmen inräknad. <b>Det här är antalet PLATSER sällskapet
+        /// tar</b>, vilket är hela skälet att gästerna är rader.</summary>
+        public int People { get; set; }
+
+        /// <summary>Summan av radernas snapshottade belopp. Aldrig omräknad mot evenemangets
+        /// nuvarande priser.</summary>
+        public decimal Total { get; set; }
+
+        /// <summary>Någon i sällskapet saknar belopp på ett evenemang som tar avgift, alltså är
+        /// <see cref="Total"/> inte hela sanningen. <b>Falskt på gratis evenemang</b>, där saknat
+        /// belopp är det normala och rätta.</summary>
+        public bool MissingPrice { get; set; }
+
+        public bool HasGuests => Guests.Count > 0;
+    }
+
+    public class ClubEventRosterRow
+    {
+        /// <summary>Radens id. <b>Adressen till en gäst</b>, som inte har något MemberId att
+        /// pekas ut med.</summary>
+        public int Id { get; set; }
+
+        public int MemberId { get; set; }
+
+        /// <summary>Personen har inget konto — en anhörig eller gäst på <see cref="GuestOfMemberId"/>:s
+        /// ansvar.</summary>
+        public bool IsGuest { get; set; }
+
+        /// <summary>Medlemmen som ansvarar för gästens plats och avgift. Null för en medlems egen rad.</summary>
+        public int? GuestOfMemberId { get; set; }
+
         public string Name { get; set; } = "";
         public DateTime? SignedUpAt { get; set; }
         public bool Cancelled { get; set; }
@@ -514,5 +809,10 @@ namespace HpskSite.Services
         /// <summary>Narvaron registrerades av medlemmen sjalv via QR-affischen, inte av en funktionar.</summary>
         public bool SelfRegistered { get; set; }
         public decimal? FeeAmount { get; set; }
+
+        /// <summary>Vilken prisrad deltagaren valde. Snapshot - se ClubEventParticipant.FeeLabel.</summary>
+        public string? FeePriceId { get; set; }
+
+        public string? FeeLabel { get; set; }
     }
 }

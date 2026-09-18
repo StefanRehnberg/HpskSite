@@ -138,8 +138,22 @@
             let html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0">';
             html += '<thead><tr><th>Namn</th><th>Anmäld</th><th style="min-width:230px;">Närvaro</th><th>Notering</th></tr></thead><tbody>';
 
+            // Vem som tog med vem. ⚠️ Slås upp bland RADERNA och inte i medlemsregistret — gästens
+            // ansvariga står redan på listan, och ett extra uppslag per rad vore en fråga per gäst.
+            const nameOf = {};
+            d.rows.forEach(r => { if (!r.isGuest) nameOf[r.memberId] = r.name; });
+
             d.rows.forEach(r => {
                 const badges = [];
+                // ⚠️ Gästen märks ut OCH får sin ansvariga namngiven. En funktionär som letar efter
+                // ett okänt namn i medlemsregistret letar förgäves — och vid avgift är det den
+                // ansvariga som ska betala, alltså den funktionären behöver kunna se.
+                if (r.isGuest) {
+                    const host = nameOf[r.guestOfMemberId];
+                    badges.push('<span class="badge bg-light text-secondary border"'
+                        + (host ? ` title="Gäst hos ${esc(host)}"` : '')
+                        + '>gäst' + (host ? ' hos ' + esc(host) : '') + '</span>');
+                }
                 if (r.isReserve) badges.push('<span class="badge bg-warning-subtle text-warning-emphasis">reserv</span>');
                 if (r.isWalkIn) badges.push('<span class="badge bg-info-subtle text-info-emphasis">oanmäld</span>');
                 if (r.cancelled) badges.push('<span class="badge bg-secondary-subtle text-secondary-emphasis">avbokad</span>');
@@ -175,13 +189,15 @@
             return '<div class="btn-group btn-group-sm" role="group">' + opts.map(o => {
                 const active = r.attendanceStatus === o.v;
                 return `<button type="button" class="btn btn-${active ? '' : 'outline-'}${o.cls}"`
-                     + ` data-att="${o.v}" data-member="${r.memberId}" data-active="${active ? '1' : '0'}"`
+                     + ` data-att="${o.v}" data-row="${r.id}" data-active="${active ? '1' : '0'}"`
                      + ` title="${o.label}">${o.label}</button>`;
             }).join('') + '</div>';
         }
 
         async function setAttendance(btn) {
-            const memberId = parseInt(btn.dataset.member, 10);
+            // ⚠️ Radens id, inte medlemmens. En gäst bär medlems-id 0, så ett upprop som pekade ut
+            // medlemmen hade antingen vägrats eller träffat en ANNAN gästs rad på samma evenemang.
+            const participantId = parseInt(btn.dataset.row, 10);
             const wasActive = btn.dataset.active === '1';
             const status = wasActive ? '' : btn.dataset.att;
 
@@ -193,7 +209,7 @@
 
             const group = btn.closest('.btn-group');
             group.querySelectorAll('button').forEach(b => b.disabled = true);
-            const d = await post('SetAttendance', { eventId: rosterEventId, memberId, status, note });
+            const d = await post('SetAttendance', { eventId: rosterEventId, participantId, status, note });
             if (!d.success) {
                 group.querySelectorAll('button').forEach(b => b.disabled = false);
                 alert(d.message || 'Kunde inte spara närvaron.');
