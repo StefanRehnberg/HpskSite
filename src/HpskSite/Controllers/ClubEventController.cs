@@ -107,7 +107,11 @@ namespace HpskSite.Controllers
             // to functionaries. Everyone else sees the COUNT — that is what tells a visitor whether
             // there is room, without publishing who is going.
             bool eligible = _participation.IsEligible(ctx, member);
-            bool showRoster = canManage || eligible;
+            // ⚠️⚠️ LISTAN FÖLJER INTE ANMÄLNINGSRÄTTEN. Fram till att publiknivån blev valbar var
+            // de två samma sak, och den likheten var en tillfällighet: att arrangören öppnar
+            // anmälan för hela landet är ett beslut om vem som får KOMMA, inte om att publicera
+            // namnen på alla som kommer. `CanSeeRoster` kapar nivån vid kretsen.
+            bool showRoster = canManage || _participation.CanSeeRoster(ctx, member);
 
             return Json(new
             {
@@ -299,13 +303,7 @@ namespace HpskSite.Controllers
 
             var member = _memberService.GetById(me);
             if (!_participation.IsEligible(ctx, member))
-                return Json(new
-                {
-                    success = false,
-                    message = ctx.IsRegionOwned
-                        ? "Anmälan är öppen för medlemmar i kretsens klubbar."
-                        : $"Anmälan är öppen för medlemmar i {ctx.OwnerName}."
-                });
+                return Json(new { success = false, message = NotEligibleMessage(ctx) });
 
             // ⚠️ PRISVALET GRINDAS FORE anmalan skrivs. Har evenemanget flera priser och inget
             // giltigt valts skulle SignUpAsync satta beloppet till null, och deltagaren stod som
@@ -419,13 +417,7 @@ namespace HpskSite.Controllers
 
             var member = _memberService.GetById(me);
             if (!_participation.IsEligible(ctx, member))
-                return Json(new
-                {
-                    success = false,
-                    message = ctx.IsRegionOwned
-                        ? "Anmälan är öppen för medlemmar i kretsens klubbar."
-                        : $"Anmälan är öppen för medlemmar i {ctx.OwnerName}."
-                });
+                return Json(new { success = false, message = NotEligibleMessage(ctx) });
 
             var (ok, msg, isReserve) = await _participation.AddGuestAsync(
                 ctx, me, request?.Name, request?.PriceId, me);
@@ -687,11 +679,18 @@ namespace HpskSite.Controllers
             // club list for every member in the register.
             var eligibleClubs = _participation.GetEligibleClubIds(ctx);
 
+            // ⚠️ På de breda publiknivåerna är klubbmängden TOM med flit (de går inte att uttrycka
+            // som en klubblista), och en rak filtrering hade då gett noll träffar — alltså en
+            // dörrlista som ser trasig ut på exakt de händelser som bjudit in flest. Där är varje
+            // medlem en giltig träff, och sökrutan är det som avgränsar.
+            bool anyMemberQualifies = HpskSite.Models.EventAudience
+                .IsAtLeastAsWideAs(ctx.Audience, HpskSite.Models.EventAudience.AllMembers);
+
             var results = new List<object>();
             foreach (var member in _memberService.GetAll(0, int.MaxValue, out _))
             {
                 if (already.Contains(member.Id)) continue;
-                if (!_participation.IsEligible(eligibleClubs, member)) continue;
+                if (!anyMemberQualifies && !_participation.IsEligible(eligibleClubs, member)) continue;
                 if (term.Length > 0 && (member.Name ?? "").IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0) continue;
                 results.Add(new { memberId = member.Id, name = member.Name ?? $"Medlem {member.Id}" });
                 if (results.Count >= 50) break;
@@ -896,6 +895,19 @@ namespace HpskSite.Controllers
 
             return Json(new { success = ok, message = ok ? "Din närvaro är registrerad." : msg });
         }
+
+        /// <summary>
+        /// Beskedet när någon inte får anmäla sig.
+        ///
+        /// <para>⚠️ EN plats, för meddelandet låg i två kopior som båda påstod "medlemmar i
+        /// {klubben}" — vilket blev direkt osant i samma stund publiknivån gick att ändra. Ett
+        /// felmeddelande som beskriver en regel som inte längre gäller skickar arrangören att leta
+        /// efter fel sak.</para>
+        /// </summary>
+        private static string NotEligibleMessage(ClubEventContext ctx)
+            => "Anmälan är öppen för "
+             + HpskSite.Models.EventAudience.Phrase(ctx.Audience, ctx.OwnerName, ctx.IsRegionOwned)
+             + ".";
 
         /// <summary>Decodes the poster token. A dead token is the common case (the event has passed),
         /// so it gets its own message rather than a bare "ogiltig länk".</summary>

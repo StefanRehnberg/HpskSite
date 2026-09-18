@@ -471,7 +471,7 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventPrices = "")
+            string registrationDeadline = "", string eventPrices = "", string eventAudience = "")
         {
             try
             {
@@ -516,7 +516,7 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(newEvent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish, så noden aldrig blir till. Ett halvsparat
@@ -756,6 +756,13 @@ namespace HpskSite.Controllers
                             lanevapenOffered = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
                                 && evt.Value<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
                             lanevapenPropertyExists = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
+                            // ⚠️ Vem som får anmäla sig. Utan raden kan dialogen inte förfylla
+                            // väljaren, och nästa sparning skickar tillbaka standard — alltså
+                            // STÄNGER tyst en händelse arrangören öppnat. Exakt samma fälla som
+                            // lanevapenOffered gick i, rapporterad av Luleå PK.
+                            eventAudience = HpskSite.Models.EventAudience.Normalise(
+                                evt.Value<string>(HpskSite.Models.EventAudience.Property)),
+                            audiencePropertyExists = evt.HasProperty(HpskSite.Models.EventAudience.Property),
                             mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty),
                             // Sista anmälningsdag. Bara datumdelen: fältet ÄR en dag, och en
                             // klockslagsdel i strängen hade flatpickr skrivit tillbaka som text.
@@ -918,7 +925,7 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventPrices = "")
+            string registrationDeadline = "", string eventPrices = "", string eventAudience = "")
         {
             try
             {
@@ -953,7 +960,7 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(eventContent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish — det som ligger publicerat är orört.
@@ -2204,6 +2211,13 @@ namespace HpskSite.Controllers
                             lanevapenOffered = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
                                 && evt.Value<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
                             lanevapenPropertyExists = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
+                            // ⚠️ Vem som får anmäla sig. Utan raden kan dialogen inte förfylla
+                            // väljaren, och nästa sparning skickar tillbaka standard — alltså
+                            // STÄNGER tyst en händelse arrangören öppnat. Exakt samma fälla som
+                            // lanevapenOffered gick i, rapporterad av Luleå PK.
+                            eventAudience = HpskSite.Models.EventAudience.Normalise(
+                                evt.Value<string>(HpskSite.Models.EventAudience.Property)),
+                            audiencePropertyExists = evt.HasProperty(HpskSite.Models.EventAudience.Property),
                             mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty),
                             // Sista anmälningsdag. Bara datumdelen: fältet ÄR en dag, och en
                             // klockslagsdel i strängen hade flatpickr skrivit tillbaka som text.
@@ -2246,7 +2260,7 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventPrices = "")
+            string registrationDeadline = "", string eventPrices = "", string eventAudience = "")
         {
             try
             {
@@ -2287,7 +2301,7 @@ namespace HpskSite.Controllers
                 newEvent.SetValue("contactEmail", contactEmail);
                 newEvent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(newEvent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish, så noden aldrig blir till. Ett halvsparat
@@ -2345,7 +2359,7 @@ namespace HpskSite.Controllers
             string contactEmail = "", string contactPhone = "", string eventDate = "",
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
-            string registrationDeadline = "", string eventPrices = "")
+            string registrationDeadline = "", string eventPrices = "", string eventAudience = "")
         {
             try
             {
@@ -2391,7 +2405,7 @@ namespace HpskSite.Controllers
                 eventContent.SetValue("contactEmail", contactEmail);
                 eventContent.SetValue("contactPhone", contactPhone);
                 var regFieldError = ApplyEventRegistrationFields(eventContent, registrationRequired,
-                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices);
+                    maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience);
                 if (regFieldError != null)
                 {
                     // Avbryts FÖRE save/publish — det som ligger publicerat är orört.
@@ -2579,6 +2593,10 @@ namespace HpskSite.Controllers
                         lanevapenOffered = eventContent.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
                             && eventContent.GetValue<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
                         lanevapenPropertyExists = eventContent.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
+                        // ⚠️ Se kommentaren i GetClubEvents — samma fälla, samma skäl.
+                        eventAudience = HpskSite.Models.EventAudience.Normalise(
+                            eventContent.GetValue<string>(HpskSite.Models.EventAudience.Property)),
+                        audiencePropertyExists = eventContent.HasProperty(HpskSite.Models.EventAudience.Property),
                         // Avgiften. ⚠️ null och 0 är olika svar — se hpskEventRegFill.
                         eventPrices = HpskSite.Models.EventPrices
                             .Parse(eventContent.GetValue<string>(HpskSite.Models.EventPrices.Property)).Rows,
@@ -2620,7 +2638,8 @@ namespace HpskSite.Controllers
         private static string? ApplyEventRegistrationFields(
             Umbraco.Cms.Core.Models.IContent eventContent,
             bool registrationRequired, int maxParticipants, bool isMandatory, string registrationUrl,
-            bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "")
+            bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "",
+            string eventAudience = "")
         {
             eventContent.SetValue("registrationRequired", registrationRequired);
             eventContent.SetValue("registrationUrl", registrationUrl ?? "");
@@ -2717,6 +2736,25 @@ namespace HpskSite.Controllers
             else if (priceRows.Count > 0)
                 missing.Add(HpskSite.Models.EventPrices.Property);
 
+            // Vem som får anmäla sig.
+            //
+            // ⚠️⚠️ ETT OKÄNT VÄRDE FÅR ALDRIG SKRIVAS. `Normalise` faller till "klubbens
+            // medlemmar", alltså SMALAST — men att tyst skriva den smalaste nivån när arrangören
+            // valde en bredare är också fel, bara åt andra hållet: hen tror att grannklubben är
+            // inbjuden. Ett värde vi inte känner igen är ett trasigt formulär, inte ett val.
+            var audience = HpskSite.Models.EventAudience.Normalise(eventAudience);
+            if (!string.IsNullOrWhiteSpace(eventAudience)
+                && !string.Equals(audience, eventAudience.Trim(), StringComparison.OrdinalIgnoreCase))
+                return $"\"{eventAudience}\" är inte ett giltigt val för vem som får anmäla sig. "
+                     + "Ladda om sidan och välj igen. Ingenting sparades.";
+
+            // ⚠️ Rapporteras bara när någon försökte välja något ANNAT än standard — annars hade
+            // varje sparning på en händelsetyp utan egenskapen larmat om ett val ingen gjorde.
+            if (eventContent.HasProperty(HpskSite.Models.EventAudience.Property))
+                eventContent.SetValue(HpskSite.Models.EventAudience.Property, audience);
+            else if (audience != HpskSite.Models.EventAudience.Club)
+                missing.Add(HpskSite.Models.EventAudience.Property);
+
             if (missing.Count == 0) return null;
             return $"Egenskapen '{string.Join("' och '", missing)}' saknas på händelsetypen i "
                  + "Umbraco — kontakta en administratör. Ingenting sparades.";
@@ -2734,7 +2772,7 @@ namespace HpskSite.Controllers
             string equipmentRequired = "", string targetAudience = "",
             bool registrationRequired = false, string registrationUrl = "", string eventEndDate = "",
             bool isMandatory = false, int maxParticipants = 0,
-            bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "")
+            bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "", string eventAudience = "")
         {
             try
             {
@@ -2791,7 +2829,7 @@ namespace HpskSite.Controllers
                 // den tysta glidningen ApplyEventRegistrationFields finns för att förhindra.
                 var regFieldError = ApplyEventRegistrationFields(
                     eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl,
-                    lanevapenOffered, registrationDeadline, eventPrices);
+                    lanevapenOffered, registrationDeadline, eventPrices, eventAudience);
 
                 if (regFieldError != null)
                 {

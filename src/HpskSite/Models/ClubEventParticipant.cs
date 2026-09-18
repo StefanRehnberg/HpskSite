@@ -206,6 +206,17 @@ namespace HpskSite.Models
         public static DateTime? RealDate(DateTime? value)
             => value.HasValue && value.Value.Year > 1900 ? value : null;
 
+        /// <summary>
+        /// Swish-numret pengarna ska till. <b>Samma alias som på klubben och kretsen</b>, med flit:
+        /// händelsens värde är en ÅSIDOSÄTTNING och ägarens är standard, så en klubb som redan
+        /// fyllt i sitt nummer får betalning på sina evenemang utan att skriva något alls.
+        ///
+        /// <para>⚠️ Ett obligatoriskt fält per händelse hade tvingat fram en omskrivning varje
+        /// gång, och en felskrivning skickar pengarna till fel konto TYST — vi har ingen Swish-API
+        /// som kan säga emot.</para>
+        /// </summary>
+        public const string SwishProperty = "swishNumber";
+
         /// <summary>Doctype property carrying the numeric fee. <c>feeAmount</c> is free text ("100 kr/person")
         /// and can never be billed from; parsing it would be a silent wrong-amount generator.</summary>
         public const string FeeProperty = "eventFee";

@@ -28,6 +28,30 @@
 </div>
 
 <div id="@(regPrefix)RegistrationOwnGroup" style="display:none;">
+
+    @* ⚠️ VEM SOM FÅR ANMÄLA SIG låg fram till 2026-09-18 inte någonstans — regeln var hårdkodad
+       till "den ägande klubben", och en klubb som ville bjuda in grannklubbarna till sin
+       gåsaskjutning hittade ingen kontroll att ändra på, för det fanns ingen.
+
+       ⚠️⚠️ ORDNINGEN I LISTAN ÄR SMALAST FÖRST, och standardvalet är det smalaste. En deploy får
+       inte öppna en enda befintlig händelse, och en arrangör som inte rör fältet ska få dagens
+       beteende. Se EventAudience för varför även ett OLÄSBART värde faller hitåt.
+
+       ⚠️ Att öppna anmälan är INTE att publicera deltagarlistan. Listan följer klubben (eller
+       kretsen när kretsnivån valts) oavsett vad som står här — annars hade en klubb som bjuder in
+       grannarna samtidigt gjort sina medlemmars namn läsbara för hela landet, utan att någonstans
+       få veta det. *@
+    <div class="mb-3">
+        <label for="@(regPrefix)EventAudience" class="form-label">Vem får anmäla sig?</label>
+        <select class="form-select" id="@(regPrefix)EventAudience" onchange="hpskEventRegAudienceHint('@regPrefix')">
+            <option value="Club">Klubbens medlemmar</option>
+            <option value="Region">Alla i kretsen</option>
+            <option value="AllMembers">Alla medlemmar på pistol.nu</option>
+            <option value="Open">Vem som helst, även utan konto</option>
+        </select>
+        <div class="form-text" id="@(regPrefix)EventAudienceHelp"></div>
+    </div>
+
     <div class="mb-3">
         <label for="@(regPrefix)RegistrationDeadline" class="form-label">Sista anmälningsdag</label>
         <input type="text" class="form-control" id="@(regPrefix)RegistrationDeadline" placeholder="Lämna tom = anmälan är öppen till och med evenemangsdagen">
@@ -178,6 +202,17 @@
                 if (help) help.innerHTML = '<span class="text-warning">Egenskapen \'isMandatory\' saknas på händelsetypen i Umbraco — kontakta en administratör innan den kan användas.</span>';
             }
 
+            // Vem som får anmäla sig. ⚠️ Saknas värdet i svaret blir det 'Club', alltså samma
+            // standard som servern — ett tomt val hade annars postats tillbaka som en tom sträng
+            // och sett ut som ett aktivt val.
+            var aud = el(prefix, 'EventAudience');
+            if (aud) aud.value = d.eventAudience || 'Club';
+            if (d.audiencePropertyExists === false && aud) {
+                aud.disabled = true;
+                aud.value = 'Club';
+            }
+            hpskEventRegAudienceHint(prefix, d.audiencePropertyExists === false);
+
             hpskEventPriceFill(prefix, d);
 
             // Lånevapen: samma mönster som isMandatory ovan, av samma skäl.
@@ -190,6 +225,29 @@
             }
 
             window.hpskEventRegToggle(prefix);
+        };
+
+        // Följden av valet, i klartext under väljaren. ⚠️ Den breda nivån SÄGER att listan ändå
+        // inte publiceras — annars är det rimligt att tro att "alla medlemmar" också betyder att
+        // alla ser vilka som kommer, och en arrangör som tror det avstår från att öppna.
+        window.hpskEventRegAudienceHint = function (prefix, propertyMissing) {
+            var box = el(prefix, 'EventAudienceHelp');
+            if (!box) return;
+            if (propertyMissing) {
+                box.innerHTML = '<span class="text-warning">Egenskapen \'eventAudience\' saknas på '
+                    + 'händelsetypen i Umbraco — kontakta en administratör. Tills dess gäller '
+                    + 'klubbens medlemmar.</span>';
+                return;
+            }
+            var aud = el(prefix, 'EventAudience');
+            var v = aud ? aud.value : 'Club';
+            var t = {
+                Club: 'Bara medlemmar i den här klubben kan anmäla sig.',
+                Region: 'Medlemmar i alla klubbar i kretsen kan anmäla sig.',
+                AllMembers: 'Alla inloggade medlemmar på pistol.nu kan anmäla sig. Deltagarlistan visas fortfarande bara för klubbens egna medlemmar.',
+                Open: '⚠️ Vem som helst kan anmäla sig utan konto, och lämnar då namn och e-post till klubben. Använd bara när det verkligen är avsikten — den som kommer i sällskap med en medlem anmäls i stället som gäst.'
+            }[v] || '';
+            box.innerHTML = v === 'Open' ? '<span class="text-warning">' + t + '</span>' : t;
         };
 
         window.hpskEventRegClear = function (prefix) {
@@ -352,10 +410,20 @@
             // arrangören har sagt att det är gratis. De två får aldrig slås ihop — se
             // EventPriceList i modellen.
             formData.append('eventPrices', JSON.stringify(hpskEventPriceCollect(prefix)));
+            // Vem som får anmäla sig. ⚠️ Skickas ALLTID, även när väljaren är avstängd för att
+            // egenskapen saknas — servern normaliserar, och ett utelämnat fält är oskiljbart från
+            // "arrangören valde klubben".
+            var aud = el(prefix, 'EventAudience');
+            formData.append('eventAudience', aud ? aud.value : 'Club');
             return formData;
         };
 
         // Samma sak som query-sträng, för de endpoints som tar parametrar i URL:en.
+        //
+        // ⚠️⚠️ INGEN ANROPARE I DAG (mätt 2026-09-18) — och den hade redan glidit isär från
+        // hpskEventRegAppend: `eventPrices` saknades. Lägger du en anropare måste den här listan
+        // vara komplett, annars nollställs de fält som fattas vid varje sparning den vägen. Det är
+        // exakt fältlista-som-glömmer, och den har bitit oss tre gånger på den här ytan.
         window.hpskEventRegQuery = function (prefix) {
             var req = el(prefix, 'RegistrationRequired');
             var max = el(prefix, 'MaxParticipants');
@@ -369,7 +437,11 @@
                         && el(prefix, 'LanevapenOffered').checked ? 'true' : 'false')
                  + '&registrationDeadline=' + encodeURIComponent(
                         el(prefix, 'RegistrationDeadline')
-                            ? el(prefix, 'RegistrationDeadline').value.trim() : '');
+                            ? el(prefix, 'RegistrationDeadline').value.trim() : '')
+                 + '&eventAudience=' + encodeURIComponent(
+                        el(prefix, 'EventAudience') ? el(prefix, 'EventAudience').value : 'Club')
+                 + '&eventPrices=' + encodeURIComponent(
+                        JSON.stringify(hpskEventPriceCollect(prefix)));
         };
     })();
     </script>

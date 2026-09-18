@@ -84,6 +84,25 @@ namespace HpskSite.Services
             // than throw — GetValue on an unknown alias returns default, so this is safe by
             // construction, but the WRITE side is what silently no-ops (see the controller).
             ctx.IsMandatory = node.GetValue<bool>(ClubEvents.MandatoryProperty);
+            // Vem som får anmäla sig. ⚠️ Saknad egenskap och oläsbart värde ger BÅDA
+            // EventAudience.Club — se den klassens huvud för varför riktningen är enkelriktad.
+            // `AudiencePropertyExists` skiljer de två åt, så gränssnittet kan säga "egenskapen
+            // saknas" i stället för att visa en väljare vars val tyst inte sparas.
+            ctx.Audience = EventAudience.Normalise(node.GetValue<string>(EventAudience.Property));
+            ctx.AudiencePropertyExists = node.HasProperty(EventAudience.Property);
+
+            // ── Swish-numret ────────────────────────────────────────────────────────────────
+            // ⚠️ ÄGAREN ÄR STANDARD, händelsen är en ÅSIDOSÄTTNING. Klubben och kretsen bär redan
+            // `swishNumber` (klubbens redigeringsmodal skriver det), så ett obligatoriskt fält per
+            // händelse hade tvingat varje arrangör att skriva om numret varje gång — och en
+            // felskrivning skickar pengarna till fel konto, tyst, eftersom vi inte har någon
+            // Swish-API som kan säga emot.
+            var ownSwish = (node.GetValue<string>(ClubEvents.SwishProperty) ?? "").Trim();
+            ctx.SwishNumber = ownSwish.Length > 0
+                ? ownSwish
+                : (parent?.GetValue<string>(ClubEvents.SwishProperty) ?? "").Trim();
+            ctx.SwishFromOwner = ownSwish.Length == 0 && ctx.SwishNumber.Length > 0;
+            ctx.SwishPropertyExists = node.HasProperty(ClubEvents.SwishProperty);
             // Prisraderna. En lista, inte ett tal - se EventPrices for varfor.
             ctx.Prices = EventPrices.Parse(node.GetValue<string>(EventPrices.Property));
             // ⚠️ RealDate, inte råvärdet: en tom Umbraco-DateTime läses som DateTime.MinValue, och
@@ -147,8 +166,50 @@ namespace HpskSite.Services
         /// read through <see cref="MemberClubService"/>, so an additional-club membership counts —
         /// primary club alone would lock out exactly the people who joined a second club.
         /// </summary>
+        /// <summary>
+        /// Får den här personen anmäla sig?
+        ///
+        /// <para>⚠️ De två breda nivåerna besvaras FÖRE klubbuppslaget, inte genom att fylla
+        /// mängden med varje klubb i landet — dels är det tusentals innehållsläsningar för en fråga
+        /// som redan är avgjord, dels skulle en klubb som råkar sakna nod tyst utesluta sina
+        /// medlemmar ur en händelse som är öppen för alla.</para>
+        ///
+        /// <para>⚠️ <see cref="EventAudience.Open"/> svarar sant även för <c>null</c>: nivån
+        /// betyder att ingen inloggning krävs. Anroparen måste alltså själv veta om den frågar om
+        /// en inloggad person eller om en besökare — se <c>SignUpOpen</c>.</para>
+        /// </summary>
         public bool IsEligible(ClubEventContext ctx, IMember? member)
-            => IsEligible(GetEligibleClubIds(ctx), member);
+        {
+            if (ctx.Audience == EventAudience.Open) return true;
+            if (member == null) return false;
+            if (ctx.Audience == EventAudience.AllMembers) return true;
+            return IsEligible(GetEligibleClubIds(ctx), member);
+        }
+
+        /// <summary>
+        /// Får den här personen se DELTAGARLISTAN?
+        ///
+        /// <para><b>⚠️⚠️ SKILD FRÅN <see cref="IsEligible"/>, och det är hela poängen.</b> Att
+        /// arrangören öppnar anmälan för hela landet är ett beslut om vem som får KOMMA — det är
+        /// inte ett beslut om att publicera namnen på alla som kommer. Läts listan följa
+        /// anmälningsrätten skulle en klubb som bjuder in grannklubbarna samtidigt, och utan att
+        /// någonstans få veta det, göra sin deltagarlista läsbar för varje medlem i landet.</para>
+        ///
+        /// <para>Listan följer därför klubben, eller kretsen när arrangören valt kretsnivå — de
+        /// bredare nivåerna kapas. Funktionärer ser den alltid (<c>CanManageAsync</c>), och
+        /// utomstående ser ANTALET, vilket är det som säger om det finns plats.</para>
+        /// </summary>
+        public bool CanSeeRoster(ClubEventContext ctx, IMember? member)
+        {
+            if (member == null) return false;
+            return IsEligible(GetRosterClubIds(ctx), member);
+        }
+
+        /// <summary>Klubbarna vars medlemmar får se listan — publiknivån kapad vid kretsen.</summary>
+        public HashSet<int> GetRosterClubIds(ClubEventContext ctx)
+            => GetClubIdsFor(ctx, EventAudience.IsAtLeastAsWideAs(ctx.Audience, EventAudience.Region)
+                ? EventAudience.Region
+                : EventAudience.Club);
 
         /// <summary>
         /// Overload for loops. <b>Resolve the club set ONCE</b> with <see cref="GetEligibleClubIds"/>
@@ -165,20 +226,46 @@ namespace HpskSite.Services
         /// Which clubs' members may sign up: the owning club, or every club in the owning krets.
         /// </summary>
         public HashSet<int> GetEligibleClubIds(ClubEventContext ctx)
+            => GetClubIdsFor(ctx, ctx.Audience);
+
+        /// <summary>
+        /// Klubbarna vars medlemmar omfattas av en given nivå.
+        ///
+        /// <para>⚠️ <see cref="EventAudience.AllMembers"/> och <see cref="EventAudience.Open"/>
+        /// ger en TOM mängd med flit — de går inte att uttrycka som en klubblista, och den som
+        /// frågar om dem via den här metoden ställer fel fråga. <see cref="IsEligible"/> besvarar
+        /// dem före uppslaget.</para>
+        /// </summary>
+        private HashSet<int> GetClubIdsFor(ClubEventContext ctx, string audience)
         {
             var ids = new HashSet<int>();
-            if (ctx.IsClubOwned)
+            var level = EventAudience.Normalise(audience);
+
+            // En kretshändelse ÄR kretsen — där betyder Klubb och Krets samma sak.
+            bool wantRegion = level == EventAudience.Region || ctx.IsRegionOwned;
+
+            if (ctx.IsClubOwned && !wantRegion)
             {
                 if (ctx.OwnerId > 0) ids.Add(ctx.OwnerId);
                 return ids;
             }
-            if (!ctx.IsRegionOwned || string.IsNullOrWhiteSpace(ctx.RegionCode)) return ids;
+
+            // ⚠️ Kretsnoden slås upp OLIKA beroende på vem som äger händelsen: en kretshändelse
+            // hänger direkt under kretsen, medan en klubbhändelse ligger två steg ned
+            // (regionalPage > clubsPage > club). Att anta det ena är hur den här kodbasen fyra
+            // gånger har låst ute kretsen från sin egen tävling.
+            var region = ctx.IsRegionOwned
+                ? _contentService.GetById(ctx.OwnerId)
+                : FindRegionForClub(ctx.OwnerId);
+            if (region == null)
+            {
+                // Hittas ingen krets faller vi tillbaka på klubben — smalare, aldrig bredare.
+                if (ctx.IsClubOwned && ctx.OwnerId > 0) ids.Add(ctx.OwnerId);
+                return ids;
+            }
 
             // The krets's clubs live under its clubsPage child; read the tree rather than scanning
             // every club in the country.
-            var region = _contentService.GetById(ctx.OwnerId);
-            if (region == null) return ids;
-
             foreach (var child in _contentService.GetPagedChildren(region.Id, 0, int.MaxValue, out _))
             {
                 if (child.ContentType.Alias == ClubEvents.OwnerClubAlias) { ids.Add(child.Id); continue; }
@@ -186,6 +273,18 @@ namespace HpskSite.Services
                     if (grand.ContentType.Alias == ClubEvents.OwnerClubAlias) ids.Add(grand.Id);
             }
             return ids;
+        }
+
+        /// <summary>Kretsnoden ovanför en klubb: <c>regionalPage &gt; clubsPage &gt; club</c>.
+        /// Samma väg som URL-provideren använder, alltså trädet och inte <c>regionalFederation</c>
+        /// — koden är en sträng som kan vara tom eller stavad annorlunda.</summary>
+        private Umbraco.Cms.Core.Models.IContent? FindRegionForClub(int clubId)
+        {
+            if (clubId <= 0) return null;
+            var club = _contentService.GetById(clubId);
+            var clubsPage = club?.ParentId > 0 ? _contentService.GetById(club.ParentId) : null;
+            var region = clubsPage?.ParentId > 0 ? _contentService.GetById(clubsPage.ParentId) : null;
+            return region?.ContentType.Alias == ClubEvents.OwnerRegionAlias ? region : null;
         }
 
         /// <summary>
@@ -581,7 +680,16 @@ namespace HpskSite.Services
         /// kvar på det de sa ja till, och en omräkning mot nuläget hade tyst ändrat överenskommelsen
         /// — samma regel som verifikationsradens belopp.</para>
         /// </summary>
-        public static ClubEventParty BuildParty(ClubEventRoster roster, int memberId)
+        /// <param name="payments">
+        /// Evenemangets betalningar ur liggaren, eller null när betalning inte är påslagen.
+        ///
+        /// <para><b>⚠️ SKICKAS IN, hämtas inte här.</b> Metoden är ren och enhetstestad; ett
+        /// databasanrop inuti hade gjort varje påstående om summan beroende av en riktig liggare,
+        /// och då hade reglerna bara gått att mäta genom hela stacken.</para>
+        /// </param>
+        public static ClubEventParty BuildParty(
+            ClubEventRoster roster, int memberId,
+            IEnumerable<HpskSite.Models.Ledger.LedgerPayment>? payments = null)
         {
             var party = new ClubEventParty { MemberId = memberId };
 
@@ -607,6 +715,23 @@ namespace HpskSite.Services
             var prices = roster.Context.Prices;
             bool eventCharges = prices.Unreadable || prices.Rows.Count > 0;
             party.MissingPrice = eventCharges && all.Any(r => !r.FeeAmount.HasValue);
+
+            // ── Betalningarna ───────────────────────────────────────────────────────────────
+            // ⚠️ Filtrerat på BETALAREN, inte på raden. Hugo swishar en gång för hela sällskapet —
+            // en betalning per rad hade gett tre QR-koder för en överföring.
+            //
+            // ⚠️⚠️ Makulerade räknas bort FÖRST. En makulerad betalning är inte pengar, och att
+            // låta den ligga kvar i summan hade gjort en anmälan giltig på en betalning arrangören
+            // uttryckligen strukit.
+            var mine = (payments ?? Enumerable.Empty<HpskSite.Models.Ledger.LedgerPayment>())
+                .Where(p => p.PayerMemberId == memberId && p.VoidedUtc is null)
+                .ToList();
+
+            // ⚠️ Bekräftade räknas på SettledAmount (det arrangören faktiskt tog emot), påstådda på
+            // det begärda beloppet — ett påstående har inget mottaget belopp att tala om.
+            party.ConfirmedPaid = mine.Where(p => p.IsMoney).Sum(p => p.SettledAmount);
+            party.ClaimedPaid = mine.Where(p => p.IsClaimedOnly).Sum(p => p.Amount);
+
             return party;
         }
 
@@ -712,6 +837,37 @@ namespace HpskSite.Services
         public string RegistrationUrl { get; set; } = "";
 
         public bool IsMandatory { get; set; }
+
+        /// <summary>
+        /// Vem som får anmäla sig — <see cref="EventAudience"/>. <b>Alltid ett känt värde</b>, för
+        /// <c>Normalise</c> körs vid inläsningen; standard och reserv är <c>Club</c>.
+        /// </summary>
+        public string Audience { get; set; } = EventAudience.Club;
+
+        /// <summary>
+        /// Finns doctype-egenskapen? <b>⚠️ Skild från <see cref="Audience"/>, för de svarar på
+        /// olika saker:</b> en saknad egenskap och ett medvetet valt "klubbens medlemmar" läses
+        /// båda som <c>Club</c>, men bara det första betyder att en sparning skulle rinna ut i
+        /// sanden. Utan den här flaggan kan gränssnittet inte skilja dem åt.
+        /// </summary>
+        public bool AudiencePropertyExists { get; set; }
+
+        /// <summary>
+        /// Swish-numret pengarna ska till — händelsens eget, annars ägarens. Tomt = klubben har
+        /// inget nummer, och då kan ingen Swish-betalning erbjudas.
+        /// </summary>
+        public string SwishNumber { get; set; } = "";
+
+        /// <summary>Numret kom från klubben/kretsen och inte från händelsen. Värt att säga på
+        /// arrangörens skärm: annars ser fältet tomt ut och hen tror att betalning saknas.</summary>
+        public bool SwishFromOwner { get; set; }
+
+        /// <summary>Finns doctype-egenskapen på HÄNDELSEN? Ägarens nummer fungerar ändå — det här
+        /// säger bara om åsidosättningen går att spara.</summary>
+        public bool SwishPropertyExists { get; set; }
+
+        /// <summary>Kan evenemanget ta betalt via Swish? Kräver både ett nummer och en avgift.</summary>
+        public bool CanTakeSwish => SwishNumber.Length > 0 && Prices.Rows.Count > 0;
         /// <summary>
         /// Evenemangets prisrader. Tom lista = ingen avgift; <c>Unreadable</c> = gar inte att lasa,
         /// vilket ALDRIG far renderas som gratis.
@@ -781,6 +937,42 @@ namespace HpskSite.Services
         public bool MissingPrice { get; set; }
 
         public bool HasGuests => Guests.Count > 0;
+
+        // ── Betalningen ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>Bekräftade betalningar — pengar som FAKTISKT kommit, enligt arrangören.</summary>
+        public decimal ConfirmedPaid { get; set; }
+
+        /// <summary>
+        /// Påstådda men obekräftade betalningar.
+        ///
+        /// <para><b>⚠️⚠️ DET HÄR ÄR INTE PENGAR.</b> Vi har ingen Swish-API och ingen callback, så
+        /// "jag har betalat" är allt vi vet. Summan hålls SKILD från <see cref="ConfirmedPaid"/>
+        /// just därför — slås de ihop kan arrangörens avprickningslista inte skilja den som
+        /// betalat från den som sagt det, och då är listan inte längre en kontroll.</para>
+        /// </summary>
+        public decimal ClaimedPaid { get; set; }
+
+        /// <summary>
+        /// Vad som återstår innan anmälan är giltig. <b>Härlett, aldrig lagrat</b> — ramen kräver
+        /// att saldot alltid är dokument minus betalningar.
+        ///
+        /// <para>⚠️ Ett PÅSTÅENDE räknas bort här, till skillnad från i arrangörens lista. Spärren
+        /// kan inte kräva mer än ett påstående, för mer vet vi inte — och att låta medlemmen vänta
+        /// på arrangörens bekräftelse innan anmälan blir giltig hade gjort varje kvällsanmälan
+        /// ogiltig till dagen efter.</para>
+        /// </summary>
+        public decimal Outstanding => Math.Max(0m, Total - ConfirmedPaid - ClaimedPaid);
+
+        /// <summary>
+        /// Är anmälan giltig? <b>Det är den här som betalningen är villkor för.</b>
+        /// Gratis sällskap är alltid giltiga — noll att betala är betalt.
+        /// </summary>
+        public bool IsPaidUp => Outstanding <= 0m;
+
+        /// <summary>Väntar på arrangörens bekräftelse. Medlemmen är anmäld, pengarna är ännu
+        /// bara påstådda.</summary>
+        public bool AwaitingConfirmation => ClaimedPaid > 0m && ConfirmedPaid < Total;
     }
 
     public class ClubEventRosterRow

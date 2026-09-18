@@ -3839,6 +3839,77 @@ minuter. Syns som att sajten hängt sig. Diagnos: `sys.dm_exec_sessions WHERE op
 > 0`; åtgärd tills vidare: starta om appen. Värd en egen titt — det ser ut som samma form som
 [[ambient-scope-flows-into-task-run]].
 
+#### Vem får anmäla sig — `eventAudience` (2026-09-18)
+
+Rapporterat om en gåsaskjutning i prod: *"det står 'Anmälan är öppen för medlemmar i Ankeborg' men
+jag hittar ingenstans i event-editorn där man kan styra det."* Kontrollen fanns inte — regeln var
+hårdkodad i `GetEligibleClubIds` sedan funktionen byggdes.
+
+Fyra nivåer på `clubSimpleEvent.eventAudience` (operatörstillagd Textstring):
+`Club` · `Region` · `AllMembers` · `Open`.
+
+**⚠️⚠️ RIKTNINGEN ÄR ENKELRIKTAD MOT DET SMALASTE.** `EventAudience.Normalise` gör ett okänt värde
+— tomt, felstavat, halvmigrerat — till `Club`. Ett oläsbart fält får aldrig ÖPPNA en anmälan:
+skillnaden är mellan att en arrangör undrar varför grannklubben inte kommer in, och att en händelse
+tyst står öppen för hela landet. Samma regel gäller `RequiresLogin` och `IsAtLeastAsWideAs`.
+**Standard är `Club`, så en deploy ändrar ingen befintlig händelse.**
+
+**⚠️⚠️ ATT ÖPPNA ANMÄLAN ÄR INTE ATT PUBLICERA DELTAGARLISTAN.** `CanSeeRoster` är en EGEN grind
+som kapar publiknivån vid kretsen. Fram till nu var de två samma sak, och den likheten var en
+tillfällighet — lät man listan följa anmälningsrätten skulle en klubb som bjuder in grannklubbarna
+samtidigt göra sina medlemmars namn läsbara för varje medlem i landet, utan att någonstans få veta
+det. Funktionärer ser listan alltid; utomstående ser ANTALET, vilket är det som säger om det finns
+plats.
+
+**⚠️ De två breda nivåerna besvaras FÖRE klubbuppslaget**, inte genom att fylla mängden med varje
+klubb i landet — dels tusentals innehållsläsningar för en fråga som redan är avgjord, dels skulle en
+klubb som råkar sakna nod tyst utesluta sina medlemmar ur en händelse som är öppen för alla.
+`GetClubIdsFor` returnerar därför TOM mängd för `AllMembers`/`Open`, med flit.
+
+**⚠️ Följden i dörrlistan vid uppropet:** `SearchAddableMembers` läser samma mängd, och tom mängd
+hade gett noll träffar — alltså en lista som ser trasig ut på exakt de händelser som bjudit in
+flest. Där släpps varje medlem igenom och sökrutan avgränsar.
+
+**⚠️ Kretsnoden slås upp OLIKA beroende på ägare.** En kretshändelse hänger direkt under kretsen;
+en klubbhändelse ligger två steg ned (`regionalPage > clubsPage > club`). `FindRegionForClub` går
+TRÄDET, inte `regionalFederation` — koden är en sträng som kan vara tom eller stavad annorlunda.
+Hittas ingen krets faller mängden tillbaka på klubben, alltså **smalare, aldrig bredare**.
+
+**Beskedet bor på EN plats** (`NotEligibleMessage` + `EventAudience.Phrase`). Det låg i två kopior
+som båda sa "medlemmar i {klubben}" — direkt osant i samma stund nivån gick att ändra, och ett
+besked som beskriver en regel som inte gäller skickar arrangören att leta efter fel sak.
+
+**⚠️ Skrivvägen VÄGRAR ett okänt värde** i stället för att tyst normalisera det till `Club`. Att
+falla till smalast är rätt vid LÄSNING, men vid skrivning är det fel åt andra hållet: arrangören
+tror att grannklubben är inbjuden. Ett värde vi inte känner igen är ett trasigt formulär, inte ett
+val. Och saknas egenskapen rapporteras det bara när någon försökte välja något ANNAT än standard —
+annars hade varje sparning larmat om ett val ingen gjorde.
+
+**⚠️ `hpskEventRegQuery` har NOLL anropare** (mätt 2026-09-18) och hade redan glidit isär från
+`hpskEventRegAppend`: `eventPrices` saknades. Båda är ifyllda nu, men lägger du en anropare måste
+listan vara komplett — det är fältlista-som-glömmer, som bitit den här ytan tre gånger.
+
+**Operatörssteg:** lägg till `clubSimpleEvent.eventAudience` (Textstring). Värdena lagras som
+engelska nycklar, inte svenska etiketter. Utan egenskapen renderas väljaren LÅST med förklaringen
+intill, och läsningen degraderar till dagens beteende. Adds C# → full ombyggnad. Ingen SQL.
+
+Verifierat **26 enhetstest** (`EventAudienceTests`) + **21/21
+`hpsk-verify/event-audience-verify.mjs`**. **A/B: 4 av 21 faller** när publiknivån ignoreras.
+- ⚠️ **Fixturen ligger i en klubb kontot INTE tillhör**, annars svarar varje nivå `true` och
+  påståendena är vakuösa. Och kretsprovet kräver **två** klubbar: Ankeborg (samma krets som kontot)
+  för att visa att kretsnivån SLÄPPER IN, och en klubb i Blekinge för att visa att den NEKAR. En
+  första version la allt i Ankeborg, fick `true` och **rödmarkerade en korrekt implementation** —
+  Ankeborg ligger i dev under Halland, trots att prods URL säger `/ankeland/`. **Läs trädet, inte
+  adressen.**
+- ⚠️ Fixturklubben måste vara **PUBLICERAD** — `CreateClubEvent` slår upp den i den publicerade
+  cachen, och en opublicerad nod svarar *"Club not found"*, vilket läser som ett behörighetsfel.
+- ⚠️ **Deltagarlistans kapning går INTE att mäta i den sviten**: kontot är sajtadmin, och
+  `showRoster` är `canManage || CanSeeRoster`, så listan visas oavsett. Regeln mäts av
+  enhetstesten. Ett påstående om listan där hade varit ett som inte kan falla.
+- **5/5 `audience-missing-property-probe.mjs`** mätte den DEGRADERADE vägen innan egenskapen lades
+  in — att en bredare nivå vägras och NAMNGER egenskapen, med kontrollprov att standardvalet ändå
+  går igenom. Det läget går inte att framkalla igen utan att ta bort egenskapen.
+
 ### Att beställa och dela ut — klubbens årslista över märken OCH medaljer (2026-08-31)
 
 Klubben måste en gång om året svara på två frågor: *vad beställer vi från förbundet* och *vad delar
