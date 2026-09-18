@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using HpskSite.Models.Staffing;
 using Umbraco.Cms.Infrastructure.Scoping;
 
@@ -88,11 +88,9 @@ namespace HpskSite.Services.Staffing
                     DoneCount = views.Count(v => string.Equals(v.Status, WorkItemStatus.Klar, StringComparison.OrdinalIgnoreCase)),
                     OverdueCount = views.Count(v => v.IsOverdue),
                     EstimatedCostSum = views.Sum(v => v.EstimatedCost ?? 0m),
-                    ActualCostSum = views.Sum(v => v.ActualCost ?? 0m),
                 });
             }
             resp.TotalEstimatedCost = resp.Areas.Sum(a => a.EstimatedCostSum);
-            resp.TotalActualCost = resp.Areas.Sum(a => a.ActualCostSum);
             return resp;
         }
 
@@ -267,7 +265,6 @@ namespace HpskSite.Services.Staffing
             row.ScopeType = string.IsNullOrWhiteSpace(req.ScopeType) ? null : req.ScopeType.Trim();
             row.ScopeKey = string.IsNullOrWhiteSpace(req.ScopeKey) ? null : req.ScopeKey.Trim();
             row.EstimatedCost = req.EstimatedCost is >= 0 ? req.EstimatedCost : null;
-            row.ActualCost = req.ActualCost is >= 0 ? req.ActualCost : null;
             row.ModifiedDate = DateTime.UtcNow;
 
             if (row.Id > 0) db.Update(row);
@@ -524,7 +521,6 @@ namespace HpskSite.Services.Staffing
                 ScopeKey = i.ScopeKey,
                 IsOverdue = overdue,
                 EstimatedCost = i.EstimatedCost,
-                ActualCost = i.ActualCost,
                 SortOrder = i.SortOrder,
             };
         }

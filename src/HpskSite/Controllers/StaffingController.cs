@@ -438,7 +438,6 @@ namespace HpskSite.Controllers
                 daysUntilComp = wb.DaysUntilComp,
                 stationSeed = wb.StationSeed,
                 totalEstimatedCost = wb.TotalEstimatedCost,
-                totalActualCost = wb.TotalActualCost,
                 compLinks = wb.CompLinks,
                 areas = wb.Areas,
                 leadership,

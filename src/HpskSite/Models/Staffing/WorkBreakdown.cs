@@ -1,4 +1,4 @@
-using NPoco;
+﻿using NPoco;
 
 namespace HpskSite.Models.Staffing
 {
@@ -41,8 +41,26 @@ namespace HpskSite.Models.Staffing
         public string Status { get; set; } = WorkItemStatus.Planerad;
         public string? ScopeType { get; set; }
         public string? ScopeKey { get; set; }
-        public decimal? EstimatedCost { get; set; }   // budgeterad kostnad
-        public decimal? ActualCost { get; set; }       // faktisk kostnad
+        /// <summary>
+        /// Arrangörens budgeterade kostnad för uppgiften. En PLAN, gjord innan något bokförts.
+        ///
+        /// <para><b>⚠️⚠️ DET FINNS MEDVETET INGET UTFALL HÄR.</b> Ett utfall är ett påstående om
+        /// pengar som faktiskt rört sig, och det är per definition vad en VERIFIKATION är. En
+        /// handskriven siffra bredvid liggaren är ett andra sanningsanspråk utan skiljedomare:
+        /// rättas fakturan står tavlan kvar och ljuger, tyst, och ingen vet vilken av de två som
+        /// gäller. Exakt det felet är varför projektdimensionen byggdes — se
+        /// <c>LedgerProject</c>.</para>
+        ///
+        /// <para>Utfallet härleds i stället ur liggaren: tävlingens projekt
+        /// (<c>LedgerProjectService.EnsureForSource</c>) summeras med <c>Summarise</c>. Fältet
+        /// <c>ActualCost</c> togs bort 2026-09-18 medan funktionen var beta och oanvänd —
+        /// databaskolumnen finns kvar men skrivs inte och läses inte.</para>
+        ///
+        /// <para>Budgeten däremot hör hemma här: den ägs av arrangören, inte av kassören, och har
+        /// ingen motsvarighet i liggaren.</para>
+        /// </summary>
+        public decimal? EstimatedCost { get; set; }
+
         public int SortOrder { get; set; }
         public int CreatedByMemberId { get; set; }
         public DateTime CreatedDate { get; set; }
@@ -130,8 +148,8 @@ namespace HpskSite.Models.Staffing
         public string? ScopeType { get; set; }
         public string? ScopeKey { get; set; }
         public bool IsOverdue { get; set; }           // past DueDate and not Klar
+        /// <summary>Budgeterad kostnad. Utfallet kommer ur liggaren — se <see cref="WorkItem.EstimatedCost"/>.</summary>
         public decimal? EstimatedCost { get; set; }
-        public decimal? ActualCost { get; set; }
         public int SortOrder { get; set; }
         public List<WorkLinkView> Links { get; set; } = new();
         public int CommentCount { get; set; }              // person-written comments (audit excluded)
@@ -189,7 +207,6 @@ namespace HpskSite.Models.Staffing
         public int TotalCount { get; set; }
         public int OverdueCount { get; set; }
         public decimal EstimatedCostSum { get; set; }
-        public decimal ActualCostSum { get; set; }
         public List<WorkItemView> Items { get; set; } = new();
         public List<WorkLinkView> Links { get; set; } = new();
     }
@@ -212,7 +229,6 @@ namespace HpskSite.Models.Staffing
         public int? DaysUntilComp { get; set; }      // negative once the comp has passed
         public StationSeedInfo? StationSeed { get; set; }
         public decimal TotalEstimatedCost { get; set; }
-        public decimal TotalActualCost { get; set; }
         public List<WorkLinkView> CompLinks { get; set; } = new();   // competition-level documents
         public List<WorkAreaView> Areas { get; set; } = new();
     }
@@ -242,7 +258,6 @@ namespace HpskSite.Models.Staffing
         public string? ScopeType { get; set; }
         public string? ScopeKey { get; set; }
         public decimal? EstimatedCost { get; set; }
-        public decimal? ActualCost { get; set; }
     }
 
     public class DeleteWorkRequest

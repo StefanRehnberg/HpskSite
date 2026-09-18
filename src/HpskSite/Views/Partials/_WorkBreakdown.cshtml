@@ -1,4 +1,4 @@
-@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+﻿@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
 @{
     // Förberedelser — the preparation work-breakdown (WorkArea → WorkItem). Områden with an
     // områdesansvarig; uppgifter with assignee (from the same people pool), deadline and status;
@@ -153,10 +153,10 @@
                     <div class="col-sm-6 mb-2">
                         <label class="form-label fw-semibold">Budget (kr)</label>
                         <input type="number" min="0" step="1" class="form-control" id="wbItemEstCost" placeholder="valfritt">
-                    </div>
-                    <div class="col-sm-6 mb-2">
-                        <label class="form-label fw-semibold">Utfall (kr)</label>
-                        <input type="number" min="0" step="1" class="form-control" id="wbItemActCost" placeholder="valfritt">
+                        @* ⚠️ Inget utfallsfält här, med flit — utfallet är vad som FAKTISKT bokförts,
+                           och det äger bokföringen. En handskriven siffra bredvid liggaren blir en
+                           andra sanning som ingen kan skilja från den rätta. Se WorkItem.EstimatedCost. *@
+                        <div class="form-text">Vad ni räknar med att det kostar. Utfallet kommer ur bokföringen.</div>
                     </div>
                 </div>
                 <div class="text-danger small mt-2" id="wbItemError"></div>
@@ -292,7 +292,7 @@
     var templates = [];
     var compLinks = [];
     var leadership = [];   // tävlingsledning rows read through from the Bemanning roster (never written here)
-    var ctx = { discipline: '', compDate: null, daysUntilComp: null, stationSeed: null, totalEstimatedCost: 0, totalActualCost: 0 };
+    var ctx = { discipline: '', compDate: null, daysUntilComp: null, stationSeed: null, totalEstimatedCost: 0 };
     var areaModal = null, itemModal = null, linkModal = null, threadModal = null, templateModal = null;
 
     var STATUS_LABEL = { Planerad: 'Planerad', Pagar: 'Pågår', Blockerad: 'Blockerad', Klar: 'Klar' };
@@ -303,14 +303,12 @@
     function q(id) { return document.getElementById(id); }
     function fmtKr(n) { return (Math.round(Number(n) || 0)).toLocaleString('sv-SE') + ' kr'; }
     // Budget/utfall chip for an item or an område sum. Shows budget, and utfall when set.
-    function costBadge(est, act) {
-        est = Number(est) || 0; act = Number(act) || 0;
-        if (est <= 0 && act <= 0) return '';
-        var parts = [];
-        if (est > 0) parts.push('budget ' + fmtKr(est));
-        if (act > 0) parts.push('utfall ' + fmtKr(act));
-        var over = (est > 0 && act > est);
-        return '<span class="badge ' + (over ? 'bg-danger-subtle text-danger-emphasis' : 'bg-light text-dark') + ' border" title="Kostnad"><i class="bi bi-cash-coin me-1"></i>' + parts.join(' · ') + '</span>';
+    // Bara BUDGET. Utfallet är bokföringens och hämtas ur tävlingens projekt när liggaren
+    // producerar tävlingsverifikationer — se WorkItem.EstimatedCost för varför det inte typas in här.
+    function costBadge(est) {
+        est = Number(est) || 0;
+        if (est <= 0) return '';
+        return '<span class="badge bg-light text-dark border" title="Budgeterad kostnad"><i class="bi bi-cash-coin me-1"></i>budget ' + fmtKr(est) + '</span>';
     }
 
     async function load() {
@@ -322,7 +320,7 @@
             compLinks = d.compLinks || [];
             leadership = d.leadership || [];
             crewCache = null;   // roster may have changed → re-fetch the crew list on the next picker focus
-            ctx = { discipline: d.discipline || '', compDate: d.compDate || null, daysUntilComp: d.daysUntilComp, stationSeed: d.stationSeed || null, totalEstimatedCost: d.totalEstimatedCost || 0, totalActualCost: d.totalActualCost || 0 };
+            ctx = { discipline: d.discipline || '', compDate: d.compDate || null, daysUntilComp: d.daysUntilComp, stationSeed: d.stationSeed || null, totalEstimatedCost: d.totalEstimatedCost || 0 };
             lastUpdated = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
             render();
         } catch (e) { q('wbAreas').innerHTML = '<div class="alert alert-warning">Kunde inte läsa förberedelserna.</div>'; }
@@ -362,8 +360,8 @@
             var cls = (days != null && days < 0) ? 'text-muted' : (days != null && days <= 14 ? 'text-danger-emphasis' : '');
             parts.push('<span class="badge bg-light text-dark border ' + cls + '"><i class="bi bi-calendar-event me-1"></i>Tävlingsdatum: ' + esc(ctx.compDate) + (when ? ' · ' + when : '') + '</span>');
         }
-        if ((ctx.totalEstimatedCost || 0) > 0 || (ctx.totalActualCost || 0) > 0) {
-            var cb = costBadge(ctx.totalEstimatedCost, ctx.totalActualCost);
+        if ((ctx.totalEstimatedCost || 0) > 0) {
+            var cb = costBadge(ctx.totalEstimatedCost);
             parts.push('<span title="Total budget / utfall för tävlingen">' + cb.replace('bi-cash-coin me-1', 'bi-wallet2 me-1') + '</span>');
         }
         // Live-collab hint: several people can plan in parallel; the list refreshes so everyone sees changes.
@@ -452,7 +450,7 @@
     function areaHtml(a) {
         var pct = a.totalCount > 0 ? Math.round((a.doneCount / a.totalCount) * 100) : 0;
         var overdue = a.overdueCount > 0 ? '<span class="badge bg-danger ms-1" title="Försenade">' + a.overdueCount + ' försenade</span>' : '';
-        var areaCost = costBadge(a.estimatedCostSum, a.actualCostSum);
+        var areaCost = costBadge(a.estimatedCostSum);
         var areaCostWrap = areaCost ? ' ' + areaCost : '';
         var resp = a.responsibleName ? '<span class="text-muted small ms-2"><i class="bi bi-person me-1"></i>' + esc(a.responsibleName) + '</span>' : '';
         var items = (a.items || []).map(itemHtml).join('') || '<div class="text-muted small py-2">Inga uppgifter ännu.</div>';
@@ -509,7 +507,7 @@
             + '<label class="form-check-label ' + titleCls + '">' + esc(i.title) + '</label>'
             + '</div>'
             + (i.description ? '<div class="text-muted small ms-4">' + esc(i.description) + '</div>' : '')
-            + '<div class="d-flex flex-wrap gap-1 mt-1 ms-4">' + who + due + statusBadge + blockedBadge + scope + costBadge(i.estimatedCost, i.actualCost) + commentBadge + '</div>'
+            + '<div class="d-flex flex-wrap gap-1 mt-1 ms-4">' + who + due + statusBadge + blockedBadge + scope + costBadge(i.estimatedCost) + commentBadge + '</div>'
             + blockLine
             + links
             + '</div>'
@@ -691,7 +689,6 @@
         q('wbItemScopeType').value = i && i.scopeType ? i.scopeType : '';
         q('wbItemScopeKey').value = i && i.scopeKey ? i.scopeKey : '';
         q('wbItemEstCost').value = i && i.estimatedCost != null ? i.estimatedCost : '';
-        q('wbItemActCost').value = i && i.actualCost != null ? i.actualCost : '';
         applyItemScope();
         q('wbItemModalTitle').textContent = i ? 'Redigera uppgift' : 'Lägg till uppgift';
         itemModal.show();
@@ -721,8 +718,7 @@
             status: q('wbItemStatus').value,
             scopeType: st,
             scopeKey: st ? q('wbItemScopeKey').value.trim() : '',
-            estimatedCost: q('wbItemEstCost').value === '' ? null : parseFloat(q('wbItemEstCost').value),
-            actualCost: q('wbItemActCost').value === '' ? null : parseFloat(q('wbItemActCost').value)
+            estimatedCost: q('wbItemEstCost').value === '' ? null : parseFloat(q('wbItemEstCost').value)
         };
         var d = await post('/umbraco/surface/Staffing/SaveWorkItem', payload);
         if (d.success) { itemModal.hide(); await load(); }

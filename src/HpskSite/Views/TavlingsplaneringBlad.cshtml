@@ -1,4 +1,4 @@
-@model HpskSite.Models.Staffing.PlaneringBladModel
+﻿@model HpskSite.Models.Staffing.PlaneringBladModel
 @using System.Globalization
 @{
     Layout = null;
@@ -98,9 +98,9 @@
         <div class="meta">
             <strong>@Model.CompName</strong>
             @if (!string.IsNullOrEmpty(Model.CompDate)) { <span> · Tävlingsdatum @Model.CompDate</span> }
-            @if (Model.ShowForberedelser && Model.Work != null && (Model.Work.TotalEstimatedCost != 0 || Model.Work.TotalActualCost != 0))
+            @if (Model.ShowForberedelser && Model.Work != null && Model.Work.TotalEstimatedCost != 0)
             {
-                <span> · Budget @Kr(Model.Work.TotalEstimatedCost)@(Model.Work.TotalActualCost != 0 ? $" · Utfall {Kr(Model.Work.TotalActualCost)}" : "")</span>
+                <span> · Budget @Kr(Model.Work.TotalEstimatedCost)</span>
             }
             @if (Model.ShowBemanning && grid != null && grid.TotalAssigned > 0)
             {
@@ -237,7 +237,7 @@
             foreach (var area in areas)
             {
                 <div class="area-head">
-                    <h3>@area.Name <span class="muted">(@area.DoneCount/@area.TotalCount klara@(area.EstimatedCostSum != 0 ? $" · budget {Kr(area.EstimatedCostSum)}" : "")@(area.ActualCostSum != 0 ? $" · utfall {Kr(area.ActualCostSum)}" : ""))</span></h3>
+                    <h3>@area.Name <span class="muted">(@area.DoneCount/@area.TotalCount klara@(area.EstimatedCostSum != 0 ? $" · budget {Kr(area.EstimatedCostSum)}" : ""))</span></h3>
                     @if (!string.IsNullOrEmpty(area.ResponsibleName)) { <span class="muted"><i class="bi bi-person"></i> @area.ResponsibleName</span> }
                 </div>
                 @if (area.Items != null && area.Items.Any())
@@ -260,7 +260,7 @@
                                 </td>
                                 <td>@(string.IsNullOrEmpty(it.AssignedName) ? "—" : it.AssignedName)</td>
                                 <td class="@(it.IsOverdue ? "overdue" : "")">@(string.IsNullOrEmpty(it.DueDate) ? "" : it.DueDate)</td>
-                                <td>@(Kr(it.EstimatedCost))@(it.ActualCost.HasValue && it.ActualCost != 0 ? $" ({Kr(it.ActualCost)})" : "")</td>
+                                <td>@(Kr(it.EstimatedCost))</td>
                                 <td>@StatusSv(it.Status)</td>
                             </tr>
                         }
