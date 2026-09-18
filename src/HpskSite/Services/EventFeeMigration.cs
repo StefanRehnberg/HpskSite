@@ -98,10 +98,17 @@ namespace HpskSite.Services
             //
             // Frågan "är det här över huvud taget ett tal?" måste alltså komma FÖRST. Punktens
             // tvetydighet är bara intressant när strängen i övrigt ÄR ett tal.
+            // ⚠️ RÅDET MÅSTE PEKA PÅ DET SOM FAKTISKT GÅR ATT GÖRA.
+            // Första formuleringen sa "sätt avgiften som ett tal och skriv villkoren i
+            // beskrivningen" — sant när avgiften var ETT tal, men föråldrat i samma stund
+            // prisraderna fanns. "180 spänn per vuxen, 90 för barn och småttingar gratis" går nu
+            // att uttrycka exakt som tre rader, och ett råd som säger åt operatören att platta till
+            // den till 180 + prosa återinför precis den motsägelse raderna byggdes för att ta bort.
             if (!Regex.IsMatch(work, @"^[\d.,]+$"))
                 return new Result(FeeParse.Unparseable, 0m,
-                    $"\"{s}\" ar inte ett belopp utan en text - t.ex. villkorade priser eller en "
-                    + "betalningsinstruktion. Satt avgiften som ett tal och skriv villkoren i beskrivningen.");
+                    $"\"{s}\" ar inte ett enda belopp utan en text - t.ex. flera priser eller en "
+                    + "betalningsinstruktion. Lagg upp en PRISRAD per pris pa evenemanget "
+                    + "(t.ex. Vuxen 180, Barn 90, Under 7 ar 0).");
 
             if (work.Contains('.'))
                 return new Result(FeeParse.Unparseable, 0m,

@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using HpskSite.Services;
 using Xunit;
 
@@ -176,6 +176,9 @@ namespace HpskSite.Tests
             r.Outcome.Should().Be(EventFeeMigration.FeeParse.Unparseable);
             r.Reason.Should().Contain("text");
             r.Reason.Should().NotContain("tusental");
+            // Radet ska peka pa prisraderna, inte pa "ett tal plus prosa" - annars plattas tre
+            // priser till ett och motsagelsen ar tillbaka.
+            r.Reason.Should().Contain("PRISRAD");
         }
 
         /// <summary>
