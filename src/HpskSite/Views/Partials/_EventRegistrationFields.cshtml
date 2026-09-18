@@ -40,6 +40,16 @@
     <div class="mb-3">
         <label for="@(regPrefix)MaxParticipants" class="form-label">Max antal deltagare</label>
         <input type="number" class="form-control" id="@(regPrefix)MaxParticipants" min="0" step="1" placeholder="0 = ingen gräns">
+    </div>
+
+    @* ⚠️ AVGIFTEN LIGGER HÄR, I DEN DELADE PARTIALEN, och inte i en enskild dialog.
+       Den gamla fritextavgiften (feeAmount) satt bara i evenemangets egen modal, så en klubbadmin
+       som skapade en händelse från klubbpanelen kunde inte sätta någon avgift alls. Samma
+       fältlista-som-glömmer som Luleå PK rapporterade om lånevapen. *@
+    <div class="mb-2">
+        <label for="@(regPrefix)EventFee" class="form-label">Avgift (kr)</label>
+        <input type="number" class="form-control" id="@(regPrefix)EventFee" min="0" step="1" placeholder="Lämna tom = ingen avgift">
+        <div class="form-text" id="@(regPrefix)EventFeeHelp">Ett belopp, inte en text. Skriv 0 för att säga att evenemanget är gratis.</div>
         <div class="form-text">Är det fullt kan man fortfarande anmäla sig — men hamnar som reserv, och flyttas upp automatiskt om någon avbokar.</div>
     </div>
     <div class="form-check mb-3">
@@ -142,6 +152,17 @@
                 if (help) help.innerHTML = '<span class="text-warning">Egenskapen \'isMandatory\' saknas på händelsetypen i Umbraco — kontakta en administratör innan den kan användas.</span>';
             }
 
+            // Avgift. ⚠️ Tomt fält och 0 är OLIKA svar: tomt = ingen avgift angiven, 0 = arrangören
+            // har sagt att evenemanget är gratis. Samma regel som tävlingarnas juniorAvgift, och
+            // skälet fältet inte defaultar till 0.
+            var fee = el(prefix, 'EventFee');
+            if (fee) fee.value = (d.eventFee === null || d.eventFee === undefined) ? '' : d.eventFee;
+            if (d.eventFeePropertyExists === false && fee) {
+                fee.disabled = true;
+                var feeHelp = el(prefix, 'EventFeeHelp');
+                if (feeHelp) feeHelp.innerHTML = '<span class="text-warning">Egenskapen \'eventFee\' saknas på händelsetypen i Umbraco — kontakta en administratör innan avgift kan användas.</span>';
+            }
+
             // Lånevapen: samma mönster som isMandatory ovan, av samma skäl.
             var lw = el(prefix, 'LanevapenOffered');
             if (lw) lw.checked = !!d.lanevapenOffered;
@@ -172,6 +193,10 @@
             formData.append('lanevapenOffered', lw ? lw.checked : false);
             var dl = el(prefix, 'RegistrationDeadline');
             formData.append('registrationDeadline', dl ? dl.value.trim() : '');
+            // ⚠️ Skickas som TOM STRÄNG när fältet är tomt, aldrig som 0. Servern behöver kunna
+            // skilja "ingen avgift angiven" från "gratis" — se hpskEventRegFill ovan.
+            var fee = el(prefix, 'EventFee');
+            formData.append('eventFee', fee ? fee.value.trim() : '');
             return formData;
         };
 

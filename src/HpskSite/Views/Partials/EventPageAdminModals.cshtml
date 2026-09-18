@@ -88,10 +88,11 @@
                     <input type="text" class="form-control" id="editEventEndDate" placeholder="Lämna tomt för endagsevent">
                     <div class="form-text">För flerdagsevent. Lämna tomt om eventet är en dag.</div>
                 </div>
-                <div class="mb-3">
-                    <label for="editFeeAmount" class="form-label">Kostnad</label>
-                    <input type="text" class="form-control" id="editFeeAmount" placeholder="t.ex. 100 kr, Gratis">
-                </div>
+                @* ⚠️ Den gamla fritextavgiften (feeAmount, "t.ex. 100 kr, Gratis") är BORTTAGEN
+                   härifrån. Avgiften sätts numera som ett tal i _EventRegistrationFields, som
+                   ALLA tre dialogerna renderar — den här rutan fanns bara på evenemangets egen
+                   sida, så en klubbadmin som skapade en händelse från klubbpanelen kunde inte
+                   sätta någon avgift alls. Lägg inte tillbaka ett avgiftsfält här. *@
                 <div class="mb-3">
                     <label for="editTargetAudience" class="form-label">Målgrupp</label>
                     <input type="text" class="form-control" id="editTargetAudience" placeholder="t.ex. Alla, Nybörjare">
@@ -303,7 +304,6 @@ function loadEventAdminData() {
 
             // Pre-fill extended fields
             document.getElementById('editEventEndDate').value = d.eventEndDate || '';
-            document.getElementById('editFeeAmount').value = d.feeAmount || '';
             document.getElementById('editTargetAudience').value = d.targetAudience || '';
             document.getElementById('editEquipmentRequired').value = d.equipmentRequired || '';
             hpskEventRegFill('edit', d);
@@ -440,7 +440,6 @@ function saveEventDetails() {
     formData.append('contactPhone', document.getElementById('editContactPhone').value);
     // Extended fields
     formData.append('eventEndDate', document.getElementById('editEventEndDate').value);
-    formData.append('feeAmount', document.getElementById('editFeeAmount').value);
     formData.append('equipmentRequired', document.getElementById('editEquipmentRequired').value);
     formData.append('targetAudience', document.getElementById('editTargetAudience').value);
     hpskEventRegAppend('edit', formData);

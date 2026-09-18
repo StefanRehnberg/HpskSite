@@ -30,7 +30,18 @@
     // ClubEventParticipationService.IsSignupOpen; här visas den bara.
     var registrationDeadline = HpskSite.Models.ClubEvents.RealDate(
         Model.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty));
-    var feeAmount = Model.Value<string>("feeAmount") ?? "";
+    @* ⚠️ Avgiften läses ur det NUMERISKA eventFee, inte ur den gamla fritexten feeAmount.
+       Två fält som båda påstår vad det kostar blir förr eller senare oense, och så fort en
+       betalning drivs av talet läser medlemmen ett belopp och debiteras ett annat. Fritexten
+       migrerades av ClubEvent/MigrateEventFee och är på väg bort.
+       ⚠️ null och 0 är OLIKA: null = ingen avgift angiven (raden visas inte), 0 = arrangören har
+       sagt att evenemanget är gratis (raden visas, och säger Gratis). *@
+    var eventFee = Model.Value<decimal?>(HpskSite.Models.ClubEvents.FeeProperty);
+    var feeText = eventFee == null
+        ? ""
+        : eventFee.Value == 0m
+            ? "Gratis"
+            : eventFee.Value.ToString("#,##0", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")) + " kr";
     var equipmentRequired = Model.Value<string>("equipmentRequired") ?? "";
     var targetAudience = Model.Value<string>("targetAudience") ?? "";
 
@@ -454,14 +465,14 @@
                         }
 
                         <!-- Fee -->
-                        @if (!string.IsNullOrEmpty(feeAmount))
+                        @if (!string.IsNullOrEmpty(feeText))
                         {
                             <div class="col-md-6 mb-3">
                                 <div class="d-flex align-items-start">
                                     <i class="bi bi-wallet2 fs-4 me-3" style="color: @eventTypeColor;"></i>
                                     <div>
-                                        <small class="text-secondary d-block">Kostnad</small>
-                                        <strong>@feeAmount</strong>
+                                        <small class="text-secondary d-block">Avgift</small>
+                                        <strong>@feeText</strong>
                                     </div>
                                 </div>
                             </div>
