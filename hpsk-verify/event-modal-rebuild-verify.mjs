@@ -215,6 +215,45 @@ const main = async () => {
     m = await readModal(page, '#eventModal', B);
     eq('urkryssad ger fyra avsnitt igen', m.titles, SEC_BASE);
 
+    // —— ⚠⚠ ETT OGILTIGT FÄLT FÅR ALDRIG GÖRA SPARA TYST ——
+    //
+    // Rapporterat 2026-09-19: "jag klickar på Skapa händelsen men inget händer". Orsaken var
+    // att valideringen bara tittade på [required]. En felskriven e-post är inte obligatorisk,
+    // så den släpptes igenom både på sitt eget steg och av hpskWizardValidateAll — varefter
+    // anroparens form.checkValidity() sa nej och reportValidity() inte kunde visa någon bubbla
+    // på ett fält i ett dölt avsnitt. Enda spåret var en konsolrad i webbläsaren:
+    // "An invalid form control with name='contactEmail' is not focusable."
+    //
+    // Två halvor mäts, och båda behövs: guiden ska stoppa felet PÅ SITT EGET STEG, och
+    // flikläget — där man aldrig "passerar" några steg — ska hoppa dit från Spara.
+    section('Klubben — ogiltigt fält blockerar, högljutt');
+    await closeModal(page, '#eventModal');
+    await page.click('button[onclick="showCreateEventModal()"]');
+    await page.waitForTimeout(900);
+    await page.fill('#eventName', 'ZZ Validering');
+    await page.evaluate(() => {
+      const f = document.getElementById('eventDate');
+      if (f._flatpickr) f._flatpickr.setDate('2026-10-15 18:00', true); else f.value = '2026-10-15 18:00';
+    });
+    await page.evaluate(() => { document.getElementById('eventContactEmail').value = 'kalle'; });
+
+    await page.click('#eventWizNext'); await page.waitForTimeout(250);
+    await page.click('#eventWizNext'); await page.waitForTimeout(300);
+    m = await readModal(page, '#eventModal', B);
+    eq('vi når Kontakt-steget', m.shown.indexOf(true), 2);
+
+    await page.click('#eventWizNext'); await page.waitForTimeout(350);
+    m = await readModal(page, '#eventModal', B);
+    eq('Nästa vägras av den felskrivna e-posten — inte bara av tomma obligatoriska fält',
+       m.shown.indexOf(true), 2);
+    ok('och fältet är utmärkt', await page.locator('#eventContactEmail.is-invalid').count() === 1);
+
+    // ⚠️ Kontrollprov: rättas fältet ska Nästa släppa igenom. Utan det kunde påståendet
+    // ovan lika gärna betyda att Kontakt-steget ALLTID vägrar.
+    await page.fill('#eventContactEmail', 'kalle@example.com');
+    await page.click('#eventWizNext'); await page.waitForTimeout(350);
+    m = await readModal(page, '#eventModal', B);
+    eq('rättat fält släpper igenom', m.shown.indexOf(true), 3);
     await closeModal(page, '#eventModal');
 
     // ── ⚠️⚠️ Flikar vid redigering, i SAMMA session ───────────────────────────────────────
@@ -247,6 +286,27 @@ const main = async () => {
       m = await readModal(page, '#eventModal', B);
       eq('ett klick byter avsnitt', m.shown.indexOf(true), 2);
       eq('och bara ETT avsnitt syns', m.shown.filter(Boolean).length, 1);
+
+      // ⚠⚠ FLIKLÄGETS HÄLFT av samma fel. Här passerar man inga steg, så ingen stegvalidering
+      // hinner fånga något — Spara är enda tillfället, och då MÅSTE den hoppa till fliken som
+      // bär felet. Gör den inte det är resultatet en knapp som inte gör någonting.
+      await page.evaluate(() => { document.getElementById('eventContactEmail').value = 'kalle'; });
+      await page.click('#eventModal .hpsk-sectabs button:nth-child(1)');
+      await page.waitForTimeout(250);
+
+      let editPosted = false;
+      const onEditReq = r => { if (/\/Club\/(Edit|Create)ClubEvent/.test(r.url())) editPosted = true; };
+      page.on('request', onEditReq);
+      await page.click('#eventSaveBtn');
+      await page.waitForTimeout(1200);
+      page.off('request', onEditReq);
+
+      m = await readModal(page, '#eventModal', B);
+      ok('ingenting sparades', !editPosted);
+      ok('dialogen står kvar öppen', await page.locator('#eventModal.show').count() === 1);
+      eq('och Spara HOPPADE till Kontakt, där felet finns', m.shown.indexOf(true), 2);
+      ok('fältet är utmärkt', await page.locator('#eventContactEmail.is-invalid').count() === 1);
+
       await closeModal(page, '#eventModal');
     }
 

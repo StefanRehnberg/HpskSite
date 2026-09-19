@@ -323,9 +323,12 @@
             var sec = document.querySelector(modalSelector + ' #' + st.sectionId);
             if (!sec) return true;
 
+            // ⚠️ ALLA kontroller, inte bara [required]. En felskriven e-post är inte obligatorisk
+            // men gör ändå formuläret ogiltigt — fångas den inte här följer den med till sista
+            // steget och måste rapporteras därifrån, långt från fältet den gäller.
             var bad = null;
-            [].slice.call(sec.querySelectorAll('[required]')).forEach(function (f) {
-                if (f.disabled || f.offsetParent === null) return;   // dolt av en egen regel
+            [].slice.call(sec.querySelectorAll('input, select, textarea')).forEach(function (f) {
+                if (f.disabled || f.type === 'hidden' || f.offsetParent === null) return;   // dolt av en egen regel
                 var okNow = typeof f.checkValidity === 'function' ? f.checkValidity()
                                                                  : !!(f.value || '').trim();
                 f.classList.toggle('is-invalid', !okNow);
@@ -365,22 +368,48 @@
 
         // ⚠️ Hela formuläret innan Skapa. Stegvalideringen räcker inte: ett avsnitt kan ha
         // hoppats över om en villkorsregel gömde och sedan visade det igen.
+        // Etiketten som människan faktiskt ser, för ett felmeddelande som går att agera på.
+        function fieldLabel(f) {
+            var lab = f.id ? document.querySelector('label[for="' + f.id + '"]') : null;
+            var t = lab ? (lab.textContent || '').trim() : '';
+            return t || f.getAttribute('placeholder') || f.name || f.id || 'ett fält';
+        }
+
+        // ⚠⚠ HELA FORMULÄRET, inte bara [required] — och det var en riktig bugg, inte
+        // försiktighet. En felskriven e-post utan domändel är inte obligatorisk, så en [required]-loop
+        // släpper igenom den, medan anroparens `form.checkValidity()` därefter säger nej. Ligger
+        // fältet på en ANNAN flik kan `reportValidity()` inte visa någon bubbla, och webbläsaren
+        // loggar bara "An invalid form control ... is not focusable" i konsolen. Följden var att
+        // Skapa händelsen inte gjorde någonting alls, utan ett enda tecken på skärmen.
         window.hpskWizardValidateAll = function (modalSelector) {
             var modal = document.querySelector(modalSelector);
-            var form = modal && modal.querySelector('form');
-            if (!form) return true;
+            if (!modal) return true;
+            // Händelsesidans dialog saknar <form>; då gäller hela modalkroppen.
+            var scope = modal.querySelector('form') || modal.querySelector('.modal-body');
+            if (!scope) return true;
+
             var bad = null;
-            [].slice.call(form.querySelectorAll('[required]')).forEach(function (f) {
-                if (f.disabled) return;
-                var okNow = typeof f.checkValidity === 'function' ? f.checkValidity()
-                                                                 : !!(f.value || '').trim();
-                if (!okNow && !bad) bad = f;
+            [].slice.call(scope.querySelectorAll('input, select, textarea')).forEach(function (f) {
+                if (bad || f.disabled || f.type === 'hidden') return;
+                if (typeof f.checkValidity === 'function' && !f.checkValidity()) bad = f;
             });
             if (!bad) return true;
+
             // Byt till det steg fältet ligger i — annars pekar felmeddelandet på något
             // osynligt, och Skapa ser ut att inte göra någonting.
             window.hpskRevealField(modalSelector, bad);
             window.hpskWizardNotify(modalSelector);
+            bad.classList.add('is-invalid');
+
+            // ⚠⚠ SISTA UTVÄGEN MÅSTE VARA HÖGLJUDD. Är fältet dolt av en EGEN regel — inte av
+            // fliken — hjälper det inte att byta avsnitt, och `reportValidity()` visar då ingenting.
+            // Att bara returnera false där är att återskapa precis den tystnad den här funktionen
+            // finns för att ta bort.
+            if (bad.offsetParent === null) {
+                alert('Följande fält måste rättas innan du kan spara: ' + fieldLabel(bad)
+                      + '. Det visas inte just nu — kontrollera inställningarna som gömmer det.');
+                return false;
+            }
             if (typeof bad.reportValidity === 'function') bad.reportValidity();
             return false;
         };
