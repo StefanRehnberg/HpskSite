@@ -3831,13 +3831,29 @@ rapporterade lyckat. Sviten måste därför städa i SQL:
 **Förbefintligt beteende för hela funktionen, inte infört här** — men det betyder att en klubb som
 raderar en händelse i backoffice lämnar sina anmälningar kvar för alltid. Värd en egen post.
 
-**⚠️ Fynd på vägen, ORELATERAT och FÖRBEFINTLIGT:** dev-appen öppnar en transaktion i en
-`TrainingMatches`-städning några minuter efter start och lämnar den **öppen**
-(`open_transaction_count = 1`, sessionen sovande), vilket blockerar Umbracos egen skrivlåsning —
-`MemberActivityService.UpdateActivityAsync` timeoutar då på `LCK_M_X` och varje sidladdning tar
-minuter. Syns som att sajten hängt sig. Diagnos: `sys.dm_exec_sessions WHERE open_transaction_count
-> 0`; åtgärd tills vidare: starta om appen. Värd en egen titt — det ser ut som samma form som
-[[ambient-scope-flows-into-task-run]].
+**⚠️⚠️ FYND PÅ VÄGEN, ORELATERAT OCH FÖRBEFINTLIGT — men det har kostat flera körningar
+(2026-09-18/19): ETT BAKGRUNDSSVEP LÄMNAR EN ÖPPEN TRANSAKTION och låser dev-appen.**
+
+Symptomet varierar och är därför lätt att felattribuera: `MemberActivityService` timeoutar på
+`LCK_M_X` och varje sidladdning tar minuter (ser ut som att sajten hängt sig), eller en
+skrivning svarar **`Failed to acquire read lock for id: -333`** (ser ut som ett produktfel i det
+man just byggde — det kostade mig en felsökningsrunda där jag trodde en verifieringssvit hade
+gått sönder).
+
+**⚠️ NAMNGE INTE EN ENSKILD TJÄNST.** En första anteckning här skyllde på
+`FirearmReminderHostedService` för att den sovande sessionens sista sats var dess
+`LicenseExpiresOn`-svep. Nästa gång var samma symptom men satsen var `TrainingMatches`-städningen.
+Det är alltså **mönstret** som läcker — ett hosted service som öppnar en Umbraco-scope och inte
+stänger den — inte ett bestämt svep. Samma form som [[ambient-scope-flows-into-task-run]].
+
+**Diagnos:**
+```sql
+SELECT session_id, status, open_transaction_count, last_request_end_time
+FROM sys.dm_exec_sessions WHERE session_id > 50 AND open_transaction_count > 0;
+```
+Den skyldiga är den **sovande** raden med öppen transaktion. Åtgärd tills vidare: starta om appen
+(`KILL <id>` fungerar också). ⚠️ Kontrollera det här **innan** du felsöker en svit som plötsligt
+beter sig oförklarligt — tre av den här sessionens "mystiska" körningar var den här låsningen.
 
 #### Vem får anmäla sig — `eventAudience` (2026-09-18)
 

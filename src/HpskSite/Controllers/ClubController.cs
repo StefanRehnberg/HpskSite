@@ -744,6 +744,15 @@ namespace HpskSite.Controllers
                             venue = evt.Value<string>("venue") ?? "",
                             contactPerson = evt.Value<string>("contactPerson") ?? "",
                             contactEmail = evt.Value<string>("contactEmail") ?? "",
+                            // ⚠️⚠️ SAKNADES, och det RADERADE numret. Redigeringsdialogen fyller
+                            // `eventContactPhone` ur den här projektionen; utan raden fylldes den
+                            // med tomt, och sparningen skriver `SetValue("contactPhone", "")`
+                            // villkorslöst. Alltså försvann kontakttelefonen varje gång någon
+                            // redigerade en händelse från klubb- eller kretspanelen — tyst, och
+                            // utan att fältet ens såg tomt ut för den som inte visste vad som stod
+                            // där förut. Samma fältlista-som-glömmer som Luleå PK rapporterade om
+                            // lånevapen, fjärde instansen på den här ytan.
+                            contactPhone = evt.Value<string>("contactPhone") ?? "",
                             isActive = evt.Value<bool>("isActive"),
                             url = evt.Url(),
                             // Anmälningsinställningarna, så redigera-dialogen kan förfyllas utan ett
@@ -2206,6 +2215,15 @@ namespace HpskSite.Controllers
                             venue = evt.Value<string>("venue") ?? "",
                             contactPerson = evt.Value<string>("contactPerson") ?? "",
                             contactEmail = evt.Value<string>("contactEmail") ?? "",
+                            // ⚠️⚠️ SAKNADES, och det RADERADE numret. Redigeringsdialogen fyller
+                            // `eventContactPhone` ur den här projektionen; utan raden fylldes den
+                            // med tomt, och sparningen skriver `SetValue("contactPhone", "")`
+                            // villkorslöst. Alltså försvann kontakttelefonen varje gång någon
+                            // redigerade en händelse från klubb- eller kretspanelen — tyst, och
+                            // utan att fältet ens såg tomt ut för den som inte visste vad som stod
+                            // där förut. Samma fältlista-som-glömmer som Luleå PK rapporterade om
+                            // lånevapen, fjärde instansen på den här ytan.
+                            contactPhone = evt.Value<string>("contactPhone") ?? "",
                             isActive = evt.Value<bool>("isActive"),
                             url = evt.Url(),
                             // Anmälningsinställningarna, så redigera-dialogen kan förfyllas utan ett

@@ -100,10 +100,27 @@ const main = async () => {
     ok('evenemanget skapas', ev.success && evId > 0, ev.message);
     if (!evId) return;
 
-    // ── ⚠️ Den automatiska etiketten ─────────────────────────────────────────────────────────
-    section('Prisradens namn');
+    // ── ⚠️⚠️ FÄLTLISTAN SOM GLÖMMER ──────────────────────────────────────────────────────────
+    //
+    // `contactPhone` saknades i `GetClubEvents`-projektionen fram till 2026-09-19. Följden var
+    // TYST DATAFÖRLUST: redigeringsdialogen fyller telefonfältet ur den här listan, så det fylldes
+    // med tomt — och sparningen skriver `SetValue("contactPhone", "")` villkorslöst. Varje
+    // redigering från klubb- eller kretspanelen raderade alltså kontakttelefonen.
+    //
+    // ⚠️ Mäts på API:et och inte i dialogen, med flit: klubbpanelens händelselista fylls
+    // asynkront och en DOM-avläsning gav TVÅ falska resultat under felsökningen — först "fältet
+    // saknas" (mitt grep-mönster matchade inte understrecket), sedan "alla fält tomma" (listan var
+    // inte laddad). Projektionen är det som faktiskt bär felet, och den går att mäta exakt.
+    section('Fältlistan');
     const list = await get(`/umbraco/surface/Club/GetClubEvents?clubId=${CLUB_ID}`);
     const row = (list.data || []).find(e => e.id === evId);
+    ok('projektionen bär contactPhone', row && 'contactPhone' in row,
+       `fälten: ${row ? Object.keys(row).join(',') : '(ingen rad)'}`);
+    // ⚠️ Kontrollprov: de fält som ALDRIG saknades. Utan dem vore påståendet ovan grönt även om
+    // projektionen råkade bära allt av en slump.
+    ok('och de fält som alltid fanns', row && 'contactPerson' in row && 'contactEmail' in row);
+
+    section('Prisradens namn');
     eq('ett ensamt pris lagras med platshållaretiketten', (row.eventPrices || [])[0]?.label, 'Avgift');
 
     // ⚠️ Och den syns INTE för medlemmen så länge den är ensam — kortet skriver bara beloppet.
