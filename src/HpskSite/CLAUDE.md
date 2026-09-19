@@ -3851,9 +3851,34 @@ stänger den — inte ett bestämt svep. Samma form som [[ambient-scope-flows-in
 SELECT session_id, status, open_transaction_count, last_request_end_time
 FROM sys.dm_exec_sessions WHERE session_id > 50 AND open_transaction_count > 0;
 ```
-Den skyldiga är den **sovande** raden med öppen transaktion. Åtgärd tills vidare: starta om appen
-(`KILL <id>` fungerar också). ⚠️ Kontrollera det här **innan** du felsöker en svit som plötsligt
-beter sig oförklarligt — tre av den här sessionens "mystiska" körningar var den här låsningen.
+⚠⚠ **DEN FÖRSTA SÖVANDE RADEN ÄR INTE NÖDVÄNDIGTVIS DEN SKYLDIGA** — följ kedjan till roten.
+Träffen 2026-09-19 visade två *körande* sessioner med öppen transaktion, men båda var själva
+blockerade. Den verkliga roten låg tre steg bort:
+
+```sql
+SELECT session_id, blocking_session_id, wait_type
+FROM sys.dm_exec_requests WHERE blocking_session_id <> 0;
+```
+Kedjan var `53 → 73 → {60, 61, 62, 66, 72, 74, 75}`. Slå sedan upp roten och dess sista sats:
+
+```sql
+SELECT s.status, s.open_transaction_count, t.text
+FROM sys.dm_exec_sessions s
+JOIN sys.dm_exec_connections c ON c.session_id = s.session_id
+CROSS APPLY sys.dm_exec_sql_text(c.most_recent_sql_handle) t
+WHERE s.session_id = <roten>;
+```
+
+Åtgärd tills vidare: `KILL <roten>` (eller starta om appen). Hela kedjan löser upp sig direkt.
+
+⚠️ **SYMPTOMET ÄR ILLA VALT och leder fel.** Sajten SVARAR — startsidan gav 200 hela tiden —
+men allt som rör en inloggad medlem hänger, eftersom det är `MemberActivityService` som timeoutar
+på skrivlåset. Det läser som ett behörighetsfel eller en hängd webbläsare, inte som en
+databaslåsning. **Mät svarstiden inloggad, inte anonymt.**
+
+⚠️ Kontrollera det här **innan** du felsöker en svit — eller en rapport om att "dev inte svarar"
+— som plötsligt beter sig oförklarligt. Fyra av den här sessionens "mystiska" körningar var den
+här låsningen.
 
 #### Händelsedialogerna: guide vid skapande, flikar vid redigering (2026-09-19)
 
