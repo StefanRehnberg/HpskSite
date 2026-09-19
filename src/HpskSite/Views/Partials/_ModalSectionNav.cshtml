@@ -52,6 +52,20 @@
             font-size: .875rem; line-height: 1.4; white-space: nowrap; cursor: pointer;
         }
         .hpsk-sectabs button:hover { background: var(--bs-tertiary-bg); color: var(--bs-body-color); }
+        /* ⚠️ GUIDELÄGE: samma rad, annan roll. Stegen nås via Bakåt/Nästa, så knapparna är
+           avstängda och visas som prickar — men de ligger kvar i DOM:en eftersom
+           `hpskShowSection` läser stegordningen ur dem. En egen lista hade varit en andra
+           sanning om ordningen. */
+        .hpsk-sectabs.hpsk-steps { gap: .4rem; align-items: center; padding-bottom: .6rem; }
+        .hpsk-sectabs.hpsk-steps button {
+            width: .6rem; height: .6rem; padding: 0; margin: 0;
+            border-radius: 50%; font-size: 0; line-height: 0;
+            background: var(--bs-border-color); border: none;
+            cursor: default; opacity: 1;
+        }
+        .hpsk-sectabs.hpsk-steps button.active { background: var(--bs-primary); }
+        .hpsk-sectabs.hpsk-steps button:disabled { pointer-events: none; }
+
         .hpsk-sectabs button.active {
             background: var(--bs-body-bg);
             color: var(--bs-primary);
@@ -187,6 +201,150 @@
             });
             body.dataset.hpskCurrentSection = sectionId;
             body.scrollTop = 0;
+        };
+
+        // ── GUIDELÄGE ────────────────────────────────────────────────────────────────────
+        //
+        // ⚠️⚠️ SAMMA GRUPPERING, SAMMA hpskShowSection — bara annan krom.
+        //
+        // Skälet: tävlingsguidens stegmaskin är handskriven och hårdkodad till sju steg
+        // (`wizardCurrentStep < 6`, en `stepLabels`-array med sju poster). Att kopiera in
+        // den i händelsedialogerna hade gett en FJÄRDE kopia av en hårdkodad stegmaskin,
+        // och den femte gången någon lägger till ett avsnitt glömmer en av dem.
+        //
+        // Här härleds stegen ur SAMMA rubriker som flikarna, vilket ger den egenskap som
+        // är hela poängen: **skapandet och redigeringen kan dela markup.** Ett fältset,
+        // två presentationer. Och eftersom grupperingen bara flyttar noder kan varken
+        // guiden eller flikarna ändra formulärets fältmängd, namn eller värden — payloaden
+        // är strukturellt oförändrad.
+        //
+        // ⚠️ Knapparna (Bakåt/Nästa/Skapa) ÄGS AV ANROPAREN och ligger i modalens footer.
+        // Partialen renderar dem inte: varje dialog har sin egen footer, och en partial som
+        // skriver in knappar där skulle slåss med markupen. Anroparen anger `onStep` och
+        // uppdaterar sina egna knappar.
+        window.hpskModalWizard = function (modalSelector, opts) {
+            opts = opts || {};
+            var n = window.hpskModalSectionNav(modalSelector, opts);
+            if (!n) return 0;
+
+            var modal = document.querySelector(modalSelector);
+            var body = modal.querySelector('.modal-body');
+            var nav = body.querySelector('.hpsk-sectabs');
+
+            // ⚠️ Flikraden blir stegprickar. Den ligger KVAR i DOM:en och bär fortfarande
+            // ordningen — `hpskShowSection` läser sina id:n därifrån, så att byta ut den mot
+            // en egen lista hade betytt en andra sanning om stegordningen.
+            nav.classList.add('hpsk-steps');
+            [].slice.call(nav.querySelectorAll('button')).forEach(function (b) {
+                b.disabled = true;               // stegen nås via Bakåt/Nästa, inte genom klick
+                b.setAttribute('aria-hidden', 'true');
+            });
+
+            body.dataset.hpskWizard = '1';
+            if (opts.onStep) body.dataset.hpskHasOnStep = '1';
+            window._hpskWizardCbs = window._hpskWizardCbs || {};
+            if (opts.onStep) window._hpskWizardCbs[modalSelector] = opts.onStep;
+
+            window.hpskWizardNotify(modalSelector);
+            return n;
+        };
+
+        // Var i guiden är vi? Anroparen använder det för att sätta etikett och knappar.
+        window.hpskWizardState = function (modalSelector) {
+            var modal = document.querySelector(modalSelector);
+            if (!modal) return null;
+            var body = modal.querySelector('.modal-body');
+            var nav = body && body.querySelector('.hpsk-sectabs');
+            if (!nav) return null;
+            var btns = [].slice.call(nav.querySelectorAll('button'));
+            var ids = btns.map(function (b) { return b.getAttribute('data-target'); });
+            var cur = body.dataset.hpskCurrentSection;
+            var i = ids.indexOf(cur);
+            if (i < 0) i = 0;
+            return {
+                index: i,
+                count: ids.length,
+                isFirst: i === 0,
+                isLast: i === ids.length - 1,
+                title: btns[i] ? btns[i].textContent : '',
+                sectionId: ids[i],
+            };
+        };
+
+        window.hpskWizardNotify = function (modalSelector) {
+            var cb = (window._hpskWizardCbs || {})[modalSelector];
+            if (cb) { try { cb(window.hpskWizardState(modalSelector)); } catch (e) { } }
+        };
+
+        // ⚠️⚠️ VALIDERAR BARA DET SYNLIGA STEGET, och det är avsiktligt. Resten av
+        // formuläret är `hidden`, och `reportValidity()` kan inte fokusera ett fält i ett
+        // dolt avsnitt — det är precis så "Nästa gör ingenting" uppstår.
+        window.hpskWizardValidate = function (modalSelector) {
+            var st = window.hpskWizardState(modalSelector);
+            if (!st) return true;
+            var sec = document.querySelector(modalSelector + ' #' + st.sectionId);
+            if (!sec) return true;
+
+            var bad = null;
+            [].slice.call(sec.querySelectorAll('[required]')).forEach(function (f) {
+                if (f.disabled || f.offsetParent === null) return;   // dolt av en egen regel
+                var okNow = typeof f.checkValidity === 'function' ? f.checkValidity()
+                                                                 : !!(f.value || '').trim();
+                f.classList.toggle('is-invalid', !okNow);
+                if (!okNow && !bad) bad = f;
+            });
+            if (bad) {
+                try { bad.focus(); } catch (e) { }
+                if (typeof bad.reportValidity === 'function') bad.reportValidity();
+                return false;
+            }
+            return true;
+        };
+
+        window.hpskWizardNext = function (modalSelector) {
+            if (!window.hpskWizardValidate(modalSelector)) return false;
+            var st = window.hpskWizardState(modalSelector);
+            if (!st || st.isLast) return true;
+            var nav = document.querySelector(modalSelector + ' .hpsk-sectabs');
+            var ids = [].slice.call(nav.querySelectorAll('button'))
+                        .map(function (b) { return b.getAttribute('data-target'); });
+            window.hpskShowSection(modalSelector, ids[st.index + 1]);
+            window.hpskWizardNotify(modalSelector);
+            return true;
+        };
+
+        window.hpskWizardPrev = function (modalSelector) {
+            var st = window.hpskWizardState(modalSelector);
+            if (!st || st.isFirst) return;
+            var nav = document.querySelector(modalSelector + ' .hpsk-sectabs');
+            var ids = [].slice.call(nav.querySelectorAll('button'))
+                        .map(function (b) { return b.getAttribute('data-target'); });
+            // ⚠️ Ingen validering bakåt. Att spärra vägen TILLBAKA för ett ofyllt fält är
+            // att låsa in någon i ett steg de försöker lämna för att rätta något tidigare.
+            window.hpskShowSection(modalSelector, ids[st.index - 1]);
+            window.hpskWizardNotify(modalSelector);
+        };
+
+        // ⚠️ Hela formuläret innan Skapa. Stegvalideringen räcker inte: ett avsnitt kan ha
+        // hoppats över om en villkorsregel gömde och sedan visade det igen.
+        window.hpskWizardValidateAll = function (modalSelector) {
+            var modal = document.querySelector(modalSelector);
+            var form = modal && modal.querySelector('form');
+            if (!form) return true;
+            var bad = null;
+            [].slice.call(form.querySelectorAll('[required]')).forEach(function (f) {
+                if (f.disabled) return;
+                var okNow = typeof f.checkValidity === 'function' ? f.checkValidity()
+                                                                 : !!(f.value || '').trim();
+                if (!okNow && !bad) bad = f;
+            });
+            if (!bad) return true;
+            // Byt till det steg fältet ligger i — annars pekar felmeddelandet på något
+            // osynligt, och Skapa ser ut att inte göra någonting.
+            window.hpskRevealField(modalSelector, bad);
+            window.hpskWizardNotify(modalSelector);
+            if (typeof bad.reportValidity === 'function') bad.reportValidity();
+            return false;
         };
 
         // Byter till den flik som bar ett visst falt, och fokuserar det. Anvands nar
