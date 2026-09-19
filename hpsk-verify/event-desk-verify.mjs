@@ -104,7 +104,11 @@ const main = async () => {
     ok('det finns en rad i listan', await page.locator('#deskBody tr').count() >= 1);
     // ⚠️ Antiforgery-token MÅSTE finnas: sidan är chromeless, och utan den blir varje
     // avprickning ett tyst 400.
-    ok('sidan bär en antiforgery-token', await page.locator('input[name="__RequestVerificationToken"]').count() === 1);
+    // ⚠️ Token MÅSTE finnas - skriv-endpointsen ar [ValidateAntiForgeryToken], och utan den
+    // blir varje avprickning ett TYST 400. Den kommer fran Master.cshtml sedan sidan fick
+    // sajtens layout. FLERA per sida ar normalt pa hela sajten (klubbsidan har tre), sa
+    // pastaendet ar "minst en" - ett krav pa exakt en hade varit ett pastaende om layouten.
+    ok('sidan bar en antiforgery-token', await page.locator('input[name="__RequestVerificationToken"]').count() >= 1);
 
     // ── ⚠️ Påstående 2: ej avprickad är inte frånvarande ──────────────────────────────
     section('Ej avprickad är ett eget tillstånd');
@@ -148,9 +152,9 @@ const main = async () => {
 
     const canConfirm = await page.evaluate(() => {
       const items = [...document.querySelectorAll('#deskBody .dropdown-item')];
-      return items.some(i => /Ta emot betalning/i.test(i.innerText));
+      return items.some(i => /Hantera betalning/i.test(i.innerText));
     });
-    ok('menyn erbjuder "Ta emot betalning"', canConfirm,
+    ok('menyn erbjuder "Hantera betalning" - samma namn som pa tavling', canConfirm,
        'det var precis den vägen som saknades helt');
 
     // Bekräfta via endpointen — dialogen är en prompt() och blockerar automationen.

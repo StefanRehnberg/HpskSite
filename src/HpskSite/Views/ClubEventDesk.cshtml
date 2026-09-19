@@ -1,7 +1,9 @@
-﻿@model HpskSite.Controllers.EventDeskPageModel
+﻿@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
-    Layout = null;
-    var title = string.IsNullOrEmpty(Model.EventName) ? "Deltagare" : $"Deltagare — {Model.EventName}";
+    Layout = "Master.cshtml";
+    var desk = ViewData["EventDeskData"] as HpskSite.Controllers.EventDeskPageModel
+                 ?? new HpskSite.Controllers.EventDeskPageModel();
+    ViewBag.Title = string.IsNullOrEmpty(desk.EventName) ? "Deltagare" : $"Deltagare — {desk.EventName}";
 }
 @*
     /evenemang/deltagare — arrangörens yta för ett klubb- eller kretsevenemang.
@@ -27,16 +29,7 @@
     därför "ingår i NN:s betalning" och aldrig ett eget belopp — annars summerar skärmen
     450 + 180 + 90 för ett sällskap som är skyldigt 450.
 *@
-<!DOCTYPE html>
-<html lang="sv">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="robots" content="noindex, nofollow">
-    <title>@title</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-    <style>
+<style>
         body { padding-bottom: 3rem; }
         /* Sticky rubrikrad: under eventet scrollar man i listan med tummen och ska ändå se
            vilket evenemang och hur många som är kvar. */
@@ -49,23 +42,23 @@
         }
         .desk-note { white-space: pre-wrap; }
         tr.desk-cancelled { opacity: .55; }
-    </style>
-</head>
-<body class="bg-body-tertiary">
+</style>
 
-@if (Model.RequiresLogin)
+<div class="container-fluid px-3 px-lg-4">
+
+@if (desk.RequiresLogin)
 {
     <div class="container py-5 text-center">
         <h1 class="h4 mb-3">Deltagarlistan</h1>
         <p class="text-muted">Du behöver vara inloggad för att se deltagarna.</p>
-        <a class="btn btn-primary" href="@Model.LoginUrl">Logga in</a>
+        <a class="btn btn-primary" href="@desk.LoginUrl">Logga in</a>
     </div>
 }
-else if (!Model.CanManage)
+else if (!desk.CanManage)
 {
     <div class="container py-5">
         <div class="alert alert-warning mb-0">
-            <i class="bi bi-exclamation-triangle me-2"></i>@(Model.Error ?? "Deltagarlistan kunde inte visas.")
+            <i class="bi bi-exclamation-triangle me-2"></i>@(desk.Error ?? "Deltagarlistan kunde inte visas.")
         </div>
     </div>
 }
@@ -74,14 +67,14 @@ else
     <div class="desk-head px-3 py-2">
         <div class="container-fluid px-0 d-flex align-items-center gap-3 flex-wrap">
             <div class="me-auto">
-                <div class="h5 mb-0">@Model.EventName</div>
+                <div class="h5 mb-0">@desk.EventName</div>
                 <div class="small text-muted">
-                    @if (Model.EventDate.HasValue)
+                    @if (desk.EventDate.HasValue)
                     {
-                        @Model.EventDate.Value.ToString("dddd d MMMM yyyy HH:mm",
+                        @desk.EventDate.Value.ToString("dddd d MMMM yyyy HH:mm",
                             new System.Globalization.CultureInfo("sv-SE"))<text> · </text>
                     }
-                    @Model.OwnerName
+                    @desk.OwnerName
                 </div>
             </div>
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="deskLoad()">
@@ -90,13 +83,12 @@ else
         </div>
     </div>
 
-    @* ⚠️ Sidan är chromeless och har inget Umbraco-formulär, alltså ingen antiforgery-token
-       i DOM:en — och skriv-endpointsen är [ValidateAntiForgeryToken]. Utan den här raden blir
-       varje avprickning ett TYST 400. Samma fälla som event-copy-svitens städning gick i, där
-       POST:en gjordes från en sida som saknade token. *@
-    @Html.AntiForgeryToken()
+    @* ⚠️ INGEN egen @@Html.AntiForgeryToken() här — Master.cshtml renderar en, och två på
+       samma sida gör att `document.querySelector` kan få fel av dem. Skriv-endpointsen är
+       [ValidateAntiForgeryToken], så token MÅSTE finnas; den kommer från layouten. Var det här
+       någonsin en chromeless sida igen behövs raden tillbaka. *@
 
-    <div class="container-fluid py-3" id="deskApp" data-event-id="@Model.EventId">
+    <div class="container-fluid py-3" id="deskApp" data-event-id="@desk.EventId">
 
         @* Summeringskorten — samma form som Anmälningars, i en rad som bryter rent. *@
         <div class="row g-2 mb-3" id="deskCards">
@@ -193,6 +185,45 @@ else
         <div class="small text-muted mt-2" id="deskFoot"></div>
     </div>
 
+    @* Hantera betalning — samma namn och samma form som på tävling. *@
+    <div class="modal fade" id="deskPayModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-wallet2 me-2"></i>Hantera betalning</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-light">
+                        <div class="fw-semibold" id="payName"></div>
+                        <div class="small text-muted" id="payPeople"></div>
+                        <hr class="my-2">
+                        <div class="d-flex justify-content-between"><span>Förväntat</span><span id="payExpected"></span></div>
+                        <div class="d-flex justify-content-between" id="payClaimedRow">
+                            <span>Medlemmen säger sig ha betalat</span><span id="payClaimed"></span>
+                        </div>
+                        <div class="d-flex justify-content-between"><span>Mottaget hittills</span><span id="payPaid"></span></div>
+                    </div>
+
+                    <label class="form-label" for="payAmount">Mottaget belopp (kr)</label>
+                    <input type="number" class="form-control" id="payAmount" min="0" step="1" inputmode="numeric">
+                    <div class="form-text">
+                        Stäm av mot bankappen. Kom det in ett annat belopp än det förväntade är det
+                        din iakttagelse som gäller — skriv in det som faktiskt kom.
+                    </div>
+
+                    <div class="alert alert-danger mt-3 py-2" id="payWarn" style="display:none"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-success" onclick="deskPaySave(this)">
+                        <i class="bi bi-check-circle me-1"></i>Registrera betalning
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     @* Lägg till deltagare — medlem eller gäst utan konto. *@
     <div class="modal fade" id="deskAddModal" tabindex="-1">
         <div class="modal-dialog">
@@ -240,7 +271,6 @@ else
     </div>
 }
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 (function () {
     if (!document.getElementById('deskApp')) return;
@@ -391,8 +421,10 @@ else
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
                             ${(!r.isGuest && r.openPaymentId) ? `
-                            <li><button class="dropdown-item" type="button" onclick="deskConfirmPay(${r.openPaymentId}, ${r.id})">
-                                <i class="bi bi-cash-coin me-2 text-success"></i>Ta emot betalning</button></li>` : ''}
+                            @* ⚠️ SAMMA NAMN SOM PÅ TÄVLING. Två ord för samma handling tvingar den som
+                               kan den ena ytan att lära sig den andra från början. *@
+                            <li><button class="dropdown-item" type="button" onclick="deskPayOpen(${r.id})">
+                                <i class="bi bi-wallet2 me-2 text-success"></i>Hantera betalning</button></li>` : ''}
                             <li><button class="dropdown-item" type="button" onclick="deskSetStatus(${r.id}, 'Present')">
                                 <i class="bi bi-check2 me-2 text-success"></i>Närvarande</button></li>
                             <li><button class="dropdown-item" type="button" onclick="deskSetStatus(${r.id}, 'Absent')">
@@ -430,23 +462,65 @@ else
         await deskLoad();
     };
 
-    window.deskConfirmPay = async function (paymentId, rowId) {
-        const row = state.rows.find(r => r.id === rowId) || {};
-        // ⚠️ Beloppet frågas, inte antas. Avviker det som kom in från det begärda är det
-        // arrangörens iakttagelse som gäller, inte vår beräkning.
-        const raw = prompt(
-            `Mottaget belopp från ${row.name || 'medlemmen'} (kr).\n`
-            + `Förväntat: ${row.partyTotal ?? 0} kr.`,
-            String(row.partyTotal ?? ''));
-        if (raw === null) return;
-        const amount = Number(String(raw).replace(',', '.').trim());
-        if (!(amount > 0)) { alert('Ange ett belopp större än noll.'); return; }
+    // ⚠️ MODAL, INTE prompt(). En prompt kan inte visa vad som förväntas, vem som är med i
+    // sällskapet eller vad medlemmen redan påstått — och den blockerar hela fönstret. Tävlingens
+    // "Hantera betalning" är en modal av precis de skälen.
+    let payRow = null;
+
+    window.deskPayOpen = function (rowId) {
+        const r = state.rows.find(x => x.id === rowId);
+        if (!r) return;
+        payRow = r;
+
+        document.getElementById('payName').textContent = r.name || '';
+        document.getElementById('payPeople').textContent =
+            (r.partyPeople > 1) ? `${r.partyPeople} personer i sällskapet` : 'Betalar för sig själv';
+        document.getElementById('payExpected').textContent = kr(r.partyTotal || 0);
+
+        // ⚠️ PÅSTÅTT OCH MOTTAGET PÅ VAR SIN RAD. Vi har ingen Swish-API, så "jag har betalat"
+        // är allt vi vet — slås de ihop kan arrangören inte längre skilja den som betalat från
+        // den som sagt det, och då är listan inte längre en kontroll.
+        const claimed = Number(r.partyClaimed || 0);
+        document.getElementById('payClaimedRow').style.display = claimed > 0 ? '' : 'none';
+        document.getElementById('payClaimed').textContent = kr(claimed);
+        document.getElementById('payPaid').textContent = kr(r.partyPaid || 0);
+
+        // Förifyllt med det som äterstår, inte med hela skulden: en delbetalning ska inte
+        // behöva räknas i huvudet.
+        const remaining = Math.max(0, Number(r.partyTotal || 0) - Number(r.partyPaid || 0));
+        document.getElementById('payAmount').value = remaining || '';
+        document.getElementById('payWarn').style.display = 'none';
+
+        new bootstrap.Modal(document.getElementById('deskPayModal')).show();
+    };
+
+    window.deskPaySave = async function (btn) {
+        if (!payRow) return;
+        const amount = Number(String(document.getElementById('payAmount').value).replace(',', '.').trim());
+        if (!(amount > 0)) {
+            document.getElementById('payWarn').textContent = 'Ange ett belopp större än noll.';
+            document.getElementById('payWarn').style.display = '';
+            return;
+        }
+        btn.disabled = true;
+        const original = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sparar…';
 
         const d = await post('/umbraco/surface/ClubEvent/ConfirmPayment',
-                             { eventId: EVENT_ID, paymentId, actualAmount: amount });
-        // ⚠️ Svaret säger om det BOKFÖRDES eller bara kvitterades. "Bokförd" är osant för varje
-        // klubb som inte bokför hos oss, och ett kvitto på mottagen betalning är giltigt ändå.
-        alert(d.success ? (d.message || 'Betalningen är mottagen.') : (d.message || 'Kunde inte bekräfta.'));
+                             { eventId: EVENT_ID, paymentId: payRow.openPaymentId, actualAmount: amount });
+        btn.disabled = false;
+        btn.innerHTML = original;
+
+        if (!d.success) {
+            document.getElementById('payWarn').textContent = d.message || 'Kunde inte registrera betalningen.';
+            document.getElementById('payWarn').style.display = '';
+            return;
+        }
+        bootstrap.Modal.getInstance(document.getElementById('deskPayModal')).hide();
+        // ⚠️ Kvittot står KVAR på sidan och säger vad som faktiskt hände. Svaret skiljer på
+        // bokförd och kvitterad — "bokförd" är osant för varje klubb som inte bokför hos oss.
+        const box = document.getElementById('deskWarnings');
+        box.innerHTML = `<div class="alert alert-success py-2"><i class="bi bi-check-circle me-2"></i>${esc(d.message || 'Betalningen är mottagen.')}</div>`;
         await deskLoad();
     };
 
@@ -525,5 +599,4 @@ else
     document.addEventListener('visibilitychange', () => { if (!document.hidden) deskLoad(); });
 })();
 </script>
-</body>
-</html>
+</div>

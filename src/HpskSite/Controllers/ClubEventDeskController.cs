@@ -2,6 +2,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
+using Umbraco.Cms.Core.Web;
+using Umbraco.Extensions;
 
 namespace HpskSite.Controllers
 {
@@ -25,6 +27,14 @@ namespace HpskSite.Controllers
     /// genom samma endpoints som medlemmens egen sida och disken redan använder. En egen
     /// läsväg hade varit en andra sanning om vem som är anmäld och vad hen är skyldig.</para>
     ///
+    /// <para><b>⚠️ Renderas med sajtens vanliga layout</b>, inte chromeless. En första utsåga
+    /// lånade <see cref="VaultController"/>s kiosksida — men den är byggd för en telefon i ett
+    /// vapenvalv där sidhuvudet bara är i vägen. Den här ytan sitter arrangören vid, och utan
+    /// Master.cshtml följer varken menyn, sidhuvudet eller <c>theme.css</c> med — alltså ingen
+    /// dark mode, och en sida som ser ut att tillhöra någon annan sajt. Mönstret är
+    /// <c>StyrelseController</c>s: rotnoden går in som modell så layoutens egna
+    /// <c>Model.Root()</c>-anrop fungerar, och sidans data följer med i ViewData.</para>
+    ///
     /// <para>Routad MVC-controller, ingen Umbraco-nod — samma mönster som <see cref="VaultController"/>.
     /// Behörigheten är evenemangets egen (<c>CanManageAsync</c>): klubbadmin, styrelse eller
     /// skjutledare, och för en kretshändelse kretsens motsvarighet. Sidan visar inget själv —
@@ -36,15 +46,18 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly ClubEventParticipationService _participation;
+        private readonly IUmbracoContextAccessor _umbracoContextAccessor;
 
         public ClubEventDeskController(
             IMemberManager memberManager,
             IMemberService memberService,
-            ClubEventParticipationService participation)
+            ClubEventParticipationService participation,
+            IUmbracoContextAccessor umbracoContextAccessor)
         {
             _memberManager = memberManager;
             _memberService = memberService;
             _participation = participation;
+            _umbracoContextAccessor = umbracoContextAccessor;
         }
 
         [HttpGet("")]
@@ -57,12 +70,22 @@ namespace HpskSite.Controllers
             if (e <= 0) e = eventId;
             if (e <= 0) e = id;
 
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var uctx) || uctx.Content == null)
+                return StatusCode(500, "Umbraco-kontext saknas.");
+            var rootNode = uctx.Content.GetAtRoot().FirstOrDefault();
+            if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
+
             var model = new EventDeskPageModel { EventId = e };
+            IActionResult Render()
+            {
+                ViewData["EventDeskData"] = model;
+                return View("ClubEventDesk", rootNode);
+            }
 
             if (e <= 0)
             {
                 model.Error = "Länken saknar vilket evenemang det gäller.";
-                return View("ClubEventDesk", model);
+                return Render();
             }
 
             var current = await _memberManager.GetCurrentMemberAsync();
@@ -74,28 +97,28 @@ namespace HpskSite.Controllers
                 model.RequiresLogin = true;
                 model.LoginUrl = "/login-register/?tab=login&returnUrl="
                                + Uri.EscapeDataString($"/evenemang/deltagare?e={e}");
-                return View("ClubEventDesk", model);
+                return Render();
             }
 
             var ctx = _participation.GetEventContext(e);
             if (ctx == null)
             {
                 model.Error = "Evenemanget hittades inte.";
-                return View("ClubEventDesk", model);
+                return Render();
             }
 
             var member = _memberService.GetByEmail(current.Email);
             if (member == null || !await _participation.CanManageAsync(ctx, member.Id))
             {
                 model.Error = "Du har inte behörighet att se deltagarlistan för det här evenemanget.";
-                return View("ClubEventDesk", model);
+                return Render();
             }
 
             model.EventName = ctx.EventName;
             model.EventDate = ctx.EventDate;
             model.OwnerName = ctx.OwnerName;
             model.CanManage = true;
-            return View("ClubEventDesk", model);
+            return Render();
         }
     }
 
