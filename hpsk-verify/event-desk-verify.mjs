@@ -24,6 +24,9 @@ const BASE = process.env.HPSK_BASE || 'http://localhost:18150';
 const CLUB = `${BASE}/halland/klubbar/haaplinge-goass/`;
 const CLUB_ID = 2604;
 const NAME = 'ZZDESK Avgiftskvall';
+// ⚠️ EN ANNAN MEDLEM an den inloggade. Lagger funktionaren till SIG SJALV ar raden inte en
+// walk-in utan hens egen anmalan, och pastaendet om "deltagare tillagd i disken" mater ingenting.
+const WALKIN_MEMBER = 5601;
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -222,6 +225,85 @@ WHERE EventId = ${eventId} AND MemberId > 0 ORDER BY Id;`).trim();
       ok('och visar att den ingår i någon annans betalning', /Ingår i/i.test(g.betalning), g.betalning);
       ok('utan ett eget belopp', !/\d+\s*kr/.test(g.betalning), g.betalning);
     }
+
+    // —— ⚠⚠ EN DELTAGARE SOM LÄGGS TILL I DISKEN GÅR ATT TA BETALT AV ——
+    //
+    // Rapporterat 2026-09-19: "lägger jag till deltagare på nya event-adminsidan finns inget
+    // sätt att ta betalt". Två orsaker, och båda mäts här:
+    //   1. Walk-in-raden föddes UTAN FeeAmount — personen var gratis för alltid.
+    //   2. Menyvalet hängde på att en betalningsrad fanns, och en rad skapas bara av MEDLEMMENS
+    //      "visa Swish-koden". Funktionärens tillagda deltagare hade därför ingen.
+    section('Deltagare tillagd i disken');
+    const walkIn = await page.evaluate(async ([id, pid]) => {
+      const tok = document.querySelector('input[name="__RequestVerificationToken"]');
+      const r = await fetch('/umbraco/surface/ClubEvent/SetAttendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': tok ? tok.value : '' },
+        body: JSON.stringify({ eventId: id, memberId: pid, status: 'Present', priceId: 'p1' }),
+      });
+      return await r.json().catch(() => null);
+    }, [eventId, WALKIN_MEMBER]);
+    ok('deltagaren gick att lägga till', walkIn && walkIn.success, walkIn && walkIn.message);
+
+    // ⚠️ MÄT AVGIFTEN I DATABASEN. En rad utan FeeAmount ser likadan ut i listan tills någon
+    // försöker ta betalt — det var precis så felet gick att missa.
+    const fee = sql(`SET NOCOUNT ON;
+SELECT ISNULL(CAST(FeeAmount AS NVARCHAR(20)),'NULL') FROM dbo.ClubEventParticipant
+WHERE EventId = ${eventId} AND MemberId = ${WALKIN_MEMBER};`).trim();
+    ok('och fick ett PRIS, inte noll-och-gratis', fee === '180.00' || fee === '180',
+       `FeeAmount = ${fee}`);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => {
+      const b = document.getElementById('deskBody');
+      return b && !b.innerText.includes('Hämtar');
+    }, null, { timeout: 30000 }).catch(() => {});
+
+    const walkRow = await page.evaluate(m => {
+      const trs = [...document.querySelectorAll('#deskBody tr')];
+      const tr = trs.find(x => x.innerHTML.includes(`deskPayOpen(`) && x.innerText.includes('på plats'));
+      if (!tr) return null;
+      return {
+        betalning: tr.children[2].innerText.trim(),
+        harMeny: [...tr.querySelectorAll('.dropdown-item')].some(i => /Hantera betalning/i.test(i.innerText)),
+      };
+    }, WALKIN_MEMBER);
+    ok('raden finns med betalningsläge', !!walkRow, JSON.stringify(walkRow));
+    if (walkRow) {
+      ok('den visar en skuld', /Obetalt/i.test(walkRow.betalning), walkRow.betalning);
+      // ⚠️ KÄRNAN i rapporten: vägen måste finnas UTAN att medlemmen först tryckt fram koden.
+      ok('och "Hantera betalning" erbjuds även utan att Swish-koden visats', walkRow.harMeny);
+    }
+
+    const reg = await page.evaluate(async ([id, payer]) => {
+      const tok = document.querySelector('input[name="__RequestVerificationToken"]');
+      const r = await fetch('/umbraco/surface/ClubEvent/RegisterPayment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': tok ? tok.value : '' },
+        body: JSON.stringify({ eventId: id, payerMemberId: payer, actualAmount: 180, method: 'kontant' }),
+      });
+      return await r.json().catch(() => null);
+    }, [eventId, WALKIN_MEMBER]);
+    ok('betalningen gick att registrera på plats', reg && reg.success, reg && reg.message);
+
+    // ⚠️ Kontrollprov: ett okänt betalsätt får INTE tyst bli Swish — kontanter och Swish
+    // landar på olika konton.
+    const bad = await page.evaluate(async id => {
+      const tok = document.querySelector('input[name="__RequestVerificationToken"]');
+      const r = await fetch('/umbraco/surface/ClubEvent/RegisterPayment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': tok ? tok.value : '' },
+        body: JSON.stringify({ eventId: id, payerMemberId: 1, actualAmount: 50, method: 'hittepa' }),
+      });
+      return await r.json().catch(() => null);
+    }, eventId);
+    ok('ett okänt betalsätt vägras', bad && bad.success === false, JSON.stringify(bad));
+
+    const paidRows = sql(`SET NOCOUNT ON;
+SELECT COUNT(*) FROM dbo.LedgerPayment
+WHERE SourceType = 'Event' AND SourceId = ${eventId}
+  AND PayerMemberId = ${WALKIN_MEMBER} AND ConfirmedUtc IS NOT NULL AND Method = 'kontant';`).trim();
+    ok('och den ligger i liggaren som kontant', paidRows === '1', `${paidRows} rader`);
 
     ok('inga JS-fel', jsErrors.length === 0, jsErrors.join(' | '));
 

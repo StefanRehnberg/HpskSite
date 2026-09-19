@@ -823,7 +823,9 @@ namespace HpskSite.Controllers
                 ? await _participation.SetAttendanceForRowAsync(
                     request.EventId, request.ParticipantId, status, request.Note, me)
                 : await _participation.SetAttendanceAsync(
-                    request.EventId, request.MemberId, status, request.Note, me);
+                    // ⚠️ Priset foljer med: utan det fods walk-in-raden utan FeeAmount och
+                    // personen ar GRATIS for alltid.
+                    request.EventId, request.MemberId, status, request.Note, me, request.PriceId);
 
             return Json(new { success = ok, message = msg, label = ClubEvents.AttendanceDisplay(status) });
         }
@@ -1376,6 +1378,113 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Arrangören registrerar en betalning som kommit in <b>på plats</b>.
+        /// POST /umbraco/surface/ClubEvent/RegisterPayment
+        ///
+        /// <para><b>⚠⚠ VARFÖR DEN BEHÖVS.</b> <c>StartPayment</c> är MEDLEMMENS väg: den bygger
+        /// sällskapet för den inloggade och kräver att hen är betalaren. En deltagare som
+        /// funktionären lägger till i disken har därför ingen betalningsrad alls, och utan en rad
+        /// finns ingenting att bekräfta — rapporterat 2026-09-19: "lägger jag till en deltagare
+        /// finns inget sätt att ta betalt". Den här endpointen skapar raden OCH kvitterar den i
+        /// samma handling, precis som tävlingsdiskens "Registrera betalning".</para>
+        ///
+        /// <para><b>⚠️ BETALSÄTTET ÄR INTE KOSMETIK.</b> <c>LedgerPaymentMethod.RoleFor</c> mappar
+        /// det till en kontoroll — kontanter och Swish landar på olika konton. Ett antaget
+        /// betalsätt bokför pengarna på fel ställe för den förening som faktiskt bokför hos oss.</para>
+        ///
+        /// <para><b>⚠️ ÅTERANVÄNDER EN ÖPPEN RAD.</b> Har medlemmen redan tryckt fram Swish-koden
+        /// finns en obekräftad begäran; att skapa en till hade gett två förväntade betalningar för
+        /// samma pengar och förstört <c>Completeness</c>. Samma regel som <c>StartPayment</c>.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RegisterPayment([FromBody] PaymentRequest request)
+        {
+            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+
+            int me = await CurrentMemberIdAsync();
+            if (!await _participation.CanManageAsync(ctx, me))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            var payer = request?.PayerMemberId ?? 0;
+            if (payer <= 0)
+                return Json(new { success = false, message = "Betalaren saknas." });
+
+            var amount = request?.ActualAmount ?? 0m;
+            if (amount <= 0m)
+                return Json(new { success = false, message = "Ange ett belopp större än noll." });
+
+            // ⚠️ Ett okänt betalsätt får inte tyst bli Swish — då bokförs kontanter som en
+            // Swish-inbetalning. Vi vägrar hellre och låter arrangören välja.
+            var method = request?.Method ?? "";
+            if (!HpskSite.Models.Ledger.LedgerPaymentMethod.All.Contains(method))
+                return Json(new { success = false, message = "Välj hur betalningen kom in." });
+
+            var issuer = _issuers.ResolveForEvent(ctx.EventId);
+            if (issuer == null)
+                return Json(new { success = false, message = "Arrangören går inte att avgöra — kontakta klubben." });
+
+            var roster = await _participation.BuildRosterAsync(ctx);
+            var party = BuildPartyWithPayments(roster, payer, ctx.EventId);
+            if (party.Self == null)
+                return Json(new { success = false, message = "Betalaren är inte anmäld till evenemanget." });
+
+            // Återanvänd en öppen rad; skapa bara när ingen finns.
+            var open = _payments
+                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .Where(p => p.PayerMemberId == payer && p.ConfirmedUtc is null && p.VoidedUtc is null)
+                .OrderBy(p => p.Id)
+                .FirstOrDefault();
+
+            int paymentId;
+            if (open != null)
+            {
+                paymentId = open.Id;
+            }
+            else
+            {
+                var payerMember = _memberService.GetById(payer);
+                var created = _payments.Request(new HpskSite.Models.Ledger.LedgerPayment
+                {
+                    IssuerType = issuer.Value.Type,
+                    IssuerId = issuer.Value.Id,
+                    SourceType = HpskSite.Models.Ledger.LedgerSourceType.Event,
+                    SourceId = ctx.EventId,
+                    PayerMemberId = payer,
+                    PayerName = payerMember?.Name ?? $"Medlem {payer}",
+                    // Begärt belopp = det arrangören säger kom in. Raden föds och kvitteras i samma
+                    // andetag, så det finns inget fönster där de två kan skilja sig åt.
+                    Amount = amount,
+                    Method = method,
+                });
+                if (created == null)
+                    return Json(new { success = false, message = "Betalningen kunde inte skapas." });
+                paymentId = created.Value;
+            }
+
+            var result = _payments.Confirm(paymentId, me, null, amount);
+            if (result.Error != null)
+                return Json(new { success = false, message = result.Error });
+
+            var message = result.JournalEntryId.HasValue
+                ? "Betalningen är mottagen och bokförd."
+                : result.PostingSkippedReason == null
+                    ? "Betalningen är mottagen och kvitterad."
+                    : "Betalningen är mottagen och kvitterad, men INTE bokförd: "
+                      + result.PostingSkippedReason
+                      + " Den ligger kvar i listan över betalningar att bokföra.";
+
+            return Json(new
+            {
+                success = true,
+                message,
+                posted = result.JournalEntryId.HasValue,
+                postingSkippedReason = result.PostingSkippedReason,
+            });
+        }
+
+        /// <summary>
         /// Beskedet när någon inte får anmäla sig.
         ///
         /// <para>⚠️ EN plats, för meddelandet låg i två kopior som båda påstod "medlemmar i
@@ -1478,6 +1587,12 @@ namespace HpskSite.Controllers
             /// Null = ingen avvikelse.</summary>
             public decimal? ActualAmount { get; set; }
 
+            /// <summary>Betalaren, nar arrangoren registrerar en betalning som kommit in pa plats.</summary>
+            public int PayerMemberId { get; set; }
+
+            /// <summary>Ur LedgerPaymentMethod. Avgor vilket konto pengarna landar pa.</summary>
+            public string? Method { get; set; }
+
             /// <summary>Betalningsdagen, när arrangören bokför i efterhand.</summary>
             public string? PaymentDate { get; set; }
         }
@@ -1495,6 +1610,9 @@ namespace HpskSite.Controllers
             public int ParticipantId { get; set; }
 
             /// <summary>Present / Absent / Excused, or empty to clear.</summary>
+            /// <summary>Priset for den som laggs till i disken. Se SetAttendanceAsync.</summary>
+            public string? PriceId { get; set; }
+
             public string? Status { get; set; }
             public string? Note { get; set; }
         }

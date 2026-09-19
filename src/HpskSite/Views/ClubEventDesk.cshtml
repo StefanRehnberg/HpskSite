@@ -205,6 +205,19 @@ else
                         <div class="d-flex justify-content-between"><span>Mottaget hittills</span><span id="payPaid"></span></div>
                     </div>
 
+                    @* ⚠⚠ BETALSÄTTET ÄR INTE KOSMETIK. LedgerPaymentMethod.RoleFor mappar det till
+                       en kontoroll — kontanter och Swish landar på olika konton. Inget förval:
+                       ett antaget betalsätt bokför pengarna på fel ställe. *@
+                    <label class="form-label" for="payMethod">Hur kom betalningen in?</label>
+                    <select class="form-select mb-3" id="payMethod">
+                        <option value="">Välj…</option>
+                        <option value="swish">Swish</option>
+                        <option value="kontant">Kontant</option>
+                        <option value="bankgiro">Bankgiro</option>
+                        <option value="kort">Kort</option>
+                        <option value="annat">Annat</option>
+                    </select>
+
                     <label class="form-label" for="payAmount">Mottaget belopp (kr)</label>
                     <input type="number" class="form-control" id="payAmount" min="0" step="1" inputmode="numeric">
                     <div class="form-text">
@@ -241,6 +254,13 @@ else
                     </ul>
                     <div class="tab-content">
                         <div class="tab-pane fade show active" id="deskAddMember">
+                            @* ⚠⚠ PRISET FÖRST, sedan personen. Utan ett pris föds raden utan belopp
+                               och deltagaren är GRATIS för alltid — sällskapets summa räknar aldrig in
+                               hen, och det finns ingenting att ta betalt för. *@
+                            <div class="mb-2" id="deskMemberPriceWrap" style="display:none">
+                                <label class="form-label" for="deskMemberPrice">Pris</label>
+                                <select class="form-select" id="deskMemberPrice"></select>
+                            </div>
                             <label class="form-label">Sök medlem</label>
                             <input type="search" class="form-control" id="deskMemberQ"
                                    placeholder="Namn" oninput="deskSearchMembers()">
@@ -420,9 +440,14 @@ else
                             <i class="bi bi-sliders me-1"></i>Åtgärder
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
-                            ${(!r.isGuest && r.openPaymentId) ? `
+                            ${(!r.isGuest && r.paymentState !== 'free' && r.paymentState !== 'none'
+                               && r.paymentState !== 'paid' && !r.cancelled) ? `
                             @* ⚠️ SAMMA NAMN SOM PÅ TÄVLING. Två ord för samma handling tvingar den som
-                               kan den ena ytan att lära sig den andra från början. *@
+                               kan den ena ytan att lära sig den andra från början.
+                               ⚠⚠ VILLKORET ÄR SKULDEN, inte att det finns en betalningsrad. En
+                               deltagare som funktionären lagt till i disken har aldrig tryckt fram
+                               Swish-koden, alltså ingen rad — och då gick det inte att ta betalt av
+                               hen alls. Rapporterat 2026-09-19. *@
                             <li><button class="dropdown-item" type="button" onclick="deskPayOpen(${r.id})">
                                 <i class="bi bi-wallet2 me-2 text-success"></i>Hantera betalning</button></li>` : ''}
                             <li><button class="dropdown-item" type="button" onclick="deskSetStatus(${r.id}, 'Present')">
@@ -502,12 +527,26 @@ else
             document.getElementById('payWarn').style.display = '';
             return;
         }
+        const method = document.getElementById('payMethod').value;
+        if (!method) {
+            document.getElementById('payWarn').textContent = 'Välj hur betalningen kom in.';
+            document.getElementById('payWarn').style.display = '';
+            return;
+        }
+
         btn.disabled = true;
         const original = btn.innerHTML;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sparar…';
 
-        const d = await post('/umbraco/surface/ClubEvent/ConfirmPayment',
-                             { eventId: EVENT_ID, paymentId: payRow.openPaymentId, actualAmount: amount });
+        // ⚠️ EN väg in: RegisterPayment återanvänder en öppen rad och skapar bara när ingen
+        // finns. Att välja endpoint här efter om raden råkar finnas hade gett två kodvägar som
+        // kan glida isär — och den ena bara nåbar i hälften av fallen.
+        const d = await post('/umbraco/surface/ClubEvent/RegisterPayment', {
+            eventId: EVENT_ID,
+            payerMemberId: payRow.memberId,
+            actualAmount: amount,
+            method,
+        });
         btn.disabled = false;
         btn.innerHTML = original;
 
@@ -536,6 +575,12 @@ else
             : '<option value="">Ingen anmäld medlem att koppla gästen till</option>';
 
         const prices = (state.event.prices || []);
+        // Medlemssidan: visa väljaren så fort evenemanget kostar något. Ett enda pris väljer sig
+        // självt men visas ändå, så funktionären ser vad hen lägger på personen.
+        document.getElementById('deskMemberPriceWrap').style.display = prices.length ? '' : 'none';
+        document.getElementById('deskMemberPrice').innerHTML =
+            prices.map(p => `<option value="${esc(p.id)}">${esc(p.label)} — ${kr(p.amount)}</option>`).join('');
+
         const wrap = document.getElementById('deskGuestPriceWrap');
         // Ett enda pris väljer sig självt; flera kräver ett val. Att gissa hade satt ett belopp
         // ingen pekat på, och det är medlemmen som får betala det.
@@ -565,8 +610,12 @@ else
     };
 
     window.deskAddMember = async function (memberId) {
+        const prices = (state.event.prices || []);
+        const priceId = prices.length
+            ? document.getElementById('deskMemberPrice').value
+            : null;
         const d = await post('/umbraco/surface/ClubEvent/SetAttendance',
-                             { eventId: EVENT_ID, memberId, status: 'Present' });
+                             { eventId: EVENT_ID, memberId, status: 'Present', priceId });
         if (!d.success) { alert(d.message || 'Kunde inte lägga till.'); return; }
         bootstrap.Modal.getInstance(document.getElementById('deskAddModal')).hide();
         await deskLoad();

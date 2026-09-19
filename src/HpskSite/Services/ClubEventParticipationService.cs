@@ -749,8 +749,19 @@ namespace HpskSite.Services
         /// Record (or clear) attendance. <paramref name="status"/> null clears it back to
         /// "ej registrerad" — which is a real state and not the same as absent.
         /// </summary>
+        /// <param name="priceId">
+        /// ⚠⚠ <b>Priset för den som dyker upp oanmäld.</b> Utan det föds walk-in-raden helt utan
+        /// <c>FeeAmount</c>, och då är personen GRATIS för alltid — sällskapets summa räknar aldrig
+        /// in hen, och arrangören har inget att ta betalt för. Rapporterat 2026-09-19: "lägger jag
+        /// till en deltagare finns inget sätt att ta betalt".
+        ///
+        /// <para>⚠️ <c>null</c> betyder <b>rör inte priset</b>, inte "gratis" — en vanlig
+        /// avprickning av någon som redan är anmäld får aldrig nolla det hen valde vid anmälan.
+        /// Priset sätts därför bara på en NY rad.</para>
+        /// </param>
         public async Task<(bool Ok, string? Message)> SetAttendanceAsync(
-            int eventId, int memberId, string? status, string? note, int actingMemberId)
+            int eventId, int memberId, string? status, string? note, int actingMemberId,
+            string? priceId = null)
         {
             if (status != null && !ClubEvents.IsAttendanceStatus(status))
                 return (false, "Ogiltig närvarostatus.");
@@ -766,11 +777,18 @@ namespace HpskSite.Services
             if (row == null)
             {
                 // Turned up without signing up. That is a legitimate row with no SignedUpAt.
+                var ctx = GetEventContext(eventId);
+                var chosen = ctx == null ? null : ResolvePriceChoice(ctx, priceId);
+
                 row = new ClubEventParticipant
                 {
                     EventId = eventId,
                     MemberId = memberId,
                     MemberName = member.Name ?? $"Medlem {memberId}",
+                    // Samma snapshot som vid en vanlig anmälan — se ClubEventParticipant.FeeLabel.
+                    FeePriceId = chosen?.Id,
+                    FeeLabel = chosen?.Label,
+                    FeeAmount = chosen?.Amount,
                     CreatedDate = now
                 };
             }
@@ -825,8 +843,10 @@ namespace HpskSite.Services
         /// it bypasses the sign-up window and the capacity split on purpose — the person is
         /// standing there, and a full list is not a reason to leave them off the roll-call.
         /// </summary>
-        public async Task<(bool Ok, string? Message)> AddWalkInAsync(int eventId, int memberId, int actingMemberId)
-            => await SetAttendanceAsync(eventId, memberId, ClubEvents.AttendancePresent, null, actingMemberId);
+        public async Task<(bool Ok, string? Message)> AddWalkInAsync(
+            int eventId, int memberId, int actingMemberId, string? priceId = null)
+            => await SetAttendanceAsync(eventId, memberId, ClubEvents.AttendancePresent, null,
+                                        actingMemberId, priceId);
     }
 
     /// <summary>Resolved facts about one event — read once, not per participant row.</summary>
