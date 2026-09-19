@@ -3910,6 +3910,54 @@ Verifierat **26 enhetstest** (`EventAudienceTests`) + **21/21
   in — att en bredare nivå vägras och NAMNGER egenskapen, med kontrollprov att standardvalet ändå
   går igenom. Det läget går inte att framkalla igen utan att ta bort egenskapen.
 
+#### "Avgift" läckte ut som ett prisnamn, och gästen gick inte att lägga till i disken (2026-09-19)
+
+Stefan om publikväljarens hjälptext: *"det framgår inte hur man anmäler en gäst, varför ska man
+anmäla som gäst..?"* Frågan avslöjade tre saker, varav två var riktiga fel.
+
+**⚠️⚠️ TEXTEN DOLDE DET SOM GÖR RÅDET BEGRIPLIGT: gäster fungerar på VARJE publiknivå.**
+`AddGuest` frågar bara om MEDLEMMEN är behörig, aldrig om gästen — så en klubb behöver **inte**
+välja "Öppet" för att en medlem ska kunna ta med sig folk utan konto. Hjälptexten rådde arrangören
+att "anmäla som gäst i stället" utan att säga vare sig varför, var eller att det gick på den nivå
+hen redan valt. Den säger nu alla tre.
+
+Varför gäst är bättre när personen kommer i sällskap: bara ett **namn** lagras (mot namn + e-post
+av en icke-medlem), medlemmen swishar **en** gång för hela sällskapet, medlemmen är kontaktvägen —
+och en sjuåring kan inte anmäla sig själv.
+
+**⚠️⚠️ FEL 1: "Avgift" är en PLATSHÅLLARE som blev ett NAMN.** Ett ensamt pris lagras med etiketten
+`Avgift` eftersom `EventPrices.Validate` kräver en etikett — men anmälningskortet visar bara
+beloppet när raden är ensam, så texten syns aldrig. **Den blir synlig i samma stund en andra rad
+läggs till:** *"Avgift 180 / Barn 90"*, där den första borde ha hetat *Vuxen*.
+`hpskEventPriceExpand` tömmer den därför när raderna öppnas.
+- ⚠️ **Bara när raden är ENSAM och etiketten är exakt `AUTO_LABEL`.** Har arrangören medvetet döpt
+  en rad till "Avgift" bland flera är det ett val, och det får inte kastas. Sviten bär ett
+  kontrollprov på att ett valt namn behålls.
+- ⚠️ **Redan sparade evenemang med 2+ rader där en heter "Avgift"** rörs inte — där är det
+  tvetydigt om arrangören valde namnet. De får döpas om för hand.
+
+**⚠️⚠️ FEL 2: FUNKTIONÄREN KUNDE INTE LÄGGA TILL EN GÄST.** Uppropet kunde bara lägga till
+MEDLEMMAR, så frun som dyker upp med Hugo fick **ingen rad alls** — ingen plats räknad, ingen
+avgift, ingen bock att sätta. Det är precis den situation gästbegreppet finns för, och den saknades
+på den enda skärm där den uppstår. `AddGuestAsync` tog redan `guestOfMemberId` och `actingMemberId`
+som skilda argument; det var endpointen som band ihop dem.
+- **⚠️ Att peka ut NÅGON ANNAN som ansvarig kräver `CanManageAsync`.** Annars kunde vem som helst
+  hänga en gäst — och därmed en avgift — på en främling.
+- Värdlistan i uppropet visar bara **anmälda** medlemmar: `AddGuestAsync` vägrar annars, och en
+  väljare som erbjuder någon som inte står på listan ger ett avslag i stället för ett besked.
+- Prisvalet följer samma regel som medlemmens: ett enda pris väljer sig självt, flera kräver ett
+  val. `GetRoster` bär därför `event.prices` nu.
+
+Verifierat **15/15 `hpsk-verify/event-guest-desk-verify.mjs`**. **A/B: 5 av 15 faller.**
+- ⚠️ **Första versionen mätte INGENTING på gästhalvan:** funktionären och värden var samma person,
+  så den nya vägen var identisk med medlemmens egen och *"hör till rätt medlem"* kunde inte falla.
+  Fixturen sätter nu en ANNAN medlem (5601) som värd — via SQL, eftersom ingen endpoint låter en
+  funktionär anmäla någon annan.
+- ⚠️ **Prisprovet måste köras på en sida som renderar `_EventRegistrationFields`.** Min sida gör
+  det inte, och första körningen föll på `hpskEventPriceFill is not defined` — vilket läser som att
+  funktionen saknas i produkten. Klubbsidan har den, men **bara för en klubbadmin**; anonymt är
+  träffarna noll.
+
 #### Betalning vid evenemangsanmälan — genom liggaren (2026-09-18)
 
 Stefan: *"Vi behöver också kunna ta betalt vid anmälan till ett event som kostar pengar, om det

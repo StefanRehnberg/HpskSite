@@ -269,9 +269,24 @@
                 Club: 'Bara medlemmar i den här klubben kan anmäla sig.',
                 Region: 'Medlemmar i alla klubbar i kretsen kan anmäla sig.',
                 AllMembers: 'Alla inloggade medlemmar på pistol.nu kan anmäla sig. Deltagarlistan visas fortfarande bara för klubbens egna medlemmar.',
-                Open: '⚠️ Vem som helst kan anmäla sig utan konto, och lämnar då namn och e-post till klubben. Använd bara när det verkligen är avsikten — den som kommer i sällskap med en medlem anmäls i stället som gäst.'
+                Open: 'Vem som helst kan anmäla sig utan konto. Välj det här bara när ni vill nå folk som inte känner någon i klubben — till en nybörjarkurs, till exempel.'
             }[v] || '';
-            box.innerHTML = v === 'Open' ? '<span class="text-warning">' + t + '</span>' : t;
+
+            // ⚠️⚠️ SÄG ATT GÄSTER FUNGERAR PÅ ALLA NIVÅER. Texten rådde tidigare arrangören att
+            // "anmäla som gäst i stället" utan att säga vare sig varför eller var — och framför
+            // allt utan att säga det som gör rådet begripligt: man behöver INTE välja "Öppet" för
+            // att en medlem ska kunna ta med sig folk utan konto. AddGuest frågar bara om
+            // MEDLEMMEN är behörig, aldrig om gästen.
+            var guests = 'Oavsett vad du väljer kan varje anmäld medlem ta med sig familj och '
+                       + 'gäster utan konto — knappen <em>Anmäl en till</em> dyker upp i deras egen '
+                       + 'anmälan. Då lämnas bara ett namn, medlemmen betalar för hela sällskapet '
+                       + 'på en gång och står som kontakt.';
+
+            box.innerHTML = (v === 'Open'
+                    ? '<span class="text-warning">' + t + ' Varje anmäld lämnar då namn och '
+                      + 'e-post till klubben, och avbokar via en länk i mejlet.</span>'
+                    : t)
+                + '<div class="mt-1">' + guests + '</div>';
         };
 
         window.hpskEventRegClear = function (prefix) {
@@ -290,6 +305,13 @@
         // att döpa om en etikett får aldrig flytta id:t.
 
         var priceState = {};
+
+        // ⚠️⚠️ ETIKETTEN ETT ENSAMT PRIS LAGRAS MED — en platshållare, inte ett namn arrangören
+        // valt. Varje prisrad MÅSTE ha en etikett (EventPrices.Validate), men när raden är ensam
+        // visar anmälningskortet bara beloppet, så texten syns aldrig. Den blir synlig först när
+        // en andra rad läggs till, och då är den fel: "Avgift 180 / Barn 90" där den första borde
+        // heta "Vuxen". Därför töms den när raderna öppnas — se hpskEventPriceExpand.
+        var AUTO_LABEL = 'Avgift';
 
         function priceRowEl(prefix, row, index) {
             var wrap = document.createElement('div');
@@ -346,7 +368,21 @@
             var v = single && single.value !== '' ? parseFloat(single.value) : null;
             priceState[prefix] = (priceState[prefix] && priceState[prefix].length)
                 ? priceState[prefix]
-                : [{ id: '', label: v === null ? '' : 'Avgift', amount: v }];
+                : [{ id: '', label: '', amount: v }];
+
+            // ⚠️⚠️ TÖM DEN AUTOMATISKA ETIKETTEN NÄR RADERNA ÖPPNAS.
+            //
+            // `AUTO_LABEL` är vad ett ENSAMT pris lagras som, och det är osynligt så länge det är
+            // ensamt: anmälningskortet visar bara beloppet när det finns en rad. Lägger arrangören
+            // till en andra rad blir platshållaren plötsligt ett NAMN medlemmen ser — "Avgift 180 /
+            // Barn 90", där den första raden borde ha hetat "Vuxen".
+            //
+            // ⚠️ Bara när den är ENSAM och exakt lika. Har arrangören medvetet döpt en rad till
+            // "Avgift" bland flera är det ett val, och det får vi inte kasta.
+            if (priceState[prefix].length === 1
+                && (priceState[prefix][0].label || '').trim() === AUTO_LABEL) {
+                priceState[prefix][0].label = '';
+            }
 
             simple.style.display = 'none';
             rows.style.display = '';
@@ -408,7 +444,11 @@
                 // Behåll id:t från en befintlig ensam rad, annars föds den på nytt och varje
                 // redan gjord anmälan tappar sin koppling.
                 var existing = (priceState[prefix] || [])[0];
-                return [{ id: (existing && existing.id) || '', label: 'Avgift', amount: parseFloat(single.value) }];
+                // ⚠️ AUTO_LABEL, inte ett namn arrangören valt. Ett pris måste ha en etikett
+                // (EventPrices.Validate kräver det), men den visas ALDRIG när raden är ensam —
+                // anmälningskortet skriver bara beloppet. Se hpskEventPriceExpand för vad som
+                // händer när den slutar vara ensam.
+                return [{ id: (existing && existing.id) || '', label: AUTO_LABEL, amount: parseFloat(single.value) }];
             }
 
             return (priceState[prefix] || [])

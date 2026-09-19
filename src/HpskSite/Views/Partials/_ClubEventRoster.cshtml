@@ -36,6 +36,27 @@
                             </label>
                             <select id="eventRosterAddPicker" class="form-select form-select-sm" style="max-width:280px;"></select>
                             <button class="btn btn-sm btn-outline-primary" type="button" id="eventRosterAddBtn">Lägg till som närvarande</button>
+
+                            @* ⚠️ GÄSTEN UTAN KONTO — den som dyker upp i sällskap med en medlem.
+                               Utan den här vägen kunde funktionären bara lägga till MEDLEMMAR, och
+                               frun som kom med Hugo fick ingen rad alls: ingen plats räknad, ingen
+                               avgift, ingen bock att sätta. Det är precis den situation gästen
+                               finns för, och den saknades på den enda skärm där den uppstår. *@
+                            <div class="w-100 border-top mt-2 pt-2" id="eventRosterGuestBox" style="display:none;">
+                                <label class="small fw-semibold mb-1 d-block">
+                                    <i class="bi bi-people me-1"></i>…eller någon utan konto, i sällskap med en anmäld:
+                                </label>
+                                <div class="d-flex align-items-center gap-2 flex-wrap">
+                                    <select id="eventRosterGuestHost" class="form-select form-select-sm" style="max-width:220px;"></select>
+                                    <input type="text" id="eventRosterGuestName" class="form-control form-control-sm"
+                                           style="max-width:200px;" maxlength="80" placeholder="Gästens namn" autocomplete="off">
+                                    <select id="eventRosterGuestPrice" class="form-select form-select-sm" style="max-width:200px;"></select>
+                                    <button class="btn btn-sm btn-outline-primary" type="button" id="eventRosterGuestBtn">Lägg till gäst</button>
+                                </div>
+                                <div class="form-text" id="eventRosterGuestHelp">
+                                    Medlemmen står som ansvarig för platsen och avgiften.
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -97,9 +118,51 @@
                     return;
                 }
                 renderRoster(d);
+                renderGuestBox(d);
                 if (!rosterAddLoaded) { rosterAddLoaded = true; loadAddable(); }
             } catch {
                 content.innerHTML = '<div class="alert alert-danger mb-0">Kunde inte hämta deltagarlistan.</div>';
+            }
+        }
+
+        // Värdlistan och prisraderna kommer ur uppropet självt. ⚠️ Bara ANMÄLDA medlemmar kan bära
+        // en gäst — `AddGuestAsync` vägrar annars, och en väljare som erbjuder någon som inte står
+        // på listan ger ett avslag i stället för ett besked.
+        function renderGuestBox(d) {
+            const box = document.getElementById('eventRosterGuestBox');
+            if (!box) return;
+
+            const hosts = (d.rows || []).filter(r => !r.isGuest && !r.cancelled && r.signedUpAt);
+            if (!hosts.length) { box.style.display = 'none'; return; }
+            box.style.display = '';
+
+            const host = document.getElementById('eventRosterGuestHost');
+            const keep = host.value;
+            host.innerHTML = '<option value="">Gäst hos…</option>';
+            hosts.forEach(r => {
+                const o = document.createElement('option');
+                o.value = r.memberId; o.textContent = r.name;
+                host.appendChild(o);
+            });
+            if (keep) host.value = keep;
+
+            // ⚠️ Prisvalet följer SAMMA regel som medlemmens: ett enda pris väljer sig självt,
+            // flera kräver ett val. Att gissa hade satt ett belopp ingen pekat på — och det är
+            // medlemmen som faktureras.
+            const price = document.getElementById('eventRosterGuestPrice');
+            const rows = (d.event && d.event.prices) || [];
+            price.innerHTML = '';
+            if (rows.length <= 1) {
+                price.style.display = 'none';
+            } else {
+                price.style.display = '';
+                price.innerHTML = '<option value="">Välj pris…</option>';
+                rows.forEach(r => {
+                    const o = document.createElement('option');
+                    o.value = r.id;
+                    o.textContent = r.label + ' — ' + (r.amount === 0 ? 'Gratis' : r.amount + ' kr');
+                    price.appendChild(o);
+                });
             }
         }
 
@@ -244,6 +307,30 @@
         });
 
         document.addEventListener('click', async e => {
+            if (e.target && e.target.id === 'eventRosterGuestBtn') {
+                const host = parseInt(document.getElementById('eventRosterGuestHost').value, 10);
+                const nameEl = document.getElementById('eventRosterGuestName');
+                const priceEl = document.getElementById('eventRosterGuestPrice');
+                if (!host) { alert('Välj vem gästen hör till.'); return; }
+                if (!nameEl.value.trim()) { alert('Skriv gästens namn.'); return; }
+
+                e.target.disabled = true;
+                // ⚠️ `guestOfMemberId` är NÅGON ANNAN än den inloggade — servern kräver då att man
+                // får administrera evenemanget. Se AddGuest.
+                const d = await post('AddGuest', {
+                    eventId: rosterEventId,
+                    guestOfMemberId: host,
+                    name: nameEl.value.trim(),
+                    priceId: priceEl.style.display === 'none' ? '' : priceEl.value,
+                });
+                e.target.disabled = false;
+                if (!d.success) { alert(d.message || 'Kunde inte lägga till gästen.'); return; }
+                nameEl.value = '';
+                if (priceEl.style.display !== 'none') priceEl.value = '';
+                await loadRoster();
+                return;
+            }
+
             if (e.target && e.target.id === 'eventRosterAddBtn') {
                 const picker = document.getElementById('eventRosterAddPicker');
                 const memberId = parseInt(picker.value, 10);

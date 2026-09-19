@@ -484,8 +484,22 @@ namespace HpskSite.Controllers
             if (!_participation.IsEligible(ctx, member))
                 return Json(new { success = false, message = NotEligibleMessage(ctx) });
 
+            // ⚠️⚠️ VEM GÄSTEN HÖR TILL är normalt den inloggade — men i disken är det en ANNAN
+            // medlem. Utan den här vägen kan en funktionär inte lägga till frun som dyker upp med
+            // Hugo på uppropet, vilket är precis den situation gästbegreppet finns för.
+            //
+            // ⚠️ Att peka ut någon annan som ansvarig kräver att man får administrera evenemanget.
+            // Annars kunde vem som helst hänga en gäst — och därmed en avgift — på en främling.
+            int host = me;
+            if (request?.GuestOfMemberId > 0 && request.GuestOfMemberId != me)
+            {
+                if (!await _participation.CanManageAsync(ctx, me))
+                    return Json(new { success = false, message = "Du kan bara anmäla dina egna gäster." });
+                host = request.GuestOfMemberId;
+            }
+
             var (ok, msg, isReserve) = await _participation.AddGuestAsync(
-                ctx, me, request?.Name, request?.PriceId, me);
+                ctx, host, request?.Name, request?.PriceId, me);
             if (!ok) return Json(new { success = false, message = msg });
 
             var name = request!.Name!.Trim();
@@ -651,6 +665,11 @@ namespace HpskSite.Controllers
                     isMandatory = ctx.IsMandatory,
                     maxParticipants = ctx.MaxParticipants,
                     registrationRequired = ctx.RegistrationRequired,
+                    // ⚠️ Prisraderna behövs för att funktionären ska kunna lägga till en gäst i
+                    // disken — samma regel som medlemmens: ett enda pris väljer sig självt, flera
+                    // kräver ett val. Att gissa hade satt ett belopp ingen pekat på, och det är
+                    // MEDLEMMEN som faktureras.
+                    prices = ctx.Prices.Rows,
                     ownerName = ctx.OwnerName
                 },
                 counts = new
@@ -1332,6 +1351,15 @@ namespace HpskSite.Controllers
             /// <summary>Radens id vid avbokning av en enskild gäst. Ett namn duger inte: två gäster
             /// kan heta likadant.</summary>
             public int ParticipantId { get; set; }
+
+            /// <summary>
+            /// Medlemmen gästen hör till. Tomt = den inloggade, vilket är normalfallet.
+            ///
+            /// <para>⚠️ Att peka ut NÅGON ANNAN kräver att man får administrera evenemanget — det
+            /// är funktionären i disken som lägger till frun som kom med Hugo. Utan grinden kunde
+            /// vem som helst hänga en gäst, och därmed en avgift, på en främling.</para>
+            /// </summary>
+            public int GuestOfMemberId { get; set; }
         }
 
         /// <summary>Betalningssteget. <b>Inget belopp</b> — det räknas alltid på servern, annars
