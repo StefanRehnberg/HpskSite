@@ -1,4 +1,4 @@
-@*
+﻿@*
     Flikar för långa redigeringsmodaler.
 
     VARFÖR: tävlingsredigeringen visade ALLT på en gång i en 3,3–5,5 skärmar hög
@@ -222,6 +222,44 @@
         // Partialen renderar dem inte: varje dialog har sin egen footer, och en partial som
         // skriver in knappar där skulle slåss med markupen. Anroparen anger `onStep` och
         // uppdaterar sina egna knappar.
+        // Guidens krom, utbrutet: både ingången och refreshen behöver det, och två kopior av
+        // "vad är ett guideläge" hade kunnat glida isär.
+        function applyWizardChrome(modalSelector) {
+            var body = document.querySelector(modalSelector + ' .modal-body');
+            var nav = body && body.querySelector('.hpsk-sectabs');
+            if (!nav) return;
+            nav.classList.add('hpsk-steps');
+            [].slice.call(nav.querySelectorAll('button')).forEach(function (b) {
+                b.disabled = true;
+                b.setAttribute('aria-hidden', 'true');
+            });
+            body.dataset.hpskWizard = '1';
+            window.hpskWizardNotify(modalSelector);
+        }
+
+        // ⚠⚠ BYGGER OM AVSNITTSRADEN UTAN ATT NOLLSTÄLLA STEGET. Ett avsnitt kan tillkomma
+        // eller falla bort medan dialogen står öppen — anmälningsfliken slår på Avgift och På
+        // plats — och raden byggdes när dialogen öppnades. Att i stället anropa hpskModalWizard
+        // här hade kastat tilläka användaren till steg 1 i samma ögonblick hen kryssade i en ruta.
+        window.hpskRefreshSections = function (modalSelector) {
+            var body = document.querySelector(modalSelector + ' .modal-body');
+            if (!body || !body.querySelector('.hpsk-sectabs')) return 0;
+            var wasWizard = body.dataset.hpskWizard === '1';
+            var n = window.hpskModalSectionNav(modalSelector);
+            if (!n) return 0;
+            // Bara guideläget behöver återställas: hpskModalSectionNav bygger nya, påslagna
+            // knappar, vilket ÄR flikläget.
+            if (wasWizard) applyWizardChrome(modalSelector);
+            return n;
+        };
+
+        // Anropas av delade partialer som inte vet vilken dialog de sitter i.
+        window.hpskRefreshOpenSections = function () {
+            [].slice.call(document.querySelectorAll('.modal.show')).forEach(function (m) {
+                if (m.id && m.querySelector('.hpsk-sectabs')) window.hpskRefreshSections('#' + m.id);
+            });
+        };
+
         window.hpskModalWizard = function (modalSelector, opts) {
             opts = opts || {};
             var n = window.hpskModalSectionNav(modalSelector, opts);
@@ -234,18 +272,18 @@
             // ⚠️ Flikraden blir stegprickar. Den ligger KVAR i DOM:en och bär fortfarande
             // ordningen — `hpskShowSection` läser sina id:n därifrån, så att byta ut den mot
             // en egen lista hade betytt en andra sanning om stegordningen.
-            nav.classList.add('hpsk-steps');
-            [].slice.call(nav.querySelectorAll('button')).forEach(function (b) {
-                b.disabled = true;               // stegen nås via Bakåt/Nästa, inte genom klick
-                b.setAttribute('aria-hidden', 'true');
-            });
+            // ⚠️ EN GUIDE BÖRJAR ALLTID OM. `hpskModalSectionNav` behåller det avsnitt man
+            // senast stod på — riktigt för flikar, som återupptar en redigering, men fel här:
+            // nästa skapande öppnades då mitt i, på "steg 3 av 4", med de tidigare stegen
+            // oifyllda och ingen väg bakåt som sa varför.
+            var first = nav.querySelector('button');
+            if (first) window.hpskShowSection(modalSelector, first.getAttribute('data-target'));
 
-            body.dataset.hpskWizard = '1';
             if (opts.onStep) body.dataset.hpskHasOnStep = '1';
             window._hpskWizardCbs = window._hpskWizardCbs || {};
             if (opts.onStep) window._hpskWizardCbs[modalSelector] = opts.onStep;
 
-            window.hpskWizardNotify(modalSelector);
+            applyWizardChrome(modalSelector);
             return n;
         };
 
@@ -345,6 +383,37 @@
             window.hpskWizardNotify(modalSelector);
             if (typeof bad.reportValidity === 'function') bad.reportValidity();
             return false;
+        };
+
+        // ⚠️⚠️ SAMMA MODAL ANVÄNDS FÖR BÅDA LÄGENA, och därför måste flikläget vara en
+        // EGEN ingång som RIVER guideläget. Klubbens och kretsens händelsedialog är en
+        // och samma `#eventModal` — "Ny händelse" öppnar den som guide, en rad i listan
+        // öppnar den som flikar. `hpskModalSectionNav` bygger om flikraden vid varje
+        // anrop och nollställer därmed de avstängda knapparna, men `hpsk-steps` och
+        // `data-hpsk-wizard` sitter kvar: utan den här funktionen blev dialogen
+        // permanent en guide efter den första skapandet, med prickar i stället för
+        // flikar och knappar som inte gick att klicka. Tyst, eftersom ingenting felar.
+        window.hpskModalTabs = function (modalSelector, opts) {
+            var n = window.hpskModalSectionNav(modalSelector, opts);
+            if (!n) return 0;
+
+            var body = document.querySelector(modalSelector + ' .modal-body');
+            var nav = body.querySelector('.hpsk-sectabs');
+            nav.classList.remove('hpsk-steps');
+            // OBS: knapparna behover INTE slas pa har. hpskModalSectionNav tommer flikradens
+            // innerHTML och bygger nya knappar vid varje anrop, sa avstangningen forsvinner med
+            // de gamla noderna. En rad som satte b.disabled = false har sag ut att vara spärren
+            // men kunde aldrig falla i ett A/B - och en spärr som inte kan falla ar samma sak
+            // som ingen spärr, bara svarare att upptacka. Det som FAKTISKT overlever en
+            // ombyggnad ar klassen och datasetarna nedan.
+
+            delete body.dataset.hpskWizard;
+            delete body.dataset.hpskHasOnStep;
+            // ⚠️ Återkallelsen måste släppas också. Anroparens `onStep` uppdaterar
+            // Bakåt/Nästa, och en kvarglömd återkallelse skulle skriva om knappar som i
+            // flikläget betyder något helt annat (Avbryt/Spara).
+            if (window._hpskWizardCbs) delete window._hpskWizardCbs[modalSelector];
+            return n;
         };
 
         // Byter till den flik som bar ett visst falt, och fokuserar det. Anvands nar

@@ -16,6 +16,7 @@
             </div>
             <div class="modal-body">
                 <!-- Basic fields -->
+                <h6 class="text-primary">Grunduppgifter</h6>
                 <div class="row">
                     <div class="col-md-6 mb-3">
                         <label for="editEventName" class="form-label">Händelsenamn <span class="text-danger">*</span></label>
@@ -56,6 +57,7 @@
                     <label for="editEventDate" class="form-label">Datum</label>
                     <input type="text" class="form-control" id="editEventDate">
                 </div>
+                <h6 class="text-primary">Plats och beskrivning</h6>
                 <div class="mb-3">
                     <label for="editVenue" class="form-label">Plats</label>
                     <input type="text" class="form-control" id="editVenue">
@@ -64,6 +66,7 @@
                     <label for="editDescription" class="form-label">Beskrivning</label>
                     <textarea class="form-control" id="editDescription" rows="3"></textarea>
                 </div>
+                <h6 class="text-primary">Kontakt</h6>
                 <div class="row">
                     <div class="col-md-4 mb-3">
                         <label for="editContactPerson" class="form-label">Kontaktperson</label>
@@ -79,8 +82,7 @@
                     </div>
                 </div>
 
-                <hr>
-                <h6 class="text-muted mb-3">Utökade detaljer</h6>
+                <h6 class="text-primary">Utökade detaljer</h6>
 
                 <!-- Extended fields (existing) -->
                 <div class="mb-3">
@@ -113,6 +115,8 @@
         </div>
     </div>
 </div>
+
+@await Html.PartialAsync("_ModalSectionNav")
 
 <!-- Edit Image Modal -->
 <div class="modal fade" id="editImageModal" tabindex="-1" aria-labelledby="editImageModalLabel" aria-hidden="true">
@@ -414,9 +418,25 @@ function openEditDetailsModal() {
     modal.show();
 }
 
+// ⚠️ Händelsens EGEN dialog redigerar bara — den kan inte skapa något, så den har inget
+// guideläge. Flikarna byggs ändå ur SAMMA rubriker som klubbens och kretsens dialog, vilket
+// är vad som gör att de tre kan hålla samma indelning utan att dela markup.
+// ⚠⚠ shown.bs.modal, inte raden före .show(): grupperingen mäter geometri.
+(function () {
+    var el = document.getElementById('editDetailsModal');
+    if (!el) return;
+    el.addEventListener('shown.bs.modal', function () {
+        window.hpskModalTabs('#editDetailsModal');
+    });
+})();
+
 function saveEventDetails() {
-    var eventName = document.getElementById('editEventName').value.trim();
+    var nameField = document.getElementById('editEventName');
+    var eventName = nameField.value.trim();
     if (!eventName) {
+        // ⚠️ Byt till den flik som bär fältet FÖRE larmet. Annars pekar meddelandet på ett
+        // fält användaren inte kan se, och Spara ser ut att vara trasigt.
+        window.hpskRevealField('#editDetailsModal', nameField);
         alert('Händelsenamn krävs.');
         return;
     }

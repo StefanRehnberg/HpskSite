@@ -923,6 +923,7 @@
             </div>
             <div class="modal-body">
                 <form id="eventForm">
+                    <h6 class="text-primary">Grunduppgifter</h6>
                     <input type="hidden" id="eventId" name="eventId">
                     <div class="row">
                         <div class="col-md-6 mb-3">
@@ -962,6 +963,7 @@
                         <input type="text" class="form-control" id="eventDate" name="eventDate" required>
                         <small class="form-text" id="eventDateHint" style="display: none;">Valfritt för nyheter. Lämna tomt för att visa utan datum.</small>
                     </div>
+                    <h6 class="text-primary">Plats och beskrivning</h6>
                     <div class="mb-3">
                         <label class="form-label">Plats</label>
                         <input type="text" class="form-control" id="event_venue" name="venue">
@@ -970,6 +972,7 @@
                         <label class="form-label">Beskrivning</label>
                         <textarea class="form-control" id="eventDescription" name="description" rows="3"></textarea>
                     </div>
+                    <h6 class="text-primary">Kontakt</h6>
                     <div class="row">
                         <div class="col-md-4 mb-3">
                             <label class="form-label">Kontaktperson</label>
@@ -988,19 +991,81 @@
                     @* Anmälningsinställningarna hör hemma DÄR händelsen skapas. Låg de bara i
                        evenemangssidans egen dialog fanns ingen väg hit alls för den som just skapat
                        en händelse — se partialens huvud. *@
-                    <hr>
                     @await Html.PartialAsync("_EventRegistrationFields", new ViewDataDictionary(ViewData) { ["Prefix"] = "clubEvent" })
                 </form>
             </div>
+            @* ⚠️ Bakåt/Nästa ägs av dialogen, inte av _ModalSectionNav: varje modal har sin
+               egen sidfot, och en partial som skriver in knappar där slåss med markupen.
+               ⚠️ Spara ligger FÖRE Nästa i DOM:en med flit — saveEvent() letade tidigare upp
+               knappen med `.modal-footer .btn-primary`, alltså "första primära knappen som råkar
+               stå här". Den bär nu ett id, så ordningen inte längre kan avgöra vilken knapp som
+               stängs av under sparningen. *@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-primary" onclick="saveEvent()">
+                <button type="button" class="btn btn-outline-secondary" id="eventWizBack" style="display:none"
+                        onclick="hpskWizardPrev('#eventModal')">
+                    <i class="bi bi-arrow-left me-1"></i>Bakåt
+                </button>
+                <button type="button" class="btn btn-primary" id="eventSaveBtn" onclick="saveEvent()">
                     <i class="bi bi-save me-2"></i>Spara
+                </button>
+                <button type="button" class="btn btn-primary" id="eventWizNext" style="display:none"
+                        onclick="hpskWizardNext('#eventModal')">
+                    Nästa<i class="bi bi-arrow-right ms-1"></i>
                 </button>
             </div>
         </div>
     </div>
 </div>
+
+@* Partialen inkluderas av dialogen SJÄLV, samma husregel som _HtmlEscape: den reser med
+   koden som behöver den och kan inte glömmas när dialogen monteras på en ny yta.
+   Dubbelinkludering är ofarlig — partialen vaktar sig själv via Context.Items. *@
+@await Html.PartialAsync("_ModalSectionNav")
+
+<script>
+(function () {
+    // ⚠⚠ GRUPPERINGEN MÅSTE SKE NÄR MODALEN ÄR SYNLIG. `isAvailable` mäter om ett avsnitt
+    // renderar något (offsetParent + höjd), och i en modal som ännu inte visas är svaret noll
+    // för varje avsnitt — alltså noll flikar och en dialog som ser tom ut. Därför
+    // `shown.bs.modal` och inte raden före .show().
+    var el = document.getElementById('eventModal');
+    if (!el) return;
+
+    function chrome(st) {
+        var back = document.getElementById('eventWizBack');
+        var next = document.getElementById('eventWizNext');
+        var save = document.getElementById('eventSaveBtn');
+        var title = document.getElementById('eventModalTitle');
+        if (!back || !next || !save) return;
+
+        if (!st) {                                   // flikläget
+            // ⚠️ Tom sträng, aldrig 'inline-block' — den återställer elementets EGET läge och
+            // är därmed riktig oavsett vilken form knappen har.
+            back.style.display = 'none';
+            next.style.display = 'none';
+            save.style.display = '';
+            save.innerHTML = '<i class="bi bi-save me-2"></i>Spara';
+            return;
+        }
+        back.style.display = '';
+        back.disabled = st.isFirst;
+        next.style.display = st.isLast ? 'none' : '';
+        save.style.display = st.isLast ? '' : 'none';
+        save.innerHTML = '<i class="bi bi-check-lg me-2"></i>Skapa händelsen';
+        if (title) title.textContent = 'Ny händelse — steg ' + (st.index + 1) + ' av ' + st.count + ': ' + st.title;
+    }
+
+    el.addEventListener('shown.bs.modal', function () {
+        if (el.dataset.hpskMode === 'wizard') {
+            window.hpskModalWizard('#eventModal', { onStep: chrome });
+        } else {
+            window.hpskModalTabs('#eventModal');
+            chrome(null);
+        }
+    });
+})();
+</script>
 
 <!-- Copy Event Modal -->
 <div class="modal fade" id="copyEventModal" tabindex="-1">
@@ -3977,6 +4042,9 @@ function showCreateEventModal() {
     // form.reset() nollstaller inputs men koer inte visa/dolj-logiken, sa gruppen maste stangas
     // explicit — annars star forra handelsens anmalningsblock oppet pa en tom blankett.
     hpskEventRegClear('clubEvent');
+    // Läget sätts FÖRE .show() och läses av shown.bs.modal-lyssnaren — samma dialog bär
+    // båda presentationerna, så det går inte att avgöra ur markupen vilken som gäller.
+    document.getElementById('eventModal').dataset.hpskMode = 'wizard';
     new bootstrap.Modal(document.getElementById('eventModal')).show();
 }
 
@@ -4043,6 +4111,7 @@ function editEvent(eventId) {
     hpskEventRegFill('clubEvent', event);
 
     // Show modal
+    document.getElementById('eventModal').dataset.hpskMode = 'tabs';
     new bootstrap.Modal(document.getElementById('eventModal')).show();
 }
 
@@ -4055,13 +4124,17 @@ function saveEvent() {
         return;
     }
     const form = document.getElementById('eventForm');
+    // ⚠⚠ ETT AVSNITT I TAGET BETYDER ATT RESTEN ÄR hidden, och `reportValidity()` kan inte
+    // fokusera ett fält i ett dolt avsnitt. Utan hoppet till rätt steg blir följden att Spara
+    // "inte gör någonting" — exakt den tystnad hpskRevealField finns för.
+    if (!window.hpskWizardValidateAll('#eventModal')) return;
     if (!form.checkValidity()) {
         form.reportValidity();
         return;
     }
 
     // Disable button and show loading state
-    const saveBtn = document.querySelector('#eventModal .modal-footer .btn-primary');
+    const saveBtn = document.getElementById('eventSaveBtn');
     if (!saveBtn) return;
     const originalBtnText = saveBtn.innerHTML;
     saveBtn.disabled = true;

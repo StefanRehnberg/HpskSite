@@ -22,6 +22,7 @@
             </div>
             <div class="modal-body">
                 <form id="regionEventForm">
+                    <h6 class="text-primary">Grunduppgifter</h6>
                     <input type="hidden" id="regionEventId" name="eventId">
                     <div class="row">
                         <div class="col-md-6 mb-3">
@@ -61,6 +62,7 @@
                         <input type="text" class="form-control" id="regionEventDate" name="eventDate" required>
                         <small class="form-text" id="regionEventDateHint" style="display: none;">Valfritt för nyheter. Lämna tomt för att visa utan datum.</small>
                     </div>
+                    <h6 class="text-primary">Plats och beskrivning</h6>
                     <div class="mb-3">
                         <label class="form-label">Plats</label>
                         <input type="text" class="form-control" id="regionEventVenue" name="venue">
@@ -69,6 +71,7 @@
                         <label class="form-label">Beskrivning</label>
                         <textarea class="form-control" id="regionEventDescription" name="description" rows="3"></textarea>
                     </div>
+                    <h6 class="text-primary">Kontakt</h6>
                     <div class="row">
                         <div class="col-md-4 mb-3">
                             <label class="form-label">Kontaktperson</label>
@@ -84,19 +87,67 @@
                         </div>
                     </div>
 
-                    <hr>
                     @await Html.PartialAsync("_EventRegistrationFields", new ViewDataDictionary(ViewData) { ["Prefix"] = "regEvent" })
                 </form>
             </div>
+            @* Se klubbdialogens sidfot — samma indelning, samma regler. *@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-primary" onclick="saveRegionEvent()">
+                <button type="button" class="btn btn-outline-secondary" id="regionEventWizBack" style="display:none"
+                        onclick="hpskWizardPrev('#regionEventModal')">
+                    <i class="bi bi-arrow-left me-1"></i>Bakåt
+                </button>
+                <button type="button" class="btn btn-primary" id="regionEventSaveBtn" onclick="saveRegionEvent()">
                     <i class="bi bi-save me-2"></i>Spara
+                </button>
+                <button type="button" class="btn btn-primary" id="regionEventWizNext" style="display:none"
+                        onclick="hpskWizardNext('#regionEventModal')">
+                    Nästa<i class="bi bi-arrow-right ms-1"></i>
                 </button>
             </div>
         </div>
     </div>
 </div>
+
+@await Html.PartialAsync("_ModalSectionNav")
+
+<script>
+(function () {
+    var el = document.getElementById('regionEventModal');
+    if (!el) return;
+
+    function chrome(st) {
+        var back = document.getElementById('regionEventWizBack');
+        var next = document.getElementById('regionEventWizNext');
+        var save = document.getElementById('regionEventSaveBtn');
+        var title = document.getElementById('regionEventModalTitle');
+        if (!back || !next || !save) return;
+
+        if (!st) {
+            back.style.display = 'none';
+            next.style.display = 'none';
+            save.style.display = '';
+            save.innerHTML = '<i class="bi bi-save me-2"></i>Spara';
+            return;
+        }
+        back.style.display = '';
+        back.disabled = st.isFirst;
+        next.style.display = st.isLast ? 'none' : '';
+        save.style.display = st.isLast ? '' : 'none';
+        save.innerHTML = '<i class="bi bi-check-lg me-2"></i>Skapa händelsen';
+        if (title) title.textContent = 'Ny händelse — steg ' + (st.index + 1) + ' av ' + st.count + ': ' + st.title;
+    }
+
+    el.addEventListener('shown.bs.modal', function () {
+        if (el.dataset.hpskMode === 'wizard') {
+            window.hpskModalWizard('#regionEventModal', { onStep: chrome });
+        } else {
+            window.hpskModalTabs('#regionEventModal');
+            chrome(null);
+        }
+    });
+})();
+</script>
 
 <div class="regional-admin-panel">
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -751,6 +802,7 @@
         syncRegionEventTypeValue();
         toggleRegionEventDateRequired();
         updateRegionEventUrlPreview();
+        document.getElementById('regionEventModal').dataset.hpskMode = 'wizard';
         new bootstrap.Modal(document.getElementById('regionEventModal')).show();
     };
 
@@ -810,6 +862,7 @@
 
         hpskEventRegFill('regEvent', event);
 
+        document.getElementById('regionEventModal').dataset.hpskMode = 'tabs';
         new bootstrap.Modal(document.getElementById('regionEventModal')).show();
     };
 
@@ -822,12 +875,14 @@
             return;
         }
         var form = document.getElementById('regionEventForm');
+        // Se klubbdialogen: ett dolt avsnitt går inte att rapportera ett fel på.
+        if (!window.hpskWizardValidateAll('#regionEventModal')) return;
         if (!form.checkValidity()) {
             form.reportValidity();
             return;
         }
 
-        var saveBtn = document.querySelector('#regionEventModal .modal-footer .btn-primary');
+        var saveBtn = document.getElementById('regionEventSaveBtn');
         if (!saveBtn) return;
         var originalBtnText = saveBtn.innerHTML;
         saveBtn.disabled = true;

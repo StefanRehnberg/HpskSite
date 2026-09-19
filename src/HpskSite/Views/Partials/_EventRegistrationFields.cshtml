@@ -21,6 +21,7 @@
     var regPrefix = ViewData["Prefix"] as string ?? "edit";
 }
 
+<h6 class="text-primary">Anmälan</h6>
 <div class="form-check mb-2">
     <input class="form-check-input" type="checkbox" id="@(regPrefix)RegistrationRequired"
            onchange="hpskEventRegToggle('@regPrefix')">
@@ -52,19 +53,6 @@
         <div class="form-text" id="@(regPrefix)EventAudienceHelp"></div>
     </div>
 
-    @* ⚠️ SWISH-NUMRET ÄR EN ÅSIDOSÄTTNING, inte ett obligatoriskt fält. Klubben och kretsen bär
-       redan `swishNumber`, så tomt betyder "använd vårt vanliga konto". Ett tvingande fält hade
-       betytt att arrangören skriver om numret varje gång — och en felskrivning skickar pengarna
-       till fel konto TYST, eftersom vi inte har någon Swish-API som kan säga emot. *@
-    <div class="mb-3">
-        <label for="@(regPrefix)SwishNumber" class="form-label">Swish-nummer (valfritt)</label>
-        <input type="text" class="form-control" id="@(regPrefix)SwishNumber"
-               placeholder="Lämna tom = klubbens/kretsens nummer" maxlength="20" autocomplete="off">
-        <div class="form-text" id="@(regPrefix)SwishNumberHelp">
-            Fyll bara i om betalningen ska gå till ett annat konto än klubbens vanliga.
-        </div>
-    </div>
-
     <div class="mb-3">
         <label for="@(regPrefix)RegistrationDeadline" class="form-label">Sista anmälningsdag</label>
         <input type="text" class="form-control" id="@(regPrefix)RegistrationDeadline" placeholder="Lämna tom = anmälan är öppen till och med evenemangsdagen">
@@ -79,6 +67,19 @@
         <input type="number" class="form-control" id="@(regPrefix)MaxParticipants" min="0" step="1" placeholder="0 = ingen gräns">
     </div>
 
+    <div class="mb-3">
+        <label for="@(regPrefix)RegistrationUrl" class="form-label">Länk till anmälan (extern)</label>
+        <input type="text" class="form-control" id="@(regPrefix)RegistrationUrl" placeholder="https://...">
+        <div class="form-text">Lämna tom för att låta medlemmarna anmäla sig här på pistol.nu. Fyller du i en länk skickas de dit i stället, och vi för ingen deltagarlista.</div>
+    </div>
+</div>
+
+<h6 class="text-primary">Avgift och betalning</h6>
+@* ⚠️ EGEN FLIK sedan 2026-09-19. Anmälningsfliken bar tio fält i tre olika ärenden och
+   rapporterades som överväldigande. Avgiften och Swish-numret är EN fråga — vad kostar det
+   och vart går pengarna — och hör därför ihop, i den ordningen: numret är ointressant så
+   länge det inte kostar något. *@
+<div id="@(regPrefix)RegistrationFeeGroup" style="display:none;">
     @* ⚠️ AVGIFTEN LIGGER HÄR, I DEN DELADE PARTIALEN, och inte i en enskild dialog.
        Den gamla fritextavgiften (feeAmount) satt bara i evenemangets egen modal, så en klubbadmin
        som skapade en händelse från klubbpanelen kunde inte sätta någon avgift alls. Samma
@@ -115,6 +116,23 @@
 
         <div class="form-text">Är det fullt kan man fortfarande anmäla sig — men hamnar som reserv, och flyttas upp automatiskt om någon avbokar.</div>
     </div>
+    @* ⚠️ SWISH-NUMRET ÄR EN ÅSIDOSÄTTNING, inte ett obligatoriskt fält. Klubben och kretsen bär
+       redan `swishNumber`, så tomt betyder "använd vårt vanliga konto". Ett tvingande fält hade
+       betytt att arrangören skriver om numret varje gång — och en felskrivning skickar pengarna
+       till fel konto TYST, eftersom vi inte har någon Swish-API som kan säga emot. *@
+    <div class="mb-3">
+        <label for="@(regPrefix)SwishNumber" class="form-label">Swish-nummer (valfritt)</label>
+        <input type="text" class="form-control" id="@(regPrefix)SwishNumber"
+               placeholder="Lämna tom = klubbens/kretsens nummer" maxlength="20" autocomplete="off">
+        <div class="form-text" id="@(regPrefix)SwishNumberHelp">
+            Fyll bara i om betalningen ska gå till ett annat konto än klubbens vanliga.
+        </div>
+    </div>
+</div>
+
+<h6 class="text-primary">På plats</h6>
+@* Det som händer NÄR man är där, inte när man anmäler sig. *@
+<div id="@(regPrefix)RegistrationOnSiteGroup" style="display:none;">
     <div class="form-check mb-3">
         <input class="form-check-input" type="checkbox" id="@(regPrefix)IsMandatory">
         <label class="form-check-label" for="@(regPrefix)IsMandatory">Obligatoriskt deltagande</label>
@@ -130,12 +148,8 @@
             bara på tillfällen där det skjuts — inte på möten och städdagar.
         </div>
     </div>
-    <div class="mb-3">
-        <label for="@(regPrefix)RegistrationUrl" class="form-label">Länk till anmälan (extern)</label>
-        <input type="text" class="form-control" id="@(regPrefix)RegistrationUrl" placeholder="https://...">
-        <div class="form-text">Lämna tom för att låta medlemmarna anmäla sig här på pistol.nu. Fyller du i en länk skickas de dit i stället, och vi för ingen deltagarlista.</div>
-    </div>
 </div>
+
 
 @* Datumfältet: hpskSetDateField skriver råvärdet OCH synkar flatpickr, och CLEAR:ar i stället för
    setDate('') — se [[flatpickr-setdate-maxdate-trap]]. Partialen guardar sig själv. *@
@@ -162,8 +176,13 @@
         window.hpskEventRegToggle = function (prefix) {
             var req = el(prefix, 'RegistrationRequired');
             if (!req) return;
-            var group = el(prefix, 'RegistrationOwnGroup');
-            if (group) group.style.display = req.checked ? '' : 'none';
+            // ⚠️ TRE grupper sedan uppdelningen. Missas en blir dess fält kvar på skärmen för
+            // en händelse som inte tar emot anmälningar — och dess flik står kvar i raden.
+            ['RegistrationOwnGroup', 'RegistrationFeeGroup', 'RegistrationOnSiteGroup']
+                .forEach(function (name) {
+                    var g = el(prefix, name);
+                    if (g) g.style.display = req.checked ? '' : 'none';
+                });
             if (!req.checked) {
                 // Kapacitet, obligatoriskt och länk hör till anmälan. Lämnas de kvar när anmälan
                 // slås av blir de osynliga inställningar som slår till igen nästa gång någon
@@ -174,6 +193,13 @@
                 var url = el(prefix, 'RegistrationUrl'); if (url) url.value = '';
                 setDate(prefix, 'RegistrationDeadline', '');
             }
+
+            // ⚠⚠ AVSNITTSRADEN MÅSTE BYGGAS OM. Avgiften och På plats är egna avsnitt, och ett
+            // avsnitt utan höjd faller ur raden — det är själva poängen (inga flikar för något som
+            // inte gäller), men raden byggdes när dialogen öppnades och vet inget om kryssrutan.
+            // Refreshen nollställer ALDRIG guiden till steg 1 — den som just kryssade i rutan står
+            // mitt i och ska stå kvar.
+            if (window.hpskRefreshOpenSections) window.hpskRefreshOpenSections();
         };
 
         // Flatpickr på sista anmälningsdag. Anropas per instans (partialen kan renderas flera
