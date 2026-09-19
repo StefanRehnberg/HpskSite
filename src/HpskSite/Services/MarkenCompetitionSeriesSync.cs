@@ -1,3 +1,4 @@
+using HpskSite.CompetitionTypes.Common;
 using HpskSite.Models;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Services;
@@ -65,6 +66,22 @@ namespace HpskSite.Services
         private const string TablePrecision = "PrecisionResultEntry";
         private const string TableDuell = "DuellResultEntry";
 
+        /// <summary>
+        /// <b>NationellHelmatchResultEntry</b> → en tävling som bär BÅDA formerna. Nationell helmatch
+        /// är tre deltävlingar i en: delmoment A är fyra precisionsserier, delmoment B fyra duellserier
+        /// (snabbskjutning) och delmoment C fyra fält-/figurserier.
+        ///
+        /// ⚠️ Serierna skjuts enligt precisionens respektive duellens regler, på samma tavlor och med
+        /// samma tider, och räknas därför som sådana serier — men de låg i en egen tabell och nådde
+        /// alltså varken Guldfodringen eller Elit. En skytt som sköt sin bästa precisionsserie för året
+        /// i en helmatch fick den inte tillgodoräknad. (Stefan 2026-09-19.)
+        ///
+        /// Vilka serienummer som är vilket delmoment läses ur <see cref="SeriesSegments"/> — samma
+        /// karta som inmatningsremsan ritar och som särskiljningen läser, så gränsen kan inte glida.
+        /// Delmoment C är varken precision eller snabbpistol och materialiseras inte alls.
+        /// </summary>
+        private const string TableNationellHelmatch = "NationellHelmatchResultEntry";
+
         /// <summary>What one reconciliation did. Returned so callers can log or assert on it.</summary>
         public record SyncResult(int Inserted, int Updated, int Deleted)
         {
@@ -102,7 +119,9 @@ namespace HpskSite.Services
                 ids = await db.FetchAsync<int>(
                     @"SELECT DISTINCT MemberId FROM PrecisionResultEntry WHERE MemberId > 0
                       UNION
-                      SELECT DISTINCT MemberId FROM DuellResultEntry WHERE MemberId > 0");
+                      SELECT DISTINCT MemberId FROM DuellResultEntry WHERE MemberId > 0
+                      UNION
+                      SELECT DISTINCT MemberId FROM NationellHelmatchResultEntry WHERE MemberId > 0");
             }
             catch (Exception ex)
             {
@@ -176,8 +195,14 @@ namespace HpskSite.Services
                 var group = Marken.WeaponGroup(r.ShootingClass);
                 if (group == null) continue;
 
+                // Vilken SORTS serie raden är — inte vilken tabell den låg i. En helmatchs tolv
+                // rader bär fyra precisionsserier, fyra duellserier och fyra fältserier, och bara
+                // de två första sorterna finns det något att materialisera för.
+                var kind = SeriesKindOf(r);
+                if (kind == SeriesKind.None) continue;
+
                 int total = SumShots(r.Shots);
-                bool isDuell = r.SourceTable == TableDuell;
+                bool isDuell = kind == SeriesKind.Speed;
 
                 // ── What is worth materialising ──
                 // Not every series: a precision competition holds 7-10 per shooter, and rows that can
@@ -390,7 +415,7 @@ namespace HpskSite.Services
         {
             var all = new List<ResultRow>();
             using var db = _databaseFactory.CreateDatabase();
-            foreach (var table in new[] { TablePrecision, TableDuell })
+            foreach (var table in new[] { TablePrecision, TableDuell, TableNationellHelmatch })
             {
                 foreach (var chunk in Chunk(ids, 1000))
                 {
@@ -398,7 +423,7 @@ namespace HpskSite.Services
                     try
                     {
                         rows = await db.FetchAsync<ResultRow>(
-                            $"SELECT Id, CompetitionId, MemberId, ShootingClass, Shots, EnteredAt FROM [{table}] WHERE MemberId IN (@0)",
+                            $"SELECT Id, CompetitionId, MemberId, ShootingClass, SeriesNumber, Shots, EnteredAt FROM [{table}] WHERE MemberId IN (@0)",
                             chunk);
                     }
                     catch (Exception ex)
@@ -456,12 +481,48 @@ namespace HpskSite.Services
             catch { return 0; }
         }
 
+        /// <summary>Vad en resultatrad är för sorts serie när märkessystemet läser den.</summary>
+        private enum SeriesKind
+        {
+            /// <summary>Precisionsserie — Guldfodringens precisionsdel och Elits precisionshalva.</summary>
+            Precision,
+            /// <summary>Snabbpistolserie (duell) — bara Elits snabbhalva.</summary>
+            Speed,
+            /// <summary>Varken eller: fält-/figurserierna i en helmatch har ingen märkesserieform.</summary>
+            None
+        }
+
+        /// <summary>
+        /// Vilken sorts serie en resultatrad bär. För precisionens och duellens egna tabeller ger
+        /// tabellen svaret; för en helmatch ger SERIENUMRET det, via delmomenten i
+        /// <see cref="SeriesSegments"/>.
+        /// </summary>
+        private static SeriesKind SeriesKindOf(ResultRow r)
+        {
+            if (r.SourceTable == TablePrecision) return SeriesKind.Precision;
+            if (r.SourceTable == TableDuell) return SeriesKind.Speed;
+
+            if (r.SourceTable == TableNationellHelmatch)
+            {
+                var a = SeriesSegments.Delmoment("NationellHelmatch", "A");
+                var b = SeriesSegments.Delmoment("NationellHelmatch", "B");
+                if (a != null && r.SeriesNumber >= a.FirstSeries && r.SeriesNumber <= a.LastSeries)
+                    return SeriesKind.Precision;
+                if (b != null && r.SeriesNumber >= b.FirstSeries && r.SeriesNumber <= b.LastSeries)
+                    return SeriesKind.Speed;
+                return SeriesKind.None; // delmoment C — fält/figur
+            }
+
+            return SeriesKind.None;
+        }
+
         private class ResultRow
         {
             public int Id { get; set; }
             public int CompetitionId { get; set; }
             public int MemberId { get; set; }
             public string ShootingClass { get; set; } = "";
+            public int SeriesNumber { get; set; }
             public string Shots { get; set; } = "";
             public DateTime EnteredAt { get; set; }
 

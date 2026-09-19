@@ -4016,10 +4016,19 @@ namespace HpskSite.Controllers
 
             // Select tiebreaker based on competition type
             // Duell uses the same tiebreaker as Precision (series count back)
-            // Nationell Helmatch uses the same tiebreaker as Milsnabb (count-back by pairs)
-            IComparer<ShooterResult> comparer = (isMilsnabb || isNationellHelmatch)
-                ? new MilsnabbTieBreaker()
+            //
+            // ⚠️ Nationell Helmatch har en EGEN regel och delade tidigare Milsnabbs återräkning
+            // på tiopoängspar. SHB särskiljer grenen på delmoment C (fält) och därefter B (duell)
+            // — se NationellHelmatchTieBreaker för varför innertiorna inte får komma före.
+            IComparer<ShooterResult> comparer =
+                isNationellHelmatch ? new NationellHelmatchTieBreaker()
+                : isMilsnabb ? new MilsnabbTieBreaker()
                 : new SeriesCountBackComparer(hasFinalsRound, qualificationSeriesCount, numberOfFinalSeries);
+
+            // Ordningen inom en klass — se PrecisionResultOrdering för varför den ligger där och
+            // inte som ett uttryck här: tre ytor behöver samma svar.
+            List<ShooterResult> OrderShooters(IEnumerable<ShooterResult> group) =>
+                PrecisionResultOrdering.Order(group, competitionTypeId, comparer);
 
             // Group by shooting class (using merge lookup if merges were applied).
             // Sort key is the MIN classOrder among the group's constituent shooters' classes,
@@ -4032,11 +4041,7 @@ namespace HpskSite.Controllers
                 .Select(classGroup => new ClassGroup
                 {
                     ClassName = classGroup.Key,
-                    Shooters = classGroup
-                        .OrderByDescending(s => s.TotalScore)
-                        .ThenByDescending(s => s.TotalXCount)
-                        .ThenByDescending(s => s, comparer)
-                        .ToList()
+                    Shooters = OrderShooters(classGroup)
                 })
                 .ToList();
 
@@ -4108,40 +4113,41 @@ namespace HpskSite.Controllers
                 // om något. Tre av de fem felaktiga grupperna var precis det: gallrade skyttar
                 // som stod lika efter grundomgången.
                 //
-                // Utan finalrunda finns ingen finalklass, och då säger regeln inget — då
-                // behålls det gamla beteendet (per klassgrupp, alla deltagare).
-                var useMedalCategories = hasFinalsRound;
+                // ⚠️ UTAN FINALRUNDA GÄLLER SAMMA KATEGORIER. Det här var tidigare gränsen
+                // `useMedalCategories = hasFinalsRound`, och den gjorde att ett mästerskap utan
+                // final aldrig fick några medaljörer uträknade alls: `medalAwardsComputed` sattes
+                // bara i grenen nedan, så prisutdelningssidan fick "vet inte" och skyllde det på
+                // en för gammal resultatlista. Rapporterat efter klubbmästerskapet i Nationell
+                // Helmatch 2026-09-19 (tävling 7075), som går i 12 serier rakt igenom.
+                //
+                // Vad som ändras med finalrunda är bara VILKA som är medaljkandidater: med final
+                // bara finalisterna, utan final alla startande — där finns ingen gallring, så en
+                // skytt kan inte vara bortsorterad från medaljen.
+                var useMedalCategories = true;
 
                 var detectionGroups = new List<(string Key, List<PrecisionShooterResult> Shooters, bool PerCategory)>();
 
-                if (useMedalCategories)
                 {
                     // Bara finalister är medaljkandidater. Är finalisterna okända ("ingen
                     // finalstartlista än") är ingen det — samma försiktighet som
                     // HasShotEverythingDue, annars är vi tillbaka i kvalrundefelet.
-                    var contenders = finalistsKnown
-                        ? classGroups.SelectMany(cg => cg.Shooters)
-                            .Where(s => IsFinalistStart(finalistStarts, s.MemberId, s.ShootingClass))
-                            .ToList()
-                        : new List<PrecisionShooterResult>();
+                    var contenders = !hasFinalsRound
+                        ? classGroups.SelectMany(cg => cg.Shooters).ToList()
+                        : finalistsKnown
+                            ? classGroups.SelectMany(cg => cg.Shooters)
+                                .Where(s => IsFinalistStart(finalistStarts, s.MemberId, s.ShootingClass))
+                                .ToList()
+                            : new List<PrecisionShooterResult>();
 
                     var splitC = ChampionshipCategory.SplitsGroupC(competitionScope);
                     foreach (var cat in contenders
                                  .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))
                                  .Where(gr => !string.IsNullOrWhiteSpace(gr.Key)))
                     {
-                        var ordered = cat
-                            .OrderByDescending(s => s.TotalScore)
-                            .ThenByDescending(s => s.TotalXCount)
-                            .ThenBy(s => s.Name, StringComparer.CurrentCulture)
-                            .ToList();
-                        detectionGroups.Add((cat.Key, ordered, true));
+                        // Samma ordningsregel som resultatlistan — annars kan medaljlistan och
+                        // tabellen namnge olika personer på samma plats.
+                        detectionGroups.Add((cat.Key, OrderShooters(cat), true));
                     }
-                }
-                else
-                {
-                    foreach (var cg in classGroups)
-                        detectionGroups.Add((cg.ClassName, cg.Shooters, false));
                 }
 
                 foreach (var (groupKey, groupShooters, perCategory) in detectionGroups)
@@ -4382,6 +4388,51 @@ namespace HpskSite.Controllers
                     // Sätts även när listan blev tom: "beräknat, inga medaljer" är ett annat
                     // svar än "vet inte", och prisutdelningssidan måste kunna skilja dem åt.
                     medalAwardsComputed = true;
+                }
+
+                // ── Låt särskjutningen slå igenom i RESULTATTABELLEN också ───────────
+                //
+                // Särskjutningen detekteras och sorteras om per MÄSTERSKAPSKATEGORI, och den
+                // listan är en annan lista än resultattabellens klassgrupper — omsorteringen
+                // landade alltså aldrig i tabellen. Läsaren såg då två skyttar i poängordning
+                // fast särskjutningen redan skilt dem åt, och bara den lilla SS-brickan
+                // antydde att ordningen inte betydde något.
+                //
+                // Skyttobjekten är desamma, så det räcker att läsa annoteringen: inom en följd
+                // med samma totalpoäng sorteras om på särskjutningens rundor i tur och ordning.
+                // En skytt utan noterad runda bidrar med 0 för den rundan — exakt samma regel
+                // som ShootOffService.ApplyShootOffOverride använder när den sorterar sin egen
+                // lista, så de två kan inte ge olika svar.
+                foreach (var cg in classGroups)
+                {
+                    var list = cg.Shooters;
+                    int i = 0;
+                    while (i < list.Count)
+                    {
+                        int j = i + 1;
+                        while (j < list.Count && list[j].TotalScore == list[i].TotalScore) j++;
+
+                        var run = list.GetRange(i, j - i);
+                        if (run.Count >= 2 && run.Count(s => s.ShootOffRoundTotals?.Count > 0) >= 2)
+                        {
+                            int maxRound = run.Max(s => s.ShootOffRoundTotals?.Count ?? 0);
+                            int RoundTotal(ShooterResult s, int round) =>
+                                (s.ShootOffRoundTotals != null && s.ShootOffRoundTotals.Count >= round)
+                                    ? s.ShootOffRoundTotals[round - 1]
+                                    : 0;
+
+                            var slice = run.OrderByDescending(s => RoundTotal(s, 1));
+                            for (int r = 2; r <= maxRound; r++)
+                            {
+                                int round = r;
+                                slice = slice.ThenByDescending(s => RoundTotal(s, round));
+                            }
+                            var ordered = slice.ToList();
+                            for (int k = 0; k < ordered.Count; k++) list[i + k] = ordered[k];
+                        }
+
+                        i = j;
+                    }
                 }
             }
 

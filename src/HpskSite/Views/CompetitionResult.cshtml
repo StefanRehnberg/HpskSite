@@ -23,6 +23,11 @@
     var isSpringskytte = competitionTypeId == "Springskytte";
     var isFaltskytte = competitionTypeId == "Faltskytte" || competitionTypeId == "MagnumFalt";
 
+    // Hur grenens 12 serier delas i avsnitt. Låg tidigare handskriven som en kedja av
+    // ternärer här nere i JavaScript; nu ur SeriesSegments, samma källa som
+    // inmatningsskärmens serieremsa och Nationell Helmatchs särskiljning läser.
+    var seriesSegmentsJson = HpskSite.CompetitionTypes.Common.SeriesSegments.ToJson(competitionTypeId, 12);
+
     // Deltävling toggle: when /resultat/?sub=true is requested, the page renders the
     // sub-competition subset (filtered to registrations with isSubCompetition=true).
     // Used to label the heading, swap the public title, and route the result-loading
@@ -357,7 +362,12 @@
 
     // Admin-only delete capability for individual shooter results
     const canDeleteResults = @(canDeleteResults.ToString().ToLower());
-        
+
+    // Avsnitten i grenens serieordning: [{first, last, label, delmoment}], 1-baserade och
+    // inklusive i båda ändar. Tom lista = ingen indelning. ENDA källan på den här sidan —
+    // både delsummekolumnerna och särskiljningen i vapengruppsvyn läser den.
+    const CR_SERIES_SEGMENTS = @Html.Raw(seriesSegmentsJson);
+
         // Fetch and display results
         // ── "Alla klasser i vapengruppen" ────────────────────────────────────────────────────────
         // A shooter wants to see where they landed among everyone who shot the same course with the
@@ -380,20 +390,44 @@
         // Series scores + totals for one shooter. ONE implementation: the flat view needs the total
         // to sort on before rendering, and the row below needs the per-series cells — two parses of
         // the same shots JSON would be free to disagree.
+        //
+        // ⚠️⚠️ `seriesScores` är indexerad på SERIENUMMER (index i = serie i+1), inte på radernas
+        // ordning. En skytt som saknar en serie i mitten hade annars fått varje efterföljande serie
+        // i FEL KOLUMN — och därmed fel delsummor. Mätt i dev på Helamatchen: en skytt utan serie 4
+        // visades som Prec 197 / Duell 183 / Fält 133 där sanningen är 148 / 192 / 173. Totalen var
+        // rätt hela tiden, vilket är varför det kunde ligga oupptäckt.
+        //
+        // Det är inte kosmetiskt: för Nationell Helmatch AVGÖR delmoment C och B placeringen
+        // (SHB:s särskiljning), och servern räknar dem på serienumret. Läste tabellen dem på
+        // radordningen skulle sidan visa andra tal än de som avgjorde ordningen den visar.
+        //
+        // En lucka är `null`, aldrig 0 — "sköt inte" och "sköt noll" är olika saker.
         function crShooterTotals(shooter) {
-            const seriesScores = [];
-            let total = 0, xCount = 0;
-            (shooter.results || []).forEach(result => {
+            const rows = shooter.results || [];
+            const byNumber = [];
+            let total = 0, xCount = 0, seq = 0;
+            rows.forEach(result => {
                 let score = 0, x = 0;
                 JSON.parse(result.shots).forEach(shot => {
                     score += (shot === 'X' ? 10 : parseInt(shot));
                     if (shot === 'X') x++;
                 });
-                seriesScores.push({ score, xCount: x });
+                // Saknas serienumret (äldre eller grenfrämmande rader) faller vi tillbaka på
+                // radordningen, vilket är exakt det gamla beteendet.
+                seq++;
+                const n = (result.seriesNumber > 0) ? result.seriesNumber : seq;
+                byNumber[n - 1] = { score, xCount: x };
                 total += score;
                 xCount += x;
             });
+            // Gör hålen explicita i stället för glesa (en gles array hoppar över forEach/reduce).
+            const seriesScores = Array.from(byNumber, v => v || null);
             return { seriesScores, total, xCount };
+        }
+
+        /// Poängen för serie i+1, eller null när skytten saknar den.
+        function crSeriesAt(seriesScores, i) {
+            return (i >= 0 && i < seriesScores.length) ? seriesScores[i] : null;
         }
 
         // "A_Opt" -> "A Opt", "A_M" -> "AM" … mirrors the prefixes ClassMergingService uses for
@@ -427,6 +461,28 @@
             return (window.getWeaponClassCode ? window.getWeaponClassCode(src) : '') || String(src).charAt(0).toUpperCase() || '?';
         }
 
+        // ── Särskiljning i vapengruppsvyn ───────────────────────────────────────────────────────
+        // Poängsumman för ett DELMOMENT. Bara de grenar vars avsnitt SHB namnger som delmoment
+        // (A/B/C) har en särskiljningsregel att läsa ur dem — Milsnabbs tider och Sportpistols
+        // halvor är avsnitt utan bokstav och ger ingen ordning.
+        function crDelmomentScore(shooter, seg) {
+            let sum = 0;
+            (shooter.results || []).forEach((result, i) => {
+                const n = (result.seriesNumber != null) ? result.seriesNumber : (i + 1);
+                if (n < seg.first || n > seg.last) return;
+                JSON.parse(result.shots).forEach(shot => { sum += (shot === 'X' ? 10 : parseInt(shot)); });
+            });
+            return sum;
+        }
+
+        // Nationell Helmatch: "Vid särskiljning går den som har högst poäng i delmoment C före,
+        // därefter i delmoment B" (SHB). Delmomenten avgör alltså platsen redan innan innertior,
+        // och de gör det över klassgränserna precis som inom en klass — det är samma regel, inte
+        // en påhittad återräkning, så vapengruppsvyn får och ska använda den.
+        const CR_DELMOMENT_ORDER = ['C', 'B']
+            .map(letter => CR_SERIES_SEGMENTS.find(s => s.delmoment === letter))
+            .filter(Boolean);
+
         function crFlattenByWeaponGroup(classGroups) {
             const byCode = new Map();
             (classGroups || []).forEach(group => {
@@ -440,7 +496,10 @@
                         __officialClassName: shooter.shootingClass || group.className || '',
                         __officialPlace: idx + 1,
                         __sortTotal: t.total,
-                        __sortX: t.xCount
+                        __sortX: t.xCount,
+                        // Delmomentspoängen i regelns ordning (C, sedan B). Tom lista för grenar
+                        // utan delmoment, och då gäller samma försiktighet som förut.
+                        __sortDelmoment: CR_DELMOMENT_ORDER.map(seg => crDelmomentScore(shooter, seg))
                     }));
                 });
             });
@@ -457,14 +516,27 @@
 
             const out = [];
             for (const [code, shooters] of byCode) {
-                shooters.sort((a, b) => (b.__sortTotal - a.__sortTotal) || (b.__sortX - a.__sortX));
-                // Equal total AND equal X share a position. The official tie-break is a series
-                // countback the server computes per class; inventing a cross-class countback here
-                // would be a second ranking rule free to disagree with the real one, so the flat
-                // list declines to separate shooters it cannot honestly separate.
-                let pos = 0, prevTotal = null, prevX = null;
+                // Jämförelsenycklarna, i den ordning regeln läser dem: poäng, sedan grenens
+                // delmoment (C före B), sedan innertior. Har grenen inga delmoment är listan i
+                // mitten tom och nycklarna är exakt de två som gällde förut.
+                //
+                // ⚠️ DELMOMENTEN LIGGER FÖRE INNERTIORNA. SHB:s särskiljning för Nationell
+                // Helmatch nämner inte innertior alls, och att läsa dem först gav fel ordning:
+                // rapporterat efter klubbmästerskapet 2026-09-19 stod skytten med högst
+                // fältresultat på plats 6 i stället för 5.
+                const crKeys = s => [s.__sortTotal, ...(s.__sortDelmoment || []), s.__sortX];
+                const crCmpKeys = (a, b) => {
+                    const ka = crKeys(a), kb = crKeys(b);
+                    for (let i = 0; i < ka.length; i++) { if (ka[i] !== kb[i]) return kb[i] - ka[i]; }
+                    return 0;
+                };
+                shooters.sort(crCmpKeys);
+                // Lika på ALLA nycklar delar plats. Den sista officiella särskiljningen är
+                // särskjutning eller lottning — en människas beslut, inte sorteringens — så den
+                // platta listan skiljer inte skyttar den inte ärligt kan skilja åt.
+                let pos = 0;
                 shooters.forEach((s, i) => {
-                    if (s.__sortTotal !== prevTotal || s.__sortX !== prevX) { pos = i + 1; prevTotal = s.__sortTotal; prevX = s.__sortX; }
+                    if (i === 0 || crCmpKeys(shooters[i - 1], s) !== 0) pos = i + 1;
                     s.__flatPos = pos;
                     s.__flatClassLabel = `${s.__officialClassName} · ${s.__officialPlace}`;
                 });
@@ -529,21 +601,15 @@
                 isOfficialResults = data.isOfficial;
                 const results = data.results;
                 const isAwardingStandardMedals = data.isAwardingStandardMedals || false;
-                const competitionTypeId = data.competitionTypeId || 'Precision';
-                const isMilsnabb = competitionTypeId === 'Milsnabb';
-                const isNationellHelmatch = competitionTypeId === 'NationellHelmatch';
 
                 // Hur grenens 12 serier delas i delsummor: [förstaSerieIndex, sistaExklusive, rubrik].
                 // Var hårdkodat till 3 grupper om 4 på TRE ställen (kolumnräkningen, rubrikerna och
                 // cellerna), vilket gjorde Sportpistols 2 grupper om 6 omöjlig att uttrycka.
+                // Kommer nu ur SeriesSegments i C# (CR_SERIES_SEGMENTS) — samma karta som
+                // inmatningsskärmens serieremsa ritar och som särskiljningen läser delmoment ur.
                 // null = ingen gruppering, alltså vanlig serie-per-kolumn-tabell.
-                const seriesGroups =
-                    isMilsnabb ? [[0, 4, '10s'], [4, 8, '8s'], [8, 12, '6s']]
-                    : isNationellHelmatch ? [[0, 4, 'Prec'], [4, 8, 'Duell'], [8, 12, 'Fält']]
-                    // Standardpistol: 150 s / 20 s / 10 s — samma 3x4-form som Milsnabb.
-                    : competitionTypeId === 'Standardpistol' ? [[0, 4, '150s'], [4, 8, '20s'], [8, 12, '10s']]
-                    // Sportpistol: precisionshalva + duellhalva, alltså 2 grupper om 6.
-                    : competitionTypeId === 'Sportpistol' ? [[0, 6, 'Prec'], [6, 12, 'Duell']]
+                const seriesGroups = CR_SERIES_SEGMENTS.length
+                    ? CR_SERIES_SEGMENTS.map(s => [s.first - 1, s.last, s.label])
                     : null;
                 const isGrouped12 = seriesGroups !== null;
 
@@ -573,8 +639,12 @@
                         // Use the MAX series count across all shooters in this class so that
                         // shooters with missing series rows still align with the header
                         // (missing cells render empty in the body below).
+                        // ⚠️ Högsta SERIENUMRET, inte antalet rader: en skytt som saknar serie 4 men
+                        // sköt serie 10 behöver tio kolumner, och radantalet säger nio.
+                        const crHighestSeries = s => (s.results || [])
+                            .reduce((m, r, i) => Math.max(m, r.seriesNumber > 0 ? r.seriesNumber : i + 1), 0);
                         const maxSeriesCount = classGroup.shooters.length > 0
-                            ? Math.max(0, ...classGroup.shooters.map(s => (s.results || []).length))
+                            ? Math.max(0, ...classGroup.shooters.map(crHighestSeries))
                             : 0;
 
                         if (isGrouped12) {
@@ -740,9 +810,9 @@
                                 seriesGroups.forEach(([start, end]) => {
                                     let groupTotal = 0;
                                     for (let i = start; i < end; i++) {
-                                        const s = i < seriesScores.length ? seriesScores[i].score : 0;
-                                        groupTotal += s;
-                                        html += `<td class="text-center milsnabb-series">${i < seriesScores.length ? s : '-'}</td>`;
+                                        const s = crSeriesAt(seriesScores, i);
+                                        groupTotal += s ? s.score : 0;
+                                        html += `<td class="text-center milsnabb-series">${s ? s.score : '-'}</td>`;
                                     }
                                     html += `<td class="text-center subtotal-col">${groupTotal}</td>`;
                                 });
@@ -752,18 +822,23 @@
                                 // A shooter who did not reach the final gets empty final cells —
                                 // never 0, which reads as "sköt och fick noll".
                                 for (let i = 0; i < qualificationSeriesCount; i++) {
-                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : ''}</td>`;
+                                    const s = crSeriesAt(seriesScores, i);
+                                    html += `<td class="text-center">${s ? s.score : ''}</td>`;
                                 }
-                                qualificationScore = seriesScores.slice(0, qualificationSeriesCount).reduce((sum, s) => sum + s.score, 0);
+                                qualificationScore = seriesScores
+                                    .slice(0, qualificationSeriesCount)
+                                    .reduce((sum, s) => sum + (s ? s.score : 0), 0);
                                 html += `<td class="text-center"><strong>${qualificationScore}</strong></td>`;
                                 for (let i = qualificationSeriesCount; i < totalSeriesCount; i++) {
-                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : ''}</td>`;
+                                    const s = crSeriesAt(seriesScores, i);
+                                    html += `<td class="text-center">${s ? s.score : ''}</td>`;
                                 }
                             } else {
                                 // Iterate up to seriesColCount (max across shooters) so cells line up
                                 // with the header. Shooters missing a series get an empty slot.
                                 for (let i = 0; i < seriesColCount; i++) {
-                                    html += `<td class="text-center">${i < seriesScores.length ? seriesScores[i].score : ''}</td>`;
+                                    const s = crSeriesAt(seriesScores, i);
+                                    html += `<td class="text-center">${s ? s.score : ''}</td>`;
                                 }
                             }
 

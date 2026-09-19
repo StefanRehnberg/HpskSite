@@ -4471,6 +4471,133 @@ Verifierat på SSM 2026 mot endpointen: A 37, B 31, C 48, C Dam 14, C Vet Ä 7, 
 alla "Guld, Silver, Brons"; C Jun 2 → "Medaljer till alla 2 deltagande". Enda kategorin under
 fem är alltså juniorklassen, som inte reduceras.
 
+### ⚠️⚠️ SERIEORDNINGEN ÄR INDELAD I AVSNITT — `SeriesSegments` (2026-09-19)
+
+Rapporterat efter ett klubbmästerskap i Nationell Helmatch (prod, tävling 7075). Fyra fel med
+samma rot: **kodbasen visste att grenen har tre delmoment, men bara på EN yta.**
+
+Nationell Helmatch är tre deltävlingar i samma tävling — **delmoment A** precision (serie 1–4),
+**B** duell/snabbskjutning (5–8), **C** fält-/figurskjutning (9–12, fyra 5-skottsserier på 18,
+16, 14 och 12 sekunder). Resultatlistan delade dem; inmatningsremsan visade tolv likadana rutor;
+särskiljningen läste Milsnabbs återräkning; och Guldfodringen såg dem inte alls.
+
+**`CompetitionTypes/Common/SeriesSegments` är ENDA kartan.** Den låg handskriven som en kedja
+av ternärer i resultatvyns JavaScript och fanns ingen annanstans. Nu läser fyra ytor samma
+källa: resultatlistans delsummekolumner, inmatningsskärmens serieremsa, särskiljningen och
+märkessynken. `ToJson(typeId, numberOfSeries)` bor i klassen, inte i vyerna — annars formar två
+Razor-filer samma fakta på två sätt.
+- Registret: NationellHelmatch (Prec/Duell/Fält, **med** bokstav), Milsnabb (10s/8s/6s),
+  Standardpistol (150s/20s/10s), Sportpistol (2×6). ⚠️ **Bokstaven sätts BARA där SHB namnger
+  avsnittet som ett delmoment.** Den som sätter en bokstav på Milsnabbs tider inför samtidigt en
+  särskiljningsregel förbundet inte har gett — `Delmoment` är vad `PrecisionResultOrdering` och
+  märkessynken grenar på.
+- **Indelningen förutsätter 12 serier** (`For` kräver serieantalet). Ett annat format har ingen.
+
+#### ⚠️⚠️ Särskiljningen: delmoment C, sedan B — FÖRE innertiorna
+
+SHB, ordagrant: *"Vid särskiljning går den som har högst poäng i delmoment C före, därefter i
+delmoment B. Kan särskiljning ändå inte erhållas, skall antingen särskjutning ske … eller …
+lottning utföras."*
+
+Grenen delade Milsnabbs `MilsnabbTieBreaker` (återräkning på tiopoängspar) och den kördes
+dessutom **efter** `ThenByDescending(TotalXCount)`. Två fel i ett: fel regel, och i fel ordning.
+- **`NationellHelmatchTieBreaker`** läser delmomenten ur `SeriesSegments`, så gränserna i remsan,
+  i tabellrubriken och i placeringen inte kan glida isär.
+- **`PrecisionResultOrdering.Order` äger ordningen mellan stegen**, inte ett uttryck inne i
+  `CalculateFinalResults`: tre ytor behöver samma svar (klasstabellerna, medaljkategorierna och
+  vapengruppsvyn), och en kopia som glider sätter olika personer på samma plats.
+  `DelmomentBeforeXCount` är sann exakt när grenen har ett delmoment C.
+- **Innertiorna ligger KVAR, men sist.** SHB nämner dem inte för grenen, och nästa steg i regeln
+  är särskjutning eller lottning — en människas beslut. Att låta dem ge en sista icke-slumpmässig
+  ordning är bättre än godtycklig ordning; att låta dem gå FÖRE är det fel som rapporterades
+  (skytten med högst fältresultat stod på plats 6 i stället för 5).
+- **Vapengruppsvyn i `CompetitionResult.cshtml` läser samma regel** (`CR_DELMOMENT_ORDER`).
+  Kommentaren där sa tidigare att den avstår från att särskilja — det gäller en PÅHITTAD
+  återräkning, inte SHB:s egen regel, och utan den delade två skyttar plats 7.
+- **Medaljstriden rörs INTE.** `DetectTiedMedalGroups` grupperar på totalpoäng och kräver
+  särskjutning; SHB:s andra stycke säger just att medaljer vid lika poäng avgörs med särskjutning.
+  Delmomentsregeln gäller de övriga placeringarna.
+
+#### ⚠️ Medaljörerna beräknades aldrig utan finalrunda
+
+`medalAwardsComputed` sattes bara inuti `if (useMedalCategories)`, och den var `hasFinalsRound`.
+Ett klubbmästerskap i 12 serier rakt igenom fick alltså **aldrig** medaljörer uträknade, och
+/prisutdelning skyllde det på en för gammal resultatlista: *"Resultatlistan räknades ut innan
+medaljfunktionen fanns … Klicka Uppdatera"* — ett råd som inte kunde hjälpa, eftersom Uppdatera
+körde samma gren igen.
+
+Kategorierna gäller nu alltid inom ett mästerskap. **Vad finalrundan avgör är bara VILKA som är
+medaljkandidater:** med final finalisterna, utan final alla startande — där finns ingen gallring,
+så ingen kan vara bortsorterad. Ordningen inom kategorin går via `OrderShooters`, så medaljlistan
+och tabellen inte kan namnge olika personer på samma plats.
+- **Följd som måste följa med:** detekteringen flyttade från klassgrupp till mästerskapskategori
+  även utan final, alltså rätt axel (se avsnittet om C.3.4.1). Men `ApplyShootOffOverride`
+  sorterar då en KOPIA, så ett efterföljande steg skriver om klassgruppernas ordning ur
+  `ShootOffRoundTotals` med samma regel som tjänsten själv använder. Utan det slutade en avgjord
+  särskjutning synas i tabellen.
+
+#### ⚠️⚠️ Resultattabellen placerade serier efter RADORDNING, inte serienummer
+
+Hittat under verifieringen, **befintligt och orelaterat till rapporten**: `crShooterTotals`
+byggde `seriesScores` genom att pusha raderna i tur och ordning. En skytt som saknar en serie i
+mitten fick därför varje efterföljande serie i fel kolumn — och därmed fel delsummor.
+Mätt i dev: en skytt utan serie 4 visades som Prec 197 / Duell 183 / Fält 133 där sanningen är
+**148 / 192 / 173**. Totalen var rätt hela tiden, vilket är varför det kunde ligga oupptäckt.
+
+Nu indexerad på serienumret, med `null` för en lucka (`crSeriesAt`) — **aldrig 0**, eftersom
+"sköt inte" och "sköt noll" är olika saker. `maxSeriesCount` räknar högsta SERIENUMRET, inte
+antalet rader. Det är inte kosmetiskt: servern räknar delmomenten på serienumret, så tabellen
+hade annars visat andra tal än de som avgjorde ordningen den visar.
+
+#### Inmatningsskärmens serieremsa
+
+- **⚠️ Remsan ritas om vid VARJE sparning, och `innerHTML` nollställer `scrollLeft`.** Med 12
+  serier är den bredare än en telefon, så funktionären matade in serie 10 och såg serie 1 längst
+  till vänster. `spScrollSeriesStripToCurrent` flyttar bara remsans egen `scrollLeft` — inte
+  `scrollIntoView()`, som också skrollar SIDAN och rubbar den pinnade panelen.
+- **⚠️⚠️ ANVÄND INTE `offsetLeft` MOT `scrollLeft` HÄR.** `.sp-series` är `position: static`, så
+  knapparnas `offsetParent` är **kortet** — offsetLeft mäts alltså i ett annat koordinatsystem än
+  scrollLeft. Mätt i webbläsaren: 16 px fel, precis nog för att sista serien inte skulle komma
+  helt i sikte. Använd `getBoundingClientRect()`-deltan, som är oberoende av vilket element som
+  råkar vara positionerat. (Samma fälla som `offsetParent === null` på en `position: fixed`-modal.)
+- Avsnittsetiketterna (`.sp-series-seg`) bär neutral vikt som resten av remsan; det avsnitt man
+  står i får tyngre text, inte en accentfärg — accenten är reserverad för sifferpanelen. Gapet
+  mellan två avsnitt är större än inuti ett, med en tunn linje. **Ingen indelning i finalfasen**:
+  finalserierna är sin egen omgång.
+- **⚠️ "Nästa serie" efter fasens sista serie landar på nästa skytts FÖRSTA SERIE UTAN RESULTAT**,
+  inte på serie 1. Den som ställt om till det läget gör det för att mata in en skytts alla
+  fältserier i ett svep, och då är serie 1–8 redan inmatade sedan tidigare — rapporterat som att
+  skärmen hoppade till serie 1 i stället för serie 9. Är allt inmatat är fasens första serie rätt
+  igen (då rättar funktionären något). Läget använder nu `spPhaseSeriesRange` i stället för en
+  egen maxberäkning, vilket också rättar att finalfasen landade på serie 1 — utanför fasen.
+
+#### Delmoment A och B är RIKTIGA precisions- respektive duellserier
+
+Serierna skjuts enligt precisionens och duellens regler, på samma tavlor och tider — men de låg
+i `NationellHelmatchResultEntry` och nådde därför varken Guldfodringen eller Elit. En skytt som
+sköt årets bästa precisionsserie i en helmatch fick den inte tillgodoräknad.
+
+`MarkenCompetitionSeriesSync` läser nu tre tabeller. **⚠️ Sorten avgörs av SERIENUMRET, inte av
+tabellen** (`SeriesKindOf`): delmoment A → precisionsserie, B → snabb/duellserie, C → ingen
+märkesserieform alls. Nyckeln `(SourceTable, SourceResultId)` bär helmatchens rader utan att
+kollidera med de andra tabellernas identitetsserier.
+- **⚠️ Skyttens SNITT och handikappindex rörs INTE** (Stefans beslut 2026-09-19). Helmatchen
+  behåller sin egen `ShooterStatistics`-disciplin; precisionens och duellens index räknas bara på
+  riktiga precisions- och duelltävlingar. Lägg inte in det utan hans besked.
+
+**Test:** `NationellHelmatchTieBreakerTests` 10/10. **A/B: 1 av 8 faller mot Milsnabbs regel**
+(paren läses bakifrån i steg om två, delmoment C är alla fyra serierna) och **1 av 10 när
+delmomenten läses efter innertiorna**. ⚠️ Testdatat måste hålla varje serie ≤ 50 — byggarens
+`CreateShotsJson` kapar varje skott vid 10, så ett högre tal summerar tyst till något annat än
+testet påstår. ⚠️ Och ett påstående som svarar likadant under båda reglerna mäter ingenting:
+`DelmomentB_Decides` är konstruerat så att serie 7+8 pekar åt ANDRA hållet.
+
+Verifierat i webbläsaren mot dev: remsan `10s | 1 2 3 4 | 8s | 5 6 7 8 | 6s | 9 10 11 12` med
+rätt avsnitt markerat; varje serie helt i sikte vid 330 px bredd (serie 12 föll före
+rect-fixen); landningen Joe Doe serie 12 → **Andy Haard serie 3** (hans första lucka);
+`medalAwardsComputed` false → **true** när omfattningen sätts till Klubbmästerskap utan final,
+och prisutdelningens falska mening borta efter Uppdatera.
+
 ### Resultatfliken: besluten först, artefakten under (2026-09-08, omarbetad samma dag)
 
 Samma form som Startlistor-fliken fick. Fliken visade tidigare en omärkt verktygsrad och sedan

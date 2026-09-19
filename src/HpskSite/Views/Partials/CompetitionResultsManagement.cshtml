@@ -37,6 +37,11 @@
     
     var hasFinalsRound = numberOfFinalSeries > 0;
     var qualificationSeriesCount = hasFinalsRound ? (numberOfSeriesOrStations.Value - numberOfFinalSeries.Value) : numberOfSeriesOrStations.Value;
+    // Hur grenens serier delas i avsnitt — Nationell Helmatchs tre delmoment, Milsnabbs tre
+    // tider, Sportpistols två halvor. Ur SeriesSegments, samma källa som resultatlistans
+    // rubriker läser, så remsan här och tabellen där inte kan rita olika delmoment.
+    var seriesSegmentsJson = SeriesSegments.ToJson(competitionTypeForView, numberOfSeriesOrStations.Value);
+
     var isStationPage = ViewData["IsStationPage"] != null && (bool)ViewData["IsStationPage"];
     var presetTeamNumber = ViewData["PresetTeamNumber"] as int? ?? 0;
     // Locked phase ("qualification" | "finals") set once by /station from ?phase=…
@@ -2269,6 +2274,10 @@ let competitionData = {
     numberOfFinalSeries: @numberOfFinalSeries,
     hasFinalsRound: @(hasFinalsRound.ToString().ToLower()),
     qualificationSeriesCount: @qualificationSeriesCount,
+    competitionType: '@competitionTypeForView',
+    // Avsnitten i serieordningen: [{first, last, label, delmoment}]. Tom lista = ingen
+    // indelning, och då ritas remsan som förut.
+    seriesSegments: @Html.Raw(seriesSegmentsJson),
     currentPhase: 'qualification' // 'qualification' or 'finals'
 };
 
@@ -2391,7 +2400,6 @@ function loadCompetitionData() {
 
     // Update competition data
     competitionData.competitionId = competitionId;
-    competitionData.competitionType = 'Precision';
 
     // Phase is locked at load by the URL (?phase=finals on the Finals skjutlag buttons).
     // Read it now so we can skip the qualifying-shooter fetch when entering finals scores.
@@ -3120,6 +3128,17 @@ function spSavedSeriesFor(memberId, shootingClass) {
     return out;
 }
 
+// Avsnittet (delmomentet) en serie hör till, eller null när grenen saknar indelning.
+// Läser competitionData.seriesSegments, som kommer ur SeriesSegments i C#.
+function spSegmentFor(series) {
+    const segs = competitionData.seriesSegments;
+    if (!Array.isArray(segs) || segs.length === 0) return null;
+    for (const seg of segs) {
+        if (series >= seg.first && series <= seg.last) return seg;
+    }
+    return null;
+}
+
 function spRenderSeriesStrip() {
     const strip = document.getElementById('spSeriesStrip');
     if (!strip || !currentShooterData) return;
@@ -3129,8 +3148,28 @@ function spRenderSeriesStrip() {
     const isFinals = competitionData.hasFinalsRound && competitionData.currentPhase === 'finals';
     const qual = competitionData.qualificationSeriesCount || 0;
 
-    let html = '<span class="sp-series-lbl">serie</span>';
+    // Delmomenten SKA synas. Nationell Helmatch är tre deltävlingar i en — 4 serier
+    // precision, 4 duell, 4 fält — och resultatlistan har alltid delat dem, medan remsan
+    // här visade tolv likadana rutor. Etiketten är samma korta ord som tabellrubriken, och
+    // rutorna i ett avsnitt hålls ihop medan gapet mellan avsnitten är större.
+    // I finalfasen finns ingen indelning: finalserierna är sin egen omgång.
+    const useSegments = !isFinals && spSegmentFor(range.first) !== null;
+
+    let html = useSegments ? '' : '<span class="sp-series-lbl">serie</span>';
+    let lastSeg = null;
     for (let s = range.first; s <= range.last; s++) {
+        if (useSegments) {
+            const seg = spSegmentFor(s);
+            if (seg && seg !== lastSeg) {
+                const inNow = currentSeries >= seg.first && currentSeries <= seg.last;
+                const title = seg.delmoment
+                    ? `Delmoment ${seg.delmoment} — serie ${seg.first}-${seg.last}`
+                    : `Serie ${seg.first}-${seg.last}`;
+                html += `<span class="sp-series-seg${inNow ? ' is-now' : ''}"${lastSeg ? ' data-gap="1"' : ''}
+                           title="${escapeHtml(title)}">${escapeHtml(seg.label)}</span>`;
+                lastSeg = seg;
+            }
+        }
         const label = isFinals ? ('F' + (s - qual)) : String(s);
         const draft = spHasDraft(currentShooterData.memberId, currentShooterData.class, s);
         let cls = 'sp-sn';
@@ -3144,6 +3183,43 @@ function spRenderSeriesStrip() {
                    title="Serie ${label}${note}">${label}</button>`;
     }
     strip.innerHTML = html;
+    spScrollSeriesStripToCurrent(strip);
+}
+
+// ⚠️ REMSAN RITAS OM VID VARJE SPARNING, och innerHTML nollställer scrollLeft. Med 12 serier
+// är remsan bredare än en telefonskärm, så aktuell serie hamnade utanför bilden så fort man
+// kommit förbi serie 6-7: funktionären matade in serie 10 och såg serie 1 längst till
+// vänster. Rapporterat efter klubbmästerskapet 2026-09-19.
+//
+// scrollIntoView() är fel verktyg — den skrollar även SIDAN, och den pinnade panelen ska
+// ligga still. Här flyttas bara remsans egen scrollLeft, och bara när rutan faktiskt
+// hamnat utanför.
+function spScrollSeriesStripToCurrent(strip) {
+    const now = strip.querySelector('.sp-sn.is-now');
+    if (!now) return;
+    if (strip.scrollWidth <= strip.clientWidth) return;
+
+    // Avsnittsetiketten hör ihop med rutan — ta med den i sikte när den ligger precis före.
+    const anchor = (now.previousElementSibling && now.previousElementSibling.classList.contains('sp-series-seg'))
+        ? now.previousElementSibling
+        : now;
+
+    // ⚠️ INTE offsetLeft. Remsan är `position: static`, så knapparnas offsetParent är kortet och
+    // inte remsan — offsetLeft mäts alltså i ett ANNAT koordinatsystem än scrollLeft, och
+    // jämförelsen blir fel med kortets egen indragning. Mätt i webbläsaren: 16 px fel, vilket
+    // räckte för att sista serien inte skulle komma helt i sikte. Rektanglarna är oberoende av
+    // vilket element som råkar vara positionerat.
+    const base = strip.getBoundingClientRect().left - strip.scrollLeft;
+    const pad = 24; // en gnutta luft, så rutan inte klistras mot kanten
+    const left = anchor.getBoundingClientRect().left - base - pad;
+    const right = now.getBoundingClientRect().right - base + pad;
+
+    const max = strip.scrollWidth - strip.clientWidth;
+    if (left < strip.scrollLeft) {
+        strip.scrollLeft = Math.max(0, left);
+    } else if (right > strip.scrollLeft + strip.clientWidth) {
+        strip.scrollLeft = Math.min(max, right - strip.clientWidth);
+    }
 }
 
 function spShooterLabel(idx) {
@@ -4162,36 +4238,58 @@ function moveToNextShooterNew() {
     spShowSaveLine('Klart — alla serier är inmatade för dina platser.', {});
 }
 
+// Första serien i fasen som skytten INTE har ett sparat resultat på. Null när allt är
+// inmatat. Används när inmatningen byter skytt: att alltid landa på seriens början är fel
+// så fort funktionären redan matat in en del av skytten — se moveToNextSeriesNew.
+function spFirstUnenteredSeries(shooter) {
+    if (!shooter) return null;
+    const range = spPhaseSeriesRange();
+    const saved = spSavedSeriesFor(shooter.memberId, shooter.shootingClass);
+    for (let s = range.first; s <= range.last; s++) {
+        if (!saved[s]) return s;
+    }
+    return null;
+}
+
 // NEW: Move to next series for current shooter
 function moveToNextSeriesNew() {
+    const range = spPhaseSeriesRange();
     const nextSeries = currentSeries + 1;
 
-    // Determine maximum series based on phase
-    let maxSeries = competitionData.numberOfSeries;
-    if (competitionData.hasFinalsRound && competitionData.currentPhase === 'qualification') {
-        maxSeries = competitionData.qualificationSeriesCount;
-    }
-
-    if (nextSeries <= maxSeries) {
+    if (nextSeries <= range.last) {
         // Move to next series for same shooter
         currentSeries = nextSeries;
         updateSeriesDisplay();
         loadCurrentShooterByIndex();
         saveCurrentSession();
-    } else {
-        // Completed all series for this shooter - move to next shooter, reset to series 1
-        console.log('Completed all series for shooter', currentShooterIndex);
-        if (currentShooterIndex < shootersData.length - 1) {
-            currentShooterIndex++;
-            currentSeries = 1;
-            updateShooterDisplay();
-            updateSeriesDisplay();
-            loadCurrentShooterByIndex();
-            saveCurrentSession();
-        } else {
-            spShowSaveLine('Klart — alla serier är inmatade för dina platser.', {});
-        }
+        return;
     }
+
+    // Fasens sista serie är klar för den här skytten — vidare till nästa skytt.
+    console.log('Completed all series for shooter', currentShooterIndex);
+    if (currentShooterIndex >= shootersData.length - 1) {
+        spShowSaveLine('Klart — alla serier är inmatade för dina platser.', {});
+        return;
+    }
+
+    currentShooterIndex++;
+    const nextShooter = shootersData[currentShooterIndex];
+
+    // ⚠️ INTE fasens första serie. Den som ställt om till "nästa serie" gör det för att mata
+    // in en skytts alla fältserier i ett svep, och då är serie 1-8 redan inmatade sedan
+    // tidigare — att hoppa till serie 1 betydde att skriva över eller leta sig tillbaka
+    // manuellt tolv gånger. Rapporterat efter klubbmästerskapet 2026-09-19: efter serie 12
+    // landade skärmen på nästa skytts serie 1 i stället för hans serie 9.
+    //
+    // Är allt redan inmatat för nästa skytt finns ingen lucka att sikta på, och då är
+    // fasens första serie rätt igen — funktionären är då på väg att RÄTTA något.
+    const landing = spFirstUnenteredSeries(nextShooter);
+    currentSeries = landing !== null ? landing : range.first;
+
+    updateShooterDisplay();
+    updateSeriesDisplay();
+    loadCurrentShooterByIndex();
+    saveCurrentSession();
 }
 
 // Update series number display

@@ -189,9 +189,9 @@
 .home-hc-big { font-size: 2.4rem; font-weight: 820; letter-spacing: -.02em; line-height: 1; margin-top: .3rem; font-variant-numeric: tabular-nums; }
 
 /* ── Registreringsbordet on a tablet ────────────────────────────────────────
-   Desk staff work the Anm�lningar and Lag tables on tablets. On a Springskytte
-   competition those tables carry enough columns (Delt�vling, N�rvaro, Notis) to
-   overflow ~950 px, and the overflow lands on the LAST column — so the �tg�rder
+   Desk staff work the Anm�lningar and Lag tables on tablets. On a Springskytte
+   competition those tables carry enough columns (Delt�vling, N�rvaro, Notis) to
+   overflow ~950 px, and the overflow lands on the LAST column — so the �tg�rder
    menu, the one control every desk task starts from, was scrolled off-screen
    (measured: 54/110 px visible at 950 px, fully off at 768 px).
    Pinning that column keeps it reachable while the rest still scrolls.
@@ -399,6 +399,34 @@
     letter-spacing: .12em;
     text-transform: uppercase;
     color: var(--bs-secondary-color);
+}
+
+/* Delmomentsetikett i serieremsan. Nationell Helmatch ar TRE deltavlingar i en --
+   4 serier precision, 4 duell, 4 falt -- och tolv likadana rutor dolde det. Etiketten
+   bar samma korta ord som resultatlistans rubrik. Neutral vikt som resten av remsan;
+   det avsnitt man star i far tyngre text, inte en accentfarg. */
+.sp-series-seg {
+    flex: 0 0 auto;
+    align-self: stretch;
+    display: grid;
+    place-items: center;
+    padding: 0 .375rem;
+    font-size: .625rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+    white-space: nowrap;
+}
+
+.sp-series-seg.is-now { color: var(--bs-emphasis-color); }
+
+/* Gapet mellan tva avsnitt ar storre an gapet inuti ett, och en tunn linje gor
+   gransen omojlig att lasa fel pa en liten skarm. */
+.sp-series-seg[data-gap] {
+    margin-left: .375rem;
+    padding-left: .75rem;
+    border-left: 1px solid var(--bs-border-color);
 }
 
 .sp-sn {
