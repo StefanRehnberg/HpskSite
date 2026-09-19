@@ -699,6 +699,11 @@ namespace HpskSite.Controllers
                 if (r.Cancelled) return "cancelled";
                 if (r.IsGuest) return "guest";                       // ingår i värdens betalning
                 if (!parties.TryGetValue(r.MemberId, out var party)) return "none";
+                // ⚠⚠ "Ingen avgift" ar ett PASTAENDE, och det far inte vara falskt. Tar
+                // evenemanget betalt men raden saknar belopp ar det en LUCKA - raden skapades
+                // innan priset fanns, eller innan disken bad om ett - och personen ar da gratis
+                // for alltid utan att nagon sagt det. Rapporterat 2026-09-19.
+                if (party.MissingPrice) return "missing";
                 if (party.Total <= 0m) return "free";                // ⚠️ 0 = GRATIS, inte ofyllt
                 if (party.IsSettled) return "paid";
                 if (party.ClaimedPaid > 0m) return "claimed";        // påstått — ALDRIG pengar
@@ -769,6 +774,8 @@ namespace HpskSite.Controllers
                     attendanceNote = r.AttendanceNote,
                     selfRegistered = r.SelfRegistered,
                     fee = r.FeeAmount,
+                    // Behovs for att forifylla prisdialogen med radens nuvarande val.
+                    feePriceId = r.FeePriceId,
 
                     // ── Betalningen, sedd från raden ──────────────────────────────────────
                     paymentState = StateFor(r),
@@ -1375,6 +1382,27 @@ namespace HpskSite.Controllers
                     receiptId = p.ReceiptId,
                 })
             });
+        }
+
+        /// <summary>
+        /// Sätter priset på en deltagarrad i efterhand.
+        /// POST /umbraco/surface/ClubEvent/SetParticipantPrice
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetParticipantPrice([FromBody] GuestRequest request)
+        {
+            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+
+            int me = await CurrentMemberIdAsync();
+            if (!await _participation.CanManageAsync(ctx, me))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            var (ok, msg) = await _participation.SetParticipantPriceAsync(
+                ctx, request?.ParticipantId ?? 0, request?.PriceId);
+
+            return Json(new { success = ok, message = msg ?? "Priset är satt." });
         }
 
         /// <summary>

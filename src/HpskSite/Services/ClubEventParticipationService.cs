@@ -843,6 +843,51 @@ namespace HpskSite.Services
         /// it bypasses the sign-up window and the capacity split on purpose — the person is
         /// standing there, and a full list is not a reason to leave them off the roll-call.
         /// </summary>
+        /// <summary>
+        /// Sätter (eller rättar) priset på EN deltagarrad.
+        ///
+        /// <para><b>⚠⚠ VARFÖR DEN BEHÖVS.</b> Priset snapshottas när raden föds, och rader som
+        /// skapades innan evenemanget hade något pris — eller innan disken började fråga efter ett
+        /// — bär inget belopp alls. De är då <b>gratis för alltid</b> och går inte att ta betalt av,
+        /// vilket är precis vad som rapporterades 2026-09-19. Samma sak händer när en klubb sätter
+        /// priset först efter att första anmälan kommit in, eller när någon valt fel rad.</para>
+        ///
+        /// <para><b>⚠️ PER RAD, inte per sällskap.</b> En gäst bär sitt eget pris — barnet betalar
+        /// inte vuxenpriset för att värden gör det.</para>
+        ///
+        /// <para><b>⚠️ RÖR ALDRIG EN REDAN BETALD RAD härifrån.</b> Skulden är snapshottad, och
+        /// att skriva om beloppet efter att pengarna kommit in hade gjort liggaren oförenlig med
+        /// vad någon faktiskt betalat. Anroparen får stämma av i stället.</para>
+        /// </summary>
+        public async Task<(bool Ok, string? Message)> SetParticipantPriceAsync(
+            ClubEventContext ctx, int participantId, string? priceId)
+        {
+            if (participantId <= 0) return (false, "Deltagarraden saknas.");
+
+            using var db = _databaseFactory.CreateDatabase();
+            var row = await db.SingleOrDefaultAsync<ClubEventParticipant>(
+                "WHERE Id = @0 AND EventId = @1", participantId, ctx.EventId);
+            if (row == null) return (false, "Deltagaren hittades inte på evenemanget.");
+
+            // ⚠⚠ HÄR NAMNGER ANROPAREN ETT PRIS, och då ska det finnas. ResolvePriceChoice duger
+            // INTE som kontroll: dess regel "ett enda pris väljer sig självt" är riktig vid ANMÄLAN,
+            // där medlemmen inte skickar något — men här hade den gjort att ett felstavat id tyst
+            // mappas till något. Slå upp på id, och låt tomt betyda "inget pris".
+            EventPrice? chosen = null;
+            if (!string.IsNullOrWhiteSpace(priceId))
+            {
+                chosen = ctx.Prices.ById(priceId);
+                if (chosen == null) return (false, "Priset finns inte på evenemanget.");
+            }
+
+            row.FeePriceId = chosen?.Id;
+            row.FeeLabel = chosen?.Label;
+            row.FeeAmount = chosen?.Amount;
+            row.UpdatedDate = DateTime.Now;
+            await db.UpdateAsync(row);
+            return (true, null);
+        }
+
         public async Task<(bool Ok, string? Message)> AddWalkInAsync(
             int eventId, int memberId, int actingMemberId, string? priceId = null)
             => await SetAttendanceAsync(eventId, memberId, ClubEvents.AttendancePresent, null,

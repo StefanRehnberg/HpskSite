@@ -185,6 +185,32 @@ else
         <div class="small text-muted mt-2" id="deskFoot"></div>
     </div>
 
+    @* Sätt pris på en enskild rad. ⚠️ PER RAD, inte per sällskap — en gäst bär sitt eget
+       pris, och barnet betalar inte vuxenpriset för att värden gör det. *@
+    <div class="modal fade" id="deskPriceModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-tag me-2"></i>Pris</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="fw-semibold mb-2" id="priceName"></div>
+                    <select class="form-select" id="priceChoice"></select>
+                    <div class="form-text">
+                        Beloppet snapshottas på raden. Har personen redan betalat bör du stämma av
+                        i stället för att skriva om skulden.
+                    </div>
+                    <div class="alert alert-danger mt-3 py-2" id="priceWarn" style="display:none"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-primary" onclick="deskPriceSave(this)">Spara</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     @* Hantera betalning — samma namn och samma form som på tävling. *@
     <div class="modal fade" id="deskPayModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
@@ -373,6 +399,13 @@ else
         switch (r.paymentState) {
             case 'free':
                 return '<span class="badge bg-secondary-subtle text-secondary-emphasis">Ingen avgift</span>';
+            case 'missing':
+                // ⚠⚠ INTE "Ingen avgift". Raden saknar belopp på ett evenemang som tar betalt —
+                // oftast för att den skapades innan priset fanns. Att visa den som gratis är ett
+                // falskt påstående, och personen blir då aldrig debiterad utan att någon märker det.
+                return '<span class="badge bg-warning-subtle text-warning-emphasis" '
+                     + 'title="Raden saknar pris. Sätt det via Åtgärder.">'
+                     + '<i class=\'bi bi-exclamation-triangle me-1\'></i>Pris saknas</span>';
             case 'paid':
                 return `<span class="badge bg-success-subtle text-success-emphasis">Mottaget ${kr(r.partyPaid)}</span>`;
             case 'claimed':
@@ -440,6 +473,9 @@ else
                             <i class="bi bi-sliders me-1"></i>Åtgärder
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
+                            ${(!r.cancelled && (state.event.prices || []).length) ? `
+                            <li><button class="dropdown-item" type="button" onclick="deskPriceOpen(${r.id})">
+                                <i class="bi bi-tag me-2 text-secondary"></i>${r.fee == null ? 'Sätt pris…' : 'Ändra pris…'}</button></li>` : ''}
                             ${(!r.isGuest && r.paymentState !== 'free' && r.paymentState !== 'none'
                                && r.paymentState !== 'paid' && !r.cancelled) ? `
                             @* ⚠️ SAMMA NAMN SOM PÅ TÄVLING. Två ord för samma handling tvingar den som
@@ -484,6 +520,38 @@ else
         const d = await post('/umbraco/surface/ClubEvent/SetAttendance',
                              { eventId: EVENT_ID, participantId: rowId, status, note });
         if (!d.success) alert(d.message || 'Kunde inte spara närvaron.');
+        await deskLoad();
+    };
+
+    let priceRow = null;
+
+    window.deskPriceOpen = function (rowId) {
+        const r = state.rows.find(x => x.id === rowId);
+        if (!r) return;
+        priceRow = r;
+        document.getElementById('priceName').textContent = r.name || '';
+        const prices = (state.event.prices || []);
+        document.getElementById('priceChoice').innerHTML =
+            prices.map(p => `<option value="${esc(p.id)}" ${p.id === r.feePriceId ? 'selected' : ''}>`
+                           + `${esc(p.label)} — ${kr(p.amount)}</option>`).join('');
+        document.getElementById('priceWarn').style.display = 'none';
+        new bootstrap.Modal(document.getElementById('deskPriceModal')).show();
+    };
+
+    window.deskPriceSave = async function (btn) {
+        if (!priceRow) return;
+        btn.disabled = true;
+        const d = await post('/umbraco/surface/ClubEvent/SetParticipantPrice', {
+            eventId: EVENT_ID, participantId: priceRow.id,
+            priceId: document.getElementById('priceChoice').value,
+        });
+        btn.disabled = false;
+        if (!d.success) {
+            document.getElementById('priceWarn').textContent = d.message || 'Kunde inte spara priset.';
+            document.getElementById('priceWarn').style.display = '';
+            return;
+        }
+        bootstrap.Modal.getInstance(document.getElementById('deskPriceModal')).hide();
         await deskLoad();
     };
 

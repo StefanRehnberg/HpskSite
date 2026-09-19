@@ -27,6 +27,8 @@ const NAME = 'ZZDESK Avgiftskvall';
 // ⚠️ EN ANNAN MEDLEM an den inloggade. Lagger funktionaren till SIG SJALV ar raden inte en
 // walk-in utan hens egen anmalan, och pastaendet om "deltagare tillagd i disken" mater ingenting.
 const WALKIN_MEMBER = 5601;
+// ⚠️ Ännu en annan medlem — raden utan pris får inte krocka med walk-in-fallet ovan.
+const NOPRICE_MEMBER = 2344;
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -34,8 +36,12 @@ const ok = (n, c, d) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { f
 const eq = (n, a, e) => ok(n, JSON.stringify(a) === JSON.stringify(e), `fick ${JSON.stringify(a)}, väntade ${JSON.stringify(e)}`);
 const section = t => console.log(`\n== ${t}`);
 
+// ⚠⚠ QUOTED_IDENTIFIER ON PA VARJE SATS. ClubEventParticipant bar ett FILTRERAT index (det
+// som slapper in flera gaster), och SQL Server vagrar all DML mot en sadan tabell nar
+// installningen ar av - vilket ar sqlcmds standard. Utan detta misslyckas bade fixturen och
+// stadningens DELETE, den senare TYST om -b saknas. Samma falla som MarkenSeries och Firearm.
 const sql = q => execFileSync('sqlcmd',
-  ['-S', 'localhost\\SQLEXPRESS', '-d', 'Umbraco', '-E', '-C', '-b', '-W', '-h', '-1', '-Q', q],
+  ['-S', 'localhost\\SQLEXPRESS', '-d', 'Umbraco', '-E', '-C', '-b', '-W', '-h', '-1', '-Q', 'SET QUOTED_IDENTIFIER ON; ' + q],
   { encoding: 'utf8', maxBuffer: 1 << 24 });
 
 const PRICES = JSON.stringify([{ id: 'p1', label: 'Vuxen', amount: 180 }]);
@@ -304,6 +310,98 @@ SELECT COUNT(*) FROM dbo.LedgerPayment
 WHERE SourceType = 'Event' AND SourceId = ${eventId}
   AND PayerMemberId = ${WALKIN_MEMBER} AND ConfirmedUtc IS NOT NULL AND Method = 'kontant';`).trim();
     ok('och den ligger i liggaren som kontant', paidRows === '1', `${paidRows} rader`);
+
+    // —— ⚠⚠ EN RAD UTAN PRIS SÄGER DET, OCH GÅR ATT RÄTTA ——
+    //
+    // Rapporterat 2026-09-19, ANDRA halvan: prisfixen gäller bara NYA rader. En deltagare som
+    // lades till innan evenemanget hade ett pris — eller innan disken började fråga efter ett
+    // — bär inget belopp, och raden påstod då "Ingen avgift" på ett evenemang som kostar pengar.
+    // Det är ett falskt påstående: personen blir aldrig debiterad och ingen märker det.
+    section('Rad utan pris');
+
+    // Bygg tillståndet: en deltagare UTAN priceId, precis som de gamla raderna.
+    const noPrice = await page.evaluate(async ([id, pid]) => {
+      const tok = document.querySelector('input[name="__RequestVerificationToken"]');
+      const r = await fetch('/umbraco/surface/ClubEvent/SetAttendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': tok ? tok.value : '' },
+        body: JSON.stringify({ eventId: id, memberId: pid, status: 'Present' }),
+      });
+      return await r.json().catch(() => null);
+    }, [eventId, NOPRICE_MEMBER]);
+    ok('en deltagare gick att lägga till', noPrice && noPrice.success, noPrice && noPrice.message);
+
+    // ⚠⚠ TILLSTÅNDET GÅR INTE LÄNGRE ATT SKAPA GENOM API:ET, och det ÄR fixen: på ett
+    // evenemang med ETT pris väljer ResolvePriceChoice det självt, så en ny rad får alltid ett
+    // belopp. Raderna som saknar pris är HISTORISKA — skapade innan disken satte något — och
+    // fixturen byggs därför i SQL. Att i stället låta bli att testa hade lämnat både
+    // "Pris saknas"-vyn och rättningen omätta, och det är just de som används på verklig data.
+    sql(`SET NOCOUNT ON;
+UPDATE dbo.ClubEventParticipant SET FeeAmount = NULL, FeePriceId = NULL, FeeLabel = NULL
+WHERE EventId = ${eventId} AND MemberId = ${NOPRICE_MEMBER};`);
+    const legacy = sql(`SET NOCOUNT ON;
+SELECT ISNULL(CAST(FeeAmount AS NVARCHAR(20)),'NULL') FROM dbo.ClubEventParticipant
+WHERE EventId = ${eventId} AND MemberId = ${NOPRICE_MEMBER};`).trim();
+    ok('fixturen är en rad utan pris, som de gamla', legacy === 'NULL', legacy);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => {
+      const b = document.getElementById('deskBody');
+      return b && !b.innerText.includes('Hämtar');
+    }, null, { timeout: 30000 }).catch(() => {});
+
+    const noPriceRow = await page.evaluate(async id => {
+      const r = await fetch(`/umbraco/surface/ClubEvent/GetRoster?eventId=${id}`);
+      const d = await r.json();
+      const row = (d.rows || []).find(x => x.fee == null && !x.isGuest && !x.cancelled);
+      const trs = [...document.querySelectorAll('#deskBody tr')];
+      const tr = trs.find(x => row && x.innerText.includes(row.name));
+      if (!row) return { debug: (d.rows||[]).map(x=>({n:x.name,fee:x.fee,g:x.isGuest,c:x.cancelled})) };
+      return row ? {
+        state: row.paymentState,
+        cell: tr ? tr.children[2].innerText.trim() : null,
+        meny: tr ? [...tr.querySelectorAll('.dropdown-item')].map(i => i.innerText.trim()) : [],
+        id: row.id,
+      } : null;
+    }, eventId);
+
+    ok('raden finns', !!(noPriceRow && noPriceRow.id), JSON.stringify(noPriceRow));
+    if (noPriceRow && noPriceRow.id) {
+      // ⚠⚠ KÄRNAN: den får INTE påstå att evenemanget är gratis.
+      ok('den påstår INTE "Ingen avgift"', !/Ingen avgift/i.test(noPriceRow.cell || ''), noPriceRow.cell);
+      ok('utan säger att priset saknas', /Pris saknas/i.test(noPriceRow.cell || ''), noPriceRow.cell);
+      ok('och menyn erbjuder att sätta det',
+         noPriceRow.meny.some(m => /Sätt pris/i.test(m)), noPriceRow.meny.join(', '));
+
+      const setP = await page.evaluate(async ([id, rowId]) => {
+        const tok = document.querySelector('input[name="__RequestVerificationToken"]');
+        const r = await fetch('/umbraco/surface/ClubEvent/SetParticipantPrice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': tok ? tok.value : '' },
+          body: JSON.stringify({ eventId: id, participantId: rowId, priceId: 'p1' }),
+        });
+        return await r.json().catch(() => null);
+      }, [eventId, noPriceRow.id]);
+      ok('priset gick att sätta i efterhand', setP && setP.success, setP && setP.message);
+
+      // ⚠️ Kontrollprov: ett pris som inte finns på evenemanget får inte tyst bli "inget pris"
+      // — då hade en felstavad rad sett ut som ett medvetet gratisval.
+      const badP = await page.evaluate(async ([id, rowId]) => {
+        const tok = document.querySelector('input[name="__RequestVerificationToken"]');
+        const r = await fetch('/umbraco/surface/ClubEvent/SetParticipantPrice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': tok ? tok.value : '' },
+          body: JSON.stringify({ eventId: id, participantId: rowId, priceId: 'finns-inte' }),
+        });
+        return await r.json().catch(() => null);
+      }, [eventId, noPriceRow.id]);
+      ok('ett okänt pris vägras', badP && badP.success === false, JSON.stringify(badP));
+
+      const after = sql(`SET NOCOUNT ON;
+SELECT ISNULL(CAST(FeeAmount AS NVARCHAR(20)),'NULL') FROM dbo.ClubEventParticipant
+WHERE Id = ${noPriceRow.id};`).trim();
+      ok('och beloppet står på raden i databasen', after === '180.00' || after === '180', after);
+    }
 
     ok('inga JS-fel', jsErrors.length === 0, jsErrors.join(' | '));
 
