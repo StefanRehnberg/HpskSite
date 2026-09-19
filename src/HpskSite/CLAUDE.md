@@ -3855,6 +3855,90 @@ Den skyldiga är den **sovande** raden med öppen transaktion. Åtgärd tills vi
 (`KILL <id>` fungerar också). ⚠️ Kontrollera det här **innan** du felsöker en svit som plötsligt
 beter sig oförklarligt — tre av den här sessionens "mystiska" körningar var den här låsningen.
 
+#### Händelsedialogerna: guide vid skapande, flikar vid redigering (2026-09-19)
+
+Modalen hade vuxit till ett enda långt formulär med ett tjugotal fält. Den bygger nu på
+**samma stegmaskin som tävlingsguiden** — `hpskModalWizard` i `_ModalSectionNav`, som
+härleder stegen ur `h6.text-primary`-rubrikerna i stället för ur en hårdkodad lista.
+
+**Alla tre ställena, med samma indelning:** klubbens adminpanel (`#eventModal`), kretsens
+(`#regionEventModal`) och händelsens egen sida (`#editDetailsModal`). Att stegen härleds ur
+rubriker är vad som gör det möjligt: **ett fältset, två presentationer.** De tre dialogerna
+renderar `_ModalSectionNav` **själva**, samma husregel som `_HtmlEscape`.
+
+**FÄLTMÄNGDEN ÄR OFÖRÄNDRAD.** Ombyggnaden gäller presentationen, inte omfånget —
+slutdatum, målgrupp och utrustning finns fortfarande bara på händelsens egen sida. Att smyga
+in nya fält i en presentationsomläggning gör en misslyckad sparning omöjlig att attribuera.
+
+**Avsnitten:** Grunduppgifter · Plats och beskrivning · Kontakt · (*Utökade detaljer*, bara
+händelsesidan) · **Anmälan · Avgift och betalning · På plats**. De tre sista bor i
+`_EventRegistrationFields`, så en ny yta som renderar partialen får dem gratis.
+
+**Anmälan delades i tre** efter rapport om att fliken var överväldigande — den bar tio fält i
+tre olika ärenden. Avgiften och Swish-numret är EN fråga (vad kostar det, vart går pengarna)
+och ligger i den ordningen: numret är ointressant så länge det inte kostar något.
+**Avgift och På plats finns BARA när anmälan krävs** — ett avsnitt utan höjd faller ur raden
+via `isAvailable`, vilket är avsikten och inte en bieffekt: inga flikar för något som inte
+gäller. `hpskEventRegToggle` växlar därför **tre** grupper, inte en.
+
+**⚠⚠ `hpskModalTabs` är en EGEN ingång som RIVER guideläget.** Klubbens och kretsens dialog
+är EN modal som används för båda lägena (`dataset.hpskMode` sätts före `.show()`).
+`hpskModalSectionNav` bygger om flikraden vid varje anrop — men `hpsk-steps` och datasetarna
+sitter kvar på nav- respektive body-elementet. Utan funktionen blev dialogen **permanent en
+guide efter det första skapandet**, med prickar i stället för flikar och knappar som inte gick
+att klicka. Tyst, eftersom ingenting felar.
+
+**⚠⚠ `hpskRefreshSections` bygger om raden UTAN att nollställa steget.** Avsnitt tillkommer
+medan dialogen står öppen (anmälningsrutan slår på två), och raden byggdes när dialogen
+öppnades. Att i stället anropa `hpskModalWizard` där hade kastat tillbaka användaren till
+steg 1 i samma ögonblick hen kryssade i rutan. `hpskRefreshOpenSections` finns för delade
+partialer som inte vet vilken dialog de sitter i.
+
+**⚠️ Grupperingen måste ske på `shown.bs.modal`, aldrig före `.show()`.** `isAvailable` mäter
+om ett avsnitt renderar något, och i en modal som ännu inte visas är svaret noll för varje
+avsnitt — alltså noll flikar och en dialog som ser tom ut.
+
+**⚠️ Valideringen går via `hpskWizardValidateAll`.** Resten av formuläret är `hidden`, och
+`reportValidity()` kan inte fokusera ett fält i ett dolt avsnitt; utan hoppet till rätt steg
+blir följden att Spara "inte gör någonting". Händelsesidan saknar `<form>` och använder
+`hpskRevealField` på sin egen namnkontroll.
+
+**⚠️ Sparknappen bär ett id nu.** `saveEvent`/`saveRegionEvent` letade upp den med
+`.modal-footer .btn-primary` — "första primära knappen som råkar stå här" — vilket gör
+knappordningen i sidfoten till en tyst bugg så fort en till primär knapp läggs dit.
+
+**Två fynd som sviten gjorde, båda riktiga:**
+- **Guiden öppnades på det avsnitt man senast stod på.** `hpskModalSectionNav` behåller
+  aktuellt avsnitt med flit — riktigt för flikar, som återupptar en redigering, men fel för
+  en guide: nästa skapande började på "steg 3 av 4" med de tidigare stegen oifyllda. En guide
+  börjar nu alltid om.
+- **Det dolda `eventId`-fältet låg utanför varje avsnitt.** Ofarligt för payloaden, men
+  undantaget är **borttaget i stället för inskrivet i testet** — regeln "varje kontroll bor i
+  ett avsnitt" är värd något bara så länge den är absolut.
+
+**⚠️ En rad som satte `b.disabled = false` i flikläget togs bort:** A/B:n visade att den inte
+kunde falla, eftersom `hpskModalSectionNav` bygger nya, påslagna knappar ändå. En spärr som
+inte kan falla är samma sak som ingen spärr, bara svårare att upptäcka.
+
+Verifierat **80/80 `hpsk-verify/event-modal-rebuild-verify.mjs`**. Sviten **skapar ingen
+händelse** — sparknappen trycks aldrig, så det finns inget att städa. Den kör
+**skapa → redigera → skapa i EN session**, för det är där lägesväxlingen går sönder, och
+assertar att **inget fält hamnar utanför ett avsnitt**. Uppdelningen mäts i båda riktningarna:
+kryssrutan på ger sex avsnitt utan att guiden kastar om, kryssrutan av ger fyra igen.
+- ⚠️ **Alla sex avsnitten finns i DOM:en hela tiden** — två faller bara ur flikraden. Ett
+  påstående om synlighet måste därför peka ut VILKET avsnitt som syns (`indexOf(true)`) plus
+  räkna dem, inte matcha en array med fix längd.
+- ⚠️ **Cookie-bannern är `position:fixed` längst ned och fångar klick på modalens sidfot.**
+  Sviten TAR BORT noden i stället för att klicka i den — att trycka på en samtyckesknapp är
+  ett val, och det är inte svitens att göra.
+
+A/B: **2 faller** när flikläget slutar riva guideläget; sviten **avbryter helt** när refreshen
+kastar tillbaka till steg 1 respektive inte bygger om raden. Regression: modal-wizard 29/29,
+event-audience 21/21, event-guests 48/48. `event-reg-fields` 21/24 är **oförändrat rött** —
+den läser `ClubController.cs`, som inte är rörd här.
+
+**Endast vyer → ingen ombyggnad krävs.** Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod.
+
 #### Vem får anmäla sig — `eventAudience` (2026-09-18)
 
 Rapporterat om en gåsaskjutning i prod: *"det står 'Anmälan är öppen för medlemmar i Ankeborg' men
