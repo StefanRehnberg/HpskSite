@@ -219,6 +219,8 @@
                     <i class="bi bi-plus-circle me-2"></i>Ny Händelse
                 </button>
             </div>
+            @* Kvitto efter en kopiering. Står kvar, till skillnad från en alert. *@
+            <div id="eventsCopyNotice" style="display:none"></div>
 
             <!-- Filter Section -->
             <div class="card mb-3">
@@ -1021,6 +1023,7 @@
 @* Partialen inkluderas av dialogen SJÄLV, samma husregel som _HtmlEscape: den reser med
    koden som behöver den och kan inte glömmas när dialogen monteras på en ny yta.
    Dubbelinkludering är ofarlig — partialen vaktar sig själv via Context.Items. *@
+@await Html.PartialAsync("_HtmlEscape")
 @await Html.PartialAsync("_ModalSectionNav")
 
 <script>
@@ -3663,12 +3666,41 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Load Events
-function loadEvents() {
+// Markerar den nyss skapade kopian i listan och säger när den ligger. Utan det är en kopia
+// bara ytterligare en rad med samma namn som någon annan.
+function hpskFlagCopiedEvent(copyId, newDate) {
+    const row = document.querySelector(`#eventsTable tr[data-event-row="${copyId}"]`)
+             || [...document.querySelectorAll('#eventsTab tbody tr')].find(tr =>
+                    tr.innerHTML.includes(`copyEvent(${copyId})`));
+    const when = newDate ? new Date(newDate) : null;
+    const nice = (when && when.getFullYear() > 1900)
+        ? when.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' })
+        : '';
+
+    const box = document.getElementById('eventsCopyNotice');
+    if (box) {
+        box.className = 'alert alert-success d-flex align-items-center gap-2 py-2';
+        box.innerHTML = '<i class="bi bi-check-circle"></i><span>Kopian ligger '
+            + (nice ? '<strong>' + hpskEsc(nice) + '</strong>' : 'på det datum du valde')
+            + '. Originalet står kvar oförändrat.</span>';
+        box.style.display = '';
+    }
+    if (row) {
+        row.classList.add('table-success');
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        // Markeringen är till för att hitta raden EN gång, inte för att färga listan för alltid.
+        setTimeout(() => row.classList.remove('table-success'), 6000);
+    }
+}
+
+function loadEvents(afterRender) {
     fetch(`/umbraco/surface/Club/GetClubEvents?clubId=${clubId}`)
         .then(response => response.json())
         .then(data => {
             if (data.success) {
                 displayEvents(data.data);
+                // Anropas EFTER omritningen: raden finns inte att markera innan dess.
+                if (typeof afterRender === 'function') afterRender();
             } else {
                 document.getElementById('eventsTableContainer').innerHTML =
                     '<div class="alert alert-warning">Inga händelser hittades.</div>';
@@ -3847,13 +3879,25 @@ function renderEvents() {
              + 'eller <a href="#" onclick="showAllClubEvents(); return false;">visa alla händelser</a>.</td></tr>';
     }
 
+    // ⚠⚠ TVÅ RADER MED SAMMA NAMN GÅR INTE ATT SKILJA ÅT. Listan visar `eventName`, medan
+    // "Gå till händelsen" följer NODENS url — och nodnamnet får ett osynligt "(1)" när en kopia
+    // delar namn med sin källa. Följden var att en kopia och dess original såg identiska ut och
+    // man landade på fel sida utan att något sa emot. Rapporterat 2026-09-19.
+    // Datumet står redan i sin egen kolumn, men ögat fäster på det feta namnet.
+    const nameCounts = {};
+    events.forEach(e => { nameCounts[e.name] = (nameCounts[e.name] || 0) + 1; });
+
     events.forEach(event => {
         const dateObj = event.date ? new Date(event.date) : null;
         const date = (dateObj && dateObj.getFullYear() > 1900) ? dateObj.toLocaleString('sv-SE') : '-';
+        // Bara när namnet förekommer flera gånger — annars är det bara brus på varje rad.
+        const dayHint = (nameCounts[event.name] > 1 && dateObj && dateObj.getFullYear() > 1900)
+            ? ` <small class="text-muted fw-normal">· ${dateObj.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}</small>`
+            : '';
         const color = eventTypeColors[event.type] || eventTypeColors.default;
         html += `
             <tr>
-                <td><strong>${event.name}</strong></td>
+                <td><strong>${hpskEsc(event.name)}</strong>${dayHint}</td>
                 <td><span class="badge" style="background-color: ${color}">${event.type}</span>${hpskEventBadges(event)}</td>
                 <td>${date}</td>
                 <td>${event.venue || '-'}</td>
@@ -3861,7 +3905,7 @@ function renderEvents() {
                     <div class="dropdown">
                         <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
                                 data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}'
-                                aria-expanded="false" title="Åtgärder för ${event.name}">
+                                aria-expanded="false" title="Åtgärder för ${hpskEsc(event.name)}">
                             <i class="bi bi-sliders me-2"></i>Åtgärder
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
@@ -3874,7 +3918,7 @@ function renderEvents() {
                             <li><button class="dropdown-item" type="button" onclick="copyEvent(${event.id})">
                                 <i class="bi bi-copy me-2 text-info"></i>Kopiera till nästa vecka</button></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><button class="dropdown-item text-danger" type="button" onclick="deleteEvent(${event.id}, '${event.name}')">
+                            <li><button class="dropdown-item text-danger" type="button" onclick="deleteEvent(${event.id})">
                                 <i class="bi bi-trash me-2"></i>Ta bort händelsen</button></li>
                         </ul>
                     </div>
@@ -4180,7 +4224,13 @@ function saveEvent() {
     });
 }
 
-function deleteEvent(eventId, eventName) {
+function deleteEvent(eventId) {
+    // ⚠️ Namnet slås upp HÄR i stället för att skickas in via onclick. Att bygga en
+    // JS-strängliteral av användartext inne i ett attribut är luckan som gav körbar kod i
+    // Fältskyttes "lägg till skytt" — och HTML-escapen räddar inget där, eftersom &#039;
+    // avkodas till en apostrof innan JS parsar raden.
+    var ev = (allEvents || []).find(function (e) { return e.id === eventId; });
+    var eventName = ev ? ev.name : 'händelsen';
     showDeleteConfirmation(eventName, () => {
         const formData = new FormData();
         formData.append('__RequestVerificationToken', getAntiForgeryToken());
@@ -4271,8 +4321,12 @@ function saveCopyEvent() {
         saveBtn.innerHTML = originalBtnText;
         if (data.success) {
             bootstrap.Modal.getInstance(document.getElementById('copyEventModal')).hide();
-            loadEvents();
-            alert('Händelse kopierad!');
+            // ⚠️ INLINE-NOTIS, INTE alert(). Ett alert försvinner när man klickar bort det och
+            // lämnar ingen ledtråd om VILKEN av de likadana raderna som är den nya — vilket är
+            // precis det som gjorde att man landade på fel händelse. Husregeln för
+            // framgångskvitton på den här ytan är en notis som står kvar.
+            const copyId = data.data && data.data.id;
+            loadEvents(() => hpskFlagCopiedEvent(copyId, newDate));
         } else {
             alert('Fel: ' + data.message);
         }
