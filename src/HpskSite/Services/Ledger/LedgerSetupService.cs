@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using HpskSite.Models.Ledger;
 using Umbraco.Cms.Infrastructure.Persistence;
 
@@ -42,13 +42,33 @@ namespace HpskSite.Services.Ledger
         /// med verksamhetsår juli–juni ska kunna sätta det här.
         /// </param>
         /// <param name="endDate">Årets slut. Null = 31 december.</param>
+        /// <param name="shape">
+        /// Ur <see cref="LedgerIssuerShape"/>. <b>⚠⚠ OBLIGATORISK, MED FLIT.</b>
+        ///
+        /// <para>Den här raden avgör om vi är föreningens bokföringsprogram eller bara dess
+        /// avgifts- och kontrollsystem — alltså om en evenemangsbetalning ska bli en verifikation
+        /// eller inte. Fram till 2026-09-19 var <c>FullLedger</c> ett förval här, och följden hade
+        /// blivit att varje förening som någon gång satts upp av en skript- eller migreringskörning
+        /// tyst hamnat i bokföringsläge — med krav på räkenskapsår för att kunna ta emot pengar.
+        /// Det är inte vårt val att göra åt en förening, och en parameter utan default är det
+        /// enda som gör "glömde välja" omöjligt att skilja från "valde".</para>
+        /// </param>
         public LedgerSetupResult EnsureIssuer(
             int issuerType,
             int issuerId,
             int year,
+            string shape,
             DateTime? startDate = null,
             DateTime? endDate = null)
         {
+            // ⚠️ Ett okänt värde får inte tolkas som något — minst av allt som FullLedger.
+            if (shape != LedgerIssuerShape.FullLedger && shape != LedgerIssuerShape.FeesAndExport)
+            {
+                throw new ArgumentException(
+                    $"Okänd föreningsform '{shape}'. Välj {LedgerIssuerShape.FullLedger} "
+                    + $"eller {LedgerIssuerShape.FeesAndExport}.", nameof(shape));
+            }
+
             using var db = _databaseFactory.CreateDatabase();
 
             var result = new LedgerSetupResult();
@@ -66,7 +86,7 @@ namespace HpskSite.Services.Ledger
                 db.Execute(
                     @"INSERT INTO dbo.LedgerIssuerSettings (IssuerType, IssuerId, IsVatRegistered, Shape)
                       VALUES (@0, @1, 0, @2)",
-                    issuerType, issuerId, LedgerIssuerShape.FullLedger);
+                    issuerType, issuerId, shape);
 
                 result.SettingsCreated = true;
             }
