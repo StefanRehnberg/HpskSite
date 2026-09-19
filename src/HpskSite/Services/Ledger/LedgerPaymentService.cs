@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using HpskSite.Models.Ledger;
 using NPoco;
 using Umbraco.Cms.Core.Web;
@@ -86,6 +86,41 @@ namespace HpskSite.Services.Ledger
         /// <param name="actualAmount">
         /// Vad som faktiskt togs emot, när det skiljer sig från det begärda. Null = ingen avvikelse.
         /// </param>
+        /// <summary>
+        /// Mottagna betalningar som saknar verifikation — <b>kön "att bokföra"</b>.
+        ///
+        /// <para>⚠⚠ HÄRLETT, ALDRIG LAGRAT. Tillståndet är "bekräftad men utan
+        /// <see cref="LedgerPayment.JournalEntryId"/>", vilket gör kön omojlig att glömma
+        /// uppdatera. En lagrad flagga hade behövt skrivas på två ställen, och en missad
+        /// skrivning är en verifikation som tyst aldrig blir av.</para>
+        ///
+        /// <para>⚠️ För en förening som bokför någon annanstans är listan ALLTID full, och
+        /// helt ointressant — den ytan ska därför bara visas för
+        /// <see cref="LedgerIssuerShape.FullLedger"/>. Se DecidePosting.</para>
+        /// </summary>
+        public List<LedgerPayment> UnpostedConfirmed(int issuerType, int issuerId)
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                return db.Fetch<LedgerPayment>(
+                    @"SELECT * FROM dbo.LedgerPayment
+                       WHERE IssuerType = @0 AND IssuerId = @1
+                         AND ConfirmedUtc IS NOT NULL
+                         AND VoidedUtc IS NULL
+                         AND JournalEntryId IS NULL
+                       ORDER BY ConfirmedUtc",
+                    issuerType, issuerId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Kunde inte läsa obokförda betalningar för utställare {Type}/{Id}.",
+                    issuerType, issuerId);
+                return new List<LedgerPayment>();
+            }
+        }
+
         public ConfirmResult Confirm(
             int paymentId, int byMemberId, DateTime? paymentDate = null, decimal? actualAmount = null)
         {
@@ -107,11 +142,28 @@ namespace HpskSite.Services.Ledger
             var amount = actualAmount ?? payment.Amount;
             var date = (paymentDate ?? DateTime.Today).Date;
 
-            // ── Bokför FÖRST, utanför kvittots transaktion ───────────────────────────────────
-            // ⚠️ Ordningen är medveten: går bokföringen inte igenom (stängt år, saknad kontoroll)
-            // ska INGENTING ha hänt — varken ett kvitto hos betalaren eller en bekräftad betalning.
-            // Ett kvitto utan bokföring är den enda av kombinationerna som är svår att upptäcka.
-            var posting = _posting.Post(new LedgerPostingRequest
+            // ── ⚠⚠ BOKFÖR FÖRST — NÄR FÖRENINGEN BOKFÖR HOS OSS ────────────────────────────
+            //
+            // Ordningen är medveten: går bokföringen inte igenom ska ingenting ha hänt. Men
+            // bokföring är OPT-IN (se DecidePosting). De flesta klubbar vill bara kunna ta betalt
+            // och bokför någon annanstans — för dem finns ingen verifikation att skriva, och ett
+            // kvitto är ändå fullt giltigt: det är ett kvitto på en MOTTAGEN BETALNING, inte en
+            // bokföringshandling.
+            //
+            // ⚠️ ETT UNDANTAG, och det är inte försiktighet: är föreningen MOMSREGISTRERAD måste
+            // kvittot ange momsen, och momsbeloppet faller ut ur bokföringens kontorader. Utan
+            // posting finns ingen moms att skriva, och ett momsfritt kvitto från en momsregistrerad
+            // förening är en oriktig uppgift. Där vägrar vi hellre än utfärdar.
+            var decision = _posting.DecidePosting(payment.IssuerType, payment.IssuerId, date);
+
+            if (!decision.ShouldPost && settings?.IsVatRegistered == true)
+                return ConfirmResult.Failed(
+                    (decision.SkipReason ?? "Föreningen bokför inte i pistol.nu.")
+                    + " Föreningen är momsregistrerad, och då kan kvittot inte utfärdas utan "
+                    + "bokföring — momsen härleds ur verifikationens konton.");
+
+            LedgerPostingResult? posting = null;
+            if (decision.ShouldPost) posting = _posting.Post(new LedgerPostingRequest
             {
                 IssuerType = payment.IssuerType,
                 IssuerId = payment.IssuerId,
@@ -146,7 +198,7 @@ namespace HpskSite.Services.Ledger
                 }
             });
 
-            if (!posting.Success)
+            if (posting is { Success: false })
                 return ConfirmResult.Failed(posting.Error ?? "Bokföringen gick inte igenom.");
 
             // ── Bekräftelsen och kvittot ────────────────────────────────────────────────────
@@ -157,9 +209,11 @@ namespace HpskSite.Services.Ledger
                 var (seriesId, number, prefix) = _allocator.Allocate(
                     db, payment.IssuerType, payment.IssuerId, date.Year, LedgerSeriesKind.Receipt);
 
-                var vat = posting.Lines
+                // Utan bokföring finns ingen momsuppdelning — och då är föreningen inte heller
+                // momsregistrerad, eftersom det fallet vägrades ovan.
+                var vat = posting?.Lines
                     .Where(l => l.VatAmount is > 0)
-                    .Sum(l => l.VatAmount!.Value);
+                    .Sum(l => l.VatAmount!.Value) ?? 0m;
 
                 var receipt = new LedgerReceipt
                 {
@@ -192,14 +246,19 @@ namespace HpskSite.Services.Ledger
                          SET ConfirmedUtc = @1, ConfirmedByMemberId = @2, ActualAmount = @3,
                              JournalEntryId = @4, ReceiptId = @5
                        WHERE Id = @0",
-                    payment.Id, DateTime.UtcNow, byMemberId, actualAmount, posting.EntryId, receipt.Id);
+                    // ⚠️ JournalEntryId = null är inte ett fel — det ÄR kön "att bokföra".
+                    // Bekräftad utan verifikation är ett härlett tillstånd, ingen lagrad flagga att
+                    // glömma uppdatera.
+                    payment.Id, DateTime.UtcNow, byMemberId, actualAmount,
+                    (object?)posting?.EntryId ?? DBNull.Value, receipt.Id);
 
                 tx.Complete();
 
                 return new ConfirmResult
                 {
                     PaymentId = payment.Id,
-                    JournalEntryId = posting.EntryId,
+                    JournalEntryId = posting?.EntryId,
+                    PostingSkippedReason = decision.SkipReason,
                     ReceiptId = receipt.Id,
                     ReceiptNumber = LedgerNumberAllocator.Format(prefix, number),
                     Amount = amount
@@ -210,6 +269,16 @@ namespace HpskSite.Services.Ledger
                 // ⚠️ Verifikationen är redan skriven och kan inte tas bort. Att låtsas att
                 // bekräftelsen misslyckades vore fel: pengarna ÄR bokförda. Säg vad som gäller och
                 // namnge verifikationen, så någon kan reda ut det.
+                if (posting is null)
+                {
+                    _logger.LogError(ex,
+                        "Betalning {PaymentId} kunde inte bekräftas. Ingen verifikation skrevs, så "
+                        + "inget behöver rattas — försök igen.", payment.Id);
+
+                    return ConfirmResult.Failed(
+                        "Betalningen kunde inte bekräftas. Ingenting sparades — försök igen.");
+                }
+
                 _logger.LogError(ex,
                     "Betalning {PaymentId} bokfördes som verifikation {EntryId} men kvittot eller "
                     + "bekräftelsen kunde inte skrivas. Betalningen står kvar som obekräftad.",
@@ -370,7 +439,16 @@ namespace HpskSite.Services.Ledger
             public bool Success => Error is null;
             public string? Error { get; set; }
             public int PaymentId { get; set; }
-            public int JournalEntryId { get; set; }
+
+            /// <summary><c>null</c> = betalningen är mottagen men inte bokförd hos oss.</summary>
+            public int? JournalEntryId { get; set; }
+
+            /// <summary>
+            /// Varför ingen verifikation skrevs, när det är något arrangören behöver veta.
+            /// <para>⚠️ <c>null</c> betyder <b>inget att säga</b> — föreningen bokför någon
+            /// annanstans. Det är inte ett fel och ska inte visas som ett.</para>
+            /// </summary>
+            public string? PostingSkippedReason { get; set; }
             public int ReceiptId { get; set; }
             public string ReceiptNumber { get; set; } = "";
             public decimal Amount { get; set; }

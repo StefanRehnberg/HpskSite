@@ -1034,17 +1034,16 @@ namespace HpskSite.Controllers
             if (issuer == null)
                 return Json(new { success = false, message = "Arrangören går inte att avgöra — kontakta klubben." });
 
-            // ⚠️⚠️ FRÅGA LIGGAREN FÖRE VI BER OM PENGAR. `Confirm` vägrar korrekt när
-            // räkenskapsåret saknas — men då har medlemmen redan swishat, och arrangören står med
-            // pengar hen inte kan kvittera eller kvitto för. Kontrollen är liggarens egen, inte en
-            // avskrift, så de två kan inte glida isär.
-            var blocked = _posting.PostingBlockedReason(issuer.Value.Type, issuer.Value.Id, DateTime.Today);
-            if (blocked != null)
-                return Json(new
-                {
-                    success = false,
-                    message = "Klubben kan inte ta emot betalningen än: " + blocked,
-                });
+            // ⚠⚠ INGEN BOKFÖRINGSGRIND HÄR, och det är en rättelse. Fram till 2026-09-19 frågade
+            // den här raden liggaren om räkenskapsåret och vägrade visa Swish-koden när det saknades.
+            // Resonemanget var att `Confirm` ändå skulle vägra — men det gör den inte längre:
+            // bokföring är opt-in (se LedgerPostingService.DecidePosting), och de flesta klubbar
+            // bokför någon annanstans.
+            //
+            // Och även om de inte gjorde det: en grind här stoppar inte pengarna, bara
+            // REGISTRERINGEN av dem. Klubben swishar vid sidan om och vi vet ingenting. En medlem
+            // som ska betala har dessutom inget med föreningens bokföring att göra — att möta hen
+            // med "lägg upp räkenskapsåret först" är att visa någon annans problem för fel person.
 
             // Mina öppna begäranden: varken påstådda, bekräftade eller makulerade.
             var open = _payments
@@ -1223,7 +1222,26 @@ namespace HpskSite.Controllers
             if (result.Error != null)
                 return Json(new { success = false, message = result.Error });
 
-            return Json(new { success = true, message = "Betalningen är bokförd." });
+            // ⚠⚠ SÄG VAD SOM FAKTISKT HÄNDE. "Betalningen är bokförd" var osant för varje
+            // förening som inte bokför hos oss — pengarna är mottagna och kvitterade, men ingen
+            // verifikation skrevs. Ett kvitto på mottagen betalning är fullt giltigt ändå.
+            // ⚠️ SkipReason != null betyder att någon som RÄKNAR med bokföring inte fick den.
+            // Det måste synas, annars är det en utebliven verifikation ingen upptäcker.
+            var message = result.JournalEntryId.HasValue
+                ? "Betalningen är mottagen och bokförd."
+                : result.PostingSkippedReason == null
+                    ? "Betalningen är mottagen och kvitterad."
+                    : "Betalningen är mottagen och kvitterad, men INTE bokförd: "
+                      + result.PostingSkippedReason
+                      + " Den ligger kvar i listan över betalningar att bokföra.";
+
+            return Json(new
+            {
+                success = true,
+                message,
+                posted = result.JournalEntryId.HasValue,
+                postingSkippedReason = result.PostingSkippedReason,
+            });
         }
 
         /// <summary>

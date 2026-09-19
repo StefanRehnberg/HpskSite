@@ -1,4 +1,4 @@
-namespace HpskSite.Models.Ledger
+﻿namespace HpskSite.Models.Ledger
 {
     /// <summary>
     /// En begäran om att bokföra. Anroparen beskriver AFFÄRSHÄNDELSEN; tjänsten gör bokföringen.
@@ -111,6 +111,45 @@ namespace HpskSite.Models.Ledger
     }
 
     /// <summary>Vad bokföringen resulterade i. <see cref="Error"/> är null när det gick.</summary>
+    /// <summary>
+    /// Svaret på "ska det här bokföras hos oss". Se
+    /// <c>LedgerPostingService.DecidePosting</c> för varför bokföring är opt-in.
+    /// </summary>
+    public sealed record LedgerPostingDecision(bool ShouldPost, string? SkipReason)
+    {
+        public static LedgerPostingDecision Post() => new(true, null);
+
+        /// <summary>
+        /// <b>Själva regeln</b>, som en ren funktion: bokför vi för den här föreningen?
+        ///
+        /// <para>⚠️ Ligger HÄR och inte i tjänsten för att kunna prövas. Tjänsten hänger på en
+        /// databasfabrik, och ett test som speglade regeln i sin egen testfil hade pinnat en
+        /// KOPIA — den kan glida från verkligheten utan att något faller. Samma skäl som
+        /// <c>FirearmAccessRules</c> och <c>FirearmBookingWindow</c> finns för.</para>
+        /// </summary>
+        /// <param name="shape">Ur <see cref="LedgerIssuerShape"/>. Tomt = föreningen har inte valt.</param>
+        /// <param name="blockedReason">
+        /// Liggarens eget svar på om den kan ta emot en post just nu (saknat eller fastställt
+        /// räkenskapsår). Betyder bara något för en förening som faktiskt bokför hos oss.
+        /// </param>
+        public static LedgerPostingDecision For(string? shape, string? blockedReason)
+        {
+            // ⚠⚠ Riktningen är enkelriktad mot att INTE bokföra. Ett oigenkännligt värde får
+            // aldrig leda till en verifikation — ett felaktigt "bokförd" är det enda av felen
+            // som är svårt att upptäcka i efterhand.
+            if (string.IsNullOrWhiteSpace(shape) || shape != LedgerIssuerShape.FullLedger)
+                return Skip(null);
+
+            return blockedReason is null ? Post() : Skip(blockedReason);
+        }
+
+        /// <param name="reason">
+        /// <c>null</c> när föreningen inte bokför hos oss — helt normalt, inget att säga.
+        /// En text när en förening som räknar med bokföring inte kan få den.
+        /// </param>
+        public static LedgerPostingDecision Skip(string? reason) => new(false, reason);
+    }
+
     public class LedgerPostingResult
     {
         public bool Success => Error is null;

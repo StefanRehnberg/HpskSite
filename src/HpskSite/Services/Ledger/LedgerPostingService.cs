@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using HpskSite.Models.Ledger;
 using NPoco;
 using Umbraco.Cms.Infrastructure.Persistence;
@@ -418,6 +418,58 @@ namespace HpskSite.Services.Ledger
         /// betalningen för en förening vars liggare är hel. <see cref="Post"/> är den som verkligen
         /// vägrar.</para>
         /// </summary>
+        /// <summary>
+        /// Ska den här betalningen bokföras hos oss — och om inte, finns det något att säga?
+        ///
+        /// <para><b>⚠⚠ BOKFÖRING ÄR OPT-IN, OCH OPT-IN:EN ÄR <see cref="LedgerIssuerShape"/>.</b>
+        /// De flesta klubbar vill skapa ett evenemang och kunna ta betalt; de bokför i sitt eget
+        /// program eller hos en byrå. Att kräva ett upplagt räkenskapsår för att ens få visa en
+        /// Swish-kod gör produkten obrukbar för dem — och löser ingenting, eftersom pengarna
+        /// rör sig ändå: klubben swishar vid sidan om och då har vi ingen registrering alls.
+        /// Samma regel som lånevapnen redan följer: <b>systemet ska registrera, inte grinda.</b></para>
+        ///
+        /// <para>⚠️ Ingen inställningsrad = föreningen har inte valt något = vi bokför inte.
+        /// Det är den säkra riktningen: vi påstår hellre att vi INTE bokfört än tvärtom.</para>
+        ///
+        /// <para>⚠️ <see cref="LedgerPostingDecision.SkipReason"/> är <c>null</c> när det är
+        /// helt normalt att inte bokföra, och en text när en förening som RÄKNAR med bokföring
+        /// inte kan få den. Skillnaden är vad arrangören ska få veta — tystnad i det andra fallet
+        /// vore en utebliven verifikation som ingen upptäcker.</para>
+        /// </summary>
+        public LedgerPostingDecision DecidePosting(int issuerType, int issuerId, DateTime accountingDate)
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+
+                var shape = db.ExecuteScalar<string>(
+                    "SELECT TOP 1 Shape FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1",
+                    issuerType, issuerId);
+
+                // ⚠️ Regeln själv bor i LedgerPostingDecision.For — den är ren och därmed
+                // provbar. Här hämtas bara de två uppgifter den behöver.
+                // PostingBlockedReason frågas BARA när formen säger att vi bokför: annars är
+                // svaret ointressant, och en tom liggare hade gett en onödig fråga per betalning.
+                if (string.IsNullOrWhiteSpace(shape) || shape != LedgerIssuerShape.FullLedger)
+                    return LedgerPostingDecision.For(shape, null);
+
+                return LedgerPostingDecision.For(
+                    shape, PostingBlockedReason(issuerType, issuerId, accountingDate));
+            }
+            catch (Exception ex)
+            {
+                // ⚠️ Går det inte att avgöra bokför vi INTE, men vi säger det. Att posta i blindo
+                // kan fälla bekräftelsen och då står arrangören med pengar hen inte kan kvittera;
+                // en obokförd rad går däremot att bokföra i efterhand.
+                _logger.LogWarning(ex,
+                    "Kunde inte avgöra bokföringsläget för utställare {Type}/{Id} — betalningen "
+                    + "bekräftas utan verifikation.", issuerType, issuerId);
+
+                return LedgerPostingDecision.Skip(
+                    "Bokföringsläget gick inte att läsa, så betalningen är inte bokförd.");
+            }
+        }
+
         public string? PostingBlockedReason(int issuerType, int issuerId, DateTime accountingDate)
         {
             try

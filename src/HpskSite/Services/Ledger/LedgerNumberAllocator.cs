@@ -1,4 +1,4 @@
-using HpskSite.Models;
+﻿using HpskSite.Models;
 using HpskSite.Models.Ledger;
 using NPoco;
 
@@ -54,12 +54,43 @@ namespace HpskSite.Services.Ledger
             // UPDATE ... OUTPUT deleted i ETT uttryck: läsningen och uppräkningen kan inte glida
             // isär, och raden är låst tills anroparens transaktion committar. Ett SELECT följt av
             // ett UPDATE hade gett två samtidiga bokföringar samma nummer.
-            var rows = db.Fetch<SeriesAllocation>(
+            // ⚠⚠ NPOCO-FÄLLAN: Fetch<T> genererar "SELECT * FROM <T>" när SQL:en inte BÖRJAR med
+            // SELECT — och den här börjar med UPDATE. Följden var
+            // "Invalid object name SeriesAllocation": NPoco frågade efter en tabell uppkallad
+            // efter POCO:n. Samma fälla som MemberMergeService gick i.
+            //
+            // ⚠️ Att det aldrig märkts beror på att raden ALDRIG KÖRTS: ingen förening hade
+            // liggare, så Confirm vägrade långt innan numret skulle tilldelas. Både kvitto- och
+            // verifikationsnummer gick genom den här metoden, alltså var hela numreringen otestad.
+            // EnableAutoSelect sitter pa NPocos konkreta Database, inte pa IDatabase.
+            var npoco = db as Database;
+            if (npoco == null)
+            {
+                // ⚠️ Hellre hogljutt an tyst fel nummer. Kan vi inte stanga av autoselect vet vi
+                // inte vilken fraga som gar till servern, och ett nummer vi inte kan garantera ar
+                // varre an inget nummer — samma regel som raden nedan redan foljer.
+                throw new InvalidOperationException(
+                    "Nummertilldelningen kraver NPocos Database for att kunna stanga av autoselect.");
+            }
+
+            var autoSelect = npoco.EnableAutoSelect;
+            npoco.EnableAutoSelect = false;
+            List<SeriesAllocation> rows;
+            try
+            {
+                rows = db.Fetch<SeriesAllocation>(
                 @"UPDATE dbo.LedgerNumberSeries
                      SET NextNumber = NextNumber + 1
                   OUTPUT deleted.Id AS SeriesId, deleted.NextNumber AS Number, deleted.Prefix AS Prefix
                   WHERE IssuerType = @0 AND IssuerId = @1 AND Year = @2 AND Kind = @3",
                 issuerType, issuerId, year, kind);
+            }
+            finally
+            {
+                // Återställ ALLTID — databasen är delad inom requesten, och en kvarglömd
+                // avstängd autoselect hade tyst brutit varje annan Fetch efter den här.
+                npoco.EnableAutoSelect = autoSelect;
+            }
 
             if (rows.Count != 1)
             {
