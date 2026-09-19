@@ -602,6 +602,30 @@ namespace HpskSite.Controllers
         /// startdatumet. Rakt kopierade hade de pekat på källans vecka, och kopian hade fötts med
         /// stängd anmälan.
         /// </summary>
+        /// <summary>
+        /// Får den inloggade administrera händelser under den här föräldernoden?
+        ///
+        /// ⚠️ FÖRÄLDERNODEN ÄR ÄGAREN. En händelse bär ingen klubb- eller kretskolumn — ägaren
+        /// härleds ur trädet, precis som `ClubEventParticipationService` gör det. Det är också
+        /// varför den här kontrollen måste fråga vad för sorts nod föräldern är, i stället för att
+        /// anta klubb.
+        /// </summary>
+        private async Task<bool> CanManageEventParentAsync(int parentId)
+        {
+            if (parentId <= 0) return false;
+
+            var parent = UmbracoContext.Content?.GetById(parentId);
+            if (parent != null && parent.ContentType.Alias == "regionalPage")
+            {
+                var regionCode = parent.Value<string>("regionCode") ?? "";
+                return !string.IsNullOrEmpty(regionCode)
+                    && await _authorizationService.IsRegionalAdminForRegion(regionCode);
+            }
+
+            // Klubbformen (och sajtadmin, som klubbkontrollen släpper igenom).
+            return await _authorizationService.IsClubAdminForClub(parentId);
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CopyClubEvent(int sourceEventId, string eventName = "",
@@ -620,8 +644,14 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Källhändelsen hittades inte." });
                 }
 
+                // ⚠⚠ BÅDA VÄRDFORMERNA. En händelse är ett `clubSimpleEvent` antingen under en
+                // KLUBB eller under en KRETS — kretsen arrangerar egna händelser och använder samma
+                // doctype. En kontroll som bara frågar `IsClubAdminForClub` låser därför ute
+                // kretsadministratören från hennes EGEN händelse. Att det inte syntes här beror på
+                // att en sajtadmin släpps igenom av klubbkontrollen ändå — samma förväxling som
+                // redan kostat fyra rundor på tävlingssidan.
                 var parentId = source.ParentId;
-                if (!await _authorizationService.IsClubAdminForClub(parentId))
+                if (!await CanManageEventParentAsync(parentId))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }

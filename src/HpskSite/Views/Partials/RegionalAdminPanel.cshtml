@@ -111,6 +111,39 @@
 
 @await Html.PartialAsync("_ModalSectionNav")
 
+@* Kopiera händelse — spegling av klubbens dialog. Kretsen arrangerar återkommande
+   träffar precis som en klubb, och saknade fram till 2026-09-19 kopieringen helt. *@
+<div class="modal fade" id="copyRegionEventModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Kopiera händelse</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="copyRegionEventSourceId">
+                <div class="mb-3">
+                    <label class="form-label">Namn på kopian</label>
+                    <input type="text" class="form-control" id="copyRegionEventName" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Datum för kopian</label>
+                    <input type="text" class="form-control" id="copyRegionEventDate" required>
+                    <div class="form-text">
+                        Slutdatum och sista anmälningsdag flyttas lika många dagar.
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="saveCopyRegionEvent()">
+                    <i class="bi bi-files me-1"></i>Kopiera
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     var el = document.getElementById('regionEventModal');
@@ -746,6 +779,9 @@
                 + '<li><button class="dropdown-item" type="button" onclick="editRegionEvent(' + event.id + ')">'
                 + '<i class="bi bi-pencil me-2 text-primary"></i>Redigera händelsen</button></li>'
                 + '<li><hr class="dropdown-divider"></li>'
+                + '<li><button class="dropdown-item" type="button" onclick="copyRegionEvent(' + event.id + ')">'
+                + '<i class="bi bi-files me-2"></i>Kopiera</button></li>'
+                + '<li><hr class="dropdown-divider"></li>'
                 + '<li><button class="dropdown-item text-danger" type="button" onclick="deleteRegionEventById(' + event.id + ')">'
                 + '<i class="bi bi-trash me-2"></i>Ta bort händelsen</button></li>'
                 + '</ul></div>'
@@ -864,6 +900,78 @@
 
         document.getElementById('regionEventModal').dataset.hpskMode = 'tabs';
         new bootstrap.Modal(document.getElementById('regionEventModal')).show();
+    };
+
+
+    // ── Kopiera händelse ────────────────────────────────────────────────────────────────
+    // Samma endpoint som klubben (`CopyClubEvent`). Ägaren härleds ur föräldernoden, så en
+    // egen kretsendpoint hade varit en andra kopia av samma regler — och de två hade glidit
+    // isär precis som create/edit redan gjort på den här ytan.
+    var copyRegionEventFlatpickr = null;
+
+    window.copyRegionEvent = function (eventId) {
+        var event = (window._regionEventsById || {})[eventId];
+        if (!event) { alert('Händelse hittades inte'); return; }
+
+        document.getElementById('copyRegionEventSourceId').value = eventId;
+        document.getElementById('copyRegionEventName').value = event.name || '';
+
+        if (!copyRegionEventFlatpickr) {
+            copyRegionEventFlatpickr = flatpickr('#copyRegionEventDate', {
+                locale: 'sv', enableTime: true, time_24hr: true, dateFormat: 'Y-m-d H:i'
+            });
+        }
+        // Samma förval som klubben: en vecka fram. En kopia är nästan alltid "samma sak
+        // nästa vecka", och ett förval som måste skrivas om varje gång är inget förval.
+        if (event.date) {
+            var d = new Date(event.date);
+            d.setDate(d.getDate() + 7);
+            copyRegionEventFlatpickr.setDate(d);
+        } else {
+            copyRegionEventFlatpickr.clear();
+        }
+
+        new bootstrap.Modal(document.getElementById('copyRegionEventModal')).show();
+    };
+
+    window.saveCopyRegionEvent = function () {
+        var sourceId = parseInt(document.getElementById('copyRegionEventSourceId').value, 10);
+        var newDate = document.getElementById('copyRegionEventDate').value;
+        if (!newDate) { alert('Ange ett datum'); return; }
+
+        var btn = document.querySelector('#copyRegionEventModal .modal-footer .btn-primary');
+        var original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Kopierar...';
+
+        // ⚠️ BARA id, namn och datum. Servern itererar källnodens egna egenskaper, så ett nytt
+        // fält på doctypen följer med utan att någon behöver ändra här. En handskriven fältlista
+        // på den här ytan har redan tappat anmälan, kapaciteten och lånevapnen en gång.
+        var fd = new FormData();
+        fd.append('sourceEventId', sourceId);
+        fd.append('eventName', document.getElementById('copyRegionEventName').value || '');
+        fd.append('eventDate', newDate);
+        fd.append('__RequestVerificationToken', getAntiForgeryToken());
+
+        fetch('/umbraco/surface/Club/CopyClubEvent', { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                btn.disabled = false;
+                btn.innerHTML = original;
+                if (data.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('copyRegionEventModal')).hide();
+                    loadRegionEvents();
+                    alert('Händelse kopierad!');
+                } else {
+                    alert('Fel: ' + data.message);
+                }
+            })
+            .catch(function (e) {
+                console.error('Error copying region event:', e);
+                btn.disabled = false;
+                btn.innerHTML = original;
+                alert('Fel vid kopiering av händelse.');
+            });
     };
 
     window.saveRegionEvent = function() {
