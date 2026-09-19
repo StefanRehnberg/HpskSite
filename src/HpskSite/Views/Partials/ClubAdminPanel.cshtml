@@ -3911,8 +3911,13 @@ function renderEvents() {
                         <ul class="dropdown-menu dropdown-menu-end">
                             ${event.url ? `<li><a class="dropdown-item" href="${event.url}">
                                 <i class="bi bi-box-arrow-up-right me-2 text-secondary"></i>Gå till händelsen</a></li>` : ''}
-                            <li><button class="dropdown-item" type="button" onclick="hpskOpenEventRoster(${event.id})">
-                                <i class="bi bi-people me-2 text-success"></i>Deltagare och upprop</button></li>
+                            @* ⚠️ EGEN SIDA, inte en modal. Ytan används både före evenemanget (laptop,
+                               läsa noteringar, bocka av Swish mot bankappen) och under det (telefon i
+                               handen, pricka närvaro, ta en sen anmälan). En sida går att bokmärka,
+                               tål en omladdning och överlever att skärmen slocknar — samma skäl som
+                               /station, /valvet och /patrullista alla är sidor. *@
+                            <li><a class="dropdown-item" href="/evenemang/deltagare?e=${event.id}">
+                                <i class="bi bi-people me-2 text-success"></i>Deltagare och upprop</a></li>
                             <li><button class="dropdown-item" type="button" onclick="editEvent(${event.id})">
                                 <i class="bi bi-pencil me-2 text-primary"></i>Redigera händelsen</button></li>
                             <li><button class="dropdown-item" type="button" onclick="copyEvent(${event.id})">

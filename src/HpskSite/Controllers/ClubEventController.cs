@@ -654,9 +654,77 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
             var roster = await _participation.BuildRosterAsync(ctx);
+
+            // ── Betalningsläget per SÄLLSKAP ──────────────────────────────────────────────
+            // ⚠⚠ SKULDEN ÄR PER SÄLLSKAP, INTE PER RAD. Hugo swishar én gång för sig, frun och
+            // sonen. Därför byggs parterna med samma `BuildParty` som medlemmens eget kort
+            // använder — en egen summering här hade varit en andra sanning om vad någon är
+            // skyldig, och de två hade kunnat säga emot varandra på samma skärm.
+            List<HpskSite.Models.Ledger.LedgerPayment> allPayments = new();
+            decimal expected = 0, settled = 0, outstanding = 0;
+            var paymentsReadable = true;
+            try
+            {
+                allPayments = _payments.ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId);
+                (expected, settled, outstanding) =
+                    _payments.Completeness(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId);
+            }
+            catch (Exception ex)
+            {
+                // ⚠️ En halv lista med en synlig varning är användbar; ett undantag är det inte.
+                // Närvaroavprickningen ska fungera även när liggaren inte går att läsa.
+                paymentsReadable = false;
+                _logger.LogWarning(ex, "Kunde inte läsa betalningar för evenemang {EventId}.", ctx.EventId);
+            }
+
+            // En part per ANSVARIG medlem. Gästrader bär ingen egen skuld — de ingår i värdens.
+            var parties = new Dictionary<int, ClubEventParty>();
+            foreach (var host in roster.Rows.Where(r => !r.IsGuest && r.MemberId > 0 && !r.Cancelled)
+                                            .Select(r => r.MemberId).Distinct())
+            {
+                parties[host] = ClubEventParticipationService.BuildParty(roster, host, allPayments);
+            }
+
+            // Den betalning som går att bekräfta: begärd eller påstådd, men varken bekräftad
+            // eller makulerad. ⚠️ Den äldsta först — växer sällskapet makuleras den gamla och en
+            // ny skapas, så "senaste" hade kunnat peka på en rad som just ersatts.
+            HpskSite.Models.Ledger.LedgerPayment? OpenFor(int memberId) => allPayments
+                .Where(p => p.PayerMemberId == memberId
+                            && p.ConfirmedUtc is null && p.VoidedUtc is null)
+                .OrderBy(p => p.Id)
+                .FirstOrDefault();
+
+            string StateFor(ClubEventRosterRow r)
+            {
+                if (r.Cancelled) return "cancelled";
+                if (r.IsGuest) return "guest";                       // ingår i värdens betalning
+                if (!parties.TryGetValue(r.MemberId, out var party)) return "none";
+                if (party.Total <= 0m) return "free";                // ⚠️ 0 = GRATIS, inte ofyllt
+                if (party.IsSettled) return "paid";
+                if (party.ClaimedPaid > 0m) return "claimed";        // påstått — ALDRIG pengar
+                if (party.ConfirmedPaid > 0m) return "partial";
+                return "unpaid";
+            }
+
             return Json(new
             {
                 success = true,
+                // ⚠⚠ BELOPP, INTE ANTAL. Completeness returnerar ANTAL betalningsrader - ett tal
+                // utan kronor - och en första utsaga skrev ut det som "1 kr". Enheten måste resa
+                // med talet; samma fälla som prisutdelningens träff/poäng.
+                // ⚠️ Summerna härleds ur SAMMA parter som raderna, så kortet och listan inte kan
+                // säga emot varandra. Att i stället summera liggarens rader hade tagit med
+                // betalningar från avbokade sällskap, som inte syns i listan.
+                payments = new
+                {
+                    readable = paymentsReadable,
+                    expectedAmount = parties.Values.Sum(p => p.Total),
+                    paidAmount = parties.Values.Sum(p => p.ConfirmedPaid),
+                    claimedAmount = parties.Values.Sum(p => p.ClaimedPaid),
+                    rowCount = expected,
+                    settledCount = settled,
+                    outstanding,
+                },
                 @event = new
                 {
                     id = ctx.EventId,
@@ -700,7 +768,26 @@ namespace HpskSite.Controllers
                     attendanceLabel = ClubEvents.AttendanceDisplay(r.AttendanceStatus),
                     attendanceNote = r.AttendanceNote,
                     selfRegistered = r.SelfRegistered,
-                    fee = r.FeeAmount
+                    fee = r.FeeAmount,
+
+                    // ── Betalningen, sedd från raden ──────────────────────────────────────
+                    paymentState = StateFor(r),
+                    // ⚠️ BARA på den ansvariga raden. En gäst som visade sitt eget "skyldig 180"
+                    // hade fått skärmen att påstå 450 + 180 + 90 för ett sällskap som är skyldigt 450.
+                    partyTotal = r.IsGuest || !parties.ContainsKey(r.MemberId)
+                        ? (decimal?)null : parties[r.MemberId].Total,
+                    partyPaid = r.IsGuest || !parties.ContainsKey(r.MemberId)
+                        ? (decimal?)null : parties[r.MemberId].ConfirmedPaid,
+                    partyClaimed = r.IsGuest || !parties.ContainsKey(r.MemberId)
+                        ? (decimal?)null : parties[r.MemberId].ClaimedPaid,
+                    partyPeople = r.IsGuest || !parties.ContainsKey(r.MemberId)
+                        ? (int?)null : parties[r.MemberId].People,
+                    // ⚠️ MissingPrice frågar EVENEMANGET, inte raden: på ett gratis evenemang är
+                    // saknat belopp det normala och rätta.
+                    partyMissingPrice = r.IsGuest || !parties.ContainsKey(r.MemberId)
+                        ? (bool?)null : parties[r.MemberId].MissingPrice,
+                    openPaymentId = r.IsGuest ? (int?)null : OpenFor(r.MemberId)?.Id,
+                    openPaymentClaimed = r.IsGuest ? (bool?)null : OpenFor(r.MemberId)?.ClaimedUtc != null
                 })
             });
         }
