@@ -312,6 +312,85 @@ const main = async () => {
          JSON.stringify((list2.payments || [])[0]));
     }
 
+    // ── Ångra en betalning ─────────────────────────────────────────────────────────────────────
+    // ⚠️⚠️ DET FANNS INGEN VÄG TILLBAKA. Trycker funktionären "Betalt" på fel rad gick det inte
+    // att ångra från någon skärm — LedgerPaymentService.Void fanns men hade varken endpoint eller
+    // knapp, och en BEKRÄFTAD betalning får den med flit inte röra. För den som står med en platta
+    // vid bordet är det fel felläge att ha kvar.
+    //
+    // Tre verkligheter, och RADEN avgör vilken: obekräftad makuleras, mottagen-men-obokförd
+    // återtas, mottagen-och-bokförd rättas med en motverifikation först.
+    section('Ångra betalningen');
+
+    // ⚠️ Betalarens id tas ur UPPROPET, inte ur en konstant i testet. Den inloggade är den enda
+    // medlemsraden på fixturen (gästen bär 0), och att hårdkoda ett id hade gjort provet beroende
+    // av vilket konto sviten råkar köras som.
+    const roster0 = await get(`/umbraco/surface/ClubEvent/GetRoster?eventId=${evId}`);
+    const ME = ((roster0.rows || []).find(r => r.memberId > 0 && !r.isGuest) || {}).memberId || 0;
+    ok('betalarens id gick att slå upp', ME > 0, JSON.stringify((roster0.rows || []).map(r => r.memberId)));
+
+    const payments = () => get(`/umbraco/surface/ClubEvent/GetPayerPayments?eventId=${evId}&payerMemberId=${ME}`);
+
+    let hist = await payments();
+    ok('betalningsraderna går att läsa', hist && hist.success === true, JSON.stringify(hist).slice(0, 160));
+    const confirmedRow = (hist.payments || []).find(p => p.confirmed && !p.voided);
+    ok('den bekräftade raden finns', !!confirmedRow, JSON.stringify(hist.payments));
+
+    if (confirmedRow) {
+        // ⚠️ Dev-klubben har ingen liggare uppsatt, så betalningen är bekräftad UTAN verifikation.
+        // Det är inte en brist i provet — det är majoritetsfallet: de flesta klubbar vill bara
+        // kunna ta betalt och bokför någon annanstans.
+        ok('och den är bekräftad utan bokföring i dev', confirmedRow.posted === false,
+           `posted=${confirmedRow.posted}`);
+        ok('funktionären erbjuds ångra den', confirmedRow.canReverse === true);
+
+        // ⚠️ SKÄLET ÄR OBLIGATORISKT. En återtagen betalning utan skäl är en ändring ingen kan
+        // granska, och det är hela poängen med en liggare.
+        const noReason = await json('/umbraco/surface/ClubEvent/ReversePayment',
+                                    { eventId: evId, paymentId: confirmedRow.id, reason: '' });
+        ok('ett ångrande utan skäl vägras', noReason && noReason.success === false,
+           JSON.stringify(noReason));
+
+        // ⚠️ Och raden måste tillhöra DET HÄR evenemanget — annars kunde ett postat id ångra
+        // en betalning i en annan tävling.
+        const alien = await json('/umbraco/surface/ClubEvent/ReversePayment',
+                                 { eventId: evId, paymentId: 999999, reason: 'prov' });
+        ok('en främmande betalningsrad vägras', alien && alien.success === false,
+           JSON.stringify(alien));
+
+        const before = await state();
+        const rev = await json('/umbraco/surface/ClubEvent/ReversePayment',
+                               { eventId: evId, paymentId: confirmedRow.id, reason: 'ZZB fel person' });
+        ok('betalningen går att ångra', rev && rev.success === true, JSON.stringify(rev).slice(0, 200));
+        // ⚠️ Beskedet måste säga VILKEN av de tre sakerna som hände. Ett gemensamt "ångrad" hade
+        // varit sant i högst ett av fallen.
+        eq('och utfallet säger att inget var bokfört', rev && rev.outcome, 'reversed-unposted');
+        eq('ingen rättelseverifikation skrevs', rev && rev.correctionEntryId, null);
+
+        // ⚠️⚠️ PENGARNA MÅSTE FÖRSVINNA UR SUMMAN. IsMoney läser VoidedUtc, så varje ställe som
+        // räknar pengar ska se det utan en extra flagga. Utan det här påståendet vore "ångrad"
+        // bara en etikett på en rad som fortfarande räknas.
+        const after = await state();
+        ok('pengarna räknas inte längre som mottagna',
+           Number(after.party.confirmedPaid) < Number(before.party.confirmedPaid),
+           `${before.party.confirmedPaid} → ${after.party.confirmedPaid}`);
+        ok('och skulden är tillbaka', Number(after.party.outstanding) > Number(before.party.outstanding),
+           `${before.party.outstanding} → ${after.party.outstanding}`);
+
+        hist = await payments();
+        const now = (hist.payments || []).find(p => p.id === confirmedRow.id);
+        ok('raden står som ångrad', now && now.voided === true, JSON.stringify(now));
+        // Skälet ska följa med — det är det som gör ändringen granskningsbar.
+        ok('med skälet kvar på raden', now && /fel person/i.test(now.voidReason || ''),
+           now && now.voidReason);
+        ok('och den går inte att ångra igen', now && now.canReverse === false);
+
+        const again = await json('/umbraco/surface/ClubEvent/ReversePayment',
+                                 { eventId: evId, paymentId: confirmedRow.id, reason: 'igen' });
+        ok('servern vägrar ett andra ångrande', again && again.success === false,
+           again && again.message);
+    }
+
     ok('inga JS-fel', jsErrors.filter(e => !/ckeditor/.test(e)).length === 0, jsErrors.join(' | '));
 
   } finally {

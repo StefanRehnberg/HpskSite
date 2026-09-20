@@ -70,6 +70,29 @@
                             <i class="bi bi-exclamation-triangle me-1"></i>
                             Evenemanget saknar Swish-nummer — kontakta arrangören för betalning.
                         </div>
+
+                        @* ⚠️⚠️ ÅNGRA-VÄGEN. Utan den fanns ingen väg tillbaka från en felregistrerad
+                           betalning på någon skärm — och den som står vid bordet med en platta
+                           trycker fel. Raderna listas, för en betalare kan ha flera; att låta en
+                           knapp gissa "den senaste" hade gjort fel rad ångrad utan att någon ser
+                           det. Renderas bara för funktionären (canManage). *@
+                        <div id="hepHistory" class="mt-3" style="display:none">
+                            <div class="small text-muted mb-1">Registrerade betalningar</div>
+                            <div id="hepHistoryList" class="list-group list-group-flush small"></div>
+                        </div>
+                    </div>
+
+                    @* ── Läge D: ångra en rad ────────────────────────────────────────────── *@
+                    <div id="hepReverse" style="display:none">
+                        <div class="alert alert-warning py-2" id="hepReverseWhat"></div>
+
+                        <label class="form-label" for="hepReverseReason">Varför ångras den?</label>
+                        <input type="text" class="form-control" id="hepReverseReason"
+                               maxlength="200" placeholder="T.ex. registrerad på fel person">
+                        <div class="form-text">
+                            ⚠️ Raden raderas inte — den återtas med ditt skäl. Det är vad som gör
+                            ändringen granskningsbar i efterhand.
+                        </div>
                     </div>
 
                     @* ── Läge B: koden ───────────────────────────────────────────────────── *@
@@ -124,6 +147,10 @@
                         <i class="bi bi-arrow-left me-1"></i>Tillbaka
                     </button>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                    <button type="button" class="btn btn-danger" id="hepReverseBtn" style="display:none"
+                            onclick="hepSaveReverse(this)">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Ångra betalningen
+                    </button>
                     <button type="button" class="btn btn-success" id="hepSaveBtn" style="display:none"
                             onclick="hepSaveRegister(this)">
                         <i class="bi bi-check-circle me-1"></i>Registrera
@@ -139,6 +166,12 @@
 
         let cfg = null;
         let paymentId = 0;
+        // ⚠️ Raderna sparas så hepShowReverse kan säga VAD ett ångrande innebär för just den
+        // rad man tryckte på. Att skicka med tillståndet i onclick-attributet hade betytt
+        // användartext i ett attribut — samma lucka som gav kodexekvering i Fältskyttes
+        // "lägg till skytt". Här är det bara ett heltal som passerar.
+        let hepRows = [];
+        let reverseId = 0;
 
         const el = id => document.getElementById(id);
         const kr = n => (n === null || n === undefined) ? '–' : Number(n).toLocaleString('sv-SE') + ' kr';
@@ -171,6 +204,8 @@
         window.hpskEventPayOpen = function (opts) {
             cfg = Object.assign({ payerMemberId: 0, canManage: false, swishAvailable: true }, opts || {});
             paymentId = 0;
+            reverseId = 0;
+            hepRows = [];
 
             el('hepName').textContent = cfg.payerName || '';
             el('hepPeople').textContent = (cfg.people > 1) ? `${cfg.people} personer i sällskapet` : '';
@@ -195,15 +230,120 @@
             hepShowActions();
             say(null, null);
             new bootstrap.Modal(el('hpskEventPayModal')).show();
+            // Efter show(): listan får fylla på sig själv utan att fördröja att dialogen syns.
+            hepLoadHistory();
         };
 
         window.hepShowActions = function () {
             el('hepActions').style.display = '';
             el('hepQr').style.display = 'none';
             el('hepRegister').style.display = 'none';
+            el('hepReverse').style.display = 'none';
             el('hepBackBtn').style.display = 'none';
             el('hepSaveBtn').style.display = 'none';
+            el('hepReverseBtn').style.display = 'none';
             say(null, null);
+        };
+
+        // ── Registrerade betalningar, och vägen att ångra dem ────────────────────────────
+        // ⚠️ HÄMTAS VID VARJE ÖPPNING. Listan ändras av precis de handlingar dialogen utför,
+        // så ett cachat svar hade visat läget före klicket.
+        window.hepLoadHistory = async function () {
+            const wrap = el('hepHistory');
+            const list = el('hepHistoryList');
+            wrap.style.display = 'none';
+            list.innerHTML = '';
+            if (!cfg.payerMemberId) return;   // 0 = jag betalar för mig själv; hanteras nedan
+
+            let rows = [];
+            try {
+                const r = await fetch('/umbraco/surface/ClubEvent/GetPayerPayments'
+                                    + `?eventId=${cfg.eventId}&payerMemberId=${cfg.payerMemberId}`,
+                                    { credentials: 'same-origin' });
+                const d = await r.json();
+                rows = (d && d.success && d.payments) || [];
+                hepRows = rows;
+            } catch (e) {
+                // ⚠️ En trasig historik får inte stänga betalningsdialogen — det är betalningen
+                // man kom hit för. Listan uteblir, resten fungerar.
+                return;
+            }
+
+            if (!rows.length) return;
+            wrap.style.display = '';
+            list.innerHTML = rows.map(p => {
+                const status = p.voided
+                    ? '<span class="badge bg-secondary-subtle text-secondary-emphasis">Ångrad</span>'
+                    : (p.confirmed
+                        ? '<span class="badge bg-success-subtle text-success-emphasis">Mottagen</span>'
+                        : (p.claimed
+                            ? '<span class="badge bg-warning-subtle text-warning-emphasis">Säger sig ha betalat</span>'
+                            : '<span class="badge bg-light text-secondary border">Väntar</span>'));
+                // ⚠️ Skälet syns på raden. En ångrad rad utan skäl är exakt det som gör en
+                // liggare ogranskningsbar, och då är kravet på skäl bara friktion.
+                const why = p.voided && p.voidReason
+                    ? `<div class="text-muted fst-italic">${esc(p.voidReason)}</div>` : '';
+                const btn = p.canReverse
+                    ? `<button type="button" class="btn btn-sm btn-outline-danger"
+                               onclick="hepShowReverse(${p.id})">Ångra</button>`
+                    : '';
+                return `<div class="list-group-item px-0 d-flex align-items-start gap-2">
+                          <div class="flex-grow-1">
+                            <div>${kr(p.amount)} · ${esc(p.method || '')} · ${esc(p.date || '')}</div>
+                            <div>${status}</div>
+                            ${why}
+                          </div>
+                          ${btn}
+                        </div>`;
+            }).join('');
+        };
+
+        window.hepShowReverse = function (id) {
+            const row = hepRows.find(p => p.id === id);
+            reverseId = id;
+            // ⚠️ SÄG VAD SOM FAKTISKT HÄNDER, innan någon trycker. "Ångra" betyder tre olika
+            // saker beroende på om pengarna är mottagna och om föreningen bokför — och bara
+            // raden vet vilket. Ett gemensamt besked hade varit sant i högst ett av fallen.
+            el('hepReverseWhat').innerHTML = !row
+                ? 'Betalningen ångras.'
+                : (!row.confirmed
+                    ? '<strong>Ingen betalning har tagits emot.</strong> Begäran makuleras — '
+                      + 'ingenting bokförs.'
+                    : (row.posted
+                        ? `<strong>${kr(row.amount)} är mottagna och bokförda.</strong> En `
+                          + 'rättelseverifikation skrivs i den öppna perioden. Originalet står '
+                          + 'kvar — en liggare raderar inte, den rättar.'
+                        : `<strong>${kr(row.amount)} är mottagna men inte bokförda här.</strong> `
+                          + 'Raden återtas; det finns ingen verifikation att rätta.'));
+
+            el('hepReverseReason').value = '';
+            el('hepActions').style.display = 'none';
+            el('hepQr').style.display = 'none';
+            el('hepRegister').style.display = 'none';
+            el('hepReverse').style.display = '';
+            el('hepBackBtn').style.display = '';
+            el('hepSaveBtn').style.display = 'none';
+            el('hepReverseBtn').style.display = '';
+            say(null, null);
+        };
+
+        window.hepSaveReverse = async function (btn) {
+            const reason = el('hepReverseReason').value.trim();
+            // Speglar serverns krav, så avslaget kommer innan anropet i stället för efter.
+            if (!reason) { say('Ange varför betalningen ångras.'); return; }
+
+            btn.disabled = true;
+            try {
+                const d = await post('/umbraco/surface/ClubEvent/ReversePayment',
+                                     { eventId: cfg.eventId, paymentId: reverseId, reason });
+                if (!d || !d.success) { say((d && d.message) || 'Betalningen kunde inte ångras.'); return; }
+                say(null, d.message);
+                await hepLoadHistory();
+                hepShowActions();
+                if (typeof cfg.onDone === 'function') cfg.onDone();
+            } finally {
+                btn.disabled = false;
+            }
         };
 
         // ⚠️ KODEN HÄMTAS FRÅN SERVERN, aldrig ihopsatt i webbläsaren. En bild som klienten

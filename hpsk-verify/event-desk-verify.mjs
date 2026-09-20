@@ -534,6 +534,87 @@ WHERE Id = ${noPriceRow.id};`).trim();
       ok('och beloppet står på raden i databasen', after === '180.00' || after === '180', after);
     }
 
+    // ── Ångra-vägen PÅ SKÄRMEN ─────────────────────────────────────────────────────────────────
+    // ⚠️⚠️ ENDPOINTEN MÄTS I event-payment-verify. Det här mäter att det finns en KNAPP — och det
+    // är den halvan som saknades: Void fanns i liggaren men hade varken endpoint eller yta, så
+    // en felregistrerad betalning gick inte att ångra från någon skärm.
+    section('Ångra en betalning på skärmen');
+
+    await page.goto(`${BASE}/evenemang/deltagare?e=${eventId}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => {
+      const b = document.getElementById('deskBody');
+      return b && !b.innerText.includes('Hämtar');
+    }, null, { timeout: 30000 }).catch(() => {});
+
+    // Öppna dialogen för den som fått en betalning registrerad tidigare i sviten.
+    const opened = await page.evaluate(async mid => {
+      const d = await (await fetch(`/umbraco/surface/ClubEvent/GetRoster?eventId=${window.EVENT_ID || 0}`)).json()
+        .catch(() => null);
+      const row = [...document.querySelectorAll('#deskBody tr')]
+        .find(tr => tr.innerHTML.includes(`deskPayOpen(`));
+      if (!row) return false;
+      const btn = [...row.querySelectorAll('.dropdown-item')]
+        .find(i => /Hantera betalning/i.test(i.innerText));
+      if (!btn) return false;
+      btn.click();
+      return true;
+    }, WALKIN_MEMBER);
+    ok('betalningsdialogen går att öppna från raden', opened);
+
+    if (opened) {
+      // Historiken hämtas efter show(), så vänta på att den fyllts.
+      await page.waitForFunction(() => {
+        const h = document.getElementById('hepHistory');
+        return h && h.style.display !== 'none' && h.innerText.trim().length > 0;
+      }, null, { timeout: 15000 }).catch(() => {});
+
+      const hist = await page.evaluate(() => {
+        const h = document.getElementById('hepHistory');
+        return {
+          syns: !!h && h.style.display !== 'none',
+          text: h ? h.innerText.trim() : '',
+          angraKnappar: [...document.querySelectorAll('#hepHistoryList button')]
+            .filter(b => /Ångra/i.test(b.innerText)).length,
+        };
+      });
+      ok('registrerade betalningar listas i dialogen', hist.syns, hist.text.slice(0, 120));
+      ok('och minst en går att ångra', hist.angraKnappar > 0, `knappar=${hist.angraKnappar}`);
+
+      if (hist.angraKnappar > 0) {
+        await page.evaluate(() => {
+          [...document.querySelectorAll('#hepHistoryList button')]
+            .find(b => /Ångra/i.test(b.innerText)).click();
+        });
+        await page.waitForTimeout(300);
+
+        const dlg = await page.evaluate(() => ({
+          rutaSyns: document.getElementById('hepReverse').style.display !== 'none',
+          // ⚠️ Beskedet ska säga VAD som händer med pengarna innan någon trycker — "ångra"
+          // betyder tre olika saker beroende på om de tagits emot och om klubben bokför.
+          forklaring: (document.getElementById('hepReverseWhat') || {}).innerText || '',
+          knappSyns: document.getElementById('hepReverseBtn').style.display !== 'none',
+        }));
+        ok('ångra-läget öppnas', dlg.rutaSyns);
+        ok('och det säger vad som händer med pengarna',
+           /mottagna|makuleras|bokf/i.test(dlg.forklaring), dlg.forklaring.slice(0, 140));
+        ok('med en knapp att bekräfta med', dlg.knappSyns);
+
+        // ⚠️ Skälet krävs, och klienten ska säga det INNAN anropet — annars kommer avslaget
+        // som ett serverfel på något användaren inte förstod att hen missade.
+        await page.evaluate(() => { document.getElementById('hepReverseReason').value = ''; });
+        await page.click('#hepReverseBtn');
+        await page.waitForTimeout(400);
+        const warn = await page.evaluate(() => {
+          const w = document.getElementById('hepWarn');
+          return w && w.style.display !== 'none' ? w.innerText.trim() : '';
+        });
+        ok('ett tomt skäl stoppas i dialogen', /skäl|varför/i.test(warn), warn);
+      }
+
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+    }
+
     ok('inga JS-fel', jsErrors.length === 0, jsErrors.join(' | '));
 
   } finally {
