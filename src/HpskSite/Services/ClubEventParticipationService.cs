@@ -573,7 +573,15 @@ namespace HpskSite.Services
             var hostRow = await db.SingleOrDefaultAsync<ClubEventParticipant>(
                 "WHERE EventId = @0 AND MemberId = @1", ctx.EventId, guestOfMemberId);
             if (hostRow == null || hostRow.SignedUpAt == null || hostRow.CancelledAt != null)
-                return (false, "Anmäl dig själv först — gästen anmäls på din anmälan.", false);
+                // ⚠️ BESKEDET MÅSTE VETA VEM SOM LÄSER DET. "Anmäl dig själv först" är sant för
+                // medlemmen på evenemangssidan och obegripligt för funktionären i disken, som
+                // inte är värden — hen börjar då leta efter sin EGEN anmälan i stället för efter
+                // värdens. actingMemberId skiljer fallen åt utan en flagga som kan glida.
+                return (false, actingMemberId == guestOfMemberId
+                        ? "Anmäl dig själv först — gästen anmäls på din anmälan."
+                        : $"{host.Name} står inte som anmäld till evenemanget. Lägg till personen "
+                          + "som deltagare först — gästen hängs på hens anmälan.",
+                        false);
 
             var mine = await db.FetchAsync<ClubEventParticipant>(
                 "WHERE EventId = @0 AND GuestOfMemberId = @1 AND CancelledAt IS NULL",
@@ -810,6 +818,22 @@ namespace HpskSite.Services
                 };
             }
 
+            // ⚠️ LÄK EN GAMMAL DISKRAD. Rader som disken skapade före 2026-09-20 bär
+            // SignedUpAt = null och kan därför aldrig vara värd för en gäst — ett dödläge
+            // operatören inte kan ta sig ur, eftersom ingen yta kan sätta fältet.
+            //
+            // ⚠⚠ CreatedDate, ALDRIG now. Raden skapades när personen lades till; dagens datum
+            // hade skrivit om NÄR anmälan gjordes, och den tiden står i Anmäld-kolumnen och
+            // bär platsordningen. Vi fyller i en uppgift som saknas — vi hittar inte på en ny.
+            //
+            // Smalt med flit: bara en rad som varken är avbokad eller redan har ett värde. En
+            // avbokad rad ska inte återuppstå som anmäld av att någon rör närvaron.
+            if (row.SignedUpAt == null && row.CancelledAt == null)
+            {
+                row.SignedUpAt = row.CreatedDate;
+                row.SignedUpByMemberId ??= actingMemberId;
+            }
+
             row.AttendanceStatus = status;
             row.AttendanceNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
             row.RecordedByMemberId = status == null ? null : actingMemberId;
@@ -846,6 +870,23 @@ namespace HpskSite.Services
             if (row == null) return (false, "Deltagaren hittades inte.");
 
             var now = DateTime.Now;
+
+            // ⚠️ LÄK EN GAMMAL DISKRAD. Rader som disken skapade före 2026-09-20 bär
+            // SignedUpAt = null och kan därför aldrig vara värd för en gäst — ett dödläge
+            // operatören inte kan ta sig ur, eftersom ingen yta kan sätta fältet.
+            //
+            // ⚠⚠ CreatedDate, ALDRIG now. Raden skapades när personen lades till; dagens datum
+            // hade skrivit om NÄR anmälan gjordes, och den tiden står i Anmäld-kolumnen och
+            // bär platsordningen. Vi fyller i en uppgift som saknas — vi hittar inte på en ny.
+            //
+            // Smalt med flit: bara en rad som varken är avbokad eller redan har ett värde. En
+            // avbokad rad ska inte återuppstå som anmäld av att någon rör närvaron.
+            if (row.SignedUpAt == null && row.CancelledAt == null)
+            {
+                row.SignedUpAt = row.CreatedDate;
+                row.SignedUpByMemberId ??= actingMemberId;
+            }
+
             row.AttendanceStatus = status;
             row.AttendanceNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
             row.RecordedByMemberId = status == null ? null : actingMemberId;

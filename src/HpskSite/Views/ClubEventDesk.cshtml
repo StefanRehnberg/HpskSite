@@ -482,7 +482,12 @@ else
         document.getElementById('deskMemberHits').innerHTML = '';
         document.getElementById('deskGuestName').value = '';
 
-        const hosts = state.rows.filter(r => !r.isGuest && !r.cancelled && r.memberId > 0);
+        // ⚠⚠ KRAVET ÄR signedUpAt, inte bara "står i listan". AddGuestAsync vägrar en
+        // värd utan anmälan, så en väljare som erbjuder en sådan ger ett AVSLAG i stället
+        // för ett besked — vilket är precis vad som hände: rader som disken skapade före
+        // 2026-09-20 saknar SignedUpAt, stod ovillkorligt i listan här, och varje försök att
+        // hänga en gäst på dem nekades. Kommentaren intill påstod redan att filtret fanns.
+        const hosts = state.rows.filter(r => !r.isGuest && !r.cancelled && r.memberId > 0 && r.signedUpAt);
         document.getElementById('deskGuestHost').innerHTML = hosts.length
             ? hosts.map(h => `<option value="${h.memberId}">${esc(h.name)}</option>`).join('')
             : '<option value="">Ingen anmäld medlem att koppla gästen till</option>';

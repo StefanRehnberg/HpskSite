@@ -1,4 +1,4 @@
-// event-guest-desk-verify.mjs — funktionären lägger till en gäst i disken, och prisradens
+﻿// event-guest-desk-verify.mjs — funktionären lägger till en gäst i disken, och prisradens
 // automatiska etikett läcker inte ut som ett namn.
 //
 // KÖR:  node hpsk-verify/event-guest-desk-verify.mjs
@@ -34,6 +34,17 @@ const ok = (n, c, d) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { f
 const eq = (n, a, e) => ok(n, JSON.stringify(a) === JSON.stringify(e), `fick ${JSON.stringify(a)}, väntade ${JSON.stringify(e)}`);
 const section = t => console.log(`\n== ${t}`);
 const day = n => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+
+// ⚠⚠ QUOTED_IDENTIFIER ON på varje sats — ClubEventParticipant bär ett FILTRERAT index
+// (det som släpper in flera gäster) och SQL Server vägrar all DML mot en sådan tabell när
+// inställningen är av, vilket är sqlcmds standard. Utan -b exitar sqlcmd dessutom 0 på felet.
+const q = sqlText => execSync(
+  `sqlcmd -S "localhost\\SQLEXPRESS" -d Umbraco -E -C -b -W -h -1 -Q "SET QUOTED_IDENTIFIER ON; ${sqlText}"`,
+  { encoding: 'utf8' }).trim();
+
+// En medlem som varken är den inloggade eller värden ovan.
+const LEGACY_MEMBER = 2344;
+const LEGACY_CREATED = '2026-09-01 10:00:00';
 
 const main = async () => {
   const browser = await chromium.launch({ headless: true });
@@ -213,6 +224,75 @@ const main = async () => {
     ok('gästen står på listan', !!guest, JSON.stringify(after.rows));
     eq('och hör till rätt medlem', guest && guest.guestOfMemberId, host.memberId);
     eq('gästen tar en plats', after.counts.signedUp, 2);
+
+    // ── Den gamla diskraden ───────────────────────────────────────────
+    // ⚠⚠ RAPPORTERAT 2026-09-20: "Kommer tillsammans med" erbjöd en person som servern sedan
+    // vägrade, med ett besked skrivet till MEDLEMMEN ("Anmäl dig själv först") som funktionären
+    // i disken inte kan agera på. Rader som disken skapade före 2026-09-20 saknar SignedUpAt.
+    // Fixturen återskapar exakt den formen — den går inte att skapa via API:et längre.
+    section('En rad utan anmälningstid kan inte bära en gäst — och läks');
+    q(`INSERT INTO dbo.ClubEventParticipant `
+      + `(EventId, MemberId, MemberName, SignedUpAt, CreatedDate, UpdatedDate) `
+      + `VALUES (${evId}, ${LEGACY_MEMBER}, 'ZZD Gammalrad', NULL, '${LEGACY_CREATED}', '${LEGACY_CREATED}');`);
+
+    await page.goto(`${BASE}/evenemang/deltagare?e=${evId}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => {
+      const b = document.getElementById('deskBody');
+      return b && !b.innerText.includes('Hämtar');
+    }, null, { timeout: 30000 }).catch(() => {});
+
+    const hostOptions = () => page.evaluate(() => {
+      window.deskAddOpen();
+      return [...document.querySelectorAll('#deskGuestHost option')]
+        .map(o => ({ id: +o.value, text: o.innerText.trim() }));
+    });
+
+    let opts = await hostOptions();
+    // KONTROLLPROV: den riktigt anmälda värden MÅSTE finnas. Utan det vore påståendet nedan
+    // grönt även på en tom väljare — alltså även om filtret stängt ute alla.
+    ok('den anmälda värden erbjuds', opts.some(o => o.id === HOST_MEMBER), JSON.stringify(opts));
+    ok('men raden utan anmälningstid erbjuds INTE som värd',
+       !opts.some(o => o.id === LEGACY_MEMBER), JSON.stringify(opts));
+
+    // Servern måste ändå vägra, och beskedet ska tala till den som läser det.
+    const refused = await json('/umbraco/surface/ClubEvent/AddGuest', {
+      eventId: evId, guestOfMemberId: LEGACY_MEMBER, name: `${PREFIX}Nekad`, priceId: '',
+    });
+    ok('servern vägrar ändå', refused && refused.success === false, JSON.stringify(refused));
+    ok('och beskedet säger INTE "Anmäl dig själv" till funktionären',
+       refused && !/anmäl dig själv/i.test(refused.message || ''), refused && refused.message);
+    ok('utan namnger personen som saknar anmälan',
+       refused && /ZZD Gammalrad|Gammalrad/i.test(refused.message || '')
+         || (refused && /står inte som anmäld/i.test(refused.message || '')),
+       refused && refused.message);
+
+    // Läkningen: en avprickning fyller i den uppgift som saknas — med radens EGEN skapelsetid.
+    const legacyRowId = +q(`SET NOCOUNT ON; SELECT TOP 1 Id FROM dbo.ClubEventParticipant `
+      + `WHERE EventId = ${evId} AND MemberId = ${LEGACY_MEMBER};`);
+    const healed = await json('/umbraco/surface/ClubEvent/SetAttendance',
+      { eventId: evId, participantId: legacyRowId, status: 'Present', note: null });
+    ok('avprickningen gick igenom', healed && healed.success, healed && healed.message);
+
+    const stamped = q(`SET NOCOUNT ON; SELECT CONVERT(varchar(19), SignedUpAt, 120) `
+      + `FROM dbo.ClubEventParticipant WHERE Id = ${legacyRowId};`);
+    // ⚠⚠ CreatedDate, ALDRIG dagens datum. Stämplas "nu" skrivs det om NÄR anmälan gjordes,
+    // och den tiden bär både Anmäld-kolumnen och platsordningen.
+    ok('raden läktes med sin EGEN skapelsetid, inte med dagens datum',
+       stamped === LEGACY_CREATED, `SignedUpAt blev "${stamped}", väntade "${LEGACY_CREATED}"`);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => {
+      const b = document.getElementById('deskBody');
+      return b && !b.innerText.includes('Hämtar');
+    }, null, { timeout: 30000 }).catch(() => {});
+    opts = await hostOptions();
+    ok('och då erbjuds den som värd', opts.some(o => o.id === LEGACY_MEMBER), JSON.stringify(opts));
+
+    await page.goto(`${BASE}/user-profile-page/`, { waitUntil: 'domcontentloaded' });
+    const nowOk = await json('/umbraco/surface/ClubEvent/AddGuest', {
+      eventId: evId, guestOfMemberId: LEGACY_MEMBER, name: `${PREFIX}Sent`, priceId: '',
+    });
+    ok('och gästen går att lägga till', nowOk && nowOk.success, JSON.stringify(nowOk).slice(0, 160));
 
     ok('inga JS-fel', jsErrors.filter(e => !/ckeditor/.test(e)).length === 0, jsErrors.join(' | '));
 
