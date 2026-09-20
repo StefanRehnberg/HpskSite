@@ -357,7 +357,13 @@ namespace HpskSite.Services
             int seatsTaken = 0;
             foreach (var p in rows)
             {
-                bool active = p.SignedUpAt != null && p.CancelledAt == null;
+                // ⚠️ VARJE rad som inte är avbokad tar en plats. Villkoret löd tidigare
+                // "SignedUpAt != null", vilket lät en diskanmälan stå i listan UTAN att räknas
+                // — tjugo personer i en lokal för tjugo rapporterade tjugo lediga platser.
+                // Formuleringen täcker också rader skrivna innan disken satte SignedUpAt, så
+                // ingen backfill behövs; ORDER BY lägger dem redan sist, alltså med rätt
+                // platsprioritet.
+                bool active = p.CancelledAt == null;
                 bool reserve = false;
 
                 if (active && ctx.MaxParticipants > 0)
@@ -380,7 +386,6 @@ namespace HpskSite.Services
                     SignedUpAt = p.SignedUpAt,
                     Cancelled = p.CancelledAt != null,
                     IsReserve = reserve,
-                    IsWalkIn = p.SignedUpAt == null,
                     Note = p.SignedUpNote,
                     AttendanceStatus = p.AttendanceStatus,
                     AttendanceNote = p.AttendanceNote,
@@ -401,8 +406,8 @@ namespace HpskSite.Services
                 });
             }
 
-            roster.SignedUp = roster.Rows.Count(r => !r.Cancelled && !r.IsWalkIn);
-            roster.Seated = roster.Rows.Count(r => !r.Cancelled && !r.IsWalkIn && !r.IsReserve);
+            roster.SignedUp = roster.Rows.Count(r => !r.Cancelled);
+            roster.Seated = roster.Rows.Count(r => !r.Cancelled && !r.IsReserve);
             roster.Reserves = roster.Rows.Count(r => !r.Cancelled && r.IsReserve);
             roster.Cancelled = roster.Rows.Count(r => r.Cancelled);
             roster.Present = roster.Rows.Count(r => r.AttendanceStatus == ClubEvents.AttendancePresent);
@@ -776,7 +781,17 @@ namespace HpskSite.Services
             var now = DateTime.Now;
             if (row == null)
             {
-                // Turned up without signing up. That is a legitimate row with no SignedUpAt.
+                // ⚠⚠ EN DISKANMÄLAN ÄR EN ANMÄLAN, med ett klockslag. Raden skrevs tidigare
+                // med SignedUpAt = null, och därmed påstod modellen att personen aldrig anmält
+                // sig — trots att hen står i listan just för att disken anmälde hen. Det var
+                // roten till fyra tysta fel på en gång: raden tog ingen PLATS (så SeatsLeft
+                // överdrev kapaciteten), den räknades inte i SignedUp/Seated, den var OSYNLIG på
+                // evenemangssidans deltagarlista, och personen kunde inte ta med en GÄST
+                // (AddGuestAsync kräver att värdens rad har SignedUpAt).
+                //
+                // ⚠️ SignedUpByMemberId bär funktionären: anmälan är gjord ÅT personen, inte AV
+                // hen. Det är samma skillnad som gästradens GuestOfMemberId vs SignedUpByMemberId,
+                // och den går isar precis när det kostar pengar.
                 var ctx = GetEventContext(eventId);
                 var chosen = ctx == null ? null : ResolvePriceChoice(ctx, priceId);
 
@@ -785,6 +800,8 @@ namespace HpskSite.Services
                     EventId = eventId,
                     MemberId = memberId,
                     MemberName = member.Name ?? $"Medlem {memberId}",
+                    SignedUpAt = now,
+                    SignedUpByMemberId = actingMemberId,
                     // Samma snapshot som vid en vanlig anmälan — se ClubEventParticipant.FeeLabel.
                     FeePriceId = chosen?.Id,
                     FeeLabel = chosen?.Label,
@@ -1095,7 +1112,6 @@ namespace HpskSite.Services
         public DateTime? SignedUpAt { get; set; }
         public bool Cancelled { get; set; }
         public bool IsReserve { get; set; }
-        public bool IsWalkIn { get; set; }
         public string? Note { get; set; }
         public string? AttendanceStatus { get; set; }
         public string? AttendanceNote { get; set; }

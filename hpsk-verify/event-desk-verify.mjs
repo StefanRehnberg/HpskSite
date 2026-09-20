@@ -240,6 +240,18 @@ WHERE EventId = ${eventId} AND MemberId > 0 ORDER BY Id;`).trim();
     //   2. Menyvalet hängde på att en betalningsrad fanns, och en rad skapas bara av MEDLEMMENS
     //      "visa Swish-koden". Funktionärens tillagda deltagare hade därför ingen.
     section('Deltagare tillagd i disken');
+
+    // ⚠⚠ EN DISKANMÄLAN TAR EN PLATS. Raden skrevs tidigare med SignedUpAt = null, och
+    // platsräkningen krävde SignedUpAt — så tjugo personer tillagda i en lokal för tjugo
+    // rapporterade tjugo lediga platser, tyst. Mäts som ett DELTA över just den här
+    // handlingen, aldrig mot ett absolut tal: fixturen bär redan en anmäld och en gäst, och
+    // ett absolut tal hade då mätt dem i stället.
+    const summary = () => page.evaluate(async id => {
+      const d = await (await fetch(`/umbraco/surface/ClubEvent/GetRoster?eventId=${id}`)).json();
+      return { signedUp: d.counts.signedUp, seatsLeft: d.counts.seatsLeft };
+    }, eventId);
+    const beforeSeats = await summary();
+
     const walkIn = await page.evaluate(async ([id, pid]) => {
       const tok = document.querySelector('input[name="__RequestVerificationToken"]');
       const r = await fetch('/umbraco/surface/ClubEvent/SetAttendance', {
@@ -250,6 +262,14 @@ WHERE EventId = ${eventId} AND MemberId > 0 ORDER BY Id;`).trim();
       return await r.json().catch(() => null);
     }, [eventId, WALKIN_MEMBER]);
     ok('deltagaren gick att lägga till', walkIn && walkIn.success, walkIn && walkIn.message);
+
+    const afterSeats = await summary();
+    ok('platsen räknas — en ledig plats färre',
+       beforeSeats.seatsLeft - afterSeats.seatsLeft === 1,
+       `${beforeSeats.seatsLeft} → ${afterSeats.seatsLeft}`);
+    ok('och den räknas bland de anmälda',
+       afterSeats.signedUp - beforeSeats.signedUp === 1,
+       `${beforeSeats.signedUp} → ${afterSeats.signedUp}`);
 
     // ⚠️ MÄT AVGIFTEN I DATABASEN. En rad utan FeeAmount ser likadan ut i listan tills någon
     // försöker ta betalt — det var precis så felet gick att missa.
@@ -270,11 +290,11 @@ WHERE EventId = ${eventId} AND MemberId = ${WALKIN_MEMBER};`).trim();
     // och rapporteras som grona. Namnet kommer ur GetRoster, alltsa fran servern och inte fran
     // den yta som provas.
     const readWalkRow = async () => {
-      const namn = await page.evaluate(async id => {
+      const namn = await page.evaluate(async ([id, mid]) => {
         const d = await (await fetch(`/umbraco/surface/ClubEvent/GetRoster?eventId=${id}`)).json();
-        const row = (d.rows || []).find(x => x.isWalkIn && !x.isGuest && !x.cancelled);
+        const row = (d.rows || []).find(x => x.memberId === mid && !x.cancelled);
         return row ? row.name : '';
-      }, eventId);
+      }, [eventId, WALKIN_MEMBER]);
       if (!namn) return null;
       return page.evaluate(n => {
         const trs = [...document.querySelectorAll('#deskBody tr')];
@@ -303,16 +323,18 @@ WHERE EventId = ${eventId} AND MemberId = ${WALKIN_MEMBER};`).trim();
       // "oanmäld" sa emot själva listan. Båda var falska påståenden om raden.
       ok('namncellen bär ingen bricka som säger emot listan',
          !/oanmäld|på plats|närvarande/i.test(walkRow.namnCell), walkRow.namnCell);
-      // ...men faktumet får inte försvinna med ordet: Anmäld-kolumnen är TOM för den som
-      // lades till i disken. Utan det här påståendet vore raden ovan grön även om skillnaden
-      // mot en förhandsanmälan slutat synas någonstans alls.
-      ok('men Anmäld-kolumnen är tom, så skillnaden syns ändå',
-         /^[\s–—-]*$/.test(walkRow.anmald), `Anmäld-cellen var "${walkRow.anmald}"`);
+      // ⚠⚠ OCH ANMÄLD-KOLUMNEN ÄR IFYLLD. En diskanmälan är en anmälan, med ett
+      // klockslag. Raden skrevs tidigare med SignedUpAt = null, och därmed påstod modellen
+      // att personen aldrig anmält sig — vilket är roten till hela brickröran OCH till att
+      // raden inte tog någon plats.
+      ok('och Anmäld-kolumnen bär en anmälningstid — en diskanmälan är en anmälan',
+         /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(walkRow.anmald),
+         `Anmäld-cellen var "${walkRow.anmald}"`);
 
-      const absent = await page.evaluate(async id => {
+      const absent = await page.evaluate(async ([id, WALKIN]) => {
         const tok = document.querySelector('input[name="__RequestVerificationToken"]');
         const rows = await (await fetch(`/umbraco/surface/ClubEvent/GetRoster?eventId=${id}`)).json();
-        const row = (rows.rows || []).find(x => x.isWalkIn && !x.isGuest && !x.cancelled);
+        const row = (rows.rows || []).find(x => x.memberId === WALKIN && !x.cancelled);
         if (!row) return null;
         const r = await fetch('/umbraco/surface/ClubEvent/SetAttendance', {
           method: 'POST',
@@ -320,7 +342,7 @@ WHERE EventId = ${eventId} AND MemberId = ${WALKIN_MEMBER};`).trim();
           body: JSON.stringify({ eventId: id, participantId: row.id, status: 'Absent', note: null }),
         });
         return await r.json().catch(() => null);
-      }, eventId);
+      }, [eventId, WALKIN_MEMBER]);
       ok('raden som lades till i disken gick att pricka av som frånvarande', absent && absent.success,
          absent && absent.message);
 

@@ -388,12 +388,11 @@ else
         document.getElementById('deskShowing').textContent =
             `Visar ${rows.length} av ${state.rows.length}`;
 
-        // ⚠️ INGEN BRICKA FÖR isWalkIn, och det är ett beslut. Står raden i listan ÄR personen
-        // anmäld — disken anmälde hen. En bricka som säger motsatsen är ett falskt påstående,
-        // oavsett vilket ord den bär: "på plats" lästes som närvaro och sa emot
-        // närvarokolumnen, "oanmäld" säger emot själva listan. Skillnaden mot en
-        // förhandsanmälan syns ändå: Anmäld-kolumnen är TOM för dem, och roster.SignedUp/Seated
-        // räknar redan bort dem ur sammanfattningen.
+        // ⚠️ INGEN BRICKA FÖR "tillagd i disken", och det är ett beslut. Står raden i listan ÄR
+        // personen anmäld — disken anmälde hen, och sedan 2026-09-20 bär raden ett riktigt
+        // SignedUpAt. En bricka som säger motsatsen är ett falskt påstående oavsett ord: "på
+        // plats" lästes som närvaro och sa emot närvarokolumnen, "oanmäld" sa emot själva listan.
+        // Anmäld-kolumnen visar anmälningstiden, vilken väg anmälan än kom in.
         document.getElementById('deskBody').innerHTML = rows.length ? rows.map(r => `
             <tr class="desk-row ${r.cancelled ? 'desk-cancelled' : ''}">
                 <td>

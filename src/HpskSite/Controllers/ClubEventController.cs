@@ -252,7 +252,10 @@ namespace HpskSite.Controllers
                     })
                 },
                 roster = showRoster
-                    ? roster.Rows.Where(r => !r.Cancelled && !r.IsWalkIn).Select(r => new
+                    // ⚠️ Filtret uteslot tidigare även diskanmälda (!IsWalkIn), så den som
+                    // anmäldes på plats var osynlig för övriga på evenemangssidan trots att hen
+                    // står på listan. Anmäld är anmäld.
+                    ? roster.Rows.Where(r => !r.Cancelled).Select(r => new
                     {
                         memberId = r.MemberId,
                         name = r.Name,
@@ -772,7 +775,6 @@ namespace HpskSite.Controllers
                     signedUpAt = r.SignedUpAt?.ToString("yyyy-MM-dd HH:mm"),
                     cancelled = r.Cancelled,
                     isReserve = r.IsReserve,
-                    isWalkIn = r.IsWalkIn,
                     note = r.Note,
                     attendanceStatus = r.AttendanceStatus,
                     attendanceLabel = ClubEvents.AttendanceDisplay(r.AttendanceStatus),
