@@ -282,6 +282,7 @@ WHERE EventId = ${eventId} AND MemberId = ${WALKIN_MEMBER};`).trim();
         if (!tr) return null;
       return {
         namnCell: tr.children[0].innerText.trim(),
+        anmald: tr.children[1].innerText.trim(),
         betalning: tr.children[2].innerText.trim(),
         narvaro: tr.children[3].innerText.trim(),
         harMeny: [...tr.querySelectorAll('.dropdown-item')].some(i => /Hantera betalning/i.test(i.innerText)),
@@ -297,13 +298,16 @@ WHERE EventId = ${eventId} AND MemberId = ${WALKIN_MEMBER};`).trim();
       // ⚠️ KÄRNAN i rapporten: vägen måste finnas UTAN att medlemmen först tryckt fram koden.
       ok('och "Hantera betalning" erbjuds även utan att Swish-koden visats', walkRow.harMeny);
 
-      // ⚠⚠ BRICKAN FÅR INTE LÄSAS SOM NÄRVARO. Den hette "på plats" och stod då kvar
-      // bredvid ett "Frånvarande" i närvarokolumnen — två celler på samma rad som påstod
-      // olika saker, utan att något sa vilken som gällde. Brickan betyder att raden saknar
-      // ANMÄLAN, och det är sant oavsett om personen dyker upp.
-      ok('brickan säger "oanmäld", inte något som läses som närvaro',
-         /oanmäld/i.test(walkRow.namnCell) && !/på plats|närvarande/i.test(walkRow.namnCell),
-         walkRow.namnCell);
+      // ⚠⚠ INGEN BRICKA FÅR SÄGA EMOT LISTAN. Står raden här ÄR personen anmäld —
+      // disken anmälde hen. "På plats" lästes som närvaro och sa emot närvarokolumnen;
+      // "oanmäld" sa emot själva listan. Båda var falska påståenden om raden.
+      ok('namncellen bär ingen bricka som säger emot listan',
+         !/oanmäld|på plats|närvarande/i.test(walkRow.namnCell), walkRow.namnCell);
+      // ...men faktumet får inte försvinna med ordet: Anmäld-kolumnen är TOM för den som
+      // lades till i disken. Utan det här påståendet vore raden ovan grön även om skillnaden
+      // mot en förhandsanmälan slutat synas någonstans alls.
+      ok('men Anmäld-kolumnen är tom, så skillnaden syns ändå',
+         /^[\s–—-]*$/.test(walkRow.anmald), `Anmäld-cellen var "${walkRow.anmald}"`);
 
       const absent = await page.evaluate(async id => {
         const tok = document.querySelector('input[name="__RequestVerificationToken"]');
@@ -317,7 +321,7 @@ WHERE EventId = ${eventId} AND MemberId = ${WALKIN_MEMBER};`).trim();
         });
         return await r.json().catch(() => null);
       }, eventId);
-      ok('den oanmälde gick att pricka av som frånvarande', absent && absent.success,
+      ok('raden som lades till i disken gick att pricka av som frånvarande', absent && absent.success,
          absent && absent.message);
 
       await page.reload({ waitUntil: 'domcontentloaded' });
@@ -333,9 +337,8 @@ WHERE EventId = ${eventId} AND MemberId = ${WALKIN_MEMBER};`).trim();
       ok('närvarokolumnen säger frånvaro efter avprickningen',
          afterAbsent && /ej här|frånvarande/i.test(afterAbsent.narvaro),
          afterAbsent && afterAbsent.narvaro);
-      ok('och namncellen säger fortfarande bara "oanmäld" — den säger emot ingenting',
-         afterAbsent && /oanmäld/i.test(afterAbsent.namnCell)
-           && !/på plats|närvarande/i.test(afterAbsent.namnCell),
+      ok('och namncellen säger fortfarande ingenting om närvaro',
+         afterAbsent && !/oanmäld|på plats|närvarande/i.test(afterAbsent.namnCell),
          afterAbsent && afterAbsent.namnCell);
 
       walkRow = afterAbsent || walkRow;

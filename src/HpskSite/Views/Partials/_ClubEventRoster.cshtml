@@ -218,7 +218,12 @@
                         + '>gäst' + (host ? ' hos ' + esc(host) : '') + '</span>');
                 }
                 if (r.isReserve) badges.push('<span class="badge bg-warning-subtle text-warning-emphasis">reserv</span>');
-                if (r.isWalkIn) badges.push('<span class="badge bg-info-subtle text-info-emphasis">oanmäld</span>');
+                // ⚠️ INGEN BRICKA FÖR isWalkIn, och det är ett beslut. Står raden i listan ÄR
+                // personen anmäld — disken anmälde hen. En bricka som säger motsatsen är ett
+                // falskt påstående, oavsett vilket ord den bär: "på plats" lästes som närvaro
+                // och sa emot närvarokolumnen, "oanmäld" säger emot själva listan. Skillnaden
+                // mot en förhandsanmälan syns ändå: Anmäld-kolumnen är TOM för dem, och
+                // roster.SignedUp/Seated räknar redan bort dem ur sammanfattningen.
                 if (r.cancelled) badges.push('<span class="badge bg-secondary-subtle text-secondary-emphasis">avbokad</span>');
                 // Sjalvregistrerad via QR ar svagare bevis an ett upprop — sag vilket som ar vilket,
                 // sarskilt nar narvaron ska bara ett Foreningsintyg.
