@@ -1498,6 +1498,108 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Betalarens egna betalningsrader, med vad som går att ångra på var och en.
+        ///
+        /// <para><b>⚠️ INTE <c>GetPayments</c></b> — det namnet är upptaget av arrangörens
+        /// avprickningslista (hela evenemanget, ingen betalare). En överlagring band anropet utan
+        /// <c>payerMemberId</c> till fel metod och lät avprickningslistan svara med en annan form,
+        /// TYST: C# tillåter överlagringen, så bygget gick igenom och bara sviten såg det.</para>
+        /// GET /umbraco/surface/ClubEvent/GetPayerPayments?eventId=&amp;payerMemberId=
+        ///
+        /// <para><b>⚠️ EGEN LÄSNING, inte ett fält på GetRoster.</b> Uppropslistan är en hot path
+        /// som ritas om vid varje filterklick, och de här raderna behövs bara när någon öppnar
+        /// betalningsdialogen. Samma skäl som deltagarnas e-postlista fick en egen endpoint.</para>
+        ///
+        /// <para><b>⚠️ <c>canReverse</c> HÄRLEDS HÄR, inte i klienten.</b> Regeln är liggarens
+        /// (<see cref="LedgerPaymentService.Reverse"/>) och en andra tolkning i JavaScript vore fri
+        /// att säga emot den — en knapp som erbjuds och sedan nekas är ett avslag i stället för ett
+        /// besked, precis som värdväljaren var.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetPayerPayments(int eventId, int payerMemberId)
+        {
+            var ctx = _participation.GetEventContext(eventId);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+
+            int me = await CurrentMemberIdAsync();
+            bool canManage = await _participation.CanManageAsync(ctx, me);
+
+            // ⚠️ Betalaren får se sina EGNA rader; funktionären får se allas. Utan den första
+            // halvan kan medlemmen inte se vad hen betalat, och utan den andra kan ingen städa.
+            if (!canManage && (payerMemberId <= 0 || payerMemberId != me))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            var rows = _payments
+                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .Where(p => p.PayerMemberId == payerMemberId)
+                .OrderByDescending(p => p.Id)
+                .Select(p => new
+                {
+                    id = p.Id,
+                    amount = p.SettledAmount,
+                    method = p.Method,
+                    confirmed = p.ConfirmedUtc != null,
+                    claimed = p.ClaimedUtc != null,
+                    voided = p.VoidedUtc != null,
+                    voidReason = p.VoidReason,
+                    // Bokförd eller inte avgör VAD ett ångrande innebär, så skärmen ska kunna
+                    // säga det innan någon trycker.
+                    posted = p.JournalEntryId != null,
+                    date = (p.ConfirmedUtc ?? p.CreatedUtc).ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                    // ⚠️ Bara funktionären ångrar. En betalare som kunde ta bort sin egen
+                    // registrerade betalning hade gjort avprickningslistan meningslös — samma
+                    // regel som att hen aldrig får sätta "mottaget".
+                    canReverse = canManage && p.VoidedUtc == null
+                })
+                .ToList();
+
+            return Json(new { success = true, payments = rows });
+        }
+
+        /// <summary>
+        /// Ångrar en betalning. POST /umbraco/surface/ClubEvent/ReversePayment
+        ///
+        /// <para><b>⚠️ VAD som händer avgörs av RADEN, inte av den här endpointen</b> — se
+        /// <see cref="LedgerPaymentService.Reverse"/>. Obekräftad begäran makuleras; mottagen
+        /// betalning återtas, och har den bokförts skrivs en rättelseverifikation först. Det är
+        /// därför svaret bär <c>outcome</c> och inte bara <c>success</c>: "ångrad" betyder tre
+        /// olika saker, och arrangören måste få veta vilket.</para>
+        ///
+        /// <para><b>⚠️ Funktionärens handling.</b> Grinden är evenemangets egen
+        /// <c>CanManageAsync</c>, samma som för att ta emot betalningen från början.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ReversePayment([FromBody] PaymentRequest request)
+        {
+            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+
+            int me = await CurrentMemberIdAsync();
+            if (!await _participation.CanManageAsync(ctx, me))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            // ⚠️ Raden måste tillhöra DET HÄR evenemanget. Utan kontrollen kunde ett postat
+            // betalnings-id från en annan tävling eller ett annat evenemang ångras härifrån.
+            var row = _payments
+                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .FirstOrDefault(p => p.Id == (request?.PaymentId ?? 0));
+
+            if (row == null)
+                return Json(new { success = false, message = "Betalningen hör inte till det här evenemanget." });
+
+            var result = _payments.Reverse(row.Id, me, request?.Reason ?? "");
+
+            return Json(new
+            {
+                success = result.Success,
+                message = result.Success ? result.Message : result.Error,
+                outcome = result.Outcome,
+                correctionEntryId = result.CorrectionEntryId
+            });
+        }
+
+        /// <summary>
         /// Arrangören registrerar en betalning som kommit in <b>på plats</b>.
         /// POST /umbraco/surface/ClubEvent/RegisterPayment
         ///
@@ -1709,6 +1811,15 @@ namespace HpskSite.Controllers
 
             /// <summary>Betalaren, nar arrangoren registrerar en betalning som kommit in pa plats.</summary>
             public int PayerMemberId { get; set; }
+
+            /// <summary>
+            /// Varför betalningen ångras. <b>Obligatoriskt</b> — liggaren vägrar utan det.
+            ///
+            /// <para>⚠️ Skälet är inte en artighet: raden raderas aldrig, den återtas, och utan ett
+            /// skäl är den en ändring ingen kan granska i efterhand. Det är hela poängen med en
+            /// verifikationsliggare.</para>
+            /// </summary>
+            public string? Reason { get; set; }
 
             /// <summary>Ur LedgerPaymentMethod. Avgor vilket konto pengarna landar pa.</summary>
             public string? Method { get; set; }

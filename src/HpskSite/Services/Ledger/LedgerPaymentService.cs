@@ -291,6 +291,124 @@ namespace HpskSite.Services.Ledger
         }
 
         /// <summary>
+        /// Ångrar en betalning. <b>EN ingång för tre olika verkligheter</b>, och vilken det är
+        /// avgörs av RADEN — aldrig av anroparen.
+        ///
+        /// <list type="table">
+        /// <item><term>Inte bekräftad</term><description>Ingenting har hänt med pengarna. Raden
+        ///   makuleras. Ingen bokföring, inget kvitto.</description></item>
+        /// <item><term>Bekräftad, inte bokförd</term><description>Föreningen bokför inte hos oss,
+        ///   eller bokföringen var blockerad. Det finns ingen verifikation att rätta — raden
+        ///   återtas.</description></item>
+        /// <item><term>Bekräftad och bokförd</term><description>En RÄTTELSEVERIFIKATION skrivs
+        ///   först, sedan återtas raden.</description></item>
+        /// </list>
+        ///
+        /// <para><b>⚠️⚠️ BOKFÖR FÖRST, MARKERA SEDAN</b> — samma ordning som <see cref="Confirm"/>,
+        /// och av samma skäl: går rättelsen inte igenom ska ingenting ha hänt. Omvänd ordning hade
+        /// lämnat en återtagen betalning vars pengar står kvar i bokföringen.</para>
+        ///
+        /// <para><b>⚠️ Fastställt räkenskapsår löser sig självt.</b>
+        /// <see cref="LedgerPostingService.CreateCorrection"/> bokför rättelsen I DAG, inte på
+        /// originalets datum — perioden då felet upptäcktes är den som är sann, och originalets
+        /// period kan vara stängd. Är även dagens år fastställt vägrar liggaren med sitt eget
+        /// besked, och det är rätt: ett fastställt år tar inte emot skrivningar.</para>
+        ///
+        /// <para><b>⚠️ Kvittot rivs inte.</b> Det ligger hos betalaren och är en handling om vad som
+        /// hände då. Att raden är återtagen följer av <see cref="LedgerPayment.IsMoney"/>, som läser
+        /// <c>VoidedUtc</c> — så varje ställe som räknar pengar ser det utan att någon behöver komma
+        /// ihåg en flagga till. Ett kreditkvitto hör till ekonomibygget (P2).</para>
+        ///
+        /// <para>Skälet är OBLIGATORISKT. En återtagen betalning utan skäl är en rad ingen kan
+        /// granska i efterhand, och det är hela poängen med en liggare.</para>
+        /// </summary>
+        public ReverseResult Reverse(int paymentId, int byMemberId, string reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason))
+                return ReverseResult.Failed(
+                    "Ange varför betalningen ångras — det är det som gör raden granskningsbar.");
+            reason = reason.Trim();
+
+            using var db = _databaseFactory.CreateDatabase();
+            var payment = db.SingleOrDefault<LedgerPayment>(
+                "SELECT * FROM dbo.LedgerPayment WHERE Id = @0", paymentId);
+
+            if (payment is null) return ReverseResult.Failed("Betalningen finns inte.");
+            if (payment.VoidedUtc is not null)
+                return ReverseResult.Failed("Betalningen är redan ångrad.");
+
+            // ── 1. Inte bekräftad: ingenting har hänt med pengarna ─────────────────────────────
+            if (payment.ConfirmedUtc is null)
+            {
+                if (!Void(paymentId, byMemberId, reason))
+                    return ReverseResult.Failed("Betalningen kunde inte makuleras. Försök igen.");
+
+                return new ReverseResult
+                {
+                    Success = true,
+                    Outcome = ReverseOutcome.Voided,
+                    Message = "Betalningsbegäran är makulerad. Inga pengar hade tagits emot, "
+                            + "så det finns ingenting att bokföra."
+                };
+            }
+
+            // ── 2. Bekräftad OCH bokförd: rättelsen skrivs FÖRST ───────────────────────────────
+            int? correctionId = null;
+            if (payment.JournalEntryId is int entryId)
+            {
+                var correction = _posting.CreateCorrection(
+                    entryId, byMemberId, $"Ångrad betalning: {reason}");
+
+                if (!correction.Success)
+                    return ReverseResult.Failed(
+                        (correction.Error ?? "Rättelsen kunde inte bokföras.")
+                        + " Betalningen står kvar som mottagen — ingenting har ändrats.");
+
+                correctionId = correction.EntryId;
+            }
+
+            // ── 3. Återta raden ────────────────────────────────────────────────────────────────
+            // ⚠️ EGEN UPDATE, inte Void(). Void vägrar med flit en bekräftad rad, så att ingen av
+            // misstag tar bort pengar ur liggaren utan att rätta bokföringen. Den här skrivningen
+            // är tillåten just därför att rättelsen redan är skriven ovanför.
+            var rows = db.Execute(
+                @"UPDATE dbo.LedgerPayment
+                     SET VoidedUtc = @1, VoidedByMemberId = @2, VoidReason = @3
+                   WHERE Id = @0 AND VoidedUtc IS NULL",
+                paymentId, DateTime.UtcNow, byMemberId, reason);
+
+            if (rows == 0)
+            {
+                // ⚠️ Rättelsen är skriven och kan inte tas bort. Säg vad som gäller och namnge
+                // verifikationen — samma hållning som Confirm när kvittot fallerar efter bokföring.
+                _logger.LogError(
+                    "Betalning {PaymentId} rättades som verifikation {EntryId} men raden kunde inte "
+                    + "markeras ångrad. Bokföringen och betalningen är nu oöverens.",
+                    paymentId, correctionId);
+
+                return ReverseResult.Failed(
+                    correctionId is null
+                        ? "Betalningen kunde inte ångras. Försök igen."
+                        : $"Rättelsen är bokförd (verifikation {correctionId}) men betalningsraden "
+                          + "kunde inte markeras ångrad. Ångra inte igen — kontakta support.");
+            }
+
+            return new ReverseResult
+            {
+                Success = true,
+                Outcome = correctionId is null
+                    ? ReverseOutcome.ReversedUnposted
+                    : ReverseOutcome.ReversedCorrected,
+                CorrectionEntryId = correctionId,
+                Message = correctionId is null
+                    ? "Betalningen är ångrad. Föreningen bokför inte i pistol.nu, så det fanns "
+                    + "ingen verifikation att rätta."
+                    : $"Betalningen är ångrad och rättad i bokföringen (verifikation {correctionId})."
+                    + " Originalet står kvar — en liggare raderar inte, den rättar."
+            };
+        }
+
+        /// <summary>
         /// Makulerar en betalningsrad.
         ///
         /// <para><b>⚠️ En bekräftad betalning makuleras INTE här.</b> Pengarna är bokförda och
@@ -455,5 +573,36 @@ namespace HpskSite.Services.Ledger
 
             public static ConfirmResult Failed(string error) => new() { Error = error };
         }
+    
+    /// <summary>Vad som faktiskt hände när en betalning ångrades.</summary>
+    public static class ReverseOutcome
+    {
+        /// <summary>Obekräftad begäran makulerad — inga pengar, ingen bokföring.</summary>
+        public const string Voided = "voided";
+
+        /// <summary>Mottagen betalning återtagen. Föreningen bokför inte hos oss.</summary>
+        public const string ReversedUnposted = "reversed-unposted";
+
+        /// <summary>Mottagen betalning återtagen OCH rättad med en motverifikation.</summary>
+        public const string ReversedCorrected = "reversed-corrected";
     }
+
+    /// <summary>
+    /// Utfallet av <see cref="LedgerPaymentService.Reverse"/>.
+    ///
+    /// <para>⚠️ <see cref="Outcome"/> finns för att skärmen ska kunna säga VAD som hände. "Ångrad"
+    /// betyder tre olika saker beroende på om pengar tagits emot och om föreningen bokför, och ett
+    /// gemensamt besked hade varit sant i högst ett av fallen.</para>
+    /// </summary>
+    public sealed class ReverseResult
+    {
+        public bool Success { get; set; }
+        public string? Error { get; set; }
+        public string Outcome { get; set; } = "";
+        public int? CorrectionEntryId { get; set; }
+        public string Message { get; set; } = "";
+
+        public static ReverseResult Failed(string error) => new() { Success = false, Error = error };
+    }
+}
 }
