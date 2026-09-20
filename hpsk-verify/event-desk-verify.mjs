@@ -1,4 +1,4 @@
-// event-desk-verify.mjs — arrangörens deltagarsida, /evenemang/deltagare
+﻿// event-desk-verify.mjs — arrangörens deltagarsida, /evenemang/deltagare
 //
 // KÖR:  node hpsk-verify/event-desk-verify.mjs
 //
@@ -370,8 +370,14 @@ WHERE EventId = ${eventId} AND MemberId = ${NOPRICE_MEMBER};`).trim();
       // ⚠⚠ KÄRNAN: den får INTE påstå att evenemanget är gratis.
       ok('den påstår INTE "Ingen avgift"', !/Ingen avgift/i.test(noPriceRow.cell || ''), noPriceRow.cell);
       ok('utan säger att priset saknas', /Pris saknas/i.test(noPriceRow.cell || ''), noPriceRow.cell);
-      ok('och menyn erbjuder att sätta det',
-         noPriceRow.meny.some(m => /Sätt pris/i.test(m)), noPriceRow.meny.join(', '));
+      // ⚠️ "Ändra pris" ÄR BORTTAGEN, med flit. Betalningsdialogen frågar hur mycket
+      // som kom in, så priset är ett förslag och inte ett andra ställe att uttrycka samma
+      // sak på. BÅDA riktningarna mäts — ett rent frånvaropostående vore grönt även på en
+      // rad som tappat hela sin meny, vilket är precis det som hände här en gång.
+      ok('menyn erbjuder INTE längre "Ändra pris"',
+         !noPriceRow.meny.some(m => /pris/i.test(m)), noPriceRow.meny.join(', '));
+      ok('utan pekar på "Hantera betalning", där beloppet anges',
+         noPriceRow.meny.some(m => /Hantera betalning/i.test(m)), noPriceRow.meny.join(', '));
 
       const setP = await page.evaluate(async ([id, rowId]) => {
         const tok = document.querySelector('input[name="__RequestVerificationToken"]');

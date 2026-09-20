@@ -1,4 +1,4 @@
-// event-payment-verify.mjs — betalning vid evenemangsanmälan, genom verifikationsliggaren.
+﻿// event-payment-verify.mjs — betalning vid evenemangsanmälan, genom verifikationsliggaren.
 //
 // KÖR:  node hpsk-verify/event-payment-verify.mjs
 //
@@ -143,6 +143,73 @@ const main = async () => {
 
     s = await state();
     eq('skulden växte till 270', s.party.outstanding, 270);
+
+    // ── Medlemmens eget kort ───────────────────────────────────────────────
+    // ⚠⚠ DEN HÄR HALVAN VAR OMÄTT. Resten av sviten driver API:et, men det som rapporterades
+    // var att det saknades en VÄG till betalningen på skärmen. Ett grep i markupen duger inte
+    // — knappen kan finnas och dialogen ändå vara odefinierad, vilket är precis vad som hände
+    // på disken när menyposten försvann medan deskPayOpen låg kvar.
+    section('Medlemmens kort på evenemangssidan');
+    const evUrl = await page.evaluate(async ([club, id]) => {
+      const r = await fetch(`/umbraco/surface/Club/GetClubEvents?clubId=${club}`, { credentials: 'same-origin' });
+      const d = await r.json();
+      const ev = (d.events || d.data || []).find(x => x.id === id);
+      return ev ? (ev.url || '') : '';
+    }, [CLUB_ID, evId]);
+    ok('evenemangets URL gick att slå upp', !!evUrl, evUrl);
+
+    if (evUrl) {
+      await page.goto(evUrl.startsWith('http') ? evUrl : `${BASE}/${evUrl.replace(/^\/+/, '')}`,
+                      { waitUntil: 'domcontentloaded' });
+      await page.evaluate(() => { const b = document.getElementById('cookieConsentBanner'); if (b) b.remove(); });
+      await page.waitForFunction(() => {
+        const c = document.getElementById('ces-card');
+        return c && c.style.display !== 'none';
+      }, null, { timeout: 30000 }).catch(() => {});
+
+      const card = await page.evaluate(() => ({
+        kortSyns: !!document.getElementById('ces-card'),
+        // Partialen ska inkludera dialogen SJÄLV — värdsidan förbereder ingenting.
+        modalIFinns: !!document.getElementById('hpskEventPayModal'),
+        oppnarenFinns: typeof window.hpskEventPayOpen === 'function',
+        betalaKnapp: !!document.getElementById('ces-pay'),
+        // KONTROLLPROV: dialogen får inte stå öppen redan. Utan det är påståendet nedan
+        // grönt även om klicket inte gör någonting.
+        redanOppen: !!document.querySelector('#hpskEventPayModal.show'),
+      }));
+      ok('anmälningskortet renderas', card.kortSyns);
+      ok('betalningsdialogen följde med partialen', card.modalIFinns);
+      ok('och öppnaren är definierad', card.oppnarenFinns);
+      ok('kortet har en Betala-knapp', card.betalaKnapp);
+      ok('dialogen är stängd innan klicket', card.redanOppen === false);
+
+      if (card.betalaKnapp && card.oppnarenFinns) {
+        await page.click('#ces-pay');
+        await page.waitForSelector('#hpskEventPayModal.show', { timeout: 10000 }).catch(() => {});
+        const dlg = await page.evaluate(() => {
+          const m = document.getElementById('hpskEventPayModal');
+          const vis = m && m.classList.contains('show');
+          return {
+            oppen: !!vis,
+            belopp: (document.getElementById('hepExpected') || {}).innerText || '',
+            // ⚠️ Medlemmen får ALDRIG kunna registrera en mottagen betalning.
+            registreraFinns: !!document.getElementById('hepRegisterBtn')
+              && document.getElementById('hepRegisterBtn').offsetParent !== null,
+            visaKodFinns: !!document.getElementById('hepShowQrBtn'),
+          };
+        });
+        ok('klicket öppnar den delade dialogen', dlg.oppen);
+        // Skulden är per SÄLLSKAP — 180 + 90 med gästen inräknad, aldrig bara mitt eget pris.
+        ok('och den visar sällskapets skuld, 270', /270/.test(dlg.belopp), dlg.belopp);
+        ok('medlemmen erbjuds Swish-koden', dlg.visaKodFinns);
+        ok('men ALDRIG att registrera en mottagen betalning', dlg.registreraFinns === false);
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(400);
+      }
+
+      // Tillbaka till en yta med token för resten av sviten.
+      await page.goto(`${BASE}/user-profile-page/`, { waitUntil: 'domcontentloaded' });
+    }
 
     // ── Request ───────────────────────────────────────────────────────────────────────────────
     section('Betalningen begärs');

@@ -33,6 +33,11 @@
 
     @Html.AntiForgeryToken()
 
+    @* ⚠️ Partialen inkluderar betalningsdialogen SJÄLV, samma husregel som _HtmlEscape:
+       den reser med koden som behöver den. Dubbelinkludering är ofarlig — dialogen vaktar
+       sig via Context.Items och skriptet via window.hpskEventPayOpen. *@
+    @await Html.PartialAsync("_EventPaymentModal")
+
     <script>
     (function () {
         if (window.cesLoaded) return;
@@ -371,6 +376,8 @@
                 return '<div class="alert alert-light border py-2 px-3 mb-2 small">'
                      + `Avgift <strong>${kr(p.total)}</strong>. Har du swishat? `
                      + '<a href="#" id="ces-pay-again">Visa koden igen</a>.</div>';
+                     // ⚠️ Samma id, samma väg in som knappen ovan — en andra kodväg här var
+                     // precis vad som en gång gjorde att "Visa koden igen" inte gjorde något.
             }
 
             // ⚠️ Skuld men ingen möjlighet att betala här — säg VAD som saknas i stället för att
@@ -381,17 +388,17 @@
                      + 'Evenemanget saknar Swish-nummer — kontakta arrangören för betalning.</div>';
             }
 
-            let h = '<div class="border rounded p-2 mb-2">'
-                  + '<div class="d-flex justify-content-between align-items-center mb-2">'
-                  + '<span class="fw-semibold">Att betala</span>'
-                  + `<span class="fs-5 fw-semibold">${kr(p.total - p.confirmedPaid)}</span></div>`;
-
-            h += '<button type="button" class="btn btn-primary w-100" id="ces-pay">'
-              +  '<i class="bi bi-qr-code me-1"></i>Betala med Swish</button>';
-
-            // Rutan fylls av StartPayment — numret och referensen kommer därifrån, aldrig härifrån.
-            h += '<div class="d-none mt-2" id="ces-pay-box"></div>';
-            return h + '</div>';
+            // ⚠⚠ EN MODAL, INTE EN RUTA SOM FÄLLS UT I KORTET. Koden låg tidigare i högerkanten
+            // på evenemangssidan, medan disken hade en egen dialog och den oanmälde ingenting alls
+            // — tre former för samma handling. Nu samma dialog på alla tre ställena, med tävlingens
+            // ord: "Hantera betalning", visa koden, maila koden.
+            return '<div class="border rounded p-2 mb-2">'
+                 + '<div class="d-flex justify-content-between align-items-center mb-2">'
+                 + '<span class="fw-semibold">Att betala</span>'
+                 + `<span class="fs-5 fw-semibold">${kr(p.total - p.confirmedPaid)}</span></div>`
+                 + '<button type="button" class="btn btn-primary w-100" id="ces-pay">'
+                 + '<i class="bi bi-wallet2 me-1"></i>Betala</button>'
+                 + '</div>';
         }
 
         function render(d) {
@@ -583,70 +590,42 @@
                 act(cancelBtn, 'Cancel', { eventId });
             });
 
-            // ── Betalning ────────────────────────────────────────────────────────────────────
-            // ⚠️ EN funktion, två ingångar. Första versionen bytte ut länken mot en knapp och
-            // klickade den — men lyssnaren satt på det GAMLA elementet, så "visa koden igen" gjorde
-            // ingenting alls. En delad funktion kan inte gå i den fällan.
-            const startPayment = async (payBtn, box) => {
-                payBtn.disabled = true;
-                payBtn.innerHTML = 'Hämtar…';
-                const r = await post('StartPayment', { eventId });
-                if (!r.success) {
-                    payBtn.disabled = false;
-                    payBtn.innerHTML = 'Betala med Swish';
-                    // ⚠️ Vägras betalningen för att klubbens liggare inte är uppsatt är det INTE
-                    // medlemmens fel och inte något hen kan åtgärda — servern säger vad som fattas,
-                    // så meddelandet visas som det är i stället för ett allmänt "gick inte".
-                    alert(r.message || 'Betalningen kunde inte startas.');
-                    return;
-                }
-                // ⚠️⚠️ QR:EN GENERERAS PÅ SERVERN ur betalningens egen rad. En bild byggd av
-                // nummer och belopp i klienten hade gått att ändra i webbläsaren, och pengarna
-                // hamnat någon annanstans utan att något sa ifrån.
-                //
-                // ⚠️ Och det är en SWISH-QR (C-formatet), inte en djuplänk. De två payloaderna är
-                // olika; appen svarar "Felaktig länk" om man kodar djuplänken i en QR.
-                const qrSrc = '/umbraco/surface/ClubEvent/GetPaymentQr'
-                            + `?eventId=${eventId}&paymentId=${r.paymentId}`;
-                box.innerHTML =
-                    '<div class="text-center">'
-                  + `<img src="${qrSrc}" alt="Swish-QR" class="img-fluid" style="max-width:200px;">`
-                  + `<div class="small mt-2">Swish <strong>${esc(r.swishNumber)}</strong></div>`
-                  + `<div class="small">Belopp <strong>${kr(r.amount)}</strong></div>`
-                  + `<div class="small text-muted">Meddelande: ${esc(r.reference)}</div>`
-                  // Betalar man PÅ telefonen är QR:en oanvändbar — då öppnar djuplänken appen
-                  // direkt. Egen payload, se servern.
-                  + (r.appUrl
-                        ? `<a href="${esc(r.appUrl)}" class="btn btn-sm btn-outline-primary w-100 mt-2 d-md-none">`
-                          + 'Öppna Swish-appen</a>'
-                        : '')
-                  // ⚠️ Texten säger rakt ut att knappen inte är ett kvitto. Vi har ingen Swish-API,
-                  // så tryckningen är ett PÅSTÅENDE som arrangören sedan stämmer av.
-                  + '<div class="form-text mt-2">Har du swishat? Tryck nedan, så vet arrangören '
-                  + 'att betalningen är på väg. Kvittot kommer när hen stämt av.</div>'
-                  + `<button type="button" class="btn btn-outline-success w-100 mt-2" id="ces-paid" `
-                  + `data-payment="${r.paymentId}">Jag har betalat</button>`
-                  + '</div>';
-                box.classList.remove('d-none');
-                payBtn.classList.add('d-none');
-
-                const paidBtn = document.getElementById('ces-paid');
-                paidBtn.addEventListener('click', () => act(paidBtn, 'ClaimPayment',
-                    { eventId, paymentId: parseInt(paidBtn.dataset.payment, 10) }));
+            // ── Betalning ──────────────────────────────────────────────────
+            // ⚠⚠ SJÄLVA FLÖDET BOR I _EventPaymentModal och delas med deltagarsidan. Den här
+            // partialen ägde tidigare en egen kopia — koden, djuplänken, "jag har betalat" — och
+            // disken en tredje. Tre kopior av samma handling är tre chanser att glida isär.
+            //
+            // ⚠️ TVÅ INGÅNGAR, EN funktion: knappen första gången och "visa koden igen" för den
+            // som tappat bort QR:en. En andra kodväg här är precis vad som en gång gjorde att
+            // "visa koden igen" inte gjorde någonting.
+            // ⚠️ Läser payloaden som render() FICK, inte ett eget tillstand. Ett andra stalle
+            // att halla samma data pa ar ett andra stalle att glomma uppdatera.
+            const openPay = () => {
+                const p = d.party || {};
+                const pay = d.payment || {};
+                window.hpskEventPayOpen({
+                    eventId,
+                    payerMemberId: 0,              // 0 = jag betalar för mig själv
+                    // Medlemmens eget kort - hen vet vem hen ar; rubriken ska saga VAD, inte VEM.
+                    payerName: 'Din anmälan',
+                    people: p.people,
+                    expected: p.total,
+                    claimed: p.claimedPaid,
+                    paid: p.confirmedPaid,
+                    // ⚠️ Medlemmen får ALDRIG registrera en mottagen betalning — det är
+                    // arrangörens iakttagelse, och en betalare som kunde sätta "mottaget" hade
+                    // gjort avprickningslistan meningslös.
+                    canManage: false,
+                    swishAvailable: !!pay.swishAvailable,
+                    onDone: () => load(),
+                });
             };
 
-            // Två ingångar till samma funktion: knappen första gången, och "visa koden igen" för
-            // den som tappat bort QR:en. StartPayment är idempotent, så den andra vägen ger SAMMA
-            // betalning och inte en ny skuld.
             const payBtn = document.getElementById('ces-pay');
-            const payBox = document.getElementById('ces-pay-box');
-            if (payBtn && payBox) payBtn.addEventListener('click', () => startPayment(payBtn, payBox));
+            if (payBtn) payBtn.addEventListener('click', openPay);
 
             const payAgain = document.getElementById('ces-pay-again');
-            if (payAgain) payAgain.addEventListener('click', e => {
-                e.preventDefault();
-                startPayment(payAgain, payAgain.closest('.alert'));
-            });
+            if (payAgain) payAgain.addEventListener('click', e => { e.preventDefault(); openPay(); });
 
             // ── Gäster ───────────────────────────────────────────────────────────────────────
             const guestOpen = document.getElementById('ces-guest-open');

@@ -43,6 +43,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Ledger.LedgerPaymentService _payments;
         private readonly HpskSite.Services.Ledger.LedgerIssuerResolver _issuers;
         private readonly HpskSite.Services.Ledger.LedgerPostingService _posting;
+        private readonly EmailService _emailService;
 
         public ClubEventController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -63,7 +64,8 @@ namespace HpskSite.Controllers
             AdminAuthorizationService auth,
             HpskSite.Services.Ledger.LedgerPaymentService payments,
             HpskSite.Services.Ledger.LedgerIssuerResolver issuers,
-            HpskSite.Services.Ledger.LedgerPostingService posting)
+            HpskSite.Services.Ledger.LedgerPostingService posting,
+            EmailService emailService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _auth = auth;
@@ -80,6 +82,7 @@ namespace HpskSite.Controllers
             _payments = payments;
             _issuers = issuers;
             _posting = posting;
+            _emailService = emailService;
         }
 
         /// <summary>
@@ -743,6 +746,8 @@ namespace HpskSite.Controllers
                     // kräver ett val. Att gissa hade satt ett belopp ingen pekat på, och det är
                     // MEDLEMMEN som faktureras.
                     prices = ctx.Prices.Rows,
+                    // Behovs for att veta om en Swish-kod alls kan visas.
+                    canTakeSwish = ctx.CanTakeSwish,
                     ownerName = ctx.OwnerName
                 },
                 counts = new
@@ -1119,10 +1124,30 @@ namespace HpskSite.Controllers
                     message = "Swish-numret hos arrangören ser inte giltigt ut — kontakta klubben.",
                 });
 
+            // ⚠⚠ BETALAREN KAN VARA NÅGON ANNAN ÄN DEN INLOGGADE. En som dyker upp oanmäld står
+            // vid disken med sin telefon; funktionären behöver kunna ta fram koden åt hen. Utan
+            // det fanns ingen väg alls att ta betalt av den som inte anmält sig i förväg.
+            // Att peka ut en ANNAN betalare kräver CanManageAsync — annars kunde vem som helst
+            // lägga en skuld på en främling.
+            var payer = me;
+            var asked = request?.MemberId ?? 0;
+            if (asked > 0 && asked != me)
+            {
+                if (!await _participation.CanManageAsync(ctx, me))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+                payer = asked;
+            }
+
             var roster = await _participation.BuildRosterAsync(ctx);
-            var party = BuildPartyWithPayments(roster, me, ctx.EventId);
+            var party = BuildPartyWithPayments(roster, payer, ctx.EventId);
             if (party.Self == null)
-                return Json(new { success = false, message = "Du är inte anmäld till evenemanget." });
+                return Json(new
+                {
+                    success = false,
+                    message = payer == me
+                        ? "Du är inte anmäld till evenemanget."
+                        : "Personen är inte anmäld till evenemanget.",
+                });
             if (party.RemainingToRequest <= 0)
                 return Json(new { success = false, message = "Det finns inget kvar att betala." });
 
@@ -1144,7 +1169,7 @@ namespace HpskSite.Controllers
             // Mina öppna begäranden: varken påstådda, bekräftade eller makulerade.
             var open = _payments
                 .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
-                .Where(p => p.PayerMemberId == me
+                .Where(p => p.PayerMemberId == payer
                             && p.VoidedUtc is null && p.ConfirmedUtc is null && p.ClaimedUtc is null)
                 .ToList();
 
@@ -1164,15 +1189,15 @@ namespace HpskSite.Controllers
             if (existing != null) paymentId = existing.Id;
             else
             {
-                var member = _memberService.GetById(me);
+                var member = _memberService.GetById(payer);
                 var id = _payments.Request(new HpskSite.Models.Ledger.LedgerPayment
                 {
                     IssuerType = issuer.Value.Type,
                     IssuerId = issuer.Value.Id,
                     SourceType = HpskSite.Models.Ledger.LedgerSourceType.Event,
                     SourceId = ctx.EventId,
-                    PayerMemberId = me,
-                    PayerName = member?.Name ?? $"Medlem {me}",
+                    PayerMemberId = payer,
+                    PayerName = member?.Name ?? $"Medlem {payer}",
                     Amount = party.RemainingToRequest,
                     Method = HpskSite.Models.Ledger.LedgerPaymentMethod.Swish,
                 });
@@ -1403,6 +1428,69 @@ namespace HpskSite.Controllers
                 ctx, request?.ParticipantId ?? 0, request?.PriceId);
 
             return Json(new { success = ok, message = msg ?? "Priset är satt." });
+        }
+
+        /// <summary>
+        /// Mailar Swish-uppgifterna till betalaren.
+        /// POST /umbraco/surface/ClubEvent/EmailPaymentCode
+        ///
+        /// <para><b>⚠️ BETALAREN ELLER EN FUNKTIONÄR.</b> Medlemmen kan mejla sig själv koden —
+        /// det är hela poängen när hen står vid disken med dålig täckning — och funktionären kan
+        /// mejla den åt någon annan. Mejlet går ALLTID till betalarens egen adress; att kunna
+        /// skicka det någon annanstans vore en väg att läcka vem som är anmäld och till vad.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> EmailPaymentCode([FromBody] PaymentRequest request)
+        {
+            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+            if (!ctx.CanTakeSwish)
+                return Json(new { success = false, message = "Evenemanget tar inte emot Swish-betalningar." });
+
+            int me = await CurrentMemberIdAsync();
+            var row = _payments
+                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .FirstOrDefault(p => p.Id == (request?.PaymentId ?? 0));
+            if (row == null) return Json(new { success = false, message = "Betalningen hittades inte." });
+
+            if (row.PayerMemberId != me && !await _participation.CanManageAsync(ctx, me))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            var payer = _memberService.GetById(row.PayerMemberId ?? 0);
+            if (payer == null || string.IsNullOrWhiteSpace(payer.Email))
+                return Json(new { success = false, message = "Betalaren saknar e-postadress." });
+
+            // Arrangörens svarsadress: evenemangets egen kontakt först, annars ägarnodens.
+            string? organiserEmail = null;
+            try
+            {
+                var node = UmbracoContext.Content?.GetById(ctx.EventId);
+                organiserEmail = node?.Value<string>("contactEmail");
+                if (string.IsNullOrWhiteSpace(organiserEmail))
+                    organiserEmail = UmbracoContext.Content?.GetById(ctx.OwnerId)?.Value<string>("contactEmail");
+            }
+            catch (Exception ex)
+            {
+                // ⚠️ En saknad kontaktadress får inte stoppa mejlet — MailReplyTo.FromClub faller
+                // tillbaka själv, och koden är mer värd än en perfekt svarsadress.
+                _logger.LogWarning(ex, "Kunde inte läsa arrangörens e-post för evenemang {EventId}.", ctx.EventId);
+            }
+
+            var sent = await _emailService.SendEventSwishCodeAsync(
+                payer.Email, payer.Name ?? "", ctx.EventName, ctx.OwnerName,
+                ctx.SwishNumber, row.Amount, PaymentReference(ctx, row.Id), organiserEmail);
+
+            // ⚠⚠ RAPPORTERA VAD SOM FAKTISKT HÄNDE. Ett "skickat" som bara betyder att vi bad om
+            // det är den lögn som redan tvingat fram en rättelse i EmailService — i dev saknas SMTP,
+            // och då ska skärmen säga det i stället för att påstå att medlemmen har koden.
+            return Json(new
+            {
+                success = sent,
+                message = sent
+                    ? $"Swish-uppgifterna är skickade till {payer.Email}."
+                    : "Mejlet kunde inte skickas. Visa koden på skärmen i stället.",
+            });
         }
 
         /// <summary>

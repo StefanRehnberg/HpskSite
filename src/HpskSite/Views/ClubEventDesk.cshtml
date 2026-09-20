@@ -185,83 +185,10 @@ else
         <div class="small text-muted mt-2" id="deskFoot"></div>
     </div>
 
-    @* Sätt pris på en enskild rad. ⚠️ PER RAD, inte per sällskap — en gäst bär sitt eget
-       pris, och barnet betalar inte vuxenpriset för att värden gör det. *@
-    <div class="modal fade" id="deskPriceModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered modal-sm">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-tag me-2"></i>Pris</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="fw-semibold mb-2" id="priceName"></div>
-                    <select class="form-select" id="priceChoice"></select>
-                    <div class="form-text">
-                        Beloppet snapshottas på raden. Har personen redan betalat bör du stämma av
-                        i stället för att skriva om skulden.
-                    </div>
-                    <div class="alert alert-danger mt-3 py-2" id="priceWarn" style="display:none"></div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                    <button type="button" class="btn btn-primary" onclick="deskPriceSave(this)">Spara</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    @* Hantera betalning — samma namn och samma form som på tävling. *@
-    <div class="modal fade" id="deskPayModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header bg-primary text-white">
-                    <h5 class="modal-title"><i class="bi bi-wallet2 me-2"></i>Hantera betalning</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="alert alert-light">
-                        <div class="fw-semibold" id="payName"></div>
-                        <div class="small text-muted" id="payPeople"></div>
-                        <hr class="my-2">
-                        <div class="d-flex justify-content-between"><span>Förväntat</span><span id="payExpected"></span></div>
-                        <div class="d-flex justify-content-between" id="payClaimedRow">
-                            <span>Medlemmen säger sig ha betalat</span><span id="payClaimed"></span>
-                        </div>
-                        <div class="d-flex justify-content-between"><span>Mottaget hittills</span><span id="payPaid"></span></div>
-                    </div>
-
-                    @* ⚠⚠ BETALSÄTTET ÄR INTE KOSMETIK. LedgerPaymentMethod.RoleFor mappar det till
-                       en kontoroll — kontanter och Swish landar på olika konton. Inget förval:
-                       ett antaget betalsätt bokför pengarna på fel ställe. *@
-                    <label class="form-label" for="payMethod">Hur kom betalningen in?</label>
-                    <select class="form-select mb-3" id="payMethod">
-                        <option value="">Välj…</option>
-                        <option value="swish">Swish</option>
-                        <option value="kontant">Kontant</option>
-                        <option value="bankgiro">Bankgiro</option>
-                        <option value="kort">Kort</option>
-                        <option value="annat">Annat</option>
-                    </select>
-
-                    <label class="form-label" for="payAmount">Mottaget belopp (kr)</label>
-                    <input type="number" class="form-control" id="payAmount" min="0" step="1" inputmode="numeric">
-                    <div class="form-text">
-                        Stäm av mot bankappen. Kom det in ett annat belopp än det förväntade är det
-                        din iakttagelse som gäller — skriv in det som faktiskt kom.
-                    </div>
-
-                    <div class="alert alert-danger mt-3 py-2" id="payWarn" style="display:none"></div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                    <button type="button" class="btn btn-success" onclick="deskPaySave(this)">
-                        <i class="bi bi-check-circle me-1"></i>Registrera betalning
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
+    @* ⚠⚠ EN DELAD MODAL, inte en egen. Samma dialog som medlemmen möter på evenemangets
+       sida — skillnaden är en flagga (canManage), inte en andra implementation. Tre former för
+       samma handling var precis vad som gjorde betalningen svår att följa. *@
+    @await Html.PartialAsync("_EventPaymentModal")
 
     @* Lägg till deltagare — medlem eller gäst utan konto. *@
     <div class="modal fade" id="deskAddModal" tabindex="-1">
@@ -390,6 +317,15 @@ else
 
     // Betalningscellen. ⚠️ "Säger sig ha betalat" och "Mottaget" hålls isär — vi har ingen
     // Swish-API, så det första är ett PÅSTÅENDE och aldrig pengar.
+    // ⚠️ EN fraga, ETT svar: far den har raden ta betalt? Brickans hjalptext och
+    // menyposten laser samma predikat — skrivs det av pa tva stallen sager de forr eller
+    // senare olika saker om samma rad, och da ar hjalptexten en atervandsgrand.
+    function deskCanPay(r) {
+        if (r.cancelled || r.isGuest) return false;
+        // 'none' = evenemanget tar inte betalt alls. 'free' = den har raden ar gratis.
+        return r.paymentState !== 'none' && r.paymentState !== 'free';
+    }
+
     function payCell(r) {
         if (r.cancelled) return '<span class="text-muted">–</span>';
         if (r.isGuest) {
@@ -404,7 +340,8 @@ else
                 // oftast för att den skapades innan priset fanns. Att visa den som gratis är ett
                 // falskt påstående, och personen blir då aldrig debiterad utan att någon märker det.
                 return '<span class="badge bg-warning-subtle text-warning-emphasis" '
-                     + 'title="Raden saknar pris. Sätt det via Åtgärder.">'
+                     + 'title="Raden saknar pris. Ta betalt via Åtgärder → Hantera betalning — '
+                     + 'dialogen frågar hur mycket som kom in.">'
                      + '<i class=\'bi bi-exclamation-triangle me-1\'></i>Pris saknas</span>';
             case 'paid':
                 return `<span class="badge bg-success-subtle text-success-emphasis">Mottaget ${kr(r.partyPaid)}</span>`;
@@ -473,19 +410,10 @@ else
                             <i class="bi bi-sliders me-1"></i>Åtgärder
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
-                            ${(!r.cancelled && (state.event.prices || []).length) ? `
-                            <li><button class="dropdown-item" type="button" onclick="deskPriceOpen(${r.id})">
-                                <i class="bi bi-tag me-2 text-secondary"></i>${r.fee == null ? 'Sätt pris…' : 'Ändra pris…'}</button></li>` : ''}
-                            ${(!r.isGuest && r.paymentState !== 'free' && r.paymentState !== 'none'
-                               && r.paymentState !== 'paid' && !r.cancelled) ? `
-                            @* ⚠️ SAMMA NAMN SOM PÅ TÄVLING. Två ord för samma handling tvingar den som
-                               kan den ena ytan att lära sig den andra från början.
-                               ⚠⚠ VILLKORET ÄR SKULDEN, inte att det finns en betalningsrad. En
-                               deltagare som funktionären lagt till i disken har aldrig tryckt fram
-                               Swish-koden, alltså ingen rad — och då gick det inte att ta betalt av
-                               hen alls. Rapporterat 2026-09-19. *@
+                            ${deskCanPay(r) ? `
                             <li><button class="dropdown-item" type="button" onclick="deskPayOpen(${r.id})">
-                                <i class="bi bi-wallet2 me-2 text-success"></i>Hantera betalning</button></li>` : ''}
+                                <i class="bi bi-wallet2 me-2 text-primary"></i>Hantera betalning</button></li>
+                            <li><hr class="dropdown-divider"></li>` : ''}
                             <li><button class="dropdown-item" type="button" onclick="deskSetStatus(${r.id}, 'Present')">
                                 <i class="bi bi-check2 me-2 text-success"></i>Närvarande</button></li>
                             <li><button class="dropdown-item" type="button" onclick="deskSetStatus(${r.id}, 'Absent')">
@@ -523,112 +451,25 @@ else
         await deskLoad();
     };
 
-    let priceRow = null;
-
-    window.deskPriceOpen = function (rowId) {
-        const r = state.rows.find(x => x.id === rowId);
-        if (!r) return;
-        priceRow = r;
-        document.getElementById('priceName').textContent = r.name || '';
-        const prices = (state.event.prices || []);
-        document.getElementById('priceChoice').innerHTML =
-            prices.map(p => `<option value="${esc(p.id)}" ${p.id === r.feePriceId ? 'selected' : ''}>`
-                           + `${esc(p.label)} — ${kr(p.amount)}</option>`).join('');
-        document.getElementById('priceWarn').style.display = 'none';
-        new bootstrap.Modal(document.getElementById('deskPriceModal')).show();
-    };
-
-    window.deskPriceSave = async function (btn) {
-        if (!priceRow) return;
-        btn.disabled = true;
-        const d = await post('/umbraco/surface/ClubEvent/SetParticipantPrice', {
-            eventId: EVENT_ID, participantId: priceRow.id,
-            priceId: document.getElementById('priceChoice').value,
-        });
-        btn.disabled = false;
-        if (!d.success) {
-            document.getElementById('priceWarn').textContent = d.message || 'Kunde inte spara priset.';
-            document.getElementById('priceWarn').style.display = '';
-            return;
-        }
-        bootstrap.Modal.getInstance(document.getElementById('deskPriceModal')).hide();
-        await deskLoad();
-    };
-
-    // ⚠️ MODAL, INTE prompt(). En prompt kan inte visa vad som förväntas, vem som är med i
-    // sällskapet eller vad medlemmen redan påstått — och den blockerar hela fönstret. Tävlingens
-    // "Hantera betalning" är en modal av precis de skälen.
-    let payRow = null;
-
+    // ⚠️ Öppnar den DELADE dialogen. Själva betalningsflödet — koden, mejlet, registreringen
+    // — bor i _EventPaymentModal och delas med evenemangets egen sida.
     window.deskPayOpen = function (rowId) {
         const r = state.rows.find(x => x.id === rowId);
         if (!r) return;
-        payRow = r;
-
-        document.getElementById('payName').textContent = r.name || '';
-        document.getElementById('payPeople').textContent =
-            (r.partyPeople > 1) ? `${r.partyPeople} personer i sällskapet` : 'Betalar för sig själv';
-        document.getElementById('payExpected').textContent = kr(r.partyTotal || 0);
-
-        // ⚠️ PÅSTÅTT OCH MOTTAGET PÅ VAR SIN RAD. Vi har ingen Swish-API, så "jag har betalat"
-        // är allt vi vet — slås de ihop kan arrangören inte längre skilja den som betalat från
-        // den som sagt det, och då är listan inte längre en kontroll.
-        const claimed = Number(r.partyClaimed || 0);
-        document.getElementById('payClaimedRow').style.display = claimed > 0 ? '' : 'none';
-        document.getElementById('payClaimed').textContent = kr(claimed);
-        document.getElementById('payPaid').textContent = kr(r.partyPaid || 0);
-
-        // Förifyllt med det som äterstår, inte med hela skulden: en delbetalning ska inte
-        // behöva räknas i huvudet.
-        const remaining = Math.max(0, Number(r.partyTotal || 0) - Number(r.partyPaid || 0));
-        document.getElementById('payAmount').value = remaining || '';
-        document.getElementById('payWarn').style.display = 'none';
-
-        new bootstrap.Modal(document.getElementById('deskPayModal')).show();
-    };
-
-    window.deskPaySave = async function (btn) {
-        if (!payRow) return;
-        const amount = Number(String(document.getElementById('payAmount').value).replace(',', '.').trim());
-        if (!(amount > 0)) {
-            document.getElementById('payWarn').textContent = 'Ange ett belopp större än noll.';
-            document.getElementById('payWarn').style.display = '';
-            return;
-        }
-        const method = document.getElementById('payMethod').value;
-        if (!method) {
-            document.getElementById('payWarn').textContent = 'Välj hur betalningen kom in.';
-            document.getElementById('payWarn').style.display = '';
-            return;
-        }
-
-        btn.disabled = true;
-        const original = btn.innerHTML;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sparar…';
-
-        // ⚠️ EN väg in: RegisterPayment återanvänder en öppen rad och skapar bara när ingen
-        // finns. Att välja endpoint här efter om raden råkar finnas hade gett två kodvägar som
-        // kan glida isär — och den ena bara nåbar i hälften av fallen.
-        const d = await post('/umbraco/surface/ClubEvent/RegisterPayment', {
+        window.hpskEventPayOpen({
             eventId: EVENT_ID,
-            payerMemberId: payRow.memberId,
-            actualAmount: amount,
-            method,
+            payerMemberId: r.memberId,
+            payerName: r.name,
+            people: r.partyPeople,
+            expected: r.partyTotal,
+            claimed: r.partyClaimed,
+            paid: r.partyPaid,
+            // ⚠️ Funktionärens flagga. Den är ALLTID sann här — sidan är grindad på
+            // CanManageAsync — men skickas uttryckligen så modalen inte behöver gissa.
+            canManage: true,
+            swishAvailable: !!state.event.canTakeSwish,
+            onDone: () => deskLoad(),
         });
-        btn.disabled = false;
-        btn.innerHTML = original;
-
-        if (!d.success) {
-            document.getElementById('payWarn').textContent = d.message || 'Kunde inte registrera betalningen.';
-            document.getElementById('payWarn').style.display = '';
-            return;
-        }
-        bootstrap.Modal.getInstance(document.getElementById('deskPayModal')).hide();
-        // ⚠️ Kvittot står KVAR på sidan och säger vad som faktiskt hände. Svaret skiljer på
-        // bokförd och kvitterad — "bokförd" är osant för varje klubb som inte bokför hos oss.
-        const box = document.getElementById('deskWarnings');
-        box.innerHTML = `<div class="alert alert-success py-2"><i class="bi bi-check-circle me-2"></i>${esc(d.message || 'Betalningen är mottagen.')}</div>`;
-        await deskLoad();
     };
 
     // ── Lägg till ───────────────────────────────────────────────────────────────────────

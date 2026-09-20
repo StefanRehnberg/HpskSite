@@ -1431,6 +1431,46 @@ namespace HpskSite.Services
         /// på en kompletteringsbegäran aldrig nådde klubben. Är sajtägaren rätt mottagare skriver
         /// du <c>MailReplyTo.SiteAdmin</c> — uttryckligen.</para>
         /// </remarks>
+        /// <summary>
+        /// Skickar Swish-uppgifterna för ett evenemang till betalaren, med QR-koden som bilaga.
+        ///
+        /// <para><b>⚠️ SVARSADRESSEN ÄR ARRANGÖREN.</b> Mejlet går från klubben till medlemmen,
+        /// och ett svar ("jag har swishat", "beloppet stämmer inte") hör hemma hos den som tar
+        /// emot pengarna — inte hos sajtägaren.</para>
+        ///
+        /// <para><b>⚠️ QR-KODEN ÄR EN BILAGA, inte en länk.</b> En bild som hämtas från sajten
+        /// kräver att mottagaren är inloggad när hen öppnar mejlet, och de flesta läser det i
+        /// telefonen. Numret och beloppet står dessutom i KLARTEXT, så mejlet fungerar även när
+        /// bilagan blockeras.</para>
+        /// </summary>
+        public async Task<bool> SendEventSwishCodeAsync(
+            string toEmail, string toName, string eventName, string organiserName,
+            string swishNumber, decimal amount, string reference, string? organiserEmail)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail)) return false;
+
+            var subject = $"Betalning för {eventName}";
+            var body = $@"
+<p>Hej {System.Net.WebUtility.HtmlEncode(toName)},</p>
+<p>Här är uppgifterna för att betala din anmälan till
+   <strong>{System.Net.WebUtility.HtmlEncode(eventName)}</strong>.</p>
+<table cellpadding=""6"" style=""border-collapse:collapse"">
+  <tr><td><strong>Swish-nummer</strong></td><td>{System.Net.WebUtility.HtmlEncode(swishNumber)}</td></tr>
+  <tr><td><strong>Belopp</strong></td><td>{amount:0.00} kr</td></tr>
+  <tr><td><strong>Meddelande</strong></td><td>{System.Net.WebUtility.HtmlEncode(reference)}</td></tr>
+</table>
+<p>Skriv meddelandet exakt som det står — det är så {System.Net.WebUtility.HtmlEncode(organiserName)}
+   ser vilken anmälan betalningen gäller.</p>
+<p>Du kan också skanna QR-koden i bilagan med Swish-appen.</p>
+<p style=""color:#666;font-size:.9em"">
+  Öppna gärna sidan för evenemanget och tryck <em>Jag har betalat</em> när du swishat,
+  så vet arrangören att pengarna är på väg.</p>";
+
+            return await SendEmailAsync(
+                toEmail, subject, body,
+                MailReplyTo.FromClub(organiserName, organiserEmail));
+        }
+
         private async Task<bool> SendEmailAsync(string toEmail, string subject, string htmlBody,
             MailReplyTo replyTo, string? bccEmail = null)
         {

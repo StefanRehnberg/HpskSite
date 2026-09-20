@@ -1,0 +1,304 @@
+﻿@*
+    Betalningsdialog för ett klubb- eller kretsevenemang — EN modal, två ytor.
+
+    ⚠️⚠️ VARFÖR DEN FINNS. Betalningen låg i tre olika former: en Swish-ruta som fälldes ut i
+    högerkanten på evenemangssidan, en egen dialog på deltagarsidan, och ingenting alls för den
+    som kom oanmäld. Tre former för en handling tvingar den som lärt sig en av dem att lära om.
+    Den här följer tävlingens "Hantera betalning" — samma två lägen (val → QR), samma ord.
+
+    ⚠️ SAMMA MODAL FÖR MEDLEM OCH FUNKTIONÄR, men inte samma knappar. Medlemmen kan visa koden,
+    maila sig den och säga "jag har betalat". Funktionären kan dessutom REGISTRERA vad som kom
+    in — och göra allt detta åt någon annan, vilket är hela vägen in för den som dyker upp
+    oanmäld. Skillnaden är EN flagga, inte en andra dialog.
+
+    ⚠️⚠️ "JAG HAR BETALAT" OCH "MOTTAGET" ÄR OLIKA SAKER OCH FÅR ALDRIG SLÅS IHOP. Vi har ingen
+    Swish-API och ingen callback, så betalarens ord är allt vi vet tills en människa sett pengarna.
+    Slås de ihop kan arrangörens lista inte längre skilja den som betalat från den som sagt det,
+    och då är listan inte en kontroll längre.
+
+    Anropas:  hpskEventPayOpen({ eventId, payerMemberId, payerName, expected, claimed, paid,
+                                 canManage, swishAvailable, onDone })
+    payerMemberId 0 = den inloggade betalar för sig själv.
+*@
+@{
+    var _payModalRendered = Context.Items.ContainsKey("_hpskEventPaymentModal");
+    if (!_payModalRendered) { Context.Items["_hpskEventPaymentModal"] = true; }
+}
+@if (!_payModalRendered)
+{
+    <div class="modal fade" id="hpskEventPayModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-wallet2 me-2"></i>Hantera betalning</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+
+                    @* Huvudremsan: vem, hur mycket, vilket läge. Samma som tävlingens. *@
+                    <div class="alert alert-light mb-3">
+                        <div class="d-flex justify-content-between align-items-baseline">
+                            <strong id="hepName"></strong>
+                            <span id="hepStatus"></span>
+                        </div>
+                        <div class="small text-muted" id="hepPeople"></div>
+                        <hr class="my-2">
+                        <div class="d-flex justify-content-between"><span>Avgift</span><strong id="hepExpected"></strong></div>
+                        <div class="d-flex justify-content-between" id="hepClaimedRow">
+                            <span>Säger sig ha betalat</span><span id="hepClaimed"></span>
+                        </div>
+                        <div class="d-flex justify-content-between"><span>Mottaget</span><span id="hepPaid"></span></div>
+                    </div>
+
+                    @* ── Läge A: vad vill du göra ────────────────────────────────────────── *@
+                    <div id="hepActions">
+                        <div class="d-grid gap-2">
+                            <button type="button" class="btn btn-primary btn-lg" id="hepShowQrBtn" onclick="hepShowQr()">
+                                <i class="bi bi-qr-code me-1"></i>Visa Swish-kod
+                                <div class="small fw-normal" id="hepShowQrSub">Skanna koden med Swish-appen</div>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="hepMailBtn" onclick="hepMail(this)">
+                                <i class="bi bi-envelope me-1"></i>Maila Swish-koden
+                                <div class="small fw-normal">Numret, beloppet och meddelandet i ett mejl</div>
+                            </button>
+                            <button type="button" class="btn btn-success btn-lg" id="hepRegisterBtn" onclick="hepShowRegister()">
+                                <i class="bi bi-check-circle me-1"></i>Registrera betalning
+                                <div class="small fw-normal">Swish, kontant, bankgiro eller annat</div>
+                            </button>
+                        </div>
+                        <div class="alert alert-warning mt-3 py-2 mb-0" id="hepNoSwish" style="display:none">
+                            <i class="bi bi-exclamation-triangle me-1"></i>
+                            Evenemanget saknar Swish-nummer — kontakta arrangören för betalning.
+                        </div>
+                    </div>
+
+                    @* ── Läge B: koden ───────────────────────────────────────────────────── *@
+                    <div id="hepQr" style="display:none" class="text-center">
+                        <img id="hepQrImg" alt="Swish-QR" class="img-fluid mb-2" style="max-width:220px">
+                        <div>Swish <strong id="hepSwishNumber"></strong></div>
+                        <div class="small text-muted mb-2">
+                            Belopp <span id="hepQrAmount"></span> · Meddelande <span id="hepQrRef" class="font-monospace"></span>
+                        </div>
+                        @* Djuplänken visas bara på mobil — på en laptop leder den ingenstans. *@
+                        <a href="#" class="btn btn-primary d-none" id="hepDeepLink">
+                            <i class="bi bi-box-arrow-up-right me-1"></i>Öppna Swish-appen
+                        </a>
+                        <div class="form-text mt-2" id="hepClaimHint">
+                            Har du swishat? Tryck nedan, så vet arrangören att pengarna är på väg.
+                            <strong>Det är inget kvitto</strong> — arrangören stämmer av mot bankappen.
+                        </div>
+                        <button type="button" class="btn btn-outline-success mt-2" id="hepClaimBtn" onclick="hepClaim(this)">
+                            <i class="bi bi-hand-thumbs-up me-1"></i>Jag har betalat
+                        </button>
+                    </div>
+
+                    @* ── Läge C: registrera det som kom in ───────────────────────────────── *@
+                    <div id="hepRegister" style="display:none">
+                        @* ⚠️⚠️ BETALSÄTTET ÄR INTE KOSMETIK. LedgerPaymentMethod.RoleFor mappar det
+                           till en kontoroll — kontanter och Swish landar på olika konton. Inget
+                           förval: ett antaget betalsätt bokför pengarna på fel ställe. *@
+                        <label class="form-label" for="hepMethod">Hur kom betalningen in?</label>
+                        <select class="form-select mb-3" id="hepMethod">
+                            <option value="">Välj…</option>
+                            <option value="swish">Swish</option>
+                            <option value="kontant">Kontant</option>
+                            <option value="bankgiro">Bankgiro</option>
+                            <option value="kort">Kort</option>
+                            <option value="annat">Annat</option>
+                        </select>
+
+                        <label class="form-label" for="hepAmount">Hur mycket kom in? (kr)</label>
+                        <input type="number" class="form-control" id="hepAmount" min="0" step="1" inputmode="numeric">
+                        <div class="form-text">
+                            Stäm av mot bankappen. Kom det in ett annat belopp än det förväntade är
+                            det din iakttagelse som gäller — skriv in det som faktiskt kom.
+                        </div>
+                    </div>
+
+                    <div class="alert alert-danger mt-3 py-2" id="hepWarn" style="display:none"></div>
+                    <div class="alert alert-success mt-3 py-2" id="hepOk" style="display:none"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-link btn-sm text-muted" id="hepBackBtn"
+                            style="display:none" onclick="hepShowActions()">
+                        <i class="bi bi-arrow-left me-1"></i>Tillbaka
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+                    <button type="button" class="btn btn-success" id="hepSaveBtn" style="display:none"
+                            onclick="hepSaveRegister(this)">
+                        <i class="bi bi-check-circle me-1"></i>Registrera
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        if (window.hpskEventPayOpen) return;
+
+        let cfg = null;
+        let paymentId = 0;
+
+        const el = id => document.getElementById(id);
+        const kr = n => (n === null || n === undefined) ? '–' : Number(n).toLocaleString('sv-SE') + ' kr';
+        const esc = s => String(s ?? '').replace(/[&<>"']/g,
+            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+
+        function token() {
+            const t = document.querySelector('input[name="__RequestVerificationToken"]');
+            return t ? t.value : '';
+        }
+
+        async function post(url, body) {
+            const r = await fetch(url, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+                body: JSON.stringify(body || {}),
+            });
+            const t = await r.text();
+            try { return JSON.parse(t); } catch { return { success: false, message: `Oväntat svar (${r.status}).` }; }
+        }
+
+        function say(warn, okMsg) {
+            el('hepWarn').style.display = warn ? '' : 'none';
+            if (warn) el('hepWarn').textContent = warn;
+            el('hepOk').style.display = okMsg ? '' : 'none';
+            if (okMsg) el('hepOk').textContent = okMsg;
+        }
+
+        window.hpskEventPayOpen = function (opts) {
+            cfg = Object.assign({ payerMemberId: 0, canManage: false, swishAvailable: true }, opts || {});
+            paymentId = 0;
+
+            el('hepName').textContent = cfg.payerName || '';
+            el('hepPeople').textContent = (cfg.people > 1) ? `${cfg.people} personer i sällskapet` : '';
+            el('hepExpected').textContent = kr(cfg.expected);
+            el('hepPaid').textContent = kr(cfg.paid || 0);
+            el('hepClaimedRow').style.display = (cfg.claimed > 0) ? '' : 'none';
+            el('hepClaimed').textContent = kr(cfg.claimed || 0);
+
+            const settled = Number(cfg.paid || 0) >= Number(cfg.expected || 0) && Number(cfg.expected || 0) > 0;
+            el('hepStatus').innerHTML = settled
+                ? '<span class="badge bg-success-subtle text-success-emphasis">Betalt</span>'
+                : (cfg.claimed > 0
+                    ? '<span class="badge bg-warning-subtle text-warning-emphasis">Säger sig ha betalat</span>'
+                    : '<span class="badge bg-danger-subtle text-danger-emphasis">Obetalt</span>');
+
+            // ⚠️ Funktionärens knapp är den ENDA skillnaden mellan de två ytorna.
+            el('hepRegisterBtn').style.display = cfg.canManage ? '' : 'none';
+            el('hepShowQrBtn').style.display = cfg.swishAvailable ? '' : 'none';
+            el('hepMailBtn').style.display = cfg.swishAvailable ? '' : 'none';
+            el('hepNoSwish').style.display = cfg.swishAvailable ? 'none' : '';
+
+            hepShowActions();
+            say(null, null);
+            new bootstrap.Modal(el('hpskEventPayModal')).show();
+        };
+
+        window.hepShowActions = function () {
+            el('hepActions').style.display = '';
+            el('hepQr').style.display = 'none';
+            el('hepRegister').style.display = 'none';
+            el('hepBackBtn').style.display = 'none';
+            el('hepSaveBtn').style.display = 'none';
+            say(null, null);
+        };
+
+        // ⚠️ KODEN HÄMTAS FRÅN SERVERN, aldrig ihopsatt i webbläsaren. En bild som klienten
+        // byggde av nummer och belopp gick att ändra, och pengarna hamnat någon annanstans.
+        window.hepShowQr = async function () {
+            say(null, null);
+            const d = await post('/umbraco/surface/ClubEvent/StartPayment',
+                                 { eventId: cfg.eventId, memberId: cfg.payerMemberId || 0 });
+            if (!d.success) { say(d.message || 'Kunde inte ta fram koden.'); return; }
+
+            paymentId = d.paymentId;
+            el('hepQrImg').src = `/umbraco/surface/ClubEvent/GetPaymentQr?eventId=${cfg.eventId}&paymentId=${d.paymentId}&t=${Date.now()}`;
+            el('hepSwishNumber').textContent = d.swishNumber || '';
+            el('hepQrAmount').textContent = kr(d.amount);
+            el('hepQrRef').textContent = d.reference || '';
+
+            const deep = el('hepDeepLink');
+            if (d.appUrl && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
+                deep.href = d.appUrl;
+                deep.classList.remove('d-none');
+            } else {
+                deep.classList.add('d-none');
+            }
+
+            // ⚠️ En funktionär som tar fram koden ÅT någon annan ska inte kunna säga
+            // "jag har betalat" i den personens namn — påståendet är betalarens.
+            const mine = !cfg.payerMemberId || cfg.payerMemberId === cfg.meMemberId;
+            el('hepClaimBtn').style.display = mine ? '' : 'none';
+            el('hepClaimHint').style.display = mine ? '' : 'none';
+
+            el('hepActions').style.display = 'none';
+            el('hepQr').style.display = '';
+            el('hepBackBtn').style.display = '';
+        };
+
+        window.hepMail = async function (btn) {
+            say(null, null);
+            btn.disabled = true;
+            // Koden måste finnas innan den kan mailas — samma rad som QR:en visar.
+            const start = await post('/umbraco/surface/ClubEvent/StartPayment',
+                                     { eventId: cfg.eventId, memberId: cfg.payerMemberId || 0 });
+            if (!start.success) { btn.disabled = false; say(start.message || 'Kunde inte ta fram koden.'); return; }
+
+            const d = await post('/umbraco/surface/ClubEvent/EmailPaymentCode',
+                                 { eventId: cfg.eventId, paymentId: start.paymentId });
+            btn.disabled = false;
+            // ⚠️ Svaret säger om mejlet FAKTISKT gick iväg. I dev saknas SMTP, och då ska det stå.
+            if (d.success) say(null, d.message); else say(d.message || 'Mejlet kunde inte skickas.');
+        };
+
+        window.hepClaim = async function (btn) {
+            btn.disabled = true;
+            const d = await post('/umbraco/surface/ClubEvent/ClaimPayment',
+                                 { eventId: cfg.eventId, paymentId });
+            btn.disabled = false;
+            if (!d.success) { say(d.message || 'Kunde inte registrera ditt svar.'); return; }
+            say(null, 'Tack — arrangören vet nu att du betalat. Det syns som mottaget när pengarna stämts av.');
+            if (cfg.onDone) cfg.onDone();
+        };
+
+        window.hepShowRegister = function () {
+            say(null, null);
+            // Förifyllt med det som återstår, inte hela avgiften: en delbetalning ska inte
+            // behöva räknas i huvudet.
+            const remaining = Math.max(0, Number(cfg.expected || 0) - Number(cfg.paid || 0));
+            el('hepAmount').value = remaining || '';
+            el('hepMethod').value = '';
+            el('hepActions').style.display = 'none';
+            el('hepRegister').style.display = '';
+            el('hepBackBtn').style.display = '';
+            el('hepSaveBtn').style.display = '';
+        };
+
+        window.hepSaveRegister = async function (btn) {
+            const method = el('hepMethod').value;
+            if (!method) { say('Välj hur betalningen kom in.'); return; }
+            const amount = Number(String(el('hepAmount').value).replace(',', '.').trim());
+            if (!(amount > 0)) { say('Ange ett belopp större än noll.'); return; }
+
+            btn.disabled = true;
+            const original = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sparar…';
+            const d = await post('/umbraco/surface/ClubEvent/RegisterPayment', {
+                eventId: cfg.eventId,
+                payerMemberId: cfg.payerMemberId || cfg.meMemberId || 0,
+                actualAmount: amount,
+                method,
+            });
+            btn.disabled = false;
+            btn.innerHTML = original;
+            if (!d.success) { say(d.message || 'Kunde inte registrera betalningen.'); return; }
+
+            bootstrap.Modal.getInstance(el('hpskEventPayModal')).hide();
+            if (cfg.onDone) cfg.onDone(d.message);
+        };
+    })();
+    </script>
+}
