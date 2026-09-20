@@ -46,6 +46,23 @@ namespace HpskSite.Models.PrizeGiving
         public bool MedalsComputed { get; set; }
 
         /// <summary>
+        /// Klartext om vilken INDELNING medaljerna i den visade listan räknades i. Tom sträng
+        /// utanför ett mästerskap.
+        ///
+        /// ⚠️ Beskriver ARTEFAKTEN, inte tävlingens nuvarande inställning — samma regel som
+        /// enheterna. Utan meningen går det inte att se om ett saknat damguld är arrangörens
+        /// val eller ett fel, och det är den frågan man ställer sig vid prisbordet.
+        /// </summary>
+        public string MedalGroupingText { get; set; } = "";
+
+        /// <summary>
+        /// Satt när tävlingens inställning INTE längre stämmer med den listan räknades i —
+        /// alltså när någon ändrat indelningen utan att räkna om. Då namnger sidan båda och
+        /// pekar på Uppdatera, i stället för att påstå en indelning listan inte har.
+        /// </summary>
+        public string? MedalGroupingStale { get; set; }
+
+        /// <summary>
         /// Enheten för resultatets huvudtal, som den skrivs intill siffran: "p" för
         /// precisionsfamiljen, "träff" för normalfält, "p" för poängfält och magnumfält.
         ///

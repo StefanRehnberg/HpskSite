@@ -2666,8 +2666,22 @@ namespace HpskSite.Controllers
                 // en FlexibleDropdown kan ha lagrat omfattningen som en JSON-array, och
                 // ChampionshipCategory.Normalize skalar av den.
                 var scopeForMedals = competition?.GetValue<string>("competitionScope") ?? "";
-                var medalGroups = BuildMedalGroups(results, scopeForMedals);
+                // Arrangörens val: en uppsättning medaljer per vapengrupp, eller delade
+                // mästerskapsklasser? Se MedalGrouping — nivåspärren ligger där.
+                var perWeaponGroup = MedalGrouping.PerWeaponGroup(competition);
+                var medalGroups = BuildMedalGroups(results, scopeForMedals, perWeaponGroup);
                 var isChampionship = ChampionshipCategory.IsChampionship(scopeForMedals);
+
+                // Tillståndet ytan behöver för att kunna VISA och ÄNDRA indelningen.
+                // `propertyExists` skiljer "arrangören har valt delad" från "egenskapen finns
+                // inte" — utan den skillnaden ser en låst kryssruta ut som ett val.
+                var medalGrouping = new
+                {
+                    perWeaponGroup,
+                    canChoose = MedalGrouping.CanChoose(scopeForMedals),
+                    propertyExists = competition?.HasProperty(MedalGrouping.PropertyAlias) ?? false,
+                    description = MedalGrouping.Describe(perWeaponGroup)
+                };
 
                 // Fallback to cached result data if DB is empty
                 if (!results.Any())
@@ -2713,19 +2727,19 @@ namespace HpskSite.Controllers
                             var analysis = svc.Analyze(syntheticResults, compTypeId);
                             return Json(new { success = true, analysis.Suggestions, analysis.Classes,
                                               applied = appliedMerges, hasResultList,
-                                              medalGroups, isChampionship });
+                                              medalGroups, isChampionship, medalGrouping });
                         }
                     }
                     return Json(new { success = true, suggestions = Array.Empty<object>(), classes = Array.Empty<object>(),
                                       applied = appliedMerges, hasResultList,
-                                      medalGroups, isChampionship });
+                                      medalGroups, isChampionship, medalGrouping });
                 }
 
                 var service = new ClassMergingService();
                 var result = service.Analyze(results, compTypeId);
                 return Json(new { success = true, result.Suggestions, result.Classes,
                                   applied = appliedMerges, hasResultList,
-                                  medalGroups, isChampionship });
+                                  medalGroups, isChampionship, medalGrouping });
             }
             catch (Exception ex)
             {
@@ -2763,12 +2777,13 @@ namespace HpskSite.Controllers
         /// är ett mästerskap — då delas inga mästerskapsmedaljer ut alls och ytan ska inte
         /// påstå något om medaljer.
         /// </summary>
-        private List<object> BuildMedalGroups(List<PrecisionResultEntry> results, string? competitionScope)
+        private List<object> BuildMedalGroups(
+            List<PrecisionResultEntry> results, string? competitionScope, bool medalsPerWeaponGroup)
         {
             var groups = new List<object>();
             if (!ChampionshipCategory.IsChampionship(competitionScope)) return groups;
 
-            var splitC = ChampionshipCategory.SplitsGroupC(competitionScope);
+            var splitC = ChampionshipCategory.SplitsGroupC(competitionScope, medalsPerWeaponGroup);
 
             // Deltagare = distinkta skyttar i kategorin. En skytt kan inte starta i två klasser
             // inom samma vapengrupp i precision (F.2.2), så distinkta medlemmar är rätt mått.
@@ -3664,6 +3679,91 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Arrangörens medaljindelning: EN uppsättning per vapengrupp, eller delade
+        /// mästerskapsklasser. Se <see cref="MedalGrouping"/> för regeln och varför valet finns.
+        ///
+        /// ⚠️ SPARAR OCH RÄKNAR OM I SAMMA HANDLING. Medaljörerna ligger i resultatartefakten,
+        /// och prisutdelningen läser den — sparades bara inställningen skulle sidan visa den
+        /// gamla indelningen tills någon råkade klicka Uppdatera, alltså exakt den tystnad
+        /// artefaktens enda skrivväg finns för att förhindra. En misslyckad omräkning
+        /// rapporteras i svaret i stället för att sväljas.
+        ///
+        /// ⚠️ EGEN SMAL ENDPOINT, inte ett fält i tävlingsredigeringen. Samma skäl som
+        /// SetStartPreference: den stora sparvägen skriver hela fältpåsen och rör då fler
+        /// egenskaper än den man ville ändra. Valet ställs dessutom i praktiken när man ser
+        /// medaljlistan, inte när tävlingen skapas — vid skapandet vet ingen hur många som
+        /// dyker upp i varje klass, vilket är precis det beslutet hänger på.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetMedalGrouping([FromBody] SetMedalGroupingRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0)
+                    return Json(new { success = false, message = "Ogiltig begäran: tävlings-ID saknas." });
+
+                if (!await CanManageCompetitionResults(request.CompetitionId))
+                    return Json(new { success = false, message = "Du har inte behörighet att hantera resultat för denna tävling." });
+
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null)
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                // ⚠️ SetValue på en saknad egenskap är en TYST no-op. Vägra och namnge den —
+                // en kryssruta som rapporterar lyckat och är borta vid nästa laddning är
+                // värre än en som säger vad som fattas.
+                if (!competition.HasProperty(MedalGrouping.PropertyAlias))
+                {
+                    return Json(new
+                    {
+                        success = false,
+                        message = $"Egenskapen {MedalGrouping.PropertyAlias} saknas på dokumenttypen "
+                                + "competition. Lägg till den i Umbraco backoffice (True/False)."
+                    });
+                }
+
+                var scope = competition.GetValue<string>("competitionScope");
+                if (!MedalGrouping.CanChoose(scope))
+                {
+                    return Json(new
+                    {
+                        success = false,
+                        message = "Indelningen går bara att välja vid klubb- och kretsmästerskap. "
+                                + "Vid landsdels- och svenskt mästerskap är de fem C-mästerskapen "
+                                + "(öppen, Dam, Vet Y, Vet Ä, Junior) vad förbundet delar ut."
+                    });
+                }
+
+                competition.SetValue(MedalGrouping.PropertyAlias, request.PerWeaponGroup);
+                _contentService.Save(competition);
+                // Publicera bara en redan publicerad tävling — att publicera ett utkast som
+                // sidoeffekt av en medaljinställning skulle göra en opublicerad tävling publik.
+                if (competition.Published) _contentService.Publish(competition, new[] { "*" }, -1);
+
+                var refreshed = await RefreshResultArtifactAsync(
+                    request.CompetitionId, "medaljindelningen ändrad");
+
+                return Json(new
+                {
+                    success = true,
+                    perWeaponGroup = request.PerWeaponGroup,
+                    resultsRefreshed = refreshed,
+                    message = refreshed
+                        ? null
+                        : "Inställningen sparades, men resultatlistan kunde inte räknas om "
+                          + "automatiskt. Klicka Uppdatera."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in SetMedalGrouping for competition {CompetitionId}",
+                    request?.CompetitionId);
+                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
         private async Task<bool> CanManageCompetitionResults(int competitionId)
         {
             if (await _adminAuthorizationService.IsCurrentUserAdminAsync()) return true;
@@ -4055,6 +4155,9 @@ namespace HpskSite.Controllers
             // after the grundomgång are not tied for a medal; they simply both go through
             // to the final, which is what separates them.
             var competitionScope = competition?.GetValue<string>("competitionScope") ?? "";
+            // Arrangörens val: EN uppsättning medaljer per vapengrupp, eller delade
+            // mästerskapsklasser? Nivåspärren (bara klubb och krets) ligger i MedalGrouping.
+            var medalsPerWeaponGroup = MedalGrouping.PerWeaponGroup(competition);
             var medalCategoryTies = new List<PrecisionMedalCategoryTies>();
             var medalAwards = new List<PrecisionMedalCategoryAwards>();
             var medalAwardsComputed = false;
@@ -4139,7 +4242,7 @@ namespace HpskSite.Controllers
                                 .ToList()
                             : new List<PrecisionShooterResult>();
 
-                    var splitC = ChampionshipCategory.SplitsGroupC(competitionScope);
+                    var splitC = ChampionshipCategory.SplitsGroupC(competitionScope, medalsPerWeaponGroup);
                     foreach (var cat in contenders
                                  .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))
                                  .Where(gr => !string.IsNullOrWhiteSpace(gr.Key)))
@@ -4279,7 +4382,7 @@ namespace HpskSite.Controllers
                 //     aldrig få medalj).
                 if (useMedalCategories)
                 {
-                    var splitCForAwards = ChampionshipCategory.SplitsGroupC(competitionScope);
+                    var splitCForAwards = ChampionshipCategory.SplitsGroupC(competitionScope, medalsPerWeaponGroup);
                     var participantsByCategory = classGroups
                         .SelectMany(cg => cg.Shooters)
                         .GroupBy(sh => ChampionshipCategory.For(sh.ShootingClass, splitCForAwards))
@@ -4567,6 +4670,7 @@ namespace HpskSite.Controllers
                 MedalCategoryTies = medalCategoryTies,
                 MedalAwards = medalAwards,
                 MedalAwardsComputed = medalAwardsComputed,
+                MedalsPerWeaponGroup = medalsPerWeaponGroup,
                 ParticipantCount = classGroups
                     .SelectMany(g => g.Shooters)
                     .Select(sh => sh.MemberId)
@@ -4975,6 +5079,16 @@ namespace HpskSite.Controllers
         public int MemberId { get; set; }
         public string ShootingClass { get; set; } = "";
         public int Round { get; set; }
+    }
+
+    /// <summary>
+    /// Arrangörens medaljindelning. <c>PerWeaponGroup = true</c> → EN uppsättning medaljer per
+    /// vapengrupp; falskt → delade mästerskapsklasser. Se <c>MedalGrouping</c>.
+    /// </summary>
+    public class SetMedalGroupingRequest
+    {
+        public int CompetitionId { get; set; }
+        public bool PerWeaponGroup { get; set; }
     }
 
     /// <summary>

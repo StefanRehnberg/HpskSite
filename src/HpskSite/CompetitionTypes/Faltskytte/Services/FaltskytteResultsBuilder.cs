@@ -282,7 +282,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             if (CompetitionScopeHelper.IsChampionshipScope(competitionScope))
             {
-                var splitC = ChampionshipCategory.SplitsGroupC(competitionScope);
+                // Arrangörens val (klubb/krets): en uppsättning medaljer per vapengrupp, eller
+                // delade mästerskapsklasser. Nivåspärren ligger i MedalGrouping.
+                var splitC = ChampionshipCategory.SplitsGroupC(
+                    competitionScope, MedalGrouping.PerWeaponGroup(competition));
                 categoryStandings = shooterResults
                     .GroupBy(s => ChampionshipCategory.For(s.ShootingClass, splitC))
                     .Where(g => !string.IsNullOrWhiteSpace(g.Key))

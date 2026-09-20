@@ -156,7 +156,26 @@
                 @Model.TotalUnresolved oavgjord@(Model.TotalUnresolved == 1 ? "" : "a") medaljplats@(Model.TotalUnresolved == 1 ? "" : "er")
             </span>
         }
+        @* Vilken INDELNING listan räknades i. Utan den meningen går det inte att se om ett
+           saknat damguld är arrangörens val eller ett fel — och det är frågan man ställer
+           sig vid prisbordet. Beskriver artefakten, inte tävlingens nuvarande inställning. *@
+        @if (!string.IsNullOrWhiteSpace(Model.MedalGroupingText))
+        {
+            <span class="text-secondary">
+                <i class="bi bi-diagram-3"></i> @Model.MedalGroupingText
+            </span>
+        }
     </div>
+
+    @* Inställningen och den visade listan har gått isär. Egen ruta, inte en rad bland
+       varningarna: den beskriver att SIFFRORNA på sidan är räknade i en annan indelning än
+       den tävlingen nu bär, alltså något som gäller allt nedanför. *@
+    @if (!string.IsNullOrWhiteSpace(Model.MedalGroupingStale))
+    {
+        <div class="alert alert-danger">
+            <i class="bi bi-exclamation-octagon-fill"></i> @Model.MedalGroupingStale
+        </div>
+    }
 
     @if (Model.Warnings.Count > 0)
     {

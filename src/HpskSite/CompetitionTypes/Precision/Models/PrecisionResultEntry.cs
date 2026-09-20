@@ -319,6 +319,19 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         /// </summary>
         public bool MedalAwardsComputed { get; set; }
 
+        /// <summary>
+        /// Vilken INDELNING medaljerna i den här artefakten räknades i: sant = en uppsättning
+        /// per vapengrupp, falskt = delade mästerskapsklasser (C, C Dam, C Vet Y, C Vet Ä,
+        /// C Jun). Se <c>MedalGrouping</c>.
+        ///
+        /// ⚠️ LIGGER PÅ ARTEFAKTEN, inte bara på tävlingen, av samma skäl som enheterna gör
+        /// det: talen står still medan inställningen kan ändras. Ändrar arrangören valet utan
+        /// att klicka Uppdatera beskriver den här flaggan fortfarande den lista som faktiskt
+        /// visas — och prisutdelningen kan då säga att de två gått isär i stället för att
+        /// påstå en indelning listan inte har.
+        /// </summary>
+        public bool MedalsPerWeaponGroup { get; set; }
+
         /// <summary>Antal distinkta skyttar med minst en serie i tävlingen. Underlaget för
         /// hederspristaket i SHB C.3.4.2 ("minst en fjärdedel av de i tävlingen deltagande").</summary>
         public int ParticipantCount { get; set; }

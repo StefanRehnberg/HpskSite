@@ -2960,6 +2960,7 @@ Navigate to **Members → Member Groups**:
 - **club**: add `activityFromRangeCheckIn` True/False property (optional, default false, label "Incheckning på banan räknas som aktivitet"). Låter QR-incheckningar på klubbens länkade banor räknas i aktivitetssammanställningen. **Av som standard, så en deploy ändrar ingen klubbs siffror.** Utan egenskapen är `SetValue` en tyst no-op — därför **vägrar** skrivvägen och namnger egenskapen, och switchen renderas låst med förklaringen intill. Added 2026-09-01.
 - **competition**: add `isAwardingHonoraryAward` True/False property (optional, default false, label "Hederspriser utgår"). Arrangören avgör om hederspriser utgår (SHB C.3.4.2); styr hedersprissektionen på **/prisutdelning**. Utan egenskapen degraderar läsvägen till "utgår inte" **och säger vilken egenskap som saknas** — en tyst utelämnad sektion är oskiljbar från att arrangören valt bort hederspriser. Kryssrutan finns i tävlingsguiden, redigeringsmodalen OCH Springskyttemodalen (samt i `CompetitionFieldCatalog`); redigeringsmodalen renderar den **avstängd** och namnger egenskapen när den saknas. Added 2026-09-08.
 - **competitionResult**: add `honoraryAwardConfig` Textarea property (optional, label "Hedersprisfördelning (JSON)"). Arrangörens egen fördelning av hederspriser — JSON, kategorinamn → antal. **⚠️ EGEN egenskap, skild från `resultData`:** fördelningen är ett manuellt beslut och måste överleva att resultatlistan räknas om (samma lärdom som `mergeConfig`). Utan egenskapen visas systemets förslag men **sparningen VÄGRAR och namnger egenskapen** i stället för att rapportera lyckat och vara borta vid nästa laddning. Added 2026-09-08.
+- **competition**: add `medalsPerWeaponGroup` True/False property (optional, default false, label "En uppsättning medaljer per vapengrupp"). Arrangörens val: delas vapengrupp C i sina mästerskapsklasser (C, C Dam, C Vet Y, C Vet Ä, C Jun) eller delas EN uppsättning medaljer ut per vapengrupp? **Default false = dagens beteende, så en deploy utan operatörssteget ändrar ingen befintlig tävling.** Erbjuds bara vid klubb- och kretsmästerskap; `MedalGrouping` ignorerar värdet över den nivån. Utan egenskapen degraderar läsvägen till dagens indelning men **`SetMedalGrouping` VÄGRAR och namnger egenskapen** — `SetValue` på en saknad egenskap är en tyst no-op, och en kryssruta som rapporterar lyckat och är borta vid nästa laddning är värre än en låst. Added 2026-09-20.
 - **competition**: add `teamResultSeriesCount` Integer property (optional, default 0, label "Antal serier i lagresultat"). How many series count toward a team's total — surfaced next to "Tillåt laganmälan" in the competition wizard + edit modals. 0/empty = auto (defaults to the qualification series count = `numberOfSeriesOrStations − numberOfFinalSeries`), so a 7+3 finals comp counts only the 7 qualifying series without any config. Set a value to override. Read by `CompetitionTeamController.GetTeamResultSeriesCount`. **The team-results-show-0 fix does NOT depend on this property** (the qualification default handles it); the property only adds explicit override. Missing property = silent no-op (auto default used). Added 2026-07-22.
 
 ### Märken (Pistolskyttemärket) ✅ Phase 1 (2026-05-31)
@@ -4495,6 +4496,93 @@ avgränsat bort klassammanslagningen från den här sortens fix. Rör den inte u
 Verifierat på SSM 2026 mot endpointen: A 37, B 31, C 48, C Dam 14, C Vet Ä 7, C Vet Y 6 →
 alla "Guld, Silver, Brons"; C Jun 2 → "Medaljer till alla 2 deltagande". Enda kategorin under
 fem är alltså juniorklassen, som inte reduceras.
+
+### ⚠️⚠️ MEDALJINDELNINGEN ÄR ARRANGÖRENS VAL — `MedalGrouping` (2026-09-20)
+
+Rapporterat från dev 5591 (klubbmästerskap i Nationell Helmatch, 8 skyttar i vapengrupp C):
+*"Andy Haard har högst poäng men han är inte med i prisutdelningen."*
+
+**Två ytor på samma tävling sa emot varandra.** Arrangören hade slagit samman alla klasser till
+C2, så resultatlistan visade EN grupp `C2+3+Dam+Vet` med Andy först på 582 p. Medaljerna
+räknades ändå per mästerskapsklass: C (4 deltagare) → guld till **tvåan** på 558, medan C Dam,
+C Vet Ä och C Vet Y hade en–två deltagare och därmed noll medaljer. Segraren fick ingenting.
+
+⚠️ **Det var inte en bugg i särskiljningen.** Före 2026-09-19 delades inga medaljer alls ut på
+en mästerskapstävling utan finalrunda — fixen började räkna, och räkningen blottade konflikten.
+
+**Valet finns nu, och det är formulerat som den fråga det är:**
+
+> **Så räknas medaljerna**
+> ○ Per mästerskapsklass — C, C Dam, C Vet Y, C Vet Ä, C Jun var för sig *(standard)*
+> ○ En uppsättning per vapengrupp — bäste skytt i vapengruppen får guld
+
+⚠️⚠️ **DET ÄR INTE "följ klassammanslagningen".** Så formulerades det först, och det är fel
+fråga: vill arrangören ha ett guld till bäste skytt ska det gälla även utan sammanslagning, och
+tvärtom. Sammanslagningen (F.2.3) ändrar hur resultatlistan GRUPPERAS och är en annan axel — se
+`ChampionshipCategory`, som beskriver den förväxlingen i detalj. Den har nu uppstått **fyra**
+gånger i den här kodbasen (finalgallringen, särskjutningen, medaljräkningen, den här).
+
+⚠️ **"Slå ihop alla" betyder per VAPENGRUPP**, inte bokstavligen alla: en tävling med både A och
+C har fortfarande ett guld i A och ett i C.
+
+**Stöd i SHB.** C.3.4.1 låter reduceringen gälla *"vid landsdels-, krets- och klubbmästerskap då
+respektive styrelse bestämt att deltagarantalet FÖR EGEN KLASS får vara färre än 5"* — regeln
+förutsätter alltså ett beslut om att köra egna klasser. Odelad vapengrupp är dessutom ett erkänt
+läge: C.5.1.1.4 delar C-mästerskapen bara vid SM och landsdel för standardmedaljerna.
+
+**`MedalGrouping` är enda platsen regeln bor** — vem som får välja, hur valet läses ur tävlingen,
+och klartexten ytorna skriver ut.
+- **Bara klubb- och kretsmästerskap** (Stefans beslut 2026-09-20). Vid SM och landsdel är de fem
+  C-mästerskapen vad förbundet delar ut, och rekord noteras i dem (C.3.7.1.1) — ett felklick där
+  skulle ta bort fyra mästerskap. Rutan renderas låst med skälet intill, och servern vägrar.
+- **⚠️ Nivåspärren tillämpas INUTI `ChampionshipCategory.SplitsGroupC`**, inte hos anroparen: ett
+  värde som blivit kvar från när tävlingen var ett klubbmästerskap får inte slå igenom på ett SM
+  bara för att ett av sex anropsställen glömde grinda. Metoden är därmed idempotent.
+- **⚠️ `SplitsGroupC` har INGEN enargumentsvariant kvar.** Alla sex anropsställena blev
+  kompileringsfel tills de uppdaterats — en anropare som glömmer flaggan ska smälla, inte tyst
+  falla tillbaka på den delade indelningen. Lägg aldrig tillbaka en överlagring utan flaggan.
+- **Förvalt delat** (Stefans beslut), så en deploy utan operatörssteget ändrar ingen befintlig
+  tävling.
+
+**Vad valet styr — samma axel överallt, annars säger ytorna emot varandra:** medaljörerna,
+medaljpanelen på Resultat-fliken, särskjutningens grupper, **hederspriserna** (Stefans beslut) och
+**finalklasserna** — har arrangören valt en uppsättning per vapengrupp finns ingen egen damfinal
+att gallra till. Fältskyttet går genom samma `SplitsGroupC` i `FaltskytteResultsBuilder`.
+
+⚠️ **Springskytte är inte med, och det är inget förbiseende:** grenen har inga
+mästerskapsmedaljer byggda alls (`SpringskytteMedalService` räknar standardmedaljer per ålders-
+och könsklass). Inställningen kan inte slå på något som inte finns.
+
+**⚠️ KONTROLLEN LIGGER PÅ RESULTAT-FLIKEN, INTE PÅ PRISUTDELNINGSSIDAN** — trots att det var där
+frågan ställdes. Prisutdelningen läser den SPARADE artefakten och rankar aldrig om (se
+`prisutdelning-medaljorer-som-data`); en inställning som bara satt där skulle antingen bryta den
+regeln eller tyst säga emot den sparade listan tills någon klickade Uppdatera. `SetMedalGrouping`
+är en egen smal endpoint som **skriver egenskapen OCH räknar om artefakten i samma handling**,
+och rapporterar en misslyckad omräkning i stället för att svälja den.
+- **Medvetet INTE i tävlingsguiden eller redigeringsmodalen.** Vid skapandet vet ingen hur många
+  som dyker upp i varje klass, vilket är precis det beslutet hänger på. Den stora sparvägen
+  skriver dessutom hela fältpåsen och rör då fler egenskaper än den man ville ändra — samma skäl
+  som `SetStartPreference` fick en egen endpoint.
+
+**`PrecisionFinalResults.MedalsPerWeaponGroup` ligger på ARTEFAKTEN**, av samma skäl som
+enheterna: talen står still medan inställningen kan ändras. Prisutdelningen skriver ut vilken
+indelning listan räknades i, och larmar i rött när de två gått isär i stället för att påstå en
+indelning listan inte har. Hederspriserna läser artefaktens flagga, inte tävlingens — annars
+hade fyra hedersprisklasser stått intill en enda medaljgrupp på samma sida.
+
+**⚠️ Etiketten måste följa läget.** Verifieringen fann att förklaringstexten under medaljtabellen
+fortsatte påstå "…samt Dam C, Veteran C och Junior C" i det odelade läget — en etikett som
+motsade siffrorna ovanför sig. Samma familj som enhetsfelet i fältskyttets prislista.
+
+**Test:** `MedalGroupingTests` 17/17, bl.a. att just 5591:s klassuppsättning kollapsar till en
+enda kategori och att 8 deltagare ger tre medaljer där 2 ger noll. **A/B: 2 av 17 faller** när
+`SplitsGroupC` ignorerar valet. Hela sviten 1178 gröna.
+⚠️ **`Should().Equal("C", "skäl")` läser skälet som ETT ELEMENT TILL** i FluentAssertions — det
+påståendet blev rött på ett korrekt utfall. Använd `ContainSingle("skäl").Which`.
+
+Verifierat i webbläsaren på 5591, båda hållen på samma data: odelat gav
+`C · 8 deltagare · Guld/Silver/Brons` med Andy på guld, delat gav tillbaka de fyra kategorierna
+med guld till Maatin. Dev återställd till delat.
 
 ### ⚠️⚠️ SERIEORDNINGEN ÄR INDELAD I AVSNITT — `SeriesSegments` (2026-09-19)
 

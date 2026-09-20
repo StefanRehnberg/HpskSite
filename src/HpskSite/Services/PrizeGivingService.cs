@@ -113,6 +113,23 @@ namespace HpskSite.Services
             model.ResultsUpdatedAt = artifact.UpdatedAt;
             model.MedalsComputed = artifact.MedalAwardsComputed;
 
+            // ⚠️ INDELNINGEN BESKRIVER ARTEFAKTEN, inte tävlingens nuvarande inställning. Samma
+            // regel som enheterna nedan: talen står still medan konfigurationen kan ändras, och
+            // en etikett ur nuläget över en lista ur artefakten är en tyst lögn.
+            if (model.IsChampionship)
+            {
+                model.MedalGroupingText = MedalGrouping.Describe(artifact.MedalsPerWeaponGroup);
+                var current = MedalGrouping.PerWeaponGroup(competition);
+                if (current != artifact.MedalsPerWeaponGroup)
+                {
+                    model.MedalGroupingStale =
+                        "Medaljindelningen har ändrats sedan listan räknades ut. Listan nedan är "
+                        + $"räknad så här: {MedalGrouping.Describe(artifact.MedalsPerWeaponGroup)} "
+                        + $"Tävlingen är nu inställd på: {MedalGrouping.Describe(current)} "
+                        + "Klicka Uppdatera på fliken Resultat.";
+                }
+            }
+
             // ⚠️ TALEN OCH ENHETEN KOMMER UR SAMMA KÄLLA. Artefakten bär sedan 2026-09-13 de
             // enheter den räknades i, och de vinner över tävlingens nuvarande konfiguration:
             // siffran i kortet är artefaktens, alltså måste etiketten också vara det. En
@@ -360,7 +377,11 @@ namespace HpskSite.Services
             var stored = ReadHonoraryConfig(resultNode);
             section.IsCustomised = stored.Count > 0;
 
-            var splitC = ChampionshipCategory.SplitsGroupC(scope);
+            // ⚠️ FÖLJER ARTEFAKTEN, inte tävlingens nuvarande inställning. Hederspriserna står
+            // bredvid medaljerna på samma sida, och medaljerna kommer ur artefakten — läste de
+            // två olika indelningar skulle sidan visa fyra hedersprisklasser intill en enda
+            // medaljgrupp. Samma skäl som att enheterna reser med talen.
+            var splitC = ChampionshipCategory.SplitsGroupC(scope, artifact.MedalsPerWeaponGroup);
 
             // ⚠️ ORDNINGEN HÄR ÄR INTE MEDALJORDNINGEN. Hederspriser tillfaller deltagarna, inte
             // finalisterna, så mängden är en annan än medaljens — och därför får den här
