@@ -824,15 +824,19 @@ namespace HpskSite.Services
             }
 
             // ⚠️ LÄK EN GAMMAL DISKRAD. Rader som disken skapade före 2026-09-20 bär
-            // SignedUpAt = null och kan därför aldrig vara värd för en gäst — ett dödläge
-            // operatören inte kan ta sig ur, eftersom ingen yta kan sätta fältet.
+            // SignedUpAt = null. Det avgör inte längre om personen är anmäld — det gör
+            // ClubEventParticipant.IsSignedUp — men tidsstämpeln är en riktig uppgift: den
+            // står i Anmäld-kolumnen och bär platsordningen. Här fylls den i när raden ändå
+            // skrivs. Migrationen backfill-clubevent-signedupat.sql gör samma sak
+            // deterministiskt, för rader ingen rör.
             //
             // ⚠⚠ CreatedDate, ALDRIG now. Raden skapades när personen lades till; dagens datum
-            // hade skrivit om NÄR anmälan gjordes, och den tiden står i Anmäld-kolumnen och
-            // bär platsordningen. Vi fyller i en uppgift som saknas — vi hittar inte på en ny.
+            // hade skrivit om NÄR anmälan gjordes och kastat om platsordningen mellan plats
+            // och reserv. Vi fyller i en uppgift som saknas — vi hittar inte på en ny.
             //
-            // Smalt med flit: bara en rad som varken är avbokad eller redan har ett värde. En
-            // avbokad rad ska inte återuppstå som anmäld av att någon rör närvaron.
+            // Avbokade rader lämnas, av försiktighet och inte av nödvändighet: en avbokad rad
+            // kan inte återuppstå som anmäld av det här (IsSignedUp läser CancelledAt), men en
+            // skrivväg som rör fler rader än den behöver är en skrivväg att förklara senare.
             if (row.SignedUpAt == null && row.CancelledAt == null)
             {
                 row.SignedUpAt = row.CreatedDate;
@@ -877,15 +881,19 @@ namespace HpskSite.Services
             var now = DateTime.Now;
 
             // ⚠️ LÄK EN GAMMAL DISKRAD. Rader som disken skapade före 2026-09-20 bär
-            // SignedUpAt = null och kan därför aldrig vara värd för en gäst — ett dödläge
-            // operatören inte kan ta sig ur, eftersom ingen yta kan sätta fältet.
+            // SignedUpAt = null. Det avgör inte längre om personen är anmäld — det gör
+            // ClubEventParticipant.IsSignedUp — men tidsstämpeln är en riktig uppgift: den
+            // står i Anmäld-kolumnen och bär platsordningen. Här fylls den i när raden ändå
+            // skrivs. Migrationen backfill-clubevent-signedupat.sql gör samma sak
+            // deterministiskt, för rader ingen rör.
             //
             // ⚠⚠ CreatedDate, ALDRIG now. Raden skapades när personen lades till; dagens datum
-            // hade skrivit om NÄR anmälan gjordes, och den tiden står i Anmäld-kolumnen och
-            // bär platsordningen. Vi fyller i en uppgift som saknas — vi hittar inte på en ny.
+            // hade skrivit om NÄR anmälan gjordes och kastat om platsordningen mellan plats
+            // och reserv. Vi fyller i en uppgift som saknas — vi hittar inte på en ny.
             //
-            // Smalt med flit: bara en rad som varken är avbokad eller redan har ett värde. En
-            // avbokad rad ska inte återuppstå som anmäld av att någon rör närvaron.
+            // Avbokade rader lämnas, av försiktighet och inte av nödvändighet: en avbokad rad
+            // kan inte återuppstå som anmäld av det här (IsSignedUp läser CancelledAt), men en
+            // skrivväg som rör fler rader än den behöver är en skrivväg att förklara senare.
             if (row.SignedUpAt == null && row.CancelledAt == null)
             {
                 row.SignedUpAt = row.CreatedDate;
