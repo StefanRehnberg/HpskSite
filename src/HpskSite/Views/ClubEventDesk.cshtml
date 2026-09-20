@@ -388,13 +388,20 @@ else
         document.getElementById('deskShowing').textContent =
             `Visar ${rows.length} av ${state.rows.length}`;
 
+        // ⚠️ BRICKAN "oanmäld" ÄR INTE EN NÄRVAROMARKERING. Den betyder att raden saknar
+        // anmälan (SignedUpAt är null), alltså någon som lades till i disken — vilket avgör
+        // plats och avgift. Närvaron är en EGEN kolumn. Den hette först "på plats" och lästes
+        // då som just närvaro, så den stod kvar och sa emot ett "Frånvarande" intill sig.
+        // Uppropsdialogen har alltid sagt "oanmäld" — det här var drift mellan två renderare
+        // av samma rad, samma fälla som startlistans dubbla renderare.
         document.getElementById('deskBody').innerHTML = rows.length ? rows.map(r => `
             <tr class="desk-row ${r.cancelled ? 'desk-cancelled' : ''}">
                 <td>
                     <strong>${esc(r.name)}</strong>
                     ${r.isGuest ? '<span class="badge bg-secondary ms-1">gäst</span>' : ''}
                     ${r.isReserve ? '<span class="badge bg-warning text-dark ms-1">reserv</span>' : ''}
-                    ${r.isWalkIn ? '<span class="badge bg-info text-dark ms-1">på plats</span>' : ''}
+                    ${r.isWalkIn ? '<span class="badge bg-info-subtle text-info-emphasis ms-1"'
+                        + ' title="Fanns inte på anmälningslistan — tillagd i disken">oanmäld</span>' : ''}
                     ${r.cancelled ? '<span class="badge bg-secondary ms-1">avbokad</span>' : ''}
                     ${r.selfRegistered ? '<span class="badge bg-light text-dark border ms-1" title="Skannade QR-koden själv">självreg.</span>' : ''}
                 </td>

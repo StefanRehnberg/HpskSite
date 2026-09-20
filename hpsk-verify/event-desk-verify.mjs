@@ -265,20 +265,80 @@ WHERE EventId = ${eventId} AND MemberId = ${WALKIN_MEMBER};`).trim();
       return b && !b.innerText.includes('Hämtar');
     }, null, { timeout: 30000 }).catch(() => {});
 
-    const walkRow = await page.evaluate(m => {
-      const trs = [...document.querySelectorAll('#deskBody tr')];
-      const tr = trs.find(x => x.innerHTML.includes(`deskPayOpen(`) && x.innerText.includes('på plats'));
-      if (!tr) return null;
+    // ⚠⚠ RADEN LETAS UPP PA NAMNET, ALDRIG PA BRICKAN. Nyckla soket pa "oanmald" och en
+    // felaktig bricka gor att raden inte hittas alls - da HOPPAS pastaendena om brickan over
+    // och rapporteras som grona. Namnet kommer ur GetRoster, alltsa fran servern och inte fran
+    // den yta som provas.
+    const readWalkRow = async () => {
+      const namn = await page.evaluate(async id => {
+        const d = await (await fetch(`/umbraco/surface/ClubEvent/GetRoster?eventId=${id}`)).json();
+        const row = (d.rows || []).find(x => x.isWalkIn && !x.isGuest && !x.cancelled);
+        return row ? row.name : '';
+      }, eventId);
+      if (!namn) return null;
+      return page.evaluate(n => {
+        const trs = [...document.querySelectorAll('#deskBody tr')];
+        const tr = trs.find(x => x.children[0] && x.children[0].innerText.includes(n));
+        if (!tr) return null;
       return {
+        namnCell: tr.children[0].innerText.trim(),
         betalning: tr.children[2].innerText.trim(),
+        narvaro: tr.children[3].innerText.trim(),
         harMeny: [...tr.querySelectorAll('.dropdown-item')].some(i => /Hantera betalning/i.test(i.innerText)),
+        harBetalvag: tr.innerHTML.includes('deskPayOpen('),
       };
-    }, WALKIN_MEMBER);
+      }, namn);
+    };
+
+    let walkRow = await readWalkRow();
     ok('raden finns med betalningsläge', !!walkRow, JSON.stringify(walkRow));
     if (walkRow) {
       ok('den visar en skuld', /Obetalt/i.test(walkRow.betalning), walkRow.betalning);
       // ⚠️ KÄRNAN i rapporten: vägen måste finnas UTAN att medlemmen först tryckt fram koden.
       ok('och "Hantera betalning" erbjuds även utan att Swish-koden visats', walkRow.harMeny);
+
+      // ⚠⚠ BRICKAN FÅR INTE LÄSAS SOM NÄRVARO. Den hette "på plats" och stod då kvar
+      // bredvid ett "Frånvarande" i närvarokolumnen — två celler på samma rad som påstod
+      // olika saker, utan att något sa vilken som gällde. Brickan betyder att raden saknar
+      // ANMÄLAN, och det är sant oavsett om personen dyker upp.
+      ok('brickan säger "oanmäld", inte något som läses som närvaro',
+         /oanmäld/i.test(walkRow.namnCell) && !/på plats|närvarande/i.test(walkRow.namnCell),
+         walkRow.namnCell);
+
+      const absent = await page.evaluate(async id => {
+        const tok = document.querySelector('input[name="__RequestVerificationToken"]');
+        const rows = await (await fetch(`/umbraco/surface/ClubEvent/GetRoster?eventId=${id}`)).json();
+        const row = (rows.rows || []).find(x => x.isWalkIn && !x.isGuest && !x.cancelled);
+        if (!row) return null;
+        const r = await fetch('/umbraco/surface/ClubEvent/SetAttendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': tok ? tok.value : '' },
+          body: JSON.stringify({ eventId: id, participantId: row.id, status: 'Absent', note: null }),
+        });
+        return await r.json().catch(() => null);
+      }, eventId);
+      ok('den oanmälde gick att pricka av som frånvarande', absent && absent.success,
+         absent && absent.message);
+
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => {
+        const b = document.getElementById('deskBody');
+        return b && !b.innerText.includes('Hämtar');
+      }, null, { timeout: 30000 }).catch(() => {});
+
+      const afterAbsent = await readWalkRow();
+      // Kontrollprov åt båda hållen: brickan ska stå KVAR (anmälan saknas fortfarande)
+      // medan närvarokolumnen säger frånvaro. Bara ett frannvaropostående hade varit grönt
+      // även om hela raden försvunnit.
+      ok('närvarokolumnen säger frånvaro efter avprickningen',
+         afterAbsent && /ej här|frånvarande/i.test(afterAbsent.narvaro),
+         afterAbsent && afterAbsent.narvaro);
+      ok('och namncellen säger fortfarande bara "oanmäld" — den säger emot ingenting',
+         afterAbsent && /oanmäld/i.test(afterAbsent.namnCell)
+           && !/på plats|närvarande/i.test(afterAbsent.namnCell),
+         afterAbsent && afterAbsent.namnCell);
+
+      walkRow = afterAbsent || walkRow;
     }
 
     const reg = await page.evaluate(async ([id, payer]) => {
