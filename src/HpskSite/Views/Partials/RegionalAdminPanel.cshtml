@@ -1374,7 +1374,11 @@
 @await Html.PartialAsync("_CompetitionListRenderer")
 
 @* Deltagare + upprop för kretsens händelser — samma dialog som klubbens panel monterar. *@
-@await Html.PartialAsync("~/Views/Partials/_ClubEventRoster.cshtml")
+@* ⚠⚠ UPPROPSMODALEN ÄR BORTTAGEN (_ClubEventRoster.cshtml, 2026-09-21). Den ritade SAMMA
+   deltagarrad som /evenemang/deltagare, och de två hann glida isär: sidan hittade på brickan
+   "på plats" där modalen sa "oanmäld", och båda var fel. Lägg inte tillbaka en andra renderare
+   — raden bor på deltagarsidan, dit menyvalet länkar. Samma fälla som startlistans två
+   renderare. *@
 
 @* ============================================================
    Tävlingar sub-tab — admin of competitions in the region.

@@ -1,4 +1,4 @@
-@using Umbraco.Cms.Web.Common.PublishedModels;
+﻿@using Umbraco.Cms.Web.Common.PublishedModels;
 @using System.Globalization;
 @using Umbraco.Cms.Core.Security;
 @using Umbraco.Cms.Core.Services;
@@ -218,6 +218,14 @@
                 <div class="alert alert-info d-flex align-items-center flex-wrap gap-2 py-2">
                     <i class="bi bi-gear me-1"></i>
                     <strong class="me-3">Admin</strong>
+                    @* ⚠️ FÖRST OCH IFYLLD, medan resten är outline. De andra knapparna redigerar
+                       SIDAN; den här öppnar arbetet på själva dagen. Utan den var deltagarsidan
+                       fyra nivåer ner i en adminpanel — samma sorts återvändsgränd som gjorde att
+                       valvet behövde en QR-affisch på dörren. Speglar "Administrera tävling" på
+                       en tävlingssida, så den som kan den ena känner igen den andra. *@
+                    <a href="/evenemang/deltagare?e=@Model.Id" class="btn btn-sm btn-primary">
+                        <i class="bi bi-people me-1"></i>Deltagare och betalning
+                    </a>
                     <button type="button" class="btn btn-sm btn-outline-primary" onclick="openEditDetailsModal()">
                         <i class="bi bi-pencil me-1"></i>Redigera detaljer
                     </button>

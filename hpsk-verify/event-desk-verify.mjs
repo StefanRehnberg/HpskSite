@@ -119,6 +119,46 @@ const main = async () => {
     // pastaendet ar "minst en" - ett krav pa exakt en hade varit ett pastaende om layouten.
     ok('sidan bar en antiforgery-token', await page.locator('input[name="__RequestVerificationToken"]').count() >= 1);
 
+    // ── Vägen hit och vägen tillbaka ───────────────────────────────────────
+    // ⚠⚠ EN FUNKTION INGEN HITTAR ÄR INTE BYGGD. Sidan låg fyra nivåer ner i en adminpanel
+    // (klubbsidan → Administration → Händelser → Åtgärder), alltså bakom en väg den som står
+    // vid anmälningsbordet aldrig går. Nu en knapp på evenemangets egen sida, som speglar
+    // "Administrera tävling" — och en väg tillbaka härifrån.
+    section('Vägen hit och tillbaka');
+
+    const backHref = await page.evaluate(() => {
+      const a = [...document.querySelectorAll('a')]
+        .find(x => /Till evenemangssidan/i.test(x.innerText));
+      return a ? a.getAttribute('href') : null;
+    });
+    ok('deltagarsidan har en väg tillbaka', !!backHref, String(backHref));
+
+    if (backHref) {
+      // ⚠️ MÄT DESTINATIONEN, INTE ADRESSEN. Ett påstående om href var grönt hela tiden
+      // medan sidan man landade på visade fel klubb — samma fälla som valvlänken.
+      await page.goto(backHref.startsWith('http') ? backHref : `${BASE}${backHref}`,
+                      { waitUntil: 'domcontentloaded' });
+      await page.evaluate(() => { const b = document.getElementById('cookieConsentBanner'); if (b) b.remove(); });
+      const landed = await page.locator('body').innerText();
+      ok('och den leder till RÄTT evenemang', landed.includes(NAME), landed.slice(0, 120));
+
+      // Och därifrån ska man ta sig till deltagarsidan igen — det är halvan som saknades.
+      const fwd = await page.evaluate(() => {
+        const a = [...document.querySelectorAll('a')]
+          .find(x => /Deltagare och betalning/i.test(x.innerText));
+        return a ? a.getAttribute('href') : null;
+      });
+      ok('evenemangssidan har en knapp till deltagarsidan', !!fwd, String(fwd));
+      ok('och den pekar på RÄTT händelse',
+         !!fwd && fwd.includes(`e=${eventId}`), String(fwd));
+
+      await page.goto(`${BASE}/evenemang/deltagare?e=${eventId}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => {
+        const b = document.getElementById('deskBody');
+        return b && !b.innerText.includes('Hämtar');
+      }, null, { timeout: 30000 }).catch(() => {});
+    }
+
     // ── ⚠️ Påstående 2: ej avprickad är inte frånvarande ──────────────────────────────
     section('Ej avprickad är ett eget tillstånd');
     const before = await page.evaluate(() => {
