@@ -498,7 +498,8 @@ namespace HpskSite.Services
             var existing = await db.SingleOrDefaultAsync<ClubEventParticipant>(
                 "WHERE EventId = @0 AND MemberId = @1", ctx.EventId, memberId);
 
-            if (existing != null && existing.SignedUpAt != null && existing.CancelledAt == null)
+            // ⚠️ Raden räcker — en diskanmälan utan tidsstämpel är också en anmälan.
+            if (existing != null && existing.IsSignedUp)
                 return (false, "Du är redan anmäld.", false);
 
             var now = DateTime.Now;
@@ -572,7 +573,9 @@ namespace HpskSite.Services
             // ha nagot att kaskadera fran.
             var hostRow = await db.SingleOrDefaultAsync<ClubEventParticipant>(
                 "WHERE EventId = @0 AND MemberId = @1", ctx.EventId, guestOfMemberId);
-            if (hostRow == null || hostRow.SignedUpAt == null || hostRow.CancelledAt != null)
+            // ⚠️ Kravet är att värden STÅR PÅ LISTAN och kan ansvara — inte att raden råkar
+            // bära en tidsstämpel. Det var ombudet som gjorde diskens egna deltagare omvalbara.
+            if (hostRow == null || !hostRow.IsSignedUp)
                 // ⚠️ BESKEDET MÅSTE VETA VEM SOM LÄSER DET. "Anmäl dig själv först" är sant för
                 // medlemmen på evenemangssidan och obegripligt för funktionären i disken, som
                 // inte är värden — hen börjar då leta efter sin EGEN anmälan i stället för efter
@@ -633,7 +636,9 @@ namespace HpskSite.Services
             using var db = _databaseFactory.CreateDatabase();
             var row = await db.SingleOrDefaultAsync<ClubEventParticipant>(
                 "WHERE EventId = @0 AND MemberId = @1", eventId, memberId);
-            if (row == null || row.SignedUpAt == null) return (false, "Ingen anmälan att avboka.", 0);
+            // ⚠️ Ombudet här gjorde en diskanmälan OMÖJLIG att avboka — personen stod i
+            // listan och fick ändå "ingen anmälan att avboka".
+            if (row == null) return (false, "Ingen anmälan att avboka.", 0);
             if (row.CancelledAt != null) return (false, "Anmälan är redan avbokad.", 0);
 
             var now = DateTime.Now;
@@ -1152,6 +1157,10 @@ namespace HpskSite.Services
         public string Name { get; set; } = "";
         public DateTime? SignedUpAt { get; set; }
         public bool Cancelled { get; set; }
+
+        /// <summary>Är personen anmäld? Se <see cref="ClubEventParticipant.IsSignedUp"/> —
+        /// fråga aldrig på <see cref="SignedUpAt"/>.</summary>
+        public bool IsSignedUp => !Cancelled;
         public bool IsReserve { get; set; }
         public string? Note { get; set; }
         public string? AttendanceStatus { get; set; }
