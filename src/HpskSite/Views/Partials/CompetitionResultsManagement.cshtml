@@ -1611,6 +1611,50 @@ async function loadMergeState() {
         </tr>`;
     }).join('');
 
+    // ── Indelningen medaljerna räknas i (bara vid mästerskap) ──
+    // Arrangören väljer mellan delade mästerskapsklasser och EN uppsättning per vapengrupp.
+    // Kontrollen står HÄR, intill medaljtabellen den styr, och sparningen räknar om listan i
+    // samma handling — se SetMedalGrouping för varför.
+    const grouping = data.medalGrouping || {};
+    let groupingBlock = '';
+    if (data.isChampionship) {
+        const per = !!grouping.perWeaponGroup;
+        const blocked = !grouping.propertyExists
+            ? 'Egenskapen <code>medalsPerWeaponGroup</code> saknas på dokumenttypen '
+              + '<code>competition</code>. Lägg till den i Umbraco backoffice (True/False).'
+            : (!grouping.canChoose
+                ? 'Indelningen går bara att välja vid klubb- och kretsmästerskap. Vid '
+                  + 'landsdels- och svenskt mästerskap är de fem C-mästerskapen vad förbundet '
+                  + 'delar ut.'
+                : '');
+        const dis = blocked ? 'disabled' : '';
+        groupingBlock = `
+            <div class="border rounded p-2 mb-2">
+                <div class="fw-semibold small mb-1">Så räknas medaljerna</div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="medalGroupingMode"
+                           id="medalGroupingSplit" ${per ? '' : 'checked'} ${dis}
+                           onchange="setMedalGrouping(false)">
+                    <label class="form-check-label small" for="medalGroupingSplit">
+                        Per mästerskapsklass
+                        <span class="text-muted d-block">C, C Dam, C Vet Y, C Vet Ä, C Jun var för sig</span>
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="medalGroupingMode"
+                           id="medalGroupingWeapon" ${per ? 'checked' : ''} ${dis}
+                           onchange="setMedalGrouping(true)">
+                    <label class="form-check-label small" for="medalGroupingWeapon">
+                        En uppsättning per vapengrupp
+                        <span class="text-muted d-block">Bäste skytt i vapengruppen får guld</span>
+                    </label>
+                </div>
+                ${blocked
+                    ? `<div class="form-text text-danger mb-0 mt-1">${blocked}</div>`
+                    : '<div class="form-text mb-0 mt-1">Ändringen räknar om resultatlistan direkt.</div>'}
+            </div>`;
+    }
+
     // ── Medaljer per mästerskapsklass (bara vid mästerskap) ──
     const medalGroups = data.medalGroups || [];
     const isChampionship = !!data.isChampionship;
@@ -1650,9 +1694,15 @@ async function loadMergeState() {
                 </table>
             </div>
             <div class="form-text mb-0">
-                Medaljerna delas ut per mästerskapsklass — vapengrupp A, B och C samt Dam C,
-                Veteran C och Junior C. <strong>Klasserna 1, 2 och 3 är kompetensnivåer och delar
-                medalj.</strong> Är deltagarna färre än fem reduceras antalet medaljer
+                ${grouping.perWeaponGroup
+                    ? 'Medaljerna delas ut <strong>per vapengrupp</strong> — A, B och C var för '
+                      + 'sig. Dam, veteran och junior tävlar om samma medaljer som den öppna '
+                      + 'klassen, och klasserna 1, 2 och 3 är kompetensnivåer som redan delar '
+                      + 'medalj.'
+                    : 'Medaljerna delas ut per mästerskapsklass — vapengrupp A, B och C samt Dam C, '
+                      + 'Veteran C och Junior C. <strong>Klasserna 1, 2 och 3 är kompetensnivåer '
+                      + 'och delar medalj.</strong>'}
+                Är deltagarna färre än fem reduceras antalet medaljer
                 (SHB C.3.4.1): fyra ger guld och silver, tre ger bara guld, två eller en ger ingen.
                 Juniorklassen är undantagen — där delas medaljer alltid ut till de tre bästa,
                 eller till alla om de är färre.
@@ -1692,9 +1742,49 @@ async function loadMergeState() {
             </div>
             <div class="col-lg-5">
                 <div class="fw-semibold small mb-1">Medaljer</div>
+                ${groupingBlock}
                 ${medalBlock}
             </div>
         </div>`;
+}
+
+// Spara arrangörens medaljindelning. Servern skriver egenskapen OCH räknar om
+// resultatartefakten i samma handling — medaljörerna ligger i den, och prisutdelningen läser
+// den, så en sparning utan omräkning hade lämnat de två oense.
+async function setMedalGrouping(perWeaponGroup) {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    if (!competitionId) { alert('Ingen tävling vald.'); return; }
+
+    const host = document.getElementById('mergeStateContent');
+    const inputs = host ? host.querySelectorAll('input[name="medalGroupingMode"]') : [];
+    inputs.forEach(i => i.disabled = true);
+
+    try {
+        const res = await fetch('/umbraco/surface/CompetitionResults/SetMedalGrouping', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val()
+            },
+            body: JSON.stringify({ competitionId: competitionId, perWeaponGroup: perWeaponGroup })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            alert(data.message || 'Indelningen kunde inte sparas.');
+            await loadMergeState();   // återställ radioknapparna till det som faktiskt gäller
+            return;
+        }
+        // En misslyckad omräkning är inte en misslyckad sparning, och får inte tystas:
+        // listan är då fortfarande räknad i den gamla indelningen.
+        if (data.resultsRefreshed === false && data.message) alert(data.message);
+
+        await loadMergeState();
+        if (typeof loadResultsList === 'function') loadResultsList();
+    } catch (e) {
+        console.error('setMedalGrouping', e);
+        alert('Ingen kontakt med servern — indelningen sparades inte.');
+        await loadMergeState();
+    }
 }
 
 // ─── Särskjutning (shoot-off) card ───────────────────────────────────────────

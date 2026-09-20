@@ -210,11 +210,14 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             //
             // Kategorin är samma regel standardmedaljerna redan använde. Utanför ett
             // mästerskap är beteendet oförändrat: resultatlistans sammanslagningar gäller.
+            // ⚠️ Finalklasserna FÖLJER medaljindelningen. Har arrangören valt en uppsättning
+            // medaljer per vapengrupp finns ingen egen damfinal att gallra till — en final per
+            // kategori och en medalj per vapengrupp vore två olika svar på samma fråga.
             var scope = competition.GetValue<string>("competitionScope");
             var lookup = ChampionshipCategory.IsChampionship(scope)
                 ? ChampionshipCategory.BuildLookup(
                     results.Select(r => r.ShootingClass).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(),
-                    ChampionshipCategory.SplitsGroupC(scope))
+                    ChampionshipCategory.SplitsGroupC(scope, MedalGrouping.PerWeaponGroup(competition)))
                 : GetMergeLookup(competitionId);
 
             return _qualificationService.BuildFullClassRankings(results, shooterInfo, lookup);

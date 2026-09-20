@@ -60,8 +60,24 @@ namespace HpskSite.CompetitionTypes.Common
         /// standardmedaljregeln, vilket poolade Dam/Vet/Junior in i öppen C på krets- och
         /// klubbmästerskap. Det gav fel finalklasser och kunde begära särskjutning mellan en
         /// dam och en öppen-klass-skytt.
+        ///
+        /// ⚠️⚠️ ARRANGÖREN KAN NUMERA VÄLJA BORT DELNINGEN på klubb- och kretsmästerskap
+        /// (2026-09-20). Därför tar metoden valet som ARGUMENT och har medvetet INGEN
+        /// enargumentsvariant kvar: en anropare som glömmer flaggan ska bli ett kompileringsfel,
+        /// inte tyst falla tillbaka på den delade indelningen. Regeln för vem som får välja, och
+        /// hur valet läses ur tävlingen, bor i <see cref="MedalGrouping"/> — läs den innan du
+        /// lägger en ny anropare.
         /// </summary>
-        public static bool SplitsGroupC(string? competitionScope) => IsChampionship(competitionScope);
+        /// <param name="medalsPerWeaponGroup">
+        /// Arrangörens val, som det är LAGRAT. ⚠️ Nivåspärren tillämpas här inne
+        /// (<see cref="MedalGrouping.PerWeaponGroup(string?, bool)"/>), inte hos anroparen — ett
+        /// värde som blivit kvar från när tävlingen var ett klubbmästerskap får aldrig slå
+        /// igenom på ett SM bara för att ett anropsställe glömde grinda. Metoden är därmed
+        /// idempotent: att skicka in ett redan grindat värde ger samma svar.
+        /// </param>
+        public static bool SplitsGroupC(string? competitionScope, bool medalsPerWeaponGroup) =>
+            IsChampionship(competitionScope)
+            && !MedalGrouping.PerWeaponGroup(competitionScope, medalsPerWeaponGroup);
 
         /// <summary>Är omfattningen ett mästerskap alls?</summary>
         public static bool IsChampionship(string? competitionScope) =>
@@ -183,7 +199,13 @@ namespace HpskSite.CompetitionTypes.Common
         /// lagt den som en JSON-array. Skala av i så fall — jämförelserna är Ordinal, så
         /// <c>["Landsdelsmästerskap"]</c> hade annars inte räknats som mästerskap alls.
         /// Samma försiktighet som CompetitionUrlProvider.ReadScopeValue.
+        ///
+        /// Publik som <see cref="NormalizeScope"/> så <see cref="MedalGrouping"/> kan ställa sin
+        /// nivåfråga mot samma avskalade värde — annars skulle en JSON-inpackad omfattning
+        /// räknas som mästerskap här och inte där.
         /// </summary>
+        public static string NormalizeScope(string? scope) => Normalize(scope);
+
         private static string Normalize(string? scope)
         {
             if (string.IsNullOrWhiteSpace(scope)) return "";
