@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
+using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Web;
 using Umbraco.Extensions;
 
@@ -47,17 +48,20 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly ClubEventParticipationService _participation;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
+        private readonly IPublishedUrlProvider _urls;
 
         public ClubEventDeskController(
             IMemberManager memberManager,
             IMemberService memberService,
             ClubEventParticipationService participation,
-            IUmbracoContextAccessor umbracoContextAccessor)
+            IUmbracoContextAccessor umbracoContextAccessor,
+            IPublishedUrlProvider urls)
         {
             _memberManager = memberManager;
             _memberService = memberService;
             _participation = participation;
             _umbracoContextAccessor = umbracoContextAccessor;
+            _urls = urls;
         }
 
         [HttpGet("")]
@@ -107,6 +111,18 @@ namespace HpskSite.Controllers
                 return Render();
             }
 
+            // ⚠️ Bäst effort. En trasig länk tillbaka är en olyckligare sida än ingen knapp,
+            // men den får aldrig hindra att listan visas — det är listan man kom hit för.
+            try
+            {
+                var node = uctx.Content.GetById(e);
+                if (node != null) model.EventUrl = _urls.GetUrl(node) ?? "";
+            }
+            catch (Exception)
+            {
+                model.EventUrl = "";
+            }
+
             var member = _memberService.GetByEmail(current.Email);
             if (member == null || !await _participation.CanManageAsync(ctx, member.Id))
             {
@@ -132,5 +148,15 @@ namespace HpskSite.Controllers
         public bool RequiresLogin { get; set; }
         public string LoginUrl { get; set; } = "";
         public string? Error { get; set; }
+
+        /// <summary>
+        /// Evenemangets egen sida. <b>Vägen TILLBAKA</b> — hit kommer man via en knapp därifrån,
+        /// via en bokmärkt länk eller via en QR, och utan den här finns ingen väg ut som inte
+        /// kräver att man vet hur sajten är byggd.
+        ///
+        /// <para>⚠️ Tom när noden inte går att slå upp — vyn döljer då knappen i stället för att
+        /// visa en länk till ingenting.</para>
+        /// </summary>
+        public string EventUrl { get; set; } = "";
     }
 }

@@ -77,6 +77,16 @@ else
                     @desk.OwnerName
                 </div>
             </div>
+            @* ⚠️ VÄGEN TILLBAKA. Hit kommer man via knappen på evenemangssidan, via ett
+               bokmärke eller via en QR — och browserns bakåtknapp duger bara i det första
+               fallet. Döljs när URL:en inte gick att slå upp: en knapp till ingenting är
+               sämre än ingen knapp. *@
+            @if (!string.IsNullOrEmpty(desk.EventUrl))
+            {
+                <a href="@desk.EventUrl" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-arrow-left me-1"></i>Till evenemangssidan
+                </a>
+            }
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="deskLoad()">
                 <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
             </button>
