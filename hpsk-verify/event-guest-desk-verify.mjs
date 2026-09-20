@@ -45,6 +45,10 @@ const q = sqlText => execSync(
 // En medlem som varken är den inloggade eller värden ovan.
 const LEGACY_MEMBER = 2344;
 const LEGACY_CREATED = '2026-09-01 10:00:00';
+// ⚠️ En medlem som INTE har någon rad på evenemanget — kontrollprovet för att värdkontrollen
+// fortfarande finns. Utan den skulle "gästen gick att lägga till" vara grönt även om kontrollen
+// raderats.
+const NO_ROW_MEMBER = 2327;
 
 const main = async () => {
   const browser = await chromium.launch({ headless: true });
@@ -225,12 +229,14 @@ const main = async () => {
     eq('och hör till rätt medlem', guest && guest.guestOfMemberId, host.memberId);
     eq('gästen tar en plats', after.counts.signedUp, 2);
 
-    // ── Den gamla diskraden ───────────────────────────────────────────
-    // ⚠⚠ RAPPORTERAT 2026-09-20: "Kommer tillsammans med" erbjöd en person som servern sedan
-    // vägrade, med ett besked skrivet till MEDLEMMEN ("Anmäl dig själv först") som funktionären
-    // i disken inte kan agera på. Rader som disken skapade före 2026-09-20 saknar SignedUpAt.
-    // Fixturen återskapar exakt den formen — den går inte att skapa via API:et längre.
-    section('En rad utan anmälningstid kan inte bära en gäst — och läks');
+    // ── Raden utan anmälningstid ─────────────────────────────────────────
+    // ⚠⚠ "ÄR PERSONEN ANMÄLD?" ÄR RADENS EXISTENS, INTE EN TIDSSTÄMPEL. Diskens rader saknade
+    // SignedUpAt före 2026-09-20, och sex ställen frågade på tidsstämpeln — så systemet sa "du är
+    // inte anmäld" till någon som stod i listan. Rapporterat som att bara 2 av 6 syntes i
+    // värdväljaren; mätt i dev-datat: 4 av 6 rader saknade tidsstämpel.
+    //
+    // Fixturen återskapar den formen i SQL — den går inte längre att skapa via API:et.
+    section('En rad utan anmälningstid ÄR anmäld');
     q(`INSERT INTO dbo.ClubEventParticipant `
       + `(EventId, MemberId, MemberName, SignedUpAt, CreatedDate, UpdatedDate) `
       + `VALUES (${evId}, ${LEGACY_MEMBER}, 'ZZD Gammalrad', NULL, '${LEGACY_CREATED}', '${LEGACY_CREATED}');`);
@@ -247,52 +253,67 @@ const main = async () => {
         .map(o => ({ id: +o.value, text: o.innerText.trim() }));
     });
 
-    let opts = await hostOptions();
-    // KONTROLLPROV: den riktigt anmälda värden MÅSTE finnas. Utan det vore påståendet nedan
-    // grönt även på en tom väljare — alltså även om filtret stängt ute alla.
+    const opts = await hostOptions();
     ok('den anmälda värden erbjuds', opts.some(o => o.id === HOST_MEMBER), JSON.stringify(opts));
-    ok('men raden utan anmälningstid erbjuds INTE som värd',
-       !opts.some(o => o.id === LEGACY_MEMBER), JSON.stringify(opts));
+    // ⚠⚠ KÄRNAN i rapporten: väljaren får inte gömma den som står i listan.
+    ok('och raden UTAN anmälningstid erbjuds också',
+       opts.some(o => o.id === LEGACY_MEMBER), JSON.stringify(opts));
 
-    // Servern måste ändå vägra, och beskedet ska tala till den som läser det.
-    const refused = await json('/umbraco/surface/ClubEvent/AddGuest', {
-      eventId: evId, guestOfMemberId: LEGACY_MEMBER, name: `${PREFIX}Nekad`, priceId: '',
+    await page.goto(`${BASE}/user-profile-page/`, { waitUntil: 'domcontentloaded' });
+
+    // ⚠️ KONTROLLPROV, och det är inte valfritt: utan det vore "gästen gick att lägga till"
+    // grönt även om värdkontrollen raderats helt. NO_ROW_MEMBER har ingen rad alls.
+    const noRow = await json('/umbraco/surface/ClubEvent/AddGuest', {
+      eventId: evId, guestOfMemberId: NO_ROW_MEMBER, name: `${PREFIX}Nekad`, priceId: '',
     });
-    ok('servern vägrar ändå', refused && refused.success === false, JSON.stringify(refused));
+    ok('en medlem UTAN rad vägras fortfarande som värd',
+       noRow && noRow.success === false, JSON.stringify(noRow));
     ok('och beskedet säger INTE "Anmäl dig själv" till funktionären',
-       refused && !/anmäl dig själv/i.test(refused.message || ''), refused && refused.message);
-    ok('utan namnger personen som saknar anmälan',
-       refused && /ZZD Gammalrad|Gammalrad/i.test(refused.message || '')
-         || (refused && /står inte som anmäld/i.test(refused.message || '')),
-       refused && refused.message);
+       noRow && !/anmäl dig själv/i.test(noRow.message || ''), noRow && noRow.message);
 
-    // Läkningen: en avprickning fyller i den uppgift som saknas — med radens EGEN skapelsetid.
+    const okGuest = await json('/umbraco/surface/ClubEvent/AddGuest', {
+      eventId: evId, guestOfMemberId: LEGACY_MEMBER, name: `${PREFIX}Sent`, priceId: '',
+    });
+    ok('men raden utan anmälningstid kan bära en gäst',
+       okGuest && okGuest.success, JSON.stringify(okGuest).slice(0, 160));
+
+    // ⚠️ SAMMA OMBUD LÅSTE AVBOKNINGEN. En diskanmälan gick inte att avboka — "ingen
+    // anmälan att avboka" om någon som stod på listan.
     const legacyRowId = +q(`SET NOCOUNT ON; SELECT TOP 1 Id FROM dbo.ClubEventParticipant `
       + `WHERE EventId = ${evId} AND MemberId = ${LEGACY_MEMBER};`);
+
+    // Läkningen är inte längre bärande, men tidsstämpeln är en riktig uppgift och ska fyllas i.
     const healed = await json('/umbraco/surface/ClubEvent/SetAttendance',
       { eventId: evId, participantId: legacyRowId, status: 'Present', note: null });
     ok('avprickningen gick igenom', healed && healed.success, healed && healed.message);
-
     const stamped = q(`SET NOCOUNT ON; SELECT CONVERT(varchar(19), SignedUpAt, 120) `
       + `FROM dbo.ClubEventParticipant WHERE Id = ${legacyRowId};`);
-    // ⚠⚠ CreatedDate, ALDRIG dagens datum. Stämplas "nu" skrivs det om NÄR anmälan gjordes,
-    // och den tiden bär både Anmäld-kolumnen och platsordningen.
-    ok('raden läktes med sin EGEN skapelsetid, inte med dagens datum',
+    // ⚠⚠ CreatedDate, ALDRIG dagens datum — tiden bär Anmäld-kolumnen och platsordningen.
+    ok('och raden fick sin EGEN skapelsetid, inte dagens datum',
        stamped === LEGACY_CREATED, `SignedUpAt blev "${stamped}", väntade "${LEGACY_CREATED}"`);
 
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => {
-      const b = document.getElementById('deskBody');
-      return b && !b.innerText.includes('Hämtar');
-    }, null, { timeout: 30000 }).catch(() => {});
-    opts = await hostOptions();
-    ok('och då erbjuds den som värd', opts.some(o => o.id === LEGACY_MEMBER), JSON.stringify(opts));
+    // ── Samma ombud, två andra ytor ──────────────────────────────────────
+    // ⚠️ Ombudet låg på SEX ställen. Värdväljaren ovan var ett; här mäts två till på den
+    // INLOGGADES egen rad, eftersom båda bara går att ställa om sig själv. Fixturen är en
+    // vanlig anmälan vars tidsstämpel nollas i SQL — exakt formen diskens rader hade.
+    section('Den egna raden utan anmälningstid');
+    const mineSignup = await json('/umbraco/surface/ClubEvent/SignUp', { eventId: evId, priceId: '' });
+    ok('den inloggade anmäler sig', mineSignup && mineSignup.success, mineSignup && mineSignup.message);
 
-    await page.goto(`${BASE}/user-profile-page/`, { waitUntil: 'domcontentloaded' });
-    const nowOk = await json('/umbraco/surface/ClubEvent/AddGuest', {
-      eventId: evId, guestOfMemberId: LEGACY_MEMBER, name: `${PREFIX}Sent`, priceId: '',
-    });
-    ok('och gästen går att lägga till', nowOk && nowOk.success, JSON.stringify(nowOk).slice(0, 160));
+    q(`UPDATE dbo.ClubEventParticipant SET SignedUpAt = NULL `
+      + `WHERE EventId = ${evId} AND MemberId > 0 AND GuestOfMemberId IS NULL `
+      + `AND MemberId NOT IN (${HOST_MEMBER}, ${LEGACY_MEMBER});`);
+
+    const st = await get(`/umbraco/surface/ClubEvent/GetSignupState?eventId=${evId}`);
+    // ⚠⚠ Kortet sa "du är inte anmäld" till någon som stod på listan, och erbjöd då en
+    // anmälan som redan fanns.
+    ok('det egna kortet säger att jag ÄR anmäld',
+       st && st.me && st.me.signedUp === true, JSON.stringify(st && st.me));
+
+    // ⚠⚠ Och avbokningen var ett dödläge: "Ingen anmälan att avboka" om en rad som finns.
+    const cancelled = await json('/umbraco/surface/ClubEvent/Cancel', { eventId: evId });
+    ok('och anmälan går att avboka', cancelled && cancelled.success,
+       cancelled && cancelled.message);
 
     ok('inga JS-fel', jsErrors.filter(e => !/ckeditor/.test(e)).length === 0, jsErrors.join(' | '));
 

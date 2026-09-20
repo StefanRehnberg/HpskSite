@@ -1,4 +1,4 @@
-using NPoco;
+﻿using NPoco;
 
 namespace HpskSite.Models
 {
@@ -72,6 +72,27 @@ namespace HpskSite.Models
 
         // ── Sign-up ──
         public DateTime? SignedUpAt { get; set; }
+
+        /// <summary>
+        /// <b>Är personen anmäld?</b> Raden finns och är inte avbokad — punkt.
+        ///
+        /// <para>⚠⚠ <b>FRÅGA ALDRIG <c>SignedUpAt != null</c>.</b> Det var ett OMBUD för den här
+        /// frågan, och det var korrekt bara så länge varje rad på listan hade en anmälningstid —
+        /// vilket diskens rader aldrig haft före 2026-09-20. Ombudet låg på sex ställen och sa
+        /// därför "du är inte anmäld" till någon som står i listan: värden för en gäst gick inte
+        /// att välja, lånevapen gick inte att boka, anmälan gick inte att avboka, och det egna
+        /// kortet erbjöd en anmälan som redan fanns.</para>
+        ///
+        /// <para>Tidsstämpeln är en UPPGIFT om anmälan (när den gjordes, och därmed
+        /// platsordningen), aldrig beviset för att den finns. Att den kan saknas på en äldre
+        /// rad får inte göra personen oanmäld.</para>
+        /// </summary>
+        /// <para>⚠️ <c>[Ignore]</c> är OBLIGATORISKT. NPoco mappar varje publik egenskap mot
+        /// en kolumn, så utan attributet blir varje läsning av tabellen ett SQL-fel 207
+        /// ("Invalid column name") — och det visar sig som att en HEL yta slutar svara, inte
+        /// som något som rör den här egenskapen. Samma regel som <see cref="IsGuest"/> intill.</para>
+        [Ignore]
+        public bool IsSignedUp => CancelledAt == null;
 
         /// <summary>Vem som utförde anmälan. <b>Inte</b> vem som betalar — se <see cref="GuestOfMemberId"/>.</summary>
         public int? SignedUpByMemberId { get; set; }

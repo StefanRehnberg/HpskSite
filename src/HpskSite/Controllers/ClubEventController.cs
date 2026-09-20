@@ -196,7 +196,7 @@ namespace HpskSite.Controllers
                 },
                 me = mine == null ? null : new
                 {
-                    signedUp = mine.SignedUpAt != null && !mine.Cancelled,
+                    signedUp = mine.IsSignedUp,
                     cancelled = mine.Cancelled,
                     isReserve = mine.IsReserve,
                     note = mine.Note,
@@ -598,7 +598,9 @@ namespace HpskSite.Controllers
             // ⚠️ !IsGuest — en gästrad bär MemberId = 0, och utan filtret hade en utloggad (me = 0)
             // kunnat boka lånevapen på första gästens anmälan. Samma fälla som i GetSignupState.
             var mineRow = roster.Rows.FirstOrDefault(r => !r.IsGuest && r.MemberId == me);
-            if (mineRow == null || mineRow.SignedUpAt == null || mineRow.Cancelled)
+            // ⚠️ Ombudet nekade lånevapen åt den som disken anmält — med orden "Anmäl dig
+            // först" till någon som redan stod på listan.
+            if (mineRow == null || !mineRow.IsSignedUp)
                 return Json(new { success = false, message = "Anmäl dig först, så kan du boka lånevapen." });
 
             var existing = _bookings
@@ -1032,7 +1034,7 @@ namespace HpskSite.Controllers
                 eligible = _participation.IsEligible(ctx, member),
                 windowOpen = IsCheckInWindowOpen(ctx),
                 alreadyPresent = existing?.AttendanceStatus == ClubEvents.AttendancePresent,
-                signedUp = existing?.SignedUpAt != null && existing.CancelledAt == null,
+                signedUp = existing != null && existing.IsSignedUp,
                 @event = new
                 {
                     id = ctx.EventId,
