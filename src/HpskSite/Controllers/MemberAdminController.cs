@@ -297,6 +297,9 @@ namespace HpskSite.Controllers
                     filteredMembers = filteredMembers.Where(m => m.IsLockedOut).ToList();
                 }
 
+                // Länkarna i radmenyn (klubb-/kretssida) — en uppslagning för hela listan
+                var (clubUrlLookup, regionUrlLookup) = GetClubAndRegionUrls();
+
                 // Transform to view models using pre-loaded roles
                 var memberList = filteredMembers.Select(m => {
                     var primaryClubIdStr = m.GetValue("primaryClubId")?.ToString();
@@ -326,6 +329,13 @@ namespace HpskSite.Controllers
                     var phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "";
                     var memberRoles = memberRolesDict[m.Id];
 
+                    var primaryClubUrl = memberPrimaryClubId.HasValue && clubUrlLookup.TryGetValue(memberPrimaryClubId.Value, out var cu)
+                        ? cu
+                        : "";
+                    var regionUrl = !string.IsNullOrWhiteSpace(memberRegion) && regionUrlLookup.TryGetValue(memberRegion, out var ru)
+                        ? ru
+                        : "";
+
                     return new MemberListItem
                     {
                         Id = m.Id,
@@ -336,7 +346,9 @@ namespace HpskSite.Controllers
                         ProfilePictureUrl = m.GetValue<string>("profilePictureUrl") ?? "",
                         PrimaryClubName = primaryClubName,
                         PrimaryClubId = memberPrimaryClubId,
+                        PrimaryClubUrl = primaryClubUrl,
                         Region = memberRegion,
+                        RegionUrl = regionUrl,
                         PhoneNumber = phoneNumber,
                         IsApproved = m.IsApproved,
                         IsLockedOut = m.IsLockedOut,
@@ -715,7 +727,9 @@ namespace HpskSite.Controllers
             public string ProfilePictureUrl { get; set; } = "";
             public string PrimaryClubName { get; set; } = "";
             public int? PrimaryClubId { get; set; }
+            public string PrimaryClubUrl { get; set; } = "";
             public string Region { get; set; } = "";
+            public string RegionUrl { get; set; } = "";
             public string PhoneNumber { get; set; } = "";
             public bool IsApproved { get; set; }
             public bool IsLockedOut { get; set; }
@@ -2130,6 +2144,58 @@ namespace HpskSite.Controllers
             {
                 return new List<ClubViewModel>();
             }
+        }
+
+        /// <summary>
+        /// Node-URL:er för radmenyns "Gå till klubb"/"Gå till krets". Klubbens id ÄR nodens id och
+        /// kretssidan hittas på sin regionCode. Byggs en gång per sidladdning — aldrig en
+        /// trädskanning per medlem.
+        /// </summary>
+        private (Dictionary<int, string> ClubUrls, Dictionary<string, string> RegionUrls) GetClubAndRegionUrls()
+        {
+            var clubUrls = new Dictionary<int, string>();
+            var regionUrls = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext) || umbracoContext.Content == null)
+                {
+                    return (clubUrls, regionUrls);
+                }
+
+                var root = umbracoContext.Content.GetAtRoot().FirstOrDefault();
+                if (root == null) return (clubUrls, regionUrls);
+
+                var clubsHubs = new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
+
+                // Legacy: clubsPage direkt under roten
+                var directClubsHub = root.Children().FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                if (directClubsHub != null) clubsHubs.Add(directClubsHub);
+
+                // Nuvarande: en clubsPage under varje kretssida
+                foreach (var region in root.Children().Where(c => c.ContentType.Alias == "regionalPage"))
+                {
+                    var code = region.Value<string>("regionCode");
+                    if (!string.IsNullOrWhiteSpace(code)) regionUrls[code] = region.Url();
+
+                    var regionClubsHub = region.Children().FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                    if (regionClubsHub != null) clubsHubs.Add(regionClubsHub);
+                }
+
+                foreach (var clubsHub in clubsHubs)
+                {
+                    foreach (var clubNode in clubsHub.Children().Where(c => c.ContentType.Alias == "club"))
+                    {
+                        clubUrls[clubNode.Id] = clubNode.Url();
+                    }
+                }
+            }
+            catch
+            {
+                // En trasig länk får aldrig fälla medlemslistan.
+            }
+
+            return (clubUrls, regionUrls);
         }
 
         #endregion

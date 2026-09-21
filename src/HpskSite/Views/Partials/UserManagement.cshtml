@@ -575,6 +575,7 @@
                         <i class="bi bi-person-gear me-2 text-warning"></i>Adminroller och behörigheter</button></li>
                     <li><button class="dropdown-item" type="button" onclick="showSecurityModal({id})">
                         <i class="bi bi-shield-lock me-2 text-secondary"></i>Säkerhet — lås upp, lösenord, inbjudan</button></li>
+                    {navLinks}
                 </ul>
             </div>
         </td>
@@ -1096,6 +1097,14 @@ function displayUsers() {
         // Render avatar
         const avatarHtml = renderUserAvatar(user);
 
+        // Genvägar till medlemmens klubb- och kretssida. Öppnas i ny flik så att admin behåller
+        // sin plats i listan; pilen i högerkanten säger det innan man klickar. Saknas noden
+        // (ogiltig klubbreferens, krets utan sida) visas posten som inaktiv i stället för att
+        // lägga en död länk i menyn.
+        const navLinks = '<li><hr class="dropdown-divider"></li>'
+            + externalMenuItem(user.primaryClubUrl, 'bi-building', 'Gå till klubb', 'Medlemmen saknar en giltig klubbsida')
+            + externalMenuItem(user.regionUrl, 'bi-geo-alt', 'Gå till krets', 'Medlemmens klubb saknar kretssida');
+
         // Locked-account badge
         const lockedBadge = user.isLockedOut
             ? ' <span class="badge bg-danger ms-1"><i class="bi bi-lock-fill me-1"></i>Låst</span>'
@@ -1117,7 +1126,8 @@ function displayUsers() {
             .replace(/{lastActiveClass}/g, lastActiveClass)
             .replace(/{lastMobileActiveDisplay}/g, lastMobileActiveDisplay)
             .replace(/{lastMobileActiveSortValue}/g, lastMobileActiveSortValue)
-            .replace(/{lastMobileActiveClass}/g, lastMobileActiveClass);
+            .replace(/{lastMobileActiveClass}/g, lastMobileActiveClass)
+            .replace(/{navLinks}/g, navLinks);
     }).join('');
 }
 
@@ -1206,6 +1216,18 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// En menypost som lämnar sidan: ikonen till vänster säger VART, pilen i högerkanten säger att
+// den öppnas i en ny flik. Utan url blir posten inaktiv med en förklaring i title.
+function externalMenuItem(url, icon, label, missingTitle) {
+    const arrow = '<i class="bi bi-box-arrow-up-right ms-2 small text-muted"></i>';
+    if (!url) {
+        return '<li><span class="dropdown-item disabled d-flex align-items-center" title="' + escapeHtml(missingTitle) + '">'
+            + '<i class="bi ' + icon + ' me-2"></i><span class="flex-grow-1">' + escapeHtml(label) + '</span>' + arrow + '</span></li>';
+    }
+    return '<li><a class="dropdown-item d-flex align-items-center" href="' + escapeHtml(url) + '" target="_blank" rel="noopener">'
+        + '<i class="bi ' + icon + ' me-2 text-success"></i><span class="flex-grow-1">' + escapeHtml(label) + '</span>' + arrow + '</a></li>';
 }
 
 function getInitials(firstName, lastName) {
