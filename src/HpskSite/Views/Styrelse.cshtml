@@ -609,7 +609,15 @@
         const body = $('aw_body_' + itemId);
         const a = r.awards;
         if (!a || !a.rows || !a.rows.length) {
-            body.innerHTML = `<p class="sv-help mb-0">Inga märken eller medaljer att dela ut för ${esc(a ? a.year : '')}.</p>`;
+            // ⚠️ Förbehållen måste med även här. "Inga medaljer att dela ut" intill en tävling
+            // vars resultatlista inte räknats om är ett direkt felaktigt påstående, och det är
+            // just i det läget en tom lista är som farligast.
+            let empty = '';
+            (a && a.notes ? a.notes : []).forEach(n => {
+                empty += `<div class="alert alert-warning py-2 px-3 small mb-2">${esc(n)}</div>`;
+            });
+            empty += `<p class="sv-help mb-0">Inga märken eller medaljer att dela ut för ${esc(a ? a.year : '')}.</p>`;
+            body.innerHTML = empty;
             return;
         }
         const locked = !!r.locked;
@@ -619,7 +627,15 @@
         window._awRows = window._awRows || {};
         window._awRows[itemId] = a.rows;
 
-        let html = `<div class="mb-2 sv-help">Hämtad ${esc(a.capturedAt)} · ${a.recipientCount} mottagare · `
+        // ⚠️ Förbehållen står FÖRE listan. En oavgjord medaljplats eller ett mästerskap vars
+        // resultatlista inte räknats om betyder att listan är ofullständig, och det måste läsas
+        // innan någon prickar av — inte upptäckas när en medalj saknas i salen.
+        let html = '';
+        (a.notes || []).forEach(n => {
+            html += `<div class="alert alert-warning py-2 px-3 small mb-2">${esc(n)}</div>`;
+        });
+
+        html += `<div class="mb-2 sv-help">Hämtad ${esc(a.capturedAt)} · ${a.recipientCount} mottagare · `
             + `${a.orderableCount} föremål`
             + (a.uncalledCount ? ` · <strong>${a.uncalledCount} inte upplast</strong>` : '')
             + `</div><div class="table-responsive"><table class="table table-sm align-middle mb-0"><tbody>`;

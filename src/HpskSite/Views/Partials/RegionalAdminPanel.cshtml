@@ -212,6 +212,7 @@
                 </optgroup>
                 <optgroup label="Utmärkelser">
                     <option value="#regionChampionsTab">Mästare</option>
+                    <option value="#regionMedalHandoutTab">Mästerskapsmedaljer</option>
                 </optgroup>
                 <optgroup label="Kretsen">
                     <option value="/styrelse?type=1&id=@regionContentId">Styrelsearbete ↗</option>
@@ -250,6 +251,9 @@
                 <div class="admin-rail-group">Utmärkelser</div>
                 <button class="nav-link" id="regionChampions-tab" data-bs-toggle="tab" data-bs-target="#regionChampionsTab" type="button" role="tab" aria-controls="regionChampionsTab" aria-selected="false">
                     <i class="bi bi-trophy-fill me-2"></i>Mästare
+                </button>
+                <button class="nav-link" id="regionMedalHandout-tab" data-bs-toggle="tab" data-bs-target="#regionMedalHandoutTab" type="button" role="tab" aria-controls="regionMedalHandoutTab" aria-selected="false">
+                    <i class="bi bi-award-fill me-2"></i>Mästerskapsmedaljer
                 </button>
 
                 <div class="admin-rail-group">Kretsen</div>
@@ -637,6 +641,17 @@
                 regChampAdminVD["ChampionsShowAllYears"] = true;
             }
             @await Html.PartialAsync("ReigningChampionsPanel", null, regChampAdminVD)
+        </div>
+
+        <!-- Mästerskapsmedaljer Sub-Tab — årsmötets utdelningsunderlag ur kretsens kretsmästerskap -->
+        <div class="tab-pane fade" id="regionMedalHandoutTab">
+            @{
+                var regMedalVD = new ViewDataDictionary(ViewData);
+                regMedalVD["MedalScopeType"] = "Region";
+                regMedalVD["MedalScopeId"] = ViewBag.regionCode as string ?? "";
+                regMedalVD["MedalScopeName"] = ViewBag.regionName as string ?? "";
+            }
+            @await Html.PartialAsync("_MedalHandoutPanel", null, regMedalVD)
         </div>
 
         <!-- Statistik Sub-Tab -->

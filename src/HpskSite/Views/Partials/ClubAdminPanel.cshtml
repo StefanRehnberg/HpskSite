@@ -90,6 +90,7 @@
                 </optgroup>
                 <optgroup label="Utmärkelser">
                     <option value="#clubChampionsTab">Mästare</option>
+                    <option value="#clubMedalHandoutTab">Mästerskapsmedaljer</option>
                     <option value="#standardMedalsTab">Standardmedaljer</option>
                     <option value="#markenTab">Märken</option>
                 </optgroup>
@@ -175,6 +176,9 @@
                 <div class="admin-rail-group">Utmärkelser</div>
                 <button class="nav-link" id="clubChampions-tab" data-bs-toggle="tab" data-bs-target="#clubChampionsTab" type="button" role="tab" aria-controls="clubChampionsTab" aria-selected="false">
                     <i class="bi bi-trophy-fill me-2"></i>Mästare
+                </button>
+                <button class="nav-link" id="clubMedalHandout-tab" data-bs-toggle="tab" data-bs-target="#clubMedalHandoutTab" type="button" role="tab" aria-controls="clubMedalHandoutTab" aria-selected="false">
+                    <i class="bi bi-award-fill me-2"></i>Mästerskapsmedaljer
                 </button>
                 <button class="nav-link" id="standardMedals-tab" data-bs-toggle="tab" data-bs-target="#standardMedalsTab" type="button" role="tab" aria-controls="standardMedalsTab" aria-selected="false">
                     <i class="bi bi-award me-2"></i>Standardmedaljer
@@ -691,6 +695,17 @@
                 clubChampAdminVD["ChampionsShowAllYears"] = true;
             }
             @await Html.PartialAsync("ReigningChampionsPanel", null, clubChampAdminVD)
+        </div>
+
+        <!-- Mästerskapsmedaljer Tab — årsmötets utdelningsunderlag ur klubbens egna klubbmästerskap -->
+        <div class="tab-pane fade" id="clubMedalHandoutTab">
+            @{
+                var clubMedalVD = new ViewDataDictionary(ViewData);
+                clubMedalVD["MedalScopeType"] = "Club";
+                clubMedalVD["MedalScopeId"] = clubId.ToString();
+                clubMedalVD["MedalScopeName"] = clubName;
+            }
+            @await Html.PartialAsync("_MedalHandoutPanel", null, clubMedalVD)
         </div>
 
         <!-- Standardmedaljer Tab -->

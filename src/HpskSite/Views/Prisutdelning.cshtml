@@ -315,7 +315,7 @@
                                             @* Medaljerna delas ut till SKYTTARNA, så namnen måste
                                                stå på kortet - annars vet funktionären inte hur
                                                många medaljer laget ska ha. *@
-                                            <div class="small mt-1">@string.Join(" · ", a.Members)</div>
+                                            <div class="small mt-1">@string.Join(" · ", a.Members.Select(m => m.Name))</div>
                                         }
                                     </div>
                                     <div class="pu-score">

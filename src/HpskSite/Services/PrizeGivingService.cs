@@ -323,7 +323,7 @@ namespace HpskSite.Services
                         XCount = team.TotalXCount,
                         Members = team.MemberResults
                             .Where(m => !string.IsNullOrWhiteSpace(m.Name))
-                            .Select(m => m.Name)
+                            .Select(m => new PrizeTeamMember { MemberId = m.MemberId, Name = m.Name })
                             .ToList()
                     });
                 }

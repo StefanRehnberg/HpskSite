@@ -1,0 +1,391 @@
+@*
+    Årsmötets mästerskapsmedaljer — vad klubben/kretsen ska beställa, gravera och dela ut.
+
+    Underlaget är årets mästerskap i systemet, läst ur varje tävlings SPARADE resultatartefakt
+    genom PrizeGivingService. Ytan räknar alltså inte om någonting; den visar vad arrangören
+    redan kontrollerat och publicerat, och namnger de tävlingar som inte bidrar.
+
+    ViewData:
+      MedalScopeType = "Club" | "Region"
+      MedalScopeId   = clubId (sträng) eller regionkod
+      MedalScopeName = klubbens/kretsens namn (valfritt, bara för rubriken)
+*@
+@{
+    var medalScopeType = ViewData["MedalScopeType"] as string ?? "Club";
+    var medalScopeId = ViewData["MedalScopeId"]?.ToString() ?? "";
+    var medalScopeName = ViewData["MedalScopeName"] as string ?? "";
+    var medalIsRegion = medalScopeType == "Region";
+    var medalInstance = (medalScopeType + "-" + medalScopeId).Replace(" ", "-");
+
+    // Årsmötet hålls på vårkanten och delar ut FÖREGÅENDE års medaljer. Förslaget följer det,
+    // men året är en väljare — en klubb som delar ut i efterhand får inte låsas av vår gissning.
+    var medalDefaultYear = DateTime.Now.Month <= 6 ? DateTime.Now.Year - 1 : DateTime.Now.Year;
+}
+
+<div class="card mb-3 medal-handout-card"
+     data-medal-instance="@medalInstance"
+     data-scope-type="@medalScopeType"
+     data-scope-id="@medalScopeId"
+     data-default-year="@medalDefaultYear">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-1">
+            <h6 class="card-title mb-0">
+                <i class="bi bi-award-fill text-warning me-1"></i>
+                @(medalIsRegion ? "Kretsmästerskapsmedaljer" : "Klubbmästerskapsmedaljer")
+                @if (!string.IsNullOrWhiteSpace(medalScopeName))
+                {
+                    <span class="text-muted fw-normal">— @medalScopeName</span>
+                }
+            </h6>
+            <div class="d-flex align-items-center gap-2">
+                <label class="small text-muted mb-0" for="medalYear-@medalInstance">Verksamhetsår:</label>
+                <select id="medalYear-@medalInstance" class="form-select form-select-sm medal-year" style="width:auto;"></select>
+            </div>
+        </div>
+
+        <p class="text-muted small mb-0">
+            @if (medalIsRegion)
+            {
+                <text>Medaljerna från årets kretsmästerskap, oavsett vilken klubb som stod som arrangör
+                — det är kretsen som beställer och delar ut dem. Listan visar antal per valör för
+                beställningen och gravyren, och vem som ska kallas fram på årsmötet.</text>
+            }
+            else
+            {
+                <text>Medaljerna från klubbens egna klubbmästerskap. Listan visar antal per valör för
+                beställningen och gravyren, och vem som ska kallas fram på årsmötet. Medaljer som
+                medlemmar vunnit på ett kretsmästerskap står på kretsens lista — kretsen delar ut dem
+                på sitt eget årsmöte.</text>
+            }
+        </p>
+
+        <p class="text-muted small mb-0 mt-1">
+            <i class="bi bi-clipboard-check me-1"></i>Själva utdelningen protokollförs på årsmötet:
+            punkten <em>Utdelning av märken och medaljer</em> i dagordningen hämtar den här listan
+            och prickar av vem som tog emot.
+        </p>
+
+        <div class="medal-content mt-3">
+            <div class="text-center py-3">
+                <div class="spinner-border spinner-border-sm text-warning" role="status">
+                    <span class="visually-hidden">Laddar...</span>
+                </div>
+            </div>
+        </div>
+
+        @* ⚠️ Växeln för ordningen ligger INTE här utan vid rubriken "Att dela ut" — den styr bara
+           den listan, och den förklarande texten som ändras med den står där. En kontroll långt
+           från det den ändrar läses som att den gäller hela kortet. *@
+        <div class="d-flex gap-2 flex-wrap mt-2 align-items-center medal-actions" style="display:none !important;">
+            <button class="btn btn-sm btn-outline-secondary medal-print" type="button">
+                <i class="bi bi-printer me-1"></i>Skriv ut listan
+            </button>
+            <button class="btn btn-sm btn-outline-secondary medal-export-order" type="button">
+                <i class="bi bi-download me-1"></i>Beställnings- och gravyrlista (CSV)
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    // Partialen kan renderas flera gånger på samma sida (klubb- och kretspanelen delar den), så
+    // allt är scopat till sitt eget kort. Ingen global funktion, ingen delad id-rymd.
+    document.querySelectorAll('.medal-handout-card:not([data-medal-wired])').forEach(function (card) {
+        card.setAttribute('data-medal-wired', '1');
+
+        var scopeType = card.getAttribute('data-scope-type') || 'Club';
+        var scopeId = card.getAttribute('data-scope-id') || '';
+        var defaultYear = parseInt(card.getAttribute('data-default-year'), 10) || new Date().getFullYear();
+        var yearSel = card.querySelector('.medal-year');
+        var content = card.querySelector('.medal-content');
+        var actions = card.querySelector('.medal-actions');
+
+        function esc(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // Sju år bakåt räcker för en klubb som kommer på efterkälken utan att väljaren blir en lista.
+        var thisYear = new Date().getFullYear();
+        for (var y = thisYear; y >= thisYear - 6; y--) {
+            var opt = document.createElement('option');
+            opt.value = y;
+            opt.textContent = y;
+            if (y === defaultYear) opt.selected = true;
+            yearSel.appendChild(opt);
+        }
+
+        function qs() {
+            return 'scopeType=' + encodeURIComponent(scopeType)
+                 + '&scopeId=' + encodeURIComponent(scopeId)
+                 + '&year=' + encodeURIComponent(yearSel.value);
+        }
+
+        // ⚠️ Ordningen bor i en VARIABEL, inte i DOM:en. Växeln ritas om tillsammans med listan
+        // den styr, så ett läge läst ur en kryssruta hade nollställts av varje omritning.
+        var groupMode = 'person';
+        function groupByCompetition() { return groupMode === 'tavling'; }
+
+        // Klubbens egen lista visar INTE mottagarens klubb — se renderingen nedan.
+        var showClub = false;
+
+        function groupToggleHtml() {
+            function btn(mode, label) {
+                return '<button type="button" class="btn btn-sm '
+                     + (groupMode === mode ? 'btn-secondary' : 'btn-outline-secondary')
+                     + '" data-medal-group="' + mode + '"'
+                     + (groupMode === mode ? ' aria-pressed="true"' : ' aria-pressed="false"')
+                     + '>' + label + '</button>';
+            }
+            return '<div class="btn-group" role="group" aria-label="Ordning på utdelningslistan">'
+                 + btn('person', 'Per mottagare') + btn('tavling', 'Per mästerskap') + '</div>';
+        }
+
+        function medalRank(medal) {
+            return medal === 'Guld' ? 1 : medal === 'Silver' ? 2 : medal === 'Brons' ? 3 : 9;
+        }
+
+        function medalBadge(medal) {
+            var cls = medal === 'Guld' ? 'text-warning'
+                    : medal === 'Silver' ? 'text-secondary'
+                    : medal === 'Brons' ? 'text-danger-emphasis' : 'text-muted';
+            return '<i class="bi bi-award-fill ' + cls + ' me-1"></i>' + esc(medal);
+        }
+
+        function render(d) {
+            // ⚠️⚠️ MOTTAGARENS KLUBB VISAS BARA PÅ KRETSENS LISTA. På en klubbs egen lista är den
+            // i bästa fall brus — alla medaljörer är klubbens egna — och i värsta fall FEL: namnet
+            // kommer ur resultatlistan och kan vara skyttens huvudklubb, så Harplinges lista kunde
+            // visa "Varbergs PK" intill en av Harplinges egna klubbmästare. På kretsens lista bär
+            // den däremot hela informationen: mottagarna kommer från flera klubbar.
+            showClub = (d.scopeType === 'Region');
+
+            var html = '';
+
+            (d.warnings || []).forEach(function (w) {
+                html += '<div class="alert alert-warning py-2 px-3 small mb-2">' + esc(w) + '</div>';
+            });
+
+            // ── Att beställa ──
+            html += '<h6 class="small text-uppercase text-muted mb-1">Att beställa</h6>';
+            if (!d.order || d.order.length === 0) {
+                html += '<p class="text-muted small">Inga mästerskapsmedaljer att beställa för '
+                     +  esc(d.year) + '.</p>';
+            } else {
+                html += '<div class="table-responsive"><table class="table table-sm align-middle mb-1">'
+                     +  '<thead><tr><th>Grupp</th><th>Valör</th>'
+                     +  '<th class="text-end" style="width:5rem;">Antal</th><th>Notering</th></tr></thead><tbody>';
+                d.order.forEach(function (l) {
+                    html += '<tr><td class="text-muted">' + esc(l.group) + '</td>'
+                         +  '<td>' + medalBadge(l.medal) + '</td>'
+                         +  '<td class="text-end fw-semibold">' + l.count + '</td>'
+                         +  '<td class="text-muted small">' + esc(l.note || '') + '</td></tr>';
+                });
+                html += '<tr class="table-light fw-semibold"><td>Totalt</td><td></td>'
+                     +  '<td class="text-end">' + d.totalMedals + '</td><td></td></tr>';
+                html += '</tbody></table></div>';
+                html += '<p class="text-muted small">En lagmedalj räknas per lagmedlem — det är skyttarna '
+                     +  'som får medaljerna, inte laget. '
+                     +  '<strong>Gravören</strong> behöver en rad per medalj med graveringstext: '
+                     +  'ladda ner <em>Beställnings- och gravyrlista (CSV)</em> nedan.</p>';
+            }
+
+            // ── Utan mottagare ──
+            // Egen sektion, aldrig bortsopad: medaljen ska beställas, men namnet kan inte graveras
+            // och ingen får kallas fram. Den som håller i ceremonin måste se det här i förväg.
+            if (d.unresolved && d.unresolved.length > 0) {
+                html += '<h6 class="small text-uppercase text-muted mb-1 mt-3">Medaljer utan mottagare</h6>';
+                html += '<p class="text-muted small mb-2">Inräknade i beställningen ovan, men platsen är '
+                     +  'inte avgjord. Avgör särskjutningen eller lagordningen på tävlingens resultatflik '
+                     +  'och hämta listan igen innan gravyren beställs.</p>';
+                d.unresolved.forEach(function (u) {
+                    html += '<div class="alert alert-danger py-2 px-3 small mb-2">'
+                         +  '<strong>' + esc(u.competitionName) + '</strong> · ' + esc(u.category)
+                         +  '<br>' + esc(u.text) + '</div>';
+                });
+            }
+
+            // ── Att dela ut ──
+            //
+            // Rubrik och växel på samma rad: växeln styr bara den här listan, och den förklarande
+            // texten direkt under ändras med den.
+            var hasHandout = d.handout && d.handout.length > 0;
+            html += '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-1 mt-3">'
+                 +  '<h6 class="small text-uppercase text-muted mb-0">Att dela ut</h6>'
+                 +  (hasHandout ? groupToggleHtml() : '')
+                 +  '</div>';
+            if (!hasHandout) {
+                html += '<p class="text-muted small">Ingen mottagare för ' + esc(d.year) + '.</p>';
+            } else if (groupByCompetition()) {
+                // En rubrik per mästerskap. Samma person kan stå under flera tävlingar — det är
+                // skillnaden mot den andra ordningen, inte en dubblett.
+                html += '<p class="text-muted small mb-2">' + d.recipientCount
+                     +  ' mottagare. Ett mästerskap i taget — samma person kan kallas fram flera gånger.</p>';
+
+                var comps = [];
+                var byId = {};
+                d.handout.forEach(function (r) {
+                    (r.items || []).forEach(function (i) {
+                        var key = String(i.competitionId);
+                        if (!byId[key]) {
+                            byId[key] = { name: i.competitionName, date: i.competitionDate || '', rows: [] };
+                            comps.push(key);
+                        }
+                        byId[key].rows.push({ r: r, i: i });
+                    });
+                });
+                comps.sort(function (a, b) {
+                    return (byId[a].date || '').localeCompare(byId[b].date || '')
+                        || byId[a].name.localeCompare(byId[b].name, 'sv');
+                });
+
+                comps.forEach(function (key) {
+                    var g = byId[key];
+                    html += '<div class="fw-semibold small mt-3">' + esc(g.name)
+                         +  (g.date ? ' <span class="text-muted fw-normal">' + esc(g.date) + '</span>' : '')
+                         +  '</div>';
+                    html += '<div class="table-responsive"><table class="table table-sm align-middle mb-1">'
+                         +  '<thead><tr><th style="width:11rem;">Medalj</th>'
+                         +  '<th style="width:14rem;">Mottagare</th><th>Detalj</th></tr></thead><tbody>';
+                    g.rows.sort(function (a, b) {
+                        return medalRank(a.i.medal) - medalRank(b.i.medal)
+                            || (a.i.category || '').localeCompare(b.i.category || '', 'sv');
+                    });
+                    g.rows.forEach(function (x) {
+                        html += '<tr><td>' + medalBadge(x.i.medal)
+                             +  ' <span class="text-muted small">' + esc(x.i.category) + '</span>'
+                             +  (x.i.isTeam ? ' <span class="badge text-bg-light">lag</span>' : '')
+                             +  '</td><td><span class="fw-semibold">' + esc(x.r.name) + '</span>'
+                             +  (showClub && x.r.club ? '<div class="text-muted small">' + esc(x.r.club) + '</div>' : '')
+                             +  '</td><td class="text-muted small">' + esc(x.i.detail) + '</td></tr>';
+                    });
+                    html += '</tbody></table></div>';
+                });
+            } else {
+                html += '<p class="text-muted small mb-2">' + d.recipientCount
+                     +  ' mottagare. Varje person kallas fram en gång och får allt hen vunnit under året.</p>';
+                html += '<div class="table-responsive"><table class="table table-sm align-middle mb-1">'
+                     +  '<thead><tr><th style="width:13rem;">Mottagare</th><th>Medalj</th>'
+                     +  '<th>Tävling</th><th>Detalj</th></tr></thead><tbody>';
+                d.handout.forEach(function (r) {
+                    (r.items || []).forEach(function (i, idx) {
+                        html += '<tr><td>';
+                        if (idx === 0) {
+                            html += '<span class="fw-semibold">' + esc(r.name) + '</span>';
+                            if (showClub && r.club) html += '<div class="text-muted small">' + esc(r.club) + '</div>';
+                        }
+                        html += '</td><td>' + medalBadge(i.medal)
+                             +  ' <span class="text-muted small">' + esc(i.category) + '</span>'
+                             +  (i.isTeam ? ' <span class="badge text-bg-light">lag</span>' : '')
+                             +  '</td><td class="small">' + esc(i.competitionName)
+                             +  (i.competitionDate ? '<div class="text-muted">' + esc(i.competitionDate) + '</div>' : '')
+                             +  '</td><td class="text-muted small">' + esc(i.detail) + '</td></tr>';
+                    });
+                });
+                html += '</tbody></table></div>';
+            }
+
+            // ── Underlaget ──
+            // Tävlingarna räknas upp även när de inte bidrar. En gren utan medaljfunktion eller en
+            // tävling vars lista inte räknats om ska synas som ett SKÄL, inte som en tom lista.
+            html += '<h6 class="small text-uppercase text-muted mb-1 mt-3">Tävlingar listan bygger på</h6>';
+            if (!d.competitions || d.competitions.length === 0) {
+                html += '<p class="text-muted small">Inga mästerskap hittades för ' + esc(d.year) + '.</p>';
+            } else {
+                html += '<div class="table-responsive"><table class="table table-sm align-middle mb-0">'
+                     +  '<thead><tr><th style="width:6.5rem;">Datum</th><th>Tävling</th>'
+                     +  '<th class="text-end" style="width:5rem;">Medaljer</th>'
+                     +  '<th>Medaljindelning</th></tr></thead><tbody>';
+                d.competitions.forEach(function (c) {
+                    html += '<tr><td class="small text-muted">' + esc(c.date || '') + '</td>'
+                         +  '<td class="small"><a href="/prisutdelning/' + c.competitionId + '" target="_blank" rel="noopener">'
+                         +  esc(c.name) + '</a>';
+                    // ⚠️ Brickan FÖRKLARAR EN FRÅNVARO och visas bara när tävlingen inte bidrar
+                    // med någon medalj. En tävling med tre medaljer som samtidigt märks
+                    // "kommande" säger emot sig själv — resultaten finns ju. Den är neutral,
+                    // aldrig i varningsfärg: det finns ingenting att åtgärda.
+                    if (c.isUpcoming && !c.hasMedals) html += ' <span class="badge text-bg-light">kommande</span>';
+                    if (c.problem) html += '<div class="text-muted">' + esc(c.problem) + '</div>';
+                    html += '</td><td class="text-end">' + c.medalCount + '</td>'
+                         +  '<td class="text-muted small">' + esc(c.medalGroupingText || '');
+                    if (c.medalGroupingStale) {
+                        html += '<div class="text-danger">' + esc(c.medalGroupingStale) + '</div>';
+                    }
+                    html += '</td></tr>';
+                });
+                html += '</tbody></table></div>';
+            }
+
+            content.innerHTML = html;
+        }
+
+        function load() {
+            actions.style.setProperty('display', 'none', 'important');
+            content.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-warning" role="status"><span class="visually-hidden">Laddar...</span></div></div>';
+
+            fetch('/umbraco/surface/MedalHandout/GetMedalHandout?' + qs())
+                .then(function (r) { return r.json(); })
+                .then(function (d) {
+                    if (!d.success) {
+                        content.innerHTML = '<div class="alert alert-warning mb-0">'
+                            + esc(d.message || 'Kunde inte hämta listan.') + '</div>';
+                        return;
+                    }
+                    lastData = d;
+                    render(d);
+                    actions.style.setProperty('display', 'flex', 'important');
+                })
+                .catch(function () {
+                    content.innerHTML = '<div class="alert alert-danger mb-0">Kunde inte hämta listan.</div>';
+                });
+        }
+
+        yearSel.addEventListener('change', load);
+
+        // ⚠️ Ordningen byts genom att RITA OM den hämtade listan, inte genom att hämta igen —
+        // sammanställningen är en tung körning per tävling, och datat är identiskt.
+        //
+        // ⚠️ DELEGERAD lyssnare på behållaren, inte på knapparna: knapparna ligger inuti listan de
+        // styr och byts ut vid varje omritning, så en lyssnare bunden direkt till dem hade slutat
+        // fungera efter första klicket.
+        var lastData = null;
+        content.addEventListener('click', function (ev) {
+            var btn = ev.target.closest('[data-medal-group]');
+            if (!btn) return;
+            var mode = btn.getAttribute('data-medal-group');
+            if (mode === groupMode) return;
+            groupMode = mode;
+            if (lastData) render(lastData);
+        });
+
+        card.querySelector('.medal-print').addEventListener('click', function () {
+            // Valet följer med, annars kommer papperet i en annan ordning än skärmen.
+            window.open('/umbraco/surface/MedalHandout/PrintMedalHandout?' + qs()
+                + '&gruppering=' + (groupByCompetition() ? 'tavling' : 'person'), '_blank', 'noopener');
+        });
+        card.querySelector('.medal-export-order').addEventListener('click', function () {
+            window.location = '/umbraco/surface/MedalHandout/ExportMedalHandout?' + qs();
+        });
+
+        // ⚠️ LADDA FÖRST NÄR KORTET SYNS. Sammanställningen läser varje mästerskaps resultat-
+        // artefakt och räknar lagresultaten live, alltså en tung körning per tävling — den får
+        // inte ligga i sidladdningen av en flik ingen öppnat. Kortet bor i en tab-pane, så
+        // "syns" mäts på faktisk layout och inte på att elementet finns.
+        if (card.offsetParent !== null) {
+            load();
+        } else if (typeof IntersectionObserver === 'function') {
+            var io = new IntersectionObserver(function (entries) {
+                if (entries.some(function (e) { return e.isIntersecting; })) {
+                    io.disconnect();
+                    load();
+                }
+            });
+            io.observe(card);
+        } else {
+            load();
+        }
+    });
+})();
+</script>

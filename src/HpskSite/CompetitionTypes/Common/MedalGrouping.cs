@@ -89,8 +89,13 @@ namespace HpskSite.CompetitionTypes.Common
         public static bool PerWeaponGroup(IPublishedContent? competition)
         {
             if (competition == null) return false;
-            var scope = competition.Value("competitionScope")?.ToString();
-            return PerWeaponGroup(scope, competition.Value<bool>(PropertyAlias));
+            // ⚠️ RÄTTAT 2026-09-20: den otypade läsningen här KASTADE på en tävling vars
+            // omfattning lagrats som ren sträng — FlexibleDropdownens konverterare kör även på
+            // Value(), inte bara på Value<string>(). CompetitionScopeHelper.ReadScope läser
+            // råvärdet förbi konverteraren och normaliserar en JSON-inpackad array.
+            return PerWeaponGroup(
+                CompetitionScopeHelper.ReadScope(competition),
+                competition.Value<bool>(PropertyAlias));
         }
 
         /// <summary>
