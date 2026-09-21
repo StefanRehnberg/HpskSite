@@ -96,6 +96,12 @@ appsettings.Development.json
 # Samma regel gäller varje nytt exportunderlag: hör det hemma i en databas, inte i git.
 /SSMData/
 
+# Medlemsexporter som hamnar i reporoten. `medlemmar_2026-09-15.csv` låg ostagead här
+# 2026-09-21, och exakt den filtypen har svepts med i en commit TVÅ gånger tidigare — varje
+# gång via ett `git add -A`. En regel är billigare än en tredje historikstädning.
+/medlemmar*.csv
+/medlemsexport*.csv
+
 # Skärmdumpar som klistras in i reporoten under felsökning. De är arbetsmaterial, och en
 # skärmdump från en inloggad yta bär nästan alltid någons namn.
 /Screenshot*.jpg
