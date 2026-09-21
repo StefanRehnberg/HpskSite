@@ -27,6 +27,7 @@ namespace HpskSite.Controllers
         private readonly EmailService _emailService;
         private readonly ClubService _clubService;
         private readonly MarkenOrderListService _markenOrderList;
+        private readonly MedalHandoutService _medalHandout;
         private readonly IDataProtector _protector;
         private readonly ILogger<BoardMeetingController> _logger;
 
@@ -45,6 +46,7 @@ namespace HpskSite.Controllers
             EmailService emailService,
             ClubService clubService,
             MarkenOrderListService markenOrderList,
+            MedalHandoutService medalHandout,
             IDataProtectionProvider dataProtection,
             ILogger<BoardMeetingController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -57,6 +59,7 @@ namespace HpskSite.Controllers
             _emailService = emailService;
             _clubService = clubService;
             _markenOrderList = markenOrderList;
+            _medalHandout = medalHandout;
             _protector = dataProtection.CreateProtector("Board.Justering.v1");
             _logger = logger;
         }
@@ -445,19 +448,24 @@ namespace HpskSite.Controllers
             var stored = _meetingService.GetAgendaAwards(agendaItemId);
             int defaultYear = BoardMeetingService.DefaultAwardsYear(meeting);
 
-            // ⚠️ Utdelningslistan är KLUBBSCOPAD (MarkenOrderListService tar ett clubId, och märken
-            // hör till en klubbmedlem). En kretsstyrelse har alltså ingen lista — säg det, i stället
-            // för att visa en tom lista som läses som "ingen fick något i år".
-            if (meeting.OwnerType != DocumentOwnerType.Club)
+            // ⚠️ TVÅ KÄLLOR, OCH DE HAR OLIKA RÄCKVIDD. Märkena är klubbscopade (de hör till en
+            // klubbmedlem), medan mästerskapsmedaljerna följer ARRANGÖRSKAPET: klubbens årsmöte
+            // delar ut medaljerna för klubbens egna klubbmästerskap, kretsens årsmöte medaljerna
+            // för kretsens kretsmästerskap (Stefan 2026-09-20). En kretsstyrelse har alltså en
+            // lista numera — den saknar bara märkeshalvan.
+            var isClub = meeting.OwnerType == DocumentOwnerType.Club;
+            var regionCode = isClub ? "" : ResolveRegionCode(meeting.OwnerId);
+
+            if (!isClub && string.IsNullOrWhiteSpace(regionCode))
                 return Json(new
                 {
                     success = true,
                     supported = false,
                     year = year ?? defaultYear,
                     defaultYear,
-                    message = "Märken och medaljer delas ut av klubben, så det finns ingen " +
-                              "utdelningslista för en krets. Punkten kan ändå användas för att " +
-                              "anteckna vad som delades ut.",
+                    message = "Kretsens regionkod kunde inte läsas, så kretsmästerskapens medaljer " +
+                              "går inte att hämta. Punkten kan ändå användas för att anteckna vad " +
+                              "som delades ut.",
                     awards = (object?)null
                 });
 
@@ -465,8 +473,23 @@ namespace HpskSite.Controllers
             if (refresh || stored == null)
             {
                 int y = year ?? stored?.Year ?? defaultYear;
-                var list = await _markenOrderList.BuildAsync(meeting.OwnerId, y);
-                var fresh = BoardMeetingAwards.FromOrderList(list);
+
+                BoardMeetingAwards fresh;
+                if (isClub)
+                {
+                    var list = await _markenOrderList.BuildAsync(meeting.OwnerId, y);
+                    fresh = BoardMeetingAwards.FromOrderList(list);
+                    BoardMeetingAwards.AddMedals(fresh, await _medalHandout.BuildForClubAsync(meeting.OwnerId, y));
+                }
+                else
+                {
+                    fresh = new BoardMeetingAwards { Year = y };
+                    BoardMeetingAwards.AddMedals(fresh, await _medalHandout.BuildForRegionAsync(regionCode, y));
+                }
+
+                // En person kallas fram EN gång, även med både ett märke och en medalj.
+                BoardMeetingAwards.SortByRecipient(fresh);
+
                 // Slå samman så en omhämtning inte raderar avprickningen (se BoardMeetingAwards.Merge).
                 result = BoardMeetingAwards.Merge(fresh, stored);
 
@@ -487,6 +510,9 @@ namespace HpskSite.Controllers
                 {
                     year = result.Year,
                     capturedAt = result.CapturedAt.ToString("yyyy-MM-dd HH:mm"),
+                    // Det som gjorde listan osäker när den hämtades. Ligger i snapshotten, så det
+                    // överlever en ren läsning — en lista som tappat sina förbehåll ser komplett ut.
+                    notes = result.Notes ?? new List<string>(),
                     recipientCount = result.RecipientCount,
                     orderableCount = result.OrderableCount,
                     receivedCount = result.ReceivedCount,
@@ -763,6 +789,28 @@ namespace HpskSite.Controllers
         /// utdelningspunkt eller ingen lista är hämtad, vilket är just den skillnad kortet i
         /// dagordningen behöver för att erbjuda "Hämta listan" i stället för en tom tabell.
         /// </summary>
+        /// <summary>
+        /// Kretsens regionkod ur kretsnoden. Mötets <c>OwnerId</c> är nodens id för en krets, men
+        /// mästerskapsmedaljerna slås upp på KODEN — den är det tävlingarna bär.
+        ///
+        /// ⚠️ Läses ur <c>regionCode</c>, aldrig ur nodens namn: namnet är en rubrik som kan ändras
+        /// i backoffice, koden är nyckeln resten av systemet jämför mot.
+        /// </summary>
+        private string ResolveRegionCode(int regionNodeId)
+        {
+            try
+            {
+                var node = Services?.ContentService?.GetById(regionNodeId);
+                if (node == null || node.ContentType.Alias != "regionalPage") return "";
+                return node.GetValue<string>("regionCode") ?? "";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte läsa regionkoden för nod {NodeId}", regionNodeId);
+                return "";
+            }
+        }
+
         private static object? AwardsSummaryDto(BoardMeetingAgendaItem a)
         {
             if (a.ItemType != "awards") return null;

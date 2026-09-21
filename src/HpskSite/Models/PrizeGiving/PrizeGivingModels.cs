@@ -154,8 +154,20 @@ namespace HpskSite.Models.PrizeGiving
         public int XCount { get; set; }
 
         /// <summary>Lagmedlemmarna. Medaljerna delas ut till skyttarna, så namnen måste stå på
-        /// kortet — annars vet funktionären inte hur många medaljer laget ska ha.</summary>
-        public List<string> Members { get; set; } = new();
+        /// kortet — annars vet funktionären inte hur många medaljer laget ska ha.
+        ///
+        /// <para>⚠️ Bär medlems-id och inte bara namnet, för att årsmötets utdelningslista ska
+        /// kunna slå ihop en lagmedalj med skyttens individuella medaljer till EN person som
+        /// kallas fram en gång. Ett namn duger till att läsa upp, men inte till att slå ihop:
+        /// två medlemmar kan heta lika.</para></summary>
+        public List<PrizeTeamMember> Members { get; set; } = new();
+    }
+
+    /// <summary>En lagmedlem på ett lagpris.</summary>
+    public class PrizeTeamMember
+    {
+        public int MemberId { get; set; }
+        public string Name { get; set; } = "";
     }
 
     /// <summary>

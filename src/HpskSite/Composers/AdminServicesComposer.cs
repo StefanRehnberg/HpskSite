@@ -72,6 +72,11 @@ namespace HpskSite.Composers
             // lagmedaljerna, sa den maste registreras efter den.
             builder.Services.AddScoped<PrizeGivingService>();
 
+            // Arsmotets medaljlista. Samlar arets masterskapsmedaljer for en klubb eller en
+            // krets genom PrizeGivingService - alltsa ur den sparade artefakten, aldrig en ny
+            // rankning - sa den maste registreras efter den.
+            builder.Services.AddScoped<MedalHandoutService>();
+
             // Register BoardRoleService as scoped
             builder.Services.AddScoped<BoardRoleService>();
             // Member-database expansion (see Documentation/MEMBER_DATABASE.md)

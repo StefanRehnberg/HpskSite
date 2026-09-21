@@ -4224,9 +4224,13 @@ säga emot varandra, och här är det ena svaret det man beställer efter. Svite
 - **Ett uppfyllt år som INTE korsar ett steg ger ingen beställningsrad** men står kvar i
   utdelningslistan som `Orderable = false` ("inget märke"), eftersom det läses upp på årsmötet.
   Utan den skillnaden ser de två halvorna ut att vara oense om antalet.
-- **Två fel flaggas i stället för att tystas:** ett **guldmärke utan registreringsnummer** kan inte
-  beställas (namnges i `Warnings`, och medlemsraden säger "Guldnummer saknas"), och en
-  **egenrapporterad, ej granskad** standardmedalj **räknas med** men flaggas — en lista som tyst
+- **⚠️ ETT SAKNAT GULDNUMMER ÄR INTE ETT FEL (rättat 2026-09-21).** Ytan varnade tidigare
+  "guldmärket saknar registreringsnummer — fyll i det innan beställning" och satte "Guldnummer
+  saknas" på medlemsraden. Det är omöjligt att uppfylla: numret är unikt per skytt men **förbundet
+  tilldelar det och graverar in det i märket**, så klubben kan inte känna till det vid
+  beställningen. Varningen och detaljtexten är borta; guldradens `Note` säger i stället vad som
+  ska göras när märkena kommit. `Guldnr` visas fortfarande när numret ÄR ifyllt.
+- **En egenrapporterad, ej granskad** standardmedalj **räknas med** men flaggas — en lista som tyst
   utesluter poster läses som komplett.
 - Primärklubb avgör tillhörighet, som på övriga märkesytor, så samma märke aldrig kan hamna på två
   klubbars beställningslistor.
@@ -4363,6 +4367,170 @@ inga tysta bortfall. Siffran 74 reproducerar inte; 71 är det mätta värdet 202
 
 Adds C# → **full ombyggnad**. **En SQL-migrering, som ska köras FÖRE deployen.** Ingen
 doctype-egenskap, ingen Umbraco-nod.
+
+### Årsmötets mästerskapsmedaljer — beställa, gravera, dela ut (2026-09-20)
+
+Märkeslistan (2026-08-31) och årsmötespunkten (2026-09-01) täckte **märken och standardmedaljer**.
+Det som saknades var den andra halvan av samma årsmöte: **placeringsmedaljerna från klubbens och
+kretsens egna mästerskap**. De fanns per tävling på `/prisutdelning/{id}` men ingenstans summerat
+över året, så en klubb kunde inte beställa medaljer eller lämna dem på gravyr utan att gå igenom
+varje tävling för hand.
+
+**⚠️⚠️ AVGRÄNSNINGEN ÄR ARRANGÖRSKAPET, INTE MEDLEMSKAPET** (Stefan 2026-09-20): klubbens årsmöte
+delar ut medaljerna för klubbens egna **klubbmästerskap**, kretsens årsmöte medaljerna för kretsens
+**kretsmästerskap**. En medlem som tog kretsguld står alltså på KRETSENS lista och inte på klubbens
+— det är kretsen som beställer och delar ut den medaljen. Att också lyfta in medlemmarnas medaljer
+från andras mästerskap övervägdes och valdes bort; det hade gjort två listor som säger emot varandra
+om vem som beställer vad.
+- **Kretsens lista följer KRETSEN, inte arrangörsklubben.** Ett kretsmästerskap som en klubb
+  arrangerar på kretsens uppdrag är fortfarande kretsens medaljer, så både den klubbvärdda och den
+  kretsvärdda formen räknas in (`clubId` satt respektive tomt med `regionalFederation` på tävlingen)
+  — samma två värdformer som redan gått fel fyra gånger på behörighetssidan.
+
+**⚠️⚠️ TJÄNSTEN RANKAR INTE OM NÅGOT.** `MedalHandoutService` går genom `PrizeGivingService`, som i
+sin tur läser den sparade resultatartefaktens `MedalAwards`. Rankningen kräver mästerskapskategorin,
+finalistfiltret, innertiorna och särskjutningen **samtidigt**, och de finns i hand exakt en gång —
+när resultatlistan räknas ut. En andra rankning här vore en femte chans att förväxla
+mästerskapskategori med skicklighetsklass. Priset är att en tävling utan omräknad artefakt saknar
+medaljer, och det priset betalas med en **namngiven varning per tävling** i stället för en tyst lucka.
+
+**⚠️⚠️ `medalsPerWeaponGroup` KAN SKILJA SIG MELLAN TÄVLINGARNA I SAMMA LISTA.** Indelningen är
+arrangörens val PER TÄVLING (se `MedalGrouping`), så ett klubbmästerskap kan ha delat vapengrupp C i
+mästerskapsklasser medan nästa gav ett enda guld per vapengrupp. Varje tävlingsrad bär därför sin
+egen indelningstext — hämtad ur **ARTEFAKTEN**, aldrig ur tävlingens nuvarande inställning, samma
+regel som att enheten måste resa med talet. Utan den går det inte att se om ett saknat damguld är ett
+val eller ett fel, och det är precis den frågan man ställer sig när medaljerna ska beställas. Har
+inställningen ändrats sedan listan räknades säger raden det i rött (`MedalGroupingStale`).
+
+**⚠️ EN LAGMEDALJ ÄR FLERA MEDALJER.** Den delas ut till varje skytt i laget, så antalet att beställa
+är antalet lagmedlemmar — inte antalet lag. Därför bär `PrizeTeamAward.Members` numera medlems-**id**
+och inte bara namnet: utan id:t går en lagmedalj inte att slå ihop med skyttens individuella
+medaljer, och hen hade kallats fram två gånger. Ett namn duger till att läsa upp, inte till att slå
+ihop — två medlemmar kan heta lika. (`Members` bytte typ till `List<PrizeTeamMember>`; enda
+renderaren var `Prisutdelning.cshtml`.)
+
+**⚠️ EN OAVGJORD MEDALJPLATS RÄKNAS I BESTÄLLNINGEN MEN NAMNGER INGEN** (Stefan 2026-09-20). Medaljen
+ska beställas oavsett vem som till slut vinner den; det är bara graveringen och uppropet som måste
+vänta. De står därför som egna röda rader, i listan, i CSV:n och i utskriften — **aldrig tyst
+utelämnade**, eftersom en gravyrlista som saknar dem läses som komplett och medaljen upptäcks först
+i salen. Valören läses ur radens inledning (`"Guld — …"`, formen alla tre producenterna skriver) och
+faller tillbaka på tom sträng i stället för att gissa: en felräknad beställning är värre än en rad
+man kan se.
+
+**⚠️ Springskytte har inga mästerskapsmedaljer byggda alls.** En springskyttetävling som är ett
+mästerskap räknas ändå upp bland tävlingarna med skälet utskrivet — en gren som tyst utelämnas läses
+som "inga medaljer".
+
+**Ytor:** en flik **Mästerskapsmedaljer** i gruppen *Utmärkelser* på klubbens OCH kretsens
+adminpanel, båda renderade ur **samma partial** `_MedalHandoutPanel.cshtml` (scope via ViewData, som
+`ReigningChampionsPanel`). Endpoints på `MedalHandoutController`: `GetMedalHandout` (JSON),
+`ExportMedalHandout?list=order|handout` (CSV, semikolon + UTF-8 BOM), `PrintMedalHandout`
+(fristående HTML, kryssruta per utdelningsrad).
+- **⚠️ Grindas i BÅDA värdformerna:** `IsClubAdminForClub` för en klubblista, `IsRegionalAdminForRegion`
+  för en kretslista. Bara det första hade låst ute kretsens egna funktionärer från kretsens egen lista.
+- **⚠️ Kortet laddar först när det SYNS** (`IntersectionObserver`). Sammanställningen läser varje
+  mästerskaps artefakt och räknar lagresultaten live, alltså en tung körning per tävling — den får
+  inte ligga i sidladdningen av en flik ingen öppnat.
+- **Verksamhetsåret föreslås till föregående år i januari–juni**, eftersom ett årsmöte behandlar
+  föregående verksamhetsår. Bara ett förslag; väljaren är alltid framme.
+
+**Årsmötespunkten bär nu BÅDA källorna.** `BoardMeetingAwards.AddMedals` lägger medaljraderna intill
+märkesraderna i samma dagordningspunkt, med samma avprickning och samma snapshot-regel.
+- **⚠️ EN KRETS HAR EN LISTA NUMERA.** `GetAgendaAwards` svarade tidigare `supported:false` för allt
+  som inte var en klubb, eftersom märken hör till klubbens medlemmar. Kretsen får medaljhalvan;
+  `supported:false` finns kvar bara för en krets vars `regionCode` inte går att läsa.
+- **⚠️ TÄVLINGEN INGÅR I ARTIKELNAMNET, och det är inte kosmetik.** Sammanslagningen nycklas på
+  (medlem, grupp, artikel), och en skytt kan ta guld i C Dam på två av årets mästerskap. Utan
+  tävlingen i artikeln blir det EN nyckel för två medaljer, och avprickningen av den ena hade följt
+  med den andra.
+- **⚠️ `SortByRecipient` måste köras när listan har flera källor.** Märkena kommer per medlem ur
+  märkesliggaren och medaljerna per medlem ur tävlingarna; läggs de bara efter varandra står samma
+  person på två ställen — och ytan grupperar på "ny medlem sedan förra raden", så hen hade kallats
+  fram två gånger.
+- **⚠️ `BoardMeetingAwards.Notes` ligger i SNAPSHOTTEN, inte i svaret.** En läsning räknar inte om
+  något, så ett förbehåll som bara fanns vid hämtningen hade försvunnit vid nästa sidladdning och
+  lämnat en lista som ser komplett ut. Renderas både på skärmen och i protokollet — en medaljplats
+  som inte kunde delas ut ska gå att läsa i efterhand, som anteckning och aldrig som en rad att
+  pricka av.
+
+#### Prodgenomgången på Harplinge PK — fyra fel (2026-09-20)
+
+Stefan körde listan mot riktig data. Allt fyra var UX-fel, inte räknefel.
+
+**1. ⚠⚠ EN KOMMANDE TÄVLING FLAGGADES SOM "ÅTGÄRDA".** Varje mästerskap utan resultatlista fick
+en gul varning — även de som inte hade ägt rum. En klubb med några tävlingar kvar på året möttes
+av en skärm full av gula rutor. **En varning som alltid lyser slutar läsas**, och då missas den
+gång den betyder något: en tävling som VARIT men vars lista aldrig räknats om.
+`MedalHandoutCompetition.IsUpcoming` mäts på **sista tävlingsdagen** (`competitionEndDate ?? competitionDate`),
+och **i dag räknas som kommande** — en tävling som avgörs i kväll har inga resultat på förmiddagen.
+- ⚠ `Value<DateTime?>("competitionEndDate")` ger **DateTime.MinValue**, inte null, för en osatt
+  egenskap. Utan rensningen ser varje tävling ut att ha avslutats år 1 och räknas som avgjord.
+- ⚠ **Brickan "kommande" visas bara när tävlingen INTE bidrar med medaljer.** Den förklarar en
+  frånvaro; på en rad med tre medaljer motsade den sina egna siffror (mätt i dev på Helmatchen).
+
+**2. Utdelningslistan måste kunna ordnas PER MÄSTERSKAP.** Ytan förutsåg att varje person kallas
+fram en gång och får allt — men flera föreningar avverkar ett mästerskap i taget, och då kallas
+samma person fram flera gånger. Båda formerna förekommer och vilken föreningen använder är en
+tradition vi inte känner. Växel på skärmen + `&gruppering=person|tavling` till utskriften.
+- ⚠ **Valet MÅSTE följa med till utskriften**, annars kommer papperet i en annan ordning än
+  skärmen man nyss läste — och det är papperet man står med i salen.
+- ⚠ Omgrupperingen **ritar om den hämtade listan**, hämtar aldrig på nytt: datat är identiskt och
+  sammanställningen är en tung körning per tävling.
+- ⚠ `h3` behöver `page-break-after:avoid` — en tävlingsrubrik sist på en sida läses som att
+  tävlingen saknar medaljörer.
+
+**3. Utdelningslistan som CSV är BORTTAGEN.** Utskriften ska duga som utdelningslista. Två
+exporter som nästan är samma sak gör att fel fil skickas till gravören.
+
+**4. ⚠⚠ BESTÄLLNINGSLISTAN VAR EN SUMMERING PER VALÖR och därmed värdelös.** "3 guld" räcker för
+att beställa råmedaljerna men säger **ingenting till gravören** — och det är gravören som är
+mottagaren av en beställningslista. Antalet kan vem som helst räkna ur listan; graveringstexten kan
+ingen gissa. Nu **en rad per fysisk medalj** med kolumnen `Gravyrtext`, delarna i egna kolumner, och
+summeringen per valör sist i samma fil.
+- **`MedalHandoutItem.Engraving(recipientName)`** är ett **FÖRSLAG**, inte en standard: varje
+  förening graverar på sitt sätt och vi känner inte konventionen. Därför ligger valör, kategori,
+  tävling, år, namn och lag också som **egna kolumner**.
+- ⚠⚠ **ÅRET KOMMER UR TÄVLINGENS DATUM, aldrig ur dagens.** Medaljerna graveras månaderna efter
+  säsongen, och **fel årtal på en graverad medalj går inte att rätta**. Pinnat med ett test.
+- ⚠ Oavgjorda medaljer står MED i filen, märkta **GRAVERAS EJ**. En gravyrlista som tyst
+  utelämnar dem läses som komplett.
+
+17 enhetstest i `MedalHandoutServiceTests` (valörläsningen + graveringstexten).
+
+**Andra vändan samma dag — två till:**
+
+**5. ⚠⚠ MOTTAGARENS KLUBB VISAS BARA PÅ KRETSENS LISTA.** På en klubbs egen lista är den i
+bästa fall brus — alla medaljörer är klubbens egna — och i värsta fall **FEL**: namnet kommer ur
+resultatlistan och kan vara skyttens HUVUDklubb, så Harplinges lista kunde visa "Varbergs PK"
+intill en av Harplinges egna klubbmästare. På kretsens lista bär den däremot hela informationen.
+- **Samma regel på ALLA tre ytorna** (skärm, utskrift, CSV). En fil som bär en uppgift skärmen
+  döljer är sin egen buggklass.
+- ⚠ I CSV:n **utgår kolumnen helt** på en klubblista i stället för att stå tom — en kolumn som är
+  tom på varje rad läses som saknad data. Summeringsraderna fylls ut till samma bredd som
+  datarader, annars hamnar de i fel kolumner i Excel.
+
+**6. Växeln för ordningen flyttade till rubriken "Att dela ut".** Den styr bara den listan, och den
+förklarande texten som ändras med den står där — en kontroll långt från det den ändrar läses som
+att den gäller hela kortet.
+- ⚠⚠ **Läget bor i en VARIABEL (`groupMode`), inte i DOM:en.** Växeln ritas om tillsammans med
+  listan den styr, så ett läge läst ur en kryssruta hade nollställts av varje omritning.
+- ⚠⚠ **DELEGERAD lyssnare på behållaren**, aldrig på knapparna: de ligger inuti listan de styr
+  och byts ut vid varje omritning, så en direktbunden lyssnare slutar fungera efter första klicket.
+
+Verifierat i dev: växeln fungerar efter omritning, klubbnamnet borta i båda ordningarna, och
+CSV:erna mätta åt båda hållen — klubbfilen 9 kolumner utan `Klubb`, kretsfilen 10 med.
+
+**⚠️ `GetScan` läser den PUBLICERADE cachen**, ett svep efter `competition` / `club` / `regionalPage`,
+cachat 60 s. Omfattningen läses **otypat** (`Value("competitionScope")?.ToString()` genom
+`ChampionshipCategory.NormalizeScope`) — `competitionScope` kan vara en FlexibleDropdown som kastar på
+`Value<string>()` och kan ligga JSON-inpackad.
+
+Adds C# → **full ombyggnad**. Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod.
+Fildeploy av KB: `KnowledgeBase/docs/masterskapsmedaljer.md` (ny).
+
+**⚠️ EJ VERIFIERAT I WEBBLÄSAREN.** C# kompilerar rent, men de tre Razor-ytorna
+(`_MedalHandoutPanel`, klubbpanelen, kretspanelen) är runtime-kompilerade — **sidladdningen ÄR
+kompileringskontrollen**. Ladda klubbens och kretsens adminsida en gång efter deploy.
 
 ### Märken: "Spara som Guldserie/Snabbserie" from Resultat-entry + Training match (2026-06-10)
 A shooter can turn a single just-shot **5-shot series** into a Märken submission from two more places besides the "Jag har skjutit en Guldserie" button on Min sida: the manual **Resultat-entry** modal (`TrainingScoreEntry.cshtml`) and a **Training match** (`TrainingMatchScoreEntry.cshtml`). Per-series, shot-by-shot only — NOT offered in serie-total / total-only entry (no per-shot data).

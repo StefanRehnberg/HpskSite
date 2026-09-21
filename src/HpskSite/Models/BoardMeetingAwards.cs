@@ -26,6 +26,18 @@ namespace HpskSite.Models
 
         public List<BoardMeetingAwardRow> Rows { get; set; } = new();
 
+        /// <summary>
+        /// Sådant som hörde till listan när den hämtades men inte är en rad att pricka av: en
+        /// medaljplats som väntar på särskjutning, ett mästerskap vars resultatlista inte räknats
+        /// om, en medaljindelning som ändrats i efterhand.
+        ///
+        /// <para><b>⚠️ Ligger i SNAPSHOTTEN, inte i svaret.</b> En läsning räknar inte om något, så
+        /// en varning som bara fanns vid hämtningen hade försvunnit vid nästa sidladdning och
+        /// lämnat en lista som ser komplett ut. Det som gjorde listan osäker måste överleva lika
+        /// länge som listan.</para>
+        /// </summary>
+        public List<string> Notes { get; set; } = new();
+
         // ── Mottagningsstatus ────────────────────────────────────────────────
         //
         // ⚠️ TRE lägen plus ett fjärde som är FRÅNVARON av läge. null = "inte upplast än", vilket
@@ -81,6 +93,7 @@ namespace HpskSite.Models
                 var a = JsonSerializer.Deserialize<BoardMeetingAwards>(json, JsonOpts);
                 if (a == null) return null;
                 a.Rows ??= new List<BoardMeetingAwardRow>();
+                a.Notes ??= new List<string>();
                 return a;
             }
             catch (JsonException)
@@ -110,6 +123,59 @@ namespace HpskSite.Models
                         Unverified = i.Unverified
                     });
             return a;
+        }
+
+        /// <summary>Gruppnamnet för en placeringsmedalj från ett klubb- eller kretsmästerskap.</summary>
+        public const string GroupChampionshipMedal = "Mästerskapsmedalj";
+
+        /// <summary>
+        /// Lägger årets mästerskapsmedaljer till en lista.
+        ///
+        /// <para><b>⚠️ TÄVLINGEN INGÅR I ARTIKELNAMNET, och det är inte kosmetik.</b>
+        /// Sammanslagningen nycklas på (medlem, grupp, artikel), och en skytt kan mycket väl ta
+        /// guld i C Dam på två av årets mästerskap. Utan tävlingen i artikeln blir det en enda
+        /// nyckel för två medaljer, och avprickningen av den ena hade följt med den andra.</para>
+        ///
+        /// <para>Medaljplatser utan mottagare blir <see cref="Notes"/>, aldrig rader: en rad är en
+        /// person som kallas fram, och ett gissat namn i ett upprop är det värsta utfallet.</para>
+        /// </summary>
+        public static void AddMedals(BoardMeetingAwards awards, MedalHandoutList medals)
+        {
+            foreach (var r in medals.Handout)
+                foreach (var i in r.Items)
+                    awards.Rows.Add(new BoardMeetingAwardRow
+                    {
+                        MemberId = r.MemberId,
+                        Name = r.Name,
+                        Group = GroupChampionshipMedal,
+                        Item = $"{i.Medal} · {i.Category} · {i.CompetitionName}",
+                        Detail = string.IsNullOrWhiteSpace(r.Club) ? i.Detail : $"{r.Club} · {i.Detail}"
+                    });
+
+            foreach (var u in medals.Unresolved)
+                awards.Notes.Add($"{u.CompetitionName} · {u.Category}: {u.Text}");
+
+            foreach (var w in medals.Warnings)
+                awards.Notes.Add(w);
+        }
+
+        /// <summary>
+        /// Ordnar raderna så en persons alla rader står tillsammans, i bokstavsordning.
+        ///
+        /// <para>⚠️ Måste köras när listan har FLERA källor. Märkena kommer per medlem ur
+        /// märkesliggaren och medaljerna per medlem ur tävlingarna; läggs de bara efter varandra
+        /// står samma person på två ställen — och ytan grupperar på "ny medlem sedan förra raden",
+        /// så hen hade kallats fram två gånger.</para>
+        /// </summary>
+        public static void SortByRecipient(BoardMeetingAwards awards)
+        {
+            var sv = StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), false);
+            awards.Rows = awards.Rows
+                .OrderBy(r => r.Name, sv)
+                .ThenBy(r => r.MemberId)
+                .ThenBy(r => r.Group, sv)
+                .ThenBy(r => r.Item, sv)
+                .ToList();
         }
 
         /// <summary>

@@ -136,6 +136,11 @@
                    märkesliggaren — liggaren fortsätter ändras (ett märke makuleras, en valör rättas)
                    och ett protokoll får inte ändra sig i efterhand. Se BoardMeetingAwards. *@
                 var aw = HpskSite.Models.BoardMeetingAwards.FromJson(it.AwardsData);
+                @* ⚠️ Förbehållen hör till HANDLINGEN, inte bara till skärmen. En medaljplats som
+                   inte kunde delas ut för att särskjutningen var oavgjord är något årsmötet ska
+                   kunna läsa i efterhand — annars ser protokollet ut att beskriva en komplett
+                   utdelning. De står som en anteckning, aldrig som en rad att pricka av. *@
+                var awNotes = aw?.Notes ?? new List<string>();
                 if (aw == null || aw.Rows.Count == 0)
                 {
                     <div class="body">Inga märken eller medaljer delades ut.</div>
@@ -189,6 +194,10 @@
                     {
                         <div class="q">@aw.UncalledCount rad(er) prickades inte av på mötet.</div>
                     }
+                }
+                @foreach (var n in awNotes)
+                {
+                    <div class="q">@n</div>
                 }
             }
             else
