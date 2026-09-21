@@ -103,17 +103,14 @@ namespace HpskSite.Services
                     bool needsNumber = b.BadgeFamily == Marken.FamilyPistolskytte && b.Level == Marken.LevelGuld;
                     string detail = "";
 
-                    if (needsNumber)
-                    {
-                        if (string.IsNullOrWhiteSpace(b.UniqueNumber))
-                        {
-                            // A Guld without its registration number cannot be ordered. Say so here
-                            // rather than shipping a count the club discovers is unusable.
-                            result.Warnings.Add($"{entry.Name}: guldmärket saknar registreringsnummer — fyll i det innan beställning.");
-                            detail = "Guldnummer saknas";
-                        }
-                        else detail = $"Guldnr {b.UniqueNumber}";
-                    }
+                    // ⚠️ ETT SAKNAT GULDNUMMER ÄR INTE ETT FEL HÄR. Numret är unikt per skytt men
+                    // det är FÖRBUNDET som tilldelar det och graverar in det i märket — klubben kan
+                    // omöjligt känna till det när beställningen skrivs. Ytan varnade tidigare för
+                    // att numret saknades "innan beställning" och påstod därmed något som aldrig
+                    // kan vara sant vid beställningstillfället; numret fylls i när märket kommit.
+                    // (Rättat 2026-09-21 efter genomgång med Stefan.)
+                    if (needsNumber && !string.IsNullOrWhiteSpace(b.UniqueNumber))
+                        detail = $"Guldnr {b.UniqueNumber}";
 
                     entry.Items.Add(new MarkenHandoutItem
                     {
@@ -186,8 +183,11 @@ namespace HpskSite.Services
                         Group = item.Group,
                         Item = item.Item,
                         Sort = ItemSort(item.Item),
+                        // Guldmärket bär ett unikt nummer per skytt, men det tilldelas och graveras
+                        // av förbundet. Raden påminner alltså om vad som ska göras NÄR märkena
+                        // kommit — den efterfrågar ingenting av den som beställer.
                         Note = item.Group == Marken.FamilyDisplayName(Marken.FamilyPistolskytte) && item.Item == Marken.LevelGuld
-                            ? "Registreringsnummer krävs per märke"
+                            ? "Förbundet graverar ett unikt nummer — fyll i det i pistol.nu när märkena kommit"
                             : ""
                     };
                     lines[key] = line;
