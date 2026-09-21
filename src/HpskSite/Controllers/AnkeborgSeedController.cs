@@ -13,6 +13,8 @@ using HpskSite.Models;
 using HpskSite.Services;
 using HpskSite.Services.Firearms;
 using HpskSite.Models.Firearms;
+using HpskSite.CompetitionTypes.Common;
+using HpskSite.CompetitionTypes.Common.Utilities;
 using Umbraco.Cms.Core.Security;
 
 namespace HpskSite.Controllers
@@ -73,6 +75,7 @@ namespace HpskSite.Controllers
         private readonly FirearmBookingService _bookings;
         private readonly BoardRoleService _boardRoles;
         private readonly BoardMeetingService _boardMeetings;
+        private readonly MarkenLedgerService _markenLedger;
         private readonly IMemberManager _memberManager;
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly IConfiguration _configuration;
@@ -94,6 +97,7 @@ namespace HpskSite.Controllers
             FirearmBookingService bookings,
             BoardRoleService boardRoles,
             BoardMeetingService boardMeetings,
+            MarkenLedgerService markenLedger,
             IMemberManager memberManager,
             IConfiguration configuration,
             Microsoft.AspNetCore.Hosting.IWebHostEnvironment env,
@@ -108,6 +112,7 @@ namespace HpskSite.Controllers
             _bookings = bookings;
             _boardRoles = boardRoles;
             _boardMeetings = boardMeetings;
+            _markenLedger = markenLedger;
             _memberManager = memberManager;
             _databaseFactory = databaseFactory;
             _configuration = configuration;
@@ -125,56 +130,74 @@ namespace HpskSite.Controllers
             string Last,
             string Role,          // fri etikett, bara för seederns egen redovisning
             string? ShooterClass, // precisionShooterClass
-            bool Pending = false);
+            bool Pending = false,
+            // ⚠️ KÖN OCH ÅLDERSGRUPP ÄR INTE DEKORATION. Mästerskapsklasserna i vapengrupp C är
+            // Dam, Vet Y, Vet Ä och Junior, och seedens tävlingar delar ut medaljer i dem. Utan de
+            // här två fälten fördelades skyttarna i tur och ordning, och första bilduttaget hade
+            // "Bertil Ranstorp — brons i C Dam" mitt i beställningslistan. Mottagarna av det
+            // utskicket är pistolskyttar; ett sådant fel läses som att hela sammanställningen är
+            // påhittad. Se PickFor().
+            string Sex = "M",     // "K" | "M"
+            string Band = "S");   // "J" junior · "S" senior · "VY" yngre veteran · "VA" äldre veteran
 
         private static readonly List<Person> Roster = new()
         {
-            new("Sigrid",       "Almkvist",    "klubbadmin (filmens 'vi')", "2"),
+            new("Sigrid",       "Almkvist",    "klubbadmin (filmens 'vi')", "2", Sex: "K"),
             new("Nils",         "Tegelberg",   "väntande ansökan",          null, Pending: true),
-            new("Britt-Marie",  "Ekvall",      "skjutledare",               "1"),
-            new("Hasse",        "Lindwall",    "aktivitet + föreningsintyg","2"),
-            new("Yvonne",       "Sjöstrand",   "guldserieskytt",            "1"),
-            new("Gunnar",       "Falkenmark",  "ordförande",                "3"),
-            new("Elin",         "Hagberg",     "medlemmen på Min Sida",     "2"),
+            new("Britt-Marie",  "Ekvall",      "skjutledare",               "1", Sex: "K", Band: "VY"),
+            new("Hasse",        "Lindwall",    "aktivitet + föreningsintyg","2", Band: "VY"),
+            new("Yvonne",       "Sjöstrand",   "guldserieskytt",            "1", Sex: "K"),
+            new("Gunnar",       "Falkenmark",  "ordförande",                "3", Band: "VA"),
+            new("Elin",         "Hagberg",     "medlemmen på Min Sida",     "2", Sex: "K"),
 
-            new("Torbjörn",  "Rydell",     "medlem", "3"),
-            new("Margareta", "Wiklund",    "medlem", "2"),
-            new("Kenneth",   "Blomgren",   "medlem", "1"),
-            new("Anneli",    "Sundström",  "medlem", "2"),
-            new("Rolf",      "Hjelmberg",  "medlem", "3"),
-            new("Ingela",    "Norrby",     "medlem", "1"),
-            new("Sven-Erik", "Dahlgren",   "medlem", "2"),
-            new("Birgitta",  "Lundahl",    "medlem", "3"),
+            new("Torbjörn",  "Rydell",     "medlem", "3", Band: "VY"),
+            new("Margareta", "Wiklund",    "medlem", "2", Sex: "K", Band: "VY"),
+            new("Kenneth",   "Blomgren",   "medlem", "1", Band: "VY"),
+            new("Anneli",    "Sundström",  "medlem", "2", Sex: "K"),
+            new("Rolf",      "Hjelmberg",  "medlem", "3", Band: "VA"),
+            new("Ingela",    "Norrby",     "medlem", "1", Sex: "K"),
+            new("Sven-Erik", "Dahlgren",   "medlem", "2", Band: "VY"),
+            new("Birgitta",  "Lundahl",    "medlem", "3", Sex: "K", Band: "VY"),
             new("Mats",      "Örnberg",    "medlem", "1"),
-            new("Karin",     "Fridell",    "medlem", "2"),
-            new("Lennart",   "Sjökvist",   "medlem", "3"),
-            new("Ulla",      "Bergquist",  "medlem", "2"),
-            new("Håkan",     "Melander",   "medlem", "1"),
-            new("Siv",       "Åkerlund",   "medlem", "2"),
-            new("Bertil",    "Ranstorp",   "medlem", "3"),
-            new("Monica",    "Hedlund",    "medlem", "1"),
-            new("Jan-Olof",  "Tornberg",   "medlem", "2"),
-            new("Elisabet",  "Widmark",    "medlem", "3"),
-            new("Per-Åke",   "Strandberg", "medlem", "1"),
-            new("Gunilla",   "Rosander",   "medlem", "2"),
-            new("Åke",       "Lindgren",   "medlem", "3"),
-            new("Vivianne",  "Sandell",    "medlem", "2"),
-            new("Bo",        "Kjellberg",  "medlem", "1"),
-            new("Marianne",  "Ödman",      "medlem", "2"),
-            new("Stig",      "Hammarlund", "medlem", "3"),
-            new("Berit",     "Falk",       "medlem", "1"),
-            new("Ove",       "Tranberg",   "medlem", "2"),
-            new("Kerstin",   "Wallin",     "medlem", "3"),
-            new("Göran",     "Ekström",    "medlem", "1"),
-            new("Astrid",    "Molander",   "medlem", "2"),
-            new("Nils-Erik", "Byström",    "medlem", "3"),
-            new("Lena",      "Hallberg",   "medlem", "2"),
-            new("Arne",      "Sjöberg",    "medlem", "1"),
-            new("Inger",     "Palmgren",   "medlem", "2"),
-            new("Kjell",     "Roos",       "medlem", "3"),
-            new("Solveig",   "Enander",    "medlem", "1"),
+            new("Karin",     "Fridell",    "medlem", "2", Sex: "K"),
+            new("Lennart",   "Sjökvist",   "medlem", "3", Band: "VA"),
+            new("Ulla",      "Bergquist",  "medlem", "2", Sex: "K", Band: "VA"),
+            new("Håkan",     "Melander",   "medlem", "1", Band: "VY"),
+            new("Siv",       "Åkerlund",   "medlem", "2", Sex: "K", Band: "VA"),
+            new("Bertil",    "Ranstorp",   "medlem", "3", Band: "VA"),
+            new("Monica",    "Hedlund",    "medlem", "1", Sex: "K", Band: "VY"),
+            new("Jan-Olof",  "Tornberg",   "medlem", "2", Band: "VY"),
+            new("Elisabet",  "Widmark",    "medlem", "3", Sex: "K", Band: "VY"),
+            new("Per-Åke",   "Strandberg", "medlem", "1", Band: "VA"),
+            new("Gunilla",   "Rosander",   "medlem", "2", Sex: "K", Band: "VY"),
+            new("Åke",       "Lindgren",   "medlem", "3", Band: "VA"),
+            new("Vivianne",  "Sandell",    "medlem", "2", Sex: "K", Band: "VA"),
+            new("Bo",        "Kjellberg",  "medlem", "1", Band: "VA"),
+            new("Marianne",  "Ödman",      "medlem", "2", Sex: "K", Band: "VA"),
+            new("Stig",      "Hammarlund", "medlem", "3", Band: "VA"),
+            new("Berit",     "Falk",       "medlem", "1", Sex: "K", Band: "VA"),
+            new("Ove",       "Tranberg",   "medlem", "2", Band: "VA"),
+            new("Kerstin",   "Wallin",     "medlem", "3", Sex: "K", Band: "VY"),
+            new("Göran",     "Ekström",    "medlem", "1", Band: "VA"),
+            new("Astrid",    "Molander",   "medlem", "2", Sex: "K", Band: "VA"),
+            new("Nils-Erik", "Byström",    "medlem", "3", Band: "VA"),
+            new("Lena",      "Hallberg",   "medlem", "2", Sex: "K"),
+            new("Arne",      "Sjöberg",    "medlem", "1", Band: "VY"),
+            new("Inger",     "Palmgren",   "medlem", "2", Sex: "K", Band: "VY"),
+            new("Kjell",     "Roos",       "medlem", "3", Band: "VA"),
+            new("Solveig",   "Enander",    "medlem", "1", Sex: "K", Band: "VA"),
             new("Tommy",     "Lindqvist",  "medlem", "2"),
-            new("Barbro",    "Nyström",    "medlem", "3"),
+            new("Barbro",    "Nyström",    "medlem", "3", Sex: "K", Band: "VY"),
+
+            // Juniorer. Tillagda 2026-09-21 för att klubbmästerskapens juniorklass ska kunna
+            // bemannas med namn som läses som juniorer — rostern i övrigt är vuxna. Tillagda
+            // SIST med flit: de sju första är filmens namngivna roller (MANUS.md) och allt som
+            // plockar "de N första" ur rostern ska ge samma personer som förut.
+            new("Wilma",     "Åkerberg",   "junior", "3", Sex: "K", Band: "J"),
+            new("Elias",     "Norling",    "junior", "3", Band: "J"),
+            new("Moa",       "Hjelm",      "junior", "2", Sex: "K", Band: "J"),
+            new("Viktor",    "Sandin",     "junior", "3", Band: "J"),
+
         };
 
         // ── Status ───────────────────────────────────────────────────────────────────
@@ -1322,6 +1345,718 @@ WHERE MemberId=@1 AND Notes=@2 AND TrainingMatchId IS NULL",
                 trainingRowsTaggedAsMatch = tagged,
                 failures
             });
+        }
+
+        // ── Klubbmästerskap med resultat ─────────────────────────────────────────────
+
+        /// <summary>
+        /// En mästerskapsklass i ett seedat klubbmästerskap: vilken skytteklass skyttarna står i
+        /// och hur många av dem. Antalet styr MEDALJERNA — se <see cref="ChampionshipMedalCount"/>:
+        /// fem deltagare i mästerskapsklassen ger guld/silver/brons, fyra ger guld+silver, tre ger
+        /// enbart guld. Juniorklassen går åt andra hållet och ger medalj till alla upp till tre.
+        /// </summary>
+        private sealed record MasterskapClass(string ShootingClass, int Shooters, double TopAverage);
+
+        /// <summary>
+        /// Vilka ur rostern som får stå i en skytteklass.
+        ///
+        /// <para>⚠️ Detta är sanningskravet i bilden. "C1 Dam" måste bemannas med kvinnor och
+        /// "C Jun" med juniorer, annars står det en Bertil i damklassen — och mottagarna av
+        /// utskicket är pistolskyttar som ser det direkt. Kravet är STRIKT: hittas för få
+        /// kandidater loggas det som ett fel i stället för att falla tillbaka på någon annan, för
+        /// en tyst fallback är precis hur felet uppstod första gången.</para>
+        /// </summary>
+        private static bool PickFor(Person p, string shootingClass)
+        {
+            var cls = shootingClass.Replace("_", " ");
+
+            if (cls.Contains("Jun", StringComparison.OrdinalIgnoreCase)) return p.Band == "J";
+            if (cls.Contains("Dam", StringComparison.OrdinalIgnoreCase)) return p.Sex == "K" && p.Band != "J";
+            if (cls.Contains("Vet Y", StringComparison.OrdinalIgnoreCase)) return p.Band == "VY";
+            if (cls.Contains("Vet Ä", StringComparison.OrdinalIgnoreCase)
+             || cls.Contains("Vet A", StringComparison.OrdinalIgnoreCase)) return p.Band == "VA";
+
+            // Öppen klass: vem som helst utom juniorerna, som har sin egen klass i planen.
+            return p.Band != "J";
+        }
+
+        /// <summary>Ett seedat klubbmästerskap.</summary>
+        private sealed record MasterskapSeed(
+            string Name,
+            string CompetitionType,
+            int Series,
+            int DaysAgo,
+            MasterskapClass[] Classes);
+
+        /// <summary>
+        /// Klubbmästerskapen som ger Ankeborg en trovärdig medaljhög att visa upp — underlaget
+        /// till marknadsföringsbilderna av <b>Mästerskapsmedaljer</b> och <b>Märken</b>.
+        ///
+        /// <para><b>⚠️ ANTALET SKYTTAR PER MÄSTERSKAPSKLASS ÄR INTE DEKORATION.</b> Medaljerna
+        /// reduceras under fem deltagare (SHB C.3.4.1), så en klass med tre skyttar ger ett enda
+        /// guld. Vill man se en full uppsättning medaljer måste klassen ha minst fem. Ändrar du
+        /// siffrorna nedan ändrar du alltså medaljantalet — inte bara listans längd.</para>
+        ///
+        /// <para><b>⚠️ Vapengrupp C delas i sina fem mästerskapsklasser</b> (öppen, Dam, Vet Y,
+        /// Vet Ä, Junior) eftersom <c>medalsPerWeaponGroup</c> lämnas OSATT, vilket är förvalet.
+        /// Se <see cref="MedalGrouping"/> — seedern sätter medvetet inte egenskapen: den skapas
+        /// för hand i backoffice, och <c>SetValue</c> på en saknad egenskap är en tyst no-op.</para>
+        ///
+        /// <para><b>⚠️ Skicklighetsklasserna 1–3 är INTE egna mästerskapsklasser.</b> C1, C2 och
+        /// C3 är alla "C öppen" och tävlar om SAMMA tre medaljer. Därför blandas de med flit inom
+        /// samma rad här — det är kategorin, inte klassen, som räknas.</para>
+        /// </summary>
+        private static readonly MasterskapSeed[] MasterskapPlan =
+        {
+            // Precision, vapengrupp A — 7 serier. En kategori ("A"), åtta skyttar → tre medaljer.
+            new("KM Precision A", "Precision", 7, 214, new MasterskapClass[]
+            {
+                new("A1", 3, 47.5), new("A2", 3, 46.0), new("A3", 2, 44.5),
+            }),
+
+            // Precision, vapengrupp B — en kategori ("B"), sex skyttar → tre medaljer.
+            new("KM Precision B", "Precision", 7, 200, new MasterskapClass[]
+            {
+                new("B1", 2, 47.0), new("B2", 2, 45.5), new("B3", 2, 44.0),
+            }),
+
+            // Precision, vapengrupp C — klubbens stora gren. FEM mästerskapsklasser, och alla
+            // utom junior har minst fem skyttar → 3+3+3+3+3 = 15 medaljer ur en enda tävling.
+            new("KM Precision C", "Precision", 7, 186, new MasterskapClass[]
+            {
+                new("C1", 2, 48.0), new("C2", 2, 46.5), new("C3", 2, 45.0),   // C öppen: 6
+                new("C1 Dam", 2, 47.0), new("C2 Dam", 2, 45.5), new("C3 Dam", 1, 44.0), // C Dam: 5
+                new("C Vet Y", 5, 46.5),
+                new("C Vet Ä", 5, 45.5),
+                new("C Jun", 3, 44.5),
+            }),
+
+            // Duell, vapengrupp C — 6 serier. Två kategorier med fem skyttar → sex medaljer.
+            new("KM Duell C", "Duell", 6, 158, new MasterskapClass[]
+            {
+                new("C1", 2, 46.0), new("C2", 2, 45.0), new("C3", 1, 43.5),   // C öppen: 5
+                new("C1 Dam", 2, 45.5), new("C2 Dam", 3, 44.0),               // C Dam: 5
+            }),
+
+            // Milsnabb, vapengrupp A — 12 serier (10 s / 8 s / 6 s). Sex skyttar → tre medaljer.
+            new("KM Milsnabb A", "Milsnabb", 12, 130, new MasterskapClass[]
+            {
+                new("A1", 2, 46.0), new("A2", 2, 44.5), new("A3", 2, 43.0),
+            }),
+
+            // Milsnabb, vapengrupp C — C öppen (6) + C Vet Ä (5) → sex medaljer.
+            new("KM Milsnabb C", "Milsnabb", 12, 116, new MasterskapClass[]
+            {
+                new("C1", 2, 46.5), new("C2", 2, 45.0), new("C3", 2, 43.5),
+                new("C Vet Ä", 5, 44.0),
+            }),
+        };
+
+        /// <summary>
+        /// Skapar sex klubbmästerskap på Ankeborg med anmälningar OCH färdiga serieresultat, så
+        /// att medaljerna faktiskt går att räkna fram.
+        ///
+        /// <para><b>⚠️ RESULTATARTEFAKTEN SKRIVS INTE HÄRIFRÅN.</b> <c>resultData</c> har exakt en
+        /// skrivväg — <c>CompetitionResultsController</c> — och den är privat med flit (se
+        /// memory/result-artifact-single-write-path). Seedern skriver alltså bara serieraderna,
+        /// precis som en sekreterare som matat in resultaten, och lämnar
+        /// <c>CompetitionResults/CreateResultsList</c> åt anroparen. Svaret räknar upp
+        /// tävlings-id:na just för det. En egen artefaktskrivning här vore en andra skrivväg, och
+        /// det är precis den buggklassen minnet beskriver.</para>
+        ///
+        /// <para>Idempotent: en tävling som redan finns återanvänds, och serieraderna skrivs med
+        /// MERGE på (tävling, medlem, klass, serie) — samma nyckel som resultatinmatningen.</para>
+        /// </summary>
+        public IActionResult SeedMasterskap(string confirm = "", bool dryRun = true)
+        {
+            var guard = Guard(confirm);
+            if (guard != null) return guard;
+
+            var club = FindClub();
+            if (club == null)
+                return Json(new { success = false, message = "Kör Seed först — Ankeborg finns inte." });
+
+            var hubId = ResolveCompetitionsHubId(out var hubError);
+            if (hubId == null)
+                return Json(new { success = false, message = hubError });
+
+            // Skyttarna hämtas ur rostern i ordning och förbrukas — samma person ska inte stå i
+            // två mästerskapsklasser i samma tävling (F.2.2), och helst inte vinna allt heller.
+            var pool = Roster.Where(p => !p.Pending).ToList();
+            var needed = MasterskapPlan.Sum(m => m.Classes.Sum(c => c.Shooters));
+
+            if (dryRun)
+            {
+                return Json(new
+                {
+                    success = true,
+                    dryRun = true,
+                    tavlingar = MasterskapPlan.Select(m => new
+                    {
+                        m.Name,
+                        typ = m.CompetitionType,
+                        serier = m.Series,
+                        datum = DateTime.Now.Date.AddDays(-m.DaysAgo).ToString("yyyy-MM-dd"),
+                        skyttar = m.Classes.Sum(c => c.Shooters),
+                        klasser = m.Classes.Select(c => $"{c.ShootingClass} ({c.Shooters})"),
+                        medaljer = MedalPreview(m),
+                    }),
+                    rosterSize = pool.Count,
+                    shootersNeededPerCompetition = MasterskapPlan.Max(m => m.Classes.Sum(c => c.Shooters)),
+                    totalStarts = needed,
+                    nextStep = "Kör om med dryRun=false, och POSTa sedan "
+                             + "CompetitionResults/CreateResultsList för varje tävlings-id i svaret."
+                });
+            }
+
+            var failures = new List<string>();
+            var created = new List<object>();
+            var compIds = new List<int>();
+            var today = DateTime.Now.Date;
+
+            using var db = _databaseFactory.CreateDatabase();
+
+            foreach (var plan in MasterskapPlan)
+            {
+                try
+                {
+                    var date = today.AddDays(-plan.DaysAgo);
+                    var classIds = plan.Classes.Select(c => c.ShootingClass).Distinct().ToArray();
+
+                    var comp = _contentService.GetPagedChildren(hubId.Value, 0, int.MaxValue, out _)
+                        .FirstOrDefault(x => x.ContentType.Alias == "competition"
+                                          && string.Equals(x.Name, plan.Name, StringComparison.OrdinalIgnoreCase));
+
+                    if (comp == null)
+                    {
+                        comp = _contentService.Create(plan.Name, hubId.Value, "competition");
+                        comp.SetValue("competitionName", plan.Name);
+                        comp.SetValue("competitionType", plan.CompetitionType);
+                        comp.SetValue("clubId", club.Id);
+                        comp.SetValue("regionalFederation", "Halland");
+                        comp.SetValue("venue", "Ankeborgs skjutbana");
+                        comp.SetValue("description",
+                            $"<p>{plan.Name} — klubbmästerskap, {plan.Series} serier.</p>");
+                        comp.SetValue("competitionDate", date.AddHours(9));
+                        comp.SetValue("registrationOpenDate", date.AddDays(-40));
+                        comp.SetValue("registrationCloseDate", date.AddDays(-3));
+                        comp.SetValue("numberOfSeriesOrStations", plan.Series);
+                        comp.SetValue("numberOfFinalSeries", 0);
+                        comp.SetValue("maxParticipants", 40);
+                        comp.SetValue("registrationFee", 60m);
+                        comp.SetValue("juniorRegistrationFee", 0m);
+                        comp.SetValue("isActive", true);
+                        comp.SetValue("isClubOnly", true);
+                        comp.SetValue("allowTeams", false);
+                        comp.SetValue("allowStafett", false);
+                        comp.SetValue("showLiveResults", true);
+                        comp.SetValue("competitionDirector", "Sigrid Almkvist");
+                        comp.SetValue("contactEmail", $"tavling@{MailDomain}");
+                        // ⚠️ Det är DEN HÄR raden som gör tävlingen till ett mästerskap. Utan den
+                        // räknas inga mästerskapsmedaljer alls och medaljpanelen står tom — och
+                        // tävlingen syns då som en vanlig klubbtävling, vilket ser ut som ett fel
+                        // i panelen snarare än som ett saknat fält här.
+                        comp.SetValue("competitionScope", CompetitionScopeHelper.Klubbmasterskap);
+                        comp.SetValue("shootingClassIds", ShootingClassIdsValue.Normalize(classIds));
+
+                        if (!_contentService.Save(comp).Success)
+                        {
+                            failures.Add($"{plan.Name}: kunde inte sparas.");
+                            continue;
+                        }
+                        var pub = _contentService.Publish(comp, new[] { "*" }, -1);
+                        if (!pub.Success)
+                        {
+                            failures.Add($"{plan.Name}: sparad men inte publicerad — "
+                                       + string.Join(", ", pub.EventMessages?.GetAll().Select(m => m.Message)
+                                                           ?? Array.Empty<string>()));
+                            continue;
+                        }
+                    }
+
+                    var (regs, rows, medals) = SeedMasterskapResults(db, comp, club.Id, plan, pool, date, failures);
+                    compIds.Add(comp.Id);
+                    created.Add(new
+                    {
+                        id = comp.Id,
+                        name = plan.Name,
+                        date = date.ToString("yyyy-MM-dd"),
+                        registrations = regs,
+                        seriesRows = rows,
+                        expectedMedals = medals
+                    });
+                }
+                catch (Exception ex) { failures.Add($"{plan.Name}: {ex.Message}"); }
+            }
+
+            return Json(new
+            {
+                success = failures.Count == 0,
+                competitions = created,
+                competitionIds = compIds,
+                expectedMedalsTotal = MasterskapPlan.Sum(MedalPreview),
+                nextStep = "POSTa CompetitionResults/CreateResultsList "
+                         + "{ competitionId, keepExistingMerges: true } för varje id ovan — "
+                         + "det är 'Uppdatera' på Resultat-fliken, och den enda vägen till resultData.",
+                failures
+            });
+        }
+
+        /// <summary>Hur många mästerskapsmedaljer planen ger, enligt samma regel som ytorna.</summary>
+        private static int MedalPreview(MasterskapSeed plan) =>
+            plan.Classes
+                .GroupBy(c => ChampionshipCategory.For(c.ShootingClass, splitGroupC: true))
+                .Sum(g => ChampionshipMedalCount.For(
+                        g.Sum(c => c.Shooters),
+                        g.Key.Contains("Jun", StringComparison.OrdinalIgnoreCase)).Medals);
+
+        /// <summary>
+        /// Anmälningar + serieresultat för ett seedat mästerskap.
+        ///
+        /// ⚠️ <b>Klassen skrivs i NAMN-form på resultatraden</b> (<c>ShootingClasses.ToCanonicalName</c>).
+        /// Id- och namnformen är samma sträng för C1/A2/B3 men skiljer sig för exakt de klasser den
+        /// här planen bygger på — C Vet Ä, C1 Dam, C Jun. Fel form hade alltså sett helt rätt ut i
+        /// vapengrupp A och B och tyst delat upp veteranerna. Se
+        /// memory/shooting-class-id-vs-name-canonical.
+        /// </summary>
+        private (int Registrations, int Rows, int Medals) SeedMasterskapResults(
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
+            IContent comp, int clubId, MasterskapSeed plan, List<Person> pool,
+            DateTime date, List<string> failures)
+        {
+            var table = CompetitionResultTables.For(plan.CompetitionType);
+
+            // ⚠️ Tabellnamnet interpoleras in i SQL:en. Det är ofarligt HÄR eftersom det kommer ur
+            // CompetitionResultTables och aldrig ur ett anrop — men skriv aldrig om det till att ta
+            // emot ett namn utifrån.
+            var mergeSql = $@"
+                MERGE INTO [{table}] AS target
+                USING (SELECT @0 AS CompetitionId, @1 AS MemberId, @2 AS ShootingClass, @3 AS SeriesNumber) AS source
+                ON target.CompetitionId = source.CompetitionId
+                   AND target.MemberId = source.MemberId
+                   AND target.ShootingClass = source.ShootingClass
+                   AND target.SeriesNumber = source.SeriesNumber
+                WHEN MATCHED THEN
+                    UPDATE SET Shots = @4, TeamNumber = @5, Position = @6,
+                               EnteredBy = @7, LastModified = @8
+                WHEN NOT MATCHED THEN
+                    INSERT (CompetitionId, SeriesNumber, MemberId, TeamNumber, Position,
+                            ShootingClass, Shots, EnteredBy, EnteredAt, LastModified)
+                    VALUES (@0, @3, @1, @5, @6, @2, @4, @7, @8, @8);";
+
+            // ⚠️ TÄVLINGEN RENSAS FÖRST, och det är inte samma sak som att skriva över.
+            // Klassen ingår i resultatradens nyckel, så en MERGE lägger till en NY rad när en
+            // skytt byter klass mellan två körningar i stället för att flytta hen — och skytten
+            // står då kvar i sin gamla mästerskapsklass också. Det upptäcktes när rostern fick
+            // kön och åldersgrupp: utan rensningen hade Bertil Ranstorp blivit kvar i C Dam vid
+            // sidan av sin nya klass. Tävlingarna ägs helt av seedern, så rensningen är trygg
+            // HÄR och bara här.
+            db.Execute($"DELETE FROM [{table}] WHERE CompetitionId = @0", comp.Id);
+
+            var regHub = _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
+                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
+            if (regHub == null)
+            {
+                regHub = _contentService.Create("Anmälningar", comp.Id, "competitionRegistrationsHub");
+                _contentService.Save(regHub);
+            }
+            foreach (var old in _contentService.GetPagedChildren(regHub.Id, 0, int.MaxValue, out _)
+                         .Where(c => c.ContentType.Alias == "competitionRegistration"
+                                  && string.Equals(c.GetValue<string>("registeredBy"), SeedTag, StringComparison.Ordinal))
+                         .ToList())
+            {
+                _contentService.Delete(old);
+            }
+            var alreadyRegistered = _contentService.GetPagedChildren(regHub.Id, 0, int.MaxValue, out _)
+                .Where(c => c.ContentType.Alias == "competitionRegistration")
+                .Select(c => c.GetValue<int>("memberId"))
+                .ToHashSet();
+
+            var now = DateTime.Now;
+            int regs = 0, rows = 0;
+            var offset = Math.Abs(comp.Id) % Math.Max(1, pool.Count);   // olika startskyttar per tävling
+            var take = 0;
+            var team = 1;
+            var pos = 0;
+
+            // ⚠️ Varje skytts slutsumma måste vara unik i HELA tävlingen, inte bara i klassen:
+            // mästerskapsklassen "C öppen" spänner över C1, C2 och C3, och en delad summa där ger
+            // en oavgjord medaljplats lika säkert som inom en klass.
+            var usedTotals = new HashSet<int>();
+
+            // Ingen skytt får dubbleras inom tävlingen — en skytt startar inte i två klasser i
+            // samma vapengrupp (F.2.2), och en dubblett hade dessutom gett samma person två
+            // medaljer i samma mästerskapsklass.
+            var usedInComp = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var cls in plan.Classes)
+            {
+                var canonical = ShootingClasses.ToCanonicalName(cls.ShootingClass);
+
+                // Kandidaterna för klassen, roterade per tävling så att inte samma personer
+                // vinner allt i alla sex mästerskapen.
+                var eligible = pool.Where(x => PickFor(x, canonical)).ToList();
+                if (eligible.Count == 0)
+                {
+                    failures.Add($"{plan.Name}: inga kandidater för klassen {canonical} — "
+                               + "kontrollera Sex/Band i rostern.");
+                    continue;
+                }
+                var rot = offset % eligible.Count;
+                var ordered = eligible.Skip(rot).Concat(eligible.Take(rot)).ToList();
+
+                var placed = 0;
+                foreach (var person in ordered)
+                {
+                    if (placed >= cls.Shooters) break;
+                    var key = $"{person.First} {person.Last}";
+                    if (!usedInComp.Add(key)) continue;
+
+                    var i = placed;
+                    placed++;
+                    take++;
+
+                    var member = FindMember(person.First, person.Last);
+                    if (member == null)
+                    {
+                        failures.Add($"{plan.Name}: hittade inte {person.First} {person.Last}.");
+                        continue;
+                    }
+
+                    pos++;
+                    if (pos > 8) { pos = 1; team++; }
+
+                    // ── Anmälan ──────────────────────────────────────────────────────
+                    if (!alreadyRegistered.Contains(member.Id))
+                    {
+                        try
+                        {
+                            var name = $"{person.First} {person.Last}";
+                            var reg = _contentService.Create(
+                                $"{name} - {date:yyyy-MM-dd}", regHub.Id, "competitionRegistration");
+                            reg.SetValue("competitionId", comp.Id);
+                            reg.SetValue("memberId", member.Id);
+                            reg.SetValue("memberName", name);
+                            reg.SetValue("clubId", clubId);
+                            reg.SetValue("shootingClasses",
+                                CompetitionRegistrationDocument.SerializeShootingClasses(
+                                    new List<ShootingClassEntry>
+                                    {
+                                        new ShootingClassEntry
+                                        {
+                                            Class = canonical,
+                                            StartPreference = "Inget",
+                                            TeamNumber = team
+                                        }
+                                    }));
+                            reg.SetValue("registrationDate", date.AddDays(-14));
+                            reg.SetValue("registeredBy", SeedTag);
+                            reg.SetValue("isActive", true);
+                            if (reg.HasProperty("isSubCompetition")) reg.SetValue("isSubCompetition", false);
+                            // ⚠️ Save, aldrig Publish — en publicerad anmälningshubb är en ogrindad
+                            // publik sida med namn, klubb och skytteklass.
+                            _contentService.Save(reg);
+                            alreadyRegistered.Add(member.Id);
+                            regs++;
+                        }
+                        catch (Exception ex) { failures.Add($"Anmälan {person.First} {person.Last}: {ex.Message}"); }
+                    }
+
+                    // ── Serieresultat ────────────────────────────────────────────────
+                    // Snittet sjunker per placering i klassen så listan får en ordning som håller
+                    // ihop. Summan knuffas därefter nedåt tills den är ledig — ett steg om en
+                    // poäng, alltså långt mindre än de ~6 poäng som skiljer två placeringar, så
+                    // den avsedda ordningen överlever.
+                    var average = cls.TopAverage - i * 0.9;
+                    var total = (int)Math.Round(average * plan.Series);
+                    while (!usedTotals.Add(total)) total--;
+
+                    try
+                    {
+                        var allSeries = BuildSeriesForShooter(total, plan.Series, member.Id);
+                        for (var s = 1; s <= plan.Series; s++)
+                        {
+                            db.Execute(mergeSql, comp.Id, member.Id, canonical, s,
+                                Newtonsoft.Json.JsonConvert.SerializeObject(allSeries[s - 1]),
+                                team, pos, 0, now);
+                            rows++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"Resultat {person.First} {person.Last} ({canonical}): {ex.Message}");
+                    }
+                }
+
+                // ⚠️ För få skyttar i en mästerskapsklass REDUCERAR medaljerna tyst (SHB C.3.4.1),
+                // så en klass som inte gick att bemanna syns bara som att listan blev kortare än
+                // planerad. Larma i stället.
+                if (placed < cls.Shooters)
+                    failures.Add($"{plan.Name}: bara {placed} av {cls.Shooters} skyttar kunde "
+                               + $"placeras i {canonical} — medaljantalet blir lägre än planerat.");
+            }
+
+            return (regs, rows, MedalPreview(plan));
+        }
+
+        /// <summary>
+        /// Skyttens alla serier, byggda så att SLUTSUMMAN blir exakt <paramref name="totalTarget"/>.
+        ///
+        /// <para><b>⚠️ SUMMAN MÅSTE VARA UNIK INOM TÄVLINGEN — annars blir medaljer OAVGJORDA.</b>
+        /// Två skyttar med samma slutsumma och samma antal innertior kan inte skiljas åt utan
+        /// särskjutning, och medaljen står då utan mottagare i beställningslistan. Det gick inte
+        /// att slumpa bort: första försöket lämnade två oavgjorda platser i KM Duell C, och ett
+        /// försök att sprida variationen mer flyttade bara problemet till KM Precision B (tre
+        /// platser). Därför tilldelas summan i stället uppifrån av anroparen, som håller en
+        /// mängd över redan använda summor. Slumpen väljer formen, inte utfallet.</para>
+        ///
+        /// <para>⚠️ Skotten är STRÄNGAR och "X" är en innertia som räknas som tio. Kolumnen rymmer
+        /// 50 tecken, alltså får en serie aldrig serialiseras bredare än
+        /// <c>["X","10","9","9","8"]</c>.</para>
+        /// </summary>
+        private static string[][] BuildSeriesForShooter(int totalTarget, int seriesCount, int memberId)
+        {
+            // Jämn fördelning över serierna, plus en variation som summerar till NOLL så att
+            // slutsumman inte glider. En spikrak serieföljd ser tillverkad ut; en som inte summerar
+            // rätt gör hela poängen med unika summor om intet.
+            var per = new int[seriesCount];
+            var baseScore = totalTarget / seriesCount;
+            var remainder = totalTarget % seriesCount;
+
+            var wobble = new int[seriesCount];
+            var wobbleSum = 0;
+            for (var i = 0; i < seriesCount; i++)
+            {
+                wobble[i] = ((memberId * 3 + i * 7) % 5) - 2;
+                wobbleSum += wobble[i];
+            }
+            wobble[seriesCount - 1] -= wobbleSum;
+
+            for (var i = 0; i < seriesCount; i++)
+                per[i] = Math.Clamp(baseScore + (i < remainder ? 1 : 0) + wobble[i], 20, 50);
+
+            // Klampningen kan ha ätit eller lagt till poäng — lägg tillbaka differensen på de
+            // serier som har utrymme, annars stämmer inte den unika summan längre.
+            var drift = totalTarget - per.Sum();
+            for (var pass = 0; pass < 3 && drift != 0; pass++)
+            {
+                for (var i = 0; i < seriesCount && drift != 0; i++)
+                {
+                    var step = Math.Sign(drift);
+                    var next = per[i] + step;
+                    if (next < 20 || next > 50) continue;
+                    per[i] = next;
+                    drift -= step;
+                }
+            }
+
+            var all = new string[seriesCount][];
+            for (var i = 0; i < seriesCount; i++)
+                all[i] = BuildShots(per[i], memberId, i + 1);
+            return all;
+        }
+
+        /// <summary>Fem skott som summerar exakt till <paramref name="seriesTotal"/>.</summary>
+        private static string[] BuildShots(int seriesTotal, int memberId, int series)
+        {
+            var shots = new string[5];
+            var left = Math.Clamp(seriesTotal, 0, 50);
+
+            for (var i = 0; i < 5; i++)
+            {
+                var remaining = 4 - i;
+                // Aldrig mer än vad resten kan bära, och aldrig mindre än vad den måste bära.
+                var max = Math.Clamp(left, 0, 10);
+                var min = Math.Clamp(left - remaining * 10, 0, 10);
+                var value = Math.Clamp((int)Math.Round((max + min) / 2.0), min, max);
+                if (i == 4) value = Math.Clamp(left, 0, 10);
+
+                // En tia skrivs ibland som innertia. Den avgör inget här (summorna är unika), men
+                // en resultatlista helt utan X ser fel ut för en skytt.
+                shots[i] = value == 10 && (memberId + series + i) % 3 == 0 ? "X" : value.ToString();
+                left -= value;
+            }
+
+            return shots;
+        }
+
+        // ── Märken ───────────────────────────────────────────────────────────────────
+
+        /// <summary>Ett märke att dela ut i år: familj, valör och vem som tog det.</summary>
+        private sealed record MarkeSeed(string Family, string Level, string First, string Last,
+                                        string? UniqueNumber = null);
+
+        /// <summary>
+        /// En medlems guldfodringshistorik: hur många år i rad t.o.m. i år som är uppfyllda.
+        /// <para>⚠️ ANTALET ÅR AVGÖR OM DET BLIR ETT MÄRKE ATT BESTÄLLA. Ett årtalsmärke delas ut
+        /// var tredje uppfyllt år (<c>Marken.YearsPerArtalsmarkeStep</c>), så tre år ger ett nytt
+        /// steg medan fyra år inte gör det — den senare står i utdelningslistan som "inget märke".
+        /// Båda utfallen finns med i planen med flit: de ser lika ut på skärmen i allt utom den
+        /// detaljen, och det är just den skillnaden ytan finns för att visa.</para>
+        /// </summary>
+        private sealed record FodringSeed(string First, string Last, string Family, int Years);
+
+        private static readonly MarkeSeed[] MarkenPlan =
+        {
+            // Pistolskyttemärket — grundvalörerna. Ett guld MED nummer och ett UTAN: numret
+            // graveras av förbundet och fylls i när märket kommit, så båda lägena är normala.
+            new(Marken.FamilyPistolskytte, Marken.LevelBrons,  "Nils-Erik", "Byström"),
+            new(Marken.FamilyPistolskytte, Marken.LevelBrons,  "Solveig",   "Enander"),
+            new(Marken.FamilyPistolskytte, Marken.LevelSilver, "Lena",      "Hallberg"),
+            new(Marken.FamilyPistolskytte, Marken.LevelSilver, "Ove",       "Tranberg"),
+            new(Marken.FamilyPistolskytte, Marken.LevelGuld,   "Elin",      "Hagberg", "24-1187"),
+            new(Marken.FamilyPistolskytte, Marken.LevelGuld,   "Kenneth",   "Blomgren"),
+
+            new(MarkenFamilies.Precision, Marken.LevelBrons,  "Karin",     "Fridell"),
+            new(MarkenFamilies.Precision, Marken.LevelSilver, "Yvonne",    "Sjöstrand"),
+            new(MarkenFamilies.Precision, Marken.LevelGuld,   "Gunnar",    "Falkenmark"),
+
+            new(MarkenFamilies.Milsnabb, Marken.LevelBrons,  "Håkan",     "Melander"),
+            new(MarkenFamilies.Milsnabb, Marken.LevelSilver, "Margareta", "Wiklund"),
+
+            new(MarkenFamilies.Falt, Marken.LevelBrons,  "Bo",        "Kjellberg"),
+            new(MarkenFamilies.Falt, Marken.LevelSilver, "Torbjörn",  "Rydell"),
+            new(MarkenFamilies.Falt, Marken.LevelGuld,   "Britt-Marie", "Ekvall"),
+
+            new(MarkenFamilies.Elit, Marken.LevelBrons,  "Sigrid",    "Almkvist"),
+        };
+
+        private static readonly FodringSeed[] FodringPlan =
+        {
+            // 3 och 6 år korsar ett steg i år → ett årtalsmärke att beställa.
+            new("Gunnar",      "Falkenmark", Marken.FamilyPistolskytte, 6),
+            new("Sigrid",      "Almkvist",   Marken.FamilyPistolskytte, 3),
+            new("Britt-Marie", "Ekvall",     Marken.FamilyPistolskytte, 3),
+            // 4 och 5 år korsar inget steg → "inget märke", men läses ändå upp på årsmötet.
+            new("Elin",        "Hagberg",    Marken.FamilyPistolskytte, 4),
+            new("Hasse",       "Lindwall",   Marken.FamilyPistolskytte, 5),
+        };
+
+        /// <summary>
+        /// Ger Ankeborg en märkesskörd för innevarande år: grundvalörer i fem familjer plus
+        /// guldfodringar med olika lång historik.
+        ///
+        /// <para>⚠️ Allt läggs som <c>Verified</c> och <c>Source = Admin</c>. Det är avsiktligt:
+        /// en egenrapporterad, ogranskad post FLAGGAS i beställningslistan ("ej granskad"), och
+        /// demodatat ska visa den normala bilden — inte en lista full av varningar. Vill du se
+        /// varningen, ändra status på en enskild post.</para>
+        ///
+        /// <para>Idempotent: ett märke som redan finns för (medlem, familj, valör) hoppas över,
+        /// och guldfodringarna går genom <c>UpsertQualificationAsync</c>, som nycklar på
+        /// (medlem, familj, år).</para>
+        /// </summary>
+        public async Task<IActionResult> SeedMarken(string confirm = "", bool dryRun = true)
+        {
+            var guard = Guard(confirm);
+            if (guard != null) return guard;
+
+            var club = FindClub();
+            if (club == null)
+                return Json(new { success = false, message = "Kör Seed först — Ankeborg finns inte." });
+
+            var year = DateTime.Now.Year;
+
+            if (dryRun)
+            {
+                return Json(new
+                {
+                    success = true,
+                    dryRun = true,
+                    year,
+                    marken = MarkenPlan.Select(m => new
+                    {
+                        familj = Marken.FamilyDisplayName(m.Family) is { Length: > 0 } d && d != m.Family
+                            ? d : MarkenFamilies.Get(m.Family)?.DisplayName ?? m.Family,
+                        m.Level,
+                        skytt = $"{m.First} {m.Last}",
+                        guldnr = m.UniqueNumber ?? "(fylls i när märket kommit)"
+                    }),
+                    guldfodringar = FodringPlan.Select(f => new
+                    {
+                        skytt = $"{f.First} {f.Last}",
+                        uppfylldaAr = f.Years,
+                        arsmarkeIAr = Marken.ArtalsmarkeStepIndex(f.Years) > Marken.ArtalsmarkeStepIndex(f.Years - 1)
+                            ? Marken.ArtalsmarkeName(f.Years) : "(inget nytt steg)"
+                    })
+                });
+            }
+
+            var failures = new List<string>();
+            int badges = 0, quals = 0, skipped = 0;
+            var signer = FindMember("Gunnar", "Falkenmark")?.Id ?? 0;
+
+            foreach (var m in MarkenPlan)
+            {
+                try
+                {
+                    var member = FindMember(m.First, m.Last);
+                    if (member == null) { failures.Add($"Märke: hittade inte {m.First} {m.Last}."); continue; }
+
+                    var existing = await _markenLedger.GetBadgesForMemberAsync(member.Id, m.Family);
+                    if (existing.Any(b => string.Equals(b.Level, m.Level, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    await _markenLedger.InsertBadgeAsync(new MemberBadge
+                    {
+                        MemberId = member.Id,
+                        BadgeFamily = m.Family,
+                        Level = m.Level,
+                        LevelOrdinal = Marken.LevelOrdinal(m.Level),
+                        AchievedYear = year,
+                        AchievedDate = new DateTime(year, 5, 18),
+                        SignedOffByMemberId = signer,
+                        SignedOffDate = new DateTime(year, 5, 20),
+                        UniqueNumber = m.UniqueNumber,
+                        Source = Marken.SourceAdmin,
+                        Status = Marken.StatusVerified,
+                        Notes = SeedTag,
+                        EnteredByMemberId = signer
+                    });
+                    badges++;
+                }
+                catch (Exception ex) { failures.Add($"Märke {m.First} {m.Last} ({m.Level}): {ex.Message}"); }
+            }
+
+            foreach (var f in FodringPlan)
+            {
+                try
+                {
+                    var member = FindMember(f.First, f.Last);
+                    if (member == null) { failures.Add($"Guldfodring: hittade inte {f.First} {f.Last}."); continue; }
+
+                    // Åren läggs bakåt från i år, så att räkningen t.o.m. i år blir exakt f.Years
+                    // och räkningen t.o.m. förra året blir f.Years − 1. Det är den JÄMFÖRELSEN
+                    // som avgör om ett årtalsmärke erövrades i år.
+                    for (var i = 0; i < f.Years; i++)
+                    {
+                        var y = year - i;
+                        await _markenLedger.UpsertQualificationAsync(new MemberBadgeQualification
+                        {
+                            MemberId = member.Id,
+                            BadgeFamily = f.Family,
+                            Year = y,
+                            Part1Met = true,
+                            Part1Source = Marken.PartSourceTrainingScore,
+                            Part1Date = new DateTime(y, 4, 12),
+                            Part2Met = true,
+                            Part2Source = Marken.PartSourceCompetition,
+                            Part2Date = new DateTime(y, 6, 8),
+                            SignedOffByMemberId = signer,
+                            SignedOffDate = new DateTime(y, 6, 10),
+                            Status = Marken.StatusVerified,
+                            Notes = SeedTag,
+                            EnteredByMemberId = signer
+                        });
+                        quals++;
+                    }
+                }
+                catch (Exception ex) { failures.Add($"Guldfodring {f.First} {f.Last}: {ex.Message}"); }
+            }
+
+            return Json(new { success = failures.Count == 0, year, badges, skipped, quals, failures });
         }
 
         // ── Städning ─────────────────────────────────────────────────────────────────
