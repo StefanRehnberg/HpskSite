@@ -53,8 +53,12 @@
       background-color: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis);
       border-left-color: var(--bs-primary); }
   .ek-page .rail a.ek-nav.soon { color: var(--bs-secondary-color); }
-  .ek-page .rail .foot { margin-top: 1rem; padding: 10px 12px 4px; font-size: .8rem;
-      color: var(--bs-secondary-color); border-top: 1px solid var(--bs-border-color); }
+  /* Tillbaka ar en utgang, inte en vy — avskild med en linje och i dampad ton, sa den inte
+     konkurrerar med de sex posterna som ar arbetet. */
+  .ek-page .rail a.ek-back { color: var(--bs-secondary-color); font-size: .9rem;
+      padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--bs-border-color);
+      border-radius: 0; }
+  .ek-page .rail a.ek-back:hover { color: var(--bs-link-color); background: none; }
 
   /* ⚠️⚠️ `flex: 1 1 auto` MASTE staa uttryckligen. Sajtens layout satter `main { flex: 1 0 auto }`
      pa ELEMENTET (sticky footer-monstret), sa flex-shrink ar 0 — och da vagrar ytan krympa hur
@@ -217,6 +221,12 @@
         <div class="club">@Model.IssuerName</div>
         <div class="role">Kassör · @Model.CurrentYear</div>
 
+        @* ⚠️ Tillbaka ligger ÖVERST och är alltid första railposten. Den låg förut som en länk i
+           en fotnot längst ned, tillsammans med skissens rationalisering "Menyn är kassörens år,
+           inte databasens tabeller" — den meningen var en anteckning till oss om VARFÖR menyn ser
+           ut som den gör, inte något en kassör behöver läsa. Den bor i koden, inte i granssnittet. *@
+        <a href="@Model.BackUrl" class="ek-nav ek-back">← Tillbaka</a>
+
         <a href="#" class="ek-nav on" data-view="oversikt">Översikt</a>
         <a href="#" class="ek-nav" data-view="bokfor">Bokför</a>
         <a href="#" class="ek-nav soon" data-view="avstamning">Avstämning</a>
@@ -225,10 +235,6 @@
         <a href="#" class="ek-nav soon" data-view="bokslut">Bokslut</a>
         <a href="#" class="ek-nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
 
-        <div class="foot">
-            <div>Menyn är kassörens år, inte databasens tabeller.</div>
-            <a href="@Model.BackUrl">← Tillbaka till @Model.IssuerName</a>
-        </div>
     </nav>
 
     <main class="ek-main">
