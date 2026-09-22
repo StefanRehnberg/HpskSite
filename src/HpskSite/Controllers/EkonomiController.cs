@@ -85,7 +85,7 @@ namespace HpskSite.Controllers
 
             var status = _setup.GetStatus(type, id);
 
-            return View("~/Views/Ekonomi.cshtml", new EkonomiPageModel
+            ViewData["EkonomiData"] = new EkonomiPageModel
             {
                 IssuerType = type,
                 IssuerId = id,
@@ -95,7 +95,16 @@ namespace HpskSite.Controllers
                 Shape = status.Shape,
                 IsSetUp = status.IsSetUp,
                 CurrentYear = status.FiscalYears.FirstOrDefault()?.Year ?? DateTime.Today.Year
-            });
+            };
+
+            // ⚠️ Rotnoden skickas som Model för att `Master.cshtml` ska kunna rendera sajtens ram;
+            // sidans egna data går via ViewData. Exakt samma recept som /styrelse — och det är
+            // också skälet att ytan har sajtens header: en ARBETSYTA behåller chromet, bara
+            // utskrifter (protokoll, kvitto) tappar den.
+            var rootNode = ctx?.Content?.GetAtRoot().FirstOrDefault();
+            if (rootNode is null) return StatusCode(500, "Ingen rotnod hittades.");
+
+            return View("Ekonomi", rootNode);
         }
     }
 
