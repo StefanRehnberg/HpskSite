@@ -61,6 +61,9 @@
 
         .notice { border: 2px solid #b02a37; color: #b02a37; background: transparent;
                   padding: 12px 14px; border-radius: 6px; margin-bottom: 20px; }
+        /* Egen färg, skild från "återtagen" — de betyder olika saker och kan förekomma samtidigt. */
+        .notice.sandbox { border-color: #6B21A8; color: #6B21A8; }
+        .notice.sandbox strong { letter-spacing: .08em; }
 
         .actions { margin-top: 28px; }
         button { font: inherit; padding: 8px 16px; border: 1px solid var(--ink);
@@ -75,6 +78,18 @@
 </head>
 <body>
 <div class="sheet">
+
+    @* ⚠️⚠️ SANDLÅDESTÄMPELN ÖVERST OCH I KLARTEXT. Kvittot är den enda handlingen som lämnar
+       sidan — den skrivs ut och mejlas — och tar ingen sidram med sig. Ett kvitto som ser äkta
+       ut men gäller ett test är en handling som ljuger, och den ligger hos betalaren.
+       Skrivs ut MED avsikt: print-CSS:en döljer den inte. *@
+    @if (Model.IsSandbox)
+    {
+        <div class="notice sandbox">
+            <strong>SANDLÅDA — INTE ETT GILTIGT KVITTO</strong>
+            <div>Utfärdat i en testliggare. Ingen betalning har tagits emot.</div>
+        </div>
+    }
 
     @if (Model.IsReversed)
     {

@@ -39,6 +39,7 @@ namespace HpskSite.Controllers
         private readonly LedgerOverviewService _overviewService;
         private readonly LedgerManualPostingService _manualPosting;
         private readonly LedgerMembershipFeeBridge _feeBridge;
+        private readonly LedgerSandboxService _sandbox;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly ILogger<EkonomiAdminController> _logger;
@@ -57,6 +58,7 @@ namespace HpskSite.Controllers
             LedgerOverviewService overviewService,
             LedgerManualPostingService manualPosting,
             LedgerMembershipFeeBridge feeBridge,
+            LedgerSandboxService sandbox,
             IMemberManager memberManager,
             IMemberService memberService,
             ILogger<EkonomiAdminController> logger)
@@ -69,6 +71,7 @@ namespace HpskSite.Controllers
             _overviewService = overviewService;
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
+            _sandbox = sandbox;
             _memberManager = memberManager;
             _memberService = memberService;
             _logger = logger;
@@ -83,16 +86,29 @@ namespace HpskSite.Controllers
         {
             if (issuerId <= 0) return (false, "");
 
-            var node = UmbracoContext.Content?.GetById(issuerId);
+            // ⚠️⚠️ ETT UTSTÄLLAR-ID ÄR INTE ETT NOD-ID. Sedan sandlådorna (2026-09-22) kan
+            // issuerId vara 1 000 000+ och då finns ingen nod med det numret — behörigheten
+            // MÅSTE gå via utställaren för att hitta ÄGAREN. Slog vi upp noden direkt skulle
+            // varje sandlåda nekas, och den dag numren råkade överlappa vore det värre än så.
+            // De levande utställarna har Id = nodens id, så den här omvägen är gratis för dem.
+            // ⚠️ Anroparens issuerType är ett PÅSTÅENDE från klienten. Är utställaren känd vinner
+            // databasens uppgift om ägaren; annars (en förening utan utställarrad ännu) faller vi
+            // tillbaka på anropet, och då är issuerId ett nod-id.
+            var issuer = _sandbox.GetById(issuerId);
+            var ownerType = issuer?.OwnerType ?? issuerType;
+            var ownerId = issuer?.OwnerId ?? issuerId;
+
+            var node = UmbracoContext.Content?.GetById(ownerId);
             if (node is null) return (false, "");
 
-            if (issuerType == DocumentOwnerType.Club)
+            if (ownerType == DocumentOwnerType.Club)
             {
-                var ok = await _authService.IsClubAdminForClub(issuerId);
+                // ⚠️ ownerId, ALDRIG issuerId. En sandlåda har id 1 000 000+ och är ingen klubb.
+                var ok = await _authService.IsClubAdminForClub(ownerId);
                 return (ok, node.Value<string>("clubName") ?? node.Name ?? "");
             }
 
-            if (issuerType == DocumentOwnerType.Region)
+            if (ownerType == DocumentOwnerType.Region)
             {
                 // ⚠️ Koden ur NODEN. Kom den ur anropet vore grinden bara en fråga om vilken
                 // sträng klienten råkade skicka.
@@ -188,6 +204,49 @@ namespace HpskSite.Controllers
                     "Kunde inte bygga ekonomiöversikten för utställare {Typ}/{Id}.", issuerType, issuerId);
 
                 return Json(new { success = false, message = "Översikten gick inte att läsa just nu." });
+            }
+        }
+
+        /// <summary>
+        /// Skapar en ny sandlåda för föreningen. En tidigare sandlåda <b>överges</b>.
+        ///
+        /// <para><b>⚠️ Det här ÄR nollställningen.</b> Den raderar ingenting och rör ingen
+        /// spärr — "börja om" är en ny utställare, inte en tömd liggare.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CreateSandbox([FromBody] CreateSandboxRequest request)
+        {
+            if (request is null || request.OwnerId <= 0)
+                return Json(new { success = false, message = "Ingen förening angiven." });
+
+            // ⚠️ Grinden prövas mot ÄGAREN (nod-id), inte mot en utställare — det är en ny
+            // sandlåda som ska skapas, och den finns inte ännu.
+            var (ok, _) = await AuthorizeIssuerAsync(request.OwnerType, request.OwnerId);
+            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            try
+            {
+                var sandbox = _sandbox.CreateSandbox(
+                    request.OwnerType, request.OwnerId, request.Label, actorId.Value);
+
+                return Json(new
+                {
+                    success = true,
+                    issuerId = sandbox.Id,
+                    url = $"/ekonomi?type={request.OwnerType}&id={request.OwnerId}&issuer={sandbox.Id}"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte skapa sandlåda för {Typ}/{Id}.",
+                    request.OwnerType, request.OwnerId);
+
+                return Json(new { success = false, message = "Sandlådan gick inte att skapa. Försök igen." });
             }
         }
 
@@ -540,6 +599,14 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Uppsättningen gick inte att spara. Försök igen." });
             }
         }
+    }
+
+    /// <summary>Det sandlådeknappen skickar. ⚠️ ÄGARENS nod-id, inte ett utställar-id.</summary>
+    public class CreateSandboxRequest
+    {
+        public int OwnerType { get; set; }
+        public int OwnerId { get; set; }
+        public string? Label { get; set; }
     }
 
     /// <summary>Det avgiftskortet skickar.</summary>

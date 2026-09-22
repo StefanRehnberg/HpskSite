@@ -32,23 +32,35 @@ namespace HpskSite.Controllers
     {
         private readonly AdminAuthorizationService _auth;
         private readonly LedgerSetupService _setup;
+        private readonly LedgerSandboxService _sandbox;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IMemberManager _memberManager;
 
         public EkonomiController(
             AdminAuthorizationService auth,
             LedgerSetupService setup,
+            LedgerSandboxService sandbox,
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberManager memberManager)
         {
             _auth = auth;
             _setup = setup;
+            _sandbox = sandbox;
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
         }
 
+        /// <param name="type">Ägarens typ ur <see cref="DocumentOwnerType"/>.</param>
+        /// <param name="id">Föreningens NOD-id.</param>
+        /// <param name="issuer">
+        /// Vilken utställare arbetet sker i. Utelämnad = den levande.
+        /// <para><b>⚠️ Ligger i URL:en med flit.</b> Vilken liggare man skriver i är för viktigt
+        /// för att gömmas i en session: en sparad flik, en delad länk och en skärmdump ska alla
+        /// säga vilken det var. En osynlig sessionsväxel hade gjort "vilken bokföring hamnade det
+        /// i?" till en fråga ingen kan svara på i efterhand.</para>
+        /// </param>
         [HttpGet("")]
-        public async Task<IActionResult> Index(int type = 0, int id = 0)
+        public async Task<IActionResult> Index(int type = 0, int id = 0, int? issuer = null)
         {
             var current = await _memberManager.GetCurrentMemberAsync();
             if (current is null)
@@ -83,12 +95,35 @@ namespace HpskSite.Controllers
 
             if (!ok) return Forbid();
 
-            var status = _setup.GetStatus(type, id);
+            // ── Vilken utställare arbetar vi i? ────────────────────────────────────────────
+            var live = _sandbox.EnsureLive(type, id);
+            var active = live;
+
+            if (issuer is > 0 && issuer != live.Id)
+            {
+                var chosen = _sandbox.GetById(issuer.Value);
+
+                // ⚠️ Utställaren måste tillhöra DEN HÄR föreningen. Utan kontrollen räcker ett
+                // gissat nummer i frågesträngen för att stå i en annan klubbs sandlåda — och
+                // behörigheten längre in skulle då pröva fel ägare.
+                if (chosen is not null && chosen.OwnerType == type && chosen.OwnerId == id && chosen.IsActive)
+                    active = chosen;
+            }
+
+            var status = _setup.GetStatus(active.OwnerType, active.Id);
 
             ViewData["EkonomiData"] = new EkonomiPageModel
             {
-                IssuerType = type,
-                IssuerId = id,
+                IssuerType = active.OwnerType,
+                // ⚠️ UTSTÄLLARENS id, inte nodens. För den levande är de samma tal — det är
+                // migreringsknepet som gjorde att inga oföränderliga rader behövde röras — men
+                // lita aldrig på likheten i kod.
+                IssuerId = active.Id,
+                OwnerId = id,
+                IsSandbox = active.IsSandbox,
+                SandboxLabel = active.Label,
+                SandboxCreatedUtc = active.IsSandbox ? active.CreatedUtc : null,
+                Issuers = _sandbox.ListForOwner(type, id),
                 IssuerName = name,
                 // Tillbakalänken: kassören ska inte behöva bläddra sig hem.
                 BackUrl = node.Url(),
@@ -113,7 +148,25 @@ namespace HpskSite.Controllers
     {
         public int IssuerType { get; set; }
 
+        /// <summary>Utställarens id — det bokföringen skrivs mot. <b>Inte nodens id.</b></summary>
         public int IssuerId { get; set; }
+
+        /// <summary>Föreningens nod-id. Behövs för länkar tillbaka och för att byta utställare.</summary>
+        public int OwnerId { get; set; }
+
+        /// <summary>
+        /// ⚠️⚠️ Arbetar vi i en sandlåda? Styr sidans märkning. <b>Allt som produceras i en
+        /// sandlåda måste bära den synligt</b> — ett sandlådekvitto som ser äkta ut är en
+        /// handling som ljuger.
+        /// </summary>
+        public bool IsSandbox { get; set; }
+
+        public string? SandboxLabel { get; set; }
+
+        public DateTime? SandboxCreatedUtc { get; set; }
+
+        /// <summary>Föreningens aktiva utställare — den levande först, sedan sandlådan.</summary>
+        public List<HpskSite.Models.Ledger.LedgerIssuer> Issuers { get; set; } = new();
 
         public string IssuerName { get; set; } = "";
 
