@@ -37,12 +37,13 @@ namespace HpskSite.Services.Ledger
         public ManualPostingContext BuildContext(int issuerType, int issuerId)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
 
             var ctx = new ManualPostingContext();
 
             // ⚠️ Ur FÖRENINGENS kontoplan. Avstängda konton utelämnas — de får inte väljas på nytt,
             // men de raderas aldrig, för en historisk rad ska fortfarande gå att förklara.
-            ctx.Accounts.AddRange(db.Fetch<LedgerAccount>(
+            ctx.Accounts.AddRange(ldb.Fetch<LedgerAccount>(
                     @"SELECT * FROM dbo.LedgerAccount
                        WHERE IssuerType = @0 AND IssuerId = @1 AND IsActive = 1
                        ORDER BY Number",
@@ -56,7 +57,7 @@ namespace HpskSite.Services.Ledger
                 }));
 
             // Betalkontot föreslås ur rollmappningen, aldrig ur ett hårdkodat nummer.
-            var roles = db.Fetch<LedgerAccountRole>(
+            var roles = ldb.Fetch<LedgerAccountRole>(
                 "SELECT * FROM dbo.LedgerAccountRole WHERE IssuerType = @0 AND IssuerId = @1",
                 issuerType, issuerId);
 
@@ -75,7 +76,7 @@ namespace HpskSite.Services.Ledger
                 });
             }
 
-            var series = db.FirstOrDefault<LedgerNumberSeries>(
+            var series = ldb.FirstOrDefault<LedgerNumberSeries>(
                 @"SELECT TOP 1 * FROM dbo.LedgerNumberSeries
                    WHERE IssuerType = @0 AND IssuerId = @1 AND Kind = @2
                    ORDER BY Year DESC",
@@ -83,7 +84,7 @@ namespace HpskSite.Services.Ledger
 
             ctx.SeriesLabel = series is null ? "" : $"Serie {series.Prefix} · {series.Year}";
 
-            var recent = db.Fetch<LedgerJournalEntry>(
+            var recent = ldb.Fetch<LedgerJournalEntry>(
                 @"SELECT TOP " + RecentLimit + @" * FROM dbo.LedgerJournalEntry
                    WHERE IssuerType = @0 AND IssuerId = @1
                    ORDER BY Id DESC",
@@ -91,14 +92,14 @@ namespace HpskSite.Services.Ledger
 
             if (recent.Count > 0)
             {
-                var seriesById = db.Fetch<LedgerNumberSeries>(
+                var seriesById = ldb.Fetch<LedgerNumberSeries>(
                         "SELECT * FROM dbo.LedgerNumberSeries WHERE IssuerType = @0 AND IssuerId = @1",
                         issuerType, issuerId)
                     .ToDictionary(s => s.Id);
 
                 // Beloppet är verifikationens debetsumma — en balanserad verifikation har samma
                 // summa på båda sidor, så vilken som helst duger; debet är den konventionella.
-                var sums = db.Fetch<EntrySum>(
+                var sums = ldb.Fetch<EntrySum>(
                         $@"SELECT JournalEntryId, SUM(Debit) AS Total
                              FROM dbo.LedgerJournalEntryLine
                             WHERE JournalEntryId IN ({string.Join(",", recent.Select(e => e.Id))})
@@ -157,7 +158,8 @@ namespace HpskSite.Services.Ledger
             string? number = null;
             using (var db = _databaseFactory.CreateDatabase())
             {
-                var prefix = db.ExecuteScalar<string>(
+                var ldb = new LedgerDb(db, r.IssuerId);
+                var prefix = ldb.ExecuteScalar<string>(
                     @"SELECT TOP 1 Prefix FROM dbo.LedgerNumberSeries
                        WHERE IssuerType = @0 AND IssuerId = @1 AND Kind = @2
                        ORDER BY Year DESC",

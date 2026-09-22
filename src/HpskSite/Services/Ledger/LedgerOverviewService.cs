@@ -45,16 +45,17 @@ namespace HpskSite.Services.Ledger
             try
             {
                 using var db = _databaseFactory.CreateDatabase();
+                var ldb = new LedgerDb(db, issuerId);
 
                 // EN hämtning av allt som inte är makulerat. Betalningsrader är få per förening
                 // och år; det är tävlingarna som är många, och de ligger i den här listan.
-                var payments = db.Fetch<LedgerPayment>(
+                var payments = ldb.Fetch<LedgerPayment>(
                     @"SELECT * FROM dbo.LedgerPayment
                        WHERE IssuerType = @0 AND IssuerId = @1 AND VoidedUtc IS NULL",
                     issuerType, issuerId);
 
                 BuildOutstanding(overview, payments);
-                BuildReceived(db, overview, payments);
+                BuildReceived(ldb, overview, payments);
                 BuildPerSource(overview, payments);
             }
             catch (Exception ex)
@@ -88,7 +89,7 @@ namespace HpskSite.Services.Ledger
 
         /// <summary>Panel 2 — de senast mottagna, med kvittonummer.</summary>
         private void BuildReceived(
-            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
+            LedgerDb db,
             LedgerOverview overview,
             List<LedgerPayment> payments)
         {
