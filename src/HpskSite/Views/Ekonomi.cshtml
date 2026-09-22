@@ -324,6 +324,33 @@
                         <div class="alert bad d-none" id="@(uid)_queueError"></div>
                     </div>
 
+                    @* ⚠️⚠️ MEDLEMSAVGIFTEN ÄR KLUBBENS STÖRSTA INTÄKTSPOST och nådde inte
+                       bokföringen förrän 2026-09-22 — avgiftsmodulen har egen tabell och egen
+                       betalvägg. Kortet finns för att den luckan ska vara SYNLIG, inte tyst. *@
+                    <div class="card wide d-none" id="@(uid)_feesCard">
+                        <div class="card-h">
+                            <h2>Medlemsavgifter</h2>
+                            <span class="meta" id="@(uid)_feesYear"></span>
+                        </div>
+                        <div class="grid" style="gap:14px">
+                            <div>
+                                <div class="muted">Har inte kommit in</div>
+                                <div style="font-size:26px;font-weight:700" id="@(uid)_feesUnpaid">—</div>
+                            </div>
+                            <div>
+                                <div class="muted">Betalt men inte bokfört</div>
+                                <div style="font-size:26px;font-weight:700" id="@(uid)_feesUnposted">—</div>
+                                <div style="margin-top:10px">
+                                    <button type="button" class="btn small d-none" id="@(uid)_feesPost">
+                                        Bokför dem
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="alert ok d-none" id="@(uid)_feesOk" style="margin-top:14px"></div>
+                        <div class="alert bad d-none" id="@(uid)_feesError" style="margin-top:14px"></div>
+                    </div>
+
                     <div class="card wide">
                         <div class="card-h">
                             <h2>Per tävling — saknas någon avgift?</h2>
@@ -605,7 +632,7 @@
     // ⚠️ BARA SAKER SOM FAKTISKT MÄTS. Skissen listar även utlägg utan attest och poster utan
     //    underlag; de lagren finns inte, och en rad som alltid säger noll lär kassören att inte
     //    läsa panelen.
-    var todo = { outstandingCount: 0, unposted: 0, missingSources: 0 };
+    var todo = { outstandingCount: 0, unposted: 0, missingSources: 0, unpaidFees: 0, unpostedFees: 0 };
 
     function renderTodo() {
         var items = [];
@@ -615,6 +642,10 @@
             items.push([todo.unposted, 'betalningar väntar på bokföring', 'Bokför', 'avgifter']);
         if (todo.missingSources > 0)
             items.push([todo.missingSources, 'tävlingar saknar avgifter', 'Visa', 'avgifter']);
+        if (todo.unpaidFees > 0)
+            items.push([todo.unpaidFees, 'medlemsavgifter har inte kommit in', 'Visa', 'avgifter']);
+        if (todo.unpostedFees > 0)
+            items.push([todo.unpostedFees, 'betalda medlemsavgifter är obokförda', 'Bokför', 'avgifter']);
 
         el('todoCount').textContent = items.length === 0 ? 'Inget just nu'
             : items.length + (items.length === 1 ? ' sak' : ' saker');
@@ -725,6 +756,11 @@
         show(el('fullOnly'), status.shape === 'full');
         if (status.shape === 'full') { loadQueue(); loadBokfor(); }
         else { todo.unposted = 0; renderTodo(); }
+
+        // ⚠️ Medlemsavgifterna läses OAVSETT föreningsform. En klubb som bokför i eget program
+        // behöver fortfarande veta vilka avgifter som inte kommit in — det är hela nyttan vi
+        // tillför den. Bara "att bokföra"-halvan är beroende av att vi för böckerna.
+        loadFees();
 
         var years = status.fiscalYears || [];
         var labels = { open: 'öppet', closing: 'bokslut pågår', established: 'fastställt' };
@@ -907,6 +943,62 @@
             .then(function (d) { if (d.success && d.context) renderBokforContext(d.context); })
             .catch(function () { });
     }
+
+    // ══ Medlemsavgifter ══════════════════════════════════════════════════════════════════
+    var feeYear = new Date().getFullYear();
+
+    function renderFees(f) {
+        show(el('feesCard'), true);
+        el('feesYear').textContent = String(f.year);
+        feeYear = f.year;
+
+        el('feesUnpaid').textContent = f.unpaidCount === 0
+            ? 'Inget' : f.unpaidCount + ' st · ' + kr(f.unpaidAmount);
+
+        el('feesUnposted').textContent = f.unpostedCount === 0
+            ? 'Inget' : f.unpostedCount + ' st · ' + kr(f.unpostedAmount);
+
+        show(el('feesPost'), f.unpostedCount > 0);
+
+        // Obetalda avgifter hör hemma i "väntar på mig" — det är kassörens största arbetslista.
+        todo.unpaidFees = f.unpaidCount;
+        todo.unpostedFees = f.unpostedCount;
+        renderTodo();
+    }
+
+    function loadFees() {
+        fetch('/umbraco/surface/EkonomiAdmin/GetMembershipFees?issuerType=' + issuerType + '&issuerId=' + issuerId)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success || !d.applicable || !d.fees) return;
+                renderFees(d.fees);
+            })
+            .catch(function () { });
+    }
+
+    el('feesPost').addEventListener('click', function () {
+        var btn = this, errBox = el('feesError'), okBox = el('feesOk');
+        errBox.classList.add('d-none'); okBox.classList.add('d-none');
+        btn.disabled = true;
+
+        postJson('/umbraco/surface/EkonomiAdmin/PostMembershipFees', { clubId: issuerId, year: feeYear })
+            .then(function (d) {
+                btn.disabled = false;
+                if (!d.success) {
+                    errBox.textContent = d.message || 'Avgifterna gick inte att bokföra.';
+                    errBox.classList.remove('d-none');
+                    return;
+                }
+                okBox.textContent = d.posted + ' medlemsavgifter bokfördes.';
+                okBox.classList.remove('d-none');
+                if (d.fees) renderFees(d.fees);
+                loadBokfor();
+            })
+            .catch(function (e) {
+                btn.disabled = false;
+                errBox.textContent = e.message; errBox.classList.remove('d-none');
+            });
+    });
 
     function loadOverview() {
         fetch('/umbraco/surface/EkonomiAdmin/GetOverview?issuerType=' + issuerType + '&issuerId=' + issuerId)

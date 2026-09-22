@@ -27,10 +27,21 @@ namespace HpskSite.Services
         private readonly IScopeProvider _scopeProvider;
         private readonly IMemberService _memberService;
 
-        public MembershipFeeService(IScopeProvider scopeProvider, IMemberService memberService)
+        /// <summary>
+        /// Bron till verifikationsliggaren. ⚠️ <b>Lat med flit</b> — bryggan hänger på
+        /// <c>LedgerPostingService</c>, och en direkt konstruktorberoende hade gjort avgiftsmodulen
+        /// beroende av hela liggaren även för en klubb som inte bokför hos oss.
+        /// </summary>
+        private readonly Lazy<Ledger.LedgerMembershipFeeBridge> _ledgerBridge;
+
+        public MembershipFeeService(
+            IScopeProvider scopeProvider,
+            IMemberService memberService,
+            Lazy<Ledger.LedgerMembershipFeeBridge> ledgerBridge)
         {
             _scopeProvider = scopeProvider;
             _memberService = memberService;
+            _ledgerBridge = ledgerBridge;
         }
 
         // ── Categories ────────────────────────────────────────────────
@@ -275,15 +286,41 @@ namespace HpskSite.Services
 
         public bool MarkPaid(int chargeId, int byMemberId)
         {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var charge = db.SingleOrDefaultById<MembershipFeeCharge>(chargeId);
-            if (charge == null) return false;
+            // ⚠️⚠️ SCOPET MÅSTE STÄNGAS INNAN BOKFÖRINGEN. Bryggan öppnar en EGEN anslutning, och
+            // körs den innanför det här scopet blockerar den på scopets egen oavslutade transaktion
+            // mot MembershipFeeCharge — SQL Server väntar, och efter ~30 sekunder faller anropet på
+            // "Execution Timeout Expired". Kassören fick alltså en yta som hängde en halv minut och
+            // sedan bokförde ingenting, tyst. Mätt 2026-09-22, hittat av ett A/B som letade efter
+            // något helt annat.
+            //
+            // Samma familj som ambient-scope-fällan som låste prod i tre timmar: ett andra
+            // anslutningsgrepp inuti någon annans scope är alltid en låsning som väntar.
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                var db = scope.Database;
+                var charge = db.SingleOrDefaultById<MembershipFeeCharge>(chargeId);
+                if (charge == null) return false;
 
-            charge.PaymentStatus = "Paid";
-            charge.PaidDate = DateTime.UtcNow;
-            charge.PaidConfirmedByMemberId = byMemberId;
-            db.Update(charge);
+                charge.PaymentStatus = "Paid";
+                charge.PaidDate = DateTime.UtcNow;
+                charge.PaidConfirmedByMemberId = byMemberId;
+                db.Update(charge);
+            }
+
+            // ⚠️⚠️ MEDLEMSAVGIFTEN NÅDDE INTE BOKFÖRINGEN FÖRRÄN 2026-09-22. Avgiftsmodulen
+            // skeppades juli 2026 med egen tabell och egen betalvägg, och MarkPaid satte bara en
+            // status — klubbens STÖRSTA intäktspost fanns alltså inte i resultaträkningen.
+            //
+            // ⚠️ Bokföringen får ALDRIG fälla kvitteringen. Bryggan sväljer sina egna fel och
+            // loggar; går posten inte igenom hamnar avgiften i "att bokföra" i stället, och
+            // pengarna står kvar som mottagna. Att en klubb inte skulle kunna kvittera en
+            // mottagen avgift för att liggaren säger ifrån vore att låta bokföringen stoppa
+            // verkligheten.
+            //
+            // ⚠️ Anropas SYNKRONT, med flit. Ett Task.Run här hade tagit med sig den omgivande
+            // Umbraco-scopen in i en bakgrundstråd — se ambient-scope-fällan som låste prod i 3 h.
+            _ledgerBridge.Value.PostCharge(chargeId, byMemberId);
+
             return true;
         }
 

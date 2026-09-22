@@ -38,6 +38,7 @@ namespace HpskSite.Controllers
         private readonly LedgerPaymentService _paymentService;
         private readonly LedgerOverviewService _overviewService;
         private readonly LedgerManualPostingService _manualPosting;
+        private readonly LedgerMembershipFeeBridge _feeBridge;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly ILogger<EkonomiAdminController> _logger;
@@ -55,6 +56,7 @@ namespace HpskSite.Controllers
             LedgerPaymentService paymentService,
             LedgerOverviewService overviewService,
             LedgerManualPostingService manualPosting,
+            LedgerMembershipFeeBridge feeBridge,
             IMemberManager memberManager,
             IMemberService memberService,
             ILogger<EkonomiAdminController> logger)
@@ -66,6 +68,7 @@ namespace HpskSite.Controllers
             _paymentService = paymentService;
             _overviewService = overviewService;
             _manualPosting = manualPosting;
+            _feeBridge = feeBridge;
             _memberManager = memberManager;
             _memberService = memberService;
             _logger = logger;
@@ -185,6 +188,79 @@ namespace HpskSite.Controllers
                     "Kunde inte bygga ekonomiöversikten för utställare {Typ}/{Id}.", issuerType, issuerId);
 
                 return Json(new { success = false, message = "Översikten gick inte att läsa just nu." });
+            }
+        }
+
+        /// <summary>
+        /// Medlemsavgifternas läge, sett från liggaren.
+        ///
+        /// <para><b>⚠️ Bara för en KLUBB.</b> Kretsen har ingen medlemsavgift — den fakturerar sina
+        /// klubbar, vilket är samma motor men en annan part, och den vägen går inte genom
+        /// <c>MembershipFeeCharge</c>.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetMembershipFees(int issuerType, int issuerId, int? year = null)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+
+            if (issuerType != DocumentOwnerType.Club)
+                return Json(new { success = true, applicable = false });
+
+            try
+            {
+                return Json(new
+                {
+                    success = true,
+                    applicable = true,
+                    fees = _feeBridge.Summarise(issuerId, year)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte läsa medlemsavgifterna för klubb {Id}.", issuerId);
+                return Json(new { success = false, message = "Medlemsavgifterna gick inte att läsa just nu." });
+            }
+        }
+
+        /// <summary>
+        /// Bokför betalda medlemsavgifter som saknar verifikation.
+        ///
+        /// <para>Behövs eftersom avgiftsmodulen levde utanför liggaren fram till 2026-09-22 — allt
+        /// som kvitterats före det är betalt men obokfört.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PostMembershipFees([FromBody] PostMembershipFeesRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att bokföra." });
+
+            var (ok, name) = await AuthorizeIssuerAsync(DocumentOwnerType.Club, request.ClubId);
+            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null)
+                return Json(new { success = false, message = "Du måste vara inloggad för att bokföra." });
+
+            try
+            {
+                var year = request.Year > 0 ? request.Year : DateTime.Today.Year;
+                var count = _feeBridge.PostPending(request.ClubId, year, actorId.Value);
+
+                _logger.LogInformation(
+                    "Ekonomi: {Forening} efterbokförde {Antal} medlemsavgifter för {Ar}.", name, count, year);
+
+                return Json(new
+                {
+                    success = true,
+                    posted = count,
+                    fees = _feeBridge.Summarise(request.ClubId, year)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Efterbokföringen av medlemsavgifter fallerade för klubb {Id}.", request.ClubId);
+                return Json(new { success = false, message = "Avgifterna gick inte att bokföra. Försök igen." });
             }
         }
 
@@ -464,6 +540,13 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Uppsättningen gick inte att spara. Försök igen." });
             }
         }
+    }
+
+    /// <summary>Det avgiftskortet skickar.</summary>
+    public class PostMembershipFeesRequest
+    {
+        public int ClubId { get; set; }
+        public int Year { get; set; }
     }
 
     /// <summary>Det köytan skickar när en rad ska bokföras.</summary>
