@@ -322,6 +322,7 @@ namespace HpskSite.Controllers
                     from = f,
                     to = t,
                     isSplit = r.IsSplit,
+                    splitConfigured = r.SplitConfigured,
                     total = r.Total,
                     missingRoles = r.MissingRoles,
                     rows = r.Rows
@@ -1522,11 +1523,16 @@ namespace HpskSite.Controllers
                         roles = a.Roles.Select(LedgerAccountRoles.Label).ToList()
                     }),
                     // Hela rollistan, som en fråga var: "när det här händer, vart går pengarna?"
-                    roles = LedgerAccountRoles.All.Select(r => new
+                    // ⚠️⚠️ `Known`, inte `All` — de VALFRIA rollerna måste erbjudas, annars är
+                    //    Fredriks uppdelade fordringskonton omöjliga att sätta och funktionen
+                    //    finns bara i koden. `optional` är vad som skiljer "inte ifylld ännu"
+                    //    från "en lucka i uppsättningen"; kravlistan räknar fortfarande `All`.
+                    roles = LedgerAccountRoles.Known.Select(r => new
                     {
                         key = r,
                         label = LedgerAccountRoles.Label(r),
                         hint = LedgerAccountRoles.Hint(r),
+                        optional = LedgerAccountRoles.IsOptional(r),
                         accountNumber = rows.FirstOrDefault(a => a.Roles.Contains(r))?.Number ?? 0
                     })
                 });
