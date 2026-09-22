@@ -17,9 +17,21 @@ namespace HpskSite.Models.Ledger
     /// <c>LedgerJournalEntry</c> eller <c>LedgerReceipt</c>. Lita inte på likheten i kod — den är
     /// ett migreringsknep, inte en regel. <b>Slå alltid upp utställaren.</b></para>
     ///
-    /// <para>Sandlådor numreras från 1 000 000 ur <c>SQ_LedgerIssuerSandbox</c>. Högsta nodnummer
-    /// är femsiffrigt, så rymderna kan inte kollidera — och ett id över en miljon syns dessutom
-    /// direkt i en logg.</para>
+    /// <para><b>⚠️⚠️ SANDLÅDOR HAR NEGATIVA ID, OCH DET ÄR INTE KOSMETIK.</b> Umbracos nod-id är
+    /// en <b>global stigande identitetssekvens</b> — varje tävling, anmälan och aktivitet tar ett
+    /// nummer. Första versionen numrerade sandlådor från 1 000 000 med motiveringen "högsta
+    /// nodnummer är 9561, så rymderna kan inte kollidera". Det är sant i dag och falskt om några
+    /// år: 500 klubbar med säsonger passerar en miljon.</para>
+    ///
+    /// <para>Konsekvensen hade varit värre än en krasch. Den dag en NOD får id 1 000 003 och en
+    /// sandlåda redan har det numret skulle <c>GetById</c> träffa sandlådan, behörigheten pröva
+    /// <b>fel ägare</b>, och <c>EnsureLive</c> för den noden krascha på primärnyckeln. Den tysta
+    /// felskopningen är farligare än kraschen.</para>
+    ///
+    /// <para><b>Att skjuta gränsen högre löser ingenting</b> — varje ändlig gräns nås till slut av
+    /// en stigande sekvens. Nod-id är alltid positiva; utställar-id är därför negativa, och
+    /// kollisionen är utesluten <b>per konstruktion</b>. Spärren ligger i databasen
+    /// (<c>CK_LedgerIssuer_SandboxNegative</c>), inte bara här.</para>
     /// </summary>
     [TableName("LedgerIssuer")]
     [PrimaryKey("Id", AutoIncrement = false)]

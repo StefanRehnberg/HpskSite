@@ -84,12 +84,14 @@ namespace HpskSite.Controllers
         /// </summary>
         private async Task<(bool ok, string name)> AuthorizeIssuerAsync(int issuerType, int issuerId)
         {
-            if (issuerId <= 0) return (false, "");
+            // ⚠️ Bara NOLL är ogiltigt. Ett negativt id är en sandlåda, inte ett fel —
+            // `issuerId <= 0` hade nekat varje sandlåda och sett ut som ett behörighetsproblem.
+            if (issuerId == 0) return (false, "");
 
             // ⚠️⚠️ ETT UTSTÄLLAR-ID ÄR INTE ETT NOD-ID. Sedan sandlådorna (2026-09-22) kan
-            // issuerId vara 1 000 000+ och då finns ingen nod med det numret — behörigheten
+            // issuerId vara NEGATIVT, och då finns ingen nod med det numret — behörigheten
             // MÅSTE gå via utställaren för att hitta ÄGAREN. Slog vi upp noden direkt skulle
-            // varje sandlåda nekas, och den dag numren råkade överlappa vore det värre än så.
+            // varje sandlåda nekas.
             // De levande utställarna har Id = nodens id, så den här omvägen är gratis för dem.
             // ⚠️ Anroparens issuerType är ett PÅSTÅENDE från klienten. Är utställaren känd vinner
             // databasens uppgift om ägaren; annars (en förening utan utställarrad ännu) faller vi
@@ -103,7 +105,7 @@ namespace HpskSite.Controllers
 
             if (ownerType == DocumentOwnerType.Club)
             {
-                // ⚠️ ownerId, ALDRIG issuerId. En sandlåda har id 1 000 000+ och är ingen klubb.
+                // ⚠️ ownerId, ALDRIG issuerId. En sandlåda har negativt id och är ingen klubb.
                 var ok = await _authService.IsClubAdminForClub(ownerId);
                 return (ok, node.Value<string>("clubName") ?? node.Name ?? "");
             }

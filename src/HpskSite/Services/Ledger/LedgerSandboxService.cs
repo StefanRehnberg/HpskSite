@@ -110,7 +110,19 @@ namespace HpskSite.Services.Ledger
                    WHERE OwnerType = @0 AND OwnerId = @1 AND Kind = @2 AND AbandonedUtc IS NULL",
                 ownerType, ownerId, LedgerIssuerKind.Sandbox, DateTime.UtcNow);
 
+            // ⚠️⚠️ NEGATIVT ID, ur en sekvens som går NEDÅT. Nod-id är alltid positiva och
+            // stigande, så en sandlåda kan aldrig råka få samma nummer som en framtida tävling
+            // eller anmälan. Se LedgerIssuer för varför ett högt positivt tak inte räcker.
             var id = db.ExecuteScalar<int>("SELECT NEXT VALUE FOR dbo.SQ_LedgerIssuerSandbox");
+
+            // Bältet till databasens hängslen: skulle sekvensen någonsin bytas ut mot en
+            // stigande stannar vi här, i stället för att skriva en rad som kolliderar om fem år.
+            if (id >= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Sandlådans id måste vara negativt (fick {id}). Sekvensen "
+                    + "SQ_LedgerIssuerSandbox ska gå nedåt — se Migrations/fix-ledger-issuer-negative-ids.sql.");
+            }
 
             var issuer = new LedgerIssuer
             {

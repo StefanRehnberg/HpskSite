@@ -99,7 +99,10 @@ namespace HpskSite.Controllers
             var live = _sandbox.EnsureLive(type, id);
             var active = live;
 
-            if (issuer is > 0 && issuer != live.Id)
+            // ⚠️ INTE `issuer is > 0`. Sandlådor har NEGATIVA id, och den kontrollen slängde
+            // tyst bort varje sandlådeval — sidan visade den levande liggaren medan URL:en sa
+            // sandlåda. Fångat av sviten samma dag rymden byttes.
+            if (issuer is not null && issuer != 0 && issuer != live.Id)
             {
                 var chosen = _sandbox.GetById(issuer.Value);
 
