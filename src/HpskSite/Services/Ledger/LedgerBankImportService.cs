@@ -310,6 +310,144 @@ namespace HpskSite.Services.Ledger
             public string? Description { get; set; }
         }
 
+        /// <summary>
+        /// Avstämningen för ett utdrag: vad som är hopparat, vad som är kvar, och differensen.
+        ///
+        /// <para><b>⚠️ Läser bokföringens saldo t.o.m. periodens SLUT, inte bara periodens rader.</b>
+        /// Ett konto har ett saldo, inte en periodsumma — jämförs bankens slutsaldo med summan av
+        /// periodens bokföringsrader blir differensen hela det ingående saldot, varje gång.</para>
+        /// </summary>
+        public LedgerReconciliation? Reconciliation(int issuerType, int issuerId, int importId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
+
+            var import = ldb.Fetch<LedgerBankImport>(
+                @"SELECT * FROM dbo.LedgerBankImport
+                   WHERE Id = @0 AND IssuerType = @1 AND IssuerId = @2",
+                importId, issuerType, issuerId).FirstOrDefault();
+
+            if (import == null) return null;
+
+            var view = new LedgerReconciliation
+            {
+                ImportId = import.Id,
+                AccountNumber = import.AccountNumber,
+                FileName = import.FileName,
+                PeriodFrom = import.PeriodFrom,
+                PeriodTo = import.PeriodTo,
+                RowCount = import.RowCount,
+                BankClosingBalance = import.ClosingBalance
+            };
+
+            view.AccountName = ldb.Fetch<string>(
+                @"SELECT TOP 1 Name FROM dbo.LedgerAccount
+                   WHERE IssuerType = @0 AND IssuerId = @1 AND Number = @2",
+                issuerType, issuerId, import.AccountNumber).FirstOrDefault() ?? "";
+
+            var rows = ldb.Fetch<LedgerBankRow>(
+                "SELECT * FROM dbo.LedgerBankRow WHERE ImportId = @0 ORDER BY LineNumber", importId);
+
+            // ⚠️ Serieprefixet bor på SERIEN, inte på verifikationen, så det måste joinas in —
+            //    ett nummer utan prefix går inte att slå upp i föreningens egen pärm.
+            var lines = ldb.Fetch<ReconLine>(
+                @"SELECT l.Id AS LineId, e.Id AS EntryId, s.Prefix, e.Number,
+                         e.AccountingDate, e.Description, l.Debit, l.Credit
+                    FROM dbo.LedgerJournalEntryLine l
+                    JOIN dbo.LedgerJournalEntry e ON e.Id = l.JournalEntryId
+                    LEFT JOIN dbo.LedgerNumberSeries s ON s.Id = e.SeriesId
+                   WHERE e.IssuerType = @0 AND e.IssuerId = @1 AND l.AccountNumber = @2
+                     AND (@3 IS NULL OR e.AccountingDate <= @3)
+                   ORDER BY e.AccountingDate, e.Number",
+                issuerType, issuerId, import.AccountNumber,
+                (object?)import.PeriodTo ?? DBNull.Value);
+
+            // Saldot är summan av ALLA rörelser t.o.m. periodens slut — se metodens kommentar.
+            view.LedgerBalance = lines.Sum(l => LedgerBankMatching.SignedMovement(l.Debit, l.Credit));
+
+            var byLineId = lines.ToDictionary(l => l.LineId);
+            var matchedLineIds = new HashSet<int>();
+
+            foreach (var r in rows)
+            {
+                var bank = ToBankView(r);
+
+                if (r.MatchedLineId is int lid && byLineId.TryGetValue(lid, out var l))
+                {
+                    matchedLineIds.Add(lid);
+                    view.Matched.Add(new LedgerReconciliation.MatchedPair
+                    {
+                        Bank = bank,
+                        Ledger = ToLineView(l),
+                        Kind = r.MatchKind ?? ""
+                    });
+                }
+                else
+                {
+                    // ⚠️ En matchning som pekar på en rad utanför perioden räknas som OMATCHAD
+                    //    här. Att visa den som hopparad medan motparten inte syns i listan gör
+                    //    differensen omöjlig att förklara.
+                    view.BankOnly.Add(bank);
+                }
+            }
+
+            // ⚠️⚠️ BARA RADER INOM UTDRAGETS PERIOD. Saldot ovanför räknas kumulativt — det är
+            //    hela poängen med ett saldo — men en bokning från mars kan omöjligen finnas i ett
+            //    utdrag för 19–22 september, och att lista den som "syns inte på kontot" är
+            //    precis det brus F6 säger att vi inte ska producera.
+            //
+            //    ⚠️ INGEN MÄTNING ATT LUTA SIG MOT ÄNNU. Dev-fixturens 34 bokförda rader på 1931
+            //    ligger ALLA inom perioden, så filtret ändrar ingenting där — regeln är riktig i
+            //    sak men oprövad i drift. (Marsraderna som såg ut att motbevisa den ligger på
+            //    1930, ett annat konto.) Skriv inte in en siffra här utan att ha mätt den.
+            //
+            //    ⚠️ Arbetsfördelningen: RADERNA stäms av inom perioden, SALDOT bevisar allt före
+            //    den. En gammal bokning som aldrig nådde banken syns alltså ändå — som en
+            //    differens, vilket är den enda plats den ärligt kan synas i det här utdraget.
+            var from = view.PeriodFrom?.AddDays(-LedgerBankMatching.DateToleranceDays);
+            var to = view.PeriodTo?.AddDays(LedgerBankMatching.DateToleranceDays);
+
+            foreach (var l in lines.Where(l => !matchedLineIds.Contains(l.LineId))
+                                   .Where(l => (from is null || l.AccountingDate >= from)
+                                               && (to is null || l.AccountingDate <= to)))
+                view.LedgerOnly.Add(ToLineView(l));
+
+            view.MatchedCount = view.Matched.Count;
+            return view;
+        }
+
+        private static LedgerReconciliation.BankRowView ToBankView(LedgerBankRow r) => new()
+        {
+            Id = r.Id,
+            LineNumber = r.LineNumber,
+            BookedDate = r.BookedDate,
+            Text = r.Text,
+            Amount = r.Amount,
+            Reference = r.Reference
+        };
+
+        private static LedgerReconciliation.LedgerLineView ToLineView(ReconLine l) => new()
+        {
+            LineId = l.LineId,
+            EntryId = l.EntryId,
+            EntryNumber = $"{l.Prefix}{l.Number}",
+            AccountingDate = l.AccountingDate,
+            Description = l.Description ?? "",
+            Movement = LedgerBankMatching.SignedMovement(l.Debit, l.Credit)
+        };
+
+        private class ReconLine
+        {
+            public int LineId { get; set; }
+            public int EntryId { get; set; }
+            public string? Prefix { get; set; }
+            public int Number { get; set; }
+            public DateTime AccountingDate { get; set; }
+            public string? Description { get; set; }
+            public decimal Debit { get; set; }
+            public decimal Credit { get; set; }
+        }
+
         public List<LedgerBankImport> List(int issuerType, int issuerId)
         {
             try

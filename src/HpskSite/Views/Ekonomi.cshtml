@@ -941,15 +941,129 @@
                 </div>
             </section>
 
+            @*
+                AVSTAMNINGEN (P11).
+
+                ⚠️⚠️ F6 STYR FORMEN: gor det AVVIKANDE hittbart och underlaget ett klick bort -
+                inte allt lika tydligt. Kasper Aase: "att medlem 1, 2 och 3 betalt sin arsavgift
+                och swishat 40 kr varje manad for en intern tavling, det tittar jag sallan
+                djupare pa." Darfor ligger det omatchade overst och det matchade hopfallt.
+
+                ⚠️ TVA SORTERS OMATCHAT AR TVA OLIKA ARBETSUPPGIFTER och far aldrig slas ihop
+                till en siffra: en bankrad utan motpart saknar en verifikation, en bokforingsrad
+                utan motpart ar bokford men syns inte pa kontot.
+            *@
             <section data-pane="avstamning" hidden>
-                <div class="head"><div><h1>Stämmer det?</h1>
-                    <div class="sub">Här bevisas fullständigheten.</div></div></div>
-                <div class="soonbox">
-                    <h2>Byggs härnäst (P11)</h2>
-                    <p class="muted">Ni laddar upp kontoutdraget själva — vi läser inte ert bankkonto,
-                    och ingen tredje part får läsrätt. Avstämningen matchar bankens rader mot
-                    bokföringens och visar differensen. <strong>Det är den här ytan som gör att panel 2
-                    på Översikt kan säga "allt stämmer".</strong></p>
+                <div class="head">
+                    <div><h1>Stämmer det?</h1>
+                        <div class="sub">Här bevisas fullständigheten.</div></div>
+                    <div class="headactions" id="@(uid)_recActions"></div>
+                </div>
+
+                <div class="ek-alert ek-bad d-none" id="@(uid)_bankError"></div>
+                <div class="ek-alert ek-ok d-none" id="@(uid)_bankOk"></div>
+
+                @* Tomt lage. ⚠️ Sager vad vi INTE gor - det ar den vanligaste farhagan. *@
+                <div class="soonbox d-none" id="@(uid)_bankEmpty">
+                    <h2>Inget kontoutdrag inläst ännu</h2>
+                    <p class="muted">
+                        Ni laddar upp kontoutdraget själva. <strong>Vi läser inte ert bankkonto</strong>,
+                        och ingen tredje part får läsrätt. Avstämningen parar ihop bankens rader med
+                        bokföringens och visar vad som är kvar.
+                    </p>
+                </div>
+
+                @if (Model.CanWrite)
+                {
+                    <div class="ek-card" id="@(uid)_bankUpload">
+                        <div class="ek-cardh"><h2>Läs in ett kontoutdrag</h2>
+                            <span class="meta">CSV från internetbanken</span></div>
+
+                        <div class="amount-row">
+                            <label>Konto
+                                <select class="form-select" id="@(uid)_bankAccount" style="width:16rem"></select></label>
+                            <label>Fil
+                                <input type="file" class="form-control" id="@(uid)_bankFile"
+                                       accept=".csv,.txt,text/csv" style="width:18rem"></label>
+                        </div>
+
+                        @* ⚠️ Mappningen ar ett FORSLAG och visas ALLTID innan nagot skrivs.
+                           Bankerna doper kolumnerna olika, och en tyst felmappning ger ett
+                           kontoutdrag som stams av mot fel siffror. *@
+                        <div class="d-none" id="@(uid)_bankMapBox">
+                            <div class="why">
+                                Så här läser vi filen. Stämmer det inte — ändra här innan du läser in.
+                            </div>
+                            <div class="fields" id="@(uid)_bankMapFields"></div>
+                            <table class="t" style="margin-top:.5rem">
+                                <thead><tr id="@(uid)_bankSampleHead"></tr></thead>
+                                <tbody id="@(uid)_bankSampleBody"></tbody>
+                            </table>
+                        </div>
+
+                        <div style="margin-top:1rem">
+                            <button type="button" class="btn btn-primary d-none"
+                                    id="@(uid)_bankImport">Läs in</button>
+                        </div>
+                    </div>
+                }
+
+                @* Avstamningen. *@
+                <div class="d-none" id="@(uid)_recWrap">
+                    <div class="ek-bigbox" id="@(uid)_recVerdict" style="margin-bottom:1rem">
+                        <div class="lead" id="@(uid)_recVerdictLead"></div>
+                        <div class="amount" id="@(uid)_recVerdictAmount"></div>
+                        <div class="note" id="@(uid)_recVerdictNote"></div>
+                    </div>
+
+                    <div class="ek-card wide" id="@(uid)_recBankOnlyCard">
+                        <div class="ek-cardh">
+                            <h2>Hänt på kontot — men inte bokfört</h2>
+                            <span class="meta" id="@(uid)_recBankOnlyMeta"></span>
+                        </div>
+                        <p class="muted" style="margin-top:0">
+                            Pengar har rört kontot utan att det finns en verifikation. Antingen ska
+                            posten bokföras, eller så hör raden till ett annat konto.
+                        </p>
+                        <table class="t">
+                            <thead><tr><th style="width:7rem">Datum</th><th>Text</th>
+                                <th class="n" style="width:8rem">Belopp</th>
+                                <th style="width:12rem"></th></tr></thead>
+                            <tbody id="@(uid)_recBankOnly"></tbody>
+                        </table>
+                    </div>
+
+                    <div class="ek-card wide" id="@(uid)_recLedgerOnlyCard" style="margin-top:1rem">
+                        <div class="ek-cardh">
+                            <h2>Bokfört — men syns inte på kontot</h2>
+                            <span class="meta" id="@(uid)_recLedgerOnlyMeta"></span>
+                        </div>
+                        <p class="muted" style="margin-top:0">
+                            Verifikationen finns, men ingen bankrad matchar den. Beloppet kan vara fel,
+                            datumet ligga utanför utdragets period, eller pengarna aldrig ha kommit.
+                        </p>
+                        <table class="t">
+                            <thead><tr><th style="width:7rem">Datum</th><th style="width:6rem">Ver.</th>
+                                <th>Beskrivning</th>
+                                <th class="n" style="width:8rem">Belopp</th></tr></thead>
+                            <tbody id="@(uid)_recLedgerOnly"></tbody>
+                        </table>
+                    </div>
+
+                    @* ⚠️ Hopfallt med FLIT - det ar den trakiga majoriteten, och F6 sager att
+                       vardet ligger i att gora det avvikande hittbart. *@
+                    <details class="ek-card wide" style="margin-top:1rem">
+                        <summary style="cursor:pointer;font-weight:700">
+                            Hopparat <span class="meta" id="@(uid)_recMatchedMeta"></span>
+                        </summary>
+                        <table class="t" style="margin-top:.75rem">
+                            <thead><tr><th style="width:7rem">Datum</th><th>Bankens text</th>
+                                <th style="width:6rem">Ver.</th>
+                                <th class="n" style="width:8rem">Belopp</th>
+                                <th style="width:8rem"></th></tr></thead>
+                            <tbody id="@(uid)_recMatched"></tbody>
+                        </table>
+                    </details>
                 </div>
             </section>
 
@@ -1221,6 +1335,11 @@
         root.querySelectorAll('[data-pane]').forEach(function (s) { s.hidden = s.dataset.pane !== name; });
         window.scrollTo(0, 0);
         if (name === 'rapport') loadReport();
+
+        // ⚠️ Avstämningen hämtas LAT och bara EN gång per sidladdning. Den läser hela kontots
+        //    bokföringsrader för att kunna räkna saldot, alltså en tung fråga — och panelen
+        //    ändrar sig inte av sig själv. Varje skrivning hämtar om den själv.
+        if (name === 'avstamning' && !bankLoaded) { bankLoaded = true; loadBank(); }
     }
     root.querySelectorAll('[data-view]').forEach(function (a) {
         a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
@@ -1323,6 +1442,294 @@
         }
 
         renderTodo();
+    }
+
+    // ══ BANKAVSTAMNINGEN (P11) ═══════════════════════════════════════════════════════════
+    //
+    // ⚠️⚠️ F6 STYR FORMEN: det avvikande overst, det matchade hopfallt. Vardet ligger inte i att
+    //    visa allt lika tydligt utan i att gora det som INTE stammer hittbart.
+    var bankMap = null, bankImports = [], recCurrent = 0, bankLoaded = false;
+
+    function bankFields() {
+        // ⚠️ Rubrikerna kommer ur FILEN, aldrig ur en lista i koden - bankerna doper kolumnerna
+        //    olika och operatoren maste kanna igen sin egen fil.
+        var head = bankMap.header || [];
+        var opts = function (sel) {
+            return '<option value="-1">— saknas —</option>' + head.map(function (h, i) {
+                return '<option value="' + i + '"' + (sel === i ? ' selected' : '') + '>'
+                     + esc(h || ('Kolumn ' + (i + 1))) + '</option>';
+            }).join('');
+        };
+
+        var row = function (key, label, sel) {
+            return '<label>' + label + '<select class="form-select" data-map="' + key + '">'
+                 + opts(sel) + '</select></label>';
+        };
+
+        el('bankMapFields').innerHTML =
+              row('date', 'Datum', bankMap.mapping.date)
+            + row('text', 'Text', bankMap.mapping.text)
+            + row('amount', 'Belopp (eller insättning)', bankMap.mapping.amount)
+            + row('amountOut', 'Uttag (om banken delar)', bankMap.mapping.amountOut)
+            + row('balance', 'Saldo', bankMap.mapping.balance);
+
+        el('bankMapFields').querySelectorAll('select[data-map]').forEach(function (sl) {
+            sl.addEventListener('change', function () {
+                bankMap.mapping[sl.dataset.map] = parseInt(sl.value, 10);
+                syncImportButton();
+            });
+        });
+
+        el('bankSampleHead').innerHTML = head.map(function (h) {
+            return '<th>' + esc(h || '') + '</th>';
+        }).join('');
+
+        el('bankSampleBody').innerHTML = (bankMap.sample || []).map(function (r) {
+            return '<tr>' + head.map(function (_, i) {
+                return '<td>' + esc(r[i] || '') + '</td>';
+            }).join('') + '</tr>';
+        }).join('');
+    }
+
+    function syncImportButton() {
+        var m = bankMap && bankMap.mapping;
+        // ⚠️ Utan datum OCH ett belopp gar filen inte att lasa alls. En knapp som gar att trycka
+        //    men alltid misslyckas ar samre an en som sager varfor den ar av.
+        var usable = !!m && m.date >= 0 && (m.amount >= 0 || m.amountOut >= 0);
+        show(el('bankImport'), usable);
+    }
+
+    async function bankPreview(file) {
+        show(el('bankError'), false);
+        show(el('bankOk'), false);
+
+        var fd = new FormData();
+        fd.append('issuerType', issuerType);
+        fd.append('issuerId', issuerId);
+        fd.append('file', file);
+
+        try {
+            var d = await postForm('/umbraco/surface/EkonomiAdmin/PreviewBankFile', fd);
+            if (!d.success) throw new Error(d.message || 'Filen gick inte att läsa.');
+
+            bankMap = d;
+            show(el('bankMapBox'), true);
+            bankFields();
+            syncImportButton();
+
+            if (!d.usable) {
+                el('bankError').textContent =
+                    'Vi hittade ingen datum- eller beloppskolumn. Peka ut dem själv nedan.';
+                show(el('bankError'), true);
+            }
+        } catch (e) {
+            el('bankError').textContent = e.message;
+            show(el('bankError'), true);
+        }
+    }
+
+    async function bankImportFile() {
+        var f = el('bankFile').files[0];
+        if (!f || !bankMap) return;
+
+        var fd = new FormData();
+        fd.append('issuerType', issuerType);
+        fd.append('issuerId', issuerId);
+        fd.append('accountNumber', el('bankAccount').value);
+        fd.append('file', f);
+        fd.append('date', bankMap.mapping.date);
+        fd.append('text', bankMap.mapping.text);
+        fd.append('amount', bankMap.mapping.amount);
+        fd.append('amountOut', bankMap.mapping.amountOut);
+        fd.append('balance', bankMap.mapping.balance);
+        fd.append('delimiter', bankMap.delimiter);
+        fd.append('headerRow', bankMap.mapping.headerRow);
+
+        try {
+            var d = await postForm('/umbraco/surface/EkonomiAdmin/ImportBankFile', fd);
+            if (!d.success) {
+                var msg = d.message || 'Filen gick inte att läsa in.';
+                if (d.skipped && d.skipped.length) msg += ' ' + d.skipped.join(' ');
+                throw new Error(msg);
+            }
+
+            // ⚠️ Overhoppade rader SAGS aven nar importen lyckades - en bortfallen rad ar en
+            //    differens operatoren annars far leta efter i kontoutdraget for hand.
+            var note = d.rows + ' rader inlästa.';
+            if (d.skipped && d.skipped.length)
+                note += ' ' + d.skipped.length + ' rad(er) kunde inte läsas: ' + d.skipped.join(' ');
+
+            el('bankOk').textContent = note;
+            show(el('bankOk'), true);
+            show(el('bankMapBox'), false);
+            show(el('bankImport'), false);
+            el('bankFile').value = '';
+            bankMap = null;
+
+            await loadBank(d.importId);
+        } catch (e) {
+            el('bankError').textContent = e.message;
+            show(el('bankError'), true);
+        }
+    }
+
+    async function loadBank(selectId) {
+        var d = await fetch('/umbraco/surface/EkonomiAdmin/GetBankImports?issuerType=' + issuerType
+                            + '&issuerId=' + issuerId, { cache: 'no-store' }).then(function (r) { return r.json(); });
+        if (!d.success) return;
+
+        bankImports = d.imports || [];
+
+        el('bankAccount').innerHTML = (d.accounts || []).map(function (a) {
+            return '<option value="' + a.number + '">' + a.number + ' · ' + esc(a.name) + '</option>';
+        }).join('');
+
+        show(el('bankEmpty'), bankImports.length === 0);
+
+        // Vaxlaren mellan inlasta utdrag. En rad racker; det ar inget register.
+        el('recActions').innerHTML = bankImports.length === 0 ? '' :
+            '<select class="form-select" id="' + uid + '_recPick" style="width:22rem">'
+            + bankImports.map(function (i) {
+                return '<option value="' + i.id + '">' + i.accountNumber + ' · '
+                     + esc(shortDate(i.periodFrom)) + '–' + esc(shortDate(i.periodTo))
+                     + ' (' + i.rowCount + ' rader)</option>';
+            }).join('') + '</select>';
+
+        var pick = el('recPick');
+        if (pick) {
+            pick.value = String(selectId || bankImports[0].id);
+            pick.addEventListener('change', function () { loadReconciliation(pick.value); });
+            await loadReconciliation(pick.value);
+        } else {
+            show(el('recWrap'), false);
+        }
+    }
+
+    async function loadReconciliation(importId) {
+        recCurrent = parseInt(importId, 10);
+
+        var d = await fetch('/umbraco/surface/EkonomiAdmin/GetReconciliation?issuerType=' + issuerType
+                            + '&issuerId=' + issuerId + '&importId=' + recCurrent,
+                            { cache: 'no-store' }).then(function (r) { return r.json(); });
+
+        if (!d.success) { show(el('recWrap'), false); return; }
+        renderReconciliation(d.reconciliation);
+    }
+
+    function renderReconciliation(r) {
+        show(el('recWrap'), true);
+
+        // ⚠️⚠️ "Allt stammer" kraver BADA halvorna: noll omatchade OCH noll differens. Var for
+        //    sig racker ingen - alla rader kan vara hopparade medan saldot anda skiljer sig, och
+        //    saldot kan rakna stamma medan tva fel tar ut varandra.
+        var box = el('recVerdict');
+        box.classList.toggle('ek-warn', !r.balances);
+
+        if (r.balances) {
+            el('recVerdictLead').textContent = 'Kontot stämmer';
+            el('recVerdictAmount').textContent = kr(r.bankClosingBalance);
+            el('recVerdictNote').textContent =
+                'Alla ' + r.rowCount + ' rader är hopparade och saldot går ihop med bokföringen.';
+        } else if (r.allRowsMatchedButNoBalance) {
+            // ⚠️ Filen bar inget saldo. Da SAGS det - ett pastaende om att kontot stammer vore
+            //    baserat pa halva beviset.
+            el('recVerdictLead').textContent = 'Alla rader är hopparade';
+            el('recVerdictAmount').textContent = r.rowCount + ' rader';
+            el('recVerdictNote').textContent =
+                'Filen bar inget saldo, så vi kan inte bevisa att kontot stämmer — bara att '
+                + 'varje rad i utdraget har en motpart.';
+        } else {
+            el('recVerdictLead').textContent = 'Det här är kvar';
+            el('recVerdictAmount').textContent = r.difference == null
+                ? (r.bankOnly.length + r.ledgerOnly.length) + ' rader'
+                : kr(r.difference);
+            el('recVerdictNote').textContent = r.difference == null
+                ? 'Filen bar inget saldo, så differensen går inte att räkna fram.'
+                : 'Bankens saldo ' + kr(r.bankClosingBalance)
+                  + ' mot bokföringens ' + kr(r.ledgerBalance) + '.';
+        }
+
+        // ── Bankrader utan motpart ──────────────────────────────────────────────────────
+        show(el('recBankOnlyCard'), r.bankOnly.length > 0);
+        el('recBankOnlyMeta').textContent = r.bankOnly.length + ' rader';
+        el('recBankOnly').innerHTML = r.bankOnly.map(function (b) {
+            return '<tr><td class="date">' + esc(shortDate(b.bookedDate)) + '</td>'
+                 + '<td>' + esc(b.text) + '</td>'
+                 + '<td class="n">' + kr(b.amount) + '</td>'
+                 + '<td class="n">' + (canWrite
+                     ? // En kapad etikett laeses som en trasig kontroll. Bredden racker for hela texten.
+                     '<select class="form-select form-select-sm" style="min-width:15rem"'
+                       + ' data-match-row="' + b.id + '">'
+                       + '<option value="0">— välj bokföringsrad —</option>'
+                       + r.ledgerOnly.map(function (l) {
+                             return '<option value="' + l.lineId + '">' + esc(l.entryNumber)
+                                  + ' · ' + kr(l.movement) + '</option>';
+                         }).join('') + '</select>'
+                     : '') + '</td></tr>';
+        }).join('');
+
+        el('recBankOnly').querySelectorAll('select[data-match-row]').forEach(function (sl) {
+            sl.addEventListener('change', function () {
+                setBankMatch(parseInt(sl.dataset.matchRow, 10), parseInt(sl.value, 10));
+            });
+        });
+
+        // ── Bokforingsrader utan motpart ────────────────────────────────────────────────
+        show(el('recLedgerOnlyCard'), r.ledgerOnly.length > 0);
+        el('recLedgerOnlyMeta').textContent = r.ledgerOnly.length + ' rader';
+        el('recLedgerOnly').innerHTML = r.ledgerOnly.map(function (l) {
+            return '<tr><td class="date">' + esc(shortDate(l.accountingDate)) + '</td>'
+                 + '<td>' + esc(l.entryNumber) + '</td>'
+                 + '<td>' + esc(l.description) + '</td>'
+                 + '<td class="n">' + kr(l.movement) + '</td></tr>';
+        }).join('');
+
+        // ── Hopparat ────────────────────────────────────────────────────────────────────
+        el('recMatchedMeta').textContent = r.matched.length + ' rader';
+        el('recMatched').innerHTML = r.matched.map(function (m) {
+            // ⚠️ "Automatiskt" star utskrivet. En automatisk traff ar en gissning operatoren kan
+            //    angra; en manuell ar ett beslut. Utan skillnaden gar det inte att se vad en
+            //    manniska faktiskt granskat.
+            var kind = m.kind === 'auto'
+                ? '<span class="muted">automatiskt</span>' : '<span class="muted">manuellt</span>';
+
+            return '<tr><td class="date">' + esc(shortDate(m.bank.bookedDate)) + '</td>'
+                 + '<td>' + esc(m.bank.text) + '</td>'
+                 + '<td>' + esc(m.ledger.entryNumber) + '</td>'
+                 + '<td class="n">' + kr(m.bank.amount) + '</td>'
+                 + '<td class="n">' + kind + (canWrite
+                     ? ' <button type="button" class="btn btn-sm btn-outline-secondary"'
+                       + ' data-unmatch="' + m.bank.id + '">Ångra</button>' : '')
+                 + '</td></tr>';
+        }).join('');
+
+        el('recMatched').querySelectorAll('button[data-unmatch]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                setBankMatch(parseInt(btn.dataset.unmatch, 10), 0);
+            });
+        });
+    }
+
+    async function setBankMatch(rowId, lineId) {
+        try {
+            var d = await postJson('/umbraco/surface/EkonomiAdmin/SetBankMatch', {
+                issuerType: issuerType, issuerId: issuerId, rowId: rowId, lineId: lineId
+            });
+            if (!d.success) throw new Error(d.message || 'Matchningen gick inte att spara.');
+            show(el('bankError'), false);
+            await loadReconciliation(recCurrent);
+        } catch (e) {
+            el('bankError').textContent = e.message;
+            show(el('bankError'), true);
+        }
+    }
+
+    if (canWrite && el('bankFile')) {
+        el('bankFile').addEventListener('change', function () {
+            var f = el('bankFile').files[0];
+            if (f) bankPreview(f);
+        });
+        el('bankImport').addEventListener('click', bankImportFile);
     }
 
     // ══ AVPRICKNINGSLISTAN ═══════════════════════════════════════════════════════════════
@@ -1846,6 +2253,32 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': t || '' },
                     body: JSON.stringify(body)
+                })
+                    .then(function (r) {
+                        return r.text().then(function (txt) {
+                            try { resolve(JSON.parse(txt)); }
+                            catch (e) { reject(new Error('Servern svarade ' + r.status + ' utan giltigt svar.')); }
+                        });
+                    })
+                    .catch(reject);
+            });
+        });
+    }
+
+    /**
+     * Som postJson, men for en fil.
+     *
+     * ⚠️ SATT ALDRIG Content-Type SJALV pa en FormData. Webblasaren maste satta den, eftersom
+     *    den bar multipart-granslinjen - anges den for hand hittar servern ingen fil och svarar
+     *    "Ingen fil vald" om en fil som ligger i begaran.
+     */
+    function postForm(url, formData) {
+        return new Promise(function (resolve, reject) {
+            withToken(function (t) {
+                fetch(url, {
+                    method: 'POST',
+                    headers: { 'RequestVerificationToken': t || '' },
+                    body: formData
                 })
                     .then(function (r) {
                         return r.text().then(function (txt) {
