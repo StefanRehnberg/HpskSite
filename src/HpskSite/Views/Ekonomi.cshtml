@@ -655,6 +655,12 @@
 
                         <label class="fieldlabel" for="@(uid)_bDate">När?</label>
                         <input type="date" id="@(uid)_bDate" class="wide-in">
+                        @* ⚠️⚠️ ÅRET MÅSTE STÅ SKRIVET intill datumet. Ligger i dag utanför
+                           räkenskapsåret förifylls ett datum INNE i året — och en kassör som ser
+                           2025-12-31 dyka upp utan förklaring läser det som ett fel. Värre: en
+                           förening som glömt lägga upp det nya året skulle annars kunna datera en
+                           januaripost till förra årets sista dag utan att något sa ifrån. *@
+                        <div class="why" id="@(uid)_bYearNote"></div>
 
                         <label class="fieldlabel" for="@(uid)_bText">Vad var det?</label>
                         <input type="text" id="@(uid)_bText" class="wide-in" maxlength="200"
@@ -1135,8 +1141,31 @@
             : '<span style="color:#b02a37;font-weight:600">' + missing.length + ' saknas</span><div class="muted">'
               + missing.map(function (r) { return ROLE_NAMES[r] || r; }).join(', ') + '</div>';
 
+        // ── Vilket år bokför vi i? ────────────────────────────────────────────────────────
+        // ⚠️ Förifyllningen får ALDRIG vara tyst. Ligger i dag inuti året står det ingenting
+        //    extra; ligger det utanför skrivs året ut, och datumet flyttas in i det.
+        var note = el('bYearNote');
+        if (status.workingYear) {
+            var iso = function (d) { return String(d).slice(0, 10); };
+            var today = new Date().toISOString().slice(0, 10);
+            var from = iso(status.workingYearStart), to = iso(status.workingYearEnd);
+            var inside = today >= from && today <= to;
+
+            el('bDate').value = inside ? today : (today > to ? to : from);
+            note.textContent = inside
+                ? 'Bokförs i räkenskapsåret ' + status.workingYear + '.'
+                : 'Bokförs i räkenskapsåret ' + status.workingYear + ' (' + from + ' – ' + to + '). '
+                  + 'I dag ligger utanför året.';
+        } else {
+            note.textContent = '';
+        }
+
         var blocked = el('blocked');
+        // ⚠️⚠️ TRE LÄGEN, inte två. En SPÄRR ("året är fastställt") och en UPPLYSNING ("i dag
+        //    ligger utanför året") är olika saker — att visa den andra som den första var precis
+        //    felet: ytan sa "lägg upp året" om ett år som fanns och gick att bokföra i.
         if (status.blockedReason) { blocked.className = 'ek-alert ek-warn'; blocked.textContent = status.blockedReason; }
+        else if (status.postingDateNote) { blocked.className = 'ek-alert'; blocked.textContent = 'Klart att bokföra. ' + status.postingDateNote; }
         else if (status.shape === 'full') { blocked.className = 'ek-alert ek-ok'; blocked.textContent = 'Klart att bokföra.'; }
         else { blocked.className = 'ek-alert d-none'; }
 
@@ -1259,6 +1288,8 @@
         if (b) { el('bText').value = b.textContent; el('bText').focus(); }
     });
 
+    // ⚠️ Sätts om i render() så fort statusen är läst — då vet vi vilket räkenskapsår
+    //    föreningen arbetar i. Det här är bara ett värde att stå med innan dess.
     el('bDate').value = new Date().toISOString().slice(0, 10);
 
     // ── Ny sandlåda ───────────────────────────────────────────────────────────────────────

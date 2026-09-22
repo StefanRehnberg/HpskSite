@@ -72,5 +72,22 @@ namespace HpskSite.Models.Ledger
         /// på plats, eller när föreningen inte bokför hos oss alls.
         /// </summary>
         public string? BlockedReason { get; set; }
+
+        /// <summary>
+        /// Året arbetet sker i — se <see cref="LedgerFiscalYearPicker"/>. Null när inget finns.
+        /// </summary>
+        public int? WorkingYear { get; set; }
+
+        public DateTime? WorkingYearStart { get; set; }
+
+        public DateTime? WorkingYearEnd { get; set; }
+
+        /// <summary>
+        /// <b>⚠️ INTE en spärr.</b> Upplysningen när i dag ligger utanför arbetsåret — bokföringen
+        /// fungerar, det är bara datumet som måste ligga i året. Att blanda ihop den här med
+        /// <see cref="BlockedReason"/> var precis felet: ytan sa "lägg upp året" om ett år som
+        /// fanns.
+        /// </summary>
+        public string? PostingDateNote { get; set; }
     }
 }

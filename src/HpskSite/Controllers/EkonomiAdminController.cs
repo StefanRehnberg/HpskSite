@@ -151,11 +151,24 @@ namespace HpskSite.Controllers
             var status = _setupService.GetStatus(issuerType, issuerId);
             status.IssuerName = issuerName;
 
+            // Arbetsåret, och upplysningen om dagens datum ligger utanför det.
+            var working = LedgerFiscalYearPicker.Working(status.FiscalYears, DateTime.Today);
+            status.WorkingYear = working?.Year;
+            status.WorkingYearStart = working?.StartDate;
+            status.WorkingYearEnd = working?.EndDate;
+            status.PostingDateNote = LedgerFiscalYearPicker.DateNote(status.FiscalYears, DateTime.Today);
+
             // Beredskapen ägs av betalvägens egen spärr — vi frågar den, vi bedömer inte själva.
             // Rollmappningen lägger vi till, för den kontrollerar spärren inte.
             if (status.IsSetUp && LedgerIssuerShape.KeepsBooks(status.Shape))
             {
-                var blocked = _postingService.PostingBlockedReason(issuerType, issuerId, DateTime.Today);
+                // ⚠️⚠️ PRÖVAS MOT ARBETSÅRET, inte mot i dag. En förening som lagt upp 2025 fick
+                // annars "Det finns inget räkenskapsår som omfattar 2026-09-22" — ett falskt larm
+                // om ett år som fanns, var öppet och gick att bokföra i. Att mata in ett passerat
+                // år för att jämföra med den befintliga bokföringen är vad en klubb GÖR när den
+                // provar oss. Rapporterat från Hallands kretsens sandlåda 2026-09-22.
+                var probe = LedgerFiscalYearPicker.ProbeDate(status.FiscalYears, DateTime.Today);
+                var blocked = _postingService.PostingBlockedReason(issuerType, issuerId, probe);
 
                 if (blocked is null && status.MissingRoles.Count > 0)
                 {
