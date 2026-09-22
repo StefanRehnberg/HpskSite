@@ -77,6 +77,26 @@
         </div>
         <p class="sv-help mt-1">@sel.Kind: <strong>@sel.Name</strong></p>
 
+        @*
+            ⚠️⚠️ VÄGEN IN TILL EKONOMIN. Utan den här länken finns ingen: /ekonomi nås annars bara
+            från klubbens adminpanel, som kräver klubbadmin — och mätt i dev 2026-09-22 var
+            10 av 12 aktiva styrelseledamöter INTE klubbadmin. Styrelsen kunde alltså inte se
+            föreningens ekonomi, trots att det är styrelsen som beviljas ansvarsfrihet.
+
+            Styrelsen LÄSER, kassören SKRIVER — grinden är LedgerAccessService, och sidan säger
+            själv vilken roll man är där. Valberedningen är utanför: de har IsBoardMember = 0 och
+            får inget läge alls.
+        *@
+        @if (!sel.ValberedningOnly)
+        {
+            <p class="sv-noprint">
+                <a href="/ekonomi?type=@sel.OwnerType&id=@sel.OwnerId" target="_blank" rel="noopener">
+                    <i class="bi bi-cash-coin me-1"></i>Föreningens ekonomi
+                </a>
+                <span class="sv-help ms-2">Budget, utfall och avgifter. Kassören bokför.</span>
+            </p>
+        }
+
         <div class="sv-nav sv-noprint">
             @if (!sel.ValberedningOnly)
             {

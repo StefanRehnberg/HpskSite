@@ -41,6 +41,7 @@ namespace HpskSite.Controllers
         private readonly LedgerManualPostingService _manualPosting;
         private readonly LedgerMembershipFeeBridge _feeBridge;
         private readonly LedgerSandboxService _sandbox;
+        private readonly LedgerAccessService _access;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly ILogger<EkonomiAdminController> _logger;
@@ -61,6 +62,7 @@ namespace HpskSite.Controllers
             LedgerManualPostingService manualPosting,
             LedgerMembershipFeeBridge feeBridge,
             LedgerSandboxService sandbox,
+            LedgerAccessService access,
             IMemberManager memberManager,
             IMemberService memberService,
             ILogger<EkonomiAdminController> logger)
@@ -75,6 +77,7 @@ namespace HpskSite.Controllers
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
             _sandbox = sandbox;
+            _access = access;
             _memberManager = memberManager;
             _memberService = memberService;
             _logger = logger;
@@ -87,9 +90,34 @@ namespace HpskSite.Controllers
         /// </summary>
         private async Task<(bool ok, string name)> AuthorizeIssuerAsync(int issuerType, int issuerId)
         {
+            var r = await ResolveAccessAsync(issuerType, issuerId);
+            return (r.CanRead, r.OwnerName);
+        }
+
+        /// <summary>
+        /// Samma uppslag, men kräver SKRIVRÄTT.
+        ///
+        /// <para><b>⚠️⚠️ VARJE MUTERANDE ENDPOINT MÅSTE ANVÄNDA DEN HÄR.</b> Styrelsen får läsa
+        /// föreningens ekonomi men inte bokföra i den (se <see cref="LedgerAccessService"/>), och
+        /// den skillnaden finns bara om skrivvägarna frågar efter den. Missas den på EN endpoint
+        /// är hela delningen borta just där, och det syns inte: ytan gömmer ändå knappen, så felet
+        /// upptäcks först av den som postar anropet för hand.</para>
+        ///
+        /// <para>⚠️ Läsande endpoints som BETJÄNAR ett formulär kräver också skrivrätt
+        /// (<c>GetPostingContext</c>, <c>GetBudgetEditor</c>) — den senare SKRIVER dessutom, den
+        /// skapar utkastet.</para>
+        /// </summary>
+        private async Task<(bool ok, string name)> AuthorizeWriteAsync(int issuerType, int issuerId)
+        {
+            var r = await ResolveAccessAsync(issuerType, issuerId);
+            return (r.CanWrite, r.OwnerName);
+        }
+
+        private async Task<LedgerAccessResult> ResolveAccessAsync(int issuerType, int issuerId)
+        {
             // ⚠️ Bara NOLL är ogiltigt. Ett negativt id är en sandlåda, inte ett fel —
             // `issuerId <= 0` hade nekat varje sandlåda och sett ut som ett behörighetsproblem.
-            if (issuerId == 0) return (false, "");
+            if (issuerId == 0) return LedgerAccessResult.None;
 
             // ⚠️⚠️ ETT UTSTÄLLAR-ID ÄR INTE ETT NOD-ID. Sedan sandlådorna (2026-09-22) kan
             // issuerId vara NEGATIVT, och då finns ingen nod med det numret — behörigheten
@@ -103,29 +131,9 @@ namespace HpskSite.Controllers
             var ownerType = issuer?.OwnerType ?? issuerType;
             var ownerId = issuer?.OwnerId ?? issuerId;
 
-            var node = UmbracoContext.Content?.GetById(ownerId);
-            if (node is null) return (false, "");
 
-            if (ownerType == DocumentOwnerType.Club)
-            {
-                // ⚠️ ownerId, ALDRIG issuerId. En sandlåda har negativt id och är ingen klubb.
-                var ok = await _authService.IsClubAdminForClub(ownerId);
-                return (ok, node.Value<string>("clubName") ?? node.Name ?? "");
-            }
-
-            if (ownerType == DocumentOwnerType.Region)
-            {
-                // ⚠️ Koden ur NODEN. Kom den ur anropet vore grinden bara en fråga om vilken
-                // sträng klienten råkade skicka.
-                var regionCode = node.Value<string>("regionCode") ?? "";
-                if (string.IsNullOrWhiteSpace(regionCode)) return (false, "");
-
-                var ok = await _authService.IsRegionalAdminForRegion(regionCode);
-                return (ok, node.Name ?? "");
-            }
-
-            // Ett tredje utställarslag finns inte. Att svara nej är rätt svar, inte ett fel.
-            return (false, "");
+            // ⚠️ ownerId, ALDRIG issuerId. En sandlåda har negativt id och är ingen klubb.
+            return await _access.ResolveAsync(ownerType, ownerId);
         }
 
         /// <summary>
@@ -162,6 +170,16 @@ namespace HpskSite.Controllers
             return status;
         }
 
+
+        /// <summary>
+        /// ⚠️ Ett gemensamt nekande, och det måste rymma BÅDA fallen: den som inte har med
+        /// föreningens ekonomi att göra, och styrelseledamoten som får läsa men inte skriva. Ett
+        /// blankt "du har inte behörighet" till den senare är falskt — hen står och läser sidan.
+        /// </summary>
+        private const string DeniedMessage =
+            "Du har inte behörighet till den här åtgärden. Styrelsen kan läsa föreningens ekonomi; "
+            + "det är kassören som bokför.";
+
         /// <summary>
         /// Läser upp föreningens ekonomiuppsättning. Ytan ritar sig helt ur det här svaret, så
         /// "inte uppsatt" måste vara ett giltigt svar med 200 — inte ett fel.
@@ -170,7 +188,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> GetSetupStatus(int issuerType, int issuerId)
         {
             var (ok, name) = await AuthorizeIssuerAsync(issuerType, issuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             try
             {
@@ -197,7 +215,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> GetOverview(int issuerType, int issuerId)
         {
             var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             try
             {
@@ -227,8 +245,8 @@ namespace HpskSite.Controllers
 
             // ⚠️ Grinden prövas mot ÄGAREN (nod-id), inte mot en utställare — det är en ny
             // sandlåda som ska skapas, och den finns inte ännu.
-            var (ok, _) = await AuthorizeIssuerAsync(request.OwnerType, request.OwnerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            var (ok, _) = await AuthorizeWriteAsync(request.OwnerType, request.OwnerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             var (actorId, _) = await GetCurrentActorAsync();
             if (actorId is null)
@@ -266,7 +284,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> GetMembershipFees(int issuerType, int issuerId, int? year = null)
         {
             var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             if (issuerType != DocumentOwnerType.Club)
                 return Json(new { success = true, applicable = false });
@@ -299,8 +317,8 @@ namespace HpskSite.Controllers
         {
             if (request is null) return Json(new { success = false, message = "Inget att bokföra." });
 
-            var (ok, name) = await AuthorizeIssuerAsync(DocumentOwnerType.Club, request.ClubId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            var (ok, name) = await AuthorizeWriteAsync(DocumentOwnerType.Club, request.ClubId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             var (actorId, _) = await GetCurrentActorAsync();
             if (actorId is null)
@@ -338,8 +356,8 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetPostingContext(int issuerType, int issuerId)
         {
-            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            var (ok, _) = await AuthorizeWriteAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             try
             {
@@ -367,8 +385,8 @@ namespace HpskSite.Controllers
         {
             if (request is null) return Json(new { success = false, message = "Inget att bokföra." });
 
-            var (ok, name) = await AuthorizeIssuerAsync(request.IssuerType, request.IssuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            var (ok, name) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             var (actorId, _) = await GetCurrentActorAsync();
             if (actorId is null)
@@ -414,7 +432,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> GetUnposted(int issuerType, int issuerId)
         {
             var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             try
             {
@@ -467,8 +485,8 @@ namespace HpskSite.Controllers
             if (payment is null)
                 return Json(new { success = false, message = "Betalningen finns inte." });
 
-            var (ok, name) = await AuthorizeIssuerAsync(payment.IssuerType, payment.IssuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            var (ok, name) = await AuthorizeWriteAsync(payment.IssuerType, payment.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             var (actorId, _) = await GetCurrentActorAsync();
             if (actorId is null)
@@ -533,8 +551,8 @@ namespace HpskSite.Controllers
         {
             if (request is null) return Json(new { success = false, message = "Inget att spara." });
 
-            var (ok, name) = await AuthorizeIssuerAsync(request.IssuerType, request.IssuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            var (ok, name) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             if (!LedgerIssuerShape.IsValid(request.Shape))
             {
@@ -619,7 +637,7 @@ namespace HpskSite.Controllers
             int issuerType, int issuerId, int? year = null, string? from = null, string? to = null)
         {
             var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             try
             {
@@ -668,8 +686,8 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetBudgetEditor(int issuerType, int issuerId, int? year = null)
         {
-            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            var (ok, _) = await AuthorizeWriteAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             try
             {
@@ -733,8 +751,8 @@ namespace HpskSite.Controllers
         {
             if (request is null) return Json(new { success = false, message = "Inget att spara." });
 
-            var (ok, _) = await AuthorizeIssuerAsync(request.IssuerType, request.IssuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             // ⚠️ Utkastet måste tillhöra den utställare anroparen har behörighet till. Utan den
             // kontrollen räcker behörighet till EN förening för att skriva i en annans budget.
@@ -767,8 +785,8 @@ namespace HpskSite.Controllers
         {
             if (request is null) return Json(new { success = false, message = "Inget att anta." });
 
-            var (ok, _) = await AuthorizeIssuerAsync(request.IssuerType, request.IssuerId);
-            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             if (!BudgetBelongsToIssuer(request.BudgetId, request.IssuerType, request.IssuerId))
                 return Json(new { success = false, message = "Budgeten hör inte till den här föreningen." });
