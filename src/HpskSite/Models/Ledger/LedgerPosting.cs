@@ -137,7 +137,7 @@
             // ⚠⚠ Riktningen är enkelriktad mot att INTE bokföra. Ett oigenkännligt värde får
             // aldrig leda till en verifikation — ett felaktigt "bokförd" är det enda av felen
             // som är svårt att upptäcka i efterhand.
-            if (string.IsNullOrWhiteSpace(shape) || shape != LedgerIssuerShape.FullLedger)
+            if (!LedgerIssuerShape.KeepsBooks(shape))
                 return Skip(null);
 
             return blockedReason is null ? Post() : Skip(blockedReason);

@@ -1,0 +1,1047 @@
+@model HpskSite.Controllers.EkonomiPageModel
+@{
+    Layout = null;
+    var uid = $"ek{Model.IssuerType}_{Model.IssuerId}";
+}
+@*
+    Kassörens arbetsyta. BYGGD MOT Ekonomi Exempel/Ekonomi_Wireframes.pdf — de sex sidorna som
+    skickades till Fredrik, Varbergs PK. Öppna PDF:en innan du ändrar något här.
+
+    ⚠️ Fyra railposter har ingen motor än (Bokför, Avstämning, Rapport, Bokslut). De säger vad de
+       ska göra och vad de väntar på. Fyll dem ALDRIG med påhittade siffror: skissens panel 2
+       bygger på att noll fel visas lika stort som fel, och en uppdiktad nolla är motsatsen.
+
+    ⚠️ Varje @@ i CSS:en är ETT at-tecken. Ett ensamt @@ följt av bokstav startar ett C#-uttryck och
+       spräcker vyns runtime-kompilering med ett meddelandelöst UmbracoCompilationException.
+       dotnet build säger ingenting — SIDLADDNINGEN är kompileringskontrollen.
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Ekonomi — @Model.IssuerName</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@@400;600;700&family=Source+Serif+4:opsz,wght@@8..60,400;600&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.css">
+<style>
+  :root {
+    --paper:#F7F6F3; --surface:#FFFFFF; --ink:#1B1B19; --ink-soft:#5E5E58;
+    --line:#DCDAD3; --line-soft:#ECEAE4; --rail:#EFEDE7;
+    --attn:#B45309; --attn-bg:#FBF4EC; --attn-line:#E8D5BE;
+    --ok:#2F6B4A; --ok-bg:#F0F5F1; --ok-line:#C3D9C9;
+    --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
+    --sans:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  @@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:#15161A; --surface:#1D1F24; --ink:#ECEAE4; --ink-soft:#A5A39C;
+      --line:#33363D; --line-soft:#292C32; --rail:#1A1C21;
+      --attn:#E0A566; --attn-bg:#2A2118; --attn-line:#4A3A24;
+      --ok:#7FBF9A; --ok-bg:#17261E; --ok-line:#2C4636;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans);
+         font-size:15px; line-height:1.5; }
+  a { color:var(--attn); }
+
+  .wrap { display:flex; min-height:100vh; }
+
+  /* ── Rail ─────────────────────────────────────────────────────────────────────── */
+  .rail { width:272px; flex-shrink:0; background:var(--paper); padding:26px 0 20px;
+          border-right:1px solid var(--line-soft); display:flex; flex-direction:column; }
+  .rail .brand { font-size:11px; letter-spacing:.14em; color:var(--ink-soft);
+                 padding:0 26px; text-transform:uppercase; }
+  .rail .club { font-size:21px; font-weight:700; padding:4px 26px 0; }
+  .rail .role { font-size:13px; color:var(--ink-soft); padding:0 26px 22px; }
+  .rail a.nav { display:block; padding:11px 26px; color:var(--ink); text-decoration:none;
+                font-size:15.5px; border-left:3px solid transparent; }
+  .rail a.nav:hover { color:var(--attn); }
+  .rail a.nav.on { font-weight:700; background:var(--surface); border-left-color:var(--attn); }
+  .rail a.nav.soon { color:var(--ink-soft); }
+  .rail .foot { margin-top:auto; padding:22px 26px 0; font-size:12.5px; color:var(--ink-soft); }
+  .rail .foot a { display:inline-block; margin-top:10px; }
+
+  /* ── Main ─────────────────────────────────────────────────────────────────────── */
+  .main { flex-grow:1; padding:26px 34px 60px; min-width:0; }
+  .head { display:flex; justify-content:space-between; align-items:flex-start; gap:20px;
+          flex-wrap:wrap; margin-bottom:22px; }
+  h1 { font-family:var(--serif); font-size:34px; font-weight:600; margin:0; }
+  .sub { color:var(--ink-soft); font-size:14px; margin-top:4px; }
+  .pills { display:flex; gap:10px; flex-wrap:wrap; }
+  .pill { border:1px solid var(--line); border-radius:999px; padding:6px 15px; font-size:13.5px;
+          background:var(--surface); color:var(--ink); text-decoration:none; white-space:nowrap; }
+  .pill.strong { border-color:var(--ink); font-weight:600; border-radius:8px; }
+
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  .card { background:var(--surface); border:1px solid var(--line-soft); border-radius:10px;
+          padding:22px 24px; }
+  .card.wide { grid-column:1 / -1; }
+  .card-h { display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+            margin-bottom:14px; }
+  .card-h h2 { font-family:var(--serif); font-size:19px; font-weight:600; margin:0; }
+  .card-h .meta { font-size:13px; color:var(--ink-soft); }
+  .card-h .meta.act { color:var(--attn); font-weight:600; text-decoration:none; cursor:pointer; }
+
+  .todo { display:flex; align-items:center; gap:14px; background:var(--attn-bg);
+          border:1px solid var(--attn-line); border-radius:8px; padding:11px 15px; margin-bottom:9px; }
+  .todo .n { font-size:17px; font-weight:700; min-width:30px; text-align:right; }
+  .todo .t { flex-grow:1; }
+  .todo .a { color:var(--attn); font-weight:700; font-size:13.5px; background:none; border:0;
+             cursor:pointer; font-family:inherit; white-space:nowrap; }
+  .todo.done { background:var(--ok-bg); border-color:var(--ok-line); }
+
+  .bigbox { background:var(--ok-bg); border:1px solid var(--ok-line); border-radius:8px;
+            padding:22px 24px; }
+  .bigbox .amount { font-size:40px; font-weight:700; color:var(--ok); line-height:1.1; }
+  .bigbox .lead { color:var(--ok); font-weight:600; margin-top:6px; }
+  .bigbox .note { color:var(--ink-soft); font-size:13.5px; margin-top:4px; }
+  .bigbox.warn { background:var(--attn-bg); border-color:var(--attn-line); }
+  .bigbox.warn .amount, .bigbox.warn .lead { color:var(--attn); }
+
+  .why { color:var(--ink-soft); font-size:13px; margin-top:12px; }
+
+  table.t { width:100%; border-collapse:collapse; font-size:14px; }
+  table.t th { text-align:left; font-size:11px; letter-spacing:.04em; text-transform:uppercase;
+               color:var(--ink-soft); padding:6px 10px; border-bottom:1px solid var(--line); }
+  table.t td { padding:9px 10px; border-top:1px solid var(--line-soft); }
+  table.t td.n, table.t th.n { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  table.t tr.gap td { background:var(--attn-bg); }
+  table.t td.miss { color:var(--attn); font-weight:700; }
+  table.t td.fine { color:var(--ok); font-weight:600; }
+  table.t td.date { color:var(--ink-soft); white-space:nowrap; }
+
+  .rows { font-size:14px; }
+  .rows > div { display:flex; gap:10px; padding:7px 0; border-bottom:1px solid var(--line-soft); }
+  .rows > div:last-child { border-bottom:0; }
+  .rows .grow { flex-grow:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rows .num { font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+  .kvitto { color:var(--ok); font-weight:700; font-size:12.5px; text-decoration:none; }
+  .muted { color:var(--ink-soft); font-size:13.5px; }
+  .more { margin-top:10px; font-size:13.5px; }
+  .more button, .linkbtn { background:none; border:0; padding:0; color:var(--attn);
+                           font:inherit; font-weight:700; cursor:pointer; }
+
+  .btn { font:inherit; font-weight:600; padding:9px 18px; border:1px solid var(--ink);
+         background:var(--ink); color:var(--paper); border-radius:8px; cursor:pointer; }
+  .btn.ghost { background:var(--surface); color:var(--ink); }
+  .btn:disabled { opacity:.55; cursor:default; }
+  .btn.small { padding:4px 12px; font-size:13px; border-color:var(--attn); color:var(--attn);
+               background:none; }
+
+  .alert { border:1px solid var(--line); border-radius:8px; padding:11px 14px; margin-bottom:16px;
+           font-size:14px; }
+  .alert.warn { border-color:var(--attn-line); background:var(--attn-bg); color:var(--attn); }
+  .alert.bad { border-color:#b02a37; color:#b02a37; }
+  .alert.ok { border-color:var(--ok-line); background:var(--ok-bg); color:var(--ok); }
+
+  .choice { display:flex; gap:12px; align-items:flex-start; border:1px solid var(--line-soft);
+            border-radius:8px; padding:13px 15px; margin-bottom:10px; cursor:pointer; }
+  .fields { display:flex; gap:16px; flex-wrap:wrap; margin:18px 0 6px; }
+  .fields label { display:flex; flex-direction:column; gap:5px; font-size:12px; font-weight:700;
+                  color:var(--ink-soft); }
+  .fields input { font:inherit; font-weight:400; color:var(--ink); padding:7px 10px;
+                  border:1px solid var(--line); border-radius:6px; background:var(--surface); }
+
+  .soonbox { border:1px dashed var(--line); border-radius:10px; padding:22px 24px;
+             background:var(--surface); }
+  .soonbox h2 { font-family:var(--serif); font-size:19px; margin:0 0 8px; }
+
+  /* ── Bokför ─────────────────────────────────────────────────────────────────── */
+  .bokfor-grid { display:grid; grid-template-columns:1fr 380px; gap:18px; align-items:start; }
+  .fieldlabel { display:block; font-weight:700; font-size:13.5px; margin:18px 0 7px; }
+  .fieldlabel:first-child { margin-top:0; }
+  .amount-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .amount-in { font:inherit; font-size:30px; font-weight:700; width:230px; padding:10px 16px;
+               border:2px solid var(--ink); border-radius:8px; background:var(--surface);
+               color:var(--ink); font-variant-numeric:tabular-nums; }
+  .kr-unit { color:var(--ink-soft); font-size:17px; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .segbtn { font:inherit; padding:10px 18px; border:0; background:var(--surface);
+            color:var(--ink); cursor:pointer; }
+  .segbtn.on { background:var(--ink); color:var(--paper); font-weight:600; }
+  .wide-in { font:inherit; width:100%; max-width:560px; padding:9px 12px; border:1px solid var(--line);
+             border-radius:8px; background:var(--surface); color:var(--ink); }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .chip { font:inherit; font-size:13px; padding:5px 14px; border:1px solid var(--line);
+          border-radius:999px; background:var(--surface); color:var(--ink); cursor:pointer; }
+  .chip:hover { border-color:var(--attn); color:var(--attn); }
+  .preview { margin-top:22px; border-top:1px solid var(--line-soft); padding-top:16px; }
+
+  .d-none { display:none !important; }
+
+  @@media (max-width: 900px) {
+    .wrap { flex-direction:column; }
+    .rail { width:auto; border-right:0; border-bottom:1px solid var(--line-soft); padding-bottom:8px; }
+    .rail a.nav { display:inline-block; border-left:0; border-bottom:3px solid transparent; padding:8px 14px; }
+    .rail a.nav.on { border-left:0; border-bottom-color:var(--attn); }
+    .rail .foot { margin-top:14px; }
+    .main { padding:20px 16px 50px; }
+    .grid, .bokfor-grid { grid-template-columns:1fr; }
+    h1 { font-size:27px; }
+    .amount-in { width:100%; }
+  }
+</style>
+</head>
+<body data-issuer-type="@Model.IssuerType" data-issuer-id="@Model.IssuerId" id="@uid">
+<div class="wrap">
+
+    <nav class="rail">
+        <div class="brand">Pistol.nu</div>
+        <div class="club">@Model.IssuerName</div>
+        <div class="role">Kassör · @Model.CurrentYear</div>
+
+        <a href="#" class="nav on" data-view="oversikt">Översikt</a>
+        <a href="#" class="nav" data-view="bokfor">Bokför</a>
+        <a href="#" class="nav soon" data-view="avstamning">Avstämning</a>
+        <a href="#" class="nav soon" data-view="rapport">Rapport</a>
+        <a href="#" class="nav" data-view="avgifter">Avgifter</a>
+        <a href="#" class="nav soon" data-view="bokslut">Bokslut</a>
+        <a href="#" class="nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
+
+        <div class="foot">
+            <div>Menyn är kassörens år, inte databasens tabeller.</div>
+            <a href="@Model.BackUrl">← Tillbaka till @Model.IssuerName</a>
+        </div>
+    </nav>
+
+    <main class="main">
+
+        <div id="@(uid)_loading" class="muted">Läser ekonomiuppgifter…</div>
+        <div id="@(uid)_error" class="alert warn d-none"></div>
+
+        <div id="@(uid)_shell" class="d-none">
+
+            @* ══ ÖVERSIKT ═══════════════════════════════════════════════════════════ *@
+            <section data-pane="oversikt">
+                <div class="head">
+                    <div>
+                        <h1>Är något fel?</h1>
+                        <div class="sub" id="@(uid)_today"></div>
+                    </div>
+                    <div class="pills">
+                        <a href="#" class="pill" data-view="installningar" id="@(uid)_shapeBadge">@Model.ShapeLabel</a>
+                        <a href="#" class="pill strong" data-view="installningar">Räkenskapsår @Model.CurrentYear</a>
+                    </div>
+                </div>
+
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-h">
+                            <h2>1 · Väntar något på mig?</h2>
+                            <span class="meta" id="@(uid)_todoCount"></span>
+                        </div>
+                        <div id="@(uid)_todo"></div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-h"><h2>2 · Stämmer det?</h2></div>
+                        @* ⚠️ Avstämningen (P11) finns inte. Att visa "0 kr — allt stämmer" här vore
+                           en LÖGN om att vi kontrollerat mot banken. Säg vad som gäller i stället. *@
+                        <div class="bigbox warn">
+                            <div class="lead">Inte avstämt mot banken än</div>
+                            <div class="note">
+                                Avstämningen läser in ert kontoutdrag och matchar rad för rad. Den byggs
+                                härnäst. Tills dess vet vi vad som bokförts — inte att det är komplett.
+                            </div>
+                        </div>
+                        <div class="why">
+                            Noll fel ska visas lika stort som fel. Därför står det inte "0 kr" här
+                            förrän någon faktiskt stämt av.
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-h">
+                            <h2>3 · Hur går året?</h2>
+                        </div>
+                        <div class="soonbox" style="border:0;padding:0;background:none">
+                            <p class="muted" style="margin-top:0">
+                                Budget mot utfall kräver en antagen budget. Den läggs in under Rapport,
+                                som byggs efter avstämningen.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-h">
+                            <h2>4 · Vad hände senast?</h2>
+                            <span class="meta">Mottagna betalningar</span>
+                        </div>
+                        <div class="rows" id="@(uid)_recvBody"></div>
+                        <div class="muted d-none" id="@(uid)_recvEmpty">Inga betalningar ännu.</div>
+                        <div class="more" id="@(uid)_recvMore"></div>
+                    </div>
+                </div>
+
+                <p class="why">
+                    De flesta posterna skriver ingen människa — de faller ut ur anmälningar och avgifter.
+                    Därför är den här sidan inte "skapa verifikation".
+                </p>
+            </section>
+
+            @* ══ AVGIFTER ══════════════════════════════════════════════════════════ *@
+            <section data-pane="avgifter" hidden>
+                <div class="head">
+                    <div>
+                        <h1>Vad har vi att få in?</h1>
+                        <div class="sub">Avgifter som begärts, och vad som saknas per tävling.</div>
+                    </div>
+                </div>
+
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-h"><h2>Att få in</h2></div>
+                        <div class="bigbox warn">
+                            <div class="amount" id="@(uid)_outTotal">—</div>
+                        </div>
+                        <div class="rows" id="@(uid)_outRows" style="margin-top:14px"></div>
+                    </div>
+
+                    <div class="card" id="@(uid)_fullOnly">
+                        <div class="card-h">
+                            <h2>Att bokföra</h2>
+                            <span class="meta d-none" id="@(uid)_queueBadge"></span>
+                        </div>
+                        <p class="muted" style="margin-top:0">
+                            Mottagna betalningar som ännu inte blivit verifikationer. De uppstår när
+                            pengarna togs emot innan bokföringen var igång.
+                        </p>
+                        <div id="@(uid)_queueEmpty" class="alert ok d-none">Allt mottaget är bokfört.</div>
+                        <div class="d-none" id="@(uid)_queueWrap">
+                            <table class="t">
+                                <thead>
+                                    <tr><th>Mottaget</th><th>Betalare</th><th class="n">Belopp</th><th></th></tr>
+                                </thead>
+                                <tbody id="@(uid)_queueBody"></tbody>
+                            </table>
+                        </div>
+                        <div class="more" id="@(uid)_queueMore"></div>
+                        <div class="alert bad d-none" id="@(uid)_queueError"></div>
+                    </div>
+
+                    <div class="card wide">
+                        <div class="card-h">
+                            <h2>Per tävling — saknas någon avgift?</h2>
+                            <span class="meta">Det som saknas ligger överst</span>
+                        </div>
+                        <div class="muted d-none" id="@(uid)_perEmpty">
+                            Inga tävlingar eller händelser med avgifter ännu.
+                        </div>
+                        <table class="t">
+                            <thead>
+                                <tr><th>Tävling</th><th class="n">Anmälda</th><th class="n">Betalt</th><th class="n">Saknas</th></tr>
+                            </thead>
+                            <tbody id="@(uid)_perBody"></tbody>
+                        </table>
+                        <div class="more" id="@(uid)_perMore"></div>
+                        <p class="why">
+                            Den här raden är poängen. Bokföringen ser vad som kom in — den kan aldrig
+                            se vad som borde ha kommit in.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            @* ══ INSTÄLLNINGAR ═════════════════════════════════════════════════════ *@
+            <section data-pane="installningar" hidden>
+                <div class="head">
+                    <div>
+                        <h1 id="@(uid)_setupTitle">Kom igång med ekonomin</h1>
+                        <div class="sub" id="@(uid)_setupIntro">
+                            Hur sköter ni bokföringen i dag, och vilket räkenskapsår gäller det?
+                        </div>
+                    </div>
+                </div>
+
+                <div class="alert d-none" id="@(uid)_blocked"></div>
+
+                <div class="card wide" id="@(uid)_setup">
+                    <div class="card-h"><h2>Har ni ett bokföringsprogram i dag?</h2></div>
+
+                    <label class="choice">
+                        <input type="radio" name="@(uid)_shape" id="@(uid)_shapeFull" value="full">
+                        <span><strong>Nej — sköt vår bokföring här</strong>
+                            <span class="muted" style="display:block">Kontoplan, verifikationer, resultat-
+                            och balansräkning och handlingar till årsmötet.</span></span>
+                    </label>
+
+                    @* ⚠️⚠️ TRE FORMER. Skillnaden mellan de två sista är om programmet läser banken
+                       självt — gör det det skulle en SIE-fil från oss bokföra samma pengar igen. *@
+                    <label class="choice">
+                        <input type="radio" name="@(uid)_shape" id="@(uid)_shapeExport" value="export">
+                        <span><strong>Ja — men det läser inte vårt bankkonto</strong>
+                            <span class="muted" style="display:block">Vi sköter avgifter och kontroll;
+                            ni för över med en SIE-fil.</span></span>
+                    </label>
+
+                    <label class="choice">
+                        <input type="radio" name="@(uid)_shape" id="@(uid)_shapeFees" value="fees">
+                        <span><strong>Ja — och det har bankkoppling</strong>
+                            <span class="muted" style="display:block">Ert program bokför varje
+                            kontohändelse självt. Vi skickar ingenting som ska bokföras.</span></span>
+                    </label>
+
+                    <div class="muted">Valet går att ändra åt alla håll senare.</div>
+
+                    <div class="fields">
+                        <label>Räkenskapsår
+                            <input type="number" id="@(uid)_year" min="2000" max="2100" value="@DateTime.Today.Year"></label>
+                        <label>Börjar <input type="date" id="@(uid)_start"></label>
+                        <label>Slutar <input type="date" id="@(uid)_end"></label>
+                    </div>
+                    <div class="muted">Lämna datumen tomma för kalenderår.</div>
+
+                    <div style="display:flex;align-items:center;gap:14px;margin-top:18px">
+                        <button type="button" class="btn" id="@(uid)_saveBtn">Spara uppsättningen</button>
+                        <span class="d-none" style="color:var(--ok);font-weight:600" id="@(uid)_saveOk"></span>
+                    </div>
+                    <div class="alert bad d-none" id="@(uid)_saveError" style="margin-top:14px"></div>
+                </div>
+
+                <div class="grid d-none" id="@(uid)_setupSummary" style="margin-top:18px">
+                    <div class="card"><div class="card-h"><h2>Räkenskapsår</h2></div>
+                        <div id="@(uid)_yearSummary">—</div></div>
+                    <div class="card"><div class="card-h"><h2>Kontoplan</h2></div>
+                        <div id="@(uid)_accountSummary">—</div></div>
+                    <div class="card wide"><div class="card-h"><h2>Kontoroller</h2></div>
+                        <div id="@(uid)_roleSummary">—</div></div>
+                </div>
+            </section>
+
+            @* ══ ÄNNU INTE BYGGDA — ärliga, aldrig fejkade ═════════════════════════ *@
+            <section data-pane="bokfor" hidden>
+                <div class="head"><div><h1>Bokför något</h1>
+                    <div class="sub">Ett kvitto, en kontant insättning, en korrigering.</div></div></div>
+
+                <div class="bokfor-grid">
+                    <div class="card">
+                        <label class="fieldlabel" for="@(uid)_bAmount">Hur mycket?</label>
+                        <div class="amount-row">
+                            <input type="number" id="@(uid)_bAmount" class="amount-in" step="0.01" min="0" placeholder="0">
+                            <span class="kr-unit">kr</span>
+                            @* ⚠️ Riktningen anges med knappen, ALDRIG med ett minustecken. Ett negativt
+                               belopp vänder bara konteringen och ger en verifikation som balanserar men
+                               betyder motsatsen till vad kassören menade. *@
+                            <div class="seg">
+                                <button type="button" class="segbtn on" id="@(uid)_bPaid">Vi betalade</button>
+                                <button type="button" class="segbtn" id="@(uid)_bGot">Vi fick in</button>
+                            </div>
+                        </div>
+
+                        <label class="fieldlabel" for="@(uid)_bDate">När?</label>
+                        <input type="date" id="@(uid)_bDate" class="wide-in">
+
+                        <label class="fieldlabel" for="@(uid)_bText">Vad var det?</label>
+                        <input type="text" id="@(uid)_bText" class="wide-in" maxlength="200"
+                               placeholder="Ammunition till måndagsträningen">
+                        <div class="chips" id="@(uid)_bChips"></div>
+
+                        <label class="fieldlabel" for="@(uid)_bAccount">Vilket konto hör det till?</label>
+                        <select id="@(uid)_bAccount" class="wide-in"></select>
+
+                        <label class="fieldlabel" for="@(uid)_bPayAccount">Hur rörde sig pengarna?</label>
+                        <select id="@(uid)_bPayAccount" class="wide-in"></select>
+
+                        @* ⚠️ "Så bokförs det" visas ALLTID, utfälld. Skissen: "Vi gömmer inte, vi
+                           sorterar." Konteringen som står här är exakt den BuildLines skapar — det
+                           kassören godkänner är det som bokförs. *@
+                        <div class="preview">
+                            <div class="fieldlabel">Så bokförs det</div>
+                            <table class="t">
+                                <thead><tr><th>Konto</th><th>Benämning</th><th class="n">Debet</th><th class="n">Kredit</th></tr></thead>
+                                <tbody id="@(uid)_bPreview"></tbody>
+                            </table>
+                            <p class="why">
+                                Kontot väljer du själv ur föreningens kontoplan. Konteringen byggs av
+                                beloppet och riktningen — du behöver inte kunna debet och kredit.
+                            </p>
+                        </div>
+
+                        <div class="alert bad d-none" id="@(uid)_bError"></div>
+                        <div class="alert ok d-none" id="@(uid)_bOk"></div>
+
+                        <div style="display:flex;gap:12px;align-items:center;margin-top:16px">
+                            <button type="button" class="btn" id="@(uid)_bSave">Bokför</button>
+                        </div>
+
+                        @* Bilagan kräver en lagringsväg som inte finns. Säg det — en attrapp som
+                           inte sparar något är värre än en tom ruta. *@
+                        <p class="why" style="margin-top:18px">
+                            <strong>Kvittobilden kommer.</strong> Att fotografera kvittot med telefonen
+                            kräver en lagringsyta som ännu inte är byggd; tabellen finns
+                            (<code>LedgerAttachment</code>), vägen dit inte.
+                        </p>
+                    </div>
+
+                    <div>
+                        <div class="card" style="margin-bottom:18px">
+                            <div class="card-h"><h2>Behöver du rätta något?</h2></div>
+                            <p class="muted" style="margin-top:0">
+                                En rättelse skapar en <strong>ny rad</strong> som tar ut den gamla. Den
+                                gamla står kvar — så ska det vara, och det är inget du gjort fel.
+                            </p>
+                            <p class="why">
+                                Rättelseytan byggs tillsammans med Avstämning. Motorn finns redan
+                                (<code>CreateCorrection</code>) och används när en betalning ångras.
+                            </p>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-h">
+                                <h2>Senast bokfört</h2>
+                                <span class="meta" id="@(uid)_bSeries"></span>
+                            </div>
+                            <div class="rows" id="@(uid)_bRecent"></div>
+                            <div class="muted d-none" id="@(uid)_bRecentEmpty">Inget bokfört ännu.</div>
+                            <p class="why">
+                                Numret är luckfritt och går inte att ändra i efterhand. Prefixet väljer
+                                föreningen själv.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section data-pane="avstamning" hidden>
+                <div class="head"><div><h1>Stämmer det?</h1>
+                    <div class="sub">Här bevisas fullständigheten.</div></div></div>
+                <div class="soonbox">
+                    <h2>Byggs härnäst (P11)</h2>
+                    <p class="muted">Ni laddar upp kontoutdraget själva — vi läser inte ert bankkonto,
+                    och ingen tredje part får läsrätt. Avstämningen matchar bankens rader mot
+                    bokföringens och visar differensen. <strong>Det är den här ytan som gör att panel 2
+                    på Översikt kan säga "allt stämmer".</strong></p>
+                </div>
+            </section>
+
+            <section data-pane="rapport" hidden>
+                <div class="head"><div><h1>Utfall mot budget</h1>
+                    <div class="sub">Kassörens vanligaste leverans — oftare än bokslutet.</div></div></div>
+                <div class="soonbox">
+                    <h2>Byggs härnäst (P8)</h2>
+                    <p class="muted">Budget mot utfall per konto, att fästa på nästa styrelsemöte.
+                    Budgeten är ett beslut, inte en prognos: den antas på årsmötet och kan inte skrivas
+                    om i efterhand.</p>
+                </div>
+            </section>
+
+            <section data-pane="bokslut" hidden>
+                <div class="head"><div><h1>Stäng räkenskapsåret</h1>
+                    <div class="sub">Görs i januari, ofta av någon som gör det första gången.</div></div></div>
+                <div class="soonbox">
+                    <h2>Byggs härnäst (P7)</h2>
+                    <p class="muted">Sju steg: alla poster bokförda, kontoutdraget avstämt, underlag på
+                    plats, obetalda avgifter som kundfordran, avskrivningar, resultat- och balansräkning,
+                    och årsmötets fastställande — då låses året.
+                    <strong>Ett fastställt år tar inte emot skrivningar</strong>; ett fel som hittas
+                    efteråt rättas som en ny post i det öppna året.</p>
+                </div>
+            </section>
+
+        </div>
+    </main>
+</div>
+
+<script>
+(function () {
+    var uid = '@uid';
+    var root = document.getElementById(uid);
+    var issuerType = parseInt(root.dataset.issuerType, 10);
+    var issuerId = parseInt(root.dataset.issuerId, 10);
+    var el = function (s) { return document.getElementById(uid + '_' + s); };
+    var show = function (n, on) { if (n) n.classList.toggle('d-none', !on); };
+
+    var ROLE_NAMES = {
+        'revenue-participation-fee':'Deltagaravgift','revenue-membership-fee':'Medlemsavgift',
+        'revenue-region-fee':'Kretsavgift','revenue-other':'Övrig intäkt','bank-account':'Bankkonto',
+        'swish':'Swish','cash-box':'Kontantkassa','accounts-receivable':'Kundfordran',
+        'accounts-payable':'Leverantörsskuld','rounding':'Öresavrundning',
+        'vat-outgoing':'Utgående moms','vat-incoming':'Ingående moms'
+    };
+    var MONTHS = ['jan','feb','mar','apr','maj','jun','jul','aug','sep','okt','nov','dec'];
+
+    // Skissen skriver "16 sep", inte "2026-09-16" — året är detsamma på varje rad ändå.
+    function shortDate(iso) {
+        if (!iso) return '';
+        var m = String(iso).slice(0, 10).split('-');
+        return m.length === 3 ? parseInt(m[2], 10) + ' ' + (MONTHS[parseInt(m[1], 10) - 1] || m[1])
+                              : String(iso).slice(0, 10);
+    }
+    function kr(n) { return (n || 0).toLocaleString('sv-SE', { maximumFractionDigits: 0 }) + ' kr'; }
+    function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+    // Varje lista har ett tak med en väg till resten — annars blir sidan en vägg av rader.
+    function capList(body, more, rows, cap, renderRow, labelAll) {
+        body.innerHTML = rows.slice(0, cap).map(renderRow).join('');
+        if (rows.length <= cap) { more.innerHTML = ''; return; }
+        more.innerHTML = '<button type="button">' + labelAll.replace('{n}', rows.length) + '</button>';
+        more.querySelector('button').addEventListener('click', function () {
+            body.innerHTML = rows.map(renderRow).join(''); more.innerHTML = '';
+        });
+    }
+
+    function showView(name) {
+        root.querySelectorAll('.rail a.nav').forEach(function (a) {
+            a.classList.toggle('on', a.dataset.view === name);
+        });
+        root.querySelectorAll('[data-pane]').forEach(function (s) { s.hidden = s.dataset.pane !== name; });
+        window.scrollTo(0, 0);
+    }
+    root.querySelectorAll('[data-view]').forEach(function (a) {
+        a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
+    });
+
+    var DAYS = ['Söndag','Måndag','Tisdag','Onsdag','Torsdag','Fredag','Lördag'];
+    var FULLMONTH = ['januari','februari','mars','april','maj','juni','juli','augusti','september','oktober','november','december'];
+    var now = new Date();
+    el('today').textContent = DAYS[now.getDay()] + ' ' + now.getDate() + ' ' + FULLMONTH[now.getMonth()] + ' ' + now.getFullYear();
+
+    // ── Panel 1: vad väntar på mig ────────────────────────────────────────────────────────
+    // ⚠️ BARA SAKER SOM FAKTISKT MÄTS. Skissen listar även utlägg utan attest och poster utan
+    //    underlag; de lagren finns inte, och en rad som alltid säger noll lär kassören att inte
+    //    läsa panelen.
+    var todo = { outstandingCount: 0, unposted: 0, missingSources: 0 };
+
+    function renderTodo() {
+        var items = [];
+        if (todo.outstandingCount > 0)
+            items.push([todo.outstandingCount, 'avgifter har inte kommit in', 'Visa', 'avgifter']);
+        if (todo.unposted > 0)
+            items.push([todo.unposted, 'betalningar väntar på bokföring', 'Bokför', 'avgifter']);
+        if (todo.missingSources > 0)
+            items.push([todo.missingSources, 'tävlingar saknar avgifter', 'Visa', 'avgifter']);
+
+        el('todoCount').textContent = items.length === 0 ? 'Inget just nu'
+            : items.length + (items.length === 1 ? ' sak' : ' saker');
+
+        if (items.length === 0) {
+            el('todo').innerHTML = '<div class="todo done"><div class="t">Ingenting väntar på dig.</div></div>';
+            return;
+        }
+
+        el('todo').innerHTML = items.map(function (i) {
+            return '<div class="todo"><div class="n">' + i[0] + '</div><div class="t">' + esc(i[1]) + '</div>'
+                 + '<button class="a" data-goto="' + i[3] + '">' + esc(i[2]) + '</button></div>';
+        }).join('');
+
+        el('todo').querySelectorAll('button[data-goto]').forEach(function (b) {
+            b.addEventListener('click', function () { showView(b.dataset.goto); });
+        });
+    }
+
+    // ── Data ──────────────────────────────────────────────────────────────────────────────
+    function renderOverview(o) {
+        el('outTotal').textContent = kr(o.outstandingTotal);
+
+        var groups = o.outstanding || [];
+        el('outRows').innerHTML = groups.length === 0
+            ? '<div style="color:var(--ok);font-weight:600">Inget utestående.</div>'
+            : groups.map(function (g) {
+                return '<div><span class="grow">' + esc(g.label) + ', ' + g.count + '</span>'
+                     + '<span class="num">' + kr(g.amount) + '</span></div>';
+            }).join('');
+
+        todo.outstandingCount = groups.reduce(function (a, g) { return a + g.count; }, 0);
+
+        var recv = o.received || [];
+        show(el('recvEmpty'), recv.length === 0);
+        capList(el('recvBody'), el('recvMore'), recv, 5, function (r) {
+            var kvitto = r.receiptId
+                ? '<a class="kvitto" href="/betalkvitto/' + r.receiptId + '" target="_blank" rel="noopener">'
+                  + esc(r.receiptNumber) + '</a>' : '<span class="muted">—</span>';
+            return '<div><span class="num muted">' + esc(shortDate(r.date)) + '</span>'
+                 + '<span class="grow">' + esc(r.payerName) + ' · ' + esc(r.what) + '</span>'
+                 + '<span class="num">' + kr(r.amount) + '</span>' + kvitto + '</div>';
+        }, 'Visa alla {n} betalningar');
+
+        var per = o.perSource || [];
+        show(el('perEmpty'), per.length === 0);
+        todo.missingSources = per.filter(function (s) { return s.missingCount > 0; }).length;
+
+        capList(el('perBody'), el('perMore'), per, 8, function (s) {
+            var miss = s.missingCount > 0
+                ? '<td class="n miss">' + s.missingCount + ' · ' + kr(s.missingAmount) + '</td>'
+                : '<td class="n fine">Inget</td>';
+            return '<tr' + (s.missingCount > 0 ? ' class="gap"' : '') + '>'
+                 + '<td>' + esc(s.name) + '</td><td class="n">' + s.expected + '</td>'
+                 + '<td class="n">' + s.settled + '</td>' + miss + '</tr>';
+        }, 'Visa alla {n} tävlingar');
+
+        renderTodo();
+    }
+
+    function renderQueue(rows, total) {
+        var badge = el('queueBadge');
+        show(el('queueEmpty'), rows.length === 0);
+        show(el('queueWrap'), rows.length > 0);
+        show(badge, rows.length > 0);
+        todo.unposted = rows.length;
+        renderTodo();
+
+        if (rows.length === 0) { el('queueBody').innerHTML = ''; return; }
+        badge.textContent = rows.length + ' st · ' + kr(total);
+
+        capList(el('queueBody'), el('queueMore'), rows, 8, function (r) {
+            return '<tr data-payment-id="' + r.id + '">'
+                 + '<td class="date">' + esc(shortDate(r.confirmedDate)) + '</td>'
+                 + '<td>' + esc(r.payerName) + ' <span class="muted">· ' + esc(r.description) + '</span></td>'
+                 + '<td class="n">' + kr(r.amount) + '</td>'
+                 + '<td class="n"><button type="button" class="btn small" data-post="' + r.id + '">Bokför</button></td>'
+                 + '</tr>';
+        }, 'Visa alla {n} betalningar att bokföra');
+    }
+
+    function render(status, keepSetupOpen) {
+        show(el('loading'), false);
+        show(el('shell'), true);
+
+        var setUp = status.isSetUp && status.shape;
+        el('shapeBadge').textContent = status.shape === 'full' ? 'Hel bokföring'
+            : status.shape === 'export' ? 'Avgifter och export'
+            : status.shape === 'fees' ? 'Avgifter och kontroll' : 'Inte uppsatt';
+
+        if (!setUp) {
+            el('setupTitle').textContent = 'Kom igång med ekonomin';
+            show(el('setupSummary'), false);
+            showView('installningar');
+            return;
+        }
+
+        el('setupTitle').textContent = 'Inställningar och räkenskapsår';
+        el('setupIntro').textContent = 'Lägg upp ett nytt räkenskapsår, eller ändra föreningsformen.';
+        show(el('setupSummary'), true);
+
+        var byShape = { full: '_shapeFull', export: '_shapeExport', fees: '_shapeFees' };
+        var radio = document.getElementById(uid + (byShape[status.shape] || ''));
+        if (radio) radio.checked = true;
+
+        // Kön bara för en förening som bokför här — för de andra saknar varje rad verifikation
+        // per definition, och listan hade påstått att allt är ogjort.
+        show(el('fullOnly'), status.shape === 'full');
+        if (status.shape === 'full') { loadQueue(); loadBokfor(); }
+        else { todo.unposted = 0; renderTodo(); }
+
+        var years = status.fiscalYears || [];
+        var labels = { open: 'öppet', closing: 'bokslut pågår', established: 'fastställt' };
+        el('yearSummary').innerHTML = years.length === 0 ? 'Inget år upplagt'
+            : years.slice(0, 3).map(function (y) {
+                return '<div>' + y.year + ' <span class="muted">' + (labels[y.status] || y.status) + '</span></div>';
+            }).join('');
+        el('accountSummary').textContent = status.accountCount + ' konton';
+
+        var missing = status.missingRoles || [];
+        el('roleSummary').innerHTML = missing.length === 0
+            ? '<span style="color:var(--ok);font-weight:600">Alla ' + status.rolesTotal + ' mappade</span>'
+            : '<span style="color:#b02a37;font-weight:600">' + missing.length + ' saknas</span><div class="muted">'
+              + missing.map(function (r) { return ROLE_NAMES[r] || r; }).join(', ') + '</div>';
+
+        var blocked = el('blocked');
+        if (status.blockedReason) { blocked.className = 'alert warn'; blocked.textContent = status.blockedReason; }
+        else if (status.shape === 'full') { blocked.className = 'alert ok'; blocked.textContent = 'Klart att bokföra.'; }
+        else { blocked.className = 'alert d-none'; }
+
+        if (keepSetupOpen === true) showView('installningar');
+        loadOverview();
+    }
+
+    // ══ Bokför ═══════════════════════════════════════════════════════════════════════════
+    var bokforCtx = null;
+    var weReceived = false;
+
+    // Förslagen i skissen. ⚠️ De fyller bara TEXTEN — kontot väljer kassören, för vilka konton
+    // som finns är föreningens sak, inte vår.
+    var CHIPS = ['Ammunition', 'El och vatten', 'Underhåll bana', 'Kiosk', 'Resa', 'Fika och möten'];
+
+    function fillSelect(sel, options, preferred) {
+        sel.innerHTML = options.map(function (a) {
+            return '<option value="' + a.number + '">' + a.number + ' · ' + esc(a.name) + '</option>';
+        }).join('');
+        if (preferred) {
+            var hit = options.find(function (a) { return a.number === preferred; });
+            if (hit) sel.value = String(preferred);
+        }
+    }
+
+    function renderBokforContext(c) {
+        bokforCtx = c;
+
+        // Kostnads- och intäktskonton i den stora listan; balanskonton hör till pengarnas väg.
+        var resultAccounts = (c.accounts || []).filter(function (a) { return !a.isBalance; });
+        fillSelect(el('bAccount'), resultAccounts.length ? resultAccounts : (c.accounts || []));
+
+        var pay = (c.paymentAccounts || []);
+        fillSelect(el('bPayAccount'), pay.length ? pay : (c.accounts || []).filter(function (a) { return a.isBalance; }));
+
+        // Förvalet sätts EFTER att listan fyllts, annars finns inget att välja bland.
+        pickAccountForDirection();
+
+        el('bSeries').textContent = c.seriesLabel || '';
+
+        var recent = c.recent || [];
+        show(el('bRecentEmpty'), recent.length === 0);
+        el('bRecent').innerHTML = recent.map(function (r) {
+            return '<div><span class="num muted">' + esc(r.number) + '</span>'
+                 + '<span class="grow">' + esc(r.description) + '</span>'
+                 + '<span class="num">' + kr(r.amount) + '</span></div>';
+        }).join('');
+
+        renderPreview();
+    }
+
+    // ⚠️⚠️ SPEGLAR LedgerManualPostingService.BuildLines. Två beskrivningar av samma kontering
+    //    kan glida isär, och då godkänner kassören en rad och en annan bokförs. Ändras den ena
+    //    MÅSTE den andra ändras — sviten LedgerManualPostingTests pinnar serverns sida.
+    function renderPreview() {
+        var amount = parseFloat(el('bAmount').value || '0') || 0;
+        var accNum = parseInt(el('bAccount').value, 10);
+        var payNum = parseInt(el('bPayAccount').value, 10);
+        var all = (bokforCtx && bokforCtx.accounts) || [];
+        var nameOf = function (n) {
+            var a = all.find(function (x) { return x.number === n; });
+            return a ? a.name : '';
+        };
+
+        if (!amount || !accNum || !payNum) {
+            el('bPreview').innerHTML = '<tr><td colspan="4" class="muted">'
+                + 'Fyll i belopp och konto så visas konteringen här.</td></tr>';
+            return;
+        }
+
+        var rows = weReceived
+            ? [[payNum, amount, null], [accNum, null, amount]]
+            : [[accNum, amount, null], [payNum, null, amount]];
+
+        el('bPreview').innerHTML = rows.map(function (r) {
+            return '<tr><td>' + r[0] + '</td><td>' + esc(nameOf(r[0])) + '</td>'
+                 + '<td class="n">' + (r[1] ? kr(r[1]) : '—') + '</td>'
+                 + '<td class="n">' + (r[2] ? kr(r[2]) : '—') + '</td></tr>';
+        }).join('');
+    }
+
+    // ⚠️⚠️ FÖRVALET MÅSTE FÖLJA RIKTNINGEN. Första versionen valde alltid det lägsta kontot i
+    //    listan — 3010 Medlemsavgifter — även när riktningen var "Vi betalade". Konteringen såg
+    //    då fullt trovärdig ut: en INTÄKT i debet, med rätt belopp och rätt motkonto. Den
+    //    balanserar, liggaren tar emot den, och felet syns först i resultatrapporten.
+    //    Ett förval som är fel åt fel håll är värre än inget förval.
+    function pickAccountForDirection() {
+        var sel = el('bAccount');
+        var cur = parseInt(sel.value, 10);
+        var wantRevenue = weReceived;
+
+        var isRevenue = function (n) { return n >= 3000 && n < 4000; };
+        if (cur && isRevenue(cur) === wantRevenue) return;   // redan på rätt sida
+
+        var options = Array.prototype.map.call(sel.options, function (o) { return parseInt(o.value, 10); });
+        var hit = options.find(function (n) { return isRevenue(n) === wantRevenue; });
+        if (hit) sel.value = String(hit);
+    }
+
+    function setDirection(received) {
+        weReceived = received;
+        el('bPaid').classList.toggle('on', !received);
+        el('bGot').classList.toggle('on', received);
+        pickAccountForDirection();
+        renderPreview();
+    }
+
+    el('bPaid').addEventListener('click', function () { setDirection(false); });
+    el('bGot').addEventListener('click', function () { setDirection(true); });
+    ['bAmount', 'bAccount', 'bPayAccount'].forEach(function (f) {
+        el(f).addEventListener('input', renderPreview);
+        el(f).addEventListener('change', renderPreview);
+    });
+
+    el('bChips').innerHTML = CHIPS.map(function (c) {
+        return '<button type="button" class="chip">' + esc(c) + '</button>';
+    }).join('');
+    el('bChips').addEventListener('click', function (ev) {
+        var b = ev.target.closest('.chip');
+        if (b) { el('bText').value = b.textContent; el('bText').focus(); }
+    });
+
+    el('bDate').value = new Date().toISOString().slice(0, 10);
+
+    el('bSave').addEventListener('click', function () {
+        var btn = this, err = el('bError'), okBox = el('bOk');
+        err.classList.add('d-none'); okBox.classList.add('d-none');
+        btn.disabled = true;
+
+        postJson('/umbraco/surface/EkonomiAdmin/PostManual', {
+            issuerType: issuerType, issuerId: issuerId,
+            amount: parseFloat(el('bAmount').value || '0') || 0,
+            weReceived: weReceived,
+            date: el('bDate').value || null,
+            description: el('bText').value,
+            accountNumber: parseInt(el('bAccount').value, 10) || 0,
+            paymentAccountNumber: parseInt(el('bPayAccount').value, 10) || 0
+        })
+            .then(function (d) {
+                btn.disabled = false;
+                if (!d.success) {
+                    err.textContent = d.message || 'Posten gick inte att bokföra.';
+                    err.classList.remove('d-none');
+                    return;
+                }
+                okBox.textContent = 'Bokfört som ' + (d.number || ('#' + d.entryId)) + '.';
+                okBox.classList.remove('d-none');
+
+                el('bAmount').value = '';
+                el('bText').value = '';
+                if (d.context) renderBokforContext(d.context);
+                loadOverview();
+            })
+            .catch(function (e) {
+                btn.disabled = false;
+                err.textContent = e.message; err.classList.remove('d-none');
+            });
+    });
+
+    function loadBokfor() {
+        fetch('/umbraco/surface/EkonomiAdmin/GetPostingContext?issuerType=' + issuerType + '&issuerId=' + issuerId)
+            .then(function (r) { return r.json(); })
+            .then(function (d) { if (d.success && d.context) renderBokforContext(d.context); })
+            .catch(function () { });
+    }
+
+    function loadOverview() {
+        fetch('/umbraco/surface/EkonomiAdmin/GetOverview?issuerType=' + issuerType + '&issuerId=' + issuerId)
+            .then(function (r) { return r.json(); })
+            .then(function (d) { if (d.success && d.overview) renderOverview(d.overview); })
+            .catch(function () { });
+    }
+
+    function loadQueue() {
+        fetch('/umbraco/surface/EkonomiAdmin/GetUnposted?issuerType=' + issuerType + '&issuerId=' + issuerId)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) {
+                    el('queueError').textContent = d.message || 'Listan gick inte att läsa.';
+                    el('queueError').classList.remove('d-none'); return;
+                }
+                el('queueError').classList.add('d-none');
+                renderQueue(d.rows || [], d.total || 0);
+            })
+            .catch(function () {
+                el('queueError').textContent = 'Listan gick inte att läsa just nu.';
+                el('queueError').classList.remove('d-none');
+            });
+    }
+
+    function load() {
+        fetch('/umbraco/surface/EkonomiAdmin/GetSetupStatus?issuerType=' + issuerType + '&issuerId=' + issuerId)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) {
+                    show(el('loading'), false);
+                    el('error').textContent = d.message || 'Ekonomiuppgifterna gick inte att läsa.';
+                    show(el('error'), true); return;
+                }
+                render(d.status);
+            })
+            .catch(function () {
+                show(el('loading'), false);
+                el('error').textContent = 'Ekonomiuppgifterna gick inte att läsa just nu.';
+                show(el('error'), true);
+            });
+    }
+
+    // ⚠️ Antiforgery: sidan har ingen Umbraco-form, så token hämtas från den delade endpointen.
+    //    Utan den blir varje POST en tom 400 som ser ut som "det gick fel".
+    var token = null;
+    function withToken(fn) {
+        if (token) return fn(token);
+        fetch('/umbraco/surface/Club/GetFormToken', { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) { token = d && d.token ? d.token : ''; fn(token); })
+            .catch(function () { fn(''); });
+    }
+
+    function postJson(url, body) {
+        return new Promise(function (resolve, reject) {
+            withToken(function (t) {
+                fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': t || '' },
+                    body: JSON.stringify(body)
+                })
+                    .then(function (r) {
+                        return r.text().then(function (txt) {
+                            try { resolve(JSON.parse(txt)); }
+                            catch (e) { reject(new Error('Servern svarade ' + r.status + ' utan giltigt svar.')); }
+                        });
+                    })
+                    .catch(reject);
+            });
+        });
+    }
+
+    el('queueBody').addEventListener('click', function (ev) {
+        var btn = ev.target.closest('button[data-post]');
+        if (!btn) return;
+        var errBox = el('queueError');
+        errBox.classList.add('d-none');
+        btn.disabled = true; btn.textContent = 'Bokför…';
+
+        postJson('/umbraco/surface/EkonomiAdmin/PostPending', { paymentId: parseInt(btn.dataset.post, 10) })
+            .then(function (d) {
+                if (!d.success) {
+                    btn.disabled = false; btn.textContent = 'Bokför';
+                    errBox.textContent = d.message || 'Betalningen gick inte att bokföra.';
+                    errBox.classList.remove('d-none'); return;
+                }
+                loadQueue(); loadOverview();
+            })
+            .catch(function (e) {
+                btn.disabled = false; btn.textContent = 'Bokför';
+                errBox.textContent = e.message; errBox.classList.remove('d-none');
+            });
+    });
+
+    el('saveBtn').addEventListener('click', function () {
+        var btn = this;
+        var chosen = root.querySelector('input[name="' + uid + '_shape"]:checked');
+        var err = el('saveError'), okNote = el('saveOk');
+        show(okNote, false); err.classList.add('d-none');
+
+        if (!chosen) {
+            err.textContent = 'Välj hur föreningen sköter sin bokföring innan du sparar.';
+            err.classList.remove('d-none'); return;
+        }
+        btn.disabled = true;
+
+        postJson('/umbraco/surface/EkonomiAdmin/SaveSetup', {
+            issuerType: issuerType, issuerId: issuerId,
+            year: parseInt(el('year').value, 10), shape: chosen.value,
+            startDate: el('start').value || null, endDate: el('end').value || null
+        })
+            .then(function (d) {
+                btn.disabled = false;
+                if (!d.success) {
+                    err.textContent = d.message || 'Uppsättningen gick inte att spara.';
+                    err.classList.remove('d-none'); return;
+                }
+                var c = d.created || {}, parts = [];
+                if (c.fiscalYear) parts.push('räkenskapsåret lades upp');
+                if (c.accounts) parts.push(c.accounts + ' konton');
+                if (c.roles) parts.push(c.roles + ' kontoroller');
+                if (c.shapeChanged) parts.push('föreningsformen ändrades');
+                okNote.textContent = parts.length ? 'Sparat — ' + parts.join(', ') + '.' : 'Sparat. Allt fanns redan.';
+                show(okNote, true);
+                // keepSetupOpen: kvittot ligger inuti uppsättningen och får inte gömmas av svaret.
+                render(d.status, true);
+            })
+            .catch(function (e) {
+                btn.disabled = false; err.textContent = e.message; err.classList.remove('d-none');
+            });
+    });
+
+    load();
+})();
+</script>
+</body>
+</html>

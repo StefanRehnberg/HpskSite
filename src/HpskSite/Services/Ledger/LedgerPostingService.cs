@@ -450,7 +450,7 @@ namespace HpskSite.Services.Ledger
                 // provbar. Här hämtas bara de två uppgifter den behöver.
                 // PostingBlockedReason frågas BARA när formen säger att vi bokför: annars är
                 // svaret ointressant, och en tom liggare hade gett en onödig fråga per betalning.
-                if (string.IsNullOrWhiteSpace(shape) || shape != LedgerIssuerShape.FullLedger)
+                if (!LedgerIssuerShape.KeepsBooks(shape))
                     return LedgerPostingDecision.For(shape, null);
 
                 return LedgerPostingDecision.For(

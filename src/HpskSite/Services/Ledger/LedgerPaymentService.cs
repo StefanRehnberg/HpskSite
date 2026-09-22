@@ -121,6 +121,173 @@ namespace HpskSite.Services.Ledger
             }
         }
 
+        /// <summary>
+        /// En betalningsrad, eller null.
+        ///
+        /// <para><b>⚠️ Finns för behörighetskontrollen.</b> En yta som får ett <c>paymentId</c> från
+        /// en klient vet ingenting om vem som äger raden — utställaren måste läsas ur databasen
+        /// innan något görs med den, annars räcker ett giltigt id för att nå en annan förenings
+        /// liggare.</para>
+        /// </summary>
+        public LedgerPayment? GetById(int paymentId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return db.SingleOrDefault<LedgerPayment>(
+                "SELECT * FROM dbo.LedgerPayment WHERE Id = @0", paymentId);
+        }
+
+        /// <summary>
+        /// Bokför en betalning som redan är bekräftad men saknar verifikation — <b>åtgärden som
+        /// tömmer kön "att bokföra"</b>.
+        ///
+        /// <para>Kön uppstår av en enda anledning: pengarna togs emot medan bokföringen var
+        /// avstängd eller blockerad. Vanligast är att föreningen inte var uppsatt ännu, vilket
+        /// gällde <b>varje</b> förening fram till 2026-09-21. Utan den här metoden är kön en lista
+        /// man kan titta på men inte göra något åt, och då står pengarna utanför bokföringen för
+        /// alltid.</para>
+        ///
+        /// <para><b>⚠️ Bokföringsdatum är <see cref="LedgerPayment.ConfirmedUtc"/>, inte i dag.</b>
+        /// Kontantmetoden är metoden, så posten hör till den dag pengarna kom in. Att bokföra dem
+        /// i dag hade flyttat en intäkt mellan räkenskapsår varje gång kön tömts sent.</para>
+        ///
+        /// <para><b>⚠️ Ett <c>paymentDate</c> som avvek vid bekräftelsen går förlorat.</b>
+        /// <see cref="Confirm"/> tar emot ett datum men <b>sparar det inte</b> — raden bär bara
+        /// <c>ConfirmedUtc</c>. För en betalning som bekräftats med ett avvikande datum bokför den
+        /// här metoden alltså på bekräftelsedagen, inte på betaldagen. Rätt åtgärd är en kolumn
+        /// för betaldatumet; tills den finns är det här det ärligaste vi kan göra, och det är
+        /// skillnaden mellan två datum som oftast är samma dag.</para>
+        /// </summary>
+        public PostPendingResult PostPending(int paymentId, int byMemberId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+
+            var payment = db.SingleOrDefault<LedgerPayment>(
+                "SELECT * FROM dbo.LedgerPayment WHERE Id = @0", paymentId);
+
+            if (payment is null) return PostPendingResult.Failed("Betalningen finns inte.");
+            if (payment.VoidedUtc is not null) return PostPendingResult.Failed("Betalningen är återtagen.");
+            if (payment.ConfirmedUtc is null)
+                return PostPendingResult.Failed("Betalningen är inte bekräftad som mottagen ännu.");
+            if (payment.JournalEntryId is not null)
+                return PostPendingResult.Failed("Betalningen är redan bokförd.");
+
+            var date = payment.ConfirmedUtc.Value.Date;
+            var settings = LoadSettings(db, payment.IssuerType, payment.IssuerId);
+
+            var decision = _posting.DecidePosting(payment.IssuerType, payment.IssuerId, date);
+
+            if (!decision.ShouldPost)
+            {
+                return PostPendingResult.Failed(
+                    decision.SkipReason
+                    ?? "Föreningen bokför inte i pistol.nu, så det finns ingen verifikation att skriva.");
+            }
+
+            // ⚠️⚠️ KVITTOT ÄR REDAN UTFÄRDAT, OCH DET PÅSTÅR NÅGOT OM MOMSEN. Blev föreningen
+            // momsregistrerad EFTER att den här betalningen bekräftades, skulle en efterbokföring
+            // nu räkna fram moms som betalarens kvitto inte visar — två handlingar om samma pengar
+            // som säger olika saker, och den ena ligger redan hos någon annan. Vägra hellre.
+            if (settings?.IsVatRegistered == true)
+            {
+                var receiptSaysVatFree = db.ExecuteScalar<int>(
+                    @"SELECT COUNT(1) FROM dbo.LedgerReceipt
+                       WHERE PaymentId = @0 AND IssuerIsVatRegistered = 0",
+                    payment.Id);
+
+                if (receiptSaysVatFree > 0)
+                {
+                    return PostPendingResult.Failed(
+                        "Kvittot för den här betalningen säger att föreningen inte är momsregistrerad, "
+                        + "men det är den nu. Att bokföra i efterhand skulle räkna fram en moms som "
+                        + "kvittot inte visar. Rätta med en rättelseverifikation i stället.");
+                }
+            }
+
+            var posting = _posting.Post(BuildPostingRequest(payment, payment.SettledAmount, date, byMemberId));
+
+            if (!posting.Success)
+                return PostPendingResult.Failed(posting.Error ?? "Bokföringen gick inte igenom.");
+
+            // ⚠️ VILLKORET I WHERE ÄR SPÄRREN mot dubbelbokföring. Två samtidiga klick — eller två
+            // öppna flikar — skulle annars skriva två verifikationer för samma pengar och bara den
+            // sista syns på raden. Den första hade blivit osynlig och omöjlig att hitta.
+            var rows = db.Execute(
+                @"UPDATE dbo.LedgerPayment SET JournalEntryId = @1
+                   WHERE Id = @0 AND JournalEntryId IS NULL AND VoidedUtc IS NULL",
+                payment.Id, posting.EntryId);
+
+            if (rows == 0)
+            {
+                // Verifikationen är skriven och går inte att ta bort. Säg det rakt ut och namnge
+                // den — precis som Confirm gör i sitt motsvarande läge.
+                _logger.LogError(
+                    "Betalning {PaymentId} bokfördes som verifikation {EntryId}, men raden hade "
+                    + "hunnit bokföras eller återtas av någon annan. Verifikationen står kvar.",
+                    payment.Id, posting.EntryId);
+
+                return PostPendingResult.Failed(
+                    $"Verifikation {posting.EntryId} skrevs, men betalningen hann ändras av någon "
+                    + "annan under tiden. Kontakta support så reds raden ut — bokför inte igen.");
+            }
+
+            _logger.LogInformation(
+                "Betalning {PaymentId} efterbokfördes som verifikation {EntryId} på {Datum}.",
+                payment.Id, posting.EntryId, date);
+
+            return new PostPendingResult
+            {
+                Success = true,
+                PaymentId = payment.Id,
+                JournalEntryId = posting.EntryId,
+                AccountingDate = date
+            };
+        }
+
+        /// <summary>
+        /// Hur en betalning ser ut som verifikation. <b>EN beskrivning, två anropare</b>
+        /// (<see cref="Confirm"/> och <see cref="PostPending"/>).
+        ///
+        /// <para>⚠️ Låg först bara inne i <c>Confirm</c>. Hade efterbokföringen fått en egen kopia
+        /// vore samma pengar bokförda på två olika sätt beroende på NÄR någon råkade trycka —
+        /// och skillnaden hade synts först i en resultatrapport långt senare.</para>
+        /// </summary>
+        private static LedgerPostingRequest BuildPostingRequest(
+            LedgerPayment payment, decimal amount, DateTime date, int byMemberId)
+            => new()
+            {
+                IssuerType = payment.IssuerType,
+                IssuerId = payment.IssuerId,
+                AccountingDate = date,
+                EventDate = date,
+                Description = DescribeFor(payment),
+                CounterpartyType = null,
+                CounterpartyId = payment.PayerMemberId,
+                CounterpartyName = payment.PayerName,
+                SourceType = payment.SourceType,
+                SourceId = payment.SourceId,
+                PaymentId = payment.Id,
+                CreatedByMemberId = byMemberId,
+                Lines = new List<LedgerPostingLine>
+                {
+                    // Pengarna in på det konto betalsättet landar på …
+                    new()
+                    {
+                        Role = LedgerPaymentMethod.RoleFor(payment.Method),
+                        Debit = amount,
+                        // ⚠️ VatRate = 0 på betalkontot. Momsen hör till INTÄKTEN, inte till
+                        // pengarnas väg in — annars delas beloppet två gånger.
+                        VatRate = 0
+                    },
+                    // … och intäkten i kredit. Momsen faller ut ur kontots DefaultVatRate.
+                    new()
+                    {
+                        Role = RevenueRoleFor(payment.SourceType),
+                        Credit = amount,
+                        Text = payment.PayerName
+                    }
+                }
+            };
+
         public ConfirmResult Confirm(
             int paymentId, int byMemberId, DateTime? paymentDate = null, decimal? actualAmount = null)
         {
@@ -163,40 +330,10 @@ namespace HpskSite.Services.Ledger
                     + "bokföring — momsen härleds ur verifikationens konton.");
 
             LedgerPostingResult? posting = null;
-            if (decision.ShouldPost) posting = _posting.Post(new LedgerPostingRequest
-            {
-                IssuerType = payment.IssuerType,
-                IssuerId = payment.IssuerId,
-                AccountingDate = date,
-                EventDate = date,
-                Description = DescribeFor(payment),
-                CounterpartyType = null,
-                CounterpartyId = payment.PayerMemberId,
-                CounterpartyName = payment.PayerName,
-                SourceType = payment.SourceType,
-                SourceId = payment.SourceId,
-                PaymentId = payment.Id,
-                CreatedByMemberId = byMemberId,
-                Lines = new List<LedgerPostingLine>
-                {
-                    // Pengarna in på det konto betalsättet landar på …
-                    new()
-                    {
-                        Role = LedgerPaymentMethod.RoleFor(payment.Method),
-                        Debit = amount,
-                        // ⚠️ VatRate = 0 på betalkontot. Momsen hör till INTÄKTEN, inte till
-                        // pengarnas väg in — annars delas beloppet två gånger.
-                        VatRate = 0
-                    },
-                    // … och intäkten i kredit. Momsen faller ut ur kontots DefaultVatRate.
-                    new()
-                    {
-                        Role = RevenueRoleFor(payment.SourceType),
-                        Credit = amount,
-                        Text = payment.PayerName
-                    }
-                }
-            });
+            // ⚠️ Samma BuildPostingRequest som efterbokföringen använder. Se dess kommentar:
+            // två kopior hade gett samma pengar två olika konteringar beroende på tidpunkt.
+            if (decision.ShouldPost)
+                posting = _posting.Post(BuildPostingRequest(payment, amount, date, byMemberId));
 
             if (posting is { Success: false })
                 return ConfirmResult.Failed(posting.Error ?? "Bokföringen gick inte igenom.");
@@ -477,7 +614,12 @@ namespace HpskSite.Services.Ledger
             _ => LedgerAccountRoles.RevenueOther
         };
 
-        private static string DescribeFor(LedgerPayment payment) => payment.SourceType switch
+        /// <summary>
+        /// Vad betalningen gallde, i klartext. <b>Publik for att ytorna ska visa SAMMA text som
+        /// verifikationen bar</b> — en egen oversattning i vyn hade kunnat saga "Startavgift" om
+        /// en rad som star bokford som "Anmalningsavgift".
+        /// </summary>
+        public static string DescribeFor(LedgerPayment payment) => payment.SourceType switch
         {
             LedgerSourceType.CompetitionRegistration => "Anmälningsavgift",
             LedgerSourceType.TeamFee => "Lagavgift",
@@ -594,6 +736,26 @@ namespace HpskSite.Services.Ledger
     /// betyder tre olika saker beroende på om pengar tagits emot och om föreningen bokför, och ett
     /// gemensamt besked hade varit sant i högst ett av fallen.</para>
     /// </summary>
+    /// <summary>Vad efterbokföringen gjorde. Se <see cref="LedgerPaymentService.PostPending"/>.</summary>
+    public sealed class PostPendingResult
+    {
+        public bool Success { get; set; }
+
+        public string? Error { get; set; }
+
+        public int PaymentId { get; set; }
+
+        public int? JournalEntryId { get; set; }
+
+        /// <summary>
+        /// Datumet posten hamnade på — betalningens bekräftelsedag, aldrig i dag. Skickas tillbaka
+        /// för att den som bokför ska se vilket år intäkten landade i, inte behöva gissa.
+        /// </summary>
+        public DateTime AccountingDate { get; set; }
+
+        public static PostPendingResult Failed(string error) => new() { Success = false, Error = error };
+    }
+
     public sealed class ReverseResult
     {
         public bool Success { get; set; }

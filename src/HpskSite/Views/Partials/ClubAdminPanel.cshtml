@@ -96,6 +96,7 @@
                 </optgroup>
                 <optgroup label="Klubben">
                     <option value="/styrelse?type=0&id=@clubId">Styrelsearbete ↗</option>
+                    <option value="/ekonomi?type=0&id=@clubId">Ekonomi ↗</option>
                     <option value="#invoicesTab">Fakturor</option>
                     <option value="#clubFirearmsTab">Klubbvapen</option>
                     <option value="#settingsTab">Inställningar</option>
@@ -192,6 +193,18 @@
                     <i class="bi bi-clipboard-check me-2"></i>Styrelsearbete
                     <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar styrelsesidan"></i>
                 </a>
+                @* ⚠️ EGEN SIDA, inte en flik — samma mönster som Styrelsearbete ovan.
+                   Kassörsytan har sex egna railposter (Översikt · Bokför · Avstämning · Rapport ·
+                   Avgifter · Bokslut) enligt `Ekonomi Exempel/Ekonomi_Wireframes.pdf`, och de får
+                   inte plats som en flik bland arton. Skissens egen fotnot säger varför:
+                   "Menyn är kassörens år, inte databasens tabeller." *@
+                <a class="nav-link d-flex align-items-center" href="/ekonomi?type=0&id=@clubId" target="_blank" rel="noopener">
+                    <i class="bi bi-cash-coin me-2"></i>Ekonomi
+                    <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar kassörens arbetsyta"></i>
+                </a>
+                @* ⚠️ Knappens id är "invoices-tab" — fakturalistan laddas lat på just den
+                   knappens shown.bs.tab (ClubAdminInvoicesList och raden längre ned i den här
+                   filen). Byt inte id. *@
                 <button class="nav-link" id="invoices-tab" data-bs-toggle="tab" data-bs-target="#invoicesTab" type="button" role="tab" aria-controls="invoicesTab" aria-selected="false">
                     <i class="bi bi-receipt me-2"></i>Fakturor
                 </button>
@@ -458,7 +471,9 @@
 
         </div>
 
-        <!-- Invoices Tab -->
+        @* Fakturor — den gamla modellen, orörd. ⚠️ TOGS INTE BORT när Ekonomi blev en egen sida:
+           Pending-fakturorna ÄR arrangörens avprickningslista, och arrangören är inte alltid
+           kassören. Den avvecklas först när betalningsflödet har en ersättare. *@
         <div class="tab-pane fade" id="invoicesTab">
             @await Html.PartialAsync("ClubAdminInvoicesList")
         </div>
