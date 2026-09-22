@@ -30,17 +30,30 @@
 
   .ek-page .wrap { display: flex; gap: 1.5rem; align-items: flex-start; }
 
-  .ek-page .rail { width: 230px; flex-shrink: 0; position: sticky; top: 1rem; }
+  /* ⚠️ SAMMA INRAMNING SOM ADMINRAILEN pa klubb- och kretssidan (ClubAdminPanel .admin-rail):
+     egen yta i --bs-tertiary-bg med ram och radie, sa den laeser som en panel och inte som
+     flytande text. Ar dessutom samma bredd, samma radie pa posterna och samma sticky-toppning. */
+  .ek-page .rail { width: 250px; flex-shrink: 0; position: sticky; top: 1rem;
+      background-color: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color);
+      border-radius: .5rem; padding: 8px; }
   .ek-page .rail .brand { display: none; }
-  .ek-page .rail .club { font-size: 1.15rem; font-weight: 700; }
-  .ek-page .rail .role { font-size: .9rem; color: var(--bs-secondary-color); margin-bottom: 1rem; }
-  .ek-page .rail a.ek-nav { display: block; padding: .5rem .85rem; border-radius: .5rem;
-      color: var(--bs-body-color); text-decoration: none; border-left: 3px solid transparent; }
-  .ek-page .rail a.ek-nav:hover { background: var(--bs-tertiary-bg); }
-  .ek-page .rail a.ek-nav.on { font-weight: 700; background: var(--bs-tertiary-bg);
-      border-left-color: var(--ek-attn); }
+  .ek-page .rail .club { font-size: 1.1rem; font-weight: 700; padding: 6px 12px 0; }
+  .ek-page .rail .role { font-size: .8rem; color: var(--bs-secondary-color);
+      padding: 0 12px 10px; }
+  .ek-page .rail a.ek-nav { display: block; text-align: left; padding: 8px 12px;
+      border-radius: 8px; color: var(--bs-body-color); text-decoration: none;
+      border-left: 3px solid transparent; }
+  /* Ett steg upp fran railens egen yta, annars syns inte hover. */
+  .ek-page .rail a.ek-nav:hover { background-color: var(--bs-secondary-bg); }
+  /* ⚠️⚠️ AKTIV POST AR BLA, INTE ORANGE. -text-emphasis pa -bg-subtle ar Bootstraps
+     kontrastsakra par i BADA temana, och det ar samma markering som resten av adminytorna.
+     Orange ar reserverat for BETYDELSE — "detta saknas" — och tappar sin kraft i samma
+     sekund den ocksa betyder "har ar du". */
+  .ek-page .rail a.ek-nav.on { font-weight: 600;
+      background-color: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis);
+      border-left-color: var(--bs-primary); }
   .ek-page .rail a.ek-nav.soon { color: var(--bs-secondary-color); }
-  .ek-page .rail .foot { margin-top: 1.25rem; padding-top: 1rem; font-size: .85rem;
+  .ek-page .rail .foot { margin-top: 1rem; padding: 10px 12px 4px; font-size: .8rem;
       color: var(--bs-secondary-color); border-top: 1px solid var(--bs-border-color); }
 
   /* ⚠️⚠️ `flex: 1 1 auto` MASTE staa uttryckligen. Sajtens layout satter `main { flex: 1 0 auto }`
@@ -57,7 +70,8 @@
   .ek-page .pill { border: 1px solid var(--bs-border-color); border-radius: 2rem;
       padding: .3rem .85rem; font-size: .9rem; text-decoration: none;
       color: var(--bs-body-color); background: var(--bs-body-bg); white-space: nowrap; }
-  .ek-page .pill.strong { border-color: var(--bs-body-color); font-weight: 600; border-radius: .5rem; }
+  .ek-page .pill.strong { border-color: var(--bs-primary); color: var(--bs-primary-text-emphasis);
+      background-color: var(--bs-primary-bg-subtle); font-weight: 600; border-radius: .5rem; }
 
   /* ⚠️ minmax(0,1fr), inte 1fr. En grid-kolumn har min-width:auto som standard, sa en bred
      tabell inuti vagrar krympa och rutnatet svammar ut ur containern — panel 2 och 4 hamnade
@@ -118,12 +132,13 @@
       text-decoration: none; }
 
   .ek-page .more { margin-top: .6rem; font-size: .9rem; }
+  /* Navigation, inte varning — darfor sajtens bla. */
   .ek-page .more button, .ek-page .linkbtn { background: none; border: 0; padding: 0;
-      color: var(--ek-attn); font: inherit; font-weight: 700; cursor: pointer; }
+      color: var(--bs-link-color); font: inherit; font-weight: 600; cursor: pointer; }
 
   .ek-page .ek-btn { font: inherit; font-weight: 600; padding: .5rem 1.1rem;
-      border: 1px solid var(--bs-body-color); background: var(--bs-body-color);
-      color: var(--bs-body-bg); border-radius: .5rem; cursor: pointer; }
+      border: 1px solid var(--bs-primary); background: var(--bs-primary);
+      color: #fff; border-radius: .5rem; cursor: pointer; }
   .ek-page .ek-btn:disabled { opacity: .55; cursor: default; }
   .ek-page .ek-btn.ek-small { padding: .2rem .7rem; font-size: .85rem; background: none;
       color: var(--ek-attn); border-color: var(--ek-attn); }
@@ -160,18 +175,18 @@
   .ek-page .fieldlabel:first-child { margin-top: 0; }
   .ek-page .amount-row { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
   .ek-page .amount-in { font-size: 1.8rem; font-weight: 700; width: 12rem; padding: .5rem .9rem;
-      border-width: 2px; border-color: var(--bs-body-color); font-variant-numeric: tabular-nums; }
+      border-width: 2px; border-color: var(--bs-primary); font-variant-numeric: tabular-nums; }
   .ek-page .kr-unit { color: var(--bs-secondary-color); }
   .ek-page .seg { display: flex; border: 1px solid var(--bs-border-color);
       border-radius: .5rem; overflow: hidden; }
   .ek-page .segbtn { font: inherit; padding: .55rem 1rem; border: 0;
       background: var(--bs-body-bg); color: var(--bs-body-color); cursor: pointer; }
-  .ek-page .segbtn.on { background: var(--bs-body-color); color: var(--bs-body-bg); font-weight: 600; }
+  .ek-page .segbtn.on { background: var(--bs-primary); color: #fff; font-weight: 600; }
   .ek-page .chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .5rem; }
   .ek-page .chip { font: inherit; font-size: .85rem; padding: .25rem .8rem;
       border: 1px solid var(--bs-border-color); border-radius: 2rem;
       background: var(--bs-body-bg); color: var(--bs-body-color); cursor: pointer; }
-  .ek-page .chip:hover { border-color: var(--ek-attn); color: var(--ek-attn); }
+  .ek-page .chip:hover { border-color: var(--bs-primary); color: var(--bs-primary-text-emphasis); }
   .ek-page .preview { margin-top: 1.25rem; border-top: 1px solid var(--bs-border-color);
       padding-top: .9rem; }
 
