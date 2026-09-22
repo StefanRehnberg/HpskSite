@@ -196,6 +196,10 @@
       padding: 1.15rem 1.25rem; background: var(--bs-body-bg); }
   .ek-page .soonbox h2 { font-size: 1.15rem; font-weight: 700; margin: 0 0 .4rem; }
 
+  /* Lågmäld, men i läsvägen och alltid synlig — den förklarar varför railen är kortare. */
+  .ek-page .ek-readonly-note { font-size: .82rem; color: var(--bs-secondary-color);
+      padding: 8px 12px 10px; border-bottom: 1px solid var(--bs-border-color); margin-bottom: 6px; }
+
   /* ── Rapport: utfall mot budget ───────────────────────────────────────────
      ⚠️ Stapeln ar utfallet som andel av budgeten, KAPAD vid 100 %. En stapel som
      vaxer forbi sin egen ram laeser som ett fel i ytan, inte som en avvikelse —
@@ -298,14 +302,25 @@
 
 <div class="ek-page container-fluid py-4 @(Model.IsSandbox ? "ek-is-sandbox" : "")"
      id="@uid" data-issuer-type="@Model.IssuerType" data-issuer-id="@Model.IssuerId"
-     data-owner-id="@Model.OwnerId" data-sandbox="@(Model.IsSandbox ? "1" : "0")">
+     data-owner-id="@Model.OwnerId" data-sandbox="@(Model.IsSandbox ? "1" : "0")"
+     data-can-write="@(Model.CanWrite ? "1" : "0")">
 
 <div class="wrap">
 
     <nav class="rail">
         <div class="brand">Pistol.nu</div>
         <div class="club">@Model.IssuerName</div>
-        <div class="role">Kassör · @Model.CurrentYear</div>
+        <div class="role">@(Model.CanWrite ? "Kassör" : "Styrelsen") · @Model.CurrentYear</div>
+
+        @* ⚠️⚠️ FRÅNVARON MÅSTE FÖRKLARAS. En yta där knapparna bara saknas läses som trasig —
+           läsaren undrar om hen gjort fel, inte om hen har fel roll. *@
+        @if (!Model.CanWrite)
+        {
+            <div class="ek-readonly-note">
+                Du läser föreningens ekonomi som styrelseledamot.
+                <strong>Det är kassören som bokför.</strong>
+            </div>
+        }
 
         @* ⚠️ Tillbaka ligger ÖVERST och är alltid första railposten. Den låg förut som en länk i
            en fotnot längst ned, tillsammans med skissens rationalisering "Menyn är kassörens år,
@@ -314,15 +329,26 @@
         <a href="@Model.BackUrl" class="ek-nav ek-back">← Tillbaka</a>
 
         <a href="#" class="ek-nav on" data-view="oversikt">Översikt</a>
-        <a href="#" class="ek-nav" data-view="bokfor">Bokför</a>
+        @* ⚠️ Skrivytorna renderas INTE för en läsare. En knapp som nekas är sämre än ingen
+           knapp — och den riktiga gränsen ligger i endpointarna, inte här. *@
+        @if (Model.CanWrite)
+        {
+            <a href="#" class="ek-nav" data-view="bokfor">Bokför</a>
+        }
         <a href="#" class="ek-nav soon" data-view="avstamning">Avstämning</a>
         <a href="#" class="ek-nav" data-view="rapport">Rapport</a>
         <a href="#" class="ek-nav" data-view="avgifter">Avgifter</a>
         <a href="#" class="ek-nav soon" data-view="bokslut">Bokslut</a>
-        <a href="#" class="ek-nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
+        @if (Model.CanWrite)
+        {
+            <a href="#" class="ek-nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
+        }
 
         @* ⚠️ Växlaren ligger SIST och lågmält. Att byta liggare är sällsynt och allvarligt;
            den ska gå att hitta, inte att råka klicka på. *@
+        @* ⚠️ Sandlådan är kassörens kladdpapper. En läsare ser bara den riktiga liggaren. *@
+        @if (Model.CanWrite)
+        {
         <div class="ek-issuer-switch">
             @foreach (var i in Model.Issuers)
             {
@@ -340,6 +366,7 @@
             </div>
             <div class="ek-alert ek-bad d-none" id="@(uid)_sandboxError"></div>
         </div>
+        }
 
     </nav>
 
@@ -413,10 +440,19 @@
                             </div>
                             <div class="why" id="@(uid)_yrNote"></div>
                         </div>
+                        @* ⚠️ Erbjud aldrig en åtgärd rollen inte kan utföra. En läsare som klickar
+                           "Lägg in den" möts av en Rapport-yta utan knapp, och undrar vad hen gjorde fel. *@
                         <div id="@(uid)_yearNoBudget" class="d-none">
                             <p class="muted" style="margin-top:0">
                                 Budget mot utfall kräver en antagen budget.
-                                <button type="button" class="linkbtn" data-view="rapport">Lägg in den under Rapport</button>.
+                                @if (Model.CanWrite)
+                                {
+                                    <button type="button" class="linkbtn" data-view="rapport">Lägg in den under Rapport</button><text>.</text>
+                                }
+                                else
+                                {
+                                    <text>Kassören lägger in den.</text>
+                                }
                             </p>
                         </div>
                     </div>
@@ -495,9 +531,12 @@
                                 <div class="muted">Betalt men inte bokfört</div>
                                 <div style="font-size:26px;font-weight:700" id="@(uid)_feesUnposted">—</div>
                                 <div style="margin-top:10px">
+                                    @if (Model.CanWrite)
+                                    {
                                     <button type="button" class="ek-btn ek-small d-none" id="@(uid)_feesPost">
                                         Bokför dem
                                     </button>
+                                    }
                                 </div>
                             </div>
                         </div>
@@ -748,7 +787,10 @@
                         Uppföljningen jämför årets utfall med det styrelsen eller årsmötet beslutade.
                         Utan ett beslut finns inget att jämföra med.
                     </p>
-                    <button type="button" class="ek-btn" id="@(uid)_repStart">Lägg in budgeten</button>
+                    @if (Model.CanWrite)
+                    {
+                        <button type="button" class="ek-btn" id="@(uid)_repStart">Lägg in budgeten</button>
+                    }
                 </div>
 
                 @* Rapporten. *@
@@ -795,7 +837,10 @@
                             Den kan inte skrivas om i efterhand — vill styrelsen ändra den blir
                             ändringen ett eget, spårbart beslut.
                         </p>
-                        <button type="button" class="linkbtn" id="@(uid)_repRevise">Gör en ny version</button>
+                        @if (Model.CanWrite)
+                        {
+                            <button type="button" class="linkbtn" id="@(uid)_repRevise">Gör en ny version</button>
+                        }
                     </div>
                 </div>
 
@@ -806,6 +851,8 @@
                     skriva in budgeten pa ar hela sidan onabar, sa den ligger har: dar budgeten
                     konsumeras, och dar den som saknar en upptacker att hen saknar en.
                 *@
+                @if (Model.CanWrite)
+                {
                 <div class="ek-card d-none" id="@(uid)_budCard">
                     <div class="ek-cardh">
                         <h2 id="@(uid)_budTitle">Budget</h2>
@@ -856,6 +903,7 @@
                         <button type="button" class="ek-btn" id="@(uid)_budAdopt">Anta budgeten</button>
                     </div>
                 </div>
+                }
             </section>
 
             <section data-pane="bokslut" hidden>
@@ -882,6 +930,13 @@
     var issuerType = parseInt(root.dataset.issuerType, 10);
     var issuerId = parseInt(root.dataset.issuerId, 10);
     var el = function (s) { return document.getElementById(uid + '_' + s); };
+
+    // ⚠️⚠️ SKRIVKONTROLLER RENDERAS INTE ALLS för en läsare, så varje addEventListener på en
+    //    sådan knapp skulle kasta på null — och det dödar HELA den här IIFE:n, alltså en sida
+    //    som inte laddar någonting. Felet syns bara för den som saknar skrivrätt.
+    //    Flaggan läses explicit ur DOM:en; härledd ur "finns knappen X?" slutar den stämma tyst
+    //    den dag knappen döps om.
+    var canWrite = root.dataset.canWrite === '1';
     var show = function (n, on) { if (n) n.classList.toggle('d-none', !on); };
 
     var ROLE_NAMES = {
@@ -1024,7 +1079,9 @@
                  + '<td class="date">' + esc(shortDate(r.confirmedDate)) + '</td>'
                  + '<td>' + esc(r.payerName) + ' <span class="muted">· ' + esc(r.description) + '</span></td>'
                  + '<td class="n">' + kr(r.amount) + '</td>'
-                 + '<td class="n"><button type="button" class="ek-btn ek-small" data-post="' + r.id + '">Bokför</button></td>'
+                 + '<td class="n">' + (canWrite
+                        ? '<button type="button" class="ek-btn ek-small" data-post="' + r.id + '">Bokför</button>'
+                        : '') + '</td>'
                  + '</tr>';
         }, 'Visa alla {n} betalningar att bokföra');
     }
@@ -1205,7 +1262,7 @@
     el('bDate').value = new Date().toISOString().slice(0, 10);
 
     // ── Ny sandlåda ───────────────────────────────────────────────────────────────────────
-    el('newSandbox').addEventListener('click', function () {
+    if (canWrite) el('newSandbox').addEventListener('click', function () {
         var btn = this, err = el('sandboxError');
         err.classList.add('d-none');
 
@@ -1294,7 +1351,7 @@
         el('feesUnposted').textContent = f.unpostedCount === 0
             ? 'Inget' : f.unpostedCount + ' st · ' + kr(f.unpostedAmount);
 
-        show(el('feesPost'), f.unpostedCount > 0);
+        if (canWrite) show(el('feesPost'), f.unpostedCount > 0);
 
         // Obetalda avgifter hör hemma i "väntar på mig" — det är kassörens största arbetslista.
         todo.unpaidFees = f.unpaidCount;
@@ -1312,7 +1369,7 @@
             .catch(function () { });
     }
 
-    el('feesPost').addEventListener('click', function () {
+    if (canWrite) el('feesPost').addEventListener('click', function () {
         var btn = this, errBox = el('feesError'), okBox = el('feesOk');
         errBox.classList.add('d-none'); okBox.classList.add('d-none');
         btn.disabled = true;
@@ -1550,7 +1607,13 @@
                   + 'ett förslag ingen beslutat om är inget att mäta mot.'
                 : 'Uppföljningen jämför årets utfall med det styrelsen eller årsmötet beslutade. '
                   + 'Utan ett beslut finns inget att jämföra med.';
-            el('repStart').textContent = rep.hasDraft ? 'Fortsätt med budgeten' : 'Lägg in budgeten';
+            // ⚠️⚠️ KNAPPEN FINNS INTE FÖR EN LÄSARE. Utan vakten kastar renderReport här, och
+            //    felet SVÄLJS av fetch-kedjans catch — det landar i felrutan i stället för i
+            //    konsolen, så "inga JS-fel" är grönt medan Översiktens kort 3 står tomt.
+            //    Upptäckt genom att titta på den renderade sidan, inte i loggen.
+            if (el('repStart'))
+                el('repStart').textContent = rep.hasDraft ? 'Fortsätt med budgeten' : 'Lägg in budgeten';
+
             renderYearCard(null);
             return;
         }
@@ -1624,7 +1687,13 @@
                     show(el('repEmpty'), true);
                     el('repEmptyH').textContent = 'Räkenskapsåret saknas';
                     el('repEmptyP').textContent = d.message || '';
-                    show(el('repStart'), false);
+                    if (el('repStart')) show(el('repStart'), false);
+
+                    // ⚠️⚠️ Översiktens kort 3 måste ändå få ett innehåll. Utan det här står
+                    //    kortet HELT TOMT för en förening som inte satt upp ekonomin — en ruta
+                    //    med en rubrik och ingenting under läses som att sidan är trasig, inte
+                    //    som att det inte finns någon budget. Syns på varje ny förening.
+                    renderYearCard(null);
                     return;
                 }
 
@@ -1703,11 +1772,16 @@
             });
     }
 
-    el('repStart').addEventListener('click', openBudget);
-    el('repRevise').addEventListener('click', openBudget);
-    el('budCancel').addEventListener('click', function () { show(el('budCard'), false); });
+    // ⚠️⚠️ VAKTERNA ÄR INTE VALFRIA. Skrivkontrollerna renderas inte alls för en läsare, och
+    //    addEventListener på null kastar — vilket dödar HELA den här IIFE:n och ger en sida som
+    //    inte laddar någonting. Felet syns bara för den som saknar skrivrätt.
+    if (canWrite) {
+        el('repStart').addEventListener('click', openBudget);
+        el('repRevise').addEventListener('click', openBudget);
+        el('budCancel').addEventListener('click', function () { show(el('budCard'), false); });
+    }
 
-    el('budSave').addEventListener('click', function () {
+    if (canWrite) el('budSave').addEventListener('click', function () {
         var btn = el('budSave');
         btn.disabled = true;
         el('budError').classList.add('d-none');
@@ -1729,7 +1803,7 @@
             });
     });
 
-    el('budAdopt').addEventListener('click', function () {
+    if (canWrite) el('budAdopt').addEventListener('click', function () {
         var btn = el('budAdopt');
         btn.disabled = true;
         el('budError').classList.add('d-none');

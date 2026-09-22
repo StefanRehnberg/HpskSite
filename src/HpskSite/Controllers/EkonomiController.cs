@@ -30,20 +30,20 @@ namespace HpskSite.Controllers
     [Route("ekonomi")]
     public class EkonomiController : Controller
     {
-        private readonly AdminAuthorizationService _auth;
+        private readonly LedgerAccessService _access;
         private readonly LedgerSetupService _setup;
         private readonly LedgerSandboxService _sandbox;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IMemberManager _memberManager;
 
         public EkonomiController(
-            AdminAuthorizationService auth,
+            LedgerAccessService access,
             LedgerSetupService setup,
             LedgerSandboxService sandbox,
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberManager memberManager)
         {
-            _auth = auth;
+            _access = access;
             _setup = setup;
             _sandbox = sandbox;
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -72,37 +72,36 @@ namespace HpskSite.Controllers
             var node = ctx?.Content?.GetById(id);
             if (node is null) return NotFound();
 
-            // ⚠️ Behörigheten läses ur NODEN, aldrig ur frågesträngen. En kretskod som fick komma
-            // från anroparen hade gjort grinden till en fråga om vilken sträng någon skrev.
-            string name;
-            bool ok;
+            // ⚠️⚠️ SAMMA UPPSLAG SOM ENDPOINTARNA (LedgerAccessService). Skrevs grinden här för
+            // hand skulle sidan och API:et förr eller senare svara olika — antingen en sida full
+            // av knappar som nekas, eller en endpoint som släpper in någon sidan gömde.
+            var access = await _access.ResolveAsync(type, id);
+            if (!access.CanRead) return Forbid();
 
-            if (type == DocumentOwnerType.Club)
-            {
-                ok = await _auth.IsClubAdminForClub(id);
-                name = node.Value<string>("clubName") ?? node.Name ?? "";
-            }
-            else if (type == DocumentOwnerType.Region)
-            {
-                var regionCode = node.Value<string>("regionCode") ?? "";
-                ok = !string.IsNullOrWhiteSpace(regionCode) && await _auth.IsRegionalAdminForRegion(regionCode);
-                name = node.Name ?? "";
-            }
-            else
-            {
-                return NotFound();
-            }
-
-            if (!ok) return Forbid();
+            var name = access.OwnerName;
 
             // ── Vilken utställare arbetar vi i? ────────────────────────────────────────────
+            // ⚠️⚠️ EN LÄSNING SOM SKRIVER — och det är ett val, inte ett förbiseende.
+            // EnsureLive skapar föreningens utställarrad om den saknas, alltså även när sidan
+            // öppnas av en styrelseledamot som bara läser. Raden är REGISTRET som liggaren hänger
+            // på: den bär ingen bokföring, den är idempotent, och dess id är deterministiskt.
+            // Alternativet — att låta en läsare möta en sida utan utställare — hade krävt en
+            // null-gren i varje läsande endpoint och gett ett sämre tomt läge.
+            // ⚠️ Följden att känna till: `LedgerIssuer` är därför INTE ett mått på "föreningar som
+            // använder ekonomin". Det måttet är LedgerIssuerSettings, som bara en kassör kan skapa.
             var live = _sandbox.EnsureLive(type, id);
             var active = live;
+
+            // ⚠️ EN LÄSANDE STYRELSELEDAMOT FÅR INGEN SANDLÅDA. Den är kassörens kladdpapper, och
+            // en ledamot som läser testsiffror utan att veta att de är påhittade är precis den
+            // förväxling den lila ramen finns för att förhindra. De kan inte skapa en heller, så
+            // den enda vägen hit vore ett gissat nummer i frågesträngen.
+            var mayUseSandbox = access.CanWrite;
 
             // ⚠️ INTE `issuer is > 0`. Sandlådor har NEGATIVA id, och den kontrollen slängde
             // tyst bort varje sandlådeval — sidan visade den levande liggaren medan URL:en sa
             // sandlåda. Fångat av sviten samma dag rymden byttes.
-            if (issuer is not null && issuer != 0 && issuer != live.Id)
+            if (mayUseSandbox && issuer is not null && issuer != 0 && issuer != live.Id)
             {
                 var chosen = _sandbox.GetById(issuer.Value);
 
@@ -126,7 +125,11 @@ namespace HpskSite.Controllers
                 IsSandbox = active.IsSandbox,
                 SandboxLabel = active.Label,
                 SandboxCreatedUtc = active.IsSandbox ? active.CreatedUtc : null,
-                Issuers = _sandbox.ListForOwner(type, id),
+                // Läsaren ser bara den riktiga liggaren — inget att välja mellan, ingen växlare.
+                Issuers = mayUseSandbox
+                    ? _sandbox.ListForOwner(type, id)
+                    : new List<HpskSite.Models.Ledger.LedgerIssuer> { live },
+                CanWrite = access.CanWrite,
                 IssuerName = name,
                 // Tillbakalänken: kassören ska inte behöva bläddra sig hem.
                 BackUrl = node.Url(),
@@ -172,6 +175,19 @@ namespace HpskSite.Controllers
         public List<HpskSite.Models.Ledger.LedgerIssuer> Issuers { get; set; } = new();
 
         public string IssuerName { get; set; } = "";
+
+        /// <summary>
+        /// Får den inloggade bokföra, eller bara läsa?
+        ///
+        /// <para><b>⚠️ Styrelsen läser, kassören skriver</b> — se <see cref="LedgerAccessService"/>.
+        /// Ytan får INTE rendera en skrivkontroll när det här är falskt; en knapp som nekas är
+        /// sämre än ingen knapp. Den riktiga gränsen ligger ändå i endpointarna, men en sida som
+        /// erbjuder något den inte kan leverera läses som trasig.</para>
+        ///
+        /// <para><b>⚠️ Och frånvaron måste FÖRKLARAS.</b> En yta där knapparna bara saknas läses
+        /// som ett fel; därför står det skrivet vem som bokför.</para>
+        /// </summary>
+        public bool CanWrite { get; set; } = true;
 
         public string BackUrl { get; set; } = "/";
 
