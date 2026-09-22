@@ -247,6 +247,80 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Avprickningslistan för EN tävling eller händelse: vilka som betalat och vilka som inte har.
+        ///
+        /// <para><b>⚠️⚠️ ÖVERSIKTENS PANEL 3 SÄGER SIFFRAN, DEN HÄR SÄGER NAMNEN.</b> "4 saknas" är
+        /// det Fredrik beskrev som okänt för kassören, men en siffra går inte att agera på — det
+        /// gör en lista. Utan den här vägen är panelen ett larm utan nästa steg, och kassören
+        /// tvingas tillbaka till de Pending-fakturor som ska ersättas.</para>
+        ///
+        /// <para><b>⚠️ TRE TILLSTÅND, ALDRIG EN BOOLEAN.</b> <i>Väntar</i> och <i>säger sig ha
+        /// betalat</i> är två skilda arbetsuppgifter: den ena ska påminnas, den andra stämmas av
+        /// mot kontoutdraget. Slås de ihop tappar listan sitt värde som kontroll — samma regel som
+        /// <c>ClubEvent/GetPayments</c> följer, och de två ytorna får inte säga olika saker.</para>
+        ///
+        /// <para><b>⚠️ Läser i UTSTÄLLARENS schema</b> via
+        /// <c>LedgerPaymentService.ForSourceInIssuer</c>. En sandlåda som visade den skarpa listan
+        /// vore precis den blandning den fysiska separationen finns för att omöjliggöra.</para>
+        ///
+        /// <para>Läsning, ingen skrivning — därför <c>AuthorizeIssuerAsync</c>. Att bekräfta en
+        /// betalning är arrangörens handling på händelsens egen yta; den här är kassörens
+        /// kontrollfråga, och styrelsen ska kunna ställa den utan skrivrätt.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetSourcePayments(
+            int issuerType, int issuerId, string sourceType, int sourceId)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            if (string.IsNullOrWhiteSpace(sourceType) || sourceId <= 0)
+                return Json(new { success = false, message = "Ingen tävling eller händelse angiven." });
+
+            try
+            {
+                // ⚠️ Makulerade rader faller bort: de beskriver en avgift som inte längre finns,
+                //    och en avprickningslista som räknar dem påstår en skuld som ingen har.
+                var rows = _paymentService
+                    .ForSourceInIssuer(issuerId, sourceType, sourceId)
+                    .Where(p => p.VoidedUtc is null)
+                    .ToList();
+
+                return Json(new
+                {
+                    success = true,
+                    // ⚠️ Inget namn i svaret, med flit. Raden man klickade på bär det redan, och
+                    //    namnuppslaget bor på ETT ställe (LedgerOverviewService.NameForSource).
+                    //    Ett andra uppslag hade kunnat svara något annat än rubriken ovanför.
+                    expected = rows.Count,
+                    settled = rows.Count(p => p.IsMoney),
+                    missingAmount = rows.Where(p => !p.IsMoney).Sum(p => p.Amount),
+                    payments = rows.Select(p => new
+                    {
+                        id = p.Id,
+                        payerName = p.PayerName,
+                        amount = p.Amount,
+                        // ⚠️ Det BEKRÄFTADE beloppet kan skilja sig från det begärda. Visas det
+                        //    begärda på en betald rad ser en delbetalning ut som en helbetalning.
+                        actualAmount = p.ActualAmount,
+                        claimedDate = p.ClaimedUtc,
+                        confirmedDate = p.ConfirmedUtc,
+                        method = p.Method,
+                        receiptId = p.ReceiptId
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Kunde inte läsa avprickningslistan för {Typ}/{Id}, källa {S}/{SId}.",
+                    issuerType, issuerId, sourceType, sourceId);
+
+                return Json(new { success = false, message = "Listan gick inte att läsa just nu." });
+            }
+        }
+
+        /// <summary>
         /// Skapar en ny sandlåda för föreningen. En tidigare sandlåda <b>överges</b>.
         ///
         /// <para><b>⚠️ Det här ÄR nollställningen.</b> Den raderar ingenting och rör ingen
