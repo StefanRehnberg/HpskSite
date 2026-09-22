@@ -45,6 +45,7 @@ namespace HpskSite.Controllers
         private readonly LedgerAccessService _access;
         private readonly LedgerBankImportService _bankService;
         private readonly LedgerClosingService _closingService;
+        private readonly LedgerSieExportService _sieService;
 
         /// <summary>
         /// Taket för ett uppladdat kontoutdrag.
@@ -77,6 +78,7 @@ namespace HpskSite.Controllers
             LedgerAccessService access,
             LedgerBankImportService bankService,
             LedgerClosingService closingService,
+            LedgerSieExportService sieService,
             IMemberManager memberManager,
             IMemberService memberService,
             ILogger<EkonomiAdminController> logger)
@@ -91,6 +93,7 @@ namespace HpskSite.Controllers
             _chartService = chartService;
             _bankService = bankService;
             _closingService = closingService;
+            _sieService = sieService;
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
             _sandbox = sandbox;
@@ -277,6 +280,61 @@ namespace HpskSite.Controllers
             }
         }
 
+        // ══ SIE-EXPORTEN (P10.1) ═════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Laddar ner räkenskapsåret som en SIE 4-fil.
+        ///
+        /// <para><b>⚠️ Skälen är inlåsning, arkivering och granskning</b> — en förening ska kunna
+        /// lämna oss utan att lämna sin historik, och filen ska gå att spara i sju år oberoende
+        /// av vår drift.</para>
+        ///
+        /// <para><b>⚠️ Bara den som bokför HOS OSS har en journal att exportera.</b> En klubb vars
+        /// bokföring ligger i ett eget program får en tom och meningslös fil — deras export är en
+        /// annan (fordringar, 1510 mot intäktskontot) och väntar på besked om vilka konton som
+        /// ska ingå.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> ExportSie(int issuerType, int issuerId, int fiscalYearId)
+        {
+            var (ok, name) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Content(DeniedMessage);
+
+            var status = _setupService.GetStatus(issuerType, issuerId);
+
+            if (!LedgerIssuerShape.KeepsBooks(status.Shape))
+                return Content("Föreningen bokför inte här, så det finns ingen verifikationslista "
+                             + "att exportera.");
+
+            try
+            {
+                // ⚠️ Sandlådan MÅSTE märkas i filen. Den lämnar sidan och tar ingen ram med sig -
+                //    samma regel som kvittot följer, och en omärkt testfil i en förenings arkiv
+                //    är oskiljbar från riktig bokföring.
+                var sandbox = issuerId < 0;
+
+                var bytes = _sieService.Build(
+                    issuerType, issuerId, fiscalYearId, name ?? "Förening", null, sandbox);
+
+                if (bytes == null) return Content("Räkenskapsåret hittades inte.");
+
+                var year = (status.FiscalYears ?? new List<LedgerFiscalYear>())
+                    .FirstOrDefault(y => y.Id == fiscalYearId)?.Year ?? DateTime.Today.Year;
+
+                var fileName = (sandbox ? "SANDLADA-" : "") + $"bokforing-{year}.se";
+
+                // ⚠️ .se är SIE:s filändelse. text/plain, inte application/octet-stream: filen ÄR
+                //    text och ska gå att öppna i en editor när något ser konstigt ut.
+                return File(bytes, "text/plain", fileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "SIE-exporten misslyckades för {Typ}/{Id} år {Ar}.",
+                    issuerType, issuerId, fiscalYearId);
+                return Content("Filen gick inte att skapa.");
+            }
+        }
+
         // ══ BOKSLUTET (P7) ═══════════════════════════════════════════════════════════════════
 
         /// <summary>
@@ -303,11 +361,18 @@ namespace HpskSite.Controllers
                     return Json(new { success = true, applicable = false });
 
                 var years = status.FiscalYears ?? new List<LedgerFiscalYear>();
-                var yearId = fiscalYearId ?? years.OrderByDescending(y => y.Year)
-                                                  .Select(y => y.Id).FirstOrDefault();
 
-                if (yearId <= 0)
+                // ⚠️⚠️ FRÅGA OM LISTAN ÄR TOM — ALDRIG OM ID:T ÄR POSITIVT. Sandlådans
+                //    räkenskapsår har NEGATIVT id (IDENTITY(-1,-1)), så ett `yearId <= 0` svarar
+                //    "inget räkenskapsår upplagt" för varje sandlåda, tyst. Det är tredje gången
+                //    den kontrollen skrivs i den här kodbasen och tredje gången den är fel —
+                //    se sandlådans egen dokumentation: "kontroller som issuerId > 0 eller <= 0
+                //    är BUGGAR". Hittad av ekonomi-sie-verify, inte av kompilatorn.
+                if (years.Count == 0)
                     return Json(new { success = true, applicable = true, hasYear = false });
+
+                var yearId = fiscalYearId
+                    ?? years.OrderByDescending(y => y.Year).Select(y => y.Id).First();
 
                 var checklist = _closingService.Checklist(issuerType, issuerId, yearId);
                 var statements = _closingService.Statements(issuerType, issuerId, yearId);
@@ -901,7 +966,11 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> PostPending([FromBody] PostPendingRequest request)
         {
-            if (request is null || request.PaymentId <= 0)
+            // ⚠️⚠️ NOLL, inte `<= 0`. Sandlådans betalningar har NEGATIVA id, så ett `<= 0` nekar
+            //    varje bokföring i en sandlåda med "Ingen betalning angiven" — alltså ett besked
+            //    om BEGÄRAN när sanningen är att koden inte förstår id:t. Samma fälla som
+            //    räkenskapsåret i GetClosing, hittad i samma svep.
+            if (request is null || request.PaymentId == 0)
                 return Json(new { success = false, message = "Ingen betalning angiven." });
 
             var payment = _paymentService.GetById(request.PaymentId);

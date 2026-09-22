@@ -8,6 +8,13 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 
+// ⚠️⚠️ CP437 för SIE-exporten. .NET Core bär bara ett fåtal kodsidor som standard, så
+//    Encoding.GetEncoding(437) KASTAR utan den här raden — och det gör den först när någon
+//    klickar Exportera, inte vid start. SIE-standarden föreskriver CP437; en fil i UTF-8 läses
+//    in med sönderslagna å, ä och ö i varje kontonamn, vilket ser ut som vårt fel även när allt
+//    annat är rätt.
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.CreateUmbracoBuilder()

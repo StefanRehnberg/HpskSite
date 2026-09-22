@@ -1569,13 +1569,19 @@
 
         closeYearId = d.checklist.fiscalYearId;
 
-        // Arsvaljaren.
+        // Arsvaljaren plus SIE-exporten.
+        // ⚠️ Exporten hor HIT, inte under Installningar: den ar en del av arsavslutet, och det ar
+        //    har kassoren star nar hen behover arkivfilen. En vanlig LANK, inte fetch - filen ska
+        //    laddas ner av webblasaren.
         el('closeActions').innerHTML =
             '<select class="form-select" id="' + uid + '_closeYear" style="width:14rem">'
             + d.years.map(function (y) {
                 return '<option value="' + y.id + '"' + (y.id === closeYearId ? ' selected' : '') + '>'
                      + y.year + '</option>';
-            }).join('') + '</select>';
+            }).join('') + '</select>'
+            + '<a class="btn btn-outline-secondary" id="' + uid + '_sieLink" href="'
+            + '/umbraco/surface/EkonomiAdmin/ExportSie?issuerType=' + issuerType
+            + '&issuerId=' + issuerId + '&fiscalYearId=' + closeYearId + '">Hämta SIE-fil</a>';
 
         var pick = el('closeYear');
         if (pick) pick.addEventListener('change', function () { loadClosing(pick.value); });
