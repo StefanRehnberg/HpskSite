@@ -188,7 +188,12 @@
   }
 </style>
 
-<div class="ek-page container py-4" id="@uid" data-issuer-type="@Model.IssuerType" data-issuer-id="@Model.IssuerId">
+@* ⚠️ container-FLUID, inte container. Sajtens standard ar full bredd (Master.cshtml har
+   <main class="container-fluid">, och klubbsidan med sin adminrail likasa). /styrelse ar den
+   MEDVETNA avvikelsen - smal rad och stor text for aldre lasare - men den ar loptext och
+   formular. Kassorsytan ar TABELLER: per tavling, kon att bokfora, konteringsforslaget. De
+   vinner pa bredden, och en smal kolumn hade tvingat fram vagrat radbrytning i sifferkolumner. *@
+<div class="ek-page container-fluid py-4" id="@uid" data-issuer-type="@Model.IssuerType" data-issuer-id="@Model.IssuerId">
 
 <div class="wrap">
 
