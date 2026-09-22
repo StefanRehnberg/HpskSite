@@ -166,6 +166,16 @@ namespace HpskSite.Models.Ledger
         ///
         /// <para>Texterna är skrivna som frågan de svarar på: <i>när det här händer, vart går
         /// pengarna?</i> — aldrig som ett kontobegrepp.</para>
+        ///
+        /// <para><b>⚠️⚠️ FÖRENINGEN ÄR "VI". PISTOL.NU SKRIVS UT. "NI" ANVÄNDS INTE.</b> Hela
+        /// ekonomiytan följer den regeln.
+        ///
+        /// <para>Den blev fel åt båda hållen innan den satt: först blandade ytan "vi" (pistol.nu)
+        /// och "ni" (föreningen) i samma stycke — Stefan 2026-09-22: <i>"vilka är ni och vi?"</i>
+        /// — och sedan rättade jag det åt fel håll genom att göra föreningen till "ni". Hans svar
+        /// på det: <i>"En kassör som läser det läser det som att ni är någon annan, vi är
+        /// föreningen."</i> <b>Läsaren ÄR föreningen</b>, och den som skriver in sin egen
+        /// förenings uppgifter talar om sig själv i första person.</para></para>
         /// </summary>
         public static string Label(string? roleKey) => roleKey switch
         {
