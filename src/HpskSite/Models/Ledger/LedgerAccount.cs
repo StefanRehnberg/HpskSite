@@ -154,5 +154,49 @@ namespace HpskSite.Models.Ledger
             VatOutgoing,
             VatIncoming
         };
+
+        /// <summary>
+        /// Rollen som en HÄNDELSE, på svenska.
+        ///
+        /// <para><b>⚠️⚠️ "KONTOROLLER" OCH "12 MAPPADE" BETYDER INGENTING för den som inte kan
+        /// bokföring</b> — och det är precis den personen modulen finns för. Stefan under provning
+        /// 2026-09-22: <i>"Jag förstår inte vad 'Kontoroller' är för nåt och vad de 12 mappade är,
+        /// men jag förstår inte bokföring…"</i> Om vår egen byggare inte förstår rubriken gör ingen
+        /// kassör det heller.</para>
+        ///
+        /// <para>Texterna är skrivna som frågan de svarar på: <i>när det här händer, vart går
+        /// pengarna?</i> — aldrig som ett kontobegrepp.</para>
+        /// </summary>
+        public static string Label(string? roleKey) => roleKey switch
+        {
+            RevenueParticipationFee => "När någon betalar en deltagaravgift",
+            RevenueMembershipFee    => "När någon betalar medlemsavgiften",
+            RevenueRegionFee        => "När en klubb betalar kretsavgiften",
+            RevenueOther            => "Övriga intäkter",
+            BankAccount             => "Pengar som kommer in på bankkontot",
+            Swish                   => "Pengar som kommer in via Swish",
+            CashBox                 => "Kontanter i kassan",
+            AccountsReceivable      => "Någon är skyldig oss pengar vid årsskiftet",
+            AccountsPayable         => "Vi är skyldiga någon pengar vid årsskiftet",
+            Rounding                => "Ören som blir över vid avrundning",
+            VatOutgoing             => "Moms vi tar ut när vi säljer",
+            VatIncoming             => "Moms vi betalar när vi köper",
+            _                       => roleKey ?? ""
+        };
+
+        /// <summary>
+        /// Vad rollen används till, när etiketten inte räcker. Tom sträng = behövs ingen.
+        /// <para>⚠️ Bara där det faktiskt hjälper. En förklaring på varje rad blir en vägg av
+        /// text, och då läses ingen av dem.</para>
+        /// </summary>
+        public static string Hint(string? roleKey) => roleKey switch
+        {
+            AccountsReceivable => "Obetalda avgifter vid bokslutet hamnar här, så de syns i balansräkningen.",
+            Rounding           => "Behövs för att en verifikation alltid ska gå ihop på öret.",
+            VatOutgoing        => "Används bara om föreningen är momsregistrerad.",
+            VatIncoming        => "Används bara om föreningen är momsregistrerad.",
+            _                  => ""
+        };
+
     }
 }

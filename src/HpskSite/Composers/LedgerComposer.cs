@@ -30,6 +30,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<LedgerOverviewService>();
             builder.Services.AddScoped<LedgerBudgetService>();
             builder.Services.AddScoped<LedgerAccessService>();
+            builder.Services.AddScoped<LedgerChartService>();
             builder.Services.AddScoped<LedgerManualPostingService>();
             builder.Services.AddScoped<LedgerMembershipFeeBridge>();
             builder.Services.AddScoped<LedgerSandboxService>();

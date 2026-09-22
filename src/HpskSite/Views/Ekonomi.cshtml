@@ -78,7 +78,12 @@
   .ek-page .ek-issuer { display: block; font-size: .85rem; padding: 4px 8px; border-radius: 6px;
       color: var(--bs-body-color); text-decoration: none; }
   .ek-page .ek-issuer.on { font-weight: 700; background: var(--bs-secondary-bg); }
+  /* ⚠️ BÅDA posterna bär en markör. Bar bara sandlådan en, läste den omärkta raden ovanför som
+     en rubrik över den — vilket är precis vad som rapporterades. */
   .ek-page .ek-issuer.sb::before { content: "⬤ "; color: #6B21A8; font-size: .7em; }
+  .ek-page .ek-issuer.live::before { content: "⬤ "; color: var(--bs-secondary-color); font-size: .7em; }
+  .ek-page .ek-issuer-head { font-size: .7rem; letter-spacing: .05em; text-transform: uppercase;
+      color: var(--bs-secondary-color); padding: 0 8px 4px; }
   .ek-page .ek-issuer-new { display: block; width: 100%; text-align: left; margin-top: 6px;
       font: inherit; font-size: .85rem; padding: 4px 8px; border: 1px solid var(--bs-border-color);
       border-radius: 6px; background: none; color: var(--bs-body-color); cursor: pointer; }
@@ -350,11 +355,15 @@
         @if (Model.CanWrite)
         {
         <div class="ek-issuer-switch">
+            @* ⚠️ Rubriken är inte pynt. Utan den läste den FÖRSTA posten ("Riktig bokföring") som
+               en rubrik över den andra — den var omärkt och låg rakt ovanför den markerade
+               sandlådan. Nu bär båda posterna samma markör, och rubriken säger vad listan ÄR. *@
+            <div class="ek-issuer-head">Du arbetar i</div>
             @foreach (var i in Model.Issuers)
             {
                 var isActive = i.Id == Model.IssuerId;
                 <a href="/ekonomi?type=@Model.IssuerType&id=@Model.OwnerId@(i.IsSandbox ? $"&issuer={i.Id}" : "")"
-                   class="ek-issuer @(isActive ? "on" : "") @(i.IsSandbox ? "sb" : "")">
+                   class="ek-issuer @(isActive ? "on" : "") @(i.IsSandbox ? "sb" : "live")">
                     @(i.IsSandbox ? (string.IsNullOrWhiteSpace(i.Label) ? "Sandlåda" : i.Label) : "Riktig bokföring")
                 </a>
             }
@@ -583,30 +592,47 @@
                 <div class="ek-card wide" id="@(uid)_setup">
                     <div class="ek-cardh"><h2>Har ni ett bokföringsprogram i dag?</h2></div>
 
+                    @* ⚠️⚠️ SUBJEKTET MÅSTE VARA UTSKRIVET I VARJE ALTERNATIV. Texten sa tidigare
+                       "det läser inte vårt bankkonto", där "det" syftade på FÖRENINGENS program —
+                       och lästes som att pistol.nu läser bankkontot. Den som byggt produkten läste
+                       fel; då är texten fel, inte läsaren. Frågan gäller ERT program, inte oss. *@
+                    <p class="muted" style="margin-top:0">
+                        Frågan gäller <strong>ert eget</strong> bokföringsprogram — vi läser aldrig
+                        någons bankkonto.
+                    </p>
+
                     <label class="choice">
                         <input type="radio" name="@(uid)_shape" id="@(uid)_shapeFull" value="full">
-                        <span><strong>Nej — sköt vår bokföring här</strong>
-                            <span class="muted" style="display:block">Kontoplan, verifikationer, resultat-
-                            och balansräkning och handlingar till årsmötet.</span></span>
+                        <span><strong>Nej, vi har inget program</strong>
+                            <span class="muted" style="display:block">Då sköter ni bokföringen här:
+                            kontoplan, verifikationer, resultat- och balansräkning och handlingar
+                            till årsmötet.</span></span>
                     </label>
 
                     @* ⚠️⚠️ TRE FORMER. Skillnaden mellan de två sista är om programmet läser banken
                        självt — gör det det skulle en SIE-fil från oss bokföra samma pengar igen. *@
                     <label class="choice">
                         <input type="radio" name="@(uid)_shape" id="@(uid)_shapeExport" value="export">
-                        <span><strong>Ja — men det läser inte vårt bankkonto</strong>
-                            <span class="muted" style="display:block">Vi sköter avgifter och kontroll;
-                            ni för över med en SIE-fil.</span></span>
+                        <span><strong>Ja, och vi för in kontohändelserna för hand</strong>
+                            <span class="muted" style="display:block">Ert program hämtar alltså
+                            <strong>inte</strong> transaktionerna från banken själv. Vi sköter
+                            avgifter och kontroll, och ni får en <strong>SIE-fil</strong> att läsa
+                            in.</span></span>
                     </label>
 
                     <label class="choice">
                         <input type="radio" name="@(uid)_shape" id="@(uid)_shapeFees" value="fees">
-                        <span><strong>Ja — och det har bankkoppling</strong>
+                        <span><strong>Ja, och det hämtar transaktionerna från banken</strong>
                             <span class="muted" style="display:block">Ert program bokför varje
-                            kontohändelse självt. Vi skickar ingenting som ska bokföras.</span></span>
+                            kontohändelse självt. Då får ni <strong>ingen SIE-fil</strong> från oss
+                            — avgifterna har redan bokförts via banken, och en fil till skulle
+                            bokföra dem en gång till.</span></span>
                     </label>
 
-                    <div class="muted">Valet går att ändra åt alla håll senare.</div>
+                    <div class="muted">
+                        Valet går att ändra åt alla håll senare. Osäker? Välj det mittersta —
+                        en SIE-fil går alltid att låta bli att läsa in.
+                    </div>
 
                     <div class="fields">
                         <label>Räkenskapsår
@@ -628,8 +654,63 @@
                         <div id="@(uid)_yearSummary">—</div></div>
                     <div class="ek-card"><div class="ek-cardh"><h2>Kontoplan</h2></div>
                         <div id="@(uid)_accountSummary">—</div></div>
-                    <div class="ek-card wide"><div class="ek-cardh"><h2>Kontoroller</h2></div>
-                        <div id="@(uid)_roleSummary">—</div></div>
+
+                    @*
+                        ⚠️⚠️ HETTE "KONTOROLLER" OCH VISADE "12 mappade".
+                        Stefan under provning: "Jag förstår inte vad 'Kontoroller' är för nåt och
+                        vad de 12 mappade är, men jag förstår inte bokföring…" — och det är exakt
+                        den personen modulen finns för. Rubriken är nu frågan kortet svarar på, och
+                        varje rad står som en HÄNDELSE i stället för ett kontobegrepp.
+                    *@
+                    <div class="ek-card wide">
+                        <div class="ek-cardh">
+                            <h2>Vad hamnar var?</h2>
+                            <span class="meta" id="@(uid)_roleSummary"></span>
+                        </div>
+                        <p class="muted" style="margin-top:0">
+                            När något händer behöver bokföringen veta vilket konto det gäller.
+                            Kopplingarna fylls i automatiskt ur mallen — du behöver bara ändra dem
+                            om er kontoplan ser annorlunda ut.
+                        </p>
+                        <table class="t">
+                            <thead><tr><th>När det här händer</th><th>Konto</th></tr></thead>
+                            <tbody id="@(uid)_roleRows"></tbody>
+                        </table>
+                        <div class="ek-alert ek-bad d-none" id="@(uid)_roleError" style="margin-top:12px"></div>
+                    </div>
+
+                    @* Kontoplanen, att faktiskt ändra i. *@
+                    <div class="ek-card wide">
+                        <div class="ek-cardh">
+                            <h2>Kontoplan</h2>
+                            <span class="meta" id="@(uid)_chartMeta"></span>
+                        </div>
+                        <p class="muted" style="margin-top:0">
+                            Kontona kom ur mallen. Saknas något — lägg till det.
+                            <strong>Ett konto raderas aldrig</strong>, det stängs: bokförda poster
+                            pekar på numret och ska gå att förklara i efterhand.
+                        </p>
+
+                        <div class="amount-row" style="margin-bottom:12px">
+                            <label>Nummer <input type="number" id="@(uid)_accNumber"
+                                   min="1000" max="8999" style="width:7rem"></label>
+                            <label>Namn <input type="text" id="@(uid)_accName" maxlength="120"
+                                   style="width:18rem" placeholder="T.ex. Sponsring"></label>
+                            <button type="button" class="ek-btn ek-small" id="@(uid)_accAdd">Lägg till</button>
+                        </div>
+
+                        <div class="ek-alert ek-bad d-none" id="@(uid)_chartError"></div>
+                        <div class="ek-alert ek-ok d-none" id="@(uid)_chartOk"></div>
+
+                        <table class="t">
+                            <thead>
+                                <tr><th>Konto</th><th>Namn</th><th>Används till</th>
+                                    <th class="n">Poster</th><th></th></tr>
+                            </thead>
+                            <tbody id="@(uid)_chartRows"></tbody>
+                        </table>
+                        <div class="more" id="@(uid)_chartMore"></div>
+                    </div>
                 </div>
             </section>
 
@@ -1135,11 +1216,21 @@
             }).join('');
         el('accountSummary').textContent = status.accountCount + ' konton';
 
+        // ⚠️ "Alla 12 mappade" sa ingenting till den som inte kan bokföring. Nu står antalet
+        //    bara som en lugn bricka, och tabellen under säger vad kopplingarna ÄR.
         var missing = status.missingRoles || [];
-        el('roleSummary').innerHTML = missing.length === 0
-            ? '<span style="color:var(--ok);font-weight:600">Alla ' + status.rolesTotal + ' mappade</span>'
-            : '<span style="color:#b02a37;font-weight:600">' + missing.length + ' saknas</span><div class="muted">'
-              + missing.map(function (r) { return ROLE_NAMES[r] || r; }).join(', ') + '</div>';
+        el('roleSummary').textContent = missing.length === 0
+            ? 'Allt har ett konto'
+            : missing.length + ' saknar konto';
+        el('roleSummary').style.color = missing.length === 0 ? '' : '#b02a37';
+
+        if (canWrite) loadChart();
+
+        // ⚠️⚠️ ÅRSFÄLTET MÅSTE FÖLJA ARBETSÅRET. Det stod på dagens år oavsett vad föreningen
+        //    lagt upp — så en förening som arbetar i 2025 och trycker "Spara uppsättningen" för
+        //    att ändra NÅGOT ANNAT (formen, momsen) fick tyst ett räkenskapsår 2026 på köpet.
+        //    Uppsättningen skapar året som står i fältet.
+        if (status.workingYear) el('year').value = status.workingYear;
 
         // ── Vilket år bokför vi i? ────────────────────────────────────────────────────────
         // ⚠️ Förifyllningen får ALDRIG vara tyst. Ligger i dag inuti året står det ingenting
@@ -1865,6 +1956,135 @@
                 el('budError').textContent = e.message;
                 el('budError').classList.remove('d-none');
             });
+    });
+
+
+    // ══ KONTOPLANEN OCH KOPPLINGARNA ═════════════════════════════════════════════════════
+    //
+    // ⚠️⚠️ Kontoplanen gick inte att ändra från någon yta alls fram till 2026-09-22. För den som
+    //    matar in förra årets bokföring är det blockerande: en förening har konton vi inte sått.
+    var chartAccounts = [], chartRoles = [], chartExpanded = false;
+
+    function chartRow(a) {
+        var uses = (a.roles || []).join(', ');
+        return '<tr' + (a.isActive ? '' : ' class="muted"') + '>'
+             + '<td>' + a.number + '</td>'
+             + '<td><input type="text" class="chart-name" data-acc="' + a.number + '" value="'
+             + esc(a.name) + '" maxlength="120"></td>'
+             + '<td class="muted">' + esc(uses) + '</td>'
+             + '<td class="n">' + (a.entryLines || 0) + '</td>'
+             + '<td class="n"><button type="button" class="linkbtn" data-toggle-acc="' + a.number + '">'
+             + (a.isActive ? 'Stäng' : 'Öppna') + '</button></td>'
+             + '</tr>';
+    }
+
+    function renderChart() {
+        // ⚠️ Kontoplanen är ~39 rader. Visa tio och erbjud resten — en vägg av rader läses inte.
+        var show = chartExpanded ? chartAccounts : chartAccounts.slice(0, 10);
+        el('chartRows').innerHTML = show.map(chartRow).join('');
+        el('chartMeta').textContent = chartAccounts.length + ' konton';
+
+        el('chartMore').innerHTML = (chartExpanded || chartAccounts.length <= 10)
+            ? '' : '<button type="button">Visa alla ' + chartAccounts.length + ' konton</button>';
+
+        var more = el('chartMore').querySelector('button');
+        if (more) more.addEventListener('click', function () { chartExpanded = true; renderChart(); });
+
+        // ⚠️ Namnet sparas när fältet lämnas, inte vid varje tangenttryck — annars blir varje
+        //    bokstav ett anrop, och ett halvskrivet namn hinner sparas.
+        el('chartRows').querySelectorAll('input.chart-name').forEach(function (i) {
+            i.addEventListener('change', function () {
+                saveAccount(parseInt(i.dataset.acc, 10), i.value, true);
+            });
+        });
+
+        el('chartRows').querySelectorAll('button[data-toggle-acc]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var num = parseInt(btn.dataset.toggleAcc, 10);
+                var acc = chartAccounts.find(function (a) { return a.number === num; });
+                postJson('/umbraco/surface/EkonomiAdmin/SetAccountActive', {
+                    issuerType: issuerType, issuerId: issuerId, number: num, active: !acc.isActive
+                }).then(chartDone).catch(chartFailed);
+            });
+        });
+    }
+
+    function renderRoles() {
+        // ⚠️ Kontot väljs ur FÖRENINGENS egen kontoplan, aldrig ur en lista i koden — en klubb som
+        //    lagt till 3015 ska kunna peka medlemsavgiften dit.
+        var options = chartAccounts.filter(function (a) { return a.isActive; });
+
+        el('roleRows').innerHTML = chartRoles.map(function (r) {
+            return '<tr><td>' + esc(r.label)
+                 + (r.hint ? '<div class="muted">' + esc(r.hint) + '</div>' : '') + '</td>'
+                 + '<td><select data-role="' + esc(r.key) + '">'
+                 + options.map(function (a) {
+                       return '<option value="' + a.number + '"'
+                            + (a.number === r.accountNumber ? ' selected' : '') + '>'
+                            + a.number + ' · ' + esc(a.name) + '</option>';
+                   }).join('')
+                 + '</select></td></tr>';
+        }).join('');
+
+        el('roleRows').querySelectorAll('select[data-role]').forEach(function (sel) {
+            sel.addEventListener('change', function () {
+                postJson('/umbraco/surface/EkonomiAdmin/SetAccountRole', {
+                    issuerType: issuerType, issuerId: issuerId,
+                    roleKey: sel.dataset.role, number: parseInt(sel.value, 10)
+                }).then(function (d) {
+                    if (!d.success) { el('roleError').textContent = d.message; show(el('roleError'), true); return; }
+                    show(el('roleError'), false);
+                    loadChart();
+                }).catch(function (e) {
+                    el('roleError').textContent = e.message; show(el('roleError'), true);
+                });
+            });
+        });
+    }
+
+    function loadChart() {
+        return fetch('/umbraco/surface/EkonomiAdmin/GetChart?issuerType=' + issuerType
+                     + '&issuerId=' + issuerId, { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) throw new Error(d.message || 'Kontoplanen gick inte att läsa.');
+                chartAccounts = d.accounts || [];
+                chartRoles = d.roles || [];
+                renderChart();
+                renderRoles();
+            })
+            .catch(function (e) {
+                el('chartError').textContent = e.message;
+                show(el('chartError'), true);
+            });
+    }
+
+    function chartDone(d) {
+        if (!d.success) { el('chartError').textContent = d.message; show(el('chartError'), true); return; }
+        show(el('chartError'), false);
+        el('chartOk').textContent = d.message;
+        show(el('chartOk'), true);
+        loadChart();
+    }
+
+    function chartFailed(e) {
+        el('chartError').textContent = e.message;
+        show(el('chartError'), true);
+    }
+
+    function saveAccount(number, name, rename) {
+        return postJson('/umbraco/surface/EkonomiAdmin/SaveAccount', {
+            issuerType: issuerType, issuerId: issuerId,
+            number: number, name: name, rename: rename === true
+        }).then(chartDone).catch(chartFailed);
+    }
+
+    if (canWrite) el('accAdd').addEventListener('click', function () {
+        var num = parseInt(el('accNumber').value, 10) || 0;
+        saveAccount(num, el('accName').value, false).then(function () {
+            el('accNumber').value = '';
+            el('accName').value = '';
+        });
     });
 
 

@@ -38,6 +38,7 @@ namespace HpskSite.Controllers
         private readonly LedgerPaymentService _paymentService;
         private readonly LedgerOverviewService _overviewService;
         private readonly LedgerBudgetService _budgetService;
+        private readonly LedgerChartService _chartService;
         private readonly LedgerManualPostingService _manualPosting;
         private readonly LedgerMembershipFeeBridge _feeBridge;
         private readonly LedgerSandboxService _sandbox;
@@ -59,6 +60,7 @@ namespace HpskSite.Controllers
             LedgerPaymentService paymentService,
             LedgerOverviewService overviewService,
             LedgerBudgetService budgetService,
+            LedgerChartService chartService,
             LedgerManualPostingService manualPosting,
             LedgerMembershipFeeBridge feeBridge,
             LedgerSandboxService sandbox,
@@ -74,6 +76,7 @@ namespace HpskSite.Controllers
             _paymentService = paymentService;
             _overviewService = overviewService;
             _budgetService = budgetService;
+            _chartService = chartService;
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
             _sandbox = sandbox;
@@ -865,9 +868,149 @@ namespace HpskSite.Controllers
             if (current?.Email is null) return 0;
             return _memberService.GetByEmail(current.Email)?.Id ?? 0;
         }
+
+        // ── Kontoplanen ──────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Föreningens kontoplan, med kontorollerna i klartext.
+        ///
+        /// <para><b>⚠️ Kontoplanen gick inte att ändra från någon yta alls fram till 2026-09-22.</b>
+        /// Kontona såddes ur mallen och sedan var det slut. För den som matar in förra årets
+        /// bokföring är det blockerande — en förening har konton vi inte sått.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetChart(int issuerType, int issuerId)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            try
+            {
+                var rows = _chartService.List(issuerType, issuerId);
+
+                return Json(new
+                {
+                    success = true,
+                    accounts = rows.Select(a => new
+                    {
+                        number = a.Number,
+                        name = a.Name,
+                        isActive = a.IsActive,
+                        fromTemplate = a.FromTemplate,
+                        entryLines = a.EntryLines,
+                        isBalance = a.IsBalance,
+                        isIncome = a.IsIncome,
+                        // ⚠️ Rollerna i KLARTEXT, aldrig som nycklar. "revenue-membership-fee"
+                        // säger ingenting till en kassör som inte kan bokföring.
+                        roles = a.Roles.Select(LedgerAccountRoles.Label).ToList()
+                    }),
+                    // Hela rollistan, som en fråga var: "när det här händer, vart går pengarna?"
+                    roles = LedgerAccountRoles.All.Select(r => new
+                    {
+                        key = r,
+                        label = LedgerAccountRoles.Label(r),
+                        hint = LedgerAccountRoles.Hint(r),
+                        accountNumber = rows.FirstOrDefault(a => a.Roles.Contains(r))?.Number ?? 0
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte läsa kontoplanen för {Typ}/{Id}.", issuerType, issuerId);
+                return Json(new { success = false, message = "Kontoplanen gick inte att läsa just nu." });
+            }
+        }
+
+        /// <summary>Lägger till ett konto, eller döper om ett som finns.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveAccount([FromBody] SaveAccountRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var result = request.Rename
+                ? _chartService.Rename(request.IssuerType, request.IssuerId, request.Number, request.Name ?? "")
+                : _chartService.Add(request.IssuerType, request.IssuerId, request.Number, request.Name ?? "");
+
+            return Json(result.Success
+                ? new { success = true, message = request.Rename
+                    ? $"Konto {request.Number} har fått ett nytt namn."
+                    : $"Konto {request.Number} tillagt." }
+                : new { success = false, message = result.Error! });
+        }
+
+        /// <summary>
+        /// Stänger eller öppnar ett konto. <b>Raderar aldrig</b> — bokförda rader pekar på numret.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetAccountActive([FromBody] SetAccountActiveRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att ändra." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var result = _chartService.SetActive(
+                request.IssuerType, request.IssuerId, request.Number, request.Active);
+
+            return Json(result.Success
+                ? new { success = true, message = request.Active
+                    ? $"Konto {request.Number} är öppet igen."
+                    : $"Konto {request.Number} är stängt. Det syns inte i väljaren, men gamla poster ligger kvar." }
+                : new { success = false, message = result.Error! });
+        }
+
+        /// <summary>Pekar om en kontoroll till ett annat konto.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetAccountRole([FromBody] SetAccountRoleRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att ändra." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var result = _chartService.SetRole(
+                request.IssuerType, request.IssuerId, request.RoleKey ?? "", request.Number);
+
+            return Json(result.Success
+                ? new { success = true, message = $"Går nu till konto {request.Number}." }
+                : new { success = false, message = result.Error! });
+        }
+
     }
 
     /// <summary>Det sandlådeknappen skickar. ⚠️ ÄGARENS nod-id, inte ett utställar-id.</summary>
+    /// <summary>⚠️ <c>Rename</c> skiljer "lägg till" från "döp om" — numret ändras aldrig.</summary>
+    public class SaveAccountRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int Number { get; set; }
+        public string? Name { get; set; }
+        public bool Rename { get; set; }
+    }
+
+    public class SetAccountActiveRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int Number { get; set; }
+        public bool Active { get; set; }
+    }
+
+    public class SetAccountRoleRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public string? RoleKey { get; set; }
+        public int Number { get; set; }
+    }
+
     public class SaveBudgetRequest
     {
         public int IssuerType { get; set; }
