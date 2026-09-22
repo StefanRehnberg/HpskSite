@@ -61,8 +61,20 @@ namespace HpskSite.Services.Ledger
             /// </summary>
             public List<string> MissingRoles { get; } = new();
 
-            /// <summary>Delar föreningen upp fordringarna, eller ligger allt på ett konto?</summary>
+            /// <summary>Bär FILEN mer än ett fordringskonto? Beskriver innehållet, inte valet.</summary>
             public bool IsSplit => Rows.Select(r => r.ReceivableAccount).Distinct().Count() > 1;
+
+            /// <summary>
+            /// Har föreningen PEKAT UT minst ett eget fordringskonto per intäktsslag?
+            ///
+            /// <para><b>⚠️⚠️ SKILD FRÅN <see cref="IsSplit"/>, och skillnaden är inte akademisk.</b>
+            /// <c>IsSplit</c> härleds ur raderna, så en period utan avgifter ger <c>false</c> —
+            /// och ytan skrev då "Allt på ett fordringskonto" till en klubb som just delat upp
+            /// dem. Det är ett påstående om föreningens egen inställning, och det var
+            /// motsatsen till sanningen. Uppdelningen är ett VAL och läses ur kontoplanen;
+            /// raderna säger bara vad den här filen råkar innehålla.</para>
+            /// </summary>
+            public bool SplitConfigured { get; set; }
         }
 
         /// <summary>
@@ -92,6 +104,9 @@ namespace HpskSite.Services.Ledger
 
             var byRole = roles.Where(r => r.AccountNumber > 0)
                               .ToDictionary(r => r.RoleKey, r => r);
+
+            // Valet läses ur kontoplanen, aldrig ur raderna — se SplitConfigured.
+            result.SplitConfigured = LedgerAccountRoles.Optional.Any(byRole.ContainsKey);
 
             // ⚠️ Anspråken tas på CreatedUtc — när avgiften uppstod. Se klassens sammanfattning:
             //    att filtrera på obetalda skulle lämna 1510 negativt för allt som hann betalas.

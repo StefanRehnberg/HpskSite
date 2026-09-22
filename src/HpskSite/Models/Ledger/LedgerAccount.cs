@@ -1,3 +1,4 @@
+using System.Linq;
 using NPoco;
 
 namespace HpskSite.Models.Ledger
@@ -198,6 +199,22 @@ namespace HpskSite.Models.Ledger
             VatOutgoing,
             VatIncoming
         };
+
+        /// <summary>
+        /// Varje roll som går att peka ut — obligatoriska OCH valfria.
+        ///
+        /// <para><b>⚠️⚠️ VALIDERING OCH KRAVLISTA ÄR TVÅ OLIKA FRÅGOR.</b> <see cref="All"/> svarar
+        /// på <i>vad måste vara mappat för att vi ska kunna bokföra</i> och driver
+        /// <c>rolesMapped/rolesTotal</c>. Den här svarar på <i>vad får en förening peka ut</i>.
+        /// Att använda <see cref="All"/> som validering gjorde Fredriks valbara fordringskonton
+        /// <b>omöjliga att sätta</b> — <c>SetRole</c> svarade "Okänd roll" och kontoplanen erbjöd
+        /// dem aldrig, så funktionen fanns men var oåtkomlig från ytan. Mätt i genomgången
+        /// 2026-09-22.</para>
+        /// </summary>
+        public static readonly string[] Known = All.Concat(Optional).ToArray();
+
+        /// <summary>Är rollen valfri? Styr att en omappad roll inte rapporteras som en lucka.</summary>
+        public static bool IsOptional(string roleKey) => Optional.Contains(roleKey);
 
         /// <summary>
         /// Rollen som en HÄNDELSE, på svenska.

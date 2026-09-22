@@ -229,13 +229,32 @@ namespace HpskSite.Services.Ledger
         /// </summary>
         public LedgerChartResult SetRole(int issuerType, int issuerId, string roleKey, int number)
         {
-            if (!LedgerAccountRoles.All.Contains(roleKey))
+            if (!LedgerAccountRoles.Known.Contains(roleKey))
                 return LedgerChartResult.Failed("Okänd roll.");
 
             try
             {
                 using var db = _databaseFactory.CreateDatabase();
                 var ldb = new LedgerDb(db, issuerId);
+
+                // ⚠️⚠️ NOLLA = TA BORT KOPPLINGEN, och bara för en VALFRI roll. Utan den här
+                //    grenen gick ett valbart fordringskonto att sätta men aldrig att ångra —
+                //    och en inställning som inte går tillbaka är en inställning man inte vågar
+                //    prova. En obligatorisk roll får däremot aldrig nollas: en betalning utan
+                //    konto går inte att bokföra, och det upptäcks först på tävlingsdagen.
+                if (number == 0)
+                {
+                    if (!LedgerAccountRoles.IsOptional(roleKey))
+                        return LedgerChartResult.Failed(
+                            "Den här kopplingen måste peka på ett konto — välj vilket.");
+
+                    ldb.Execute(
+                        @"DELETE FROM dbo.LedgerAccountRole
+                           WHERE IssuerType = @0 AND IssuerId = @1 AND RoleKey = @2",
+                        issuerType, issuerId, roleKey);
+
+                    return new LedgerChartResult { Number = 0 };
+                }
 
                 var open = ldb.ExecuteScalar<int>(
                     @"SELECT COUNT(1) FROM dbo.LedgerAccount

@@ -1651,7 +1651,10 @@
         if (!el('fordrFrom').value) setDateField('fordrFrom', String(d.from).substring(0, 10));
         if (!el('fordrTo').value) setDateField('fordrTo', String(d.to).substring(0, 10));
 
-        el('fordrMeta').textContent = d.isSplit
+        // ⚠️ Etiketten beskriver FÖRENINGENS VAL, inte den här periodens rader. Läst ur raderna
+        //    sa den "Allt på ett fordringskonto" så fort perioden var tom — alltså motsatsen till
+        //    vad klubben just ställt in.
+        el('fordrMeta').textContent = d.splitConfigured
             ? 'Uppdelat per intäktsslag' : 'Allt på ett fordringskonto';
 
         // ⚠️ En roll utan konto SAGS. En fordran som inte kan exporteras gor filen ofullstandig,
@@ -3154,9 +3157,20 @@
         var options = chartAccounts.filter(function (a) { return a.isActive; });
 
         el('roleRows').innerHTML = chartRoles.map(function (r) {
+            // ⚠️⚠️ EN VALFRI ROLL MÅSTE KUNNA STÅ TOM. Utan det tomma alternativet väljs första
+            //    kontot i listan automatiskt, och raden PÅSTÅR en koppling som inte finns —
+            //    på en inställning vars hela poäng är att den är frivillig. Det tomma valet är
+            //    också enda vägen tillbaka; servern tolkar 0 som "ta bort", men bara här.
+            var tomt = r.optional
+                ? '<option value="0"' + (!r.accountNumber ? ' selected' : '') + '>'
+                  + '— används inte, allt ligger på kundfordran —</option>'
+                : '';
+
             return '<tr><td>' + esc(r.label)
+                 + (r.optional ? ' <span class="muted">(valfritt)</span>' : '')
                  + (r.hint ? '<div class="muted">' + esc(r.hint) + '</div>' : '') + '</td>'
                  + '<td><select class="form-select form-select-sm" data-role="' + esc(r.key) + '">'
+                 + tomt
                  + options.map(function (a) {
                        return '<option value="' + a.number + '"'
                             + (a.number === r.accountNumber ? ' selected' : '') + '>'
