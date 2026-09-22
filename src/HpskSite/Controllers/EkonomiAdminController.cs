@@ -46,6 +46,7 @@ namespace HpskSite.Controllers
         private readonly LedgerBankImportService _bankService;
         private readonly LedgerClosingService _closingService;
         private readonly LedgerSieExportService _sieService;
+        private readonly LedgerReceivableExportService _receivableService;
 
         /// <summary>
         /// Taket för ett uppladdat kontoutdrag.
@@ -79,6 +80,7 @@ namespace HpskSite.Controllers
             LedgerBankImportService bankService,
             LedgerClosingService closingService,
             LedgerSieExportService sieService,
+            LedgerReceivableExportService receivableService,
             IMemberManager memberManager,
             IMemberService memberService,
             ILogger<EkonomiAdminController> logger)
@@ -94,6 +96,7 @@ namespace HpskSite.Controllers
             _bankService = bankService;
             _closingService = closingService;
             _sieService = sieService;
+            _receivableService = receivableService;
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
             _sandbox = sandbox;
@@ -278,6 +281,111 @@ namespace HpskSite.Controllers
 
                 return Json(new { success = false, message = "Översikten gick inte att läsa just nu." });
             }
+        }
+
+        // ══ FORDRINGSEXPORTEN ════════════════════════════════════════════════════════════════
+        //
+        // ⚠️⚠️ ANNAN FIL, ANNAT ÄNDAMÅL än SIE-exporten nedan. Den exporterar vår journal; den här
+        //    exporterar ANSPRÅKEN — vad föreningen har rätt att få in. Formen är Fredriks:
+        //    1510 debet mot valt intäktskonto, så klubbens bankkoppling kan boka 1930/1510 när
+        //    pengarna kommer i stället för att skapa intäkten en andra gång.
+
+        /// <summary>Förhandsvisning: vilka fordringar skulle filen bära för perioden?</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetReceivables(
+            int issuerType, int issuerId, string? from = null, string? to = null)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var status = _setupService.GetStatus(issuerType, issuerId);
+
+            // ⚠️ Bara den förening som bokför NÅGON ANNANSTANS har nytta av den här filen. Bokför
+            //    vi åt dem finns fordran redan i deras egen liggare, och en import skulle bokföra
+            //    samma anspråk två gånger.
+            if (LedgerIssuerShape.KeepsBooks(status.Shape))
+                return Json(new { success = true, applicable = false });
+
+            if (!LedgerIssuerShape.OffersExport(status.Shape))
+                return Json(new { success = true, applicable = false, bankLinked = true });
+
+            var (f, t) = ResolvePeriod(from, to, status);
+
+            try
+            {
+                var r = _receivableService.Build(issuerType, issuerId, f, t);
+
+                return Json(new
+                {
+                    success = true,
+                    applicable = true,
+                    from = f,
+                    to = t,
+                    isSplit = r.IsSplit,
+                    total = r.Total,
+                    missingRoles = r.MissingRoles,
+                    rows = r.Rows
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Fordringarna gick inte att summera för {Typ}/{Id}.",
+                    issuerType, issuerId);
+                return Json(new { success = false, message = "Fordringarna gick inte att läsa." });
+            }
+        }
+
+        /// <summary>Laddar ner fordringarna som SIE-fil.</summary>
+        [HttpGet]
+        public async Task<IActionResult> ExportReceivables(
+            int issuerType, int issuerId, string? from = null, string? to = null)
+        {
+            var (ok, name) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Content(DeniedMessage);
+
+            var status = _setupService.GetStatus(issuerType, issuerId);
+
+            if (LedgerIssuerShape.KeepsBooks(status.Shape))
+                return Content("Föreningen bokför här, så fordringarna finns redan i liggaren.");
+
+            var (f, t) = ResolvePeriod(from, to, status);
+
+            try
+            {
+                var r = _receivableService.Build(issuerType, issuerId, f, t);
+
+                if (r.Rows.Count == 0)
+                    return Content("Inga avgifter uppstod under perioden.");
+
+                var bytes = _receivableService.BuildFile(r, name ?? "Förening", issuerId < 0);
+                var fileName = (issuerId < 0 ? "SANDLADA-" : "")
+                             + $"fordringar-{f:yyyyMMdd}-{t:yyyyMMdd}.se";
+
+                return File(bytes, "text/plain", fileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Fordringsexporten misslyckades för {Typ}/{Id}.",
+                    issuerType, issuerId);
+                return Content("Filen gick inte att skapa.");
+            }
+        }
+
+        /// <summary>
+        /// Perioden, med arbetsårets gränser som förval.
+        /// <para>⚠️ Ett oläsbart datum blir ALDRIG tyst "hela året" — då hade en felskrivning
+        /// kunnat exportera om en period som redan bokförts, och dubbelbokfört intäkten.</para>
+        /// </summary>
+        private static (DateTime From, DateTime To) ResolvePeriod(
+            string? from, string? to, LedgerSetupStatus status)
+        {
+            var start = status.WorkingYearStart ?? new DateTime(DateTime.Today.Year, 1, 1);
+            var end = status.WorkingYearEnd ?? new DateTime(DateTime.Today.Year, 12, 31);
+
+            if (DateTime.TryParse(from, out var f)) start = f.Date;
+            if (DateTime.TryParse(to, out var t)) end = t.Date;
+
+            return (start, end);
         }
 
         // ══ SIE-EXPORTEN (P10.1) ═════════════════════════════════════════════════════════════
@@ -777,12 +885,33 @@ namespace HpskSite.Controllers
             if (issuerType != DocumentOwnerType.Club)
                 return Json(new { success = true, applicable = false });
 
+            // ⚠️⚠️ SANDLÅDAN SER INGA MEDLEMSAVGIFTER, OCH DET MÅSTE STÅ PÅ SKÄRMEN.
+            //    `MembershipFeeCharge` är LIVE-data nycklad på klubbens riktiga nod-id; en
+            //    sandlåda har ett negativt id och träffar därför noll rader. Utan den här grenen
+            //    svarade ytan "Inget · Inget" — oskiljbart från en klubb där alla har betalat, på
+            //    årets STÖRSTA intäktspost. En klubb som provar i sandlådan drog då slutsatsen
+            //    att avgifterna inte finns i systemet.
+            //    ⚠️ Att i stället läsa ÄGARENS avgifter vore värre: knappen "Bokför" hade då
+            //    skrivit verifikationer för riktiga krav in i en kastbar liggare, och nästa
+            //    sandlåda hade gjort det igen. Sandlådan säger vad den inte kan visa.
+            if (issuerId < 0)
+                return Json(new
+                {
+                    success = true,
+                    applicable = true,
+                    sandbox = true,
+                    message = "Medlemsavgifterna ligger i den riktiga bokföringen och följer inte "
+                            + "med hit. En sandlåda får inte bokföra riktiga krav — byt till "
+                            + "Riktig bokföring för att se och bokföra dem."
+                });
+
             try
             {
                 return Json(new
                 {
                     success = true,
                     applicable = true,
+                    sandbox = false,
                     fees = _feeBridge.Summarise(issuerId, year)
                 });
             }
@@ -1246,6 +1375,14 @@ namespace HpskSite.Controllers
             var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
             if (!ok) return Json(new { success = false, message = DeniedMessage });
 
+            // ⚠️⚠️ ETT SAKNAT FÄLT ÄR INTE ETT ÄGARSKAPSFEL. Utan den här grenen svarade servern
+            // "Budgeten hör inte till den här föreningen" på en begäran som bara utelämnade
+            // budgetId — ett påstående om ÄGARSKAP när sanningen är ett påstående om BEGÄRAN.
+            // Det kostade en felsökningsrunda i kassörsgenomgången, och är samma felattribution
+            // som redan rättats på DeleteResult och RemoveShooterFromStartList.
+            if (request.BudgetId == 0)
+                return Json(new { success = false, message = "Begäran saknar budgetId — hämta utkastet först (GetBudgetEditor svarar med draftId)." });
+
             // ⚠️ Utkastet måste tillhöra den utställare anroparen har behörighet till. Utan den
             // kontrollen räcker behörighet till EN förening för att skriva i en annans budget.
             if (!BudgetBelongsToIssuer(request.BudgetId, request.IssuerType, request.IssuerId))
@@ -1279,6 +1416,10 @@ namespace HpskSite.Controllers
 
             var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
             if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            // ⚠️ Samma skillnad som i SaveBudgetDraft: saknat fält namnges, ägarskap är något annat.
+            if (request.BudgetId == 0)
+                return Json(new { success = false, message = "Begäran saknar budgetId — hämta utkastet först (GetBudgetEditor svarar med draftId)." });
 
             if (!BudgetBelongsToIssuer(request.BudgetId, request.IssuerType, request.IssuerId))
                 return Json(new { success = false, message = "Budgeten hör inte till den här föreningen." });

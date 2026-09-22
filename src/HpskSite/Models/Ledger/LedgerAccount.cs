@@ -118,6 +118,20 @@ namespace HpskSite.Models.Ledger
         /// </summary>
         public const string AccountsReceivable = "accounts-receivable";
 
+        /// <summary>
+        /// Kundfordran för <b>deltagaravgifter</b>. <b>Valfri.</b>
+        ///
+        /// <para><b>⚠️⚠️ SKÄLET ÄR INTE ORDNING — DET ÄR ATT SALDOT SKA GÅ ATT LÄSA.</b> Fredrik
+        /// (Varbergs PK, 2026-09-23): <i>"Medlemskapen tar i värsta fall ett halvår att få in och
+        /// då är det dumt att blanda dessa med tävlingsintäkter som oftast kommer in med en
+        /// gång."</i> Ligger båda på samma konto går det inte att skilja normal eftersläpning
+        /// från en avgift som aldrig kom — och då säger fordringssaldot ingenting.</para>
+        /// </summary>
+        public const string ReceivableParticipationFee = "receivable-participation-fee";
+
+        /// <summary>Kundfordran för <b>medlemsavgifter</b>. <b>Valfri.</b> Se ovan.</summary>
+        public const string ReceivableMembershipFee = "receivable-membership-fee";
+
         public const string AccountsPayable = "accounts-payable";
 
         /// <summary>Öresavrundning. Finns för att en balanserad verifikation alltid ska gå att skriva.</summary>
@@ -139,6 +153,36 @@ namespace HpskSite.Models.Ledger
         /// momsregistrera kiosken finns kontot redan — i stället för att bokföringen felar mitt i
         /// en tävlingsdag.</para>
         /// </summary>
+        /// <summary>
+        /// Roller föreningen KAN mappa, men inte måste.
+        ///
+        /// <para><b>⚠️⚠️ FÅR ALDRIG LIGGA I <see cref="All"/>.</b> Den listan driver
+        /// <c>rolesMapped/rolesTotal</c> och startkontrollen — läggs de här dit rapporteras varje
+        /// befintlig förening plötsligt som ofullständigt uppsatt, för något de inte bett om och
+        /// inte behöver. "Valbart" var Fredriks eget ord, och det är ett krav, inte en artighet.</para>
+        ///
+        /// <para>Omappad ⇒ fordran hamnar på <see cref="AccountsReceivable"/> som förut.</para>
+        /// </summary>
+        public static readonly string[] Optional =
+        {
+            ReceivableParticipationFee,
+            ReceivableMembershipFee
+        };
+
+        /// <summary>
+        /// Fordringsrollen för ett intäktsslag — den specifika när den finns, annars den allmänna.
+        ///
+        /// <para><b>⚠️ Paras med intäktsrollen ur SAMMA fråga.</b> Fordran och intäkt är två ben i
+        /// samma verifikation; härleds de ur olika klassificeringar kan en deltagaravgift bokföras
+        /// mot medlemsfordran, och det syns först när någon försöker läsa saldot.</para>
+        /// </summary>
+        public static string ReceivableFor(string revenueRole) => revenueRole switch
+        {
+            RevenueParticipationFee => ReceivableParticipationFee,
+            RevenueMembershipFee => ReceivableMembershipFee,
+            _ => AccountsReceivable
+        };
+
         public static readonly string[] All =
         {
             RevenueParticipationFee,
@@ -187,6 +231,8 @@ namespace HpskSite.Models.Ledger
             Swish                   => "Pengar som kommer in via Swish",
             CashBox                 => "Kontanter i kassan",
             AccountsReceivable      => "Någon är skyldig oss pengar vid årsskiftet",
+            ReceivableParticipationFee => "Obetalda deltagaravgifter",
+            ReceivableMembershipFee => "Obetalda medlemsavgifter",
             AccountsPayable         => "Vi är skyldiga någon pengar vid årsskiftet",
             Rounding                => "Ören som blir över vid avrundning",
             VatOutgoing             => "Moms vi tar ut när vi säljer",
@@ -202,6 +248,16 @@ namespace HpskSite.Models.Ledger
         public static string Hint(string? roleKey) => roleKey switch
         {
             AccountsReceivable => "Obetalda avgifter vid bokslutet hamnar här, så de syns i balansräkningen.",
+
+            // ⚠️ Förklaringen säger VARFÖR man skulle vilja dela, inte bara vad fältet gör. Utan
+            //    skälet ser de två raderna ut som onödig administration — och då mappar ingen dem.
+            ReceivableParticipationFee =>
+                "Frivilligt. Egna konton gör att medlemsavgifter som normalt dröjer inte blandas "
+                + "med anmälningsavgifter som skulle ha kommit direkt. Lämnas den tom hamnar allt "
+                + "på kontot ovan.",
+            ReceivableMembershipFee =>
+                "Frivilligt. Medlemsavgifter kan ta ett halvår att få in — på ett eget konto syns "
+                + "det som normal eftersläpning i stället för som en obetald avgift.",
             Rounding           => "Behövs för att en verifikation alltid ska gå ihop på öret.",
             VatOutgoing        => "Används bara om föreningen är momsregistrerad.",
             VatIncoming        => "Används bara om föreningen är momsregistrerad.",

@@ -26,6 +26,50 @@ namespace HpskSite.Models.Ledger
 
         /// <summary>Panel 3 — en rad per tävling eller händelse som har avgifter.</summary>
         public List<SourceCompleteness> PerSource { get; } = new();
+
+        /// <summary>
+        /// Panel 4 för den förening som <b>bokför här</b> — de senast bokförda verifikationerna.
+        ///
+        /// <para><b>⚠️⚠️ PANELEN LÄSTE BARA BETALNINGSRADER, OCH DÅ VAR DEN TOM.</b> En klubb som
+        /// bokfört ett helt år med manuella verifikationer fick svaret "Inga betalningar ännu" på
+        /// frågan "vad hände senast?". Panelens egen text sa varför: <i>"de flesta posterna skriver
+        /// ingen människa — de faller ut ur anmälningar och avgifter"</i>. Det är sant för en klubb
+        /// vars enda ekonomi är tävlingsavgifter, och <b>falskt för den som för hela sin bokföring
+        /// hos oss</b> — alltså precis den vi bygger liggaren för.</para>
+        ///
+        /// <para><b>⚠️ Tom lista betyder "föreningen bokför inte här", inte "inget har hänt"</b> —
+        /// då står panelen kvar på betalningsraderna. Ingen form att läsa av, ingen flagga att
+        /// hålla i takt: finns det verifikationer bokför de här, och då är verifikationerna det
+        /// sannare svaret. En bekräftad betalning bär alltid en verifikation hos en sådan förening,
+        /// så listorna dubblerar inte varandra.</para>
+        /// </summary>
+        public List<JournalRow> Journal { get; } = new();
+    }
+
+    /// <summary>En bokförd verifikation, så som panel 4 visar den.</summary>
+    public class JournalRow
+    {
+        public int EntryId { get; set; }
+
+        /// <summary>Verifikationsnumret, formaterat (<c>A-14</c>).</summary>
+        public string Number { get; set; } = "";
+
+        /// <summary>Bokföringsdatumet — det som avgör period, inte systemtiden.</summary>
+        public DateTime Date { get; set; }
+
+        public string Description { get; set; } = "";
+
+        /// <summary>Motpartens namn ur verifikationens snapshot. Tom när posten saknar motpart.</summary>
+        public string Counterparty { get; set; } = "";
+
+        /// <summary>
+        /// Verifikationens omslutning — summan av debetsidan.
+        ///
+        /// <para><b>⚠️ Ett ENDA tal, och det är summan av EN sida.</b> Debet och kredit är lika
+        /// stora i en balanserad verifikation, så att summera båda hade visat dubbelt belopp. Ett
+        /// "netto" finns inte att visa: en verifikation har inget tecken, det har kontona.</para>
+        /// </summary>
+        public decimal Amount { get; set; }
     }
 
     /// <summary>Ett avgiftsslag som ännu inte kommit in.</summary>
