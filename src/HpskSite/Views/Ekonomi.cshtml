@@ -243,6 +243,16 @@
   .ek-page input.chart-name { width: 100%; box-sizing: border-box; }
   .ek-page table.t td.chart-off { color: var(--bs-secondary-color); }
   .ek-page .headactions { display: flex; gap: .6rem; flex-wrap: wrap; }
+  /* Utfallslistan hor till raden ovanfor, sa den ar indragen och avskild med en linje. */
+  .ek-page .ek-drill { margin-top: 1rem; padding: .9rem 0 0 1rem;
+      border-top: 1px solid var(--bs-border-color); border-left: 3px solid var(--bs-border-color); }
+  .ek-page tr.ek-clickable { cursor: pointer; }
+  .ek-page tr.ek-clickable:hover td { background: var(--bs-tertiary-bg); }
+  .ek-page tr.ek-open td { background: var(--bs-tertiary-bg); font-weight: 600; }
+  /* ⚠️ Lagena bar ORD, aldrig bara farg (WCAG 1.4.1). Fargen ar en andrahandssignal. */
+  .ek-page .st-wait { color: var(--bs-secondary-color); }
+  .ek-page .st-claim { color: var(--ek-attn); font-weight: 600; }
+  .ek-page .st-paid { color: var(--bs-success-text-emphasis); font-weight: 600; }
   /* Rymmer ÅÅÅÅ-MM-DD utan att kapa. Bootstraps width:100% duger inte i en <label>. */
   .ek-page .ek-date { width: 11rem; }
 
@@ -591,6 +601,29 @@
                             <tbody id="@(uid)_perBody"></tbody>
                         </table>
                         <div class="more" id="@(uid)_perMore"></div>
+
+                        @* ⚠️⚠️ SIFFRAN GÅR INTE ATT AGERA PÅ — NAMNEN GÖR DET. "4 saknas" är det
+                           Fredrik beskrev som okänt för kassören, men utan vägen hit är panelen
+                           ett larm utan nästa steg, och kassören går tillbaka till just de
+                           Pending-fakturor som ska ersättas. *@
+                        <div class="ek-drill d-none" id="@(uid)_perDrill">
+                            <div class="ek-cardh">
+                                <h2 id="@(uid)_drillName"></h2>
+                                <button type="button" class="btn btn-sm btn-link"
+                                        id="@(uid)_drillClose">Stäng listan</button>
+                            </div>
+                            <div class="ek-alert ek-bad d-none" id="@(uid)_drillError"></div>
+                            <table class="t">
+                                <thead>
+                                    <tr><th>Betalare</th><th>Läge</th>
+                                        <th class="n" style="width:8rem">Belopp</th>
+                                        <th class="n" style="width:7rem">Kvitto</th></tr>
+                                </thead>
+                                <tbody id="@(uid)_drillBody"></tbody>
+                            </table>
+                            <div class="more" id="@(uid)_drillMore"></div>
+                        </div>
+
                         <p class="why">
                             Den här raden är poängen. Bokföringen ser vad som kom in — den kan aldrig
                             se vad som borde ha kommit in.
@@ -1268,12 +1301,120 @@
             var miss = s.missingCount > 0
                 ? '<td class="n miss">' + s.missingCount + ' · ' + kr(s.missingAmount) + '</td>'
                 : '<td class="n fine">Inget</td>';
-            return '<tr' + (s.missingCount > 0 ? ' class="gap"' : '') + '>'
+            var cls = 'ek-clickable' + (s.missingCount > 0 ? ' gap' : '')
+                    + (drillKey === s.sourceType + ':' + s.sourceId ? ' ek-open' : '');
+
+            return '<tr class="' + cls + '" data-src-type="' + esc(s.sourceType) + '"'
+                 + ' data-src-id="' + s.sourceId + '" data-src-name="' + esc(s.name) + '">'
                  + '<td>' + esc(s.name) + '</td><td class="n">' + s.expected + '</td>'
                  + '<td class="n">' + s.settled + '</td>' + miss + '</tr>';
         }, 'Visa alla {n} tävlingar');
 
+        // ⚠️ Delegerad lyssnare pa TBODY. Raderna byts ut vid varje omritning (capList skriver
+        //    innerHTML), sa en lyssnare bunden till raden slutar fungera efter forsta uppdateringen.
+        //    Samma fella som vaxeln i medaljutdelningen.
+        if (!el('perBody').dataset.wired) {
+            el('perBody').dataset.wired = '1';
+            el('perBody').addEventListener('click', function (ev) {
+                var tr = ev.target.closest('tr[data-src-type]');
+                if (tr) openDrill(tr.dataset.srcType, parseInt(tr.dataset.srcId, 10),
+                                  tr.dataset.srcName, tr);
+            });
+        }
+
         renderTodo();
+    }
+
+    // ══ AVPRICKNINGSLISTAN ═══════════════════════════════════════════════════════════════
+    //
+    // ⚠️⚠️ TRE TILLSTAND, ALDRIG EN BOOLEAN. "Vantar" och "sager sig ha betalat" ar tva skilda
+    //    arbetsuppgifter: den ena ska paminnas, den andra stammas av mot kontoutdraget. Slas de
+    //    ihop ar listan inte langre en kontroll. Samma regel som ClubEvent/GetPayments foljer -
+    //    de tva ytorna far inte saga olika saker om samma betalning.
+    var drillKey = '';
+
+    function drillState(p) {
+        if (p.confirmedDate) return ['st-paid', 'Betalt'];
+        if (p.claimedDate) return ['st-claim', 'Säger sig ha betalat'];
+        return ['st-wait', 'Väntar'];
+    }
+
+    function openDrill(sourceType, sourceId, name, tr) {
+        var key = sourceType + ':' + sourceId;
+
+        // Andra klicket pa samma rad stanger. En lista som bara gar att oppna tvingar fram
+        // "Stang listan" for nagot man just pekade pa.
+        if (drillKey === key) { closeDrill(); return; }
+
+        drillKey = key;
+        markOpenRow(tr);
+        el('drillName').textContent = name || 'Avprickning';
+        show(el('perDrill'), true);
+        show(el('drillError'), false);
+        el('drillBody').innerHTML = '<tr><td colspan="4" class="muted">Hämtar…</td></tr>';
+        el('drillMore').innerHTML = '';
+
+        fetch('/umbraco/surface/EkonomiAdmin/GetSourcePayments?issuerType=' + issuerType
+              + '&issuerId=' + issuerId + '&sourceType=' + encodeURIComponent(sourceType)
+              + '&sourceId=' + sourceId, { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (drillKey !== key) return;   // Hann klicka vidare - kasta det gamla svaret.
+                if (!d.success) throw new Error(d.message || 'Listan gick inte att läsa.');
+                renderDrill(d);
+            })
+            .catch(function (e) {
+                if (drillKey !== key) return;
+                el('drillBody').innerHTML = '';
+                el('drillError').textContent = e.message;
+                show(el('drillError'), true);
+            });
+    }
+
+    // Markeringen skots direkt i DOM:en. Att rita om panelen for att tanda eller slacka en klass
+    // hade kostat en ny GetOverview, och den bygger hela oversikten.
+    function markOpenRow(tr) {
+        var open = el('perBody').querySelector('tr.ek-open');
+        if (open) open.classList.remove('ek-open');
+        if (tr) tr.classList.add('ek-open');
+    }
+
+    function closeDrill() {
+        drillKey = '';
+        show(el('perDrill'), false);
+        markOpenRow(null);
+    }
+
+    function renderDrill(d) {
+        // ⚠️ De obetalda overst. Listan ar en arbetslista, inte ett register - samma ordning som
+        //    panelen ovanfor sorterar tavlingarna i.
+        var rows = (d.payments || []).slice().sort(function (a, b) {
+            var aw = a.confirmedDate ? 1 : 0, bw = b.confirmedDate ? 1 : 0;
+            if (aw !== bw) return aw - bw;
+            return (a.payerName || '').localeCompare(b.payerName || '', 'sv');
+        });
+
+        capList(el('drillBody'), el('drillMore'), rows, 12, function (p) {
+            var st = drillState(p);
+            var kvitto = p.receiptId
+                ? '<a class="kvitto" href="/betalkvitto/' + p.receiptId
+                  + '" target="_blank" rel="noopener">Kvitto</a>'
+                : '<span class="muted">—</span>';
+
+            // ⚠️ Pa en betald rad visas det BEKRAFTADE beloppet nar det finns. Visas det begarda
+            //    ser en delbetalning ut som en helbetalning.
+            var amount = (p.confirmedDate && p.actualAmount != null) ? p.actualAmount : p.amount;
+
+            return '<tr><td>' + esc(p.payerName || '—') + '</td>'
+                 + '<td class="' + st[0] + '">' + st[1] + '</td>'
+                 + '<td class="n">' + kr(amount) + '</td>'
+                 + '<td class="n">' + kvitto + '</td></tr>';
+        }, 'Visa alla {n} betalare');
+
+        if (rows.length === 0) {
+            el('drillBody').innerHTML =
+                '<tr><td colspan="4" class="muted">Inga avgifter på den här raden.</td></tr>';
+        }
     }
 
     function renderQueue(rows, total) {

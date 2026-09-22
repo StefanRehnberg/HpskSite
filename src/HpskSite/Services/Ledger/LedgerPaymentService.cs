@@ -613,11 +613,32 @@ namespace HpskSite.Services.Ledger
         /// <summary>
         /// Avprickningslistan: alla betalningsrader för en källa (ett evenemang, en tävling).
         /// <para>Det HÄR ersätter Pending-fakturorna, som är arrangörens arbetslista i dag.</para>
+        ///
+        /// <para><b>⚠️ LEDGER-SEAM-OK: läser alltid den SKARPA liggaren.</b> Anroparen är
+        /// evenemangets egen adminyta, som inte har någon utställare i sitt anrop — den arbetar
+        /// per definition mot klubbens riktiga pengar. Markeringen står här för att nästa läsare
+        /// inte ska behöva härleda om det är ett val eller ett slarv; de tre andra undantagen i
+        /// liggaren bär samma märkning.</para>
+        ///
+        /// <para><b>⚠️ Har din väg en utställare — använd <see cref="ForSourceInIssuer"/>.</b>
+        /// Ekonomiytan bär utställaren i URL:en, och en sandlåda som läser den skarpa listan är
+        /// precis den blandning den fysiska separationen finns för att omöjliggöra.</para>
         /// </summary>
         public List<LedgerPayment> ForSource(string sourceType, int sourceId)
+            => ForSourceInIssuer(LedgerSchema.LiveOnly, sourceType, sourceId);
+
+        /// <summary>
+        /// Samma lista, men i den utställarens schema som anroparen faktiskt arbetar i.
+        ///
+        /// <para><b>⚠️ EGET NAMN, ALDRIG EN ÖVERLAGRING.</b> En överlagring i just den här
+        /// familjen har redan bundit ett anrop till fel metod och låtit avprickningslistan svara
+        /// med en annan form (se <c>ClubEventController.GetPayments</c>). Två metoder med skilda
+        /// namn kan inte förväxlas av kompilatorn åt oss.</para>
+        /// </summary>
+        public List<LedgerPayment> ForSourceInIssuer(int issuerId, string sourceType, int sourceId)
         {
             using var db = _databaseFactory.CreateDatabase();
-            var ldb = new LedgerDb(db, LedgerSchema.LiveOnly);
+            var ldb = new LedgerDb(db, issuerId);
 
             return ldb.Fetch<LedgerPayment>(
                 @"SELECT * FROM dbo.LedgerPayment
