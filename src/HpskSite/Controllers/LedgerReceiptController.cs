@@ -56,15 +56,21 @@ namespace HpskSite.Controllers
 
             using var db = _databaseFactory.CreateDatabase();
 
-            var receipt = db.SingleOrDefault<LedgerReceipt>(
+            // ⚠️⚠️ SCHEMAT VÄLJS AV KVITTOTS EGET ID, inte av en utställare — den här vägen har
+            // ingen. Sandlådans identiteter är IDENTITY(-1,-1), så tecknet ÄR schemat: ett
+            // negativt kvittonummer kan bara betyda sbx. Läses ett sandlådekvitto ur dbo får vi
+            // tomt och svarar 404, alltså "finns inte" om en handling som finns.
+            var ldb = new LedgerDb(db, receiptId);
+
+            var receipt = ldb.SingleOrDefault<LedgerReceipt>(
                 "SELECT * FROM dbo.LedgerReceipt WHERE Id = @0", receiptId);
 
             if (receipt is null) return NotFound();
 
-            var payment = db.SingleOrDefault<LedgerPayment>(
+            var payment = ldb.SingleOrDefault<LedgerPayment>(
                 "SELECT * FROM dbo.LedgerPayment WHERE Id = @0", receipt.PaymentId);
 
-            var series = db.SingleOrDefault<LedgerNumberSeries>(
+            var series = ldb.SingleOrDefault<LedgerNumberSeries>(
                 "SELECT * FROM dbo.LedgerNumberSeries WHERE Id = @0", receipt.SeriesId);
 
             // ⚠️ Betalaren ska komma åt SITT kvitto utan att vara administratör — det är hela
@@ -90,7 +96,8 @@ namespace HpskSite.Controllers
                 // ⚠️⚠️ ETT SANDLÅDEKVITTO MÅSTE SÄGA DET. Handlingen lämnar sidan — den skrivs ut,
                 // mejlas, fotograferas — och tar ingen sidram med sig. Ett kvitto som ser äkta ut
                 // men gäller ett test är en handling som ljuger, och den ligger hos betalaren.
-                IsSandbox = db.ExecuteScalar<int>(
+                // ⚠️ Registret bor bara i dbo och skrivs aldrig om — se LedgerSchema.
+                IsSandbox = ldb.ExecuteScalar<int>(
                     "SELECT COUNT(1) FROM dbo.LedgerIssuer WHERE Id = @0 AND Kind = 'sandbox'",
                     receipt.IssuerId) > 0
             };

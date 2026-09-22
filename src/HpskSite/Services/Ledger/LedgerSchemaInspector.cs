@@ -69,11 +69,30 @@ namespace HpskSite.Services.Ledger
             "TR_LedgerReceipt_NoUpdateDelete"
         };
 
+        /// <summary>
+        /// Sandlådans egna oföränderlighetstriggrar.
+        ///
+        /// <para><b>⚠️ En sandlåda ska bete sig som verkligheten.</b> Går en verifikation att
+        /// radera där övar kassören in en vana som inte finns i skarp drift, och sandlådan slutar
+        /// pröva det den finns för. Årslåsningen har ingen motsvarighet här — den hänger på
+        /// <c>LedgerFiscalYear</c> i dbo.</para>
+        /// </summary>
+        private static readonly string[] RequiredSandboxTriggers =
+        {
+            "TR_sbx_LedgerJournalEntry_NoUpdateDelete",
+            "TR_sbx_LedgerJournalEntryLine_NoUpdateDelete",
+            "TR_sbx_LedgerReceipt_NoUpdateDelete"
+        };
+
         // Båda skripten namnges: en saknad momskolumn kommer ur det andra, och ett meddelande som
         // pekar på fel skript skickar operatören att köra om ett som inte hjälper.
         public const string MigrationScript =
             "Migrations/create-ledger-tables.sql + add-vat-to-ledger.sql + create-ledger-draft-tables.sql "
             + "+ create-ledger-payment-tables.sql + add-project-dimension-to-ledger.sql";
+
+        /// <summary>Skriptet som skapar sandlådans schema. Ett eget svar kräver ett eget skript.</summary>
+        public const string SandboxMigrationScript =
+            "Migrations/create-sbx-schema.sql + sbx-negative-identities.sql";
 
         /// <summary>Hur länge en låsbegäran får vänta. Blockerar något är det svaret vi vill ha.</summary>
         private const int LockTimeoutMs = 3000;
@@ -92,6 +111,8 @@ namespace HpskSite.Services.Ledger
 
         public int TriggerCount => RequiredTriggers.Length;
 
+        public int SandboxTriggerCount => RequiredSandboxTriggers.Length;
+
         /// <summary>
         /// Kontrollerar schemat och returnerar vad som fattas. Kastar aldrig — ett fel blir
         /// <see cref="LedgerSchemaStatus.CouldNotCheck"/>, eftersom "vi vet inte" är ett annat
@@ -107,10 +128,7 @@ namespace HpskSite.Services.Ledger
                 // 1. Tabellerna. Saknas ALLA är liggaren helt enkelt inte migrerad ännu — ett
                 //    väntat läge före första körningen, som inte ska låta som en katastrof.
                 var expectedTables = LedgerTypes.Select(TableNameOf).ToArray();
-                var existingTables = FetchNames(
-                    db,
-                    "SELECT t.name FROM sys.tables t WHERE SCHEMA_NAME(t.schema_id) = 'dbo' AND t.name IN (@0)",
-                    expectedTables);
+                var existingTables = FetchTables(db, LedgerSchema.Live, expectedTables);
 
                 var missingTables = expectedTables
                     .Where(t => !existingTables.Contains(t))
@@ -134,28 +152,7 @@ namespace HpskSite.Services.Ledger
                 //    EN saknad kolumn fäller varje sparning mot den tabellen — inte bara läsningen.
                 //    ⚠️ ETT anrop för alla tabeller. Per kolumn blir det ~170 tur och retur, vilket
                 //    en endpoint som får pollas inte ska kosta.
-                var existingColumns = new HashSet<string>(
-                    FetchNames(
-                        db,
-                        @"SELECT t.name + '.' + c.name
-                            FROM sys.columns c
-                            JOIN sys.tables t ON t.object_id = c.object_id
-                           WHERE SCHEMA_NAME(t.schema_id) = 'dbo' AND t.name IN (@0)",
-                        expectedTables),
-                    StringComparer.OrdinalIgnoreCase);
-
-                var missingColumns = new List<string>();
-                foreach (var type in LedgerTypes)
-                {
-                    var table = TableNameOf(type);
-                    foreach (var column in ColumnsOf(type))
-                    {
-                        if (!existingColumns.Contains($"{table}.{column}"))
-                        {
-                            missingColumns.Add($"{table}.{column}");
-                        }
-                    }
-                }
+                var missingColumns = MissingColumnsIn(db, LedgerSchema.Live);
 
                 if (missingColumns.Count > 0)
                 {
@@ -193,7 +190,89 @@ namespace HpskSite.Services.Ledger
                     };
                 }
 
-                // 4. Rollmappningen — men bara för utställare som faktiskt bokfört något. En saknad
+                // 4. ⚠️⚠️ SANDLÅDAN ÄR ETT EGET SCHEMA, OCH DEN MÅSTE KONTROLLERAS SEPARAT.
+                //    En halvskapad sbx ser ut som ingenting från dbo:s håll: den skarpa sidan är
+                //    hel, varje skarp fråga går igenom, och det enda som är trasigt är den yta vi
+                //    ber klubbarna prova i. En läsning i ett schema som saknar tabellen kastar,
+                //    och en läsning i ett schema som saknar en KOLUMN fäller varje sparning —
+                //    men bara för negativa utställare, alltså bara i sandlådan.
+                var sandboxMissing = new List<string>();
+                var sandboxTables = FetchTables(db, LedgerSchema.Sandbox, expectedTables);
+
+                // Inget alls = sandlådan är inte skapad ännu. Ett väntat läge, inte ett haveri —
+                // och medvetet skilt från "halvt skapad", som är det farliga.
+                var sandboxStatus = sandboxTables.Count == 0
+                    ? LedgerSandboxSchemaStatus.NotCreated
+                    : LedgerSandboxSchemaStatus.Ok;
+
+                if (sandboxStatus == LedgerSandboxSchemaStatus.Ok)
+                {
+                    sandboxMissing.AddRange(expectedTables
+                        .Where(t => !sandboxTables.Contains(t))
+                        .Select(t => $"{LedgerSchema.Sandbox}.{t}"));
+
+                    sandboxMissing.AddRange(MissingColumnsIn(db, LedgerSchema.Sandbox)
+                        .Select(c => $"{LedgerSchema.Sandbox}.{c}"));
+
+                    var sandboxTriggers = FetchNames(
+                        db,
+                        "SELECT name FROM sys.triggers WHERE name IN (@0) AND is_disabled = 0",
+                        RequiredSandboxTriggers);
+
+                    sandboxMissing.AddRange(RequiredSandboxTriggers.Where(t => !sandboxTriggers.Contains(t)));
+
+                    if (sandboxMissing.Count > 0)
+                    {
+                        return new LedgerSchemaReport
+                        {
+                            Status = LedgerSchemaStatus.SandboxIncomplete,
+                            SandboxStatus = LedgerSandboxSchemaStatus.Incomplete,
+                            SandboxMissing = sandboxMissing
+                        };
+                    }
+                }
+
+                // 5. ⚠️⚠️ DE MOTSATTA CHECK-VILLKOREN. Det är INTE schemat som gör blandning
+                //    omöjlig — det är de här. dbo kräver IssuerId > 0, sbx kräver IssuerId < 0,
+                //    så en skrivning i fel schema AVVISAS och en läsning i fel schema ger TOMT.
+                //    Tas en av dem bort ser allting friskt ut ända tills en sandlåderad ligger i
+                //    den skarpa tabellen, och då är den oföränderlig.
+                //    Kontrolleras bara när sandlådan finns: skriptet skapar båda sidorna.
+                var missingGuards = new List<string>();
+
+                if (sandboxStatus == LedgerSandboxSchemaStatus.Ok)
+                {
+                    var guardTables = LedgerTypes
+                        .Where(HasIssuerId)
+                        .Select(TableNameOf)
+                        .ToArray();
+
+                    var expectedGuards = guardTables
+                        .SelectMany(t => new[] { $"CK_dbo_{t}_Live", $"CK_sbx_{t}_Sandbox" })
+                        .ToArray();
+
+                    // ⚠️ `is_not_trusted` läses INTE som saknad: dev:s gamla rader tvingade fram
+                    //    NOCHECK på dbo-sidan, men villkoret gäller varje NY rad ändå — och det
+                    //    är nya rader som är risken.
+                    var existingGuards = FetchNames(
+                        db,
+                        "SELECT name FROM sys.check_constraints WHERE name IN (@0) AND is_disabled = 0",
+                        expectedGuards);
+
+                    missingGuards.AddRange(expectedGuards.Where(g => !existingGuards.Contains(g)));
+
+                    if (missingGuards.Count > 0)
+                    {
+                        return new LedgerSchemaReport
+                        {
+                            Status = LedgerSchemaStatus.MissingGuards,
+                            SandboxStatus = sandboxStatus,
+                            MissingGuards = missingGuards
+                        };
+                    }
+                }
+
+                // 6. Rollmappningen — men bara för utställare som faktiskt bokfört något. En saknad
                 //    roll är en betalning som inte går att bokföra, och det ska upptäckas här och
                 //    inte av kassören mitt i en tävlingsdag.
                 //    ⚠️ Enda frågan som rör riktiga rader och alltså kan blockera bakom en skrivare.
@@ -208,6 +287,9 @@ namespace HpskSite.Services.Ledger
                 try
                 {
                     db.Execute($"SET LOCK_TIMEOUT {LockTimeoutMs}");
+                    // LEDGER-SEAM-OK: kontrollen fragar avsiktligt bara den SKARPA liggaren.
+                    // En sandlada utan kontoroller ar inte ett driftlarm - den ar ett test som
+                    // inte gar att bokfora i, och det marker den som testar direkt.
                     gaps = db.Fetch<IssuerRoleGap>(
                         @"SELECT e.IssuerType, e.IssuerId, COUNT(DISTINCT r.RoleKey) AS MappedRoles
                             FROM dbo.LedgerJournalEntry e
@@ -227,6 +309,7 @@ namespace HpskSite.Services.Ledger
                     return new LedgerSchemaReport
                     {
                         Status = LedgerSchemaStatus.RolesIncomplete,
+                        SandboxStatus = sandboxStatus,
                         RequiredRoles = LedgerAccountRoles.All.Length,
                         IssuerRoleGaps = gaps
                             .Select(g => $"typ {g.IssuerType}/id {g.IssuerId}: {g.MappedRoles} av {LedgerAccountRoles.All.Length}")
@@ -234,7 +317,11 @@ namespace HpskSite.Services.Ledger
                     };
                 }
 
-                return new LedgerSchemaReport { Status = LedgerSchemaStatus.Ok };
+                return new LedgerSchemaReport
+                {
+                    Status = LedgerSchemaStatus.Ok,
+                    SandboxStatus = sandboxStatus
+                };
             }
             catch (Exception ex)
             {
@@ -252,6 +339,51 @@ namespace HpskSite.Services.Ledger
         /// </summary>
         private static HashSet<string> FetchNames(IUmbracoDatabase db, string sql, string[] values)
             => new HashSet<string>(db.Fetch<string>(sql, new object[] { values }), StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Tabellerna som finns i ett givet schema, av dem vi väntar oss.</summary>
+        private static HashSet<string> FetchTables(IUmbracoDatabase db, string schema, string[] expected)
+            => new HashSet<string>(
+                db.Fetch<string>(
+                    "SELECT t.name FROM sys.tables t WHERE SCHEMA_NAME(t.schema_id) = @0 AND t.name IN (@1)",
+                    schema, expected),
+                StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Kolumnerna som saknas i ett schema, härledda ur POCO:erna. Samma lista för båda
+        /// schemana — sandlådans tabeller är klonade ur de skarpa och ska aldrig skilja sig.
+        /// </summary>
+        private static List<string> MissingColumnsIn(IUmbracoDatabase db, string schema)
+        {
+            var expectedTables = LedgerTypes.Select(TableNameOf).ToArray();
+
+            var existingColumns = new HashSet<string>(
+                db.Fetch<string>(
+                    @"SELECT t.name + '.' + c.name
+                        FROM sys.columns c
+                        JOIN sys.tables t ON t.object_id = c.object_id
+                       WHERE SCHEMA_NAME(t.schema_id) = @0 AND t.name IN (@1)",
+                    schema, expectedTables),
+                StringComparer.OrdinalIgnoreCase);
+
+            var missing = new List<string>();
+            foreach (var type in LedgerTypes)
+            {
+                var table = TableNameOf(type);
+                foreach (var column in ColumnsOf(type))
+                {
+                    if (!existingColumns.Contains($"{table}.{column}"))
+                    {
+                        missing.Add($"{table}.{column}");
+                    }
+                }
+            }
+
+            return missing;
+        }
+
+        /// <summary>Bär tabellen en utställare? Bara de kan bära de motsatta CHECK-villkoren.</summary>
+        private static bool HasIssuerId(Type type)
+            => type.GetProperty("IssuerId", BindingFlags.Public | BindingFlags.Instance) is not null;
 
         /// <summary>Tabellnamnet ur POCO:ns <see cref="TableNameAttribute"/>.</summary>
         private static string TableNameOf(Type type)
@@ -291,8 +423,25 @@ namespace HpskSite.Services.Ledger
         HalfMigrated,
         MissingColumns,
         MissingTriggers,
+        SandboxIncomplete,
+        MissingGuards,
         RolesIncomplete,
         CouldNotCheck
+    }
+
+    /// <summary>
+    /// Sandlådeschemats läge.
+    ///
+    /// <para><b>⚠️ <see cref="NotCreated"/> och <see cref="Incomplete"/> är inte varianter av
+    /// varandra.</b> Att sandlådan inte är skapad är ett väntat läge före den tas i bruk; att den
+    /// är halvskapad betyder att klubbarna möter fel i den yta vi bett dem prova i, medan den
+    /// skarpa sidan ser fullständigt frisk ut.</para>
+    /// </summary>
+    public enum LedgerSandboxSchemaStatus
+    {
+        Ok,
+        NotCreated,
+        Incomplete
     }
 
     public class LedgerSchemaReport
@@ -304,6 +453,14 @@ namespace HpskSite.Services.Ledger
         public List<string> MissingColumns { get; set; } = new();
 
         public List<string> MissingTriggers { get; set; } = new();
+
+        /// <summary>De motsatta CHECK-villkoren som saknas. Utan dem är blandning möjlig igen.</summary>
+        public List<string> MissingGuards { get; set; } = new();
+
+        public LedgerSandboxSchemaStatus SandboxStatus { get; set; }
+
+        /// <summary>Tabeller, kolumner och triggrar som saknas i <c>sbx</c>.</summary>
+        public List<string> SandboxMissing { get; set; } = new();
 
         public List<string> IssuerRoleGaps { get; set; } = new();
 
@@ -319,6 +476,8 @@ namespace HpskSite.Services.Ledger
         public bool IsBroken =>
             Status is LedgerSchemaStatus.HalfMigrated
                    or LedgerSchemaStatus.MissingColumns
-                   or LedgerSchemaStatus.MissingTriggers;
+                   or LedgerSchemaStatus.MissingTriggers
+                   or LedgerSchemaStatus.SandboxIncomplete
+                   or LedgerSchemaStatus.MissingGuards;
     }
 }

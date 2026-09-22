@@ -79,10 +79,10 @@ namespace HpskSite.Services.Ledger
             try
             {
                 rows = db.Fetch<SeriesAllocation>(
-                @"UPDATE dbo.LedgerNumberSeries
+                LedgerSchema.Sql(issuerId, @"UPDATE dbo.LedgerNumberSeries
                      SET NextNumber = NextNumber + 1
                   OUTPUT deleted.Id AS SeriesId, deleted.NextNumber AS Number, deleted.Prefix AS Prefix
-                  WHERE IssuerType = @0 AND IssuerId = @1 AND Year = @2 AND Kind = @3",
+                  WHERE IssuerType = @0 AND IssuerId = @1 AND Year = @2 AND Kind = @3"),
                 issuerType, issuerId, year, kind);
             }
             finally
@@ -121,8 +121,8 @@ namespace HpskSite.Services.Ledger
         private void EnsureSeries(IDatabase db, int issuerType, int issuerId, int year, string kind)
         {
             var exists = db.ExecuteScalar<int>(
-                @"SELECT COUNT(1) FROM dbo.LedgerNumberSeries
-                   WHERE IssuerType = @0 AND IssuerId = @1 AND Year = @2 AND Kind = @3",
+                LedgerSchema.Sql(issuerId, @"SELECT COUNT(1) FROM dbo.LedgerNumberSeries
+                   WHERE IssuerType = @0 AND IssuerId = @1 AND Year = @2 AND Kind = @3"),
                 issuerType, issuerId, year, kind);
 
             if (exists > 0) return;
@@ -130,8 +130,8 @@ namespace HpskSite.Services.Ledger
             try
             {
                 db.Execute(
-                    @"INSERT INTO dbo.LedgerNumberSeries (IssuerType, IssuerId, Year, Kind, Prefix, NextNumber)
-                      VALUES (@0, @1, @2, @3, @4, 1)",
+                    LedgerSchema.Sql(issuerId, @"INSERT INTO dbo.LedgerNumberSeries (IssuerType, IssuerId, Year, Kind, Prefix, NextNumber)
+                      VALUES (@0, @1, @2, @3, @4, 1)"),
                     issuerType, issuerId, year, kind, DefaultPrefix(kind));
             }
             catch (Exception)
@@ -139,8 +139,8 @@ namespace HpskSite.Services.Ledger
                 // Förlorad kapplöpning mot det unika indexet. Serien finns nu — det var allt vi
                 // ville. Kastar Allocate ändå efteråt är det ett verkligt fel och syns där.
                 if (db.ExecuteScalar<int>(
-                        @"SELECT COUNT(1) FROM dbo.LedgerNumberSeries
-                           WHERE IssuerType = @0 AND IssuerId = @1 AND Year = @2 AND Kind = @3",
+                        LedgerSchema.Sql(issuerId, @"SELECT COUNT(1) FROM dbo.LedgerNumberSeries
+                           WHERE IssuerType = @0 AND IssuerId = @1 AND Year = @2 AND Kind = @3"),
                         issuerType, issuerId, year, kind) == 0)
                 {
                     throw;

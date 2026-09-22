@@ -43,11 +43,12 @@ namespace HpskSite.Services.Ledger
         public int Save(LedgerJournalEntryDraft draft, IEnumerable<LedgerJournalEntryDraftLine> lines)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, draft.IssuerId);
             using var tx = db.GetTransaction();
 
             if (draft.Id > 0)
             {
-                var existing = db.SingleOrDefault<LedgerJournalEntryDraft>(
+                var existing = ldb.SingleOrDefault<LedgerJournalEntryDraft>(
                     "SELECT * FROM dbo.LedgerJournalEntryDraft WHERE Id = @0", draft.Id);
 
                 if (existing is null)
@@ -67,14 +68,36 @@ namespace HpskSite.Services.Ledger
                 draft.PostedEntryId = existing.PostedEntryId;
                 draft.UpdatedUtc = DateTime.UtcNow;
 
-                db.Update(draft);
-                db.Execute("DELETE FROM dbo.LedgerJournalEntryDraftLine WHERE DraftId = @0", draft.Id);
+                ldb.Execute(
+                    @"UPDATE dbo.LedgerJournalEntryDraft
+                         SET IssuerType = @1, IssuerId = @2, AccountingDate = @3, EventDate = @4,
+                             Description = @5, CounterpartyType = @6, CounterpartyId = @7,
+                             CounterpartyName = @8, SourceType = @9, SourceId = @10, PaymentId = @11,
+                             UpdatedUtc = @12
+                       WHERE Id = @0",
+                    draft.Id, draft.IssuerType, draft.IssuerId, draft.AccountingDate, draft.EventDate,
+                    draft.Description, draft.CounterpartyType, draft.CounterpartyId,
+                    draft.CounterpartyName, draft.SourceType, draft.SourceId, draft.PaymentId,
+                    draft.UpdatedUtc);
+
+                ldb.Execute("DELETE FROM dbo.LedgerJournalEntryDraftLine WHERE DraftId = @0", draft.Id);
             }
             else
             {
                 draft.CreatedUtc = DateTime.UtcNow;
                 draft.UpdatedUtc = draft.CreatedUtc;
-                db.Insert(draft);
+                draft.Id = ldb.ExecuteScalar<int>(
+                    @"INSERT INTO dbo.LedgerJournalEntryDraft
+                          (IssuerType, IssuerId, AccountingDate, EventDate, Description,
+                           CounterpartyType, CounterpartyId, CounterpartyName,
+                           SourceType, SourceId, PaymentId,
+                           CreatedByMemberId, CreatedUtc, UpdatedUtc)
+                      OUTPUT INSERTED.Id
+                      VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, @10, @11, @12, @13)",
+                    draft.IssuerType, draft.IssuerId, draft.AccountingDate, draft.EventDate,
+                    draft.Description, draft.CounterpartyType, draft.CounterpartyId,
+                    draft.CounterpartyName, draft.SourceType, draft.SourceId, draft.PaymentId,
+                    draft.CreatedByMemberId, draft.CreatedUtc, draft.UpdatedUtc);
             }
 
             var lineNo = 1;
@@ -83,7 +106,13 @@ namespace HpskSite.Services.Ledger
                 line.DraftId = draft.Id;
                 line.LineNumber = lineNo++;
                 line.Id = 0;
-                db.Insert(line);
+
+                ldb.Execute(
+                    @"INSERT INTO dbo.LedgerJournalEntryDraftLine
+                          (DraftId, LineNumber, Role, AccountNumber, Debit, Credit, Text, VatRate, ProjectId)
+                      VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8)",
+                    line.DraftId, line.LineNumber, line.Role, line.AccountNumber,
+                    line.Debit, line.Credit, line.Text, line.VatRate, line.ProjectId);
             }
 
             tx.Complete();
@@ -93,13 +122,14 @@ namespace HpskSite.Services.Ledger
         public (LedgerJournalEntryDraft? Draft, List<LedgerJournalEntryDraftLine> Lines) Get(int id)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, id);
 
-            var draft = db.SingleOrDefault<LedgerJournalEntryDraft>(
+            var draft = ldb.SingleOrDefault<LedgerJournalEntryDraft>(
                 "SELECT * FROM dbo.LedgerJournalEntryDraft WHERE Id = @0", id);
 
             if (draft is null) return (null, new List<LedgerJournalEntryDraftLine>());
 
-            var lines = db.Fetch<LedgerJournalEntryDraftLine>(
+            var lines = ldb.Fetch<LedgerJournalEntryDraftLine>(
                 "SELECT * FROM dbo.LedgerJournalEntryDraftLine WHERE DraftId = @0 ORDER BY LineNumber", id);
 
             return (draft, lines);
@@ -109,8 +139,9 @@ namespace HpskSite.Services.Ledger
         public List<LedgerJournalEntryDraft> ListOpen(int issuerType, int issuerId)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
 
-            return db.Fetch<LedgerJournalEntryDraft>(
+            return ldb.Fetch<LedgerJournalEntryDraft>(
                 @"SELECT * FROM dbo.LedgerJournalEntryDraft
                    WHERE IssuerType = @0 AND IssuerId = @1 AND PostedEntryId IS NULL
                    ORDER BY UpdatedUtc DESC",
@@ -125,14 +156,15 @@ namespace HpskSite.Services.Ledger
         public bool Discard(int id)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, id);
 
-            var posted = db.ExecuteScalar<int?>(
+            var posted = ldb.ExecuteScalar<int?>(
                 "SELECT PostedEntryId FROM dbo.LedgerJournalEntryDraft WHERE Id = @0", id);
 
             if (posted is not null) return false;
 
             // Raderna följer med via ON DELETE CASCADE.
-            return db.Execute("DELETE FROM dbo.LedgerJournalEntryDraft WHERE Id = @0", id) > 0;
+            return ldb.Execute("DELETE FROM dbo.LedgerJournalEntryDraft WHERE Id = @0", id) > 0;
         }
 
         /// <summary>
@@ -153,6 +185,7 @@ namespace HpskSite.Services.Ledger
         public LedgerPostingResult Commit(int draftId, int byMemberId)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, draftId);
 
             var (draft, lines) = Get(draftId);
             if (draft is null)
@@ -171,7 +204,7 @@ namespace HpskSite.Services.Ledger
                 return LedgerPostingResult.Failed("Utkastet saknar bokföringsdatum.");
 
             // Anspråket. Villkoret i WHERE är spärren — två samtidiga försök kan inte båda vinna.
-            var claimed = db.Execute(
+            var claimed = ldb.Execute(
                 @"UPDATE dbo.LedgerJournalEntryDraft
                      SET CommitClaimedUtc = @1
                    WHERE Id = @0 AND CommitClaimedUtc IS NULL AND PostedEntryId IS NULL",
@@ -229,7 +262,7 @@ namespace HpskSite.Services.Ledger
             {
                 // Känt fel — Post skriver ingenting när den returnerar ett fel, så anspråket släpps
                 // och kassören kan rätta och försöka igen.
-                db.Execute(
+                ldb.Execute(
                     "UPDATE dbo.LedgerJournalEntryDraft SET CommitClaimedUtc = NULL WHERE Id = @0",
                     draftId);
                 return result;
@@ -237,13 +270,13 @@ namespace HpskSite.Services.Ledger
 
             // Markera FÖRE raderingen. Misslyckas raderingen står utkastet kvar med sitt
             // PostedEntryId och kan inte bokföras igen — spåret är kvar, dubbelposten omöjlig.
-            db.Execute(
+            ldb.Execute(
                 "UPDATE dbo.LedgerJournalEntryDraft SET PostedEntryId = @1 WHERE Id = @0",
                 draftId, result.EntryId);
 
             try
             {
-                db.Execute("DELETE FROM dbo.LedgerJournalEntryDraft WHERE Id = @0", draftId);
+                ldb.Execute("DELETE FROM dbo.LedgerJournalEntryDraft WHERE Id = @0", draftId);
             }
             catch (Exception ex)
             {

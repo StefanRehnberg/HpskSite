@@ -108,6 +108,9 @@ namespace HpskSite.Services.Ledger
                 // ⚠️ Spärren mot dubbelbokföring, härledd ur liggaren själv.
                 if (PostedChargeIds(db, new[] { charge.Id }).Count > 0) return null;
 
+                // LEDGER-SEAM-OK: medlemsavgifter finns BARA i den levande liggaren. En
+                // sandlada har inga MembershipFeeCharge-rader att brygga, och att gora bryggan
+                // schemamedveten hade antytt att den kan kora mot en sandlada.
                 var settings = db.FirstOrDefault<LedgerIssuerSettings>(
                     "SELECT * FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1",
                     DocumentOwnerType.Club, charge.ClubId);
@@ -212,6 +215,7 @@ namespace HpskSite.Services.Ledger
             if (ids.Count == 0) return new HashSet<int>();
 
             return db.Fetch<int>(
+                    // LEDGER-SEAM-OK: samma skal som ovan - avgiftsbryggan ar levande-bara.
                     $@"SELECT SourceId FROM dbo.LedgerJournalEntry
                         WHERE SourceType = @0 AND SourceId IN ({string.Join(",", ids)})",
                     LedgerSourceType.MembershipFee)

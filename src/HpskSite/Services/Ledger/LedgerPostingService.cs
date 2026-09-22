@@ -122,28 +122,64 @@ namespace HpskSite.Services.Ledger
                     CreatedByMemberId = request.CreatedByMemberId
                 };
 
-                db.Insert(entry);
+                // ⚠️⚠️ SKRIVS SOM SQL, INTE db.Insert. NPocos [TableName] bär inget schema, så
+                // en Insert hamnar ALLTID i dbo — en sandlådas verifikation hade då skrivits i
+                // den skarpa tabellen. (Numera avvisad av CK_dbo_*_Live, men det är en spärr,
+                // inte en design.) Se LedgerDb.Insert, som kastar av samma skäl.
+                // ⚠️⚠️ VARKEN `OUTPUT INSERTED.Id` ELLER EN TABELLVARIABEL GÅR HÄR.
+                // SQL Server vägrar ett naket OUTPUT på en tabell med triggrar (Msg 334), och
+                // liggarens oföränderlighetstriggrar sitter på exakt den här tabellen — felet
+                // slog till på VARJE bokföring och såg ut som "Bokföringen kunde inte skrivas".
+                // Och `OUTPUT … INTO @new` går inte heller: NPoco läser varje `@namn` som en
+                // parameter och kastar "Parameter '@new' specified but none of the passed
+                // arguments have a property with this name". SCOPE_IDENTITY klarar båda —
+                // triggrarna är INSTEAD OF UPDATE/DELETE och rör inte INSERT:en.
+                entry.Id = db.ExecuteScalar<int>(
+                    LedgerSchema.Sql(request.IssuerId,
+                    @"INSERT INTO dbo.LedgerJournalEntry
+                        (IssuerType, IssuerId, SeriesId, Number, FiscalYearId, AccountingDate,
+                         EventDate, RegisteredUtc, Description, CounterpartyType, CounterpartyId,
+                         CounterpartyName, SourceType, SourceId, PaymentId, CorrectsEntryId,
+                         CreatedByMemberId)
+                      VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, @10, @11, @12, @13, @14, @15, @16);
+                      SELECT CAST(SCOPE_IDENTITY() AS int);"),
+                    entry.IssuerType, entry.IssuerId, entry.SeriesId, entry.Number, entry.FiscalYearId,
+                    entry.AccountingDate, entry.EventDate, entry.RegisteredUtc, entry.Description,
+                    (object?)entry.CounterpartyType ?? DBNull.Value, (object?)entry.CounterpartyId ?? DBNull.Value,
+                    (object?)entry.CounterpartyName ?? DBNull.Value, entry.SourceType,
+                    (object?)entry.SourceId ?? DBNull.Value, (object?)entry.PaymentId ?? DBNull.Value,
+                    (object?)entry.CorrectsEntryId ?? DBNull.Value, entry.CreatedByMemberId);
 
                 var lineNo = 1;
                 foreach (var line in built)
                 {
                     line.JournalEntryId = entry.Id;
                     line.LineNumber = lineNo++;
-                    db.Insert(line);
+
+                    db.Execute(
+                        LedgerSchema.Sql(request.IssuerId,
+                        @"INSERT INTO dbo.LedgerJournalEntryLine
+                            (JournalEntryId, LineNumber, AccountNumber, AccountName, Debit, Credit,
+                             Text, VatRate, VatAmount, ProjectId, ProjectName)
+                          VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, @10)"),
+                        line.JournalEntryId, line.LineNumber, line.AccountNumber, line.AccountName,
+                        line.Debit, line.Credit, (object?)line.Text ?? DBNull.Value,
+                        (object?)line.VatRate ?? DBNull.Value, (object?)line.VatAmount ?? DBNull.Value,
+                        (object?)line.ProjectId ?? DBNull.Value, (object?)line.ProjectName ?? DBNull.Value);
                 }
 
-                db.Insert(new LedgerAuditEvent
-                {
-                    OccurredUtc = DateTime.UtcNow,
-                    MemberId = request.CreatedByMemberId,
-                    Action = request.CorrectsEntryId is null
-                        ? LedgerAuditAction.Posted
-                        : LedgerAuditAction.Corrected,
-                    ObjectType = "JournalEntry",
-                    ObjectId = entry.Id,
-                    Detail = $"{{\"number\":{number},\"source\":\"{request.SourceType}\"" +
-                             (request.CorrectsEntryId is int c ? $",\"corrects\":{c}}}" : "}")
-                });
+                db.Execute(
+                    LedgerSchema.Sql(request.IssuerId,
+                    @"INSERT INTO dbo.LedgerAuditEvent
+                        (OccurredUtc, MemberId, Action, ObjectType, ObjectId, Detail)
+                      VALUES (@0, @1, @2, @3, @4, @5)"),
+                    DateTime.UtcNow,
+                    request.CreatedByMemberId,
+                    request.CorrectsEntryId is null ? LedgerAuditAction.Posted : LedgerAuditAction.Corrected,
+                    "JournalEntry",
+                    entry.Id,
+                    $"{{\"number\":{number},\"source\":\"{request.SourceType}\"" +
+                        (request.CorrectsEntryId is int c ? $",\"corrects\":{c}}}" : "}"));
 
                 tx.Complete();
 
@@ -183,14 +219,17 @@ namespace HpskSite.Services.Ledger
         {
             using var db = _databaseFactory.CreateDatabase();
 
+            // Verifikationens EGET id avslojar schemat: negativa id finns bara i sandladan.
+            // Det ar hela vinsten med att tecknet betyder samma sak overallt.
             var original = db.SingleOrDefault<LedgerJournalEntry>(
-                "SELECT * FROM dbo.LedgerJournalEntry WHERE Id = @0", entryId);
+                LedgerSchema.Sql(entryId, "SELECT * FROM dbo.LedgerJournalEntry WHERE Id = @0"), entryId);
 
             if (original is null)
                 return LedgerPostingResult.Failed("Verifikationen som skulle rättas hittades inte.");
 
             var lines = db.Fetch<LedgerJournalEntryLine>(
-                "SELECT * FROM dbo.LedgerJournalEntryLine WHERE JournalEntryId = @0 ORDER BY LineNumber",
+                LedgerSchema.Sql(entryId,
+                    "SELECT * FROM dbo.LedgerJournalEntryLine WHERE JournalEntryId = @0 ORDER BY LineNumber"),
                 entryId);
 
             if (lines.Count == 0)
@@ -443,7 +482,7 @@ namespace HpskSite.Services.Ledger
                 using var db = _databaseFactory.CreateDatabase();
 
                 var shape = db.ExecuteScalar<string>(
-                    "SELECT TOP 1 Shape FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1",
+                    LedgerSchema.Sql(issuerId, "SELECT TOP 1 Shape FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1"),
                     issuerType, issuerId);
 
                 // ⚠️ Regeln själv bor i LedgerPostingDecision.For — den är ren och därmed
@@ -477,10 +516,10 @@ namespace HpskSite.Services.Ledger
                 using var db = _databaseFactory.CreateDatabase();
 
                 var year = db.FirstOrDefault<LedgerFiscalYear>(
-                    @"SELECT * FROM dbo.LedgerFiscalYear
+                    LedgerSchema.Sql(issuerId, @"SELECT * FROM dbo.LedgerFiscalYear
                        WHERE IssuerType = @0 AND IssuerId = @1
                          AND StartDate <= @2 AND EndDate >= @2
-                       ORDER BY Year",
+                       ORDER BY Year"),
                     issuerType, issuerId, accountingDate.Date);
 
                 if (year is null)
@@ -503,15 +542,15 @@ namespace HpskSite.Services.Ledger
 
         private static LedgerFiscalYear? ResolveFiscalYear(IDatabase db, LedgerPostingRequest request)
             => db.FirstOrDefault<LedgerFiscalYear>(
-                @"SELECT * FROM dbo.LedgerFiscalYear
+                LedgerSchema.Sql(request.IssuerId, @"SELECT * FROM dbo.LedgerFiscalYear
                    WHERE IssuerType = @0 AND IssuerId = @1
                      AND StartDate <= @2 AND EndDate >= @2
-                   ORDER BY Year",
+                   ORDER BY Year"),
                 request.IssuerType, request.IssuerId, request.AccountingDate.Date);
 
         private static Dictionary<int, LedgerAccount> LoadAccounts(IDatabase db, int issuerType, int issuerId)
             => db.Fetch<LedgerAccount>(
-                    "SELECT * FROM dbo.LedgerAccount WHERE IssuerType = @0 AND IssuerId = @1",
+                    LedgerSchema.Sql(issuerId, "SELECT * FROM dbo.LedgerAccount WHERE IssuerType = @0 AND IssuerId = @1"),
                     issuerType, issuerId)
                  .ToDictionary(a => a.Number);
 
@@ -540,13 +579,13 @@ namespace HpskSite.Services.Ledger
         /// </summary>
         private static Dictionary<int, LedgerProject> LoadProjects(IDatabase db, int issuerType, int issuerId)
             => db.Fetch<LedgerProject>(
-                    "SELECT * FROM dbo.LedgerProject WHERE IssuerType = @0 AND IssuerId = @1",
+                    LedgerSchema.Sql(issuerId, "SELECT * FROM dbo.LedgerProject WHERE IssuerType = @0 AND IssuerId = @1"),
                     issuerType, issuerId)
                  .ToDictionary(p => p.Id);
 
         private static Dictionary<string, int> LoadRoleMap(IDatabase db, int issuerType, int issuerId)
             => db.Fetch<LedgerAccountRole>(
-                    "SELECT * FROM dbo.LedgerAccountRole WHERE IssuerType = @0 AND IssuerId = @1",
+                    LedgerSchema.Sql(issuerId, "SELECT * FROM dbo.LedgerAccountRole WHERE IssuerType = @0 AND IssuerId = @1"),
                     issuerType, issuerId)
                  .ToDictionary(r => r.RoleKey, r => r.AccountNumber);
     }

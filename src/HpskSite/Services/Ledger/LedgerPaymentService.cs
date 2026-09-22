@@ -54,8 +54,29 @@ namespace HpskSite.Services.Ledger
                 throw new ArgumentException($"Okänt betalsätt: {payment.Method}", nameof(payment));
 
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, payment.IssuerId);
             payment.CreatedUtc = DateTime.UtcNow;
-            db.Insert(payment);
+
+            // SQL, inte db.Insert: NPocos [TableName] bar inget schema och hade alltid
+            // hamnat i dbo. Se LedgerDb.Insert, som kastar av samma skal.
+            payment.Id = ldb.ExecuteScalar<int>(
+                @"INSERT INTO dbo.LedgerPayment
+                    (IssuerType, IssuerId, SourceType, SourceId, PayerMemberId, PayerName, Amount,
+                     Method, ClaimedUtc, ClaimedByMemberId, ConfirmedUtc, ConfirmedByMemberId,
+                     ActualAmount, JournalEntryId, ReceiptId, VoidedUtc, VoidedByMemberId,
+                     VoidReason, CreatedUtc)
+                  OUTPUT INSERTED.Id
+                  VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18)",
+                payment.IssuerType, payment.IssuerId, payment.SourceType,
+                (object?)payment.SourceId ?? DBNull.Value, (object?)payment.PayerMemberId ?? DBNull.Value,
+                payment.PayerName, payment.Amount, payment.Method,
+                (object?)payment.ClaimedUtc ?? DBNull.Value, (object?)payment.ClaimedByMemberId ?? DBNull.Value,
+                (object?)payment.ConfirmedUtc ?? DBNull.Value, (object?)payment.ConfirmedByMemberId ?? DBNull.Value,
+                (object?)payment.ActualAmount ?? DBNull.Value, (object?)payment.JournalEntryId ?? DBNull.Value,
+                (object?)payment.ReceiptId ?? DBNull.Value, (object?)payment.VoidedUtc ?? DBNull.Value,
+                (object?)payment.VoidedByMemberId ?? DBNull.Value, (object?)payment.VoidReason ?? DBNull.Value,
+                payment.CreatedUtc);
+
             return payment.Id;
         }
 
@@ -70,10 +91,11 @@ namespace HpskSite.Services.Ledger
         public bool RegisterClaim(int paymentId, int byMemberId)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, paymentId);
 
             // Villkoret i WHERE är spärren: en redan bekräftad eller makulerad betalning tar inte
             // emot ett påstående, och ett andra påstående skriver inte över det första.
-            return db.Execute(
+            return ldb.Execute(
                 @"UPDATE dbo.LedgerPayment
                      SET ClaimedUtc = @1, ClaimedByMemberId = @2
                    WHERE Id = @0 AND ClaimedUtc IS NULL AND ConfirmedUtc IS NULL AND VoidedUtc IS NULL",
@@ -103,7 +125,8 @@ namespace HpskSite.Services.Ledger
             try
             {
                 using var db = _databaseFactory.CreateDatabase();
-                return db.Fetch<LedgerPayment>(
+                var ldb = new LedgerDb(db, issuerId);
+                return ldb.Fetch<LedgerPayment>(
                     @"SELECT * FROM dbo.LedgerPayment
                        WHERE IssuerType = @0 AND IssuerId = @1
                          AND ConfirmedUtc IS NOT NULL
@@ -132,7 +155,8 @@ namespace HpskSite.Services.Ledger
         public LedgerPayment? GetById(int paymentId)
         {
             using var db = _databaseFactory.CreateDatabase();
-            return db.SingleOrDefault<LedgerPayment>(
+            var ldb = new LedgerDb(db, paymentId);
+            return ldb.SingleOrDefault<LedgerPayment>(
                 "SELECT * FROM dbo.LedgerPayment WHERE Id = @0", paymentId);
         }
 
@@ -160,8 +184,9 @@ namespace HpskSite.Services.Ledger
         public PostPendingResult PostPending(int paymentId, int byMemberId)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, paymentId);
 
-            var payment = db.SingleOrDefault<LedgerPayment>(
+            var payment = ldb.SingleOrDefault<LedgerPayment>(
                 "SELECT * FROM dbo.LedgerPayment WHERE Id = @0", paymentId);
 
             if (payment is null) return PostPendingResult.Failed("Betalningen finns inte.");
@@ -189,7 +214,7 @@ namespace HpskSite.Services.Ledger
             // som säger olika saker, och den ena ligger redan hos någon annan. Vägra hellre.
             if (settings?.IsVatRegistered == true)
             {
-                var receiptSaysVatFree = db.ExecuteScalar<int>(
+                var receiptSaysVatFree = ldb.ExecuteScalar<int>(
                     @"SELECT COUNT(1) FROM dbo.LedgerReceipt
                        WHERE PaymentId = @0 AND IssuerIsVatRegistered = 0",
                     payment.Id);
@@ -211,7 +236,7 @@ namespace HpskSite.Services.Ledger
             // ⚠️ VILLKORET I WHERE ÄR SPÄRREN mot dubbelbokföring. Två samtidiga klick — eller två
             // öppna flikar — skulle annars skriva två verifikationer för samma pengar och bara den
             // sista syns på raden. Den första hade blivit osynlig och omöjlig att hitta.
-            var rows = db.Execute(
+            var rows = ldb.Execute(
                 @"UPDATE dbo.LedgerPayment SET JournalEntryId = @1
                    WHERE Id = @0 AND JournalEntryId IS NULL AND VoidedUtc IS NULL",
                 payment.Id, posting.EntryId);
@@ -292,8 +317,9 @@ namespace HpskSite.Services.Ledger
             int paymentId, int byMemberId, DateTime? paymentDate = null, decimal? actualAmount = null)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, paymentId);
 
-            var payment = db.SingleOrDefault<LedgerPayment>(
+            var payment = ldb.SingleOrDefault<LedgerPayment>(
                 "SELECT * FROM dbo.LedgerPayment WHERE Id = @0", paymentId);
 
             if (payment is null) return ConfirmResult.Failed("Betalningen finns inte.");
@@ -341,7 +367,7 @@ namespace HpskSite.Services.Ledger
             // ── Bekräftelsen och kvittot ────────────────────────────────────────────────────
             try
             {
-                using var tx = db.GetTransaction();
+                using var tx = ldb.GetTransaction();
 
                 var (seriesId, number, prefix) = _allocator.Allocate(
                     db, payment.IssuerType, payment.IssuerId, date.Year, LedgerSeriesKind.Receipt);
@@ -376,9 +402,25 @@ namespace HpskSite.Services.Ledger
                     Amount = amount
                 };
 
-                db.Insert(receipt);
+                // ⚠️⚠️ SCOPE_IDENTITY, inte OUTPUT: kvittotabellen bär en
+                // oföränderlighetstrigger, och SQL Server vägrar OUTPUT utan INTO då — medan
+                // `INTO @new` i sin tur läses av NPoco som en parameter. Se LedgerPostingService.
+                receipt.Id = ldb.ExecuteScalar<int>(
+                    @"INSERT INTO dbo.LedgerReceipt
+                        (IssuerType, IssuerId, SeriesId, Number, PaymentId, IssuedUtc,
+                         IssuedByMemberId, IssuerName, IssuerOrgNumber, IssuerAddress, IssuerEmail,
+                         PaymentDetails, IssuerIsVatRegistered, IssuerVatNumber, VatAmount,
+                         Description, Amount)
+                      VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16);
+                      SELECT CAST(SCOPE_IDENTITY() AS int);",
+                    receipt.IssuerType, receipt.IssuerId, receipt.SeriesId, receipt.Number,
+                    receipt.PaymentId, receipt.IssuedUtc, receipt.IssuedByMemberId, receipt.IssuerName,
+                    (object?)receipt.IssuerOrgNumber ?? DBNull.Value, (object?)receipt.IssuerAddress ?? DBNull.Value,
+                    (object?)receipt.IssuerEmail ?? DBNull.Value, (object?)receipt.PaymentDetails ?? DBNull.Value,
+                    receipt.IssuerIsVatRegistered, (object?)receipt.IssuerVatNumber ?? DBNull.Value,
+                    (object?)receipt.VatAmount ?? DBNull.Value, receipt.Description, receipt.Amount);
 
-                db.Execute(
+                ldb.Execute(
                     @"UPDATE dbo.LedgerPayment
                          SET ConfirmedUtc = @1, ConfirmedByMemberId = @2, ActualAmount = @3,
                              JournalEntryId = @4, ReceiptId = @5
@@ -467,7 +509,8 @@ namespace HpskSite.Services.Ledger
             reason = reason.Trim();
 
             using var db = _databaseFactory.CreateDatabase();
-            var payment = db.SingleOrDefault<LedgerPayment>(
+            var ldb = new LedgerDb(db, paymentId);
+            var payment = ldb.SingleOrDefault<LedgerPayment>(
                 "SELECT * FROM dbo.LedgerPayment WHERE Id = @0", paymentId);
 
             if (payment is null) return ReverseResult.Failed("Betalningen finns inte.");
@@ -508,7 +551,7 @@ namespace HpskSite.Services.Ledger
             // ⚠️ EGEN UPDATE, inte Void(). Void vägrar med flit en bekräftad rad, så att ingen av
             // misstag tar bort pengar ur liggaren utan att rätta bokföringen. Den här skrivningen
             // är tillåten just därför att rättelsen redan är skriven ovanför.
-            var rows = db.Execute(
+            var rows = ldb.Execute(
                 @"UPDATE dbo.LedgerPayment
                      SET VoidedUtc = @1, VoidedByMemberId = @2, VoidReason = @3
                    WHERE Id = @0 AND VoidedUtc IS NULL",
@@ -558,8 +601,9 @@ namespace HpskSite.Services.Ledger
             if (string.IsNullOrWhiteSpace(reason)) return false;
 
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, paymentId);
 
-            return db.Execute(
+            return ldb.Execute(
                 @"UPDATE dbo.LedgerPayment
                      SET VoidedUtc = @1, VoidedByMemberId = @2, VoidReason = @3
                    WHERE Id = @0 AND ConfirmedUtc IS NULL AND VoidedUtc IS NULL",
@@ -573,8 +617,9 @@ namespace HpskSite.Services.Ledger
         public List<LedgerPayment> ForSource(string sourceType, int sourceId)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, LedgerSchema.LiveOnly);
 
-            return db.Fetch<LedgerPayment>(
+            return ldb.Fetch<LedgerPayment>(
                 @"SELECT * FROM dbo.LedgerPayment
                    WHERE SourceType = @0 AND SourceId = @1
                    ORDER BY PayerName, Id",
@@ -631,7 +676,8 @@ namespace HpskSite.Services.Ledger
 
         private static LedgerIssuerSettings? LoadSettings(IDatabase db, int issuerType, int issuerId)
             => db.FirstOrDefault<LedgerIssuerSettings>(
-                "SELECT * FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1",
+                LedgerSchema.Sql(issuerId,
+                    "SELECT * FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1"),
                 issuerType, issuerId);
 
         private readonly record struct IssuerDetails(
