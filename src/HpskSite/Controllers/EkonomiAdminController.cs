@@ -37,6 +37,7 @@ namespace HpskSite.Controllers
         private readonly LedgerPostingService _postingService;
         private readonly LedgerPaymentService _paymentService;
         private readonly LedgerOverviewService _overviewService;
+        private readonly LedgerBudgetService _budgetService;
         private readonly LedgerManualPostingService _manualPosting;
         private readonly LedgerMembershipFeeBridge _feeBridge;
         private readonly LedgerSandboxService _sandbox;
@@ -56,6 +57,7 @@ namespace HpskSite.Controllers
             LedgerPostingService postingService,
             LedgerPaymentService paymentService,
             LedgerOverviewService overviewService,
+            LedgerBudgetService budgetService,
             LedgerManualPostingService manualPosting,
             LedgerMembershipFeeBridge feeBridge,
             LedgerSandboxService sandbox,
@@ -69,6 +71,7 @@ namespace HpskSite.Controllers
             _postingService = postingService;
             _paymentService = paymentService;
             _overviewService = overviewService;
+            _budgetService = budgetService;
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
             _sandbox = sandbox;
@@ -601,9 +604,265 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Uppsättningen gick inte att spara. Försök igen." });
             }
         }
+
+        // ── Rapport: utfall mot budget ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Rapport-ytan. Svarar ALLTID 200 med ett läsbart tillstånd — "ingen budget antagen" är
+        /// ett riktigt och vanligt läge, inte ett fel, och ytan ritar sig helt ur det här svaret.
+        ///
+        /// <para>⚠️ <paramref name="from"/> och <paramref name="to"/> är "Byt period" i skissen.
+        /// Utelämnade betyder räkenskapsårets början fram till i dag.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetBudgetReport(
+            int issuerType, int issuerId, int? year = null, string? from = null, string? to = null)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+
+            try
+            {
+                var fiscalYear = ResolveFiscalYear(issuerType, issuerId, year);
+
+                if (fiscalYear is null)
+                    return Json(new
+                    {
+                        success = true,
+                        hasFiscalYear = false,
+                        message = "Det finns inget räkenskapsår att följa upp ännu."
+                    });
+
+                var report = _budgetService.BuildReport(
+                    issuerType, issuerId, fiscalYear, ParseDate(from), ParseDate(to));
+
+                return Json(new
+                {
+                    success = true,
+                    hasFiscalYear = true,
+                    report,
+                    periodLabel = report.PeriodLabel,
+                    resultTone = report.ResultTone,
+                    yearStart = fiscalYear.StartDate.ToString("yyyy-MM-dd"),
+                    yearEnd = fiscalYear.EndDate.ToString("yyyy-MM-dd")
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte bygga budgetrapporten för {Typ}/{Id}.", issuerType, issuerId);
+                return Json(new { success = false, message = "Rapporten gick inte att läsa just nu." });
+            }
+        }
+
+        /// <summary>
+        /// Underlaget för att skriva in budgeten: föreningens resultatkonton, utkastets belopp, och
+        /// förra årets utfall som stöd.
+        ///
+        /// <para><b>⚠️ Kontolistan kommer ur FÖRENINGENS kontoplan</b>, aldrig ur en lista i koden —
+        /// samma regel som bokföringsytan. En klubb som lagt till 4015 ska kunna budgetera på det.</para>
+        ///
+        /// <para><b>⚠️ Förra årets utfall visas men fylls ALDRIG i åt kassören.</b> Budgeten är ett
+        /// beslut; ett förifyllt tal är en gissning som ser ut som ett beslut så fort någon trycker
+        /// spara utan att läsa.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetBudgetEditor(int issuerType, int issuerId, int? year = null)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+
+            try
+            {
+                var fiscalYear = ResolveFiscalYear(issuerType, issuerId, year);
+                if (fiscalYear is null)
+                    return Json(new { success = false, message = "Lägg upp räkenskapsåret först." });
+
+                var memberId = await CurrentMemberIdAsync();
+                var draft = _budgetService.EnsureDraft(issuerType, issuerId, fiscalYear.Id, memberId);
+
+                if (!draft.Success || draft.Budget is null)
+                    return Json(new { success = false, message = draft.Error ?? "Budgetutkastet kunde inte skapas." });
+
+                var lines = _budgetService.GetLines(draft.Budget.Id);
+                var ctx = _manualPosting.BuildContext(issuerType, issuerId);
+
+                // Föregående år, som stöd. Finns det inget är listan tom och ytan säger inget om det.
+                var previous = _setupService.GetStatus(issuerType, issuerId).FiscalYears
+                    .Where(y => y.Year == fiscalYear.Year - 1)
+                    .Select(y => _budgetService.BuildReport(issuerType, issuerId, y, y.StartDate, y.EndDate))
+                    .FirstOrDefault();
+
+                var previousActuals = previous is null
+                    ? new Dictionary<int, decimal>()
+                    : previous.Income.Concat(previous.Costs).ToDictionary(r => r.AccountNumber, r => r.Actual);
+
+                var accounts = ctx.Accounts
+                    .Where(a => !a.IsBalance)
+                    .Select(a => new
+                    {
+                        number = a.Number,
+                        name = a.Name,
+                        isIncome = LedgerBudgetService.IsIncome(a.Number),
+                        amount = lines.FirstOrDefault(l => l.AccountNumber == a.Number)?.Amount ?? 0m,
+                        previousActual = previousActuals.TryGetValue(a.Number, out var pa) ? pa : 0m
+                    })
+                    .OrderBy(a => a.number)
+                    .ToList();
+
+                return Json(new
+                {
+                    success = true,
+                    draftId = draft.Budget.Id,
+                    revision = draft.Budget.Revision,
+                    fiscalYear = fiscalYear.Year,
+                    previousYear = previous is null ? (int?)null : fiscalYear.Year - 1,
+                    accounts
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte läsa budgetunderlaget för {Typ}/{Id}.", issuerType, issuerId);
+                return Json(new { success = false, message = "Budgetunderlaget gick inte att läsa just nu." });
+            }
+        }
+
+        /// <summary>Sparar utkastets belopp. Raderna skrivs om helt — formuläret ÄR sanningen.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveBudgetDraft([FromBody] SaveBudgetRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+
+            var (ok, _) = await AuthorizeIssuerAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+
+            // ⚠️ Utkastet måste tillhöra den utställare anroparen har behörighet till. Utan den
+            // kontrollen räcker behörighet till EN förening för att skriva i en annans budget.
+            if (!BudgetBelongsToIssuer(request.BudgetId, request.IssuerType, request.IssuerId))
+                return Json(new { success = false, message = "Budgeten hör inte till den här föreningen." });
+
+            var lines = (request.Lines ?? new List<BudgetLineInput>())
+                .Select(l => new LedgerBudgetLine
+                {
+                    AccountNumber = l.AccountNumber,
+                    AccountName = l.AccountName ?? "",
+                    Amount = l.Amount
+                })
+                .ToList();
+
+            var result = _budgetService.SaveDraftLines(request.BudgetId, lines);
+
+            return Json(result.Success
+                ? new { success = true, message = $"Budgeten sparad — {result.LineCount} konton." }
+                : new { success = false, message = result.Error! });
+        }
+
+        /// <summary>
+        /// Antar budgeten. <b>Efter det här går den inte att ändra</b> — en revidering är en ny
+        /// version, och det säger svaret också.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AdoptBudget([FromBody] AdoptBudgetRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att anta." });
+
+            var (ok, _) = await AuthorizeIssuerAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = "Du har inte behörighet till den här föreningens ekonomi." });
+
+            if (!BudgetBelongsToIssuer(request.BudgetId, request.IssuerType, request.IssuerId))
+                return Json(new { success = false, message = "Budgeten hör inte till den här föreningen." });
+
+            var date = ParseDate(request.AdoptedDate);
+            if (date is null)
+                return Json(new { success = false, message = "Ange vilket datum beslutet fattades." });
+
+            var memberId = await CurrentMemberIdAsync();
+
+            var result = _budgetService.Adopt(
+                request.BudgetId, date.Value, request.AdoptedBody ?? LedgerBudgetAdoptedBy.AnnualMeeting,
+                string.IsNullOrWhiteSpace(request.Note) ? null : request.Note!.Trim(), memberId);
+
+            return Json(result.Success
+                ? new
+                {
+                    success = true,
+                    message = "Budgeten är antagen och kan inte längre ändras. "
+                            + "Behöver den revideras blir det en ny version."
+                }
+                : new { success = false, message = result.Error! });
+        }
+
+        /// <summary>
+        /// ⚠️ Budgeten adresseras med sitt EGET id, som klienten skickar. Utan den här kontrollen
+        /// räcker behörighet till en förening för att skriva i en annans budget. Samma familj som
+        /// kvittots ägarkontroll.
+        /// </summary>
+        private bool BudgetBelongsToIssuer(int budgetId, int issuerType, int issuerId)
+        {
+            if (budgetId == 0) return false;
+
+            using var db = DatabaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, budgetId);
+
+            return ldb.ExecuteScalar<int>(
+                "SELECT COUNT(1) FROM dbo.LedgerBudget WHERE Id = @0 AND IssuerType = @1 AND IssuerId = @2",
+                budgetId, issuerType, issuerId) > 0;
+        }
+
+        /// <summary>Året som ska följas upp: det efterfrågade, annars det innevarande.</summary>
+        private LedgerFiscalYear? ResolveFiscalYear(int issuerType, int issuerId, int? year)
+        {
+            var years = _setupService.GetStatus(issuerType, issuerId).FiscalYears;
+            if (years.Count == 0) return null;
+
+            if (year is int y)
+                return years.FirstOrDefault(f => f.Year == y);
+
+            var today = DateTime.Today;
+
+            return years.FirstOrDefault(f => f.StartDate.Date <= today && f.EndDate.Date >= today)
+                ?? years.OrderByDescending(f => f.Year).First();
+        }
+
+        private static DateTime? ParseDate(string? value)
+            => DateTime.TryParse(value, out var d) ? d.Date : null;
+
+        private async Task<int> CurrentMemberIdAsync()
+        {
+            var current = await _memberManager.GetCurrentMemberAsync();
+            if (current?.Email is null) return 0;
+            return _memberService.GetByEmail(current.Email)?.Id ?? 0;
+        }
     }
 
     /// <summary>Det sandlådeknappen skickar. ⚠️ ÄGARENS nod-id, inte ett utställar-id.</summary>
+    public class SaveBudgetRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int BudgetId { get; set; }
+        public List<BudgetLineInput>? Lines { get; set; }
+    }
+
+    public class BudgetLineInput
+    {
+        public int AccountNumber { get; set; }
+        public string? AccountName { get; set; }
+        public decimal Amount { get; set; }
+    }
+
+    /// <summary>⚠️ Datumet är BESLUTETS, inte dagens. Budgeten antogs på ett möte.</summary>
+    public class AdoptBudgetRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int BudgetId { get; set; }
+        public string? AdoptedDate { get; set; }
+        public string? AdoptedBody { get; set; }
+        public string? Note { get; set; }
+    }
+
     public class CreateSandboxRequest
     {
         public int OwnerType { get; set; }

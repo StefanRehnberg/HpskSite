@@ -28,6 +28,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<LedgerIssuerResolver>();
             builder.Services.AddScoped<LedgerPaymentService>();
             builder.Services.AddScoped<LedgerOverviewService>();
+            builder.Services.AddScoped<LedgerBudgetService>();
             builder.Services.AddScoped<LedgerManualPostingService>();
             builder.Services.AddScoped<LedgerMembershipFeeBridge>();
             builder.Services.AddScoped<LedgerSandboxService>();
