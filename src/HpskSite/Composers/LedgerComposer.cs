@@ -36,6 +36,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<LedgerSandboxService>();
             builder.Services.AddScoped<LedgerBankImportService>();
             builder.Services.AddScoped<LedgerClosingService>();
+            builder.Services.AddScoped<LedgerSieExportService>();
             builder.Services.AddHostedService<LedgerSchemaGuardHostedService>();
         }
     }
