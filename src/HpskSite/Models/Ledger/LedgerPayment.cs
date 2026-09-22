@@ -110,6 +110,20 @@ namespace HpskSite.Models.Ledger
         };
 
         public static bool IsValid(string method) => All.Contains(method);
+
+        /// <summary>
+        /// Betalsättet i klartext, för en handling en människa läser.
+        /// <para>⚠️ Nycklarna ligger i databasen och får aldrig döpas om — därför översätts de här
+        /// i stället för att lagras läsbara.</para>
+        /// </summary>
+        public static string LabelFor(string method) => method switch
+        {
+            Swish => "Swish",
+            BankGiro => "Bankgiro",
+            Cash => "Kontant",
+            Card => "Kort",
+            _ => "Annat"
+        };
     }
 
     /// <summary>

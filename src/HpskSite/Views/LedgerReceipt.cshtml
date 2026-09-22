@@ -1,0 +1,170 @@
+@model HpskSite.Controllers.LedgerReceiptViewModel
+@{
+    Layout = null;
+    var r = Model.Receipt;
+}
+@*
+    Kvitto på en mottagen betalning.
+
+    ⚠️ VARJE UPPGIFT OM FÖRENINGEN KOMMER UR KVITTORADEN, inte ur nuläget. Vyn slår medvetet inte
+       upp någonting — se controllerns kommentar. Lägg aldrig till ett @@Umbraco-uppslag här.
+*@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kvitto @Model.Number</title>
+    <style>
+        :root {
+            --ink: #1a1a1a;
+            --muted: #666;
+            --line: #ddd;
+            --bg: #fff;
+        }
+
+        @@media (prefers-color-scheme: dark) {
+            /* Kvittot är en handling som ska skrivas ut. Mörkt läge gäller skärmen; utskriften
+               nedan tvingar tillbaka vitt. */
+            :root { --ink: #eee; --muted: #aaa; --line: #444; --bg: #1c1c1c; }
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: var(--ink);
+            background: var(--bg);
+            margin: 0;
+            padding: 24px 16px;
+            line-height: 1.5;
+        }
+
+        .sheet { max-width: 640px; margin: 0 auto; }
+
+        .head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+                border-bottom: 2px solid var(--ink); padding-bottom: 12px; margin-bottom: 20px; }
+
+        h1 { font-size: 1.5rem; margin: 0 0 4px; }
+
+        .num { font-size: 1.1rem; font-weight: 600; white-space: nowrap; }
+
+        .muted { color: var(--muted); font-size: .875rem; }
+
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { text-align: left; padding: 8px 0; border-bottom: 1px solid var(--line); }
+        td.amount, th.amount { text-align: right; white-space: nowrap; }
+
+        .total td { border-bottom: none; border-top: 2px solid var(--ink);
+                    font-weight: 700; font-size: 1.15rem; padding-top: 12px; }
+
+        .issuer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line);
+                  font-size: .875rem; color: var(--muted); }
+
+        .notice { border: 2px solid #b02a37; color: #b02a37; background: transparent;
+                  padding: 12px 14px; border-radius: 6px; margin-bottom: 20px; }
+
+        .actions { margin-top: 28px; }
+        button { font: inherit; padding: 8px 16px; border: 1px solid var(--ink);
+                 background: transparent; color: var(--ink); border-radius: 6px; cursor: pointer; }
+
+        @@media print {
+            body { padding: 0; background: #fff; color: #000; }
+            .actions { display: none; }
+            :root { --ink: #000; --muted: #444; --line: #bbb; --bg: #fff; }
+        }
+    </style>
+</head>
+<body>
+<div class="sheet">
+
+    @if (Model.IsReversed)
+    {
+        @* ⚠️ Handlingen rivs inte, men den får inte heller se giltig ut. Betalaren som öppnar
+           sitt gamla kvitto ska se att pengarna gått tillbaka. *@
+        <div class="notice">
+            <strong>Betalningen är återtagen.</strong>
+            @if (!string.IsNullOrWhiteSpace(Model.ReversedReason))
+            {
+                <span>Skäl: @Model.ReversedReason</span>
+            }
+            <div class="muted" style="color:inherit">
+                Kvittot står kvar som en handling om vad som hände då.
+            </div>
+        </div>
+    }
+
+    <div class="head">
+        <div>
+            <h1>Kvitto</h1>
+            <div class="muted">Mottagen betalning</div>
+        </div>
+        <div style="text-align:right">
+            <div class="num">@Model.Number</div>
+            <div class="muted">@r.IssuedUtc.ToLocalTime().ToString("yyyy-MM-dd")</div>
+        </div>
+    </div>
+
+    <div>
+        <strong>Betalare</strong><br>
+        @(string.IsNullOrWhiteSpace(Model.Payment?.PayerName) ? "—" : Model.Payment!.PayerName)
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Avser</th>
+                <th class="amount">Belopp</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>@r.Description</td>
+                <td class="amount">@r.Amount.ToString("N2") kr</td>
+            </tr>
+
+            @if (r.VatAmount is > 0)
+            {
+                <tr>
+                    <td class="muted">varav moms</td>
+                    <td class="amount muted">@r.VatAmount!.Value.ToString("N2") kr</td>
+                </tr>
+            }
+
+            <tr class="total">
+                <td>Betalt</td>
+                <td class="amount">@r.Amount.ToString("N2") kr</td>
+            </tr>
+        </tbody>
+    </table>
+
+    @if (Model.Payment is not null)
+    {
+        <div class="muted">
+            Betalsätt: @HpskSite.Models.Ledger.LedgerPaymentMethod.LabelFor(Model.Payment.Method)
+        </div>
+    }
+
+    <div class="issuer">
+        <strong>@r.IssuerName</strong><br>
+        @if (!string.IsNullOrWhiteSpace(r.IssuerOrgNumber)) { <text>Org.nr @r.IssuerOrgNumber<br></text> }
+        @if (!string.IsNullOrWhiteSpace(r.IssuerAddress)) { <text>@r.IssuerAddress<br></text> }
+        @if (!string.IsNullOrWhiteSpace(r.IssuerEmail)) { <text>@r.IssuerEmail<br></text> }
+        @if (!string.IsNullOrWhiteSpace(r.PaymentDetails)) { <text>@r.PaymentDetails<br></text> }
+
+        @* ⚠️ Momspåståendet ur kvittoraden, aldrig ur en textrad i koden — fel 8 i den gamla
+           modellen var just en hårdkodad mening om momsen på allas handlingar. *@
+        @if (r.IssuerIsVatRegistered)
+        {
+            <text>Momsreg.nr @r.IssuerVatNumber</text>
+        }
+        else
+        {
+            <text>Föreningen är inte momsregistrerad.</text>
+        }
+    </div>
+
+    <div class="actions">
+        <button type="button" onclick="window.print()">Skriv ut</button>
+    </div>
+</div>
+</body>
+</html>

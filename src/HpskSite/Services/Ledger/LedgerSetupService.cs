@@ -62,11 +62,14 @@ namespace HpskSite.Services.Ledger
             DateTime? endDate = null)
         {
             // ⚠️ Ett okänt värde får inte tolkas som något — minst av allt som FullLedger.
-            if (shape != LedgerIssuerShape.FullLedger && shape != LedgerIssuerShape.FeesAndExport)
+            // ⚠️ Listan frågas ur LedgerIssuerShape.IsValid, aldrig uppräknad här. En egen
+            // upprepning hade behövt rättas på två ställen den dag en form tillkom — och en av
+            // dem hade glömts. Formen FeesOnly tillkom 2026-09-21.
+            if (!LedgerIssuerShape.IsValid(shape))
             {
                 throw new ArgumentException(
-                    $"Okänd föreningsform '{shape}'. Välj {LedgerIssuerShape.FullLedger} "
-                    + $"eller {LedgerIssuerShape.FeesAndExport}.", nameof(shape));
+                    $"Okänd föreningsform '{shape}'. Välj en av: "
+                    + string.Join(", ", LedgerIssuerShape.All) + ".", nameof(shape));
             }
 
             using var db = _databaseFactory.CreateDatabase();
@@ -186,6 +189,112 @@ namespace HpskSite.Services.Ledger
                 result.AccountsAdded, result.RolesMapped, result.SeriesCreated);
 
             return result;
+        }
+
+        /// <summary>
+        /// Läser upp föreningens uppsättning för ekonomiytan. Skriver ingenting.
+        ///
+        /// <para><b>⚠️ Fyller INTE i <see cref="LedgerSetupStatus.CanPost"/> eller
+        /// <see cref="LedgerSetupStatus.BlockedReason"/>.</b> Beredskapen att bokföra ägs av
+        /// <c>LedgerPostingService.PostingBlockedReason</c>, som är den kontroll betalvägen
+        /// faktiskt frågar. En andra bedömning här hade varit fri att säga emot den, och då är
+        /// det ytan som ljuger — inte spärren.</para>
+        /// </summary>
+        public LedgerSetupStatus GetStatus(int issuerType, int issuerId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+
+            var status = new LedgerSetupStatus
+            {
+                IssuerType = issuerType,
+                IssuerId = issuerId,
+                RolesTotal = LedgerAccountRoles.All.Length
+            };
+
+            var settings = db.FirstOrDefault<LedgerIssuerSettings>(
+                "SELECT * FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1",
+                issuerType, issuerId);
+
+            if (settings is null)
+            {
+                // Inte uppsatt. Allt nedanför är tomt med flit — vyn ska visa uppsättningen,
+                // inte en bokföring utan innehåll.
+                return status;
+            }
+
+            status.IsSetUp = true;
+            status.Shape = settings.Shape ?? "";
+            status.IsVatRegistered = settings.IsVatRegistered;
+            status.VatNumber = settings.VatNumber;
+
+            status.AccountCount = db.ExecuteScalar<int>(
+                "SELECT COUNT(1) FROM dbo.LedgerAccount WHERE IssuerType = @0 AND IssuerId = @1",
+                issuerType, issuerId);
+
+            var mapped = db.Fetch<string>(
+                "SELECT RoleKey FROM dbo.LedgerAccountRole WHERE IssuerType = @0 AND IssuerId = @1",
+                issuerType, issuerId).ToHashSet();
+
+            status.RolesMapped = mapped.Count;
+
+            foreach (var role in LedgerAccountRoles.All)
+            {
+                if (!mapped.Contains(role)) status.MissingRoles.Add(role);
+            }
+
+            status.FiscalYears.AddRange(db.Fetch<LedgerFiscalYear>(
+                @"SELECT * FROM dbo.LedgerFiscalYear
+                   WHERE IssuerType = @0 AND IssuerId = @1
+                   ORDER BY Year DESC",
+                issuerType, issuerId));
+
+            return status;
+        }
+
+        /// <summary>
+        /// Byter föreningsform. <b>Egen metod med flit</b> — <see cref="EnsureIssuer"/> skriver
+        /// formen bara när inställningsraden skapas, eftersom den aldrig får skriva över något
+        /// föreningen valt. Utan den här metoden hade en förening som en gång hamnat i fel form
+        /// suttit fast i den, och valet ska gå att ändra åt båda hållen utan att börja om.
+        ///
+        /// <para><b>⚠️ Byter ingenting annat.</b> Konton, mappningar, räkenskapsår och redan
+        /// skrivna verifikationer står kvar. Går föreningen från <c>full</c> till <c>export</c>
+        /// slutar nya betalningar bli verifikationer — de gamla raderas inte, för en
+        /// verifikationsliggare raderar ingenting.</para>
+        /// </summary>
+        /// <returns>Sant om formen ändrades. Falskt om den redan var den efterfrågade.</returns>
+        public bool SetShape(int issuerType, int issuerId, string shape)
+        {
+            // ⚠️ Listan frågas ur LedgerIssuerShape.IsValid, aldrig uppräknad här. En egen
+            // upprepning hade behövt rättas på två ställen den dag en form tillkom — och en av
+            // dem hade glömts. Formen FeesOnly tillkom 2026-09-21.
+            if (!LedgerIssuerShape.IsValid(shape))
+            {
+                throw new ArgumentException(
+                    $"Okänd föreningsform '{shape}'. Välj en av: "
+                    + string.Join(", ", LedgerIssuerShape.All) + ".", nameof(shape));
+            }
+
+            using var db = _databaseFactory.CreateDatabase();
+
+            var current = db.ExecuteScalar<string>(
+                "SELECT Shape FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1",
+                issuerType, issuerId);
+
+            if (current == shape) return false;
+
+            var rows = db.Execute(
+                "UPDATE dbo.LedgerIssuerSettings SET Shape = @2 WHERE IssuerType = @0 AND IssuerId = @1",
+                issuerType, issuerId, shape);
+
+            if (rows > 0)
+            {
+                _logger.LogInformation(
+                    "Verifikationsliggaren: utställare {Typ}/{Id} bytte föreningsform {Fran} → {Till}.",
+                    issuerType, issuerId, current ?? "(ingen)", shape);
+            }
+
+            return rows > 0;
         }
     }
 
