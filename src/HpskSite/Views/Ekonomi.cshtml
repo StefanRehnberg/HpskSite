@@ -1,193 +1,195 @@
-@model HpskSite.Controllers.EkonomiPageModel
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
-    Layout = null;
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Ekonomi";
+    var Model = ViewData["EkonomiData"] as HpskSite.Controllers.EkonomiPageModel
+                ?? new HpskSite.Controllers.EkonomiPageModel();
     var uid = $"ek{Model.IssuerType}_{Model.IssuerId}";
 }
 @*
-    Kassörens arbetsyta. BYGGD MOT Ekonomi Exempel/Ekonomi_Wireframes.pdf — de sex sidorna som
-    skickades till Fredrik, Varbergs PK. Öppna PDF:en innan du ändrar något här.
+    Kassorens arbetsyta. Innehallet foljer Ekonomi Exempel/Ekonomi_Wireframes.pdf - oppna den
+    innan du andrar nagot har.
 
-    ⚠️ Fyra railposter har ingen motor än (Bokför, Avstämning, Rapport, Bokslut). De säger vad de
-       ska göra och vad de väntar på. Fyll dem ALDRIG med påhittade siffror: skissens panel 2
-       bygger på att noll fel visas lika stort som fel, och en uppdiktad nolla är motsatsen.
+    AVSTEG FRAN SKISSEN, MED FLIT (Stefan 2026-09-22): skissen ar ett fristaende dokument utan
+    sajtens ram. Den LEVANDE ytan behaller headern och formspraket, precis som /styrelse - det
+    ar samma sorts arbetsyta, och /styrelse loste redan fragan. Bara UTSKRIFTER (protokoll,
+    kvitto) kor Layout = null. Skissens accentfarg och serif ar darfor utbytta mot --bs-*;
+    det som ar kvar ar det som BAR BETYDELSE: numrerade paneler, fragor som rubriker, tonade
+    rader dar nagot saknas, och "Inget" i stallet for en nolla.
 
-    ⚠️ Varje @@ i CSS:en är ETT at-tecken. Ett ensamt @@ följt av bokstav startar ett C#-uttryck och
-       spräcker vyns runtime-kompilering med ett meddelandelöst UmbracoCompilationException.
-       dotnet build säger ingenting — SIDLADDNINGEN är kompileringskontrollen.
+    Fyra railposter har ingen motor an. De sager vad de ska gora och visar ALDRIG ett belopp.
 *@
-<!DOCTYPE html>
-<html lang="sv">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex, nofollow">
-<title>Ekonomi — @Model.IssuerName</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@@400;600;700&family=Source+Serif+4:opsz,wght@@8..60,400;600&display=swap">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@@1.11.3/font/bootstrap-icons.css">
+@* ⚠️ ALLT ar scopat under .ek-page och bygger pa --bs-*-variabler. Dels foljer morkt lage och
+   temat da med av sig sjalvt, dels kan inget harifran lacka ut i resten av sajten. Klasser som
+   krockar med Bootstrap (nav, card, btn, alert) ar omdopta till ek-*; utan det staller ramverket
+   railen pa hogkant och kort utan variant blir osynliga.
+   Toppniva-<style> i en VY ar OK - /styrelse gor samma sak. Det ar i en PARTIAL det 500:ar. *@
 <style>
-  :root {
-    --paper:#F7F6F3; --surface:#FFFFFF; --ink:#1B1B19; --ink-soft:#5E5E58;
-    --line:#DCDAD3; --line-soft:#ECEAE4; --rail:#EFEDE7;
-    --attn:#B45309; --attn-bg:#FBF4EC; --attn-line:#E8D5BE;
-    --ok:#2F6B4A; --ok-bg:#F0F5F1; --ok-line:#C3D9C9;
-    --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
-    --sans:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  }
-  @@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --paper:#15161A; --surface:#1D1F24; --ink:#ECEAE4; --ink-soft:#A5A39C;
-      --line:#33363D; --line-soft:#292C32; --rail:#1A1C21;
-      --attn:#E0A566; --attn-bg:#2A2118; --attn-line:#4A3A24;
-      --ok:#7FBF9A; --ok-bg:#17261E; --ok-line:#2C4636;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans);
-         font-size:15px; line-height:1.5; }
-  a { color:var(--attn); }
+  .ek-page { --ek-attn: #B45309; --ek-attn-bg: #FBF4EC; --ek-attn-line: #E8D5BE; }
+  [data-bs-theme="dark"] .ek-page { --ek-attn: #E0A566; --ek-attn-bg: #2A2118; --ek-attn-line: #4A3A24; }
 
-  .wrap { display:flex; min-height:100vh; }
+  .ek-page .wrap { display: flex; gap: 1.5rem; align-items: flex-start; }
 
-  /* ── Rail ─────────────────────────────────────────────────────────────────────── */
-  .rail { width:272px; flex-shrink:0; background:var(--paper); padding:26px 0 20px;
-          border-right:1px solid var(--line-soft); display:flex; flex-direction:column; }
-  .rail .brand { font-size:11px; letter-spacing:.14em; color:var(--ink-soft);
-                 padding:0 26px; text-transform:uppercase; }
-  .rail .club { font-size:21px; font-weight:700; padding:4px 26px 0; }
-  .rail .role { font-size:13px; color:var(--ink-soft); padding:0 26px 22px; }
-  .rail a.nav { display:block; padding:11px 26px; color:var(--ink); text-decoration:none;
-                font-size:15.5px; border-left:3px solid transparent; }
-  .rail a.nav:hover { color:var(--attn); }
-  .rail a.nav.on { font-weight:700; background:var(--surface); border-left-color:var(--attn); }
-  .rail a.nav.soon { color:var(--ink-soft); }
-  .rail .foot { margin-top:auto; padding:22px 26px 0; font-size:12.5px; color:var(--ink-soft); }
-  .rail .foot a { display:inline-block; margin-top:10px; }
+  .ek-page .rail { width: 230px; flex-shrink: 0; position: sticky; top: 1rem; }
+  .ek-page .rail .brand { display: none; }
+  .ek-page .rail .club { font-size: 1.15rem; font-weight: 700; }
+  .ek-page .rail .role { font-size: .9rem; color: var(--bs-secondary-color); margin-bottom: 1rem; }
+  .ek-page .rail a.ek-nav { display: block; padding: .5rem .85rem; border-radius: .5rem;
+      color: var(--bs-body-color); text-decoration: none; border-left: 3px solid transparent; }
+  .ek-page .rail a.ek-nav:hover { background: var(--bs-tertiary-bg); }
+  .ek-page .rail a.ek-nav.on { font-weight: 700; background: var(--bs-tertiary-bg);
+      border-left-color: var(--ek-attn); }
+  .ek-page .rail a.ek-nav.soon { color: var(--bs-secondary-color); }
+  .ek-page .rail .foot { margin-top: 1.25rem; padding-top: 1rem; font-size: .85rem;
+      color: var(--bs-secondary-color); border-top: 1px solid var(--bs-border-color); }
 
-  /* ── Main ─────────────────────────────────────────────────────────────────────── */
-  .main { flex-grow:1; padding:26px 34px 60px; min-width:0; }
-  .head { display:flex; justify-content:space-between; align-items:flex-start; gap:20px;
-          flex-wrap:wrap; margin-bottom:22px; }
-  h1 { font-family:var(--serif); font-size:34px; font-weight:600; margin:0; }
-  .sub { color:var(--ink-soft); font-size:14px; margin-top:4px; }
-  .pills { display:flex; gap:10px; flex-wrap:wrap; }
-  .pill { border:1px solid var(--line); border-radius:999px; padding:6px 15px; font-size:13.5px;
-          background:var(--surface); color:var(--ink); text-decoration:none; white-space:nowrap; }
-  .pill.strong { border-color:var(--ink); font-weight:600; border-radius:8px; }
+  /* ⚠️⚠️ `flex: 1 1 auto` MASTE staa uttryckligen. Sajtens layout satter `main { flex: 1 0 auto }`
+     pa ELEMENTET (sticky footer-monstret), sa flex-shrink ar 0 — och da vagrar ytan krympa hur
+     mycket min-width:0 man an satter. Matt 2026-09-22: .ek-main blev 2010 px i en 1296 px bred
+     container och panel 2 och 4 hamnade utanfor skarmen. Att doypa om KLASSEN hjalper inte, for
+     regeln traeffar taggen. */
+  .ek-page .ek-main { flex: 1 1 auto; min-width: 0; }
+  .ek-page .head { display: flex; justify-content: space-between; align-items: flex-start;
+      gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+  .ek-page h1 { font-size: 1.9rem; font-weight: 700; margin: 0; }
+  .ek-page .sub { color: var(--bs-secondary-color); margin-top: .2rem; }
+  .ek-page .pills { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .ek-page .pill { border: 1px solid var(--bs-border-color); border-radius: 2rem;
+      padding: .3rem .85rem; font-size: .9rem; text-decoration: none;
+      color: var(--bs-body-color); background: var(--bs-body-bg); white-space: nowrap; }
+  .ek-page .pill.strong { border-color: var(--bs-body-color); font-weight: 600; border-radius: .5rem; }
 
-  .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
-  .card { background:var(--surface); border:1px solid var(--line-soft); border-radius:10px;
-          padding:22px 24px; }
-  .card.wide { grid-column:1 / -1; }
-  .card-h { display:flex; justify-content:space-between; align-items:baseline; gap:12px;
-            margin-bottom:14px; }
-  .card-h h2 { font-family:var(--serif); font-size:19px; font-weight:600; margin:0; }
-  .card-h .meta { font-size:13px; color:var(--ink-soft); }
-  .card-h .meta.act { color:var(--attn); font-weight:600; text-decoration:none; cursor:pointer; }
+  /* ⚠️ minmax(0,1fr), inte 1fr. En grid-kolumn har min-width:auto som standard, sa en bred
+     tabell inuti vagrar krympa och rutnatet svammar ut ur containern — panel 2 och 4 hamnade
+     utanfor skarmkanten. */
+  .ek-page .ek-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+  .ek-page .ek-card { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);
+      border-radius: .75rem; padding: 1.15rem 1.25rem; }
+  .ek-page .ek-card.wide { grid-column: 1 / -1; }
+  .ek-page .ek-cardh { display: flex; justify-content: space-between; align-items: baseline;
+      gap: .75rem; margin-bottom: .9rem; }
+  .ek-page .ek-cardh h2 { font-size: 1.15rem; font-weight: 700; margin: 0; }
+  .ek-page .meta { font-size: .875rem; color: var(--bs-secondary-color); }
 
-  .todo { display:flex; align-items:center; gap:14px; background:var(--attn-bg);
-          border:1px solid var(--attn-line); border-radius:8px; padding:11px 15px; margin-bottom:9px; }
-  .todo .n { font-size:17px; font-weight:700; min-width:30px; text-align:right; }
-  .todo .t { flex-grow:1; }
-  .todo .a { color:var(--attn); font-weight:700; font-size:13.5px; background:none; border:0;
-             cursor:pointer; font-family:inherit; white-space:nowrap; }
-  .todo.done { background:var(--ok-bg); border-color:var(--ok-line); }
+  /* Skissens tonade problemrad — den enda platsen accentfargen bar betydelse. */
+  .ek-page .todo { display: flex; align-items: center; gap: .9rem; background: var(--ek-attn-bg);
+      border: 1px solid var(--ek-attn-line); border-radius: .5rem; padding: .65rem .9rem;
+      margin-bottom: .5rem; }
+  .ek-page .todo .n { font-size: 1.1rem; font-weight: 700; min-width: 2rem; text-align: right; }
+  .ek-page .todo .t { flex-grow: 1; }
+  .ek-page .todo .a { color: var(--ek-attn); font-weight: 700; font-size: .9rem;
+      background: none; border: 0; cursor: pointer; white-space: nowrap; }
+  .ek-page .todo.done { background: var(--bs-success-bg-subtle);
+      border-color: var(--bs-success-border-subtle); }
 
-  .bigbox { background:var(--ok-bg); border:1px solid var(--ok-line); border-radius:8px;
-            padding:22px 24px; }
-  .bigbox .amount { font-size:40px; font-weight:700; color:var(--ok); line-height:1.1; }
-  .bigbox .lead { color:var(--ok); font-weight:600; margin-top:6px; }
-  .bigbox .note { color:var(--ink-soft); font-size:13.5px; margin-top:4px; }
-  .bigbox.warn { background:var(--attn-bg); border-color:var(--attn-line); }
-  .bigbox.warn .amount, .bigbox.warn .lead { color:var(--attn); }
+  .ek-page .ek-bigbox { background: var(--bs-success-bg-subtle);
+      border: 1px solid var(--bs-success-border-subtle); border-radius: .5rem; padding: 1.15rem 1.25rem; }
+  .ek-page .ek-bigbox .amount { font-size: 2.2rem; font-weight: 700;
+      color: var(--bs-success-text-emphasis); line-height: 1.1; }
+  .ek-page .ek-bigbox .lead { color: var(--bs-success-text-emphasis); font-weight: 600; font-size: 1rem; }
+  .ek-page .ek-bigbox .note { color: var(--bs-secondary-color); font-size: .9rem; margin-top: .25rem; }
+  .ek-page .ek-bigbox.ek-warn { background: var(--ek-attn-bg); border-color: var(--ek-attn-line); }
+  .ek-page .ek-bigbox.ek-warn .amount, .ek-page .ek-bigbox.ek-warn .lead { color: var(--ek-attn); }
 
-  .why { color:var(--ink-soft); font-size:13px; margin-top:12px; }
+  .ek-page .why { color: var(--bs-secondary-color); font-size: .875rem; margin-top: .75rem; }
+  .ek-page .muted { color: var(--bs-secondary-color); font-size: .9rem; }
 
-  table.t { width:100%; border-collapse:collapse; font-size:14px; }
-  table.t th { text-align:left; font-size:11px; letter-spacing:.04em; text-transform:uppercase;
-               color:var(--ink-soft); padding:6px 10px; border-bottom:1px solid var(--line); }
-  table.t td { padding:9px 10px; border-top:1px solid var(--line-soft); }
-  table.t td.n, table.t th.n { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
-  table.t tr.gap td { background:var(--attn-bg); }
-  table.t td.miss { color:var(--attn); font-weight:700; }
-  table.t td.fine { color:var(--ok); font-weight:600; }
-  table.t td.date { color:var(--ink-soft); white-space:nowrap; }
+  .ek-page table.t { width: 100%; border-collapse: collapse; }
+  .ek-page table.t th { text-align: left; font-size: .72rem; letter-spacing: .04em;
+      text-transform: uppercase; color: var(--bs-secondary-color); padding: .4rem .6rem;
+      border-bottom: 1px solid var(--bs-border-color); }
+  .ek-page table.t td { padding: .55rem .6rem; border-top: 1px solid var(--bs-border-color-translucent); }
+  .ek-page table.t td.n, .ek-page table.t th.n { text-align: right;
+      font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* ⚠️ Tonad rad DAR NAGOT SAKNAS. Textfargen sätts uttryckligen: arvd muted text pa en ljus
+     rad ar osynlig i morkt lage. */
+  .ek-page table.t tr.gap td { background: var(--ek-attn-bg); color: var(--bs-body-color); }
+  .ek-page table.t td.miss { color: var(--ek-attn); font-weight: 700; }
+  .ek-page table.t td.fine { color: var(--bs-success-text-emphasis); font-weight: 600; }
+  .ek-page table.t td.date { color: var(--bs-secondary-color); white-space: nowrap; }
 
-  .rows { font-size:14px; }
-  .rows > div { display:flex; gap:10px; padding:7px 0; border-bottom:1px solid var(--line-soft); }
-  .rows > div:last-child { border-bottom:0; }
-  .rows .grow { flex-grow:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .rows .num { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .ek-page .rows > div { display: flex; gap: .6rem; padding: .45rem 0;
+      border-bottom: 1px solid var(--bs-border-color-translucent); }
+  .ek-page .rows > div:last-child { border-bottom: 0; }
+  .ek-page .rows .grow { flex-grow: 1; min-width: 0; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+  .ek-page .rows .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ek-page .kvitto { color: var(--bs-success-text-emphasis); font-weight: 700; font-size: .8rem;
+      text-decoration: none; }
 
-  .kvitto { color:var(--ok); font-weight:700; font-size:12.5px; text-decoration:none; }
-  .muted { color:var(--ink-soft); font-size:13.5px; }
-  .more { margin-top:10px; font-size:13.5px; }
-  .more button, .linkbtn { background:none; border:0; padding:0; color:var(--attn);
-                           font:inherit; font-weight:700; cursor:pointer; }
+  .ek-page .more { margin-top: .6rem; font-size: .9rem; }
+  .ek-page .more button, .ek-page .linkbtn { background: none; border: 0; padding: 0;
+      color: var(--ek-attn); font: inherit; font-weight: 700; cursor: pointer; }
 
-  .btn { font:inherit; font-weight:600; padding:9px 18px; border:1px solid var(--ink);
-         background:var(--ink); color:var(--paper); border-radius:8px; cursor:pointer; }
-  .btn.ghost { background:var(--surface); color:var(--ink); }
-  .btn:disabled { opacity:.55; cursor:default; }
-  .btn.small { padding:4px 12px; font-size:13px; border-color:var(--attn); color:var(--attn);
-               background:none; }
+  .ek-page .ek-btn { font: inherit; font-weight: 600; padding: .5rem 1.1rem;
+      border: 1px solid var(--bs-body-color); background: var(--bs-body-color);
+      color: var(--bs-body-bg); border-radius: .5rem; cursor: pointer; }
+  .ek-page .ek-btn:disabled { opacity: .55; cursor: default; }
+  .ek-page .ek-btn.ek-small { padding: .2rem .7rem; font-size: .85rem; background: none;
+      color: var(--ek-attn); border-color: var(--ek-attn); }
 
-  .alert { border:1px solid var(--line); border-radius:8px; padding:11px 14px; margin-bottom:16px;
-           font-size:14px; }
-  .alert.warn { border-color:var(--attn-line); background:var(--attn-bg); color:var(--attn); }
-  .alert.bad { border-color:#b02a37; color:#b02a37; }
-  .alert.ok { border-color:var(--ok-line); background:var(--ok-bg); color:var(--ok); }
+  .ek-page .ek-alert { border: 1px solid var(--bs-border-color); border-radius: .5rem;
+      padding: .6rem .85rem; margin-bottom: .9rem; font-size: .95rem; }
+  .ek-page .ek-alert.ek-warn { border-color: var(--ek-attn-line); background: var(--ek-attn-bg);
+      color: var(--ek-attn); }
+  .ek-page .ek-alert.ek-bad { border-color: var(--bs-danger-border-subtle);
+      background: var(--bs-danger-bg-subtle); color: var(--bs-danger-text-emphasis); }
+  .ek-page .ek-alert.ek-ok { border-color: var(--bs-success-border-subtle);
+      background: var(--bs-success-bg-subtle); color: var(--bs-success-text-emphasis); }
 
-  .choice { display:flex; gap:12px; align-items:flex-start; border:1px solid var(--line-soft);
-            border-radius:8px; padding:13px 15px; margin-bottom:10px; cursor:pointer; }
-  .fields { display:flex; gap:16px; flex-wrap:wrap; margin:18px 0 6px; }
-  .fields label { display:flex; flex-direction:column; gap:5px; font-size:12px; font-weight:700;
-                  color:var(--ink-soft); }
-  .fields input { font:inherit; font-weight:400; color:var(--ink); padding:7px 10px;
-                  border:1px solid var(--line); border-radius:6px; background:var(--surface); }
+  .ek-page .choice { display: flex; gap: .7rem; align-items: flex-start;
+      border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .8rem .9rem;
+      margin-bottom: .5rem; cursor: pointer; }
+  .ek-page .fields { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0 .3rem; }
+  .ek-page .fields label { display: flex; flex-direction: column; gap: .25rem; font-size: .8rem;
+      font-weight: 700; color: var(--bs-secondary-color); }
+  .ek-page .fields input, .ek-page .wide-in, .ek-page .amount-in {
+      font: inherit; font-weight: 400; padding: .45rem .7rem; border-radius: .4rem;
+      border: 1px solid var(--bs-border-color); background: var(--bs-body-bg);
+      color: var(--bs-body-color); }
+  .ek-page .wide-in { width: 100%; max-width: 34rem; }
 
-  .soonbox { border:1px dashed var(--line); border-radius:10px; padding:22px 24px;
-             background:var(--surface); }
-  .soonbox h2 { font-family:var(--serif); font-size:19px; margin:0 0 8px; }
+  .ek-page .soonbox { border: 1px dashed var(--bs-border-color); border-radius: .75rem;
+      padding: 1.15rem 1.25rem; background: var(--bs-body-bg); }
+  .ek-page .soonbox h2 { font-size: 1.15rem; font-weight: 700; margin: 0 0 .4rem; }
 
-  /* ── Bokför ─────────────────────────────────────────────────────────────────── */
-  .bokfor-grid { display:grid; grid-template-columns:1fr 380px; gap:18px; align-items:start; }
-  .fieldlabel { display:block; font-weight:700; font-size:13.5px; margin:18px 0 7px; }
-  .fieldlabel:first-child { margin-top:0; }
-  .amount-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-  .amount-in { font:inherit; font-size:30px; font-weight:700; width:230px; padding:10px 16px;
-               border:2px solid var(--ink); border-radius:8px; background:var(--surface);
-               color:var(--ink); font-variant-numeric:tabular-nums; }
-  .kr-unit { color:var(--ink-soft); font-size:17px; }
-  .seg { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
-  .segbtn { font:inherit; padding:10px 18px; border:0; background:var(--surface);
-            color:var(--ink); cursor:pointer; }
-  .segbtn.on { background:var(--ink); color:var(--paper); font-weight:600; }
-  .wide-in { font:inherit; width:100%; max-width:560px; padding:9px 12px; border:1px solid var(--line);
-             border-radius:8px; background:var(--surface); color:var(--ink); }
-  .chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
-  .chip { font:inherit; font-size:13px; padding:5px 14px; border:1px solid var(--line);
-          border-radius:999px; background:var(--surface); color:var(--ink); cursor:pointer; }
-  .chip:hover { border-color:var(--attn); color:var(--attn); }
-  .preview { margin-top:22px; border-top:1px solid var(--line-soft); padding-top:16px; }
+  /* ── Bokför ──────────────────────────────────────────────────────────────── */
+  .ek-page .bokfor-grid { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1rem;
+      align-items: start; }
+  .ek-page .fieldlabel { display: block; font-weight: 700; font-size: .9rem; margin: 1.1rem 0 .4rem; }
+  .ek-page .fieldlabel:first-child { margin-top: 0; }
+  .ek-page .amount-row { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+  .ek-page .amount-in { font-size: 1.8rem; font-weight: 700; width: 12rem; padding: .5rem .9rem;
+      border-width: 2px; border-color: var(--bs-body-color); font-variant-numeric: tabular-nums; }
+  .ek-page .kr-unit { color: var(--bs-secondary-color); }
+  .ek-page .seg { display: flex; border: 1px solid var(--bs-border-color);
+      border-radius: .5rem; overflow: hidden; }
+  .ek-page .segbtn { font: inherit; padding: .55rem 1rem; border: 0;
+      background: var(--bs-body-bg); color: var(--bs-body-color); cursor: pointer; }
+  .ek-page .segbtn.on { background: var(--bs-body-color); color: var(--bs-body-bg); font-weight: 600; }
+  .ek-page .chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .5rem; }
+  .ek-page .chip { font: inherit; font-size: .85rem; padding: .25rem .8rem;
+      border: 1px solid var(--bs-border-color); border-radius: 2rem;
+      background: var(--bs-body-bg); color: var(--bs-body-color); cursor: pointer; }
+  .ek-page .chip:hover { border-color: var(--ek-attn); color: var(--ek-attn); }
+  .ek-page .preview { margin-top: 1.25rem; border-top: 1px solid var(--bs-border-color);
+      padding-top: .9rem; }
 
-  .d-none { display:none !important; }
-
-  @@media (max-width: 900px) {
-    .wrap { flex-direction:column; }
-    .rail { width:auto; border-right:0; border-bottom:1px solid var(--line-soft); padding-bottom:8px; }
-    .rail a.nav { display:inline-block; border-left:0; border-bottom:3px solid transparent; padding:8px 14px; }
-    .rail a.nav.on { border-left:0; border-bottom-color:var(--attn); }
-    .rail .foot { margin-top:14px; }
-    .main { padding:20px 16px 50px; }
-    .grid, .bokfor-grid { grid-template-columns:1fr; }
-    h1 { font-size:27px; }
-    .amount-in { width:100%; }
+  @@media (max-width: 991px) {
+    .ek-page .wrap { flex-direction: column; }
+    .ek-page .rail { width: auto; position: static; display: flex; flex-wrap: wrap;
+        gap: .3rem; align-items: center; }
+    .ek-page .rail .club, .ek-page .rail .role { width: 100%; margin-bottom: .3rem; }
+    .ek-page .rail a.ek-nav { border-left: 0; }
+    .ek-page .rail a.ek-nav.on { border-left: 0; box-shadow: inset 0 -3px 0 var(--ek-attn); }
+    .ek-page .rail .foot { width: 100%; }
+    .ek-page .ek-grid, .ek-page .bokfor-grid { grid-template-columns: 1fr; }
+    .ek-page .amount-in { width: 100%; }
   }
 </style>
-</head>
-<body data-issuer-type="@Model.IssuerType" data-issuer-id="@Model.IssuerId" id="@uid">
+
+<div class="ek-page container py-4" id="@uid" data-issuer-type="@Model.IssuerType" data-issuer-id="@Model.IssuerId">
+
 <div class="wrap">
 
     <nav class="rail">
@@ -195,13 +197,13 @@
         <div class="club">@Model.IssuerName</div>
         <div class="role">Kassör · @Model.CurrentYear</div>
 
-        <a href="#" class="nav on" data-view="oversikt">Översikt</a>
-        <a href="#" class="nav" data-view="bokfor">Bokför</a>
-        <a href="#" class="nav soon" data-view="avstamning">Avstämning</a>
-        <a href="#" class="nav soon" data-view="rapport">Rapport</a>
-        <a href="#" class="nav" data-view="avgifter">Avgifter</a>
-        <a href="#" class="nav soon" data-view="bokslut">Bokslut</a>
-        <a href="#" class="nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
+        <a href="#" class="ek-nav on" data-view="oversikt">Översikt</a>
+        <a href="#" class="ek-nav" data-view="bokfor">Bokför</a>
+        <a href="#" class="ek-nav soon" data-view="avstamning">Avstämning</a>
+        <a href="#" class="ek-nav soon" data-view="rapport">Rapport</a>
+        <a href="#" class="ek-nav" data-view="avgifter">Avgifter</a>
+        <a href="#" class="ek-nav soon" data-view="bokslut">Bokslut</a>
+        <a href="#" class="ek-nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
 
         <div class="foot">
             <div>Menyn är kassörens år, inte databasens tabeller.</div>
@@ -209,10 +211,10 @@
         </div>
     </nav>
 
-    <main class="main">
+    <main class="ek-main">
 
         <div id="@(uid)_loading" class="muted">Läser ekonomiuppgifter…</div>
-        <div id="@(uid)_error" class="alert warn d-none"></div>
+        <div id="@(uid)_error" class="ek-alert ek-warn d-none"></div>
 
         <div id="@(uid)_shell" class="d-none">
 
@@ -229,20 +231,20 @@
                     </div>
                 </div>
 
-                <div class="grid">
-                    <div class="card">
-                        <div class="card-h">
+                <div class="ek-grid">
+                    <div class="ek-card">
+                        <div class="ek-cardh">
                             <h2>1 · Väntar något på mig?</h2>
                             <span class="meta" id="@(uid)_todoCount"></span>
                         </div>
                         <div id="@(uid)_todo"></div>
                     </div>
 
-                    <div class="card">
-                        <div class="card-h"><h2>2 · Stämmer det?</h2></div>
+                    <div class="ek-card">
+                        <div class="ek-cardh"><h2>2 · Stämmer det?</h2></div>
                         @* ⚠️ Avstämningen (P11) finns inte. Att visa "0 kr — allt stämmer" här vore
                            en LÖGN om att vi kontrollerat mot banken. Säg vad som gäller i stället. *@
-                        <div class="bigbox warn">
+                        <div class="ek-bigbox ek-warn">
                             <div class="lead">Inte avstämt mot banken än</div>
                             <div class="note">
                                 Avstämningen läser in ert kontoutdrag och matchar rad för rad. Den byggs
@@ -255,8 +257,8 @@
                         </div>
                     </div>
 
-                    <div class="card">
-                        <div class="card-h">
+                    <div class="ek-card">
+                        <div class="ek-cardh">
                             <h2>3 · Hur går året?</h2>
                         </div>
                         <div class="soonbox" style="border:0;padding:0;background:none">
@@ -267,8 +269,8 @@
                         </div>
                     </div>
 
-                    <div class="card">
-                        <div class="card-h">
+                    <div class="ek-card">
+                        <div class="ek-cardh">
                             <h2>4 · Vad hände senast?</h2>
                             <span class="meta">Mottagna betalningar</span>
                         </div>
@@ -293,17 +295,17 @@
                     </div>
                 </div>
 
-                <div class="grid">
-                    <div class="card">
-                        <div class="card-h"><h2>Att få in</h2></div>
-                        <div class="bigbox warn">
+                <div class="ek-grid">
+                    <div class="ek-card">
+                        <div class="ek-cardh"><h2>Att få in</h2></div>
+                        <div class="ek-bigbox ek-warn">
                             <div class="amount" id="@(uid)_outTotal">—</div>
                         </div>
                         <div class="rows" id="@(uid)_outRows" style="margin-top:14px"></div>
                     </div>
 
-                    <div class="card" id="@(uid)_fullOnly">
-                        <div class="card-h">
+                    <div class="ek-card" id="@(uid)_fullOnly">
+                        <div class="ek-cardh">
                             <h2>Att bokföra</h2>
                             <span class="meta d-none" id="@(uid)_queueBadge"></span>
                         </div>
@@ -311,7 +313,7 @@
                             Mottagna betalningar som ännu inte blivit verifikationer. De uppstår när
                             pengarna togs emot innan bokföringen var igång.
                         </p>
-                        <div id="@(uid)_queueEmpty" class="alert ok d-none">Allt mottaget är bokfört.</div>
+                        <div id="@(uid)_queueEmpty" class="ek-alert ek-ok d-none">Allt mottaget är bokfört.</div>
                         <div class="d-none" id="@(uid)_queueWrap">
                             <table class="t">
                                 <thead>
@@ -321,18 +323,18 @@
                             </table>
                         </div>
                         <div class="more" id="@(uid)_queueMore"></div>
-                        <div class="alert bad d-none" id="@(uid)_queueError"></div>
+                        <div class="ek-alert ek-bad d-none" id="@(uid)_queueError"></div>
                     </div>
 
                     @* ⚠️⚠️ MEDLEMSAVGIFTEN ÄR KLUBBENS STÖRSTA INTÄKTSPOST och nådde inte
                        bokföringen förrän 2026-09-22 — avgiftsmodulen har egen tabell och egen
                        betalvägg. Kortet finns för att den luckan ska vara SYNLIG, inte tyst. *@
-                    <div class="card wide d-none" id="@(uid)_feesCard">
-                        <div class="card-h">
+                    <div class="ek-card wide d-none" id="@(uid)_feesCard">
+                        <div class="ek-cardh">
                             <h2>Medlemsavgifter</h2>
                             <span class="meta" id="@(uid)_feesYear"></span>
                         </div>
-                        <div class="grid" style="gap:14px">
+                        <div class="ek-grid" style="gap:14px">
                             <div>
                                 <div class="muted">Har inte kommit in</div>
                                 <div style="font-size:26px;font-weight:700" id="@(uid)_feesUnpaid">—</div>
@@ -341,18 +343,18 @@
                                 <div class="muted">Betalt men inte bokfört</div>
                                 <div style="font-size:26px;font-weight:700" id="@(uid)_feesUnposted">—</div>
                                 <div style="margin-top:10px">
-                                    <button type="button" class="btn small d-none" id="@(uid)_feesPost">
+                                    <button type="button" class="ek-btn ek-small d-none" id="@(uid)_feesPost">
                                         Bokför dem
                                     </button>
                                 </div>
                             </div>
                         </div>
-                        <div class="alert ok d-none" id="@(uid)_feesOk" style="margin-top:14px"></div>
-                        <div class="alert bad d-none" id="@(uid)_feesError" style="margin-top:14px"></div>
+                        <div class="ek-alert ek-ok d-none" id="@(uid)_feesOk" style="margin-top:14px"></div>
+                        <div class="ek-alert ek-bad d-none" id="@(uid)_feesError" style="margin-top:14px"></div>
                     </div>
 
-                    <div class="card wide">
-                        <div class="card-h">
+                    <div class="ek-card wide">
+                        <div class="ek-cardh">
                             <h2>Per tävling — saknas någon avgift?</h2>
                             <span class="meta">Det som saknas ligger överst</span>
                         </div>
@@ -385,10 +387,10 @@
                     </div>
                 </div>
 
-                <div class="alert d-none" id="@(uid)_blocked"></div>
+                <div class="ek-alert d-none" id="@(uid)_blocked"></div>
 
-                <div class="card wide" id="@(uid)_setup">
-                    <div class="card-h"><h2>Har ni ett bokföringsprogram i dag?</h2></div>
+                <div class="ek-card wide" id="@(uid)_setup">
+                    <div class="ek-cardh"><h2>Har ni ett bokföringsprogram i dag?</h2></div>
 
                     <label class="choice">
                         <input type="radio" name="@(uid)_shape" id="@(uid)_shapeFull" value="full">
@@ -424,18 +426,18 @@
                     <div class="muted">Lämna datumen tomma för kalenderår.</div>
 
                     <div style="display:flex;align-items:center;gap:14px;margin-top:18px">
-                        <button type="button" class="btn" id="@(uid)_saveBtn">Spara uppsättningen</button>
+                        <button type="button" class="ek-btn" id="@(uid)_saveBtn">Spara uppsättningen</button>
                         <span class="d-none" style="color:var(--ok);font-weight:600" id="@(uid)_saveOk"></span>
                     </div>
-                    <div class="alert bad d-none" id="@(uid)_saveError" style="margin-top:14px"></div>
+                    <div class="ek-alert ek-bad d-none" id="@(uid)_saveError" style="margin-top:14px"></div>
                 </div>
 
-                <div class="grid d-none" id="@(uid)_setupSummary" style="margin-top:18px">
-                    <div class="card"><div class="card-h"><h2>Räkenskapsår</h2></div>
+                <div class="ek-grid d-none" id="@(uid)_setupSummary" style="margin-top:18px">
+                    <div class="ek-card"><div class="ek-cardh"><h2>Räkenskapsår</h2></div>
                         <div id="@(uid)_yearSummary">—</div></div>
-                    <div class="card"><div class="card-h"><h2>Kontoplan</h2></div>
+                    <div class="ek-card"><div class="ek-cardh"><h2>Kontoplan</h2></div>
                         <div id="@(uid)_accountSummary">—</div></div>
-                    <div class="card wide"><div class="card-h"><h2>Kontoroller</h2></div>
+                    <div class="ek-card wide"><div class="ek-cardh"><h2>Kontoroller</h2></div>
                         <div id="@(uid)_roleSummary">—</div></div>
                 </div>
             </section>
@@ -446,7 +448,7 @@
                     <div class="sub">Ett kvitto, en kontant insättning, en korrigering.</div></div></div>
 
                 <div class="bokfor-grid">
-                    <div class="card">
+                    <div class="ek-card">
                         <label class="fieldlabel" for="@(uid)_bAmount">Hur mycket?</label>
                         <div class="amount-row">
                             <input type="number" id="@(uid)_bAmount" class="amount-in" step="0.01" min="0" placeholder="0">
@@ -489,11 +491,11 @@
                             </p>
                         </div>
 
-                        <div class="alert bad d-none" id="@(uid)_bError"></div>
-                        <div class="alert ok d-none" id="@(uid)_bOk"></div>
+                        <div class="ek-alert ek-bad d-none" id="@(uid)_bError"></div>
+                        <div class="ek-alert ek-ok d-none" id="@(uid)_bOk"></div>
 
                         <div style="display:flex;gap:12px;align-items:center;margin-top:16px">
-                            <button type="button" class="btn" id="@(uid)_bSave">Bokför</button>
+                            <button type="button" class="ek-btn" id="@(uid)_bSave">Bokför</button>
                         </div>
 
                         @* Bilagan kräver en lagringsväg som inte finns. Säg det — en attrapp som
@@ -506,8 +508,8 @@
                     </div>
 
                     <div>
-                        <div class="card" style="margin-bottom:18px">
-                            <div class="card-h"><h2>Behöver du rätta något?</h2></div>
+                        <div class="ek-card" style="margin-bottom:18px">
+                            <div class="ek-cardh"><h2>Behöver du rätta något?</h2></div>
                             <p class="muted" style="margin-top:0">
                                 En rättelse skapar en <strong>ny rad</strong> som tar ut den gamla. Den
                                 gamla står kvar — så ska det vara, och det är inget du gjort fel.
@@ -518,8 +520,8 @@
                             </p>
                         </div>
 
-                        <div class="card">
-                            <div class="card-h">
+                        <div class="ek-card">
+                            <div class="ek-cardh">
                                 <h2>Senast bokfört</h2>
                                 <span class="meta" id="@(uid)_bSeries"></span>
                             </div>
@@ -613,7 +615,7 @@
     }
 
     function showView(name) {
-        root.querySelectorAll('.rail a.nav').forEach(function (a) {
+        root.querySelectorAll('.rail a.ek-nav').forEach(function (a) {
             a.classList.toggle('on', a.dataset.view === name);
         });
         root.querySelectorAll('[data-pane]').forEach(function (s) { s.hidden = s.dataset.pane !== name; });
@@ -722,7 +724,7 @@
                  + '<td class="date">' + esc(shortDate(r.confirmedDate)) + '</td>'
                  + '<td>' + esc(r.payerName) + ' <span class="muted">· ' + esc(r.description) + '</span></td>'
                  + '<td class="n">' + kr(r.amount) + '</td>'
-                 + '<td class="n"><button type="button" class="btn small" data-post="' + r.id + '">Bokför</button></td>'
+                 + '<td class="n"><button type="button" class="ek-btn ek-small" data-post="' + r.id + '">Bokför</button></td>'
                  + '</tr>';
         }, 'Visa alla {n} betalningar att bokföra');
     }
@@ -777,9 +779,9 @@
               + missing.map(function (r) { return ROLE_NAMES[r] || r; }).join(', ') + '</div>';
 
         var blocked = el('blocked');
-        if (status.blockedReason) { blocked.className = 'alert warn'; blocked.textContent = status.blockedReason; }
-        else if (status.shape === 'full') { blocked.className = 'alert ok'; blocked.textContent = 'Klart att bokföra.'; }
-        else { blocked.className = 'alert d-none'; }
+        if (status.blockedReason) { blocked.className = 'ek-alert ek-warn'; blocked.textContent = status.blockedReason; }
+        else if (status.shape === 'full') { blocked.className = 'ek-alert ek-ok'; blocked.textContent = 'Klart att bokföra.'; }
+        else { blocked.className = 'ek-alert d-none'; }
 
         if (keepSetupOpen === true) showView('installningar');
         loadOverview();
@@ -1135,5 +1137,4 @@
     load();
 })();
 </script>
-</body>
-</html>
+</div>
