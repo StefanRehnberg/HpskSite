@@ -957,10 +957,13 @@ namespace HpskSite.Controllers
             var result = _chartService.SetActive(
                 request.IssuerType, request.IssuerId, request.Number, request.Active);
 
+            // ⚠️ Kvittot använder SAMMA ord som knappen. Knappen sa "Sluta använda" och svaret
+            // "är stängt" — två ord för samma sak får läsaren att undra om något annat hände.
             return Json(result.Success
                 ? new { success = true, message = request.Active
-                    ? $"Konto {request.Number} är öppet igen."
-                    : $"Konto {request.Number} är stängt. Det syns inte i väljaren, men gamla poster ligger kvar." }
+                    ? $"Konto {request.Number} används igen."
+                    : $"Konto {request.Number} används inte längre. Det erbjuds inte när du bokför, "
+                      + "men gamla poster ligger kvar." }
                 : new { success = false, message = result.Error! });
         }
 

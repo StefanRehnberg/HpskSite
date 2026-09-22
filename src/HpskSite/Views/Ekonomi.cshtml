@@ -221,6 +221,9 @@
   .ek-page table.t tr.sum td { font-weight: 700; background: var(--bs-tertiary-bg);
       border-top: 2px solid var(--bs-border-color); }
   .ek-page .rep-amt { width: 8rem; text-align: right; font-variant-numeric: tabular-nums; }
+  /* ⚠️ Kontonamnet fyller sin kolumn. En smal ruta mitt i en bred kolumn läses som avstängd. */
+  .ek-page input.chart-name { width: 100%; box-sizing: border-box; }
+  .ek-page table.t td.chart-off { color: var(--bs-secondary-color); }
   .ek-page .headactions { display: flex; gap: .6rem; flex-wrap: wrap; }
 
   /* ── Utskrift: underlaget till styrelsemötet ──────────────────────────────
@@ -590,49 +593,97 @@
                 <div class="ek-alert d-none" id="@(uid)_blocked"></div>
 
                 <div class="ek-card wide" id="@(uid)_setup">
-                    <div class="ek-cardh"><h2>Har ni ett bokföringsprogram i dag?</h2></div>
+                    <div class="ek-cardh"><h2>Vad vill ni använda pistol.nu till?</h2></div>
 
-                    @* ⚠️⚠️ SUBJEKTET MÅSTE VARA UTSKRIVET I VARJE ALTERNATIV. Texten sa tidigare
-                       "det läser inte vårt bankkonto", där "det" syftade på FÖRENINGENS program —
-                       och lästes som att pistol.nu läser bankkontot. Den som byggt produkten läste
-                       fel; då är texten fel, inte läsaren. Frågan gäller ERT program, inte oss. *@
+                    @*
+                        ⚠️⚠️ FRÅGAN GÄLLER AVSIKTEN, INTE NULÄGET — och det är skillnaden mellan
+                        att fånga föreningens vilja och att gissa fel åt den.
+
+                        Första versionen frågade "Var bokförs föreningens ekonomi?", alltså ett
+                        FAKTUM om i dag. Stefan 2026-09-22: en förening som HAR ett program men
+                        hellre vill flytta bokföringen hit svarar då sanningsenligt "vi har ett
+                        program och skriver in kontohändelserna själva" — och hamnar i
+                        avgiftsläget, tvärtemot vad den ville. Frågan var rätt ställd och gav fel
+                        svar, vilket är den värsta sorten: ingenting felar.
+
+                        DÄRFÖR TVÅ STEG:
+                          1. VAD VILL NI ANVÄNDA PISTOL.NU TILL?  (avsikt — väljer full eller ej)
+                          2. Bara om bokföringen stannar kvar hos er: HÄMTAR ERT PROGRAM
+                             KONTOHÄNDELSERNA FRÅN BANKEN?  (faktum — avgör om SIE-filen är säker
+                             eller skulle dubbelbokföra)
+
+                        ⚠️ Steg 2 är ett FAKTUM om programmet och hör därför inte ihop med steg 1.
+                        Slås de ihop till en lista måste läsaren hålla två frågor i huvudet
+                        samtidigt, och det var precis vad som gick fel.
+
+                        ⚠️ FÖRENINGEN ÄR "VI". PISTOL.NU SKRIVS UT. "NI" ANVÄNDS INTE — utom i
+                        frågerubrikerna, där det är pistol.nu som frågar föreningen.
+                        Regeln blev fel åt båda hållen innan den satt: först blandades "vi"
+                        (pistol.nu) och "ni" (föreningen), sedan gjorde jag föreningen till "ni".
+                        Stefan: "En kassör som läser det läser det som att ni är någon annan, vi är
+                        föreningen." Läsaren ÄR föreningen.
+                    *@
                     <p class="muted" style="margin-top:0">
-                        Frågan gäller <strong>ert eget</strong> bokföringsprogram — vi läser aldrig
-                        någons bankkonto.
+                        Svaret styr bara vad den här sidan visar.
+                        Pistol.nu kopplas aldrig till föreningens bankkonto.
                     </p>
 
                     <label class="choice">
-                        <input type="radio" name="@(uid)_shape" id="@(uid)_shapeFull" value="full">
-                        <span><strong>Nej, vi har inget program</strong>
-                            <span class="muted" style="display:block">Då sköter ni bokföringen här:
-                            kontoplan, verifikationer, resultat- och balansräkning och handlingar
-                            till årsmötet.</span></span>
-                    </label>
-
-                    @* ⚠️⚠️ TRE FORMER. Skillnaden mellan de två sista är om programmet läser banken
-                       självt — gör det det skulle en SIE-fil från oss bokföra samma pengar igen. *@
-                    <label class="choice">
-                        <input type="radio" name="@(uid)_shape" id="@(uid)_shapeExport" value="export">
-                        <span><strong>Ja, och vi för in kontohändelserna för hand</strong>
-                            <span class="muted" style="display:block">Ert program hämtar alltså
-                            <strong>inte</strong> transaktionerna från banken själv. Vi sköter
-                            avgifter och kontroll, och ni får en <strong>SIE-fil</strong> att läsa
-                            in.</span></span>
+                        <input type="radio" name="@(uid)_use" id="@(uid)_useFull" value="full">
+                        <span><strong>Sköta hela bokföringen här</strong>
+                            <span class="muted" style="display:block">Kontoplan, verifikationer,
+                            resultat- och balansräkning och handlingarna till årsmötet.
+                            <strong>Det här gäller även om vi redan har ett bokföringsprogram</strong>
+                            — vi kan välja att flytta hit.</span></span>
                     </label>
 
                     <label class="choice">
-                        <input type="radio" name="@(uid)_shape" id="@(uid)_shapeFees" value="fees">
-                        <span><strong>Ja, och det hämtar transaktionerna från banken</strong>
-                            <span class="muted" style="display:block">Ert program bokför varje
-                            kontohändelse självt. Då får ni <strong>ingen SIE-fil</strong> från oss
-                            — avgifterna har redan bokförts via banken, och en fil till skulle
-                            bokföra dem en gång till.</span></span>
+                        <input type="radio" name="@(uid)_use" id="@(uid)_useKeep" value="keep">
+                        <span><strong>Bara avgifter och kontroll</strong>
+                            <span class="muted" style="display:block">Bokföringen ligger kvar i
+                            vårt eget program. Pistol.nu håller reda på vem som betalat och vad som
+                            saknas.</span></span>
                     </label>
 
-                    <div class="muted">
-                        Valet går att ändra åt alla håll senare. Osäker? Välj det mittersta —
-                        en SIE-fil går alltid att låta bli att läsa in.
+                    @* Steg 2 — visas bara när bokföringen stannar kvar hos föreningen. *@
+                    <div class="d-none" id="@(uid)_bankStep" style="margin:14px 0 0 28px">
+                        <div class="fieldlabel" style="margin-top:0">
+                            Hämtar ert program kontohändelserna från banken automatiskt?
+                        </div>
+
+                        <label class="choice">
+                            <input type="radio" name="@(uid)_bank" id="@(uid)_shapeExport" value="export">
+                            <span><strong>Nej, någon av oss skriver in dem</strong>
+                                <span class="muted" style="display:block">Då hämtar vi en
+                                <strong>SIE-fil</strong> härifrån och läser in den i vårt
+                                program.</span></span>
+                        </label>
+
+                        <label class="choice">
+                            <input type="radio" name="@(uid)_bank" id="@(uid)_shapeFees" value="fees">
+                            <span><strong>Ja, de dyker upp av sig själva</strong>
+                                <span class="muted" style="display:block">Då lämnar pistol.nu
+                                <strong>ingen SIE-fil</strong> — avgifterna är redan bokförda via
+                                banken, och en fil till skulle bokföra samma sak en gång till.</span></span>
+                        </label>
+
+                        @* ⚠️ Tipset hör HIT, inte under båda stegen. Det låg i foten och talade om
+                           "den andra frågan" och "svara nej" — men steg 2 är dolt för den som valt
+                           hela bokföringen, så texten hänvisade till något som inte fanns på
+                           skärmen. Ett råd om ett val ska stå vid valet. *@
+                        @* ⚠️ Formen är inte kosmetik. Rådet och foten under steg 2 har samma färg
+                           och storlek, så kant i kant läses de som EN mening — alltså tillbaka
+                           till att rådet ser ut att gälla hela uppsättningen. Kantlinjen binder
+                           det till frågan ovanför i stället. *@
+                        <div class="why"
+                             style="margin:12px 0 2px 2px;padding-left:10px;
+                                    border-left:3px solid var(--bs-border-color)">
+                            Osäker? Välj <strong>Nej</strong> — en SIE-fil går alltid att låta bli
+                            att läsa in, men en som saknas går inte att skapa i efterhand.
+                        </div>
                     </div>
+
+                    <div class="muted">Valet går att ändra när som helst.</div>
 
                     <div class="fields">
                         <label>Räkenskapsår
@@ -685,10 +736,14 @@
                             <h2>Kontoplan</h2>
                             <span class="meta" id="@(uid)_chartMeta"></span>
                         </div>
+                        @* ⚠️ "Stäng" sa ingenting om vad som händer. Knappen heter nu vad den
+                           GÖR — kontot slutar erbjudas när man bokför — och texten här säger att
+                           ingenting försvinner. *@
                         <p class="muted" style="margin-top:0">
                             Kontona kom ur mallen. Saknas något — lägg till det.
-                            <strong>Ett konto raderas aldrig</strong>, det stängs: bokförda poster
-                            pekar på numret och ska gå att förklara i efterhand.
+                            <strong>Ett konto raderas aldrig.</strong> Det du kan göra är att sluta
+                            använda ett konto: då erbjuds det inte längre när du bokför, men gamla
+                            poster ligger kvar och går att förklara.
                         </p>
 
                         <div class="amount-row" style="margin-bottom:12px">
@@ -704,8 +759,13 @@
 
                         <table class="t">
                             <thead>
-                                <tr><th>Konto</th><th>Namn</th><th>Används till</th>
-                                    <th class="n">Poster</th><th></th></tr>
+                                @* "Poster" = antal bokförda rader som pekar hit. Skillnaden
+                                   mellan ett konto som går att sluta använda utan följder och ett
+                                   som bär historik. *@
+                                <tr><th style="width:5rem">Konto</th><th>Namn</th>
+                                    <th style="width:16rem">Används till</th>
+                                    <th class="n" style="width:6rem">Bokförda poster</th>
+                                    <th style="width:9rem"></th></tr>
                             </thead>
                             <tbody id="@(uid)_chartRows"></tbody>
                         </table>
@@ -1193,9 +1253,9 @@
         el('setupIntro').textContent = 'Lägg upp ett nytt räkenskapsår, eller ändra föreningsformen.';
         show(el('setupSummary'), true);
 
-        var byShape = { full: '_shapeFull', export: '_shapeExport', fees: '_shapeFees' };
-        var radio = document.getElementById(uid + (byShape[status.shape] || ''));
-        if (radio) radio.checked = true;
+        // ⚠️ EN sparad form, TVÅ frågor på ytan. Formen "full" är steg 1; "export" och "fees"
+        //    är steg 1 = behåll + ett svar på steg 2.
+        applyShape(status.shape);
 
         // Kön bara för en förening som bokför här — för de andra saknar varje rad verifikation
         // per definition, och listan hade påstått att allt är ogjort.
@@ -1615,19 +1675,25 @@
 
     el('saveBtn').addEventListener('click', function () {
         var btn = this;
-        var chosen = root.querySelector('input[name="' + uid + '_shape"]:checked');
+        var chosen = chosenShape();
         var err = el('saveError'), okNote = el('saveOk');
         show(okNote, false); err.classList.add('d-none');
 
+        // ⚠️ Två steg betyder två sätt att vara ofärdig, och de kräver olika besked. "Välj hur
+        //    föreningen sköter sin bokföring" hjälper inte den som redan valt steg 1 och står och
+        //    undrar vad som fattas.
         if (!chosen) {
-            err.textContent = 'Välj hur föreningen sköter sin bokföring innan du sparar.';
+            var use = root.querySelector('input[name="' + uid + '_use"]:checked');
+            err.textContent = use
+                ? 'Svara på frågan om ert bokföringsprogram hämtar kontohändelserna från banken.'
+                : 'Välj vad ni vill använda pistol.nu till innan du sparar.';
             err.classList.remove('d-none'); return;
         }
         btn.disabled = true;
 
         postJson('/umbraco/surface/EkonomiAdmin/SaveSetup', {
             issuerType: issuerType, issuerId: issuerId,
-            year: parseInt(el('year').value, 10), shape: chosen.value,
+            year: parseInt(el('year').value, 10), shape: chosen,
             startDate: el('start').value || null, endDate: el('end').value || null
         })
             .then(function (d) {
@@ -1965,16 +2031,25 @@
     //    matar in förra årets bokföring är det blockerande: en förening har konton vi inte sått.
     var chartAccounts = [], chartRoles = [], chartExpanded = false;
 
+    // ⚠️⚠️ KNAPPEN HETER VAD DEN GÖR. Den hette "Stäng", och det sa ingenting om vad som
+    //    händer — Stefan 2026-09-22: "Vad menas med / vad gör, länken / knappen Stäng". Ett konto
+    //    RADERAS aldrig; det slutar bara erbjudas när man bokför. Då ska knappen säga just det.
     function chartRow(a) {
         var uses = (a.roles || []).join(', ');
-        return '<tr' + (a.isActive ? '' : ' class="muted"') + '>'
-             + '<td>' + a.number + '</td>'
-             + '<td><input type="text" class="chart-name" data-acc="' + a.number + '" value="'
-             + esc(a.name) + '" maxlength="120"></td>'
+
+        // Läget står SKRIVET på raden, inte bara som en blek färg. Färg ensam bär aldrig
+        // information (WCAG 1.4.1) — och "varför är den här raden grå?" är en onödig fråga.
+        var name = '<input type="text" class="chart-name" data-acc="' + a.number + '" value="'
+                 + esc(a.name) + '" maxlength="120">'
+                 + (a.isActive ? '' : '<div class="muted">Används inte längre</div>');
+
+        return '<tr>'
+             + '<td' + (a.isActive ? '' : ' class="chart-off"') + '>' + a.number + '</td>'
+             + '<td>' + name + '</td>'
              + '<td class="muted">' + esc(uses) + '</td>'
              + '<td class="n">' + (a.entryLines || 0) + '</td>'
              + '<td class="n"><button type="button" class="linkbtn" data-toggle-acc="' + a.number + '">'
-             + (a.isActive ? 'Stäng' : 'Öppna') + '</button></td>'
+             + (a.isActive ? 'Sluta använda' : 'Använd igen') + '</button></td>'
              + '</tr>';
     }
 
@@ -2085,6 +2160,47 @@
             el('accNumber').value = '';
             el('accName').value = '';
         });
+    });
+
+
+    // ══ FORMEN: avsikt först, faktum sedan ═══════════════════════════════════════════════
+    //
+    // ⚠️⚠️ Ytan frågade tidigare om NULÄGET ("var bokförs ekonomin?") men styr AVSIKTEN. En
+    //    förening som HAR ett program men vill flytta hit svarade då sanningsenligt fel och
+    //    hamnade i avgiftsläget — utan att något felade. Steg 1 är därför viljan, steg 2 ett
+    //    faktum om programmet som bara spelar roll om bokföringen stannar kvar hos föreningen.
+    function syncBankStep() {
+        var use = root.querySelector('input[name="' + uid + '_use"]:checked');
+        show(el('bankStep'), !!use && use.value === 'keep');
+    }
+
+    function applyShape(shape) {
+        var useFull = el('useFull'), useKeep = el('useKeep');
+
+        if (shape === 'full') {
+            useFull.checked = true;
+        } else if (shape === 'export' || shape === 'fees') {
+            useKeep.checked = true;
+            var bank = document.getElementById(uid + (shape === 'export' ? '_shapeExport' : '_shapeFees'));
+            if (bank) bank.checked = true;
+        }
+
+        syncBankStep();
+    }
+
+    // ⚠️ Den valda formen är HÄRLEDD ur de två stegen, aldrig lagrad i en tredje variabel som kan
+    //    hamna ur takt med radioknapparna.
+    function chosenShape() {
+        var use = root.querySelector('input[name="' + uid + '_use"]:checked');
+        if (!use) return null;
+        if (use.value === 'full') return 'full';
+
+        var bank = root.querySelector('input[name="' + uid + '_bank"]:checked');
+        return bank ? bank.value : null;
+    }
+
+    root.querySelectorAll('input[name="' + uid + '_use"]').forEach(function (r) {
+        r.addEventListener('change', syncBankStep);
     });
 
 
