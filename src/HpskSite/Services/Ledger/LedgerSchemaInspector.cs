@@ -56,7 +56,12 @@ namespace HpskSite.Services.Ledger
             typeof(LedgerPayment),
             typeof(LedgerReceipt),
             typeof(LedgerBudget),
-            typeof(LedgerBudgetLine)
+            typeof(LedgerBudgetLine),
+            // ⚠️ Bankavstämningen (P11). Lägg ALLTID till en ny liggartabell här i samma
+            //    omgång som migreringen — annars är en tabell som saknas i prod osynlig för
+            //    startkontrollen, och det är precis det tysta läget hela lagret finns för.
+            typeof(LedgerBankImport),
+            typeof(LedgerBankRow)
         };
 
         /// <summary>
