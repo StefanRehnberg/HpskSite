@@ -43,6 +43,15 @@ namespace HpskSite.Controllers
         private readonly LedgerMembershipFeeBridge _feeBridge;
         private readonly LedgerSandboxService _sandbox;
         private readonly LedgerAccessService _access;
+        private readonly LedgerBankImportService _bankService;
+
+        /// <summary>
+        /// Taket för ett uppladdat kontoutdrag.
+        /// <para>⚠️ Ett ärligt tak, inte en gissning: ett års utdrag för en klubb är några hundra
+        /// rader, alltså tiotals kilobyte. 8 MB rymmer det med marginal och stoppar samtidigt en
+        /// felvald fil innan den läses in i minnet.</para>
+        /// </summary>
+        private const long MaxBankFileBytes = 8 * 1024 * 1024;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly ILogger<EkonomiAdminController> _logger;
@@ -65,6 +74,7 @@ namespace HpskSite.Controllers
             LedgerMembershipFeeBridge feeBridge,
             LedgerSandboxService sandbox,
             LedgerAccessService access,
+            LedgerBankImportService bankService,
             IMemberManager memberManager,
             IMemberService memberService,
             ILogger<EkonomiAdminController> logger)
@@ -77,6 +87,7 @@ namespace HpskSite.Controllers
             _overviewService = overviewService;
             _budgetService = budgetService;
             _chartService = chartService;
+            _bankService = bankService;
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
             _sandbox = sandbox;
@@ -244,6 +255,223 @@ namespace HpskSite.Controllers
 
                 return Json(new { success = false, message = "Översikten gick inte att läsa just nu." });
             }
+        }
+
+        // ══ BANKAVSTÄMNINGEN (P11) ═══════════════════════════════════════════════════════════
+        //
+        // ⚠️ Inget bank-API. PSD2 är licens- och kostnadsdrivet och valdes bort — föreningen
+        //    laddar upp filen själv, och ingen tredje part får läsrätt till kontot.
+
+        /// <summary>Kontoutdragen som lästs in, nyast först.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetBankImports(int issuerType, int issuerId)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var accounts = _chartService.List(issuerType, issuerId)
+                .Where(a => a.IsActive && a.Number >= 1900 && a.Number <= 1999)
+                .Select(a => new { number = a.Number, name = a.Name })
+                .ToList();
+
+            return Json(new
+            {
+                success = true,
+                // ⚠️ Kontona erbjuds ur FÖRENINGENS egen kontoplan, aldrig ur en lista i koden.
+                //    En klubb som lagt upp 1932 för sitt andra konto ska kunna stämma av det.
+                accounts,
+                imports = _bankService.List(issuerType, issuerId).Select(i => new
+                {
+                    id = i.Id,
+                    accountNumber = i.AccountNumber,
+                    fileName = i.FileName,
+                    periodFrom = i.PeriodFrom,
+                    periodTo = i.PeriodTo,
+                    rowCount = i.RowCount,
+                    importedUtc = i.ImportedUtc
+                })
+            });
+        }
+
+        /// <summary>
+        /// Läser filen och svarar med vad vi TROR att den innehåller. <b>Skriver ingenting.</b>
+        ///
+        /// <para>⚠️ Mappningen är ett FÖRSLAG. Bankerna döper kolumnerna olika, och en tyst
+        /// felmappning ger ett kontoutdrag som stäms av mot fel siffror — operatören ska se och
+        /// kunna rätta varje val innan något importeras.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PreviewBankFile(
+            int issuerType, int issuerId, IFormFile? file)
+        {
+            var (ok, _) = await AuthorizeWriteAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+            if (file == null || file.Length == 0)
+                return Json(new { success = false, message = "Ingen fil vald." });
+
+            if (file.Length > MaxBankFileBytes)
+                return Json(new { success = false, message = "Filen är för stor (max 8 MB)." });
+
+            try
+            {
+                using var ms = new MemoryStream();
+                await file.CopyToAsync(ms);
+
+                var (map, sample, header) = _bankService.Preview(ms.ToArray());
+
+                return Json(new
+                {
+                    success = true,
+                    header,
+                    sample,
+                    // ⚠️ Delimitern som STRÄNG. Ett tabbtecken i JSON är osynligt i en dropdown,
+                    //    och operatören kan inte välja något hen inte kan se.
+                    delimiter = map.Delimiter.ToString(),
+                    mapping = new
+                    {
+                        date = map.Date, text = map.Text, amount = map.Amount,
+                        amountOut = map.AmountOut, balance = map.Balance, headerRow = map.HeaderRow
+                    },
+                    usable = map.Date >= 0 && (map.Amount >= 0 || map.AmountOut >= 0)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte läsa kontoutdraget för {Typ}/{Id}.",
+                    issuerType, issuerId);
+                return Json(new { success = false, message = "Filen gick inte att läsa." });
+            }
+        }
+
+        /// <summary>Läser in utdraget enligt operatörens mappning och parar ihop det entydiga.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ImportBankFile(
+            int issuerType, int issuerId, int accountNumber, IFormFile? file,
+            int date, int text, int amount, int amountOut, int balance,
+            string delimiter, int headerRow)
+        {
+            var (ok, _) = await AuthorizeWriteAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+            if (file == null || file.Length == 0)
+                return Json(new { success = false, message = "Ingen fil vald." });
+            if (file.Length > MaxBankFileBytes)
+                return Json(new { success = false, message = "Filen är för stor (max 8 MB)." });
+            if (accountNumber <= 0)
+                return Json(new { success = false, message = "Välj vilket konto utdraget gäller." });
+
+            try
+            {
+                using var ms = new MemoryStream();
+                await file.CopyToAsync(ms);
+
+                var map = new LedgerBankImportService.Mapping
+                {
+                    Date = date, Text = text, Amount = amount, AmountOut = amountOut,
+                    Balance = balance, HeaderRow = headerRow,
+                    Delimiter = string.IsNullOrEmpty(delimiter) ? ';' : delimiter[0]
+                };
+
+                var parsed = _bankService.Parse(ms.ToArray(), map);
+
+                if (parsed.Rows.Count == 0)
+                    return Json(new
+                    {
+                        success = false,
+                        message = "Ingen rad gick att läsa med den mappningen.",
+                        // ⚠️ Skälen följer med. "Ingen rad gick att läsa" utan att säga varför
+                        //    lämnar operatören att gissa om det är filen eller mappningen.
+                        skipped = parsed.Skipped.Take(10)
+                    });
+
+                var importId = _bankService.Store(
+                    issuerType, issuerId, accountNumber,
+                    Path.GetFileName(file.FileName) ?? "kontoutdrag",
+                    parsed, await CurrentMemberIdAsync());
+
+                return Json(new
+                {
+                    success = true,
+                    importId,
+                    rows = parsed.Rows.Count,
+                    // ⚠️ Överhoppade rader SÄGS alltid, även när importen lyckades. En bortfallen
+                    //    rad är en differens operatören annars får leta efter för hand.
+                    skipped = parsed.Skipped
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Import av kontoutdrag misslyckades för {Typ}/{Id}.",
+                    issuerType, issuerId);
+                return Json(new { success = false, message = "Filen gick inte att läsa in." });
+            }
+        }
+
+        /// <summary>Avstämningen för ett utdrag.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetReconciliation(int issuerType, int issuerId, int importId)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            try
+            {
+                var r = _bankService.Reconciliation(issuerType, issuerId, importId);
+                if (r == null) return Json(new { success = false, message = "Utdraget hittades inte." });
+
+                return Json(new { success = true, reconciliation = r });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Avstämningen gick inte att bygga för utdrag {Id}.", importId);
+                return Json(new { success = false, message = "Avstämningen gick inte att läsa." });
+            }
+        }
+
+        /// <summary>Operatörens egen matchning. <c>lineId = 0</c> tar bort den.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetBankMatch([FromBody] BankMatchRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Ogiltig begäran." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var done = _bankService.SetMatch(
+                request.IssuerId, request.RowId, request.LineId, await CurrentMemberIdAsync());
+
+            return Json(new
+            {
+                success = done,
+                // ⚠️ Det unika indexet är spärren mot att samma bokföringsrad kvittas två gånger.
+                //    Beskedet måste säga VAD som hindrade, annars läser det som en trasig knapp.
+                message = done ? null
+                    : "Den bokföringsraden är redan avstämd mot en annan bankrad."
+            });
+        }
+
+        /// <summary>Tar bort ett utdrag. Raderna följer med.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteBankImport([FromBody] BankMatchRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Ogiltig begäran." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            return Json(new { success = _bankService.Delete(request.IssuerId, request.ImportId) });
+        }
+
+        public class BankMatchRequest
+        {
+            public int IssuerType { get; set; }
+            public int IssuerId { get; set; }
+            public int ImportId { get; set; }
+            public int RowId { get; set; }
+            public int LineId { get; set; }
         }
 
         /// <summary>
