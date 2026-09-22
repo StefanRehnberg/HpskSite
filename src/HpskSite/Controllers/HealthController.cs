@@ -156,8 +156,16 @@ namespace HpskSite.Controllers
             switch (report.Status)
             {
                 case LedgerSchemaStatus.Ok:
+                    // ⚠️ Sandlådan står MED i det gröna svaret. Nämns den bara när den är trasig
+                    //    går "sandlådan är hel" inte att skilja från "ingen tittade", vilket är
+                    //    exakt den tystnad endpointen finns för att bryta.
+                    var sandbox = report.SandboxStatus == LedgerSandboxSchemaStatus.NotCreated
+                        ? "sandbox=saknas"
+                        : $"sandbox={_ledgerSchema.TableCount} sandboxtriggers={_ledgerSchema.SandboxTriggerCount}";
+
                     return Content(
-                        $"OK ledger {ms}ms tables={_ledgerSchema.TableCount} triggers={_ledgerSchema.TriggerCount}\n",
+                        $"OK ledger {ms}ms tables={_ledgerSchema.TableCount} "
+                        + $"triggers={_ledgerSchema.TriggerCount} {sandbox}\n",
                         PlainText);
 
                 case LedgerSchemaStatus.NotMigrated:
@@ -189,6 +197,17 @@ namespace HpskSite.Controllers
             {
                 LedgerSchemaStatus.HalfMigrated => "tabeller saknas: " + string.Join(", ", report.MissingTables),
                 LedgerSchemaStatus.MissingColumns => "kolumner saknas: " + string.Join(", ", report.MissingColumns),
+                // Sandlådan är halvskapad. Den skarpa sidan är hel — det är ytan vi bett klubbarna
+                // prova i som är trasig, och ett annat skript som lagar den.
+                LedgerSchemaStatus.SandboxIncomplete =>
+                    "sandlådan är ofullständig: " + string.Join(", ", report.SandboxMissing)
+                    + $". Kör {LedgerSchemaInspector.SandboxMigrationScript}",
+                // ⚠️ Det värsta läget av dem alla: allt ser friskt ut, och det enda som är borta
+                // är garantin att sandlådedata inte kan hamna i den skarpa tabellen.
+                LedgerSchemaStatus.MissingGuards =>
+                    "SPÄRRAR SAKNAS (sandlådedata kan hamna i skarpa tabeller): "
+                    + string.Join(", ", report.MissingGuards)
+                    + $". Kör {LedgerSchemaInspector.SandboxMigrationScript}",
                 _ => "SPÄRRAR SAKNAS (verifikationer går att ändra och radera): "
                      + string.Join(", ", report.MissingTriggers)
             };

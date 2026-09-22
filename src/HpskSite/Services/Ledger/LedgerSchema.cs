@@ -37,6 +37,17 @@ namespace HpskSite.Services.Ledger
         public static string For(int issuerId) => issuerId < 0 ? Sandbox : Live;
 
         /// <summary>
+        /// Ett utställar-id som alltid pekar på den skarpa liggaren.
+        ///
+        /// <para>⚠️ För de få vägar som saknar utställare i sitt anrop och <b>alltid</b> arbetar
+        /// mot skarp data — avprickningen mot en tävling, medlemsavgifterna. Att skriva
+        /// <c>1</c> på de ställena hade sett ut som ett slarv; det här namnet säger att det är
+        /// ett val. <b>Använd den inte för att slippa tänka</b>: saknar en ny väg utställare är
+        /// det oftast den vägen som är fel, inte schemat.</para>
+        /// </summary>
+        public const int LiveOnly = 1;
+
+        /// <summary>
         /// Skriver om en ledger-fråga till rätt schema.
         ///
         /// <para>Frågan skrivs alltid med <c>dbo.Ledger…</c> och pekas om hit. Det gör att en

@@ -34,18 +34,20 @@ namespace HpskSite.Services.Ledger
         public List<LedgerProject> List(int issuerType, int issuerId, bool includeClosed = false)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
 
             var sql = includeClosed
                 ? "SELECT * FROM dbo.LedgerProject WHERE IssuerType = @0 AND IssuerId = @1 ORDER BY IsClosed, Name"
                 : "SELECT * FROM dbo.LedgerProject WHERE IssuerType = @0 AND IssuerId = @1 AND IsClosed = 0 ORDER BY Name";
 
-            return db.Fetch<LedgerProject>(sql, issuerType, issuerId);
+            return ldb.Fetch<LedgerProject>(sql, issuerType, issuerId);
         }
 
         public LedgerProject? Get(int id)
         {
             using var db = _databaseFactory.CreateDatabase();
-            return db.SingleOrDefault<LedgerProject>("SELECT * FROM dbo.LedgerProject WHERE Id = @0", id);
+            var ldb = new LedgerDb(db, id);
+            return ldb.SingleOrDefault<LedgerProject>("SELECT * FROM dbo.LedgerProject WHERE Id = @0", id);
         }
 
         /// <summary>
@@ -78,7 +80,9 @@ namespace HpskSite.Services.Ledger
 
             // Kollas före insert för att kunna svara begripligt; det unika indexet är ändå det som
             // garanterar saken när två personer skapar samtidigt.
-            var existing = db.FirstOrDefault<LedgerProject>(
+            var ldb = new LedgerDb(db, issuerId);
+
+            var existing = ldb.FirstOrDefault<LedgerProject>(
                 "SELECT * FROM dbo.LedgerProject WHERE IssuerType = @0 AND IssuerId = @1 AND Name = @2",
                 issuerType, issuerId, name);
 
@@ -101,7 +105,15 @@ namespace HpskSite.Services.Ledger
 
             try
             {
-                db.Insert(project);
+                project.Id = ldb.ExecuteScalar<int>(
+                    @"INSERT INTO dbo.LedgerProject
+                          (IssuerType, IssuerId, Name, Description, StartDate, EndDate,
+                           IsClosed, SourceType, SourceId, CreatedUtc, CreatedByMemberId)
+                      OUTPUT INSERTED.Id
+                      VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, @10)",
+                    project.IssuerType, project.IssuerId, project.Name, project.Description,
+                    project.StartDate, project.EndDate, project.IsClosed, project.SourceType,
+                    project.SourceId, project.CreatedUtc, project.CreatedByMemberId);
             }
             catch (Exception ex)
             {
@@ -137,7 +149,9 @@ namespace HpskSite.Services.Ledger
         {
             using (var db = _databaseFactory.CreateDatabase())
             {
-                var existing = db.FirstOrDefault<LedgerProject>(
+                var ldb = new LedgerDb(db, issuerId);
+
+                var existing = ldb.FirstOrDefault<LedgerProject>(
                     @"SELECT * FROM dbo.LedgerProject
                        WHERE IssuerType = @0 AND IssuerId = @1 AND SourceType = @2 AND SourceId = @3",
                     issuerType, issuerId, sourceType, sourceId);
@@ -153,7 +167,7 @@ namespace HpskSite.Services.Ledger
             // Namnkrocken är det troliga felet: föreningen har redan ett projekt med samma namn som
             // de skapat för hand. Koppla ihop det i stället för att skapa ett andra med samma namn.
             using var db2 = _databaseFactory.CreateDatabase();
-            return db2.FirstOrDefault<LedgerProject>(
+            return new LedgerDb(db2, issuerId).FirstOrDefault<LedgerProject>(
                 "SELECT * FROM dbo.LedgerProject WHERE IssuerType = @0 AND IssuerId = @1 AND Name = @2",
                 issuerType, issuerId, (name ?? "").Trim());
         }
@@ -174,14 +188,15 @@ namespace HpskSite.Services.Ledger
                 return LedgerProjectResult.Failed("Projektet kan inte sluta innan det börjar.");
 
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, id);
 
-            var project = db.SingleOrDefault<LedgerProject>(
+            var project = ldb.SingleOrDefault<LedgerProject>(
                 "SELECT * FROM dbo.LedgerProject WHERE Id = @0", id);
 
             if (project is null)
                 return LedgerProjectResult.Failed("Projektet hittades inte.");
 
-            var clash = db.FirstOrDefault<LedgerProject>(
+            var clash = ldb.FirstOrDefault<LedgerProject>(
                 @"SELECT * FROM dbo.LedgerProject
                    WHERE IssuerType = @0 AND IssuerId = @1 AND Name = @2 AND Id <> @3",
                 project.IssuerType, project.IssuerId, name, id);
@@ -194,7 +209,11 @@ namespace HpskSite.Services.Ledger
             project.StartDate = startDate?.Date;
             project.EndDate = endDate?.Date;
 
-            db.Update(project);
+            ldb.Execute(
+                @"UPDATE dbo.LedgerProject
+                     SET Name = @1, Description = @2, StartDate = @3, EndDate = @4
+                   WHERE Id = @0",
+                project.Id, project.Name, project.Description, project.StartDate, project.EndDate);
 
             return new LedgerProjectResult { Project = project };
         }
@@ -211,15 +230,18 @@ namespace HpskSite.Services.Ledger
         public LedgerProjectResult SetClosed(int id, bool closed)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, id);
 
-            var project = db.SingleOrDefault<LedgerProject>(
+            var project = ldb.SingleOrDefault<LedgerProject>(
                 "SELECT * FROM dbo.LedgerProject WHERE Id = @0", id);
 
             if (project is null)
                 return LedgerProjectResult.Failed("Projektet hittades inte.");
 
             project.IsClosed = closed;
-            db.Update(project);
+
+            ldb.Execute("UPDATE dbo.LedgerProject SET IsClosed = @1 WHERE Id = @0",
+                        project.Id, project.IsClosed);
 
             return new LedgerProjectResult { Project = project };
         }
@@ -239,6 +261,7 @@ namespace HpskSite.Services.Ledger
         public List<LedgerProjectSummary> Summarise(int issuerType, int issuerId, int? fiscalYearId = null)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
 
             var sql = @"SELECT p.Id AS ProjectId,
                                p.Name AS ProjectName,
@@ -257,7 +280,7 @@ namespace HpskSite.Services.Ledger
                          GROUP BY p.Id, p.Name, p.IsClosed
                          ORDER BY p.IsClosed, p.Name";
 
-            return db.Fetch<LedgerProjectSummary>(sql, issuerType, issuerId, fiscalYearId);
+            return ldb.Fetch<LedgerProjectSummary>(sql, issuerType, issuerId, fiscalYearId);
         }
     }
 
