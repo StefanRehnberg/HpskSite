@@ -28,6 +28,19 @@
   .ek-page { --ek-attn: #B45309; --ek-attn-bg: #FBF4EC; --ek-attn-line: #E8D5BE; }
   [data-bs-theme="dark"] .ek-page { --ek-attn: #E0A566; --ek-attn-bg: #2A2118; --ek-attn-line: #4A3A24; }
 
+  /* ── Sandlådemärkning ───────────────────────────────────────────────────────
+     ⚠️ Egen färg, INTE den orangea. Orange betyder redan "detta saknas" i den här ytan;
+     låter vi den också betyda "du är i en sandlåda" slutar båda betyda något. Lila är
+     obesatt i produkten och läses som "annat läge", inte som "fel". */
+  .ek-sandbox-bar { position: sticky; top: 0; z-index: 1030;
+      background: #6B21A8; color: #fff; padding: .5rem 1rem; font-size: .9rem;
+      display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+  .ek-sandbox-bar strong { letter-spacing: .1em; }
+  .ek-sandbox-name { background: rgba(255,255,255,.18); padding: .1rem .6rem; border-radius: 2rem; }
+  .ek-sandbox-meta { opacity: .75; font-size: .85rem; }
+  /* Ramen: perifer och alltid synlig, aven efter att raden scrollats forbi. */
+  .ek-page.ek-is-sandbox { outline: 3px solid #6B21A8; outline-offset: -3px; }
+
   .ek-page .wrap { display: flex; gap: 1.5rem; align-items: flex-start; }
 
   /* ⚠️ SAMMA INRAMNING SOM ADMINRAILEN pa klubb- och kretssidan (ClubAdminPanel .admin-rail):
@@ -59,6 +72,17 @@
       padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--bs-border-color);
       border-radius: 0; }
   .ek-page .rail a.ek-back:hover { color: var(--bs-link-color); background: none; }
+
+  .ek-page .ek-issuer-switch { margin-top: 1rem; padding: 10px 12px 4px;
+      border-top: 1px solid var(--bs-border-color); }
+  .ek-page .ek-issuer { display: block; font-size: .85rem; padding: 4px 8px; border-radius: 6px;
+      color: var(--bs-body-color); text-decoration: none; }
+  .ek-page .ek-issuer.on { font-weight: 700; background: var(--bs-secondary-bg); }
+  .ek-page .ek-issuer.sb::before { content: "⬤ "; color: #6B21A8; font-size: .7em; }
+  .ek-page .ek-issuer-new { display: block; width: 100%; text-align: left; margin-top: 6px;
+      font: inherit; font-size: .85rem; padding: 4px 8px; border: 1px solid var(--bs-border-color);
+      border-radius: 6px; background: none; color: var(--bs-body-color); cursor: pointer; }
+  .ek-page .ek-issuer-why { font-size: .75rem; color: var(--bs-secondary-color); margin-top: 6px; }
 
   /* ⚠️⚠️ `flex: 1 1 auto` MASTE staa uttryckligen. Sajtens layout satter `main { flex: 1 0 auto }`
      pa ELEMENTET (sticky footer-monstret), sa flex-shrink ar 0 — och da vagrar ytan krympa hur
@@ -212,7 +236,39 @@
    MEDVETNA avvikelsen - smal rad och stor text for aldre lasare - men den ar loptext och
    formular. Kassorsytan ar TABELLER: per tavling, kon att bokfora, konteringsforslaget. De
    vinner pa bredden, och en smal kolumn hade tvingat fram vagrat radbrytning i sifferkolumner. *@
-<div class="ek-page container-fluid py-4" id="@uid" data-issuer-type="@Model.IssuerType" data-issuer-id="@Model.IssuerId">
+@* ══ SANDLÅDEMÄRKNING ════════════════════════════════════════════════════════════════════
+   ⚠️⚠️ TRE SAMVERKANDE SIGNALER, och valet är inte smak:
+
+   1. EN TEXTRAD I LÄSVÄGEN. Ordet "SANDLÅDA" står skrivet, inte antytt. WCAG 1.4.1: information
+      får aldrig bäras av färg ensam — var tionde man ser inte skillnad på den orangea ramen.
+      Raden går inte att stänga; en märkning man kan klicka bort är ingen märkning.
+   2. EN RAM RUNT YTAN. Perifert och alltid synligt, även när man scrollat förbi raden. Samma
+      grepp som betaltjänsters testläge, och det överlever en skärmdump — vilket spelar roll
+      den dag någon mejlar en bild och frågar "varför står det så här?".
+   3. MÄRKNING PÅ HANDLINGARNA. Kvittot bär sin egen stämpel (se LedgerReceipt.cshtml). En
+      utskrift lämnar sidan och tar ingen ram med sig.
+
+   ⛔ INGEN VATTENSTÄMPEL ÖVER INNEHÅLLET. Sidan är till för att läsa siffror, och en stämpel
+      tvärs över gör exakt det svårare. Den signal som förstör uppgiften är fel signal. *@
+@if (Model.IsSandbox)
+{
+    <div class="ek-sandbox-bar">
+        <strong>SANDLÅDA</strong>
+        <span>Inget här är riktig bokföring. Allt kan kastas.</span>
+        @if (!string.IsNullOrWhiteSpace(Model.SandboxLabel))
+        {
+            <span class="ek-sandbox-name">@Model.SandboxLabel</span>
+        }
+        @if (Model.SandboxCreatedUtc is not null)
+        {
+            <span class="ek-sandbox-meta">skapad @Model.SandboxCreatedUtc.Value.ToLocalTime().ToString("yyyy-MM-dd")</span>
+        }
+    </div>
+}
+
+<div class="ek-page container-fluid py-4 @(Model.IsSandbox ? "ek-is-sandbox" : "")"
+     id="@uid" data-issuer-type="@Model.IssuerType" data-issuer-id="@Model.IssuerId"
+     data-owner-id="@Model.OwnerId" data-sandbox="@(Model.IsSandbox ? "1" : "0")">
 
 <div class="wrap">
 
@@ -234,6 +290,26 @@
         <a href="#" class="ek-nav" data-view="avgifter">Avgifter</a>
         <a href="#" class="ek-nav soon" data-view="bokslut">Bokslut</a>
         <a href="#" class="ek-nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
+
+        @* ⚠️ Växlaren ligger SIST och lågmält. Att byta liggare är sällsynt och allvarligt;
+           den ska gå att hitta, inte att råka klicka på. *@
+        <div class="ek-issuer-switch">
+            @foreach (var i in Model.Issuers)
+            {
+                var isActive = i.Id == Model.IssuerId;
+                <a href="/ekonomi?type=@Model.IssuerType&id=@Model.OwnerId@(i.IsSandbox ? $"&issuer={i.Id}" : "")"
+                   class="ek-issuer @(isActive ? "on" : "") @(i.IsSandbox ? "sb" : "")">
+                    @(i.IsSandbox ? (string.IsNullOrWhiteSpace(i.Label) ? "Sandlåda" : i.Label) : "Riktig bokföring")
+                </a>
+            }
+            <button type="button" class="ek-issuer-new" id="@(uid)_newSandbox">
+                @(Model.Issuers.Any(i => i.IsSandbox) ? "Börja om i ny sandlåda" : "Skapa en sandlåda")
+            </button>
+            <div class="ek-issuer-why">
+                En sandlåda kastas genom att du skapar en ny. Inget raderas — den gamla lämnas bara.
+            </div>
+            <div class="ek-alert ek-bad d-none" id="@(uid)_sandboxError"></div>
+        </div>
 
     </nav>
 
@@ -929,6 +1005,40 @@
     });
 
     el('bDate').value = new Date().toISOString().slice(0, 10);
+
+    // ── Ny sandlåda ───────────────────────────────────────────────────────────────────────
+    el('newSandbox').addEventListener('click', function () {
+        var btn = this, err = el('sandboxError');
+        err.classList.add('d-none');
+
+        // ⚠️ prompt() och inte en tyst skapelse: att byta liggare ska kräva ett medvetet
+        // ögonblick. Ett namn gör dessutom att kassören kan skilja två försök åt i efterhand.
+        var label = window.prompt(
+            'Vad ska sandlådan heta? (t.ex. "Test 1" eller "Provade bokslut")\n\n'
+            + 'En eventuell tidigare sandlåda lämnas — ingenting raderas.', '');
+        if (label === null) return;
+
+        btn.disabled = true;
+        postJson('/umbraco/surface/EkonomiAdmin/CreateSandbox', {
+            ownerType: parseInt(root.dataset.issuerType, 10),
+            ownerId: parseInt(root.dataset.ownerId, 10),
+            label: label
+        })
+            .then(function (d) {
+                btn.disabled = false;
+                if (!d.success) {
+                    err.textContent = d.message || 'Sandlådan gick inte att skapa.';
+                    err.classList.remove('d-none');
+                    return;
+                }
+                // Hela sidan laddas om i den nya sandlådan — utställaren bor i URL:en.
+                window.location = d.url;
+            })
+            .catch(function (e) {
+                btn.disabled = false;
+                err.textContent = e.message; err.classList.remove('d-none');
+            });
+    });
 
     el('bSave').addEventListener('click', function () {
         var btn = this, err = el('bError'), okBox = el('bOk');

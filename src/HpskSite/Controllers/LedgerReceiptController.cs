@@ -85,7 +85,14 @@ namespace HpskSite.Controllers
                 // Kvittot rivs inte — det ligger hos betalaren — men sidan måste säga det, annars
                 // visar vi en giltig handling om pengar som lämnats tillbaka.
                 IsReversed = payment?.VoidedUtc is not null,
-                ReversedReason = payment?.VoidReason
+                ReversedReason = payment?.VoidReason,
+
+                // ⚠️⚠️ ETT SANDLÅDEKVITTO MÅSTE SÄGA DET. Handlingen lämnar sidan — den skrivs ut,
+                // mejlas, fotograferas — och tar ingen sidram med sig. Ett kvitto som ser äkta ut
+                // men gäller ett test är en handling som ljuger, och den ligger hos betalaren.
+                IsSandbox = db.ExecuteScalar<int>(
+                    "SELECT COUNT(1) FROM dbo.LedgerIssuer WHERE Id = @0 AND Kind = 'sandbox'",
+                    receipt.IssuerId) > 0
             };
 
             return View("~/Views/LedgerReceipt.cshtml", model);
@@ -121,5 +128,8 @@ namespace HpskSite.Controllers
         public bool IsReversed { get; set; }
 
         public string? ReversedReason { get; set; }
+
+        /// <summary>⚠️ Utfärdat i en sandlåda — handlingen måste säga det, i klartext.</summary>
+        public bool IsSandbox { get; set; }
     }
 }
