@@ -94,6 +94,7 @@ namespace HpskSite.Services.Ledger
             {
                 using var db = _databaseFactory.CreateDatabase();
 
+
                 var charge = db.SingleOrDefault<MembershipFeeCharge>(
                     "SELECT * FROM dbo.MembershipFeeCharge WHERE Id = @0", chargeId);
 

@@ -73,6 +73,7 @@ namespace HpskSite.Services.Ledger
             }
 
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
 
             var result = new LedgerSetupResult();
 
@@ -80,13 +81,13 @@ namespace HpskSite.Services.Ledger
             //    förening utan rad skulle falla tillbaka på ett hårdkodat påstående om momsen.
             //    ⚠️ Momsregistrering är AV som förval — den är ett faktum om föreningen, inte något
             //    vi får gissa åt den.
-            var hasSettings = db.ExecuteScalar<int>(
+            var hasSettings = ldb.ExecuteScalar<int>(
                 "SELECT COUNT(1) FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1",
                 issuerType, issuerId);
 
             if (hasSettings == 0)
             {
-                db.Execute(
+                ldb.Execute(
                     @"INSERT INTO dbo.LedgerIssuerSettings (IssuerType, IssuerId, IsVatRegistered, Shape)
                       VALUES (@0, @1, 0, @2)",
                     issuerType, issuerId, shape);
@@ -96,7 +97,7 @@ namespace HpskSite.Services.Ledger
 
             // 1. Kontoplanen. Bara konton som saknas läggs till — ett konto föreningen döpt om
             //    eller stängt av rörs inte.
-            var existingNumbers = db.Fetch<int>(
+            var existingNumbers = ldb.Fetch<int>(
                 "SELECT Number FROM dbo.LedgerAccount WHERE IssuerType = @0 AND IssuerId = @1",
                 issuerType, issuerId).ToHashSet();
 
@@ -104,7 +105,7 @@ namespace HpskSite.Services.Ledger
             {
                 if (existingNumbers.Contains(account.Number)) continue;
 
-                db.Execute(
+                ldb.Execute(
                     @"INSERT INTO dbo.LedgerAccount (IssuerType, IssuerId, Number, Name, IsActive, FromTemplate)
                       VALUES (@0, @1, @2, @3, 1, 1)",
                     issuerType, issuerId, account.Number, account.Name);
@@ -113,7 +114,7 @@ namespace HpskSite.Services.Ledger
             }
 
             // 2. Rollmappningen. Samma regel: en roll föreningen redan pekat om lämnas i fred.
-            var mappedRoles = db.Fetch<string>(
+            var mappedRoles = ldb.Fetch<string>(
                 "SELECT RoleKey FROM dbo.LedgerAccountRole WHERE IssuerType = @0 AND IssuerId = @1",
                 issuerType, issuerId).ToHashSet();
 
@@ -134,7 +135,7 @@ namespace HpskSite.Services.Ledger
                     continue;
                 }
 
-                db.Execute(
+                ldb.Execute(
                     @"INSERT INTO dbo.LedgerAccountRole (IssuerType, IssuerId, RoleKey, AccountNumber)
                       VALUES (@0, @1, @2, @3)",
                     issuerType, issuerId, role, accountNumber);
@@ -143,14 +144,14 @@ namespace HpskSite.Services.Ledger
             }
 
             // 3. Räkenskapsåret.
-            var fiscalYearId = db.ExecuteScalar<int?>(
+            var fiscalYearId = ldb.ExecuteScalar<int?>(
                 @"SELECT Id FROM dbo.LedgerFiscalYear
                    WHERE IssuerType = @0 AND IssuerId = @1 AND Year = @2",
                 issuerType, issuerId, year);
 
             if (fiscalYearId is null)
             {
-                db.Execute(
+                ldb.Execute(
                     @"INSERT INTO dbo.LedgerFiscalYear (IssuerType, IssuerId, Year, StartDate, EndDate, Status)
                       VALUES (@0, @1, @2, @3, @4, @5)",
                     issuerType, issuerId, year,
@@ -166,14 +167,14 @@ namespace HpskSite.Services.Ledger
             //    ger föreningen något att sätta sitt prefix på innan första posten skrivs.
             foreach (var kind in new[] { LedgerSeriesKind.JournalEntry, LedgerSeriesKind.Receipt })
             {
-                var exists = db.ExecuteScalar<int>(
+                var exists = ldb.ExecuteScalar<int>(
                     @"SELECT COUNT(1) FROM dbo.LedgerNumberSeries
                        WHERE IssuerType = @0 AND IssuerId = @1 AND Year = @2 AND Kind = @3",
                     issuerType, issuerId, year, kind);
 
                 if (exists > 0) continue;
 
-                db.Execute(
+                ldb.Execute(
                     @"INSERT INTO dbo.LedgerNumberSeries (IssuerType, IssuerId, Year, Kind, Prefix, NextNumber)
                       VALUES (@0, @1, @2, @3, @4, 1)",
                     issuerType, issuerId, year, kind,
@@ -203,6 +204,7 @@ namespace HpskSite.Services.Ledger
         public LedgerSetupStatus GetStatus(int issuerType, int issuerId)
         {
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
 
             var status = new LedgerSetupStatus
             {
@@ -211,7 +213,7 @@ namespace HpskSite.Services.Ledger
                 RolesTotal = LedgerAccountRoles.All.Length
             };
 
-            var settings = db.FirstOrDefault<LedgerIssuerSettings>(
+            var settings = ldb.FirstOrDefault<LedgerIssuerSettings>(
                 "SELECT * FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1",
                 issuerType, issuerId);
 
@@ -227,11 +229,11 @@ namespace HpskSite.Services.Ledger
             status.IsVatRegistered = settings.IsVatRegistered;
             status.VatNumber = settings.VatNumber;
 
-            status.AccountCount = db.ExecuteScalar<int>(
+            status.AccountCount = ldb.ExecuteScalar<int>(
                 "SELECT COUNT(1) FROM dbo.LedgerAccount WHERE IssuerType = @0 AND IssuerId = @1",
                 issuerType, issuerId);
 
-            var mapped = db.Fetch<string>(
+            var mapped = ldb.Fetch<string>(
                 "SELECT RoleKey FROM dbo.LedgerAccountRole WHERE IssuerType = @0 AND IssuerId = @1",
                 issuerType, issuerId).ToHashSet();
 
@@ -242,7 +244,7 @@ namespace HpskSite.Services.Ledger
                 if (!mapped.Contains(role)) status.MissingRoles.Add(role);
             }
 
-            status.FiscalYears.AddRange(db.Fetch<LedgerFiscalYear>(
+            status.FiscalYears.AddRange(ldb.Fetch<LedgerFiscalYear>(
                 @"SELECT * FROM dbo.LedgerFiscalYear
                    WHERE IssuerType = @0 AND IssuerId = @1
                    ORDER BY Year DESC",
@@ -276,14 +278,15 @@ namespace HpskSite.Services.Ledger
             }
 
             using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
 
-            var current = db.ExecuteScalar<string>(
+            var current = ldb.ExecuteScalar<string>(
                 "SELECT Shape FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1",
                 issuerType, issuerId);
 
             if (current == shape) return false;
 
-            var rows = db.Execute(
+            var rows = ldb.Execute(
                 "UPDATE dbo.LedgerIssuerSettings SET Shape = @2 WHERE IssuerType = @0 AND IssuerId = @1",
                 issuerType, issuerId, shape);
 
