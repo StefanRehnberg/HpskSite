@@ -54,7 +54,9 @@ namespace HpskSite.Services.Ledger
             typeof(LedgerJournalEntryDraftLine),
             typeof(LedgerNumberGap),
             typeof(LedgerPayment),
-            typeof(LedgerReceipt)
+            typeof(LedgerReceipt),
+            typeof(LedgerBudget),
+            typeof(LedgerBudgetLine)
         };
 
         /// <summary>
@@ -66,7 +68,11 @@ namespace HpskSite.Services.Ledger
             "TR_LedgerJournalEntry_NoUpdateDelete",
             "TR_LedgerJournalEntryLine_NoUpdateDelete",
             "TR_LedgerJournalEntry_NoWriteInEstablishedYear",
-            "TR_LedgerReceipt_NoUpdateDelete"
+            "TR_LedgerReceipt_NoUpdateDelete",
+            // ⚠️ Budgetens spärr hör hit av samma skäl som de andra: utan den är
+            // "en antagen budget kan inte skrivas om" en överenskommelse, inte en garanti.
+            "TR_LedgerBudget_AdoptedIsFinal",
+            "TR_LedgerBudgetLine_AdoptedIsFinal"
         };
 
         /// <summary>
@@ -81,14 +87,17 @@ namespace HpskSite.Services.Ledger
         {
             "TR_sbx_LedgerJournalEntry_NoUpdateDelete",
             "TR_sbx_LedgerJournalEntryLine_NoUpdateDelete",
-            "TR_sbx_LedgerReceipt_NoUpdateDelete"
+            "TR_sbx_LedgerReceipt_NoUpdateDelete",
+            "TR_sbx_LedgerBudget_AdoptedIsFinal",
+            "TR_sbx_LedgerBudgetLine_AdoptedIsFinal"
         };
 
         // Båda skripten namnges: en saknad momskolumn kommer ur det andra, och ett meddelande som
         // pekar på fel skript skickar operatören att köra om ett som inte hjälper.
         public const string MigrationScript =
             "Migrations/create-ledger-tables.sql + add-vat-to-ledger.sql + create-ledger-draft-tables.sql "
-            + "+ create-ledger-payment-tables.sql + add-project-dimension-to-ledger.sql";
+            + "+ create-ledger-payment-tables.sql + add-project-dimension-to-ledger.sql "
+            + "+ create-ledger-budget-tables.sql";
 
         /// <summary>Skriptet som skapar sandlådans schema. Ett eget svar kräver ett eget skript.</summary>
         public const string SandboxMigrationScript =

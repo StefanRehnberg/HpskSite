@@ -196,6 +196,36 @@
       padding: 1.15rem 1.25rem; background: var(--bs-body-bg); }
   .ek-page .soonbox h2 { font-size: 1.15rem; font-weight: 700; margin: 0 0 .4rem; }
 
+  /* ── Rapport: utfall mot budget ───────────────────────────────────────────
+     ⚠️ Stapeln ar utfallet som andel av budgeten, KAPAD vid 100 %. En stapel som
+     vaxer forbi sin egen ram laeser som ett fel i ytan, inte som en avvikelse —
+     och avvikelsen star redan utskriven i kronor och procent bredvid. */
+  .ek-page .rep-bar { width: 11rem; height: .5rem; border-radius: 1rem;
+      background: var(--bs-secondary-bg); overflow: hidden; }
+  .ek-page .rep-bar i { display: block; height: 100%; background: var(--bs-secondary-color); }
+  .ek-page .rep-bar.ok i { background: var(--bs-success); }
+  .ek-page .rep-bar.attn i { background: var(--ek-attn); }
+  .ek-page table.t td.barcell { width: 12rem; }
+  /* Avsnittsrubrik i tabellen. Bar ingen siffra — den skiljer bara intakt fran kostnad. */
+  .ek-page table.t tr.grp td { font-size: .72rem; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--bs-secondary-color); font-weight: 700; padding-top: 1.1rem; border-top: 0; }
+  .ek-page table.t tr.sum td { font-weight: 700; background: var(--bs-tertiary-bg);
+      border-top: 2px solid var(--bs-border-color); }
+  .ek-page .rep-amt { width: 8rem; text-align: right; font-variant-numeric: tabular-nums; }
+  .ek-page .headactions { display: flex; gap: .6rem; flex-wrap: wrap; }
+
+  /* ── Utskrift: underlaget till styrelsemötet ──────────────────────────────
+     ⚠️ Skissens primara knapp ar en LEVERANS, inte en vy. Papperet ar det som laeses
+     pa motet, sa railen, sajtens header och alla andra paneler maste bort — annars
+     far styrelsen tre sidor meny och en tabell. */
+  @@media print {
+      .ek-page .rail, .ek-page .headactions, .ek-page .ek-sandbox-bar,
+      .ek-page .soonbox, .ek-page #@(uid)_repPeriodBox { display: none !important; }
+      .ek-page .wrap { display: block; }
+      .ek-page .ek-card { border: 0; padding: 0; }
+      .ek-page table.t tr.sum td { background: none; }
+  }
+
   /* ── Bokför ──────────────────────────────────────────────────────────────── */
   .ek-page .bokfor-grid { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1rem;
       align-items: start; }
@@ -286,7 +316,7 @@
         <a href="#" class="ek-nav on" data-view="oversikt">Översikt</a>
         <a href="#" class="ek-nav" data-view="bokfor">Bokför</a>
         <a href="#" class="ek-nav soon" data-view="avstamning">Avstämning</a>
-        <a href="#" class="ek-nav soon" data-view="rapport">Rapport</a>
+        <a href="#" class="ek-nav" data-view="rapport">Rapport</a>
         <a href="#" class="ek-nav" data-view="avgifter">Avgifter</a>
         <a href="#" class="ek-nav soon" data-view="bokslut">Bokslut</a>
         <a href="#" class="ek-nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
@@ -363,10 +393,30 @@
                         <div class="ek-cardh">
                             <h2>3 · Hur går året?</h2>
                         </div>
-                        <div class="soonbox" style="border:0;padding:0;background:none">
+                        @* Skissens kort 3: tva staplar och en rad om beslutet. Samma motor som
+                           Rapport-ytan — kortet far ALDRIG rakna sjalvt, da kan de tva saga olika
+                           saker om samma ar. *@
+                        <div id="@(uid)_yearBars" class="d-none">
+                            <div class="rows">
+                                <div><span class="grow">Intäkter</span>
+                                     <span class="num" id="@(uid)_yrIncome">—</span></div>
+                            </div>
+                            <div class="rep-bar ok" style="width:100%;margin:.15rem 0 .8rem">
+                                <i id="@(uid)_yrIncomeBar" style="width:0"></i>
+                            </div>
+                            <div class="rows">
+                                <div><span class="grow">Kostnader</span>
+                                     <span class="num" id="@(uid)_yrCost">—</span></div>
+                            </div>
+                            <div class="rep-bar" style="width:100%;margin:.15rem 0 0">
+                                <i id="@(uid)_yrCostBar" style="width:0"></i>
+                            </div>
+                            <div class="why" id="@(uid)_yrNote"></div>
+                        </div>
+                        <div id="@(uid)_yearNoBudget" class="d-none">
                             <p class="muted" style="margin-top:0">
-                                Budget mot utfall kräver en antagen budget. Den läggs in under Rapport,
-                                som byggs efter avstämningen.
+                                Budget mot utfall kräver en antagen budget.
+                                <button type="button" class="linkbtn" data-view="rapport">Lägg in den under Rapport</button>.
                             </p>
                         </div>
                     </div>
@@ -650,14 +700,161 @@
                 </div>
             </section>
 
+            @*
+                RAPPORT — Ekonomi_Wireframes.pdf sida 4.
+
+                ⚠️ Det HAR ar inte en resultatrakning. Den hor till Bokslut, steg 6. Ytan svarar
+                pa en annan fraga: haller vi budgeten? Den stalls pa varje styrelsemote, medan
+                bokslutet gors en gang om aret — darav skissens egen underrubrik.
+
+                ⚠️ PERIODEN MASTE STA UTSKRIVEN. Budgeten ar hela arets och proportioneras aldrig
+                (se LedgerBudgetService), sa −49 % pa kiosken i maj betyder "sasongen har inte
+                borjat". Utan perioden i rubriken laeser en styrelse det som en katastrof.
+            *@
             <section data-pane="rapport" hidden>
-                <div class="head"><div><h1>Utfall mot budget</h1>
-                    <div class="sub">Kassörens vanligaste leverans — oftare än bokslutet.</div></div></div>
-                <div class="soonbox">
-                    <h2>Byggs härnäst (P8)</h2>
-                    <p class="muted">Budget mot utfall per konto, att fästa på nästa styrelsemöte.
-                    Budgeten är ett beslut, inte en prognos: den antas på årsmötet och kan inte skrivas
-                    om i efterhand.</p>
+                <div class="head">
+                    <div>
+                        <h1>Utfall mot budget</h1>
+                        <div class="sub" id="@(uid)_repPeriod">Kassörens vanligaste leverans — oftare än bokslutet.</div>
+                    </div>
+                    <div class="headactions d-none" id="@(uid)_repActions">
+                        <button type="button" class="ek-btn ek-small" id="@(uid)_repPeriodBtn">Byt period</button>
+                        <button type="button" class="ek-btn" id="@(uid)_repPrint">Ta fram underlag till styrelsemötet</button>
+                    </div>
+                </div>
+
+                <div class="ek-alert ek-bad d-none" id="@(uid)_repError"></div>
+
+                @* Perioden. Doljd tills nagon trycker "Byt period" — skissen visar den inte, och
+                   en kassor som bara vill se laget ska inte motas av tva datumfalt. *@
+                <div class="ek-card d-none" id="@(uid)_repPeriodBox">
+                    <div class="ek-cardh"><h2>Period</h2></div>
+                    <div class="amount-row">
+                        <label>Från <input type="date" id="@(uid)_repFrom"></label>
+                        <label>Till <input type="date" id="@(uid)_repTo"></label>
+                        <button type="button" class="ek-btn ek-small" id="@(uid)_repApply">Visa</button>
+                        <button type="button" class="linkbtn" id="@(uid)_repReset">Hela året hittills</button>
+                    </div>
+                    <div class="why">
+                        Budgeten är alltid hela årets och räknas aldrig om till en del av året.
+                        Ett halvår mot en helårsbudget ser ut som ett underskott även när allt går som planerat.
+                    </div>
+                </div>
+
+                @* Tomt lage. ⚠️ Visar ALDRIG ett belopp — en rapport mot ingen budget ar inget. *@
+                <div class="soonbox d-none" id="@(uid)_repEmpty">
+                    <h2 id="@(uid)_repEmptyH">Ingen budget är antagen ännu</h2>
+                    <p class="muted" id="@(uid)_repEmptyP">
+                        Uppföljningen jämför årets utfall med det styrelsen eller årsmötet beslutade.
+                        Utan ett beslut finns inget att jämföra med.
+                    </p>
+                    <button type="button" class="ek-btn" id="@(uid)_repStart">Lägg in budgeten</button>
+                </div>
+
+                @* Rapporten. *@
+                <div class="ek-card d-none" id="@(uid)_repCard">
+                    <table class="t">
+                        <thead>
+                            <tr>
+                                <th>Konto</th>
+                                <th class="barcell"></th>
+                                <th class="n">Budget</th>
+                                <th class="n">Utfall</th>
+                                <th class="n">Diff kr</th>
+                                <th class="n">Diff %</th>
+                            </tr>
+                        </thead>
+                        <tbody id="@(uid)_repBody"></tbody>
+                    </table>
+                    <div class="why" id="@(uid)_repAdopted"></div>
+                </div>
+
+                <div class="ek-grid d-none" id="@(uid)_repFooter">
+                    @* ⚠️ Skissens "Fäst på styrelsemötet" är INTE byggd, och rutan säger det i
+                       stället för att bära en knapp som inte gör något. Den kräver en delbar
+                       handling: styrelsen kan inte öppna /ekonomi, så en länk dit i dagordningen
+                       vore en länk de flesta möts av ett nekande på. Samma fråga som revisorns
+                       åtkomst — den ska lösas en gång, för båda. *@
+                    <div class="soonbox">
+                        <h2>Fäst på styrelsemötet</h2>
+                        <p class="muted" style="margin-top:0">
+                            Budgetuppföljning är redan en punkt på dagordningen, och nästa steg är att
+                            fästa den här sidan där. Det kräver en läsbar handling som en ledamot kan
+                            öppna utan kassörens behörighet — tills dess: <strong>Ta fram underlag</strong>
+                            skriver ut den.
+                        </p>
+                    </div>
+
+                    @* ⚠️ Skissens egen text, ordagrant. Den forklarar varfor ytan inte har en
+                       "redigera budget"-knapp, och det ar den vanligaste fragan om sidan. *@
+                    <div class="ek-card">
+                        <div class="ek-cardh"><h2>Om budgeten</h2></div>
+                        <p class="muted" style="margin-top:0">
+                            <strong>Budgeten är ett beslut, inte en prognos.</strong>
+                            <span id="@(uid)_repDecision"></span>
+                            Den kan inte skrivas om i efterhand — vill styrelsen ändra den blir
+                            ändringen ett eget, spårbart beslut.
+                        </p>
+                        <button type="button" class="linkbtn" id="@(uid)_repRevise">Gör en ny version</button>
+                    </div>
+                </div>
+
+                @*
+                    BUDGETINMATNINGEN.
+
+                    ⚠️ Finns INTE i skissen — den visar bara uppfoljningen. Men utan en yta att
+                    skriva in budgeten pa ar hela sidan onabar, sa den ligger har: dar budgeten
+                    konsumeras, och dar den som saknar en upptacker att hen saknar en.
+                *@
+                <div class="ek-card d-none" id="@(uid)_budCard">
+                    <div class="ek-cardh">
+                        <h2 id="@(uid)_budTitle">Budget</h2>
+                        <span class="meta" id="@(uid)_budMeta"></span>
+                    </div>
+
+                    <p class="muted" style="margin-top:0">
+                        Skriv beloppen som de är — en intäkt på 146 000 skrivs 146000, en kostnad på
+                        95 000 skrivs 95000. Konton du lämnar tomma räknas inte som noll, de räknas
+                        som obudgeterade.
+                    </p>
+
+                    <div class="ek-alert ek-bad d-none" id="@(uid)_budError"></div>
+                    <div class="ek-alert ek-ok d-none" id="@(uid)_budOk"></div>
+
+                    <table class="t">
+                        <thead>
+                            <tr>
+                                <th>Konto</th>
+                                <th class="n" id="@(uid)_budPrevH"></th>
+                                <th class="n">Budget</th>
+                            </tr>
+                        </thead>
+                        <tbody id="@(uid)_budBody"></tbody>
+                    </table>
+
+                    <div class="amount-row" style="margin-top:1rem">
+                        <button type="button" class="ek-btn ek-small" id="@(uid)_budSave">Spara utkastet</button>
+                        <button type="button" class="linkbtn" id="@(uid)_budCancel">Stäng</button>
+                    </div>
+
+                    <div class="ek-cardh" style="margin-top:1.5rem"><h2>Anta budgeten</h2></div>
+                    <p class="muted" style="margin-top:0">
+                        <strong>Efter det här går den inte att ändra.</strong>
+                        Ett utkast går att rätta hur många gånger som helst; en antagen budget är ett
+                        beslut, och en ändring blir en ny version med båda kvar.
+                    </p>
+                    <div class="amount-row">
+                        <label>Beslutsdatum <input type="date" id="@(uid)_budDate"></label>
+                        <label>Beslutades av
+                            <select id="@(uid)_budAdoptedBy">
+                                <option value="arsmote">Årsmötet</option>
+                                <option value="styrelse">Styrelsen</option>
+                            </select>
+                        </label>
+                        <input type="text" id="@(uid)_budNote" class="wide-in"
+                               style="max-width:18rem" placeholder="T.ex. Årsmötet 14 mars">
+                        <button type="button" class="ek-btn" id="@(uid)_budAdopt">Anta budgeten</button>
+                    </div>
                 </div>
             </section>
 
@@ -722,6 +919,7 @@
         });
         root.querySelectorAll('[data-pane]').forEach(function (s) { s.hidden = s.dataset.pane !== name; });
         window.scrollTo(0, 0);
+        if (name === 'rapport') loadReport();
     }
     root.querySelectorAll('[data-view]').forEach(function (a) {
         a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
@@ -1172,6 +1370,10 @@
                     show(el('error'), true); return;
                 }
                 render(d.status);
+
+                // Översiktens kort 3 läser SAMMA svar som Rapport-ytan. Kortet syns på första
+                // skärmen, så det måste fyllas här och inte först när någon öppnar Rapport.
+                loadReport();
             })
             .catch(function () {
                 show(el('loading'), false);
@@ -1269,6 +1471,297 @@
                 btn.disabled = false; err.textContent = e.message; err.classList.remove('d-none');
             });
     });
+
+    // ══ RAPPORT: utfall mot budget ═══════════════════════════════════════════════════════
+    //
+    // ⚠️ Laeses om vid VARJE besok i panelen, med flit. Datat andras fran Bokfor-ytan bredvid,
+    //    och fragan ar en enda GROUP BY over arets verifikationsrader — alltsa billig. Det ar en
+    //    annan sak an tavlingarnas resultatlista, dar en omrakning kostade 8-16 s och darfor
+    //    laddas en gang per sidladdning.
+    var repFrom = null, repTo = null, budAccounts = [], budDraftId = 0;
+
+    function toneClass(t) { return t === 'ok' ? 'fine' : (t === 'attn' ? 'miss' : ''); }
+
+    // "Antagen av årsmötet 14 mars 2026". Faller tillbaka på ett ensamt "Antagen" hellre än på
+    // en halv mening — en rad som slutar mitt i läses som ett fel i sidan.
+    function adoptedSentence(rep) {
+        var who = (rep.adoptedBodyLabel || '').toLowerCase();
+        var dat = rep.adoptedDate ? longDate(rep.adoptedDate) : '';
+        if (!who && !dat) return 'Antagen';
+        return 'Antagen av ' + (who || 'föreningen') + (dat ? ' ' + dat : '');
+    }
+
+    function longDate(iso) {
+        var m = String(iso).slice(0, 10).split('-');
+        if (m.length !== 3) return '';
+        return parseInt(m[2], 10) + ' ' + (FULLMONTH[parseInt(m[1], 10) - 1] || m[1]) + ' ' + m[0];
+    }
+
+    function signed(n) {
+        if (!n) return '0 kr';
+        return (n > 0 ? '+' : '−') + Math.abs(n).toLocaleString('sv-SE', { maximumFractionDigits: 0 }) + ' kr';
+    }
+
+    function pct(p) {
+        if (p === null || p === undefined) return '—';
+        return (p > 0 ? '+' : (p < 0 ? '−' : '')) + Math.abs(p) + ' %';
+    }
+
+    function repRow(r) {
+        var tc = toneClass(r.tone);
+        var bar = r.budget > 0
+            ? '<div class="rep-bar ' + (r.tone === 'ok' ? 'ok' : (r.tone === 'attn' ? 'attn' : ''))
+              + '"><i style="width:' + r.barPercent + '%"></i></div>'
+            : '';
+
+        return '<tr>'
+             + '<td>' + r.accountNumber + ' ' + esc(r.accountName)
+             + (r.unbudgeted ? ' <span class="muted">(obudgeterat)</span>' : '') + '</td>'
+             + '<td class="barcell">' + bar + '</td>'
+             + '<td class="n">' + (r.budget > 0 ? kr(r.budget) : '—') + '</td>'
+             + '<td class="n"><strong>' + kr(r.actual) + '</strong></td>'
+             + '<td class="n ' + tc + '">' + (r.budget > 0 ? signed(r.diff) : '—') + '</td>'
+             + '<td class="n ' + tc + '">' + (r.budget > 0 ? pct(r.diffPercent) : '—') + '</td>'
+             + '</tr>';
+    }
+
+    function renderReport(d) {
+        var rep = d.report || {};
+        var hasBudget = !!rep.hasBudget;
+
+        el('repPeriod').textContent = hasBudget
+            ? d.periodLabel
+            : 'Kassörens vanligaste leverans — oftare än bokslutet.';
+
+        show(el('repActions'), hasBudget);
+        show(el('repCard'), hasBudget);
+        show(el('repFooter'), hasBudget);
+        show(el('repEmpty'), !hasBudget);
+
+        // ⚠️ Det tomma laget maste skilja "ingen budget alls" fran "ett utkast ligger och
+        //    vantar". Det andra ar nagon som borjat och inte blivit klar, och da ar radet ett
+        //    annat.
+        if (!hasBudget) {
+            el('repEmptyH').textContent = rep.hasDraft
+                ? 'Budgeten är påbörjad men inte antagen'
+                : 'Ingen budget är antagen ännu';
+            el('repEmptyP').textContent = rep.hasDraft
+                ? 'Ett utkast ligger och väntar. Uppföljningen visas när budgeten är antagen — '
+                  + 'ett förslag ingen beslutat om är inget att mäta mot.'
+                : 'Uppföljningen jämför årets utfall med det styrelsen eller årsmötet beslutade. '
+                  + 'Utan ett beslut finns inget att jämföra med.';
+            el('repStart').textContent = rep.hasDraft ? 'Fortsätt med budgeten' : 'Lägg in budgeten';
+            renderYearCard(null);
+            return;
+        }
+
+        var html = '';
+        if ((rep.income || []).length) {
+            html += '<tr class="grp"><td colspan="6">Intäkter</td></tr>'
+                  + rep.income.map(repRow).join('');
+        }
+        if ((rep.costs || []).length) {
+            html += '<tr class="grp"><td colspan="6">Kostnader</td></tr>'
+                  + rep.costs.map(repRow).join('');
+        }
+
+        html += '<tr class="sum"><td>Resultat</td><td></td>'
+              + '<td class="n">' + kr(rep.budgetResult) + '</td>'
+              + '<td class="n">' + kr(rep.actualResult) + '</td>'
+              + '<td class="n ' + toneClass(d.resultTone) + '">' + signed(rep.resultDiff) + '</td>'
+              + '<td></td></tr>';
+
+        el('repBody').innerHTML = html;
+
+        // ⚠️ Meningen byggs av DELARNA (vem + datum), aldrig av adoptedLabel — den kan vara
+        //    kassörens egen fritext, och "Den antogs Årsmötet 14 mars" är ingen mening.
+        var rev = rep.revision > 1 ? (' · version ' + rep.revision) : '';
+        var decided = adoptedSentence(rep);
+        el('repAdopted').textContent = decided + rev
+            + (rep.adoptedNote ? ' · ' + rep.adoptedNote : '')
+            + '. Budgeten gäller hela året och räknas aldrig om till en del av det.';
+        el('repDecision').textContent = decided + '.';
+
+        renderYearCard(rep);
+    }
+
+    // Översiktens kort 3. ⚠️ Samma svar som rapporten — kortet räknar aldrig själv, då kan de
+    //    två säga olika saker om samma år.
+    function renderYearCard(rep) {
+        var has = !!(rep && rep.hasBudget);
+        show(el('yearBars'), has);
+        show(el('yearNoBudget'), !has);
+        if (!has) return;
+
+        var sum = function (rows, f) { return (rows || []).reduce(function (a, r) { return a + f(r); }, 0); };
+        var inB = sum(rep.income, function (r) { return r.budget; });
+        var inA = sum(rep.income, function (r) { return r.actual; });
+        var koB = sum(rep.costs, function (r) { return r.budget; });
+        var koA = sum(rep.costs, function (r) { return r.actual; });
+        var w = function (a, b) { return b > 0 ? Math.min(100, Math.round(a / b * 100)) : 0; };
+
+        el('yrIncome').textContent = kr(inA) + ' av ' + kr(inB);
+        el('yrCost').textContent = kr(koA) + ' av ' + kr(koB);
+        el('yrIncomeBar').style.width = w(inA, inB) + '%';
+        el('yrCostBar').style.width = w(koA, koB) + '%';
+        el('yrNote').textContent = adoptedSentence(rep) + '.';
+    }
+
+    function loadReport() {
+        var q = '?issuerType=' + issuerType + '&issuerId=' + issuerId
+              + (repFrom ? '&from=' + repFrom : '') + (repTo ? '&to=' + repTo : '');
+
+        return fetch('/umbraco/surface/EkonomiAdmin/GetBudgetReport' + q, { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) throw new Error(d.message || 'Rapporten gick inte att läsa.');
+
+                // Inget räkenskapsår = ingenting att följa upp. Ett eget läge, inte ett fel.
+                if (d.hasFiscalYear === false) {
+                    show(el('repActions'), false);
+                    show(el('repCard'), false);
+                    show(el('repFooter'), false);
+                    show(el('repEmpty'), true);
+                    el('repEmptyH').textContent = 'Räkenskapsåret saknas';
+                    el('repEmptyP').textContent = d.message || '';
+                    show(el('repStart'), false);
+                    return;
+                }
+
+                el('repFrom').value = d.report.periodStart ? d.report.periodStart.substring(0, 10) : '';
+                el('repTo').value = d.report.periodEnd ? d.report.periodEnd.substring(0, 10) : '';
+                el('repError').classList.add('d-none');
+                renderReport(d);
+            })
+            .catch(function (e) {
+                el('repError').textContent = e.message;
+                el('repError').classList.remove('d-none');
+            });
+    }
+
+    el('repPeriodBtn').addEventListener('click', function () {
+        el('repPeriodBox').classList.toggle('d-none');
+    });
+    el('repApply').addEventListener('click', function () {
+        repFrom = el('repFrom').value || null;
+        repTo = el('repTo').value || null;
+        loadReport();
+    });
+    el('repReset').addEventListener('click', function () {
+        repFrom = null; repTo = null; loadReport();
+    });
+    el('repPrint').addEventListener('click', function () { window.print(); });
+
+    // ── Budgetinmatningen ────────────────────────────────────────────────────────────────
+    function budRow(a) {
+        return '<tr>'
+             + '<td>' + a.number + ' ' + esc(a.name) + '</td>'
+             + '<td class="n muted">' + (a.previousActual ? kr(a.previousActual) : '—') + '</td>'
+             + '<td class="n"><input type="number" step="1" min="0" class="rep-amt" '
+             + 'data-acc="' + a.number + '" value="' + (a.amount || '') + '"></td>'
+             + '</tr>';
+    }
+
+    function openBudget() {
+        show(el('budCard'), true);
+        el('budError').classList.add('d-none');
+        el('budOk').classList.add('d-none');
+
+        fetch('/umbraco/surface/EkonomiAdmin/GetBudgetEditor?issuerType=' + issuerType
+              + '&issuerId=' + issuerId, { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) throw new Error(d.message || 'Budgetunderlaget gick inte att läsa.');
+
+                budDraftId = d.draftId;
+                budAccounts = d.accounts || [];
+
+                el('budTitle').textContent = 'Budget ' + d.fiscalYear;
+                el('budMeta').textContent = d.revision > 1 ? ('version ' + d.revision) : '';
+                el('budPrevH').textContent = d.previousYear ? ('Utfall ' + d.previousYear) : '';
+
+                var inc = budAccounts.filter(function (a) { return a.isIncome; });
+                var cos = budAccounts.filter(function (a) { return !a.isIncome; });
+
+                el('budBody').innerHTML =
+                    (inc.length ? '<tr class="grp"><td colspan="3">Intäkter</td></tr>' + inc.map(budRow).join('') : '')
+                  + (cos.length ? '<tr class="grp"><td colspan="3">Kostnader</td></tr>' + cos.map(budRow).join('') : '');
+            })
+            .catch(function (e) {
+                el('budError').textContent = e.message;
+                el('budError').classList.remove('d-none');
+            });
+    }
+
+    function collectBudgetLines() {
+        return Array.prototype.map.call(
+            el('budBody').querySelectorAll('input[data-acc]'),
+            function (i) {
+                var num = parseInt(i.dataset.acc, 10);
+                var a = budAccounts.find(function (x) { return x.number === num; });
+                return { accountNumber: num, accountName: a ? a.name : '', amount: parseFloat(i.value || '0') || 0 };
+            });
+    }
+
+    el('repStart').addEventListener('click', openBudget);
+    el('repRevise').addEventListener('click', openBudget);
+    el('budCancel').addEventListener('click', function () { show(el('budCard'), false); });
+
+    el('budSave').addEventListener('click', function () {
+        var btn = el('budSave');
+        btn.disabled = true;
+        el('budError').classList.add('d-none');
+        el('budOk').classList.add('d-none');
+
+        postJson('/umbraco/surface/EkonomiAdmin/SaveBudgetDraft', {
+            issuerType: issuerType, issuerId: issuerId, budgetId: budDraftId, lines: collectBudgetLines()
+        })
+            .then(function (d) {
+                btn.disabled = false;
+                if (!d.success) throw new Error(d.message);
+                el('budOk').textContent = d.message;
+                el('budOk').classList.remove('d-none');
+            })
+            .catch(function (e) {
+                btn.disabled = false;
+                el('budError').textContent = e.message;
+                el('budError').classList.remove('d-none');
+            });
+    });
+
+    el('budAdopt').addEventListener('click', function () {
+        var btn = el('budAdopt');
+        btn.disabled = true;
+        el('budError').classList.add('d-none');
+        el('budOk').classList.add('d-none');
+
+        // ⚠️ Sparar FÖRST. Annars antas det som ligger i databasen, inte det som står på
+        //    skärmen — och skillnaden syns aldrig, eftersom raden sedan är låst.
+        postJson('/umbraco/surface/EkonomiAdmin/SaveBudgetDraft', {
+            issuerType: issuerType, issuerId: issuerId, budgetId: budDraftId, lines: collectBudgetLines()
+        })
+            .then(function (d) {
+                if (!d.success) throw new Error(d.message);
+                return postJson('/umbraco/surface/EkonomiAdmin/AdoptBudget', {
+                    issuerType: issuerType, issuerId: issuerId, budgetId: budDraftId,
+                    adoptedDate: el('budDate').value,
+                    adoptedBody: el('budAdoptedBy').value,
+                    note: el('budNote').value
+                });
+            })
+            .then(function (d) {
+                btn.disabled = false;
+                if (!d.success) throw new Error(d.message);
+                show(el('budCard'), false);
+                loadReport();
+            })
+            .catch(function (e) {
+                btn.disabled = false;
+                el('budError').textContent = e.message;
+                el('budError').classList.remove('d-none');
+            });
+    });
+
 
     load();
 })();
