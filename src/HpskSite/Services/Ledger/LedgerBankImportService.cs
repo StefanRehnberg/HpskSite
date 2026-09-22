@@ -448,6 +448,47 @@ namespace HpskSite.Services.Ledger
             public decimal Credit { get; set; }
         }
 
+        /// <summary>
+        /// Kort läge för Översiktens andra panel: har någon stämt av, och stämde det?
+        ///
+        /// <para><b>⚠️ EGEN, LÄTT FRÅGA — inte <see cref="Reconciliation"/>.</b> Den läser hela
+        /// kontots bokföringsrader för att kunna summera saldot, och Översikt är den panel som
+        /// laddas först och oftast. Panelen behöver bara veta om det finns ett utdrag och om
+        /// något är kvar.</para>
+        ///
+        /// <para>⚠️ Returnerar null när inget utdrag finns. Panelen får då säga <i>"inte avstämt
+        /// än"</i> — och den får ALDRIG säga "0 kr, allt stämmer" på en avstämning som inte
+        /// gjorts. Se panelens egen regel: noll fel ska visas lika stort som fel.</para>
+        /// </summary>
+        public (DateTime? PeriodTo, int Unmatched, int Rows)? Summary(int issuerType, int issuerId)
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                var ldb = new LedgerDb(db, issuerId);
+
+                var latest = ldb.Fetch<LedgerBankImport>(
+                    @"SELECT TOP 1 * FROM dbo.LedgerBankImport
+                       WHERE IssuerType = @0 AND IssuerId = @1
+                       ORDER BY PeriodTo DESC, ImportedUtc DESC",
+                    issuerType, issuerId).FirstOrDefault();
+
+                if (latest == null) return null;
+
+                var unmatched = ldb.Fetch<int>(
+                    @"SELECT COUNT(*) FROM dbo.LedgerBankRow
+                       WHERE ImportId = @0 AND MatchedLineId IS NULL", latest.Id).FirstOrDefault();
+
+                return (latest.PeriodTo, unmatched, latest.RowCount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte läsa avstämningsläget för {Typ}/{Id}.",
+                    issuerType, issuerId);
+                return null;
+            }
+        }
+
         public List<LedgerBankImport> List(int issuerType, int issuerId)
         {
             try

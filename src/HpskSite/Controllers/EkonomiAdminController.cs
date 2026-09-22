@@ -44,6 +44,7 @@ namespace HpskSite.Controllers
         private readonly LedgerSandboxService _sandbox;
         private readonly LedgerAccessService _access;
         private readonly LedgerBankImportService _bankService;
+        private readonly LedgerClosingService _closingService;
 
         /// <summary>
         /// Taket för ett uppladdat kontoutdrag.
@@ -75,6 +76,7 @@ namespace HpskSite.Controllers
             LedgerSandboxService sandbox,
             LedgerAccessService access,
             LedgerBankImportService bankService,
+            LedgerClosingService closingService,
             IMemberManager memberManager,
             IMemberService memberService,
             ILogger<EkonomiAdminController> logger)
@@ -88,6 +90,7 @@ namespace HpskSite.Controllers
             _budgetService = budgetService;
             _chartService = chartService;
             _bankService = bankService;
+            _closingService = closingService;
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
             _sandbox = sandbox;
@@ -246,7 +249,24 @@ namespace HpskSite.Controllers
 
             try
             {
-                return Json(new { success = true, overview = _overviewService.Build(issuerType, issuerId) });
+                var overview = _overviewService.Build(issuerType, issuerId);
+
+                // ⚠️ Avstamningslaget for panel 2. EGEN latt fraga - inte hela avstamningen,
+                //    som laser kontots alla bokforingsrader. Null = ingen har stamt av, och da
+                //    star panelen kvar i sitt varnande lage.
+                var rs = _bankService.Summary(issuerType, issuerId);
+
+                return Json(new
+                {
+                    success = true,
+                    overview,
+                    reconciliation = rs is null ? null : new
+                    {
+                        periodTo = rs.Value.PeriodTo,
+                        unmatched = rs.Value.Unmatched,
+                        rows = rs.Value.Rows
+                    }
+                });
             }
             catch (Exception ex)
             {
@@ -255,6 +275,91 @@ namespace HpskSite.Controllers
 
                 return Json(new { success = false, message = "Översikten gick inte att läsa just nu." });
             }
+        }
+
+        // ══ BOKSLUTET (P7) ═══════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Bokslutets sju steg och årets resultat- och balansräkning.
+        ///
+        /// <para>⚠️ Stegen är HÄRLEDDA ur verkligt tillstånd, aldrig kryssrutor. En kryssruta
+        /// säger att kassören TROR att steget är gjort; det här säger om det ÄR gjort — och det
+        /// är hela poängen med en checklista i ett bokslut.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetClosing(int issuerType, int issuerId, int? fiscalYearId = null)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            try
+            {
+                var status = _setupService.GetStatus(issuerType, issuerId);
+
+                // ⚠️ Bokslutet hör till den som bokför HOS OSS. En förening som bokför i sitt
+                //    eget program stänger sitt år där, och en halvtom bokslutsyta här vore det
+                //    snabbaste sättet till slutsatsen "det här är inte färdigt".
+                if (!LedgerIssuerShape.KeepsBooks(status.Shape))
+                    return Json(new { success = true, applicable = false });
+
+                var years = status.FiscalYears ?? new List<LedgerFiscalYear>();
+                var yearId = fiscalYearId ?? years.OrderByDescending(y => y.Year)
+                                                  .Select(y => y.Id).FirstOrDefault();
+
+                if (yearId <= 0)
+                    return Json(new { success = true, applicable = true, hasYear = false });
+
+                var checklist = _closingService.Checklist(issuerType, issuerId, yearId);
+                var statements = _closingService.Statements(issuerType, issuerId, yearId);
+
+                return Json(new
+                {
+                    success = true,
+                    applicable = true,
+                    hasYear = true,
+                    years = years.OrderByDescending(y => y.Year)
+                                 .Select(y => new { id = y.Id, year = y.Year, status = y.Status }),
+                    checklist,
+                    statements
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Bokslutet gick inte att bygga för {Typ}/{Id}.",
+                    issuerType, issuerId);
+                return Json(new { success = false, message = "Bokslutet gick inte att läsa." });
+            }
+        }
+
+        /// <summary>
+        /// Flyttar året mellan öppet, bokslutsarbete och fastställt.
+        ///
+        /// <para><b>⚠️⚠️ FASTSTÄLLANDE ÄR ENKELRIKTAT</b> — ett fastställt år tar inte emot
+        /// skrivningar, och spärren ligger i databastriggern. Tjänsten vägrar dessutom fastställa
+        /// ett år vars balansräkning inte går ihop: att frysa det låser in felet.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetFiscalYearStatus([FromBody] FiscalYearStatusRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Ogiltig begäran." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (done, message) = _closingService.SetStatus(
+                request.IssuerType, request.IssuerId, request.FiscalYearId,
+                request.Status ?? "", await CurrentMemberIdAsync());
+
+            return Json(new { success = done, message });
+        }
+
+        public class FiscalYearStatusRequest
+        {
+            public int IssuerType { get; set; }
+            public int IssuerId { get; set; }
+            public int FiscalYearId { get; set; }
+            public string? Status { get; set; }
         }
 
         // ══ BANKAVSTÄMNINGEN (P11) ═══════════════════════════════════════════════════════════

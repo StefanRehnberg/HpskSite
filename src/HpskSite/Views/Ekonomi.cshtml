@@ -443,14 +443,21 @@
 
                     <div class="ek-card">
                         <div class="ek-cardh"><h2>2 · Stämmer det?</h2></div>
-                        @* ⚠️ Avstämningen (P11) finns inte. Att visa "0 kr — allt stämmer" här vore
-                           en LÖGN om att vi kontrollerat mot banken. Säg vad som gäller i stället. *@
-                        <div class="ek-bigbox ek-warn">
-                            <div class="lead">Inte avstämt mot banken än</div>
-                            <div class="note">
-                                Avstämningen läser in ert kontoutdrag och matchar rad för rad. Den byggs
-                                härnäst. Tills dess vet vi vad som bokförts — inte att det är komplett.
+                        @* ⚠️⚠️ PANELEN VISAR VERKLIGT LAGE och far ALDRIG saga "0 kr - allt
+                           stammer" pa en avstamning som inte gjorts. Det vore en logn om att vi
+                           kontrollerat mot banken.
+
+                           ⚠️ Texten pastod "den byggs harnast" anda efter att P11 byggts - en
+                           hanvisning som blev falsk i samma stund funktionen blev klar. Darfor
+                           renderas den har rutan nu ur DATA, inte som fast text. *@
+                        <div class="ek-bigbox ek-warn" id="@(uid)_recPanel">
+                            <div class="lead" id="@(uid)_recPanelLead">Inte avstämt mot banken än</div>
+                            <div class="note" id="@(uid)_recPanelNote">
+                                Avstämningen läser in ert kontoutdrag och matchar rad för rad.
+                                Tills någon gjort det vet vi vad som bokförts — inte att det är komplett.
                             </div>
+                            <button type="button" class="btn btn-sm btn-link" style="padding:0"
+                                    data-view="avstamning" id="@(uid)_recPanelGo">Gå till Avstämning</button>
                         </div>
                         <div class="why">
                             Noll fel ska visas lika stort som fel. Därför står det inte "0 kr" här
@@ -1234,16 +1241,78 @@
                 }
             </section>
 
+            @*
+                BOKSLUTET (P7).
+
+                ⚠️ STEGEN AR HARLEDDA ur verkligt tillstand, aldrig kryssrutor. En kryssruta sager
+                att kassoren TROR att steget ar gjort; harlett sager om det AR gjort - och det ar
+                hela poangen med en checklista i ett bokslut. Den ska kunna saga emot.
+
+                ⚠️ Ett steg vi inte kan MATA sags vara omatt, inte klart. Ett omatt steg som visas
+                som klart ar varre an inget steg alls.
+            *@
             <section data-pane="bokslut" hidden>
-                <div class="head"><div><h1>Stäng räkenskapsåret</h1>
-                    <div class="sub">Görs i januari, ofta av någon som gör det första gången.</div></div></div>
-                <div class="soonbox">
-                    <h2>Byggs härnäst (P7)</h2>
-                    <p class="muted">Sju steg: alla poster bokförda, kontoutdraget avstämt, underlag på
-                    plats, obetalda avgifter som kundfordran, avskrivningar, resultat- och balansräkning,
-                    och årsmötets fastställande — då låses året.
-                    <strong>Ett fastställt år tar inte emot skrivningar</strong>; ett fel som hittas
-                    efteråt rättas som en ny post i det öppna året.</p>
+                <div class="head">
+                    <div><h1>Stäng räkenskapsåret</h1>
+                        <div class="sub">Görs i januari, ofta av någon som gör det första gången.</div></div>
+                    <div class="headactions" id="@(uid)_closeActions"></div>
+                </div>
+
+                <div class="ek-alert ek-bad d-none" id="@(uid)_closeError"></div>
+                <div class="ek-alert ek-ok d-none" id="@(uid)_closeOk"></div>
+
+                @* En forening som bokfor nagon annanstans stanger sitt ar dar. *@
+                <div class="soonbox d-none" id="@(uid)_closeNotApplicable">
+                    <h2>Bokslutet görs i ert eget program</h2>
+                    <p class="muted">
+                        Ni har valt att bokföringen ligger kvar hos er, så det är där året stängs.
+                        Den här sidan håller reda på avgifterna — vad som borde ha kommit in och
+                        vad som faktiskt gjorde det.
+                    </p>
+                </div>
+
+                <div class="soonbox d-none" id="@(uid)_closeNoYear">
+                    <h2>Inget räkenskapsår upplagt</h2>
+                    <p class="muted">Lägg upp året under Inställningar först.</p>
+                </div>
+
+                <div class="d-none" id="@(uid)_closeWrap">
+                    <div class="ek-card wide">
+                        <div class="ek-cardh"><h2>Sju steg</h2>
+                            <span class="meta" id="@(uid)_closeMeta"></span></div>
+                        <div class="rows" id="@(uid)_closeSteps"></div>
+                    </div>
+
+                    <div class="ek-grid" style="margin-top:1rem">
+                        <div class="ek-card">
+                            <div class="ek-cardh"><h2>Resultaträkning</h2>
+                                <span class="meta" id="@(uid)_resPeriod"></span></div>
+                            <table class="t">
+                                <tbody id="@(uid)_resBody"></tbody>
+                            </table>
+                        </div>
+
+                        <div class="ek-card">
+                            <div class="ek-cardh"><h2>Balansräkning</h2>
+                                <span class="meta" id="@(uid)_balDate"></span></div>
+                            <table class="t">
+                                <tbody id="@(uid)_balBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    @* ⚠️ Fastställandet ligger SIST och efter handlingarna. Det ar en enkelriktad
+                       handling, och den som trycker ska ha resultat- och balansrakningen pa
+                       skarmen nar hen gor det. *@
+                    <div class="ek-card wide" style="margin-top:1rem" id="@(uid)_establishCard">
+                        <div class="ek-cardh"><h2>Fastställ året</h2></div>
+                        <p class="muted" style="margin-top:0">
+                            <strong>Efter det här tar året inte emot bokföring.</strong>
+                            Ett fel som hittas senare rättas som en ny verifikation i ett öppet år —
+                            ingenting skrivs om i efterhand.
+                        </p>
+                        <div class="amount-row" id="@(uid)_establishRow"></div>
+                    </div>
                 </div>
             </section>
 
@@ -1340,6 +1409,11 @@
         //    bokföringsrader för att kunna räkna saldot, alltså en tung fråga — och panelen
         //    ändrar sig inte av sig själv. Varje skrivning hämtar om den själv.
         if (name === 'avstamning' && !bankLoaded) { bankLoaded = true; loadBank(); }
+
+        // ⚠️ Samma skal som avstamningen: bokslutet laser hela arets bokforingsrader for att
+        //    kunna summera resultat och balans, alltsa en tung fraga som inte andrar sig av sig
+        //    sjalv. Varje skrivning hamtar om den sjalv.
+        if (name === 'bokslut' && !closeLoaded) { closeLoaded = true; loadClosing(); }
     }
     root.querySelectorAll('[data-view]').forEach(function (a) {
         a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
@@ -1412,6 +1486,32 @@
                  + '<span class="num">' + kr(r.amount) + '</span>' + kvitto + '</div>';
         }, 'Visa alla {n} betalningar');
 
+        // ⚠️ Panelen far bara saga att det stammer nar nagon FAKTISKT stamt av. Saknas utdrag
+        //    star den kvar i sitt varnande lage - noll fel ska visas lika stort som fel.
+        var rs = o.reconciliation;
+        var panel = el('recPanel');
+        if (panel) {
+            if (!rs) {
+                panel.classList.add('ek-warn');
+                el('recPanelLead').textContent = 'Inte avstämt mot banken än';
+                el('recPanelNote').textContent =
+                    'Avstämningen läser in ert kontoutdrag och matchar rad för rad. Tills någon '
+                    + 'gjort det vet vi vad som bokförts — inte att det är komplett.';
+            } else if (rs.unmatched === 0) {
+                panel.classList.remove('ek-warn');
+                el('recPanelLead').textContent = 'Avstämt mot banken';
+                el('recPanelNote').textContent =
+                    'Alla ' + rs.rows + ' rader i utdraget t.o.m. ' + shortDate(rs.periodTo)
+                    + ' har en motpart i bokföringen.';
+            } else {
+                panel.classList.add('ek-warn');
+                el('recPanelLead').textContent = rs.unmatched + ' rader utan motpart';
+                el('recPanelNote').textContent =
+                    'Av ' + rs.rows + ' rader i utdraget t.o.m. ' + shortDate(rs.periodTo)
+                    + ' saknar ' + rs.unmatched + ' en bokföringsrad.';
+            }
+        }
+
         var per = o.perSource || [];
         show(el('perEmpty'), per.length === 0);
         todo.missingSources = per.filter(function (s) { return s.missingCount > 0; }).length;
@@ -1442,6 +1542,158 @@
         }
 
         renderTodo();
+    }
+
+    // ══ BOKSLUTET (P7) ═══════════════════════════════════════════════════════════════════
+    var closeLoaded = false, closeYearId = 0;
+
+    function stepMark(state) {
+        // ⚠️ ORD, inte bara farg (WCAG 1.4.1). Och "omatt" ar ett EGET lage - att visa det som
+        //    klart vore falsk trygghet i precis den handling som inte tal sadan.
+        if (state === 1) return '<span class="st-paid">Klart</span>';
+        if (state === 2) return '<span class="st-claim">Omätt</span>';
+        return '<span class="st-wait">Kvar</span>';
+    }
+
+    async function loadClosing(yearId) {
+        var url = '/umbraco/surface/EkonomiAdmin/GetClosing?issuerType=' + issuerType
+                + '&issuerId=' + issuerId + (yearId ? '&fiscalYearId=' + yearId : '');
+
+        var d = await fetch(url, { cache: 'no-store' }).then(function (r) { return r.json(); });
+        if (!d.success) return;
+
+        show(el('closeNotApplicable'), d.applicable === false);
+        show(el('closeNoYear'), d.applicable !== false && d.hasYear === false);
+        show(el('closeWrap'), d.applicable !== false && d.hasYear === true);
+        if (d.applicable === false || d.hasYear === false) { el('closeActions').innerHTML = ''; return; }
+
+        closeYearId = d.checklist.fiscalYearId;
+
+        // Arsvaljaren.
+        el('closeActions').innerHTML =
+            '<select class="form-select" id="' + uid + '_closeYear" style="width:14rem">'
+            + d.years.map(function (y) {
+                return '<option value="' + y.id + '"' + (y.id === closeYearId ? ' selected' : '') + '>'
+                     + y.year + '</option>';
+            }).join('') + '</select>';
+
+        var pick = el('closeYear');
+        if (pick) pick.addEventListener('change', function () { loadClosing(pick.value); });
+
+        renderSteps(d.checklist);
+        renderStatements(d.statements);
+        renderEstablish(d.checklist, d.statements);
+    }
+
+    function renderSteps(c) {
+        var done = c.steps.filter(function (s) { return s.state === 1; }).length;
+        el('closeMeta').textContent = done + ' av ' + c.steps.length + ' klara';
+
+        el('closeSteps').innerHTML = c.steps.map(function (s, i) {
+            var link = (s.goTo && s.state === 0)
+                ? ' <button type="button" class="btn btn-sm btn-link" data-goto-view="'
+                  + esc(s.goTo) + '">Gå dit</button>' : '';
+
+            return '<div><span class="num muted">' + (i + 1) + '</span>'
+                 + '<span class="grow"><strong>' + esc(s.title) + '</strong>'
+                 + (s.detail ? '<div class="muted">' + esc(s.detail) + link + '</div>' : '')
+                 + '</span><span class="num">' + stepMark(s.state) + '</span></div>';
+        }).join('');
+
+        el('closeSteps').querySelectorAll('button[data-goto-view]').forEach(function (btn) {
+            btn.addEventListener('click', function () { showView(btn.dataset.gotoView); });
+        });
+    }
+
+    function stmtRows(rows, total, totalLabel) {
+        var body = rows.map(function (r) {
+            return '<tr><td class="muted" style="width:4rem">' + r.accountNumber + '</td>'
+                 + '<td>' + esc(r.accountName) + '</td>'
+                 + '<td class="n">' + kr(r.amount) + '</td></tr>';
+        }).join('');
+
+        return body + '<tr class="sum"><td></td><td>' + esc(totalLabel) + '</td>'
+             + '<td class="n">' + kr(total) + '</td></tr>';
+    }
+
+    function renderStatements(s) {
+        el('resPeriod').textContent = shortDate(s.from) + '–' + shortDate(s.to);
+        el('balDate').textContent = 'per ' + shortDate(s.to);
+
+        el('resBody').innerHTML =
+              '<tr class="grp"><td colspan="3">Intäkter</td></tr>'
+            + stmtRows(s.revenue, s.revenueTotal, 'Summa intäkter')
+            + '<tr class="grp"><td colspan="3">Kostnader</td></tr>'
+            + stmtRows(s.costs, s.costTotal, 'Summa kostnader')
+            + '<tr class="sum"><td></td><td><strong>Årets resultat</strong></td>'
+            + '<td class="n"><strong>' + kr(s.result) + '</strong></td></tr>';
+
+        // ⚠️⚠️ ARETS RESULTAT STAR PA SKULDSIDAN. Det ar inte bokfort mot eget kapital forran
+        //    aret stangs, sa utan raden ar differensen exakt arets resultat - varje ar, for varje
+        //    forening - och det laeses som ett fel i bokforingen i stallet for i jamforelsen.
+        var diff = s.balanceDifference === 0 ? '' :
+              '<tr class="gap"><td></td><td><strong>Differens</strong></td>'
+            + '<td class="n miss">' + kr(s.balanceDifference) + '</td></tr>';
+
+        el('balBody').innerHTML =
+              '<tr class="grp"><td colspan="3">Tillgångar</td></tr>'
+            + stmtRows(s.assets, s.assetTotal, 'Summa tillgångar')
+            + '<tr class="grp"><td colspan="3">Eget kapital och skulder</td></tr>'
+            + stmtRows(s.equityAndLiabilities, s.equityAndLiabilityTotal, 'Summa')
+            + '<tr><td></td><td>Årets resultat</td><td class="n">' + kr(s.result) + '</td></tr>'
+            + '<tr class="sum"><td></td><td><strong>Summa eget kapital och skulder</strong></td>'
+            + '<td class="n"><strong>' + kr(s.equityAndLiabilityTotal + s.result) + '</strong></td></tr>'
+            + diff;
+    }
+
+    function renderEstablish(c, s) {
+        var row = el('establishRow');
+
+        if (c.status === 'established') {
+            row.innerHTML = '<div class="ek-alert ek-ok" style="margin:0">'
+                + 'Året är fastställt och tar inte emot bokföring.</div>';
+            return;
+        }
+
+        if (!canWrite) { row.innerHTML = '<span class="muted">Endast kassören kan fastställa året.</span>'; return; }
+
+        // ⚠️ Knappen ar AV tills balansrakningen gar ihop OCH stegen ar klara. Att fastalla ett
+        //    ar som inte balanserar laser in felet - servern vagrar ocksa, men en knapp som gar
+        //    att trycka och alltid nekas ar samre an en som sager varfor.
+        var blocked = !s.balances || !c.readyToEstablish;
+
+        row.innerHTML =
+              '<button type="button" class="btn btn-primary" id="' + uid + '_establishBtn"'
+            + (blocked ? ' disabled' : '') + '>Fastställ ' + c.year + '</button>'
+            + (blocked ? '<span class="muted">'
+                 + (!s.balances ? 'Balansräkningen går inte ihop.'
+                                : 'Det finns steg kvar i listan ovan.') + '</span>' : '');
+
+        var btn = el('establishBtn');
+        if (btn) btn.addEventListener('click', establishYear);
+    }
+
+    async function establishYear() {
+        if (!window.confirm('Fastställ året? Efter det tar det inte emot bokföring. '
+                          + 'Ett fel som hittas senare rättas som en ny verifikation i ett öppet år.'))
+            return;
+
+        try {
+            var d = await postJson('/umbraco/surface/EkonomiAdmin/SetFiscalYearStatus', {
+                issuerType: issuerType, issuerId: issuerId,
+                fiscalYearId: closeYearId, status: 'established'
+            });
+            if (!d.success) throw new Error(d.message || 'Året gick inte att fastställa.');
+
+            show(el('closeError'), false);
+            el('closeOk').textContent = 'Året är fastställt.';
+            show(el('closeOk'), true);
+            await loadClosing(closeYearId);
+        } catch (e) {
+            show(el('closeOk'), false);
+            el('closeError').textContent = e.message;
+            show(el('closeError'), true);
+        }
     }
 
     // ══ BANKAVSTAMNINGEN (P11) ═══════════════════════════════════════════════════════════
