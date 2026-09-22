@@ -509,7 +509,10 @@
                     <div class="ek-card">
                         <div class="ek-cardh">
                             <h2>4 · Vad hände senast?</h2>
-                            <span class="meta">Mottagna betalningar</span>
+                        @* ⚠️ Rubriken sätts av JS: "Bokförda verifikationer" när föreningen
+                           bokför här, annars "Mottagna betalningar". En fast rubrik hade beskrivit
+                           fel lista för den ena av dem. *@
+                            <span class="meta" id="@(uid)_recvMeta">Mottagna betalningar</span>
                         </div>
                         <div class="rows" id="@(uid)_recvBody"></div>
                         <div class="muted d-none" id="@(uid)_recvEmpty">Inga betalningar ännu.</div>
@@ -518,8 +521,11 @@
                 </div>
 
                 <p class="why">
-                    De flesta posterna skriver ingen människa — de faller ut ur anmälningar och avgifter.
-                    Därför är den här sidan inte "skapa verifikation".
+                    @* ⚠️ Texten påstod att "de flesta posterna skriver ingen människa". Det är sant
+                       för en klubb vars ekonomi är tävlingsavgifter, och falskt för den som för
+                       hela sin bokföring här — alltså den vi bygger liggaren för. *@
+                    Anmälningar och avgifter bokförs av sig själva. Resten — hyran, inköpen,
+                    bidragen — lägger kassören in under Bokför.
                 </p>
             </section>
 
@@ -571,7 +577,12 @@
                             <h2>Medlemsavgifter</h2>
                             <span class="meta" id="@(uid)_feesYear"></span>
                         </div>
-                        <div class="ek-grid" style="gap:14px">
+
+                        @* ⚠️ Sandlådan har inga medlemsavgifter att visa, och tystnad om det är
+                           oskiljbart från "alla har betalat" — på årets största intäktspost. *@
+                        <div class="ek-alert ek-warn d-none" id="@(uid)_feesSandbox"></div>
+
+                        <div class="ek-grid" id="@(uid)_feesNumbers" style="gap:14px">
                             <div>
                                 <div class="muted">Har inte kommit in</div>
                                 <div style="font-size:26px;font-weight:700" id="@(uid)_feesUnpaid">—</div>
@@ -635,6 +646,56 @@
                             Den här raden är poängen. Bokföringen ser vad som kom in — den kan aldrig
                             se vad som borde ha kommit in.
                         </p>
+                    </div>
+
+                    @*
+                        FORDRINGSEXPORTEN. Bara for den forening som bokfor NAGON ANNANSTANS.
+
+                        ⚠️⚠️ Formen ar Fredriks (Varbergs PK): vi lamnar 1510 debet mot valt
+                        intaktskonto nar avgiften uppstar, sa klubbens bankkoppling kan boka
+                        1930/1510 nar pengarna kommer. Utan fordringsbenet skapar bankhandelsen
+                        intakten en ANDRA gang - och det var just den dubbelbokforingen som holl
+                        exporten borta fran den bankkopplade klubben.
+                    *@
+                    @* ⚠️ Prefixet är `fordr`, INTE `recv` — översiktens panel 4 äger redan
+                       `recvBody`, och två element med samma id gör det andra dött för
+                       getElementById. Följden var att fordringsraderna skrevs in i panel 4
+                       medan den här tabellen stod tom. *@
+                    <div class="ek-card wide d-none" id="@(uid)_fordrCard">
+                        <div class="ek-cardh">
+                            <h2>Fordringar till ert bokföringsprogram</h2>
+                            <span class="meta" id="@(uid)_fordrMeta"></span>
+                        </div>
+                        <p class="muted" style="margin-top:0">
+                            Filen bokför vad ni har rätt att få in — fordran mot intäkt. När pengarna
+                            sedan syns på kontot bokar ert program bankkontot mot fordran, och
+                            intäkten räknas en gång.
+                        </p>
+
+                        <div class="ek-alert ek-warn d-none" id="@(uid)_fordrMissing"></div>
+
+                        <div class="amount-row">
+                            <label>Från <input type="text" class="form-control ek-date"
+                                   placeholder="åååå-mm-dd" id="@(uid)_fordrFrom"></label>
+                            <label>Till <input type="text" class="form-control ek-date"
+                                   placeholder="åååå-mm-dd" id="@(uid)_fordrTo"></label>
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    id="@(uid)_fordrApply">Visa</button>
+                        </div>
+
+                        <table class="t" style="margin-top:.5rem">
+                            <thead><tr><th style="width:9rem">Fordran</th><th>Avser</th>
+                                <th class="n" style="width:5rem">Antal</th>
+                                <th class="n" style="width:8rem">Belopp</th></tr></thead>
+                            <tbody id="@(uid)_fordrBody"></tbody>
+                        </table>
+
+                        @* ⚠️ Perioden star UTSKRIVEN pa knappen. Samma period importerad tva ganger
+                           dubbelbokfor intakten, och det ar den troligaste felhandlingen har. *@
+                        <div class="amount-row" style="margin-top:1rem">
+                            <a class="btn btn-primary" id="@(uid)_fordrDownload" href="#">Hämta SIE-fil</a>
+                            <span class="muted" id="@(uid)_fordrWarn"></span>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -1332,7 +1393,8 @@
     //    webblasarens sprak — ett <input type="date"> gjorde det INTE och visade dd/mm/yyyy.
     //    'Y-m-d' betyder att faltets .value fortsatter vara ISO, sa varje lasning och varje
     //    payload nedanfor ar oforandrad. Lagg till ett nytt datumfalt HAR, aldrig som type=date.
-    var EK_DATE_FIELDS = ['start', 'end', 'bDate', 'repFrom', 'repTo', 'budDate'];
+    var EK_DATE_FIELDS = ['start', 'end', 'bDate', 'repFrom', 'repTo', 'budDate',
+                          'fordrFrom', 'fordrTo'];
     if (window.flatpickr) {
         EK_DATE_FIELDS.forEach(function (n) {
             var f = el(n);
@@ -1414,6 +1476,8 @@
         //    kunna summera resultat och balans, alltsa en tung fraga som inte andrar sig av sig
         //    sjalv. Varje skrivning hamtar om den sjalv.
         if (name === 'bokslut' && !closeLoaded) { closeLoaded = true; loadClosing(); }
+
+        if (name === 'avgifter' && !recvLoaded) { recvLoaded = true; loadReceivables(); }
     }
     root.querySelectorAll('[data-view]').forEach(function (a) {
         a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
@@ -1475,16 +1539,38 @@
 
         todo.outstandingCount = groups.reduce(function (a, g) { return a + g.count; }, 0);
 
+        // ⚠️⚠️ TVÅ LISTOR, EN PANEL. Bokför föreningen här är VERIFIKATIONERNA svaret på "vad
+        //    hände senast?" — panelen läste bara betalningsrader, och en klubb som bokfört ett
+        //    helt år manuellt fick därför "Inga betalningar ännu" på en full liggare.
+        //    Verifikationer finns = föreningen bokför här; då täcker de även betalningarna,
+        //    eftersom en bekräftad betalning alltid bär en verifikation hos en sådan förening.
+        var journal = o.journal || [];
         var recv = o.received || [];
-        show(el('recvEmpty'), recv.length === 0);
-        capList(el('recvBody'), el('recvMore'), recv, 5, function (r) {
-            var kvitto = r.receiptId
-                ? '<a class="kvitto" href="/betalkvitto/' + r.receiptId + '" target="_blank" rel="noopener">'
-                  + esc(r.receiptNumber) + '</a>' : '<span class="muted">—</span>';
-            return '<div><span class="num muted">' + esc(shortDate(r.date)) + '</span>'
-                 + '<span class="grow">' + esc(r.payerName) + ' · ' + esc(r.what) + '</span>'
-                 + '<span class="num">' + kr(r.amount) + '</span>' + kvitto + '</div>';
-        }, 'Visa alla {n} betalningar');
+        var books = journal.length > 0;
+
+        el('recvMeta').textContent = books ? 'Bokförda verifikationer' : 'Mottagna betalningar';
+        el('recvEmpty').textContent = books ? 'Inget bokfört ännu.' : 'Inga betalningar ännu.';
+        show(el('recvEmpty'), (books ? journal : recv).length === 0);
+
+        if (books) {
+            capList(el('recvBody'), el('recvMore'), journal, 5, function (v) {
+                var vad = v.counterparty
+                    ? esc(v.description) + ' · ' + esc(v.counterparty) : esc(v.description);
+                return '<div><span class="num muted">' + esc(shortDate(v.date)) + '</span>'
+                     + '<span class="grow">' + vad + '</span>'
+                     + '<span class="num">' + kr(v.amount) + '</span>'
+                     + '<span class="kvitto muted">' + esc(v.number) + '</span></div>';
+            }, 'Visa alla {n} verifikationer');
+        } else {
+            capList(el('recvBody'), el('recvMore'), recv, 5, function (r) {
+                var kvitto = r.receiptId
+                    ? '<a class="kvitto" href="/betalkvitto/' + r.receiptId + '" target="_blank" rel="noopener">'
+                      + esc(r.receiptNumber) + '</a>' : '<span class="muted">—</span>';
+                return '<div><span class="num muted">' + esc(shortDate(r.date)) + '</span>'
+                     + '<span class="grow">' + esc(r.payerName) + ' · ' + esc(r.what) + '</span>'
+                     + '<span class="num">' + kr(r.amount) + '</span>' + kvitto + '</div>';
+            }, 'Visa alla {n} betalningar');
+        }
 
         // ⚠️ Panelen far bara saga att det stammer nar nagon FAKTISKT stamt av. Saknas utdrag
         //    star den kvar i sitt varnande lage - noll fel ska visas lika stort som fel.
@@ -1544,8 +1630,67 @@
         renderTodo();
     }
 
+    // ══ FORDRINGSEXPORTEN ════════════════════════════════════════════════════════════════
+    async function loadReceivables() {
+        var q = '';
+        var f = el('fordrFrom') && el('fordrFrom').value;
+        var t = el('fordrTo') && el('fordrTo').value;
+        if (f) q += '&from=' + encodeURIComponent(f);
+        if (t) q += '&to=' + encodeURIComponent(t);
+
+        var d = await fetch('/umbraco/surface/EkonomiAdmin/GetReceivables?issuerType=' + issuerType
+                            + '&issuerId=' + issuerId + q, { cache: 'no-store' })
+            .then(function (r) { return r.json(); });
+
+        if (!d.success) return;
+
+        show(el('fordrCard'), d.applicable === true);
+        if (d.applicable !== true) return;
+
+        // Faltens forval kommer fran servern - arbetsaret - sa kassoren slipper skriva dem.
+        if (!el('fordrFrom').value) setDateField('fordrFrom', String(d.from).substring(0, 10));
+        if (!el('fordrTo').value) setDateField('fordrTo', String(d.to).substring(0, 10));
+
+        el('fordrMeta').textContent = d.isSplit
+            ? 'Uppdelat per intäktsslag' : 'Allt på ett fordringskonto';
+
+        // ⚠️ En roll utan konto SAGS. En fordran som inte kan exporteras gor filen ofullstandig,
+        //    och att tyst utelamna den ar samma sak som att ljuga om totalen.
+        show(el('fordrMissing'), (d.missingRoles || []).length > 0);
+        if ((d.missingRoles || []).length > 0) {
+            el('fordrMissing').textContent = 'Saknar konto och kommer inte med: '
+                + d.missingRoles.join(', ') + '. Peka ut dem under Inställningar.';
+        }
+
+        el('fordrBody').innerHTML = (d.rows || []).length === 0
+            ? '<tr><td colspan="4" class="muted">Inga avgifter uppstod under perioden.</td></tr>'
+            : d.rows.map(function (r) {
+                return '<tr><td>' + r.receivableAccount + ' <span class="muted">'
+                     + esc(r.receivableName) + '</span></td>'
+                     + '<td>' + esc(r.what) + ' <span class="muted">mot ' + r.revenueAccount
+                     + ' ' + esc(r.revenueName) + '</span></td>'
+                     + '<td class="n">' + r.count + '</td>'
+                     + '<td class="n">' + kr(r.amount) + '</td></tr>';
+            }).join('')
+            + '<tr class="sum"><td></td><td><strong>Summa</strong></td><td></td>'
+            + '<td class="n"><strong>' + kr(d.total) + '</strong></td></tr>';
+
+        var from = String(d.from).substring(0, 10), to = String(d.to).substring(0, 10);
+
+        el('fordrDownload').setAttribute('href',
+            '/umbraco/surface/EkonomiAdmin/ExportReceivables?issuerType=' + issuerType
+            + '&issuerId=' + issuerId + '&from=' + from + '&to=' + to);
+
+        // ⚠️ Perioden utskriven intill knappen, och varningen med. Samma period importerad tva
+        //    ganger dubbelbokfor intakten - den troligaste felhandlingen pa den har ytan.
+        el('fordrWarn').textContent = from + ' till ' + to
+            + ' — läs bara in samma period en gång.';
+    }
+
+    if (el('fordrApply')) el('fordrApply').addEventListener('click', loadReceivables);
+
     // ══ BOKSLUTET (P7) ═══════════════════════════════════════════════════════════════════
-    var closeLoaded = false, closeYearId = 0;
+    var closeLoaded = false, closeYearId = 0, recvLoaded = false;
 
     function stepMark(state) {
         // ⚠️ ORD, inte bara farg (WCAG 1.4.1). Och "omatt" ar ett EGET lage - att visa det som
@@ -2417,7 +2562,22 @@
         fetch('/umbraco/surface/EkonomiAdmin/GetMembershipFees?issuerType=' + issuerType + '&issuerId=' + issuerId)
             .then(function (r) { return r.json(); })
             .then(function (d) {
-                if (!d.success || !d.applicable || !d.fees) return;
+                if (!d.success || !d.applicable) return;
+
+                // ⚠️ I en sandlåda finns inga avgifter att visa. Kortet visas ändå — med SKÄLET
+                //    i stället för nollor, och utan siffror som inte betyder något.
+                if (d.sandbox) {
+                    show(el('feesCard'), true);
+                    show(el('feesNumbers'), false);
+                    show(el('feesSandbox'), true);
+                    el('feesSandbox').textContent = d.message || '';
+                    el('feesYear').textContent = 'Sandlåda';
+                    return;
+                }
+
+                if (!d.fees) return;
+                show(el('feesSandbox'), false);
+                show(el('feesNumbers'), true);
                 renderFees(d.fees);
             })
             .catch(function () { });

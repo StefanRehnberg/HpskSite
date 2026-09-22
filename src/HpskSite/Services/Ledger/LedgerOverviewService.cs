@@ -26,6 +26,9 @@ namespace HpskSite.Services.Ledger
         /// <summary>Hur många mottagna betalningar panel 2 visar. Den är en puls, inte ett arkiv.</summary>
         private const int ReceivedLimit = 15;
 
+        /// <summary>Hur många verifikationer panel 4 visar. Samma skäl som ovan — en puls.</summary>
+        private const int JournalLimit = 15;
+
         public LedgerOverviewService(
             IUmbracoDatabaseFactory databaseFactory,
             IUmbracoContextFactory contextFactory,
@@ -57,6 +60,7 @@ namespace HpskSite.Services.Ledger
                 BuildOutstanding(overview, payments);
                 BuildReceived(ldb, overview, payments);
                 BuildPerSource(overview, payments);
+                BuildJournal(ldb, overview, issuerType, issuerId);
             }
             catch (Exception ex)
             {
@@ -244,6 +248,73 @@ namespace HpskSite.Services.Ledger
             LedgerSourceType.Manual => "Övrigt",
             _ => "Övrigt"
         };
+
+        /// <summary>
+        /// Panel 4 för den som bokför här — de senast bokförda verifikationerna.
+        ///
+        /// <para><b>⚠️ Ingen föreningsform läses av.</b> Finns det verifikationer bokför föreningen
+        /// här; finns det inga står panelen kvar på betalningsraderna. Det gör panelen riktig utan
+        /// en andra uppgift att hålla i takt — en avläst <c>Shape</c> som glidit från verkligheten
+        /// hade tömt panelen för exakt den förening som har mest i den.</para>
+        ///
+        /// <para><b>⚠️ Ordnat på REGISTRERINGSTID, inte på bokföringsdatum.</b> "Vad hände senast?"
+        /// är en fråga om registreringsordningen. Ett bokföringsdatum får ligga bakåt i tiden, så
+        /// en datumsortering hade lagt en nyss inmatad rättelse av fjolåret längst ned — alltså
+        /// gömt just den post kassören sist rörde.</para>
+        ///
+        /// <para><b>⚠️⚠️ OCH INTE PÅ <c>Id DESC</c> — SANDLÅDANS ID:N RÄKNAS NEDÅT.</b> Sandlådan
+        /// är <c>IDENTITY(-1,-1)</c>, så den först registrerade posten har det STÖRSTA id:t och
+        /// <c>Id DESC</c> ger exakt omvänd ordning där. Mätt i sandlåda -132: panelen började på
+        /// verifikation 1 av 9 och kallade den "senast". <b>Tie-break är <c>Number</c>, aldrig
+        /// <c>Id</c></b> — numret är luckfritt och stigande i BÅDA schemana, vilket id:t inte är.
+        /// Samma fälla som varje <c>&lt;= 0</c>-kontroll som låst ute sandlådan, en tredje gång.</para>
+        ///
+        /// <para><b>⚠️ Beloppet summeras i EN underfråga per verifikation-topplista</b>, inte i en
+        /// runda per rad: <c>JournalLimit</c> rader in, en fråga ut.</para>
+        /// </summary>
+        private static void BuildJournal(
+            LedgerDb db, LedgerOverview overview, int issuerType, int issuerId)
+        {
+            var rows = db.Fetch<JournalEntryRow>(
+                $@"SELECT TOP ({JournalLimit})
+                          e.Id, e.Number, s.Prefix, e.AccountingDate, e.Description,
+                          e.CounterpartyName,
+                          (SELECT SUM(l.Debit)
+                             FROM dbo.LedgerJournalEntryLine l
+                            WHERE l.JournalEntryId = e.Id) AS Amount
+                     FROM dbo.LedgerJournalEntry e
+                     JOIN dbo.LedgerNumberSeries s ON s.Id = e.SeriesId
+                    WHERE e.IssuerType = @0 AND e.IssuerId = @1
+                    ORDER BY e.RegisteredUtc DESC, e.Number DESC",
+                issuerType, issuerId);
+
+            foreach (var r in rows)
+            {
+                overview.Journal.Add(new JournalRow
+                {
+                    EntryId = r.Id,
+                    Number = LedgerNumberAllocator.Format(r.Prefix, r.Number),
+                    Date = r.AccountingDate.Date,
+                    Description = r.Description,
+                    Counterparty = r.CounterpartyName ?? "",
+                    Amount = r.Amount ?? 0m
+                });
+            }
+        }
+
+        /// <summary>Radformen för verifikationsuppslaget. Egen typ — NPoco mappar på kolumnnamn.</summary>
+        private class JournalEntryRow
+        {
+            public int Id { get; set; }
+            public int Number { get; set; }
+            public string Prefix { get; set; } = "";
+            public DateTime AccountingDate { get; set; }
+            public string Description { get; set; } = "";
+            public string? CounterpartyName { get; set; }
+
+            /// <summary>Null när verifikationen saknar rader — får aldrig bli en krasch i en läsvy.</summary>
+            public decimal? Amount { get; set; }
+        }
 
         /// <summary>Radformen för kvittouppslaget. Egen typ — NPoco mappar på kolumnnamn.</summary>
         private class ReceiptNumberRow
