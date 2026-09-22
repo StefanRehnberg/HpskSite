@@ -34,6 +34,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<LedgerManualPostingService>();
             builder.Services.AddScoped<LedgerMembershipFeeBridge>();
             builder.Services.AddScoped<LedgerSandboxService>();
+            builder.Services.AddScoped<LedgerBankImportService>();
             builder.Services.AddHostedService<LedgerSchemaGuardHostedService>();
         }
     }
