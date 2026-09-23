@@ -412,6 +412,40 @@ namespace HpskSite.Services
             Upsert(RegionFeeCalculator.PerMemberCategory, "Per medlem", Math.Max(0m, perMember));
         }
 
+        /// <summary>Kretsens justeringar per klubb för ett år, före utskicket.</summary>
+        public Dictionary<int, RegionFeeDraft> GetRegionDrafts(int regionId, int year)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<RegionFeeDraft>(
+                    "SELECT * FROM RegionFeeDraft WHERE RegionId = @0 AND Year = @1", regionId, year)
+                .ToDictionary(d => d.ClubId);
+        }
+
+        /// <summary>
+        /// Sparar kretsens justering för en klubb. Null = ingen justering; båda null tar bort raden.
+        /// Anroparen skickar null för ett värde som är LIKA med registret/taxan.
+        /// </summary>
+        public void SaveRegionDraft(int regionId, int year, int clubId, int? memberCount, decimal? manualAmount, int byMemberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var row = db.FirstOrDefault<RegionFeeDraft>(
+                "SELECT * FROM RegionFeeDraft WHERE RegionId = @0 AND Year = @1 AND ClubId = @2", regionId, year, clubId);
+
+            if (memberCount is null && manualAmount is null)
+            {
+                if (row is not null) db.Delete(row);
+                return;
+            }
+
+            row ??= new RegionFeeDraft { RegionId = regionId, Year = year, ClubId = clubId };
+            row.MemberCount = memberCount is null ? null : Math.Max(0, memberCount.Value);
+            row.ManualAmount = manualAmount is null ? null : Math.Round(Math.Max(0m, manualAmount.Value), 2, MidpointRounding.AwayFromZero);
+            row.UpdatedUtc = DateTime.UtcNow;
+            row.UpdatedByMemberId = byMemberId;
+            if (row.Id == 0) db.Insert(row); else db.Update(row);
+        }
+
         /// <summary>Kretsens krav för ett år, med rader och klubbnamn.</summary>
         public List<MembershipFeeCharge> GetChargesForRegionYear(int regionId, int year)
         {
@@ -483,6 +517,10 @@ namespace HpskSite.Services
                     line.CreatedByMemberId = byMemberId;
                     db.Insert(line);
                 }
+
+                // Från och med nu är det avgiften som gäller; justeringen har gjort sitt.
+                db.Execute("DELETE FROM RegionFeeDraft WHERE RegionId = @0 AND Year = @1 AND ClubId = @2",
+                    regionId, year, club.ClubId);
 
                 existing.Add(club.ClubId);
                 result.Created++;

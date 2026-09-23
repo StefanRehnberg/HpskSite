@@ -5034,6 +5034,11 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
   - **En rad förklarande text.** Lägg inte tillbaka steglistan.
   - ⚠️ `load()` rör inte beskedet — det körs direkt efter Skicka, och ett tömt besked betyder att
     kassören aldrig får veta vad som hände.
+  - **⚠️⚠️ Justeringarna före utskicket sparas på SERVERN** (`RegionFeeDraft`, en rad per krets/år/
+    klubb, `SaveRegionDraft`). De låg först bara i webbläsaren och försvann vid årsbyte och omladdning
+    medan skärmen såg sparad ut (rapporterat 2026-09-23). Null = följer registret/taxan; ett värde
+    lika med registret/taxan sparas som null. Raderna raderas när avgiften skapas. Ett rättat antal
+    visar "registret: N" under talet.
 - **Betalsidan** säger *Kretsavgift*, kretsen som mottagare, klubben som betalare, och raderna.
   **⚠️ Swish-meddelandet namnger KLUBBEN** (max 50 tecken) — annars står femton likadana
   "Kretsavgift 2026" på kretsens kontoutdrag.
@@ -5045,12 +5050,13 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
   kretsen vägras i `GenerateRegionCharges` och **ingenting** skapas.
 - **Ta bort ett krav** bara så länge klubben varken betalat eller sagt sig ha betalat.
 
-**Operatörssteg:** kör `Migrations/add-region-fee-to-membership-fee.sql` **FÖRE deployen** — NPoco
+**Operatörssteg:** kör `Migrations/add-region-fee-to-membership-fee.sql` **och
+`Migrations/create-region-fee-draft-table.sql`** (körd i dev 2026-09-23, EJ i prod) **FÖRE deployen** — NPoco
 genererar `SET IssuerType = …` i varje uppdatering av en avgift så snart POCO:n bär fältet, så utan
 kolumnerna faller **varje klubbs "Markera betald"**, inte bara kretsens. Körd i dev 2026-09-23;
 **EJ körd i prod.** Fildeploy av `KnowledgeBase/docs/kretsavgift.md` (ny). Adds C# → full ombyggnad.
 
-Verifierat **18 enhetstest** (`RegionFeeCalculatorTests`; hela sviten 1447/1447) och **105/105
+Verifierat **18 enhetstest** (`RegionFeeCalculatorTests`; hela sviten 1447/1447) och **115/115
 `hpsk-verify/kretsavgift-verify.mjs`**, två körningar i rad (efter Ove-omarbetningen; avsnitt 10 kör
 hela skicka-flödet i ytan och avsnitt 8 prövar `ChargeIds` åt båda håll). Sviten hittade att `load()`
 tömde beskedet efter Skicka — och att påståendet "Ronneby mejlades inte igen" var vakuöst grönt på

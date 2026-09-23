@@ -275,12 +275,14 @@ namespace HpskSite.Controllers
             var (baseAmount, perMember) = _feeService.GetRegionRate(regionId, year);
             var charges = _feeService.GetChargesForRegionYear(regionId, year)
                 .ToDictionary(c => c.PayerClubId ?? 0);
+            var drafts = _feeService.GetRegionDrafts(regionId, year);
 
             var rows = RegionClubs(region.Value.Code).Select(club =>
             {
                 var count = ActiveMemberCount(club.Id);
                 var proposal = RegionFeeCalculator.Lines(year, baseAmount, perMember, count, null);
                 charges.TryGetValue(club.Id, out var charge);
+                drafts.TryGetValue(club.Id, out var draft);
 
                 return new
                 {
@@ -289,6 +291,9 @@ namespace HpskSite.Controllers
                     hasEmail = !string.IsNullOrWhiteSpace(club.ContactEmail),
                     proposedCount = count,
                     proposedAmount = RegionFeeCalculator.Total(proposal),
+                    // Kretsens sparade justering före utskicket (null = följer registret/taxan).
+                    draftCount = draft?.MemberCount,
+                    draftManual = draft?.ManualAmount,
                     charge = charge is null ? null : RegionChargeDto(charge)
                 };
             }).OrderBy(r => r.clubName, StringComparer.CurrentCultureIgnoreCase).ToList();
@@ -391,6 +396,28 @@ namespace HpskSite.Controllers
                 createdChargeIds = result.CreatedChargeIds,
                 message = string.Join(" ", parts)
             });
+        }
+
+        /// <summary>
+        /// Sparar kretsens justering för en klubb som inte fått avgiften än. Null = ingen justering.
+        /// <b>Bara klubbar i kretsen godtas</b>, samma regel som när avgiften skapas.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveRegionDraft([FromBody] RegionDraftRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+            var region = await AuthorizeRegionAsync(request.RegionId);
+            if (region is null) return Json(new { success = false, message = "Åtkomst nekad" });
+
+            if (!RegionClubs(region.Value.Code).Any(c => c.Id == request.ClubId))
+                return Json(new { success = false, message = "Klubben hör inte till kretsen." });
+            if (request.MemberCount < 0 || request.ManualAmount < 0)
+                return Json(new { success = false, message = "Talen kan inte vara negativa." });
+
+            _feeService.SaveRegionDraft(request.RegionId, request.Year, request.ClubId,
+                request.MemberCount, request.ManualAmount, await GetCurrentMemberIdAsync());
+            return Json(new { success = true });
         }
 
         [HttpPost]
@@ -612,6 +639,19 @@ namespace HpskSite.Controllers
         public int Year { get; set; }
         public decimal BaseAmount { get; set; }
         public decimal PerMember { get; set; }
+    }
+
+    public class RegionDraftRequest
+    {
+        public int RegionId { get; set; }
+        public int Year { get; set; }
+        public int ClubId { get; set; }
+
+        /// <summary>Null = följer registret.</summary>
+        public int? MemberCount { get; set; }
+
+        /// <summary>Null = följer taxan.</summary>
+        public decimal? ManualAmount { get; set; }
     }
 
     public class RegionSendRequest
