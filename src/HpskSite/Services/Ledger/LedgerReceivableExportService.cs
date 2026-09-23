@@ -1,3 +1,4 @@
+using HpskSite.Models;
 using System.Text;
 using HpskSite.Models.Ledger;
 using Umbraco.Cms.Infrastructure.Persistence;
@@ -119,6 +120,18 @@ namespace HpskSite.Services.Ledger
                    GROUP BY SourceType",
                 issuerType, issuerId, from.Date, to.Date.AddDays(1));
 
+            // ⚠️⚠️ MEDLEMS- OCH KRETSAVGIFTERNA LIGGER INTE I LedgerPayment. De bor i
+            //    MembershipFeeCharge, och exporten läste bara betalningstabellen — så den klubb som
+            //    exporten FINNS för (stor förening, eget program, bankkoppling) fick en fil utan
+            //    sin största intäkt. Bankkopplingen bokförde sedan 1930/1510 för varje inbetald
+            //    avgift, och 1510 stod negativt för alltid. Precis det felet klassens egen
+            //    sammanfattning beskriver.
+            //    Anspråket uppstår när avgiften SKICKAS (en oskickad avgift är ingen fordran —
+            //    ingen har fått en räkning), eller när medlemmen väljer sin medlemstyp om det sker
+            //    senare, eftersom beloppet först då är känt. Sandlådor har inga avgifter.
+            if (issuerId > 0)
+                claims.AddRange(FeeClaims(db, issuerType, issuerId, from.Date, to.Date.AddDays(1)));
+
             foreach (var c in claims)
             {
                 if (c.Amount == 0m) continue;
@@ -233,6 +246,31 @@ namespace HpskSite.Services.Ledger
             }
 
             return Encoding.GetEncoding(SieFormat.CodePage).GetBytes(sb.ToString());
+        }
+
+        /// <summary>Medlemsavgifter (klubb) eller kretsavgifter (krets) som blev fordringar i perioden.</summary>
+        private static IEnumerable<ClaimRow> FeeClaims(
+            IUmbracoDatabase db, int issuerType, int issuerId, DateTime from, DateTime toExclusive)
+        {
+            var isRegion = issuerType == (int)DocumentOwnerType.Region;
+            var ownerFilter = isRegion ? "c.IssuerType = 1 AND c.RegionId = @0" : "c.IssuerType = 0 AND c.ClubId = @0";
+
+            var row = db.Fetch<ClaimRow>(
+                $@"SELECT COUNT(*) AS Count_, ISNULL(SUM(c.Amount), 0) AS Amount
+                     FROM dbo.MembershipFeeCharge c
+                    WHERE {ownerFilter}
+                      AND c.RequestSentDate IS NOT NULL
+                      AND c.Amount > 0
+                      AND CASE WHEN c.MemberChosenAt > c.RequestSentDate THEN c.MemberChosenAt
+                               ELSE c.RequestSentDate END >= @1
+                      AND CASE WHEN c.MemberChosenAt > c.RequestSentDate THEN c.MemberChosenAt
+                               ELSE c.RequestSentDate END < @2",
+                issuerId, from, toExclusive).FirstOrDefault();
+
+            if (row is null || row.Count_ == 0) yield break;
+
+            row.SourceType = isRegion ? LedgerSourceType.RegionFee : LedgerSourceType.MembershipFee;
+            yield return row;
         }
 
         /// <summary>Samma indelning som betalningarnas egen — se <c>LedgerPaymentService</c>.</summary>
