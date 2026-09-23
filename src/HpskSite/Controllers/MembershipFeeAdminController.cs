@@ -213,6 +213,11 @@ namespace HpskSite.Controllers
             if (!await CanManageChargeAsync(charge))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
+            // ⚠️ En kretsavgift vars länk kopieras räknas som SKICKAD: kretsen skickar den själv (klubben
+            //    saknar ofta e-postadress). Annars står klubben kvar som "Inte skickad" och räknas med i
+            //    nästa "Skicka avgiften" fast den redan fått sin räkning.
+            if (charge.IsRegionFee) _feeService.MarkRegionRequestSent(chargeId);
+
             return Json(new { success = true, url = BuildPayUrl(chargeId) });
         }
 
@@ -275,14 +280,12 @@ namespace HpskSite.Controllers
             var (baseAmount, perMember) = _feeService.GetRegionRate(regionId, year);
             var charges = _feeService.GetChargesForRegionYear(regionId, year)
                 .ToDictionary(c => c.PayerClubId ?? 0);
-            var drafts = _feeService.GetRegionDrafts(regionId, year);
 
             var rows = RegionClubs(region.Value.Code).Select(club =>
             {
                 var count = ActiveMemberCount(club.Id);
                 var proposal = RegionFeeCalculator.Lines(year, baseAmount, perMember, count, null);
                 charges.TryGetValue(club.Id, out var charge);
-                drafts.TryGetValue(club.Id, out var draft);
 
                 return new
                 {
@@ -291,9 +294,6 @@ namespace HpskSite.Controllers
                     hasEmail = !string.IsNullOrWhiteSpace(club.ContactEmail),
                     proposedCount = count,
                     proposedAmount = RegionFeeCalculator.Total(proposal),
-                    // Kretsens sparade justering före utskicket (null = följer registret/taxan).
-                    draftCount = draft?.MemberCount,
-                    draftManual = draft?.ManualAmount,
                     charge = charge is null ? null : RegionChargeDto(charge)
                 };
             }).OrderBy(r => r.clubName, StringComparer.CurrentCultureIgnoreCase).ToList();
@@ -329,6 +329,7 @@ namespace HpskSite.Controllers
             amount = c.Amount,
             memberCount = c.MemberCount,
             status = c.PaymentStatus,
+            requestSentDate = c.RequestSentDate?.ToString("yyyy-MM-dd"),
             paymentSentDate = c.PaymentSentDate?.ToString("yyyy-MM-dd"),
             paymentSentBy = c.PaymentSentBy,
             paidDate = c.PaidDate?.ToString("yyyy-MM-dd"),
@@ -399,25 +400,33 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Sparar kretsens justering för en klubb som inte fått avgiften än. Null = ingen justering.
-        /// <b>Bara klubbar i kretsen godtas</b>, samma regel som när avgiften skapas.
+        /// Klubbens avgift för året — skapas oskickad om den inte finns, med registrets antal. Varje
+        /// handling på en rad börjar här, så raden beter sig likadant före och efter utskicket.
+        /// <b>Bara klubbar i kretsen godtas.</b>
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SaveRegionDraft([FromBody] RegionDraftRequest request)
+        public async Task<IActionResult> EnsureRegionCharge([FromBody] RegionEnsureRequest request)
         {
-            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+            if (request is null) return Json(new { success = false, message = "Ingen klubb angiven." });
             var region = await AuthorizeRegionAsync(request.RegionId);
             if (region is null) return Json(new { success = false, message = "Åtkomst nekad" });
-
             if (!RegionClubs(region.Value.Code).Any(c => c.Id == request.ClubId))
                 return Json(new { success = false, message = "Klubben hör inte till kretsen." });
-            if (request.MemberCount < 0 || request.ManualAmount < 0)
-                return Json(new { success = false, message = "Talen kan inte vara negativa." });
 
-            _feeService.SaveRegionDraft(request.RegionId, request.Year, request.ClubId,
-                request.MemberCount, request.ManualAmount, await GetCurrentMemberIdAsync());
-            return Json(new { success = true });
+            var (id, error) = _feeService.EnsureRegionCharge(request.RegionId, request.Year, request.ClubId,
+                ActiveMemberCount(request.ClubId), await GetCurrentMemberIdAsync());
+            return Json(error is null ? new { success = true, chargeId = id, message = (string?)null }
+                                      : new { success = false, chargeId = (int?)null, message = (string?)error });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetRegionChargeManualAmount([FromBody] RegionChargeLineRequest request)
+        {
+            if (request?.ManualAmount < 0) return Json(new { success = false, message = "Beloppet kan inte vara negativt." });
+            return await EditRegionCharge(request?.ChargeId ?? 0, () =>
+                _feeService.SetRegionChargeManualAmount(request!.ChargeId, request.ManualAmount));
         }
 
         [HttpPost]
@@ -479,14 +488,21 @@ namespace HpskSite.Controllers
             var noEmail = new List<string>();
             var failed = new List<string>();
 
-            // ⚠️ Med ChargeIds mejlas BARA de avgifterna (de som just skapades). Utan listan mejlas
-            //    alla obetalda — det är påminnelsen, och den är ett eget, uttryckligt val i ytan.
+            // ⚠️ Tre urval, och de får inte blandas ihop:
+            //    ChargeIds  = bara de avgifterna (t.ex. "skicka till den här klubben"),
+            //    "unsent"   = de som inte gått ut än (knappen "Skicka avgiften"),
+            //    "reminder" = de som gått ut men inte betalats (knappen "Påminn").
+            //    Utan något av dem mejlas alla obetalda.
             var only = request.ChargeIds is { Count: > 0 } ? request.ChargeIds.ToHashSet() : null;
 
             foreach (var charge in _feeService.GetChargesForRegionYear(request.RegionId, request.Year))
             {
                 if (charge.PaymentStatus == "Paid") continue;
                 if (only is not null && !only.Contains(charge.Id)) continue;
+                if (request.Mode == "unsent" && charge.IsRequestSent) continue;
+                if (request.Mode == "reminder" && !charge.IsRequestSent) continue;
+                // En avgift på 0 kr är ingen räkning och går aldrig ut.
+                if (charge.Amount <= 0) continue;
 
                 var club = _clubService.GetClubById(charge.PayerClubId ?? 0);
                 var name = charge.PayerClubName ?? club?.Name ?? $"Klubb {charge.PayerClubId}";
@@ -508,6 +524,9 @@ namespace HpskSite.Controllers
                 }
 
                 (ok ? sent : failed).Add(name);
+                // ⚠️ Bara ett mejl som FAKTISKT gick räknas som skickat. Annars står klubben som
+                //    "Skickad" utan att ha fått något.
+                if (ok) _feeService.MarkRegionRequestSent(charge.Id);
             }
 
             var parts = new List<string> { $"Betalningsuppmaningen mejlades till {sent.Count} klubbar." };
@@ -641,23 +660,20 @@ namespace HpskSite.Controllers
         public decimal PerMember { get; set; }
     }
 
-    public class RegionDraftRequest
+    public class RegionEnsureRequest
     {
         public int RegionId { get; set; }
         public int Year { get; set; }
         public int ClubId { get; set; }
-
-        /// <summary>Null = följer registret.</summary>
-        public int? MemberCount { get; set; }
-
-        /// <summary>Null = följer taxan.</summary>
-        public decimal? ManualAmount { get; set; }
     }
 
     public class RegionSendRequest
     {
         public int RegionId { get; set; }
         public int Year { get; set; }
+
+        /// <summary>"unsent" = inte skickade än, "reminder" = skickade men obetalda, tomt = alla obetalda.</summary>
+        public string? Mode { get; set; }
 
         /// <summary>Tom = alla obetalda (påminnelse). Satt = bara de här avgifterna.</summary>
         public List<int>? ChargeIds { get; set; }
@@ -677,5 +693,8 @@ namespace HpskSite.Controllers
         public string? Description { get; set; }
         public decimal Amount { get; set; }
         public int MemberCount { get; set; }
+
+        /// <summary>Eget belopp på en oskickad avgift. Null = tillbaka till taxan.</summary>
+        public decimal? ManualAmount { get; set; }
     }
 }

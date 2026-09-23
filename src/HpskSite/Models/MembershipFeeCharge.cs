@@ -68,6 +68,19 @@ namespace HpskSite.Models
         /// </summary>
         public int? MemberCount { get; set; }
 
+        /// <summary>
+        /// När betalningsuppmaningen FÖRST gick ut (mejl, eller betallänken kopierad). Null = inte skickad.
+        ///
+        /// <para><b>⚠️ En kretsavgift finns INNAN den skickas</b> (Stefan 2026-09-23): kretsen ska kunna
+        /// lägga till en lagavgift och titta på mejlet före utskicket, och raden ska se likadan ut före
+        /// och efter. Följderna: en oskickad avgift räknas INTE som obetald fordran (ingen har fått en
+        /// räkning), och den följer taxan när taxan ändras — en skickad gör det inte.</para>
+        /// </summary>
+        public DateTime? RequestSentDate { get; set; }
+
+        [Ignore]
+        public bool IsRequestSent => RequestSentDate.HasValue;
+
         [Ignore]
         public bool IsRegionFee => IssuerType == MembershipFeeIssuer.Region;
 

@@ -378,7 +378,8 @@ namespace HpskSite.Services
         /// </summary>
         public void SaveRegionRate(int regionId, int year, decimal baseAmount, decimal perMember)
         {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
             var db = scope.Database;
 
             void Upsert(string key, string label, decimal amount)
@@ -410,40 +411,115 @@ namespace HpskSite.Services
 
             Upsert(RegionFeeCalculator.BaseCategory, "Grundavgift per klubb", Math.Max(0m, baseAmount));
             Upsert(RegionFeeCalculator.PerMemberCategory, "Per medlem", Math.Max(0m, perMember));
-        }
+            }
 
-        /// <summary>Kretsens justeringar per klubb för ett år, före utskicket.</summary>
-        public Dictionary<int, RegionFeeDraft> GetRegionDrafts(int regionId, int year)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.Fetch<RegionFeeDraft>(
-                    "SELECT * FROM RegionFeeDraft WHERE RegionId = @0 AND Year = @1", regionId, year)
-                .ToDictionary(d => d.ClubId);
+            // ⚠️ OSKICKADE avgifter följer taxan — ingen klubb har fått dem än. Ett eget belopp och
+            //    tilläggen står kvar. Skickade avgifter rörs aldrig.
+            foreach (var charge in GetChargesForRegionYear(regionId, year)
+                         .Where(c => !c.IsRequestSent && c.PaymentStatus != "Paid"
+                                     && c.Lines.All(l => l.Kind != MembershipFeeLineKind.Manual)))
+            {
+                EditRegionChargeLines(charge.Id, (c, lines) =>
+                {
+                    RebuildBaseLines(lines, c.Year, Math.Max(0m, baseAmount), Math.Max(0m, perMember), c.MemberCount ?? 0, null);
+                    return null;
+                });
+            }
         }
 
         /// <summary>
-        /// Sparar kretsens justering för en klubb. Null = ingen justering; båda null tar bort raden.
-        /// Anroparen skickar null för ett värde som är LIKA med registret/taxan.
+        /// Klubbens avgift för året — skapas (OSKICKAD) om den inte finns. Används när kretsen rör en
+        /// rad: lägger till en rad, tittar på mejlet, ändrar ett tal eller markerar betald.
+        ///
+        /// <para>⚠️ En avgift på 0 kr får skapas här: kretsen kan vara på väg att lägga till en
+        /// lagavgift på en klubb utan medlemmar. Den skickas aldrig (utskicket hoppar över 0 kr) och
+        /// räknas aldrig som fordran (den är inte skickad).</para>
         /// </summary>
-        public void SaveRegionDraft(int regionId, int year, int clubId, int? memberCount, decimal? manualAmount, int byMemberId)
+        public (int? ChargeId, string? Error) EnsureRegionCharge(int regionId, int year, int clubId, int memberCount, int byMemberId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
-            var row = db.FirstOrDefault<RegionFeeDraft>(
-                "SELECT * FROM RegionFeeDraft WHERE RegionId = @0 AND Year = @1 AND ClubId = @2", regionId, year, clubId);
 
-            if (memberCount is null && manualAmount is null)
+            var existing = db.FirstOrDefault<int?>(
+                "SELECT Id FROM MembershipFeeCharge WHERE IssuerType = @0 AND RegionId = @1 AND Year = @2 AND PayerClubId = @3",
+                MembershipFeeIssuer.Region, regionId, year, clubId);
+            if (existing is not null) return (existing, null);
+
+            var (baseAmount, perMember) = GetRegionRate(regionId, year);
+            var count = Math.Max(0, memberCount);
+            var lines = RegionFeeCalculator.Lines(year, baseAmount, perMember, count, null);
+
+            var charge = new MembershipFeeCharge
             {
-                if (row is not null) db.Delete(row);
-                return;
+                IssuerType = MembershipFeeIssuer.Region,
+                RegionId = regionId,
+                PayerClubId = clubId,
+                ClubId = 0,
+                MemberId = 0,
+                Year = year,
+                Amount = RegionFeeCalculator.Total(lines),
+                MemberCount = count,
+                PaymentStatus = "Pending",
+                CreatedDate = DateTime.UtcNow
+            };
+            db.Insert(charge);
+            for (var i = 0; i < lines.Count; i++)
+            {
+                lines[i].ChargeId = charge.Id;
+                lines[i].SortOrder = i;
+                lines[i].CreatedUtc = DateTime.UtcNow;
+                lines[i].CreatedByMemberId = byMemberId;
+                db.Insert(lines[i]);
             }
+            return (charge.Id, null);
+        }
 
-            row ??= new RegionFeeDraft { RegionId = regionId, Year = year, ClubId = clubId };
-            row.MemberCount = memberCount is null ? null : Math.Max(0, memberCount.Value);
-            row.ManualAmount = manualAmount is null ? null : Math.Round(Math.Max(0m, manualAmount.Value), 2, MidpointRounding.AwayFromZero);
-            row.UpdatedUtc = DateTime.UtcNow;
-            row.UpdatedByMemberId = byMemberId;
-            if (row.Id == 0) db.Insert(row); else db.Update(row);
+        /// <summary>
+        /// Sätter ett eget belopp på en OSKICKAD avgift (null = tillbaka till taxan). Tilläggsraderna
+        /// står kvar. <b>En skickad avgift ändras inte så</b> — klubben har fått ett belopp, och ett
+        /// tyst nytt belopp på samma räkning är inget klubben kan förklara.
+        /// </summary>
+        public string? SetRegionChargeManualAmount(int chargeId, decimal? amount)
+            => EditRegionChargeLines(chargeId, (charge, lines) =>
+            {
+                if (charge.IsRequestSent)
+                    return "Avgiften är redan skickad till klubben. Lägg till en rad i stället, eller ta bort avgiften och skicka en ny.";
+                var (baseAmount, perMember) = GetRegionRate(charge.RegionId ?? 0, charge.Year);
+                var manual = amount is null ? (decimal?)null : Math.Max(0m, amount.Value);
+                RebuildBaseLines(lines, charge.Year, baseAmount, perMember, charge.MemberCount ?? 0, manual);
+                // ⚠️ "Ingen avgift i år" (0 kr) måste STÅ KVAR som ett val. Kalkylatorn ger ingen rad
+                //    för 0 kr, och utan en rad räknar nästa taxeändring tillbaka klubben till taxan.
+                if (manual == 0m)
+                    lines.Insert(0, new MembershipFeeChargeLine
+                    {
+                        Kind = MembershipFeeLineKind.Manual,
+                        Description = $"Ingen kretsavgift {charge.Year}",
+                        Amount = 0m
+                    });
+                if (manual is null && charge.MemberCount is null) charge.MemberCount = 0;
+                return null;
+            });
+
+        /// <summary>Markerar att betalningsuppmaningen gått ut. Första datumet står kvar vid påminnelser.</summary>
+        public void MarkRegionRequestSent(int chargeId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            scope.Database.Execute(
+                "UPDATE MembershipFeeCharge SET RequestSentDate = @1 WHERE Id = @0 AND IssuerType = @2 AND RequestSentDate IS NULL",
+                chargeId, DateTime.UtcNow, MembershipFeeIssuer.Region);
+        }
+
+        /// <summary>
+        /// Byter ut grund-, per-medlem- och egen-belopp-raderna och behåller tilläggen.
+        /// Tilläggen läggs sist, så räkningen alltid börjar med årsavgiften.
+        /// </summary>
+        private static void RebuildBaseLines(List<MembershipFeeChargeLine> lines, int year,
+            decimal baseAmount, decimal perMember, int memberCount, decimal? manual)
+        {
+            var extras = lines.Where(l => l.Kind == MembershipFeeLineKind.Extra).ToList();
+            lines.Clear();
+            lines.AddRange(RegionFeeCalculator.Lines(year, baseAmount, perMember, memberCount, manual));
+            lines.AddRange(extras);
         }
 
         /// <summary>Kretsens krav för ett år, med rader och klubbnamn.</summary>
@@ -518,10 +594,6 @@ namespace HpskSite.Services
                     db.Insert(line);
                 }
 
-                // Från och med nu är det avgiften som gäller; justeringen har gjort sitt.
-                db.Execute("DELETE FROM RegionFeeDraft WHERE RegionId = @0 AND Year = @1 AND ClubId = @2",
-                    regionId, year, club.ClubId);
-
                 existing.Add(club.ClubId);
                 result.Created++;
                 result.CreatedChargeIds.Add(charge.Id);
@@ -564,10 +636,21 @@ namespace HpskSite.Services
                 return null;
             });
 
-        /// <summary>Rättar medlemsantalet på ett obetalt krav och räknar om per-medlem-raden.</summary>
+        /// <summary>
+        /// Rättar medlemsantalet och räknar om. <b>Oskickad:</b> räknas ur dagens taxa och ett eget
+        /// belopp släpps (att ändra antalet betyder "räkna på medlemmarna"). <b>Skickad:</b> bara
+        /// per-medlem-raden, med det pris avgiften skickades med.
+        /// </summary>
         public string? SetRegionChargeMemberCount(int chargeId, int memberCount)
             => EditRegionChargeLines(chargeId, (charge, lines) =>
             {
+                if (!charge.IsRequestSent)
+                {
+                    var (b, p) = GetRegionRate(charge.RegionId ?? 0, charge.Year);
+                    charge.MemberCount = Math.Max(0, memberCount);
+                    RebuildBaseLines(lines, charge.Year, b, p, charge.MemberCount.Value, null);
+                    return null;
+                }
                 var (_, perMember) = GetRegionRate(charge.RegionId ?? 0, charge.Year);
                 var error = RegionFeeCalculator.SetMemberCount(lines, charge.Year, perMember, memberCount);
                 if (error is not null) return error;
