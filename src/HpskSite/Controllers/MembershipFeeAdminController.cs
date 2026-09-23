@@ -379,10 +379,10 @@ namespace HpskSite.Controllers
             var byId = await GetCurrentMemberIdAsync();
             var result = _feeService.GenerateRegionCharges(request.RegionId, request.Year, clubs, byId);
 
-            var parts = new List<string> { $"{result.Created} krav skapades ({result.TotalAmount:N0} kr)." };
-            if (result.SkippedExisting > 0) parts.Add($"{result.SkippedExisting} klubbar hade redan ett krav för året.");
+            var parts = new List<string> { $"Kretsavgift skapades för {result.Created} klubbar ({result.TotalAmount:N0} kr)." };
+            if (result.SkippedExisting > 0) parts.Add($"{result.SkippedExisting} klubbar hade redan fått årets avgift och rördes inte.");
             // ⚠️ Nollkraven SÄGS. Utan det ser en klubb som inte fick något krav ut att ha glömts bort.
-            if (result.SkippedZero > 0) parts.Add($"{result.SkippedZero} klubbar fick inget krav eftersom beloppet blev 0 kr.");
+            if (result.SkippedZero > 0) parts.Add($"{result.SkippedZero} klubbar fick ingen avgift eftersom beloppet blev 0 kr.");
 
             return Json(new { success = true, created = result.Created, message = string.Join(" ", parts) });
         }
@@ -472,7 +472,7 @@ namespace HpskSite.Controllers
                 (ok ? sent : failed).Add(name);
             }
 
-            var parts = new List<string> { $"Betalkravet skickades till {sent.Count} klubbar." };
+            var parts = new List<string> { $"Betalningsuppmaningen mejlades till {sent.Count} klubbar." };
             if (noEmail.Count > 0) parts.Add($"Saknar kontaktadress: {string.Join(", ", noEmail)}.");
             if (failed.Count > 0) parts.Add($"Kunde inte skickas: {string.Join(", ", failed)}.");
 
@@ -484,6 +484,53 @@ namespace HpskSite.Controllers
                 failed,
                 message = string.Join(" ", parts)
             });
+        }
+
+        /// <summary>
+        /// Visar betalkravsmejlet för ett krav precis som det skulle skickas — kuvert, ämne, kropp
+        /// och svarsfot — utan att skicka något. Byggs av samma kod som utskicket.
+        ///
+        /// <para>⚠️ Visar sig som en egen sida (öppnas i ny flik), så mejlets egna stilar inte
+        /// blandas med adminpanelens. Kuvertet står i en ram ovanför, tydligt skilt från mejlet.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> PreviewRegionPaymentRequest(int chargeId)
+        {
+            var charge = chargeId == 0 ? null : _feeService.GetCharge(chargeId);
+            if (charge is null || !charge.IsRegionFee)
+                return Content("Kravet hittades inte.");
+            var region = await AuthorizeRegionAsync(charge.RegionId ?? 0);
+            if (region is null) return Content("Åtkomst nekad.");
+
+            var club = _clubService.GetClubById(charge.PayerClubId ?? 0);
+            var name = charge.PayerClubName ?? club?.Name ?? $"Klubb {charge.PayerClubId}";
+            var to = string.IsNullOrWhiteSpace(club?.ContactEmail) ? "" : club!.ContactEmail!;
+
+            var mail = _emailService.PreviewRegionFeeRequest(
+                to, name, region.Value.Name, charge.Year,
+                charge.Lines.Select(l => (l.Description, l.Amount)).ToList(),
+                charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForRegion(region.Value.Id));
+
+            var enc = new Func<string?, string>(s => System.Net.WebUtility.HtmlEncode(s ?? ""));
+            var envelope =
+                "<div style=\"font-family:Arial,sans-serif;font-size:13px;max-width:560px;margin:16px auto;"
+              + "padding:12px 16px;border:1px dashed #6b7280;border-radius:6px;background:#fff;color:#333\">"
+              + "<div style=\"font-weight:bold;margin-bottom:6px\">Förhandsvisning — inget har skickats</div>"
+              + $"<div><b>Från:</b> {enc(mail.FromName)} &lt;{enc(mail.FromAddress)}&gt;</div>"
+              + $"<div><b>Svar till:</b> {(mail.ReplyTo is null ? "<i>ingen svarsadress</i>" : enc(mail.ReplyTo))}</div>"
+              + $"<div><b>Till:</b> {(to.Length == 0 ? "<i style=\"color:#b45309\">klubben saknar kontaktadress — mejlet skickas inte</i>" : enc(to))}</div>"
+              + $"<div><b>Ämne:</b> {enc(mail.Subject)}</div>"
+              + (charge.PaymentStatus == "Paid"
+                    ? "<div style=\"color:#b45309;margin-top:6px\">Kravet är betalt och ingår inte i ett utskick.</div>" : "")
+              + "</div>";
+
+            // Kuvertet läggs in direkt efter <body>, så mejlets eget dokument står orört under det.
+            var html = mail.Html;
+            var bodyAt = html.IndexOf("<body", StringComparison.OrdinalIgnoreCase);
+            var bodyEnd = bodyAt < 0 ? -1 : html.IndexOf('>', bodyAt);
+            html = bodyEnd < 0 ? envelope + html : html.Insert(bodyEnd + 1, envelope);
+
+            return Content(html, "text/html; charset=utf-8");
         }
 
         /// <summary>
