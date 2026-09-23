@@ -40,5 +40,28 @@ namespace HpskSite.Models.Ledger
         public int UploadedByMemberId { get; set; }
 
         public DateTime UploadedUtc { get; set; }
+
+        /// <summary>
+        /// Makulerad — bilagan hörde inte till den här verifikationen.
+        ///
+        /// <para><b>⚠️⚠️ DET FINNS INGEN RADERING, och det är en DB-trigger som håller det</b>
+        /// (<c>TR_LedgerAttachment_NoDelete</c>), inte en regel i koden. Ett kvitto kan hamna på
+        /// fel verifikation, och då måste kopplingen gå att bryta — men underlaget självt är
+        /// räkenskapsinformation och ska bevaras i sju år. Samma form som fakturor och
+        /// verifikationer redan har: originalet står kvar, med ett skäl och en tidsstämpel.</para>
+        ///
+        /// <para><b>⚠️ Filen på disk rörs ALDRIG vid makulering.</b> Namnet är innehållets hash, så
+        /// samma fil kan vara underlag till en annan verifikation — en radering hade tagit den
+        /// med sig. Se <c>LedgerAttachmentStorage</c>.</para>
+        /// </summary>
+        public DateTime? VoidedUtc { get; set; }
+
+        public int? VoidedByMemberId { get; set; }
+
+        /// <summary>Varför den kopplades bort. <b>Obligatoriskt vid makulering</b> — en bortkopplad
+        /// bilaga utan skäl går inte att bedöma i efterhand, allra minst av en revisor.</summary>
+        public string? VoidReason { get; set; }
+
+        public bool IsVoided => VoidedUtc.HasValue;
     }
 }

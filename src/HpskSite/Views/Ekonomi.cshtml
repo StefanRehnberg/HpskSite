@@ -373,6 +373,10 @@
         {
             <a href="#" class="ek-nav" data-view="bokfor">Bokför</a>
         }
+        @* ⚠️ Verifikationerna ligger direkt efter Bokför, inte bland rapporterna. Det är dit man
+           går för att LETA REDA PÅ en post — "vad var det där på 3 400 i mars?" — och det är en
+           daglig fråga, inte en årlig. *@
+        <a href="#" class="ek-nav" data-view="verifikationer">Verifikationer</a>
         <a href="#" class="ek-nav soon" data-view="avstamning">Avstämning</a>
         <a href="#" class="ek-nav" data-view="rapport">Rapport</a>
         <a href="#" class="ek-nav" data-view="avgifter">Avgifter</a>
@@ -1021,6 +1025,75 @@
                 till en siffra: en bankrad utan motpart saknar en verifikation, en bokforingsrad
                 utan motpart ar bokford men syns inte pa kontot.
             *@
+            @*
+                ⚠️⚠️ VERIFIKATIONSLISTAN ÄR REVISIONENS RYGGRAD, och den saknades helt.
+                Skatteverket kräver att revisorn självständigt kan följa *bokförd transaktion →
+                verifikation → faktisk betalning* åt båda hållen. Bokföringen fanns, bankkopplingen
+                fanns — men det gick inte att BLÄDDRA i dem, och en kedja som inte går att följa
+                går inte att granska.
+
+                ⚠️ Två kolumner bär hela kedjan: "Underlag" och "Bank". En rad utan båda är inte
+                nödvändigtvis fel — men det är den raden en revisor frågar om.
+            *@
+            <section data-pane="verifikationer" hidden>
+                <div class="head">
+                    <div><h1>Vad är bokfört?</h1>
+                        <div class="sub">Varje verifikation, i nummerordning, med sitt underlag.</div></div>
+                    <div class="headactions">
+                        <span class="meta" id="@(uid)_verSummary"></span>
+                    </div>
+                </div>
+
+                @* ⚠️ Luckvarningen är ett EGET tillstånd, inte en rad i listan. Luckfri numrering
+                   är ett påstående vi gör; den här rutan är beviset, och den måste synas även när
+                   man sökt fram något helt annat. *@
+                <div class="ek-alert ek-bad d-none" id="@(uid)_verGap"></div>
+
+                <div class="ek-card wide">
+                    <div class="amount-row">
+                        <label style="flex:1 1 220px">Sök
+                            <input type="text" class="form-control" id="@(uid)_verSearch"
+                                   placeholder="text, motpart eller konto"></label>
+                        <label>Från <input type="text" class="form-control ek-date"
+                               placeholder="åååå-mm-dd" id="@(uid)_verFrom"></label>
+                        <label>Till <input type="text" class="form-control ek-date"
+                               placeholder="åååå-mm-dd" id="@(uid)_verTo"></label>
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                id="@(uid)_verApply">Visa</button>
+                        <button type="button" class="btn btn-sm btn-link"
+                                id="@(uid)_verClear">Rensa</button>
+                    </div>
+
+                    <table class="t" style="margin-top:.5rem">
+                        <thead><tr>
+                            <th style="width:6rem">Nr</th>
+                            <th style="width:7rem">Datum</th>
+                            <th>Avser</th>
+                            <th class="n" style="width:8rem">Belopp</th>
+                            <th style="width:6rem">Underlag</th>
+                            <th style="width:5rem">Bank</th>
+                        </tr></thead>
+                        <tbody id="@(uid)_verBody"></tbody>
+                    </table>
+
+                    <div class="amount-row" style="margin-top:.75rem">
+                        <button type="button" class="btn btn-sm btn-outline-secondary d-none"
+                                id="@(uid)_verMore">Visa fler</button>
+                        <span class="muted" id="@(uid)_verCount"></span>
+                    </div>
+                </div>
+
+                @* Detaljen öppnas i samma panel — en modal hade gjort det omöjligt att läsa
+                   verifikationen och listan samtidigt, vilket är precis vad man gör när man letar. *@
+                <div class="ek-card wide d-none" id="@(uid)_verDetail">
+                    <div class="ek-cardh">
+                        <h2 id="@(uid)_verDetailTitle">Verifikation</h2>
+                        <button type="button" class="btn btn-sm btn-link" id="@(uid)_verClose">Stäng</button>
+                    </div>
+                    <div id="@(uid)_verDetailBody"></div>
+                </div>
+            </section>
+
             <section data-pane="avstamning" hidden>
                 <div class="head">
                     <div><h1>Stämmer det?</h1>
@@ -1394,7 +1467,7 @@
     //    'Y-m-d' betyder att faltets .value fortsatter vara ISO, sa varje lasning och varje
     //    payload nedanfor ar oforandrad. Lagg till ett nytt datumfalt HAR, aldrig som type=date.
     var EK_DATE_FIELDS = ['start', 'end', 'bDate', 'repFrom', 'repTo', 'budDate',
-                          'fordrFrom', 'fordrTo'];
+                          'fordrFrom', 'fordrTo', 'verFrom', 'verTo'];
     if (window.flatpickr) {
         EK_DATE_FIELDS.forEach(function (n) {
             var f = el(n);
@@ -1478,6 +1551,9 @@
         if (name === 'bokslut' && !closeLoaded) { closeLoaded = true; loadClosing(); }
 
         if (name === 'avgifter' && !recvLoaded) { recvLoaded = true; loadReceivables(); }
+
+        // ⚠️ Samma skäl som ovan: listan läser hela årets verifikationer för luckkontrollen.
+        if (name === 'verifikationer' && !verLoaded) { verLoaded = true; loadJournal(true); }
     }
     root.querySelectorAll('[data-view]').forEach(function (a) {
         a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
@@ -1629,6 +1705,270 @@
 
         renderTodo();
     }
+
+    // ══ VERIFIKATIONERNA ═════════════════════════════════════════════════
+    var verLoaded = false, verSkip = 0, verRows = [];
+    var VER_PAGE = 50;
+
+    function verQuery(skip) {
+        var q = '?issuerType=' + issuerType + '&issuerId=' + issuerId
+              + '&skip=' + skip + '&take=' + VER_PAGE;
+
+        var f = el('verFrom') && el('verFrom').value;
+        var t = el('verTo') && el('verTo').value;
+        var s = el('verSearch') && el('verSearch').value;
+
+        if (f) q += '&from=' + encodeURIComponent(f);
+        if (t) q += '&to=' + encodeURIComponent(t);
+        if (s) q += '&search=' + encodeURIComponent(s);
+
+        return q;
+    }
+
+    // ⚠️ `reset` skiljer "visa fler" från en ny sökning. Utan den växer listan när man
+    //    filtrerar, och träffarna blandas med de gamla — vilket ser ut som att filtret inte tog.
+    async function loadJournal(reset) {
+        if (reset) { verSkip = 0; verRows = []; closeEntry(); }
+
+        var d = await fetch('/umbraco/surface/EkonomiAdmin/GetJournal' + verQuery(verSkip),
+                            { cache: 'no-store' }).then(function (r) { return r.json(); });
+
+        if (!d.success) {
+            el('verBody').innerHTML = '<tr><td colspan="6" class="muted">'
+                + esc(d.message || 'Listan gick inte att läsa.') + '</td></tr>';
+            return;
+        }
+
+        verRows = verRows.concat(d.rows || []);
+        verSkip = verRows.length;
+
+        // ⚠️⚠️ LUCKAN ÄR DET FÖRSTA EN REVISOR KONTROLLERAR. Numreringen påstås vara
+        //    luckfri; rutan är beviset. Den räknas på HELA året, inte på den filtrerade sidan —
+        //    ett filter tar självklart bort nummer, och att kalla det en lucka vore falskt larm
+        //    på varje sökning.
+        show(el('verGap'), d.hasGaps === true);
+        if (d.hasGaps) {
+            el('verGap').textContent = 'Det saknas verifikationsnummer i serien: '
+                + (d.series || []).filter(function (x) { return x.count !== x.expected; })
+                    .map(function (x) {
+                        return x.prefix + '-' + x.first + '\u2013' + x.prefix + '-' + x.last
+                             + ' har ' + x.count + ' av ' + x.expected;
+                    }).join(', ')
+                + '. Numreringen ska vara luckfri — kontakta oss.';
+        }
+
+        el('verSummary').textContent = (d.series || [])
+            .map(function (x) { return x.prefix + '-' + x.first + ' – ' + x.prefix + '-' + x.last; })
+            .join(' · ');
+
+        renderJournal(d.total);
+    }
+
+    function renderJournal(total) {
+        el('verBody').innerHTML = verRows.length === 0
+            ? '<tr><td colspan="6" class="muted">Inga verifikationer i urvalet.</td></tr>'
+            : verRows.map(function (v, i) {
+                // ⚠️ Kedjans två sista led som EGNA kolumner. En bock räcker: frågan är
+                //    "finns det underlag" och "syns betalningen på banken", inte hur många.
+                var underlag = v.attachmentCount > 0
+                    ? '<span title="' + v.attachmentCount + ' underlag">\u2713 '
+                      + v.attachmentCount + '</span>'
+                    : (v.isManual
+                        ? '<span class="muted" title="Bokförd för hand utan underlag">\u2014</span>'
+                        : '<span class="muted" title="Faller ut ur en avgift — underlaget är anmälan">auto</span>');
+
+                var bank = v.bankMatchedLines > 0
+                    ? '<span title="Matchad mot kontoutdraget">\u2713</span>'
+                    : '<span class="muted">\u2014</span>';
+
+                return '<tr class="ver-row" data-ver="' + i + '" style="cursor:pointer">'
+                     + '<td>' + esc(v.number) + '</td>'
+                     + '<td class="muted">' + esc(shortDate(v.accountingDate)) + '</td>'
+                     + '<td>' + esc(v.description)
+                     + (v.counterparty ? ' <span class="muted">· ' + esc(v.counterparty) + '</span>' : '')
+                     + (v.correctsEntryId ? ' <span class="muted">(rättelse)</span>' : '')
+                     + '</td>'
+                     + '<td class="n">' + kr(v.amount) + '</td>'
+                     + '<td>' + underlag + '</td>'
+                     + '<td>' + bank + '</td></tr>';
+            }).join('');
+
+        el('verCount').textContent = verRows.length + ' av ' + total;
+        show(el('verMore'), verRows.length < total);
+
+        // ⚠️ Raden bär ett INDEX, aldrig verifikationens text i ett onclick. Beskrivningen
+        //    skrivs av en människa, och ett citattecken där hade avslutat attributet.
+        el('verBody').querySelectorAll('tr[data-ver]').forEach(function (tr) {
+            tr.addEventListener('click', function () {
+                openEntry(verRows[parseInt(tr.dataset.ver, 10)]);
+            });
+        });
+    }
+
+    function closeEntry() { show(el('verDetail'), false); }
+
+    async function openEntry(v) {
+        if (!v) return;
+
+        var d = await fetch('/umbraco/surface/EkonomiAdmin/GetJournalEntry?issuerType=' + issuerType
+                            + '&issuerId=' + issuerId + '&entryId=' + v.entryId, { cache: 'no-store' })
+            .then(function (r) { return r.json(); });
+
+        if (!d.success) { alert(d.message || 'Verifikationen gick inte att läsa.'); return; }
+
+        el('verDetailTitle').textContent = 'Verifikation ' + d.head.number;
+
+        var rader = '<table class="t"><thead><tr><th>Konto</th><th>Text</th>'
+                  + '<th class="n" style="width:7rem">Debet</th>'
+                  + '<th class="n" style="width:7rem">Kredit</th></tr></thead><tbody>'
+            + (d.lines || []).map(function (l) {
+                return '<tr><td>' + l.accountNumber + ' <span class="muted">'
+                     + esc(l.accountName) + '</span></td>'
+                     + '<td>' + esc(l.text || '') + '</td>'
+                     + '<td class="n">' + (l.debit ? kr(l.debit) : '') + '</td>'
+                     + '<td class="n">' + (l.credit ? kr(l.credit) : '') + '</td></tr>';
+            }).join('')
+            // ⚠️ Summaraden visas ALLTID, också när den går ihop. Det är den enklaste
+            //    kontrollen som finns, och en revisor ska slippa addera i huvudet.
+            + '<tr class="sum"><td colspan="2"><strong>' + (d.balances ? 'Går ihop' : 'GÅR INTE IHOP')
+            + '</strong></td><td class="n"><strong>' + kr(d.debitTotal) + '</strong></td>'
+            + '<td class="n"><strong>' + kr(d.creditTotal) + '</strong></td></tr>'
+            + '</tbody></table>';
+
+        var bank = (d.bankRows || []).length === 0
+            ? '<p class="muted">Ingen rad i kontoutdraget pekar på den här verifikationen.</p>'
+            : '<table class="t"><thead><tr><th style="width:7rem">Bokfördes</th><th>Text på kontoutdraget</th>'
+              + '<th class="n" style="width:8rem">Belopp</th><th style="width:10rem">Matchad</th></tr></thead><tbody>'
+              + d.bankRows.map(function (b) {
+                  return '<tr><td class="muted">' + esc(shortDate(b.bookedDate)) + '</td>'
+                       + '<td>' + esc(b.text) + '</td>'
+                       + '<td class="n">' + kr(b.amount) + '</td>'
+                       + '<td class="muted">' + esc(b.matchKind || '')
+                       + (b.matchedByName ? ' · ' + esc(b.matchedByName) : '') + '</td></tr>';
+              }).join('') + '</tbody></table>';
+
+        var underlag = (d.attachments || []).length === 0
+            ? '<p class="muted">Inget underlag kopplat än.</p>'
+            : '<div class="rows">' + d.attachments.map(function (a) {
+                var url = '/umbraco/surface/EkonomiAdmin/GetAttachment?issuerType=' + issuerType
+                        + '&issuerId=' + issuerId + '&attachmentId=' + a.id;
+                return '<div><span class="grow">'
+                     + (a.isVoided ? '<s>' : '')
+                     + '<a href="' + url + '" target="_blank" rel="noopener">' + esc(a.fileName) + '</a>'
+                     + (a.isVoided ? '</s>' : '')
+                     + '<span class="muted"> · ' + esc(a.uploadedByName) + ' ' + esc(shortDate(a.uploadedUtc)) + '</span>'
+                     + (a.isVoided ? '<div class="muted">Bortkopplad: ' + esc(a.voidReason || '') + '</div>' : '')
+                     + '</span>'
+                     + (canWrite && !a.isVoided
+                        ? '<button type="button" class="btn btn-sm btn-link" data-void="' + a.id + '">Koppla bort</button>'
+                        : '')
+                     + '</div>';
+            }).join('') + '</div>';
+
+        // ⚠️ Uppladdningen renderas bara för den som får skriva. En inbjuden revisor läser
+        //    underlagen, lägger aldrig till dem.
+        var uppladdning = !canWrite ? '' :
+            '<div class="amount-row" style="margin-top:.75rem">'
+            + '<input type="file" class="form-control" id="' + uid + '_verFile" '
+            + 'accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.csv,.txt">'
+            + '<button type="button" class="btn btn-sm btn-primary" id="' + uid + '_verUpload">'
+            + 'Lägg till underlag</button></div>'
+            + '<div class="ek-alert ek-bad d-none" id="' + uid + '_verUploadErr" style="margin-top:.5rem"></div>';
+
+        el('verDetailBody').innerHTML =
+            '<p class="muted" style="margin-top:0">' + esc(shortDate(d.head.accountingDate))
+            + ' · ' + esc(d.head.description)
+            + (d.head.counterparty ? ' · ' + esc(d.head.counterparty) : '') + '</p>'
+            + rader
+            + '<h3 style="margin-top:1.25rem">Underlag</h3>' + underlag + uppladdning
+            + '<h3 style="margin-top:1.25rem">Betalningen på banken</h3>' + bank;
+
+        show(el('verDetail'), true);
+        el('verDetail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        if (canWrite) wireEntryActions(d.head.entryId, v);
+    }
+
+    function wireEntryActions(entryId, row) {
+        var up = el('verUpload');
+        if (up) up.addEventListener('click', function () {
+            var input = el('verFile');
+            var errBox = el('verUploadErr');
+            show(errBox, false);
+
+            if (!input.files || input.files.length === 0) {
+                errBox.textContent = 'Välj en fil först.';
+                show(errBox, true);
+                return;
+            }
+
+            up.disabled = true;
+
+            // ⚠️ FormData, inte JSON — en fil ska aldrig base64-kodas genom ett JSON-fält.
+            //    Token hämtas på samma sätt som postJson gör.
+            withToken(function (t) {
+                var fd = new FormData();
+                fd.append('issuerType', issuerType);
+                fd.append('issuerId', issuerId);
+                fd.append('entryId', entryId);
+                fd.append('file', input.files[0]);
+
+                fetch('/umbraco/surface/EkonomiAdmin/UploadAttachment', {
+                    method: 'POST',
+                    headers: { 'RequestVerificationToken': t || '' },
+                    body: fd
+                })
+                    .then(function (r) { return r.json(); })
+                    .then(function (j) {
+                        up.disabled = false;
+                        if (!j.success) { errBox.textContent = j.message; show(errBox, true); return; }
+                        // Listan måste hämtas om — underlagskolumnen är en av kedjans två bockar.
+                        loadJournal(true).then(function () { openEntry(row); });
+                    })
+                    .catch(function (e) {
+                        up.disabled = false;
+                        errBox.textContent = e.message;
+                        show(errBox, true);
+                    });
+            });
+        });
+
+        el('verDetailBody').querySelectorAll('button[data-void]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                // ⚠️ Skälet är obligatoriskt och prövas på servern också. En bortkopplad
+                //    bilaga utan skäl går inte att bedöma i efterhand.
+                var reason = window.prompt(
+                    'Varför kopplas underlaget bort? Texten syns för revisorn.\n\n'
+                    + 'Filen raderas inte — den är räkenskapsinformation.');
+
+                if (reason === null) return;
+
+                postJson('/umbraco/surface/EkonomiAdmin/VoidAttachment', {
+                    issuerType: issuerType, issuerId: issuerId,
+                    attachmentId: parseInt(b.dataset.void, 10), reason: reason
+                }).then(function (j) {
+                    if (!j.success) { alert(j.message); return; }
+                    loadJournal(true).then(function () { openEntry(row); });
+                });
+            });
+        });
+    }
+
+    if (el('verApply')) el('verApply').addEventListener('click', function () { loadJournal(true); });
+    if (el('verMore')) el('verMore').addEventListener('click', function () { loadJournal(false); });
+    if (el('verClose')) el('verClose').addEventListener('click', closeEntry);
+
+    if (el('verClear')) el('verClear').addEventListener('click', function () {
+        el('verSearch').value = '';
+        setDateField('verFrom', '');
+        setDateField('verTo', '');
+        loadJournal(true);
+    });
+
+    // Enter i sökrutan ska söka — annars får man leta efter knappen.
+    if (el('verSearch')) el('verSearch').addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); loadJournal(true); }
+    });
 
     // ══ FORDRINGSEXPORTEN ════════════════════════════════════════════════════════════════
     async function loadReceivables() {
