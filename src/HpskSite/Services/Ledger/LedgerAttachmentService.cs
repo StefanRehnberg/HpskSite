@@ -206,19 +206,23 @@ namespace HpskSite.Services.Ledger
                 using var db = _databaseFactory.CreateDatabase();
                 var ldb = new LedgerDb(db, issuerId);
 
+                // ⚠️⚠️ BETALDA UTGIFTER KRÄVER UNDERLAG PRECIS SOM HANDBOKFÖRDA POSTER. Räkningen
+                //    tog bara källtypen "manual", så ett utbetalt utlägg utan kvitto — det en
+                //    revisor letar efter först — räknades aldrig som saknat. En RÄTTELSE räknas
+                //    inte: dess underlag är originalet och skälet.
+                const string needsDocs =
+                    @"e.IssuerType = @0 AND e.IssuerId = @1 AND e.FiscalYearId = @2
+                      AND e.SourceType IN (@3, @4) AND e.CorrectsEntryId IS NULL";
+
                 var total = ldb.ExecuteScalar<int>(
-                    @"SELECT COUNT(1) FROM dbo.LedgerJournalEntry
-                       WHERE IssuerType = @0 AND IssuerId = @1 AND FiscalYearId = @2
-                         AND SourceType = @3",
-                    issuerType, issuerId, fiscalYearId, LedgerSourceType.Manual);
+                    "SELECT COUNT(1) FROM dbo.LedgerJournalEntry e WHERE " + needsDocs,
+                    issuerType, issuerId, fiscalYearId, LedgerSourceType.Manual, LedgerSourceType.Expense);
 
                 var missing = ldb.ExecuteScalar<int>(
-                    @"SELECT COUNT(1) FROM dbo.LedgerJournalEntry e
-                       WHERE e.IssuerType = @0 AND e.IssuerId = @1 AND e.FiscalYearId = @2
-                         AND e.SourceType = @3
-                         AND NOT EXISTS (SELECT 1 FROM dbo.LedgerAttachment a
-                                          WHERE a.JournalEntryId = e.Id AND a.VoidedUtc IS NULL)",
-                    issuerType, issuerId, fiscalYearId, LedgerSourceType.Manual);
+                    "SELECT COUNT(1) FROM dbo.LedgerJournalEntry e WHERE " + needsDocs + @"
+                       AND NOT EXISTS (SELECT 1 FROM dbo.LedgerAttachment a
+                                        WHERE a.JournalEntryId = e.Id AND a.VoidedUtc IS NULL)",
+                    issuerType, issuerId, fiscalYearId, LedgerSourceType.Manual, LedgerSourceType.Expense);
 
                 return (missing, total);
             }

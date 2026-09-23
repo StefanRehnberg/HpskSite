@@ -222,21 +222,21 @@
                 else if (Model.AttachmentsTotal == 0)
                 {
                     <p class="muted" style="margin:0">
-                        Inga handbokförda poster i året — allt har fallit ut ur avgifter och
+                        Inga handbokförda poster eller betalda utgifter i året — allt har fallit ut ur avgifter och
                         anmälningar, där underlaget är anmälan själv.
                     </p>
                 }
                 else if (Model.AttachmentsMissing == 0)
                 {
                     <div class="okbx">
-                        Alla @Model.AttachmentsTotal handbokförda poster har ett underlag.
+                        Alla @Model.AttachmentsTotal handbokförda poster och betalda utgifter har ett underlag.
                     </div>
                 }
                 else
                 {
                     <div class="warn">
                         <strong>@Model.AttachmentsMissing av @Model.AttachmentsTotal</strong>
-                        handbokförda poster saknar underlag.
+                        handbokförda poster och betalda utgifter saknar underlag.
                         @* Rakt in i listan, filtrerad — annars får revisorn leta själv. *@
                         <div style="margin-top:8px">
                             <a href="/ekonomi?type=@s.OwnerType&id=@s.OwnerId&vy=verifikationer">
