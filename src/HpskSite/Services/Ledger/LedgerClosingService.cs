@@ -235,9 +235,9 @@ namespace HpskSite.Services.Ledger
                     ? "Underlagsläget gick inte att läsa."
                     : missingDocs == 0
                         ? (totalDocs == 0
-                            ? "Inga handbokförda poster i året — avgifternas underlag är anmälan."
+                            ? "Inga handbokförda poster eller betalda utgifter i året — avgifternas underlag är anmälan."
                             : "")
-                        : $"{missingDocs} av {totalDocs} handbokförda poster saknar underlag.",
+                        : $"{missingDocs} av {totalDocs} handbokförda poster och betalda utgifter saknar underlag.",
                 GoTo = "verifikationer"
             });
 
