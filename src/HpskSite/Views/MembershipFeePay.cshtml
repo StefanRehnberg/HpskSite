@@ -99,9 +99,10 @@
                 @* ⚠️⚠️ SWISH ELLER BANKGIRO — många klubbar och kretsar betalar via bankgiro (Stefan
                    2026-09-23). Båda visas när föreningen har båda, och "Jag har betalat" gäller båda.
                    Referensen kommer ur MembershipFeeCharge.PaymentReference — samma som i mejlet. *@
+                @* id="swish"/"bankgiro" är mejlets två knappar: var och en landar på sin egen sektion. *@
                 @if (Model.HasSwish)
                 {
-                    <h2 class="pay-h">Betala med Swish</h2>
+                    <h2 class="pay-h" id="swish">Betala med Swish</h2>
                     <img class="qr" src="@Model.SwishQrDataUri" alt="Swish QR-kod" />
                     <p class="hint">Skanna QR-koden med Swish, eller öppna Swish-appen på din telefon.</p>
                     @if (!string.IsNullOrEmpty(Model.SwishAppUrl))
@@ -111,7 +112,7 @@
                 }
                 @if (Model.HasBg)
                 {
-                    <h2 class="pay-h">@(Model.HasSwish ? "Eller betala med bankgiro" : "Betala med bankgiro")</h2>
+                    <h2 class="pay-h" id="bankgiro">@(Model.HasSwish ? "Eller betala med bankgiro" : "Betala med bankgiro")</h2>
                     <table class="bg">
                         <tr><td>Bankgiro</td><td>@Model.BgNumber</td></tr>
                         <tr><td>Mottagare</td><td>@Model.ClubName</td></tr>

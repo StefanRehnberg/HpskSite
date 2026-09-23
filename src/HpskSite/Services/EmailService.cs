@@ -2551,19 +2551,20 @@ namespace HpskSite.Services
             string payUrl,
             MailReplyTo replyTo,
             string? bgNumber = null,
-            string? reference = null)
+            string? reference = null,
+            bool hasSwish = true)
         {
             // ⚠️ Returnerar om mejlet FAKTISKT skickades — ytan markerar avgiften som skickad bara då.
-            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference);
+            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference, hasSwish);
             return await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>Exakt det mejl <see cref="SendMembershipFeeRequestAsync"/> skickar, utan att skicka.</summary>
         public RegionFeeMailPreview PreviewMembershipFeeRequest(
             string memberEmail, string memberName, string clubName, int year, decimal amount, string payUrl, MailReplyTo replyTo,
-            string? bgNumber = null, string? reference = null)
+            string? bgNumber = null, string? reference = null, bool hasSwish = true)
         {
-            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference);
+            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference, hasSwish);
             var reply = ResolveReplyAddress(replyTo);
             return new RegionFeeMailPreview
             {
@@ -2581,11 +2582,11 @@ namespace HpskSite.Services
         /// svarsfoten säger det. De två raderna sa emot varandra.
         /// </summary>
         private static (string Subject, string Body) BuildMembershipFeeRequestBody(
-            string memberName, string clubName, int year, decimal amount, string payUrl, string? bgNumber, string? reference)
+            string memberName, string clubName, int year, decimal amount, string payUrl, string? bgNumber, string? reference, bool hasSwish)
         {
-            var bgBlock = BankgiroMailBlock(bgNumber, reference);
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
             var amountLabel = Math.Round(amount).ToString("N0", sv) + " kr";
+            var payBlock = PaymentOptionsMailBlock(payUrl, hasSwish, bgNumber, clubName, amountLabel, reference);
             var subject = $"Medlemsavgift {year} – {clubName}";
 
             var body = $@"<html>
@@ -2609,11 +2610,8 @@ namespace HpskSite.Services
             <p>Det är dags att betala medlemsavgiften till
                <strong>{System.Net.WebUtility.HtmlEncode(clubName)}</strong> för {year}.</p>
             <div class='amount'>{amountLabel}</div>
-            <p>Klicka på knappen nedan för att öppna betalsidan. Där kan du betala med
-               Swish direkt via QR-kod eller app.</p>
-            <p><a class='btn' href='{payUrl}'>Betala medlemsavgift</a></p>
-            {bgBlock}
-            <p style='font-size:13px;color:#6c757d;'>Har du redan betalat ser du det på sidan.</p>
+            {payBlock}
+            <p style='font-size:13px;color:#6c757d;'>När du har betalat kan du trycka <em>Jag har betalat</em> på betalsidan. Har du redan betalat ser du det där.</p>
         </div>
     </div>
 </body>
@@ -2641,9 +2639,10 @@ namespace HpskSite.Services
             string payUrl,
             MailReplyTo replyTo,
             string? bgNumber = null,
-            string? reference = null)
+            string? reference = null,
+            bool hasSwish = true)
         {
-            var (subject, body) = BuildRegionFeeRequestBody(clubName, regionName, year, lines, total, payUrl, bgNumber, reference);
+            var (subject, body) = BuildRegionFeeRequestBody(clubName, regionName, year, lines, total, payUrl, bgNumber, reference, hasSwish);
             return await SendEmailAsync(clubEmail, subject, body, replyTo);
         }
 
@@ -2666,9 +2665,10 @@ namespace HpskSite.Services
             string payUrl,
             MailReplyTo replyTo,
             string? bgNumber = null,
-            string? reference = null)
+            string? reference = null,
+            bool hasSwish = true)
         {
-            var (subject, body) = BuildRegionFeeRequestBody(clubName, regionName, year, lines, total, payUrl, bgNumber, reference);
+            var (subject, body) = BuildRegionFeeRequestBody(clubName, regionName, year, lines, total, payUrl, bgNumber, reference, hasSwish);
             var reply = ResolveReplyAddress(replyTo);
 
             return new RegionFeeMailPreview
@@ -2685,17 +2685,54 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Bankgiro som alternativ till Swish i avgiftsmejlen — tomt när föreningen saknar bankgiro.
-        /// <b>Referensen är samma som på betalsidan</b> (MembershipFeeCharge.PaymentReference), annars går
-        /// en inbetalning inte att para ihop med avgiften.
+        /// Betalsätten i avgiftsmejlen: <b>en rubricerad sektion och en egen knapp per sätt.</b>
+        ///
+        /// <para>⚠️ Skäl (Stefan 2026-09-23): en knapp följd av "du kan också betala till bankgiro" läses
+        /// som "knappen = Swish, annars bankgiro för hand" — den som vill betala med bankgiro klickar
+        /// aldrig och ser inte bankgiro-QR:en. Båda sätten står därför som jämbördiga sektioner, och
+        /// bankgiroknappen landar på betalsidans bankgirosektion (<c>#bankgiro</c>).</para>
+        ///
+        /// <para>Referensen är samma som på betalsidan (MembershipFeeCharge.PaymentReference), annars går
+        /// en inbetalning inte att para ihop med avgiften. Inline-stilar: många e-postklienter
+        /// ignorerar &lt;style&gt;.</para>
         /// </summary>
-        private static string BankgiroMailBlock(string? bgNumber, string? reference)
+        private static string PaymentOptionsMailBlock(
+            string payUrl, bool hasSwish, string? bgNumber, string payeeName, string amountLabel, string? reference)
         {
-            if (string.IsNullOrWhiteSpace(bgNumber)) return "";
             var enc = new Func<string, string>(System.Net.WebUtility.HtmlEncode);
-            return $"<p style='font-size:14px'>Du kan också betala till <strong>bankgiro {enc(bgNumber)}</strong>"
-                 + (string.IsNullOrWhiteSpace(reference) ? "." : $" — ange referensen <strong>{enc(reference)}</strong>.")
-                 + "</p>";
+            var hasBg = !string.IsNullOrWhiteSpace(bgNumber);
+            const string btn = "display:inline-block;background:#0d6efd;color:#fff;text-decoration:none;padding:11px 20px;border-radius:6px;font-size:15px";
+            const string box = "background:#fff;border:1px solid #dee2e6;border-radius:6px;padding:14px 16px;margin:0 0 12px";
+            const string h = "margin:0 0 6px;font-size:16px";
+
+            if (!hasSwish && !hasBg)
+                return $"<p>Öppna betalsidan för att se hur du betalar.</p><p><a href='{payUrl}' style='{btn}'>Öppna betalsidan</a></p>";
+
+            var both = hasSwish && hasBg;
+            var sb = new System.Text.StringBuilder();
+            if (both) sb.Append("<p style='margin:18px 0 10px'><strong>Du kan betala på två sätt — välj det som passar dig:</strong></p>");
+
+            if (hasSwish)
+            {
+                sb.Append($"<div style='{box}'><h3 style='{h}'>{(both ? "1. " : "")}Betala med Swish</h3>")
+                  .Append("<p style='margin:0 0 10px'>Öppna betalsidan och skanna QR-koden med Swish-appen, eller öppna Swish direkt från telefonen.</p>")
+                  .Append($"<a href='{payUrl}#swish' style='{btn}'>Betala med Swish</a></div>");
+            }
+            if (hasBg)
+            {
+                const string td = "padding:2px 14px 2px 0;color:#6c757d";
+                sb.Append($"<div style='{box}'><h3 style='{h}'>{(both ? "2. " : "")}Betala med bankgiro</h3>")
+                  .Append("<table style='border-collapse:collapse;margin:0 0 8px'>")
+                  .Append($"<tr><td style='{td}'>Bankgiro</td><td><strong>{enc(bgNumber!)}</strong></td></tr>")
+                  .Append($"<tr><td style='{td}'>Mottagare</td><td>{enc(payeeName)}</td></tr>")
+                  .Append($"<tr><td style='{td}'>Belopp</td><td>{amountLabel}</td></tr>");
+                if (!string.IsNullOrWhiteSpace(reference))
+                    sb.Append($"<tr><td style='{td}'>Referens</td><td><strong>{enc(reference)}</strong></td></tr>");
+                sb.Append("</table>")
+                  .Append("<p style='margin:0 0 10px'>Ange referensen när du betalar. På betalsidan finns också en QR-kod du kan skanna i din bankapp.</p>")
+                  .Append($"<a href='{payUrl}#bankgiro' style='{btn}'>Betala med bankgiro</a></div>");
+            }
+            return sb.ToString();
         }
 
         private static (string Subject, string Body) BuildRegionFeeRequestBody(
@@ -2706,12 +2743,13 @@ namespace HpskSite.Services
             decimal total,
             string payUrl,
             string? bgNumber,
-            string? reference)
+            string? reference,
+            bool hasSwish)
         {
-            var bgBlock = BankgiroMailBlock(bgNumber, reference);
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
             string Kr(decimal d) => d.ToString("N0", sv) + " kr";
             var enc = new Func<string, string>(System.Net.WebUtility.HtmlEncode);
+            var payBlock = PaymentOptionsMailBlock(payUrl, hasSwish, bgNumber, regionName, Kr(total), reference);
 
             var subject = $"Kretsavgift {year} – {regionName}";
             var rows = string.Join("", lines.Select(l =>
@@ -2731,10 +2769,9 @@ namespace HpskSite.Services
                 <tr><td style='padding:8px 12px 0 0;border-top:1px solid #ccc'><strong>Att betala</strong></td>
                     <td style='padding:8px 0 0;border-top:1px solid #ccc;text-align:right'><strong>{Kr(total)}</strong></td></tr>
             </table>
-            <p>Öppna betalsidan för att betala med Swish. Har klubben ett annat antal medlemmar än det
-               som står ovan kan ni svara på det här mejlet — svaret går till kretsen.</p>
-            <p><a href='{payUrl}' style='display:inline-block;background:#0d6efd;color:#fff;text-decoration:none;padding:12px 22px;border-radius:6px'>Öppna betalsidan</a></p>
-            {bgBlock}
+            {payBlock}
+            <p style='font-size:13px;color:#6c757d'>Har klubben ett annat antal medlemmar än det som står ovan kan ni
+               svara på det här mejlet — svaret går till kretsen.</p>
         </div>
     </div>
 </body>
