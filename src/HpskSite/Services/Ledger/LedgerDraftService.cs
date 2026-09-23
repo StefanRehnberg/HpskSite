@@ -46,7 +46,11 @@ namespace HpskSite.Services.Ledger
             var ldb = new LedgerDb(db, draft.IssuerId);
             using var tx = db.GetTransaction();
 
-            if (draft.Id > 0)
+            // ⚠️⚠️ `!= 0`, ALDRIG `> 0` — sandlådans id räknar nedåt. Med `> 0` såg varje
+            //    sandlådeutkast ut som ett NYTT utkast vid varje sparning, och raden dubblerades
+            //    i stället för att uppdateras. Förbefintligt; hittat 2026-09-23 när samma fälla
+            //    slog till i utgiftssidan.
+            if (draft.Id != 0)
             {
                 var existing = ldb.SingleOrDefault<LedgerJournalEntryDraft>(
                     "SELECT * FROM dbo.LedgerJournalEntryDraft WHERE Id = @0", draft.Id);

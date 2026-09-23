@@ -23,8 +23,12 @@ namespace HpskSite.Services.Ledger
         private readonly LedgerPostingService _posting;
         private readonly ILogger<LedgerAssetService> _logger;
 
-        /// <summary>Källtypen på avskrivningens verifikation. <b>Nyckeln hela härledningen vilar på.</b></summary>
-        public const string SourceType = "asset-depreciation";
+        /// <summary>
+        /// Källtypen på avskrivningens verifikation. <b>Nyckeln hela härledningen vilar på.</b>
+        /// <para>⚠️ Samma sträng som förut, flyttad till <see cref="LedgerSourceType"/> där de
+        /// andra bor — ett värdebyte hade gjort varje redan bokförd avskrivning osynlig.</para>
+        /// </summary>
+        public const string SourceType = LedgerSourceType.AssetDepreciation;
 
         public LedgerAssetService(
             IUmbracoDatabaseFactory databaseFactory,

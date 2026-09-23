@@ -4590,6 +4590,131 @@ The legacy `#finalsStartListSection` markup + `checkFinalsEligibility` / `displa
 - `Views/CompetitionManagement.cshtml` — partial wired in, gated on `numberOfFinalSeries > 0`
 - `Views/Competition.cshtml` — public "Visa finalsstartlista" button gated on `isOfficialFinalsStartList`
 
+## Utgiftssidan (P6) — utlägg, leverantörsfakturor och attest (2026-09-23)
+
+Den sista stora luckan innan påståendet *"vi är ert bokföringsprogram"* håller. Den som lägger ut
+pengar för klubben hade ingen väg alls tillbaka, och `LedgerApproval` fanns som **tabell i prod
+sedan P1 — tom, utan en enda läsare eller skrivare**.
+
+### ⚠️⚠️ KONTANTMETODEN STYR HELA FORMEN
+
+Föreningen bokför enligt kontantmetoden (beslutat 2026-09-16), så **att registrera en utgift
+bokför ingenting**. Verifikationen skrivs när pengarna FAKTISKT betalas. Raden är arbetslistan och
+beslutsunderlaget, inte bokföringen.
+
+- **Bokföringsdatumet är BETALdatumet**, aldrig fakturadatumet. En decemberfaktura som betalas i
+  januari hör till det nya året. Tar man fakturadatumet blir kontantmetoden en faktureringsmetod
+  utan att någon valt det.
+- **Det som står obetalt vid årets slut är en leverantörsskuld**, och bokslutet har fått ett eget
+  steg för det — **spegelbilden av kundfordringssteget**, som inte fanns förrän nu. Utan det ser
+  ett år med obetalda räkningar exakt ut som ett år utan. Checklistan är därmed **åtta** steg.
+
+### ⚠️⚠️ UTLÄGG OCH LEVERANTÖRSFAKTURA ÄR SAMMA FORM — en tabell
+
+Båda är *"åtagandet uppstod före pengarna"*, alltså exakt den andra betalningsformen i den låsta
+ramen. Det som skiljer är **motparten**: en medlem som ska ha tillbaka sina pengar, eller ett
+företag med en förfallodag. Det är ett fält. Byggda som två tabeller hade attest, kvitto, betalning
+och bokslutssteg funnits i två exemplar, fria att glida isär.
+
+- **Ett utlägg har ingen förfallodag**, och det är inte ett saknat värde — att tillåta en hade gjort
+  listan "förfallna utgifter" obegriplig. Skrivvägen vägrar den.
+- **Ett utlägg KRÄVER en medlem** (`PayeeMemberId`), och det är inte formalia: det är det fältet
+  attestspärren läser. Tillåts fritext kan någon registrera ett utlägg till sig själv och godkänna
+  det, och kontrollen är borta.
+
+### ⚠️⚠️ ATTESTEN BOR PÅ UTGIFTEN, INTE PÅ VERIFIKATIONEN
+
+`LedgerApproval` är nycklad på en **verifikation**, och modellens egen kommentar sa *"attesten sätts
+EFTER att verifikationen skrivits"*. Det var riktigt när den skrevs — men under kontantmetoden finns
+ingen verifikation förrän pengarna redan gått, **och en attest som bara kan sättas efter
+utbetalningen är ingen internkontroll**.
+
+Godkännandet registreras därför på utgiften, och **speglas till `LedgerApproval` när verifikationen
+skrivs**, så revisorn hittar attesten från verifikationens sida — det är verifikationslistan hen
+läser, inte utgiftslistan. De två kan inte glida isär: **en betald utgift går inte att attestera om.**
+
+### ⚠️⚠️ TVÅ REGLER, OLIKA HÅRDA — och skillnaden är avsiktlig
+
+| Fall | Utfall |
+|---|---|
+| **Mottagaren attesterar sin egen utbetalning** | **VÄGRAS**, alltid |
+| **Registreraren attesterar** | Tillåts, men **noteras** på raden och på verifikationen |
+
+Den första är den enda regeln som alltid är rätt och alltid går att följa — det finns alltid någon
+annan i styrelsen. Att bara varna där hade gjort attesten till en formalitet i exakt det fall den
+finns för. Den andra hade, som spärr, gjort funktionen **oanvändbar för en liten förening** där
+samma person öppnar posten och betalar räkningarna; `ApprovedBySelf` bär i stället uppgiften vidare
+till verifikationen.
+
+**⚠️ Attesten är ett VILLKOR för betalningen, inte en anteckning bredvid den.** Går det att betala
+en oattesterad utgift är attesten frivillig i praktiken.
+
+**⚠️ En ändring av belopp, datum, konto, mottagare eller form RIVER attesten** och svaret säger det.
+Godkännandet gällde en bestämd summa. Men **en rättad stavning river den inte** — annars blir varje
+stavfel en ny attestrunda, och då slutar folk rätta stavfel.
+
+### ⚠️ Kvittot lagras vid registreringen, bilagras vid bokföringen
+
+Attesten sker **mot kvittot**, alltså innan det finns någon verifikation att hänga det på. Filen
+sparas därför genom `LedgerAttachmentStorage` när utgiften registreras, och `LedgerAttachment`-raden
+skapas först när verifikationen finns. Lagringen är innehållsadresserad, så det kostar ingenting.
+Efter betalningen hör kvittot till **verifikationen** och `SetReceipt` vägrar — annars hade ytan
+visat en annan fil än bilagan, alltså två svar på "vad är underlaget".
+
+### ⚠️ Mottagarlistan kan inte se likadan ut för klubb och krets
+
+`GetExpensePayees` är ett ställe, med båda värdformerna: en **klubb** har medlemmar, en **krets** har
+klubbar — inte medlemmar — så där erbjuds kretsens **styrelse**, och avgränsningen skrivs ut på
+skärmen. Skrivs regeln i klienten blir kretsens lista tom och formuläret ser trasigt ut i stället för
+avgränsat. Läses **LAT**, först när någon väljer Utlägg: klubbgrenen går genom hela medlemsregistret.
+
+### ⚠️⚠️ SANDLÅDANS ID ÄR NEGATIVA — `!= 0`, ALDRIG `> 0`
+
+Sviten hittade tre ställen där `id > 0` betydde "finns", och i en sandlåda är varje id negativt:
+
+1. **`LedgerExpenseService.ResolveEntryNumbers`** — verifikationsnumret försvann från varje betald
+   rad i sandlådan.
+2. **`SaveExpense`s `ProjectId > 0`** — ett projekt i sandlådan gick inte att koppla till en utgift.
+3. **`LedgerDraftService.Save` (FÖRBEFINTLIG)** — `draft.Id > 0` fick varje sandlådeutkast att se ut
+   som ett NYTT utkast vid varje sparning, så raden **dubblerades** i stället för att uppdateras.
+
+Samma familj som `ORDER BY Id DESC`-fällan. **Leta efter `> 0` på ett id varje gång något nytt rör
+liggaren.**
+
+### Ytan
+
+Rälspost **Utgifter**, mellan Avgifter (pengar in) och Tillgångar. **Inte gated på `CanWrite`** —
+revisorn måste kunna läsa utgifterna och se vem som attesterat. Två tabeller: *Att göra* (väntar på
+attest + attesterade) och *Avklarat* i en `<details>`.
+- **Betalpanelen ligger ÖVER listan**, inte i raden: betalningen behöver ett datum och ett konto, och
+  ett formulär inuti en tabellrad blir oläsbart på en telefon — som är där kassören står.
+- **"Kvitto saknas" står UT.** En tom cell läser som att ingen tittat efter kvittot.
+- Formen styr fälten: utlägg visar medlemsväljaren och gömmer förfallodagen, faktura tvärtom — och
+  **förfallodagen nollställs** vid byte, annars vägrar servern på något användaren inte ser.
+
+**Operatörssteg:** kör `Migrations/create-ledger-expense-table.sql` — **FÖRE deployen**, som alltid
+när NPoco får en ny POCO. Körd i dev 2026-09-23; **EJ körd i prod.** Både `LedgerAsset` och
+`LedgerExpense` är tillagda i `LedgerSchemaInspector`, så en saknad tabell larmar vid start i stället
+för att fälla varje skrivning tyst. Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen
+Umbraco-nod.
+
+**⛔ Ingenting av ekonomidelen deployas till prod** förrän klubbarna kan prova i sandlådan.
+
+Verifierat **35 enhetstest** (`LedgerExpenseRulesTests`) och **83/83
+`hpsk-verify/ekonomi-utgifter-verify.mjs`**. **A/B mot en byggd mutation som tar bort de tre
+reglerna: 15 av 83 faller** — och kaskaden visar vad de skyddar mot: en oattesterad utgift blev
+betald, och en självattest gick igenom.
+
+⚠️ Sviten kör i en **egen sandlåda** av samma skäl som anläggningsregistrets: den BETALAR, och en
+verifikation går inte att ta tillbaka. Den bär **kontrollprov åt båda håll** — att en rättad
+beskrivning INTE river attesten, och att ett intäktskonto vägras (annars kan "bara kostnadskonton"
+vara sant i listan och obevakat i sparningen).
+
+⚠️ **Två fällor sviten själv gick i, båda värda att känna igen:** `id > 0` rödmarkerade en korrekt
+produkt (se ovan), och **en kollapsad `<details>` renderar inte sitt innehåll** — tre påståenden föll
+på en fullt fungerande panel innan sviten öppnade den. Samma fälla som förtroenderutan i
+vapenregistret.
+
 ## Anläggningsregistret (P9) — vad föreningen äger, och årets avskrivning (2026-09-23)
 
 Bokslutets sista frågetecken. Steget "Avskrivningar" stod som **Unknown** med texten

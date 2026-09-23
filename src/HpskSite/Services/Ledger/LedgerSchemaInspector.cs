@@ -61,7 +61,14 @@ namespace HpskSite.Services.Ledger
             //    omgång som migreringen — annars är en tabell som saknas i prod osynlig för
             //    startkontrollen, och det är precis det tysta läget hela lagret finns för.
             typeof(LedgerBankImport),
-            typeof(LedgerBankRow)
+            typeof(LedgerBankRow),
+
+            // ⚠️ Anläggningsregistret (P9) och utgiftssidan (P6). Båda kräver sin migrering FÖRE
+            //    deploy — NPoco genererar SET-satser mot dem så fort POCO:n finns, så en saknad
+            //    tabell fäller varje skrivning. Startkontrollen är det som gör den saknaden
+            //    högljudd i stället för tyst.
+            typeof(LedgerAsset),
+            typeof(LedgerExpense)
         };
 
         /// <summary>

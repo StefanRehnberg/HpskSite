@@ -16,6 +16,7 @@ namespace HpskSite.Services.Ledger
         private readonly LedgerBankImportService _bank;
         private readonly LedgerAttachmentService _attachments;
         private readonly LedgerAssetService _assets;
+        private readonly LedgerExpenseService _expenses;
         private readonly ILogger<LedgerClosingService> _logger;
 
         public LedgerClosingService(
@@ -23,12 +24,14 @@ namespace HpskSite.Services.Ledger
             LedgerBankImportService bank,
             LedgerAttachmentService attachments,
             LedgerAssetService assets,
+            LedgerExpenseService expenses,
             ILogger<LedgerClosingService> logger)
         {
             _databaseFactory = databaseFactory;
             _bank = bank;
             _attachments = attachments;
             _assets = assets;
+            _expenses = expenses;
             _logger = logger;
         }
 
@@ -249,7 +252,33 @@ namespace HpskSite.Services.Ledger
                 GoTo = "bokfor"
             });
 
-            // 5 — Avskrivningar.
+            // 5 — Obetalda utgifter som leverantörsskuld.
+            //
+            // ⚠️⚠️ SPEGELBILDEN AV KUNDFORDRINGSSTEGET, och den fanns inte förrän utgiftssidan
+            //    byggdes. Under kontantmetoden bokförs en faktura när den betalas — alltså är en
+            //    obetald faktura vid årsskiftet en SKULD som inte syns någonstans i liggaren.
+            //    Utan det här steget ser ett år med obetalda räkningar exakt ut som ett år utan.
+            var (unpaidCount, unpaidAmount) = _expenses.UnpaidAt(issuerType, issuerId, s.To);
+
+            list.Steps.Add(new()
+            {
+                Key = "payables",
+                Title = "Obetalda utgifter som leverantörsskuld",
+                // ⚠️ Finns inget obetalt är steget klart — inte "ej tillämpligt". En förening som
+                //    betalat allt har gjort steget genom att inte behöva det. Samma form som
+                //    kundfordringssteget ovan.
+                State = unpaidCount < 0 ? LedgerClosingChecklist.StepState.Unknown
+                      : unpaidCount == 0 ? LedgerClosingChecklist.StepState.Done
+                                         : LedgerClosingChecklist.StepState.Unknown,
+                Detail = unpaidCount < 0
+                    ? "Utgiftsläget gick inte att läsa."
+                    : unpaidCount == 0 ? ""
+                    : $"{unpaidCount} utgifter på {unpaidAmount:N0} kr är registrerade men inte "
+                      + "betalda vid årets slut. Bokför dem som leverantörsskuld innan året fastställs.",
+                GoTo = "utgifter"
+            });
+
+            // 6 — Avskrivningar.
             // ⚠️ Steget stod som UNKNOWN fram till 2026-09-23 med texten "anläggningsregister
             //    finns inte ännu". Nu finns det, och steget kan svara.
             //
