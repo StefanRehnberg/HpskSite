@@ -106,15 +106,20 @@
             </table>
         </div>
         <div class="d-flex flex-wrap gap-2 align-items-center">
-            <button type="button" class="btn btn-primary btn-sm" id="rfGenerate">Skapa krav för klubbar utan krav</button>
+            @* ⚠️ "Skapa krav för 10 klubbar utan krav" var obegripligt (Stefan 2026-09-23): samma ord
+               betydde både handlingen och läget. Knappen säger nu VAD som skapas, och vilka klubbar
+               som hoppas över står i förklaringen under. Ytan säger "kretsavgift"/"avgift" genomgående. *@
+            <button type="button" class="btn btn-primary btn-sm" id="rfGenerate">Skapa kretsavgift</button>
             <button type="button" class="btn btn-outline-primary btn-sm" id="rfSend">
-                <i class="bi bi-envelope me-1"></i>Skicka betalkrav (e-post)
+                <i class="bi bi-envelope me-1"></i>Mejla betalningsuppmaning till klubbarna
             </button>
         </div>
         <p class="small text-muted mt-2 mb-0">
-            Medlemsantalet är ett förslag ur pistol.nu:s register (utträdda och avlidna räknas inte).
-            Rätta talet om registret inte stämmer — det tal du anger sparas på kravet.
-            En klubb vars belopp blir 0 kr får inget krav.
+            <strong>Skapa kretsavgift</strong> gäller klubbarna som ännu inte fått årets avgift, med det
+            medlemsantal och det egna belopp som står på raden. Klubbar som redan fått sin avgift rörs inte,
+            och en klubb vars belopp blir 0 kr får ingen avgift.
+            Medlemsantalet är ett förslag ur pistol.nu:s register (utträdda och avlidna räknas inte) —
+            rätta det om registret inte stämmer.
         </p>
     </div>
 </div>
@@ -179,7 +184,7 @@
     }
 
     function stateCell(c) {
-        if (!c) return '<span class="text-muted">Inget krav</span>';
+        if (!c) return '<span class="text-muted">Inte skapad än</span>';
         if (c.status === 'Paid')
             return '<span class="badge bg-success-subtle text-success-emphasis">Betald</span>'
                  + (c.paidDate ? '<div class="small text-muted">' + esc(c.paidDate) + '</div>' : '');
@@ -213,9 +218,10 @@
             items.push(['unpaid', 'Markera obetald']);
         }
         items.push(['link', 'Kopiera betallänk']);
+        if (unpaid) items.push(['preview', 'Förhandsvisa mejlet']);
         var del = unpaid && !c.paymentSentDate
             ? '<li><hr class="dropdown-divider"></li><li><button type="button" class="dropdown-item text-danger" data-rf-act="delete" data-rf-charge="'
-              + c.id + '">Ta bort kravet</button></li>' : '';
+              + c.id + '">Ta bort avgiften</button></li>' : '';
 
         // ⚠️ strategy:fixed — tabellen ligger i .table-responsive, vars overflow klipper menyn.
         return '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" '
@@ -232,8 +238,8 @@
         $('rfPer').value = data.rate.perMember || 0;
 
         var t = data.totals;
-        $('rfSummary').textContent = t.count === 0 ? 'Inga krav för året ännu'
-            : t.count + ' krav · ' + kr(t.charged) + ' · ' + t.paidCount + ' betalda (' + kr(t.paid) + ') · kvar ' + kr(t.outstanding);
+        $('rfSummary').textContent = t.count === 0 ? 'Ingen kretsavgift skapad för året ännu'
+            : t.count + (t.count === 1 ? ' avgift · ' : ' avgifter · ') + kr(t.charged) + ' · ' + t.paidCount + ' betalda (' + kr(t.paid) + ') · kvar ' + kr(t.outstanding);
 
         var rows = data.rows || [];
         $('rfRows').innerHTML = rows.length === 0
@@ -272,7 +278,8 @@
 
         var without = rows.filter(function (r) { return !r.charge; }).length;
         $('rfGenerate').disabled = without === 0;
-        $('rfGenerate').textContent = without === 0 ? 'Alla klubbar har ett krav' : 'Skapa krav för ' + without + ' klubbar utan krav';
+        $('rfGenerate').textContent = without === 0 ? 'Alla klubbar har fått årets kretsavgift'
+            : 'Skapa kretsavgift för ' + without + (without === 1 ? ' klubb' : ' klubbar');
     }
 
     function readInputs(i) {
@@ -290,7 +297,7 @@
         var v = readInputs(i);
         var cell = document.querySelector('[data-rf-preview="' + i + '"]');
         var amount = preview(v.count, v.manual);
-        cell.innerHTML = amount > 0 ? kr(amount) : '<span class="text-muted">0 kr — inget krav</span>';
+        cell.innerHTML = amount > 0 ? kr(amount) : '<span class="text-muted">0 kr — ingen avgift</span>';
     });
 
     async function load() {
@@ -378,12 +385,18 @@
     async function act(action, chargeId, lineId) {
         var d;
         if (action === 'extra' || action === 'count') { openEdit(action, chargeId); return; }
+        if (action === 'preview') {
+            // Egen flik: mejlets stilar ska inte blandas med panelens. Inget skickas.
+            window.open('/umbraco/surface/MembershipFeeAdmin/PreviewRegionPaymentRequest?chargeId=' + chargeId,
+                        '_blank', 'noopener');
+            return;
+        }
         if (action === 'rmline') {
             d = await post('/umbraco/surface/MembershipFeeAdmin/RemoveRegionChargeLine', { chargeId: chargeId, lineId: lineId });
         } else if (action === 'delete') {
             var c = findCharge(chargeId);
-            if (!window.confirm('Ta bort kravet för ' + (c ? c.clubName : '') + '?\n\nKravet och dess rader försvinner. '
-                                + 'Klubben kan få ett nytt krav efteråt.')) return;
+            if (!window.confirm('Ta bort kretsavgiften för ' + (c ? c.clubName : '') + '?\n\nAvgiften och dess rader försvinner. '
+                                + 'Klubben kan få en ny avgift efteråt.')) return;
             d = await post('/umbraco/surface/MembershipFeeAdmin/DeleteRegionCharge', { chargeId: chargeId });
         } else if (action === 'paid' || action === 'unpaid') {
             // Samma MarkPaid/MarkUnpaid som medlemsavgiften — formulärpost med token, som där.

@@ -2614,6 +2614,53 @@ namespace HpskSite.Services
             string payUrl,
             MailReplyTo replyTo)
         {
+            var (subject, body) = BuildRegionFeeRequestBody(clubName, regionName, year, lines, total, payUrl);
+            return await SendEmailAsync(clubEmail, subject, body, replyTo);
+        }
+
+        /// <summary>
+        /// Exakt det mejl <see cref="SendRegionFeeRequestAsync"/> skickar — kuvert, ämne och kropp med
+        /// svarsfoten — utan att skicka något.
+        ///
+        /// <para><b>⚠️ Samma byggväg som utskicket, aldrig en kopia.</b> En förhandsvisning som byggs
+        /// på egen hand visar det man TROR skickas; den här visar det som skickas. Den finns för att
+        /// kretsen ska kunna se mejlet innan det går till femton klubbar — och för att dev, som saknar
+        /// SMTP, ska kunna visa det över huvud taget.</para>
+        /// </summary>
+        public RegionFeeMailPreview PreviewRegionFeeRequest(
+            string clubEmail,
+            string clubName,
+            string regionName,
+            int year,
+            IReadOnlyList<(string Description, decimal Amount)> lines,
+            decimal total,
+            string payUrl,
+            MailReplyTo replyTo)
+        {
+            var (subject, body) = BuildRegionFeeRequestBody(clubName, regionName, year, lines, total, payUrl);
+            var reply = ResolveReplyAddress(replyTo);
+
+            return new RegionFeeMailPreview
+            {
+                To = clubEmail,
+                FromName = string.IsNullOrWhiteSpace(replyTo?.FromDisplayName) ? _fromName : replyTo!.FromDisplayName!,
+                FromAddress = _fromAddress,
+                ReplyTo = reply is null ? null : $"{reply.Value.Name} <{reply.Value.Email}>",
+                Subject = subject,
+                // ⚠️ Svarsfoten fogas in precis som i SendEmailAsync — utan den visar
+                //    förhandsvisningen ett annat mejl än det som skickas.
+                Html = AppendReplyFooter(body, replyTo)
+            };
+        }
+
+        private static (string Subject, string Body) BuildRegionFeeRequestBody(
+            string clubName,
+            string regionName,
+            int year,
+            IReadOnlyList<(string Description, decimal Amount)> lines,
+            decimal total,
+            string payUrl)
+        {
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
             string Kr(decimal d) => d.ToString("N0", sv) + " kr";
             var enc = new Func<string, string>(System.Net.WebUtility.HtmlEncode);
@@ -2644,7 +2691,18 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            return await SendEmailAsync(clubEmail, subject, body, replyTo);
+            return (subject, body);
         }
+    }
+
+    /// <summary>Ett mejl som det skulle se ut, med sitt kuvert. Se <c>PreviewRegionFeeRequest</c>.</summary>
+    public class RegionFeeMailPreview
+    {
+        public string To { get; set; } = "";
+        public string FromName { get; set; } = "";
+        public string FromAddress { get; set; } = "";
+        public string? ReplyTo { get; set; }
+        public string Subject { get; set; } = "";
+        public string Html { get; set; } = "";
     }
 }
