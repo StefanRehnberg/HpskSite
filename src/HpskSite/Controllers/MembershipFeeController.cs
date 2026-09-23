@@ -76,6 +76,8 @@ namespace HpskSite.Controllers
                         : issuer.Value<string>("clubName") ?? issuer.Name ?? "";
                     // NEW club-doctype property the owner will add; read defensively.
                     model.SwishNumber = (issuer.HasProperty("swishNumber") ? issuer.Value<string>("swishNumber") : null) ?? "";
+                    model.BgNumber = (issuer.HasProperty("bgNumber") ? issuer.Value<string>("bgNumber") : null)?.Trim() ?? "";
+                    model.OrgNumber = (issuer.HasProperty("orgNumber") ? issuer.Value<string>("orgNumber") : null) ?? "";
                 }
 
                 if (charge.IsRegionFee)
@@ -110,6 +112,21 @@ namespace HpskSite.Controllers
                     _logger.LogWarning(ex, "Failed to build Swish QR for membership fee charge {ChargeId}", chargeId);
                 }
             }
+
+            // Bankgiro: siffror + referens alltid som text; QR:en är en bekvämlighet för bankappen.
+            model.Reference = charge.PaymentReference;
+            if (!model.Covered && BankgiroQrCodeGenerator.IsValidBankgiro(model.BgNumber))
+            {
+                model.BgNumber = BankgiroQrCodeGenerator.FormatAccount(model.BgNumber);
+                if (charge.Amount > 0)
+                    try
+                    {
+                        model.BgQrDataUri = "data:image/png;base64," + Convert.ToBase64String(BankgiroQrCodeGenerator.GeneratePng(
+                            model.ClubName, model.BgNumber, charge.Amount, model.Reference, payeeOrgNumber: model.OrgNumber));
+                    }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Bankgiro-QR för avgift {ChargeId} gick inte att bygga", chargeId); }
+            }
+            else model.BgNumber = "";
 
             return View("~/Views/MembershipFeePay.cshtml", model);
         }
@@ -146,6 +163,14 @@ namespace HpskSite.Controllers
         public string SwishAppUrl { get; set; } = "";
 
         public bool HasSwish => !string.IsNullOrEmpty(SwishQrDataUri);
+
+        /// <summary>Föreningens bankgiro (formaterat), tomt om det saknas eller är ogiltigt.</summary>
+        public string BgNumber { get; set; } = "";
+        public string OrgNumber { get; set; } = "";
+        public string BgQrDataUri { get; set; } = "";
+        /// <summary>Referensen vid bankgirobetalning — <see cref="MembershipFeeCharge.PaymentReference"/>.</summary>
+        public string Reference { get; set; } = "";
+        public bool HasBg => !string.IsNullOrEmpty(BgNumber);
 
         /// <summary>Kretsavgift: kretsen tar emot (<see cref="ClubName"/>), klubben betalar.</summary>
         public bool IsRegionFee { get; set; }

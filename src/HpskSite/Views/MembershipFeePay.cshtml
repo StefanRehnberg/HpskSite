@@ -44,6 +44,10 @@
         }
         .claimed { color: var(--muted); font-size: 13px; margin-top: 10px; }
         .hint { font-size: 13px; color: var(--muted); }
+        .pay-h { font-size: 16px; margin: 18px 0 8px; }
+        table.bg { margin: 0 auto 8px; border-collapse: collapse; font-size: 15px; text-align: left; }
+        table.bg td { padding: 3px 12px 3px 0; }
+        table.bg td:first-child { color: var(--muted); }
     </style>
 </head>
 <body>
@@ -92,20 +96,41 @@
             {
                 <div class="amount">@Kr(Model.Amount)</div>
 
+                @* ⚠️⚠️ SWISH ELLER BANKGIRO — många klubbar och kretsar betalar via bankgiro (Stefan
+                   2026-09-23). Båda visas när föreningen har båda, och "Jag har betalat" gäller båda.
+                   Referensen kommer ur MembershipFeeCharge.PaymentReference — samma som i mejlet. *@
                 @if (Model.HasSwish)
                 {
+                    <h2 class="pay-h">Betala med Swish</h2>
                     <img class="qr" src="@Model.SwishQrDataUri" alt="Swish QR-kod" />
                     <p class="hint">Skanna QR-koden med Swish, eller öppna Swish-appen på din telefon.</p>
-
                     @if (!string.IsNullOrEmpty(Model.SwishAppUrl))
                     {
                         <a class="btn btn-swish" href="@Model.SwishAppUrl">Öppna Swish</a>
                     }
+                }
+                @if (Model.HasBg)
+                {
+                    <h2 class="pay-h">@(Model.HasSwish ? "Eller betala med bankgiro" : "Betala med bankgiro")</h2>
+                    <table class="bg">
+                        <tr><td>Bankgiro</td><td>@Model.BgNumber</td></tr>
+                        <tr><td>Mottagare</td><td>@Model.ClubName</td></tr>
+                        <tr><td>Belopp</td><td>@Kr(Model.Amount)</td></tr>
+                        <tr><td>Referens</td><td><strong>@Model.Reference</strong></td></tr>
+                    </table>
+                    <p class="hint">Ange referensen, så vet @(Model.IsRegionFee ? "kretsen" : "klubben") vem betalningen gäller.</p>
+                    @if (!string.IsNullOrEmpty(Model.BgQrDataUri))
+                    {
+                        <img class="qr" src="@Model.BgQrDataUri" alt="Bankgiro-QR" style="max-width:180px" />
+                        <p class="hint">Eller skanna koden i din bankapp.</p>
+                    }
+                }
 
-                    <form method="post" action="/medlemsavgift/@Model.Token/betalat" style="display:inline-block;">
+                @if (Model.HasSwish || Model.HasBg)
+                {
+                    <form method="post" action="/medlemsavgift/@Model.Token/betalat" style="display:block;margin-top:12px">
                         <button type="submit" class="btn btn-paid">Jag har betalat</button>
                     </form>
-
                     @if (Model.PaymentClaimed)
                     {
                         <p class="claimed">@(Model.IsRegionFee
@@ -116,8 +141,8 @@
                 else
                 {
                     <div class="warn">@(Model.IsRegionFee
-                        ? "Kretsen har inte lagt in något Swishnummer ännu — kontakta kretsen."
-                        : "Klubben har inte konfigurerat Swish ännu — kontakta klubben.")</div>
+                        ? "Kretsen har inte lagt in något Swishnummer eller bankgiro ännu — kontakta kretsen."
+                        : "Klubben har inte lagt in något Swishnummer eller bankgiro ännu — kontakta klubben.")</div>
                 }
             }
         }

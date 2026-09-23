@@ -5070,7 +5070,23 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
     orörda klubbar fått sin avgift via `GenerateRegionCharges`); "Påminn N klubbar" = `mode: reminder`.
     `ChargeIds` = en enda klubb ("Skicka mejlet nu"). 0 kr skickas aldrig.
   - **Taxan är EN MENING** (ren text); den ändras i en dialog via sidans Åtgärder. Antal och belopp ändras
-    i en dialog via radens Åtgärder. Ett ändrat antal visar "registret: N". Ordet "krav" står inte på sidan.
+    i en dialog via radens Åtgärder. Ordet "krav" står inte på sidan.
+  - **Omgång 7 (Stefan 2026-09-23) — samma regler på båda ytorna:**
+    - **Status är sajtens badges** (`bg-success` Betald, `bg-warning text-dark` Väntande/Skickad), inte en
+      egen textkolumn. Ingen förklarande text under listan, inget "registret: N".
+    - **Markera som betald ligger i radens Åtgärder** (först, under Betalning) — ingen egen Betald-knapp.
+    - **E-post är en kolumn**, och en saknad adress visas som badgen *Ingen e-post* PÅ RADEN — aldrig som en
+      summering under listan.
+    - **⚠️ Eget e-postregister per utställare: `MembershipFeePayerEmail`** (IssuerType, IssuerId, PayerId,
+      Email; unikt per trio). Kretsen kan ha en annan adress för klubbens BETALNINGAR än klubbens allmänna
+      `contactEmail`, klubben en annan för medlemmens avgift. **Effektiv adress = registrets om den finns,
+      annars klubbens contactEmail / medlemmens e-post** — samma regel i listan, utskicket, förhandsvisningen
+      och påminnelsen. `SetFeeEmail` (radens *E-post för avgiften…*) skriver; tom adress tar bort raden.
+      ⚠️ Skriver ALDRIG tillbaka till klubbnoden eller medlemmen — den uppgiften delas med annat.
+    - **Bankgiro som alternativ till Swish** på betalsidan och i mejlet, ur utställarens `bgNumber`
+      (`BankgiroQrCodeGenerator`). Referensen är `MembershipFeeCharge.PaymentReference` = `KA{år}-{id}` /
+      `MA{år}-{id}` — **samma sträng på sidan, i mejlet och i BG-QR:en**, annars går betalningen inte att
+      stämma av. "Jag har betalat" visas när Swish ELLER bankgiro finns.
   - **Telefon:** status och knappar får en egen rad under klubben (`tr.rf-mrow`); knapparna finns
     därför två gånger i DOM:en — `td.rf-actions` är datorns.
   - ⚠️ `load()` rör inte beskedet — det körs direkt efter Skicka.
@@ -5086,7 +5102,7 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
   kretsen vägras i `GenerateRegionCharges` och **ingenting** skapas.
 - **Ta bort ett krav** bara så länge klubben varken betalat eller sagt sig ha betalat.
 
-**Operatörssteg:** kör `Migrations/add-region-fee-to-membership-fee.sql` (bär även `RequestSentDate`) **FÖRE deployen** — NPoco
+**Operatörssteg:** kör `Migrations/add-region-fee-to-membership-fee.sql` (bär även `RequestSentDate` och tabellen `MembershipFeePayerEmail`) **FÖRE deployen** — NPoco
 genererar `SET IssuerType = …` i varje uppdatering av en avgift så snart POCO:n bär fältet, så utan
 kolumnerna faller **varje klubbs "Markera betald"**, inte bara kretsens. Körd i dev 2026-09-23;
 **EJ körd i prod.** Fildeploy av `KnowledgeBase/docs/kretsavgift.md` (ny). Adds C# → full ombyggnad.
