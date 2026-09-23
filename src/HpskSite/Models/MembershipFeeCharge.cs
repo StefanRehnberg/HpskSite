@@ -81,6 +81,14 @@ namespace HpskSite.Models
         [Ignore]
         public bool IsRequestSent => RequestSentDate.HasValue;
 
+        /// <summary>
+        /// Referensen vid betalning via bankgiro — "KA2026-123" (kretsavgift) / "MA2026-123"
+        /// (medlemsavgift). <b>EN plats</b>: betalsidan, bankgiro-QR:en och mejlet visar samma, annars
+        /// går en inbetalning inte att para ihop med avgiften. Max 25 tecken (bankgiro-QR:ens iref).
+        /// </summary>
+        [Ignore]
+        public string PaymentReference => $"{(IsRegionFee ? "KA" : "MA")}{Year}-{Id}";
+
         [Ignore]
         public bool IsRegionFee => IssuerType == MembershipFeeIssuer.Region;
 

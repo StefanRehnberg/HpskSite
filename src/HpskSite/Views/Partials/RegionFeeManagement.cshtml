@@ -78,6 +78,7 @@
             <table class="table align-middle mb-2">
                 <thead><tr>
                     <th>Klubb</th>
+                    <th class="d-none d-md-table-cell">E-post</th>
                     <th class="text-end"><span class="d-none d-sm-inline">Medlemmar</span><span class="d-sm-none" title="Medlemmar">Medl.</span></th>
                     <th class="text-end">Att betala</th>
                     <th class="d-none d-sm-table-cell">Status</th>
@@ -86,7 +87,6 @@
                 <tbody id="rfRows"></tbody>
             </table>
         </div>
-        <div class="small text-muted" id="rfHint"></div>
     </div>
 </div>
 
@@ -200,12 +200,22 @@
         };
     }
 
+    // ⚠️ Status som på resten av sajten (Anmälningar, Fakturor): en BRICKA, datum intill i grått.
+    //    Betald = grön, Väntande = gul (skickad, inte betald), Inte skickad = grå.
+    function badge(cls, text, note) {
+        return '<span class="badge ' + cls + '">' + text + '</span>' + (note ? ' <span class="small text-muted">' + note + '</span>' : '');
+    }
     function statusCell(r, s) {
-        if (s.paid) return '<span class="text-success">✓ Betald' + (s.c.paidDate ? ' ' + day(s.c.paidDate) : '') + '</span>';
-        if (s.claimed) return '<span>Klubben säger att de betalat</span>';
-        if (s.amount <= 0) return '<span class="text-muted">Ingen avgift</span>';
-        if (s.sent) return '<span>Skickad ' + day(s.c.requestSentDate) + '</span>';
-        return '<span class="text-muted">Inte skickad' + (r.hasEmail ? '' : ' · ingen e-post') + '</span>';
+        if (s.paid) return badge('bg-success', 'Betald', s.c.paidDate ? day(s.c.paidDate) : '');
+        if (s.claimed) return badge('bg-info text-dark', 'Uppgett betald', day(s.c.paymentSentDate));
+        if (s.amount <= 0) return badge('bg-light text-dark border', 'Ingen avgift');
+        if (s.sent) return badge('bg-warning text-dark', 'Väntande', 'skickad ' + day(s.c.requestSentDate));
+        return badge('bg-secondary', 'Inte skickad');
+    }
+    // Vart avgiften mejlas. Saknas adress står det i listan — inte i en text under den.
+    function emailCell(r) {
+        if (!r.hasEmail) return '<span class="badge bg-danger-subtle text-danger-emphasis border">Ingen e-post</span>';
+        return '<span class="small">' + esc(r.email) + '</span>';
     }
 
     function item(act, clubId, text, extra) {
@@ -220,6 +230,12 @@
         if (s.paid) {
             items.push(item('unpaid', id, 'Ångra betald'));
         } else {
+            // Betald ligger i menyn som allt annat på raden — samma form som resten av sajten.
+            if (s.amount > 0) {
+                items.push('<li><h6 class="dropdown-header">Betalning</h6></li>');
+                items.push(item('paid', id, 'Markera som betald'));
+                items.push('<li><hr class="dropdown-divider"></li>');
+            }
             items.push('<li><h6 class="dropdown-header">Avgiften</h6></li>');
             items.push(item('count', id, 'Ändra antal medlemmar…'));
             if (!s.sent) items.push(item('amount', id, 'Ändra beloppet…'));
@@ -233,6 +249,7 @@
             items.push(item('preview', id, 'Visa mejlet'));
             if (r.hasEmail && s.amount > 0) items.push(item('send-one', id, s.sent ? 'Skicka mejlet igen' : 'Skicka mejlet nu'));
             items.push(item('link', id, 'Kopiera betallänk'));
+            items.push(item('email', id, 'E-post för avgiften…'));
             if (s.c && !s.claimed) {
                 items.push('<li><hr class="dropdown-divider"></li>');
                 items.push(s.sent ? item('delete', id, 'Ta bort avgiften', ' text-danger')
@@ -240,11 +257,9 @@
             }
         }
         // ⚠️ strategy:fixed — tabellen ligger i .table-responsive, vars overflow annars klipper menyn.
-        return '<div class="d-inline-flex gap-1 align-items-center">'
-             + (s.paid ? '' : '<button type="button" class="btn btn-sm btn-outline-success" data-rf-act="paid" data-rf-id="' + id + '">Betald</button>')
-             + '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" '
+        return '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" '
              + 'data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\'>Åtgärder</button>'
-             + '<ul class="dropdown-menu dropdown-menu-end">' + items.join('') + '</ul></div></div>';
+             + '<ul class="dropdown-menu dropdown-menu-end">' + items.join('') + '</ul></div>';
     }
 
     function render() {
@@ -274,18 +289,17 @@
                   + (s.extras.length ? '<div class="small text-muted">inkl. ' + s.extras.map(function (l) {
                         return esc(l.description.toLowerCase()) + ' ' + kr(l.amount); }).join(', ') + '</div>' : '')
                   + '</td>'
-                  + '<td class="text-end rf-n">' + esc(countLabel)
-                  + (s.count != null && s.count !== r.proposedCount ? '<div class="small text-muted">registret: ' + r.proposedCount + '</div>' : '')
-                  + '</td>'
+                  + '<td class="d-none d-md-table-cell">' + emailCell(r) + '</td>'
+                  + '<td class="text-end rf-n">' + esc(countLabel) + '</td>'
                   + '<td class="text-end rf-n">' + kr(s.amount) + (s.manual ? '<div class="small text-muted">eget belopp</div>' : '') + '</td>'
                   + '<td class="small d-none d-sm-table-cell">' + statusCell(r, s) + '</td>'
                   + '<td class="text-end rf-n rf-actions d-none d-sm-table-cell">' + actionsCell(r, s) + '</td></tr>'
                   // På telefon ryms inte fem kolumner: status och knappar får en egen rad under klubben.
                   + '<tr class="rf-mrow d-sm-none"><td colspan="3"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2 small">'
-                  + statusCell(r, s) + actionsCell(r, s) + '</div></td></tr>';
+                  + '<span>' + statusCell(r, s) + (r.hasEmail ? '' : ' ' + emailCell(r)) + '</span>' + actionsCell(r, s) + '</div></td></tr>';
         });
 
-        html += '<tr class="rf-total"><td>Totalt</td><td></td><td class="text-end rf-n">' + kr(total) + '</td><td class="d-none d-sm-table-cell"></td><td class="d-none d-sm-table-cell"></td></tr>';
+        html += '<tr class="rf-total"><td>Totalt</td><td class="d-none d-md-table-cell"></td><td></td><td class="text-end rf-n">' + kr(total) + '</td><td class="d-none d-sm-table-cell"></td><td class="d-none d-sm-table-cell"></td></tr>';
         $('rfRows').innerHTML = html;
 
         $('rfSummary').textContent = hasRate
@@ -301,9 +315,6 @@
             $('rfNothingToSend').textContent = hasRate ? 'Alla klubbar har fått avgiften.' : 'Bestäm avgiften först.';
         }
 
-        // ⚠️ EN rad text, och bara det som behövs för att komma vidare.
-        $('rfHint').textContent = noMail === 0 || READONLY ? ''
-            : noMail + (noMail === 1 ? ' klubb har' : ' klubbar har') + ' ingen e-postadress. Välj Åtgärder → Kopiera betallänk på raden och skicka länken själv.';
     }
 
     // ⚠️ load() rör INTE beskedet. Den körs direkt efter Skicka, och ett tömt besked betyder att
@@ -409,6 +420,19 @@
                 async function () {
                     var cid = await chargeIdFor(clubId); if (!cid) return 'Avgiften kunde inte skapas.';
                     var x = await post('AddRegionChargeLine', { chargeId: cid, description: $('rfFormLineText').value, amount: num('rfFormLineAmount') });
+                    return x.success ? null : x.message;
+                });
+            return;
+        }
+        if (act === 'email') {
+            // Kretsens eget adressregister: kassörens adress är sällan klubbens allmänna.
+            openForm('E-post för avgiften — ' + row.clubName,
+                field('rfFormEmail', 'Skicka kretsavgiften till', row.emailIsOwn ? row.email : '', '', 'email')
+                + '<p class="text-muted small mb-0">' + (row.defaultEmail
+                    ? 'Lämna tomt för att använda klubbens vanliga adress (' + esc(row.defaultEmail) + ').'
+                    : 'Klubben har ingen vanlig adress på pistol.nu.') + ' Klubbens egen adress ändras inte.</p>',
+                async function () {
+                    var x = await postForm('SetFeeEmail', { issuerType: 1, issuerId: REGION_ID, payerId: clubId, email: $('rfFormEmail').value });
                     return x.success ? null : x.message;
                 });
             return;

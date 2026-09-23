@@ -2549,18 +2549,21 @@ namespace HpskSite.Services
             int year,
             decimal amount,
             string payUrl,
-            MailReplyTo replyTo)
+            MailReplyTo replyTo,
+            string? bgNumber = null,
+            string? reference = null)
         {
             // ⚠️ Returnerar om mejlet FAKTISKT skickades — ytan markerar avgiften som skickad bara då.
-            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl);
+            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference);
             return await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>Exakt det mejl <see cref="SendMembershipFeeRequestAsync"/> skickar, utan att skicka.</summary>
         public RegionFeeMailPreview PreviewMembershipFeeRequest(
-            string memberEmail, string memberName, string clubName, int year, decimal amount, string payUrl, MailReplyTo replyTo)
+            string memberEmail, string memberName, string clubName, int year, decimal amount, string payUrl, MailReplyTo replyTo,
+            string? bgNumber = null, string? reference = null)
         {
-            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl);
+            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference);
             var reply = ResolveReplyAddress(replyTo);
             return new RegionFeeMailPreview
             {
@@ -2578,8 +2581,9 @@ namespace HpskSite.Services
         /// svarsfoten säger det. De två raderna sa emot varandra.
         /// </summary>
         private static (string Subject, string Body) BuildMembershipFeeRequestBody(
-            string memberName, string clubName, int year, decimal amount, string payUrl)
+            string memberName, string clubName, int year, decimal amount, string payUrl, string? bgNumber, string? reference)
         {
+            var bgBlock = BankgiroMailBlock(bgNumber, reference);
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
             var amountLabel = Math.Round(amount).ToString("N0", sv) + " kr";
             var subject = $"Medlemsavgift {year} – {clubName}";
@@ -2608,6 +2612,7 @@ namespace HpskSite.Services
             <p>Klicka på knappen nedan för att öppna betalsidan. Där kan du betala med
                Swish direkt via QR-kod eller app.</p>
             <p><a class='btn' href='{payUrl}'>Betala medlemsavgift</a></p>
+            {bgBlock}
             <p style='font-size:13px;color:#6c757d;'>Har du redan betalat ser du det på sidan.</p>
         </div>
     </div>
@@ -2634,9 +2639,11 @@ namespace HpskSite.Services
             IReadOnlyList<(string Description, decimal Amount)> lines,
             decimal total,
             string payUrl,
-            MailReplyTo replyTo)
+            MailReplyTo replyTo,
+            string? bgNumber = null,
+            string? reference = null)
         {
-            var (subject, body) = BuildRegionFeeRequestBody(clubName, regionName, year, lines, total, payUrl);
+            var (subject, body) = BuildRegionFeeRequestBody(clubName, regionName, year, lines, total, payUrl, bgNumber, reference);
             return await SendEmailAsync(clubEmail, subject, body, replyTo);
         }
 
@@ -2657,9 +2664,11 @@ namespace HpskSite.Services
             IReadOnlyList<(string Description, decimal Amount)> lines,
             decimal total,
             string payUrl,
-            MailReplyTo replyTo)
+            MailReplyTo replyTo,
+            string? bgNumber = null,
+            string? reference = null)
         {
-            var (subject, body) = BuildRegionFeeRequestBody(clubName, regionName, year, lines, total, payUrl);
+            var (subject, body) = BuildRegionFeeRequestBody(clubName, regionName, year, lines, total, payUrl, bgNumber, reference);
             var reply = ResolveReplyAddress(replyTo);
 
             return new RegionFeeMailPreview
@@ -2675,14 +2684,31 @@ namespace HpskSite.Services
             };
         }
 
+        /// <summary>
+        /// Bankgiro som alternativ till Swish i avgiftsmejlen — tomt när föreningen saknar bankgiro.
+        /// <b>Referensen är samma som på betalsidan</b> (MembershipFeeCharge.PaymentReference), annars går
+        /// en inbetalning inte att para ihop med avgiften.
+        /// </summary>
+        private static string BankgiroMailBlock(string? bgNumber, string? reference)
+        {
+            if (string.IsNullOrWhiteSpace(bgNumber)) return "";
+            var enc = new Func<string, string>(System.Net.WebUtility.HtmlEncode);
+            return $"<p style='font-size:14px'>Du kan också betala till <strong>bankgiro {enc(bgNumber)}</strong>"
+                 + (string.IsNullOrWhiteSpace(reference) ? "." : $" — ange referensen <strong>{enc(reference)}</strong>.")
+                 + "</p>";
+        }
+
         private static (string Subject, string Body) BuildRegionFeeRequestBody(
             string clubName,
             string regionName,
             int year,
             IReadOnlyList<(string Description, decimal Amount)> lines,
             decimal total,
-            string payUrl)
+            string payUrl,
+            string? bgNumber,
+            string? reference)
         {
+            var bgBlock = BankgiroMailBlock(bgNumber, reference);
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
             string Kr(decimal d) => d.ToString("N0", sv) + " kr";
             var enc = new Func<string, string>(System.Net.WebUtility.HtmlEncode);
@@ -2708,6 +2734,7 @@ namespace HpskSite.Services
             <p>Öppna betalsidan för att betala med Swish. Har klubben ett annat antal medlemmar än det
                som står ovan kan ni svara på det här mejlet — svaret går till kretsen.</p>
             <p><a href='{payUrl}' style='display:inline-block;background:#0d6efd;color:#fff;text-decoration:none;padding:12px 22px;border-radius:6px'>Öppna betalsidan</a></p>
+            {bgBlock}
         </div>
     </div>
 </body>

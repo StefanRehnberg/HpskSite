@@ -84,6 +84,32 @@ namespace HpskSite.Services
             return cat;
         }
 
+        /// <summary>Utställarens egna avgiftsadresser: betalare → e-post. Se MembershipFeePayerEmail.</summary>
+        public Dictionary<int, string> GetPayerEmails(int issuerType, int issuerId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<MembershipFeePayerEmail>(
+                    "SELECT * FROM MembershipFeePayerEmail WHERE IssuerType = @0 AND IssuerId = @1", issuerType, issuerId)
+                .ToDictionary(e => e.PayerId, e => e.Email);
+        }
+
+        /// <summary>Sätter (eller, med tom adress, tar bort) avgiftsadressen för en betalare.</summary>
+        public void SetPayerEmail(int issuerType, int issuerId, int payerId, string? email, int byMemberId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var row = db.FirstOrDefault<MembershipFeePayerEmail>(
+                "SELECT * FROM MembershipFeePayerEmail WHERE IssuerType = @0 AND IssuerId = @1 AND PayerId = @2",
+                issuerType, issuerId, payerId);
+            if (string.IsNullOrWhiteSpace(email)) { if (row is not null) db.Delete(row); return; }
+
+            row ??= new MembershipFeePayerEmail { IssuerType = issuerType, IssuerId = issuerId, PayerId = payerId };
+            row.Email = email.Trim();
+            row.UpdatedUtc = DateTime.UtcNow;
+            row.UpdatedByMemberId = byMemberId;
+            if (row.Id == 0) db.Insert(row); else db.Update(row);
+        }
+
         /// <summary>Vilket år en avgiftskategori gäller (null om den inte finns).</summary>
         public int? GetCategoryYear(int id)
         {

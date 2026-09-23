@@ -70,6 +70,7 @@
                 <thead><tr>
                     <th>Medlem</th>
                     <th class="d-none d-sm-table-cell">Medlemstyp</th>
+                    <th class="d-none d-md-table-cell">E-post</th>
                     <th class="text-end">Att betala</th>
                     <th class="d-none d-sm-table-cell">Status</th>
                     <th class="text-end d-none d-sm-table-cell"><span class="visually-hidden">Åtgärder</span></th>
@@ -77,7 +78,6 @@
                 <tbody id="cfRows"></tbody>
             </table>
         </div>
-        <div class="small text-muted" id="cfHint"></div>
     </div>
 </div>
 
@@ -117,6 +117,28 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Klar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Vart medlemmens avgift ska mejlas — t.ex. förälderns adress för en junior. *@
+<div class="modal fade" id="cfEmailModal" tabindex="-1" aria-hidden="true" aria-labelledby="cfEmailTitle">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cfEmailTitle">E-post för avgiften</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label" for="cfEmailInput">Skicka medlemsavgiften till</label>
+                <input id="cfEmailInput" type="email" class="form-control" autocomplete="off">
+                <p class="text-muted small mt-2 mb-0" id="cfEmailHelp"></p>
+                <div class="alert alert-danger d-none mt-3 mb-0" id="cfEmailError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="cfEmailSave">Spara</button>
             </div>
         </div>
     </div>
@@ -186,15 +208,24 @@
         };
     }
 
+    // ⚠️ Status som på resten av sajten (Anmälningar, Fakturor): en BRICKA, datum intill i grått.
+    function badge(cls, text, note) {
+        return '<span class="badge ' + cls + '">' + text + '</span>' + (note ? ' <span class="small text-muted">' + note + '</span>' : '');
+    }
     function statusCell(r, s) {
-        if (s.covered) return '<span class="text-muted">Ingår i familjens avgift' + (r.coveredBy ? ' (' + esc(r.coveredBy) + ')' : '') + '</span>';
-        if (s.paid) return '<span class="text-success">✓ Betald' + (s.c.paidDate ? ' ' + day(s.c.paidDate) : '') + '</span>';
-        if (s.claimed) return '<span>Medlemmen säger att hen betalat</span>';
-        if (!s.c && r.kind === 'NoType') return '<span class="text-muted">Ingen medlemstyp — ange den under Medlemmar</span>';
-        if (!s.c && r.kind === 'NoCategory') return '<span class="text-muted">Ingen avgift för ' + esc(r.membershipType) + '</span>';
-        if (s.amount <= 0) return '<span class="text-muted">Ingen avgift</span>';
-        if (s.sent) return '<span>Skickad ' + day(s.c.requestSentDate) + '</span>';
-        return '<span class="text-muted">Inte skickad' + (r.hasEmail ? '' : ' · ingen e-post') + '</span>';
+        if (s.covered) return badge('bg-light text-dark border', 'Ingår i familjen', r.coveredBy ? esc(r.coveredBy) + ' betalar' : '');
+        if (s.paid) return badge('bg-success', 'Betald', s.c.paidDate ? day(s.c.paidDate) : '');
+        if (s.claimed) return badge('bg-info text-dark', 'Uppgett betald', day(s.c.paymentSentDate));
+        if (!s.c && r.kind === 'NoType') return badge('bg-light text-dark border', 'Ingen medlemstyp', 'ange den under Medlemmar');
+        if (!s.c && r.kind === 'NoCategory') return badge('bg-light text-dark border', 'Ingen avgift', 'för ' + esc(r.membershipType));
+        if (s.amount <= 0) return badge('bg-light text-dark border', 'Ingen avgift');
+        if (s.sent) return badge('bg-warning text-dark', 'Väntande', 'skickad ' + day(s.c.requestSentDate));
+        return badge('bg-secondary', 'Inte skickad');
+    }
+    // Vart avgiften mejlas. Saknas adress står det i listan — inte i en text under den.
+    function emailCell(r) {
+        if (!r.hasEmail) return '<span class="badge bg-danger-subtle text-danger-emphasis border">Ingen e-post</span>';
+        return '<span class="small">' + esc(r.email) + '</span>';
     }
 
     function item(act, id, text, extra) {
@@ -202,22 +233,24 @@
              + '" data-cf-id="' + id + '">' + text + '</button></li>';
     }
     function actionsCell(r, s) {
-        // Ingen meny när det som saknas är medlemstypen: den rättas i medlemsregistret, inte här.
-        if (READONLY || s.covered || (!s.c && r.kind === 'NoType')) return '';
+        if (READONLY || s.covered) return '';
         var id = r.memberId, items = [];
         if (s.paid) items.push(item('unpaid', id, 'Ångra betald'));
-        else if (!s.billable) items.push(item('rates', id, 'Avgift per medlemstyp…'));
-        else {
+        else if (s.billable) {
+            // Betald ligger i menyn som allt annat på raden — samma form som resten av sajten.
+            items.push('<li><h6 class="dropdown-header">Betalning</h6></li>');
+            items.push(item('paid', id, 'Markera som betald'));
+            items.push('<li><hr class="dropdown-divider"></li>');
             items.push('<li><h6 class="dropdown-header">Mejlet</h6></li>');
             items.push(item('preview', id, 'Visa mejlet'));
             if (r.hasEmail) items.push(item('send-one', id, s.sent ? 'Skicka mejlet igen' : 'Skicka mejlet nu'));
             items.push(item('link', id, 'Kopiera betallänk'));
-        }
-        return '<div class="d-inline-flex gap-1 align-items-center">'
-             + (!s.paid && s.billable ? '<button type="button" class="btn btn-sm btn-outline-success" data-cf-act="paid" data-cf-id="' + id + '">Betald</button>' : '')
-             + '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" '
+        } else if (r.kind === 'NoCategory') items.push(item('rates', id, 'Avgift per medlemstyp…'));
+        // E-postadressen går att sätta för alla — en förälder som betalar juniorens avgift.
+        if (!s.paid) items.push(item('email', id, 'E-post för avgiften…'));
+        return '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" '
              + 'data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\'>Åtgärder</button>'
-             + '<ul class="dropdown-menu dropdown-menu-end">' + items.join('') + '</ul></div></div>';
+             + '<ul class="dropdown-menu dropdown-menu-end">' + items.join('') + '</ul></div>';
     }
 
     function render() {
@@ -243,13 +276,14 @@
             var amount = s.covered ? '<span class="text-muted">—</span>' : (s.billable || s.paid ? kr(s.amount) : '<span class="text-muted">—</span>');
             html += '<tr class="cf-main"><td>' + esc(r.name) + '<div class="small text-muted d-sm-none">' + esc(r.membershipType || '') + '</div></td>'
                   + '<td class="d-none d-sm-table-cell">' + esc(r.membershipType || '') + '</td>'
+                  + '<td class="d-none d-md-table-cell">' + emailCell(r) + '</td>'
                   + '<td class="text-end cf-n">' + amount + '</td>'
                   + '<td class="small d-none d-sm-table-cell">' + statusCell(r, s) + '</td>'
                   + '<td class="text-end cf-n cf-actions d-none d-sm-table-cell">' + actionsCell(r, s) + '</td></tr>'
                   + '<tr class="cf-mrow d-sm-none"><td colspan="2"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2 small">'
-                  + statusCell(r, s) + actionsCell(r, s) + '</div></td></tr>';
+                  + '<span>' + statusCell(r, s) + (r.hasEmail ? '' : ' ' + emailCell(r)) + '</span>' + actionsCell(r, s) + '</div></td></tr>';
         });
-        html += '<tr class="cf-total"><td>Totalt</td><td class="d-none d-sm-table-cell"></td><td class="text-end cf-n">' + kr(total)
+        html += '<tr class="cf-total"><td>Totalt</td><td class="d-none d-sm-table-cell"></td><td class="d-none d-md-table-cell"></td><td class="text-end cf-n">' + kr(total)
               + '</td><td class="d-none d-sm-table-cell"></td><td class="d-none d-sm-table-cell"></td></tr>';
         $('cfRows').innerHTML = html;
 
@@ -264,8 +298,6 @@
             show($('cfNothingToSend'), !(hasRate && (toSend > 0 || toRemind > 0)));
             $('cfNothingToSend').textContent = hasRate ? 'Alla medlemmar har fått avgiften.' : 'Bestäm avgiften först.';
         }
-        $('cfHint').textContent = noMail === 0 || READONLY ? ''
-            : noMail + (noMail === 1 ? ' medlem har' : ' medlemmar har') + ' ingen e-postadress. Välj Åtgärder → Kopiera betallänk på raden och skicka länken själv.';
 
         renderRates();
     }
@@ -322,6 +354,17 @@
     });
     $('cfRatesModal').addEventListener('hidden.bs.modal', function () { if (dirty) { dirty = false; msg(true, ''); } });
 
+    // ── E-post för avgiften ─────────────────────────────────────────────────────────────
+    var emailFor = 0;
+    $('cfEmailSave').addEventListener('click', async function () {
+        var d = await form('SetFeeEmail', { issuerType: 0, issuerId: CLUB_ID, payerId: emailFor, email: $('cfEmailInput').value });
+        // ⚠️ Dialogen stängs INTE vid fel — annars får man börja om för att läsa vad som gick snett.
+        if (!d.success) { $('cfEmailError').textContent = d.message || 'Adressen kunde inte sparas.'; show($('cfEmailError'), true); return; }
+        bootstrap.Modal.getOrCreateInstance($('cfEmailModal')).hide();
+        msg(true, '');
+        load();
+    });
+
     // ── Klick i listan ──────────────────────────────────────────────────────────────────
     $('cfRoot').addEventListener('click', async function (ev) {
         var a = ev.target.closest('[data-cf-act]');
@@ -330,6 +373,17 @@
         var row = rowOf(memberId), r, id;
 
         if (act === 'rates') { openRates(); return; }
+        if (act === 'email') {
+            emailFor = memberId;
+            $('cfEmailTitle').textContent = 'E-post för avgiften — ' + row.name;
+            $('cfEmailInput').value = row.emailIsOwn ? row.email : '';
+            $('cfEmailHelp').textContent = (row.defaultEmail
+                ? 'Lämna tomt för att använda medlemmens egen adress (' + row.defaultEmail + ').'
+                : 'Medlemmen har ingen egen adress på pistol.nu.') + ' Medlemmens egen adress ändras inte.';
+            show($('cfEmailError'), false);
+            bootstrap.Modal.getOrCreateInstance($('cfEmailModal')).show();
+            return;
+        }
         if (act === 'preview') {
             // ⚠️ Fönstret öppnas FÖRE await — ett window.open efter en väntan blockeras.
             var w = window.open('about:blank', '_blank');

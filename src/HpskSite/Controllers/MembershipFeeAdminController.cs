@@ -92,6 +92,7 @@ namespace HpskSite.Controllers
             var proposal = ClubFeeProposal.Build(categories, members);
             var chargeByMember = charges.GroupBy(c => c.MemberId).ToDictionary(g => g.Key, g => g.First());
             var info = MemberInfo(members.Select(m => m.MemberId).Concat(charges.Select(c => c.MemberId)).Distinct());
+            var feeEmails = _feeService.GetPayerEmails(MembershipFeeIssuer.Club, clubId);
 
             var rows = members.Select(m =>
             {
@@ -104,7 +105,11 @@ namespace HpskSite.Controllers
                 {
                     memberId = m.MemberId,
                     name = mi.Name ?? c?.MemberName ?? $"Medlem {m.MemberId}",
-                    hasEmail = !string.IsNullOrWhiteSpace(mi.Email),
+                    // Den adress avgiften mejlas till: klubbens egen för avgifter, annars medlemmens.
+                    email = feeEmails.GetValueOrDefault(m.MemberId) ?? mi.Email ?? "",
+                    emailIsOwn = feeEmails.ContainsKey(m.MemberId),
+                    defaultEmail = mi.Email ?? "",
+                    hasEmail = !string.IsNullOrWhiteSpace(feeEmails.GetValueOrDefault(m.MemberId) ?? mi.Email),
                     membershipType = m.MembershipType ?? "",
                     kind = (p?.Kind ?? ClubFeeKind.NoType).ToString(),
                     proposedAmount = p?.Amount ?? 0m,
@@ -291,9 +296,11 @@ namespace HpskSite.Controllers
             if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, charge.ClubId)).CanRead) return Content("Åtkomst nekad.");
 
             var clubName = _clubService.GetClubNameById(charge.ClubId) ?? "Klubben";
-            var mail = _emailService.PreviewMembershipFeeRequest(charge.MemberEmail ?? "", charge.MemberName ?? "medlem",
-                clubName, charge.Year, charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForClub(charge.ClubId));
-            return Content(PreviewPage(mail, charge.MemberEmail, charge.PaymentStatus == "Paid"), "text/html; charset=utf-8");
+            var to = _feeService.GetPayerEmails(MembershipFeeIssuer.Club, charge.ClubId).GetValueOrDefault(charge.MemberId) ?? charge.MemberEmail ?? "";
+            var mail = _emailService.PreviewMembershipFeeRequest(to, charge.MemberName ?? "medlem",
+                clubName, charge.Year, charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForClub(charge.ClubId),
+                IssuerBankgiro(charge.ClubId), charge.PaymentReference);
+            return Content(PreviewPage(mail, to, charge.PaymentStatus == "Paid"), "text/html; charset=utf-8");
         }
 
         [HttpPost]
@@ -360,6 +367,8 @@ namespace HpskSite.Controllers
             var sent = new List<string>();
             var noEmail = new List<string>();
             var failed = new List<string>();
+            var feeEmails = _feeService.GetPayerEmails(MembershipFeeIssuer.Club, clubId);
+            var bg = IssuerBankgiro(clubId);
             foreach (var charge in _feeService.GetChargesForClubYear(clubId, year))
             {
                 if (charge.IsRegionFee || charge.PaymentStatus == "Paid") continue;
@@ -370,15 +379,16 @@ namespace HpskSite.Controllers
                 if (mode == "reminder" && !charge.IsRequestSent) continue;
 
                 var name = charge.MemberName ?? $"Medlem {charge.MemberId}";
-                if (string.IsNullOrWhiteSpace(charge.MemberEmail)) { noEmail.Add(name); continue; }
+                var to = feeEmails.GetValueOrDefault(charge.MemberId) ?? charge.MemberEmail;
+                if (string.IsNullOrWhiteSpace(to)) { noEmail.Add(name); continue; }
 
                 bool ok;
                 try
                 {
                     // ⚠️ Svaret hör till KLUBBEN, som är den som kräver avgiften.
                     ok = await _emailService.SendMembershipFeeRequestAsync(
-                        charge.MemberEmail!, name, clubName, year, charge.Amount, BuildPayUrl(charge.Id),
-                        _replyContacts.ForClub(clubId));
+                        to!, name, clubName, year, charge.Amount, BuildPayUrl(charge.Id),
+                        _replyContacts.ForClub(clubId), bg, charge.PaymentReference);
                 }
                 catch (Exception ex)
                 {
@@ -415,6 +425,7 @@ namespace HpskSite.Controllers
             var (baseAmount, perMember) = _feeService.GetRegionRate(regionId, year);
             var charges = _feeService.GetChargesForRegionYear(regionId, year)
                 .ToDictionary(c => c.PayerClubId ?? 0);
+            var feeEmails = _feeService.GetPayerEmails(MembershipFeeIssuer.Region, regionId);
 
             var rows = RegionClubs(region.Value.Code).Select(club =>
             {
@@ -426,7 +437,11 @@ namespace HpskSite.Controllers
                 {
                     clubId = club.Id,
                     clubName = club.Name,
-                    hasEmail = !string.IsNullOrWhiteSpace(club.ContactEmail),
+                    // Kretsens egen adress för avgifter till klubben, annars klubbens kontaktadress.
+                    email = feeEmails.GetValueOrDefault(club.Id) ?? club.ContactEmail ?? "",
+                    emailIsOwn = feeEmails.ContainsKey(club.Id),
+                    defaultEmail = club.ContactEmail ?? "",
+                    hasEmail = !string.IsNullOrWhiteSpace(feeEmails.GetValueOrDefault(club.Id) ?? club.ContactEmail),
                     proposedCount = count,
                     proposedAmount = RegionFeeCalculator.Total(proposal),
                     charge = charge is null ? null : RegionChargeDto(charge)
@@ -629,6 +644,8 @@ namespace HpskSite.Controllers
             //    "reminder" = de som gått ut men inte betalats (knappen "Påminn").
             //    Utan något av dem mejlas alla obetalda.
             var only = request.ChargeIds is { Count: > 0 } ? request.ChargeIds.ToHashSet() : null;
+            var feeEmails = _feeService.GetPayerEmails(MembershipFeeIssuer.Region, request.RegionId);
+            var bg = IssuerBankgiro(request.RegionId);
 
             foreach (var charge in _feeService.GetChargesForRegionYear(request.RegionId, request.Year))
             {
@@ -642,15 +659,16 @@ namespace HpskSite.Controllers
                 var club = _clubService.GetClubById(charge.PayerClubId ?? 0);
                 var name = charge.PayerClubName ?? club?.Name ?? $"Klubb {charge.PayerClubId}";
 
-                if (string.IsNullOrWhiteSpace(club?.ContactEmail)) { noEmail.Add(name); continue; }
+                var to = feeEmails.GetValueOrDefault(charge.PayerClubId ?? 0) ?? club?.ContactEmail;
+                if (string.IsNullOrWhiteSpace(to)) { noEmail.Add(name); continue; }
 
                 bool ok;
                 try
                 {
                     ok = await _emailService.SendRegionFeeRequestAsync(
-                        club.ContactEmail!, name, region.Value.Name, charge.Year,
+                        to!, name, region.Value.Name, charge.Year,
                         charge.Lines.Select(l => (l.Description, l.Amount)).ToList(),
-                        charge.Amount, BuildPayUrl(charge.Id), reply);
+                        charge.Amount, BuildPayUrl(charge.Id), reply, bg, charge.PaymentReference);
                 }
                 catch (Exception ex)
                 {
@@ -696,12 +714,14 @@ namespace HpskSite.Controllers
 
             var club = _clubService.GetClubById(charge.PayerClubId ?? 0);
             var name = charge.PayerClubName ?? club?.Name ?? $"Klubb {charge.PayerClubId}";
-            var to = string.IsNullOrWhiteSpace(club?.ContactEmail) ? "" : club!.ContactEmail!;
+            var to = _feeService.GetPayerEmails(MembershipFeeIssuer.Region, region.Value.Id).GetValueOrDefault(charge.PayerClubId ?? 0)
+                     ?? club?.ContactEmail ?? "";
 
             var mail = _emailService.PreviewRegionFeeRequest(
                 to, name, region.Value.Name, charge.Year,
                 charge.Lines.Select(l => (l.Description, l.Amount)).ToList(),
-                charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForRegion(region.Value.Id));
+                charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForRegion(region.Value.Id),
+                IssuerBankgiro(region.Value.Id), charge.PaymentReference);
 
             return Content(PreviewPage(mail, to, charge.PaymentStatus == "Paid"), "text/html; charset=utf-8");
         }
@@ -778,6 +798,47 @@ namespace HpskSite.Controllers
         private int ActiveMemberCount(int clubId)
             => _clubMembershipService.GetForClub(clubId)
                 .Count(cm => cm.MembershipStatus != "Utträdd" && cm.MembershipStatus != "Avliden");
+
+        /// <summary>
+        /// Sätter vart en avgift ska mejlas (tom = den vanliga adressen igen). Kretsen sätter den för
+        /// sina klubbar, klubben för sina medlemmar. <b>Ändrar aldrig betalarens vanliga adress.</b>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetFeeEmail(int issuerType, int issuerId, int payerId, string? email)
+        {
+            email = (email ?? "").Trim();
+            if (email.Length > 0)
+            {
+                try { if (new System.Net.Mail.MailAddress(email).Address != email) throw new FormatException(); }
+                catch { return Json(new { success = false, message = "Det ser inte ut som en e-postadress." }); }
+            }
+
+            if (issuerType == MembershipFeeIssuer.Region)
+            {
+                var region = await AuthorizeRegionAsync(issuerId);
+                if (region is null) return Json(new { success = false, message = "Åtkomst nekad" });
+                if (!RegionClubs(region.Value.Code).Any(c => c.Id == payerId))
+                    return Json(new { success = false, message = "Klubben hör inte till kretsen." });
+            }
+            else
+            {
+                if (!await _auth.IsClubAdminForClub(issuerId)) return Json(new { success = false, message = "Åtkomst nekad" });
+                if (ActiveFeeMembers(issuerId).All(m => m.MemberId != payerId))
+                    return Json(new { success = false, message = "Medlemmen finns inte i klubbens register." });
+            }
+
+            _feeService.SetPayerEmail(issuerType, issuerId, payerId, email, await GetCurrentMemberIdAsync());
+            return Json(new { success = true });
+        }
+
+        /// <summary>Utställarens bankgiro (formaterat), eller null om det saknas eller är ogiltigt.</summary>
+        private string? IssuerBankgiro(int nodeId)
+        {
+            var node = Services.ContentService.GetById(nodeId);
+            var bg = node is not null && node.HasProperty("bgNumber") ? node.GetValue<string>("bgNumber") : null;
+            return BankgiroQrCodeGenerator.IsValidBankgiro(bg) ? BankgiroQrCodeGenerator.FormatAccount(bg) : null;
+        }
 
         // ── Helpers ───────────────────────────────────────────────────
 
