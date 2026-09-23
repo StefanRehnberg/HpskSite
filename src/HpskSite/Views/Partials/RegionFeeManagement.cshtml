@@ -92,12 +92,31 @@
             <h6 class="text-primary mb-0">Klubbarna i kretsen</h6>
             <span class="small text-muted" id="rfSummary"></span>
         </div>
+
+        @* ⚠️⚠️ ARBETSGÅNGEN STÅR PÅ SIDAN (Stefan 2026-09-23): "det finns inget Åtgärder på
+           klubbraderna" och "hur Eget belopp ska användas framgår inte". Båda var sanna — menyn
+           finns först när avgiften är SKAPAD, och ingenting sa det. Stegen står här, i den ordning
+           de görs, så att det som kommer efter skapandet går att hitta innan det finns. *@
+        <ol class="small mb-3 ps-3" id="rfSteps">
+            <li><strong>Medlemmar</strong> är ett förslag ur pistol.nu:s register (utträdda och avlidna
+                räknas inte). Stämmer det inte, skriv rätt antal.</li>
+            <li><strong>Eget belopp</strong> fyller du bara i när en klubb ska betala något annat än taxan —
+                till exempel en ny klubb som betalar halva avgiften första året. Beloppet <em>ersätter</em>
+                taxan för den klubben. Lämna rutan tom för att använda taxan.</li>
+            <li>Tryck <strong>Skapa kretsavgift</strong>. Klubbar som redan fått årets avgift rörs inte, och
+                en klubb vars belopp blir 0 kr får ingen avgift.</li>
+            <li>När avgiften är skapad får klubbens rad en meny <strong>Åtgärder</strong>. Där lägger du till
+                ett tillägg (till exempel en lagavgift), rättar medlemsantalet, markerar avgiften som
+                betald eller förhandsvisar mejlet.</li>
+            <li>Tryck <strong>Mejla betalningsuppmaning till klubbarna</strong> när avgifterna ser rätt ut.</li>
+        </ol>
+
         <div class="table-responsive">
             <table class="table table-sm align-middle mb-2">
                 <thead><tr>
                     <th>Klubb</th>
                     <th style="width:9rem">Medlemmar</th>
-                    <th style="width:9rem">Eget belopp</th>
+                    <th style="width:9rem">Eget belopp<div class="small fw-normal text-muted">ersätter taxan</div></th>
                     <th class="text-end" style="width:8rem">Belopp</th>
                     <th style="width:12rem">Läge</th>
                     <th class="text-end" style="width:6rem"></th>
@@ -114,13 +133,6 @@
                 <i class="bi bi-envelope me-1"></i>Mejla betalningsuppmaning till klubbarna
             </button>
         </div>
-        <p class="small text-muted mt-2 mb-0">
-            <strong>Skapa kretsavgift</strong> gäller klubbarna som ännu inte fått årets avgift, med det
-            medlemsantal och det egna belopp som står på raden. Klubbar som redan fått sin avgift rörs inte,
-            och en klubb vars belopp blir 0 kr får ingen avgift.
-            Medlemsantalet är ett förslag ur pistol.nu:s register (utträdda och avlidna räknas inte) —
-            rätta det om registret inte stämmer.
-        </p>
     </div>
 </div>
 
@@ -247,7 +259,7 @@
             : rows.map(function (r, i) {
                 var c = r.charge;
                 var name = '<strong>' + esc(r.clubName) + '</strong>'
-                         + (r.hasEmail ? '' : '<div class="small text-warning-emphasis">Saknar kontaktadress — kan inte få betalkravet per e-post</div>');
+                         + (r.hasEmail ? '' : '<div class="small text-warning-emphasis">Saknar kontaktadress på klubbsidan — får inget mejl. Kopiera betallänken via Åtgärder när avgiften är skapad.</div>');
 
                 if (c) {
                     return '<tr><td>' + name + linesHtml(c) + '</td>'
@@ -263,8 +275,9 @@
                      + '<td><input type="number" min="0" step="1" class="form-control form-control-sm" data-rf-count="' + i
                      + '" value="' + r.proposedCount + '" aria-label="Antal medlemmar för ' + esc(r.clubName) + '"></td>'
                      + '<td><input type="number" min="0" step="1" class="form-control form-control-sm" data-rf-manual="' + i
-                     + '" placeholder="—" aria-label="Eget belopp för ' + esc(r.clubName) + '"></td>'
-                     + '<td class="text-end" data-rf-preview="' + i + '">' + kr(preview(r.proposedCount, null)) + '</td>'
+                     + '" placeholder="taxan" title="Fyll bara i om klubben ska betala något annat än taxan. Beloppet ersätter taxan."'
+                     + ' aria-label="Eget belopp för ' + esc(r.clubName) + ', ersätter taxan"></td>'
+                     + '<td class="text-end" data-rf-preview="' + i + '">' + previewCell(r.proposedCount, null) + '</td>'
                      + '<td>' + stateCell(null) + '</td><td></td></tr>';
             }).join('');
 
@@ -295,10 +308,16 @@
         var i = ev.target.getAttribute('data-rf-count') || ev.target.getAttribute('data-rf-manual');
         if (i === null) return;
         var v = readInputs(i);
-        var cell = document.querySelector('[data-rf-preview="' + i + '"]');
-        var amount = preview(v.count, v.manual);
-        cell.innerHTML = amount > 0 ? kr(amount) : '<span class="text-muted">0 kr — ingen avgift</span>';
+        document.querySelector('[data-rf-preview="' + i + '"]').innerHTML = previewCell(v.count, v.manual);
     });
+
+    // Beloppet OCH varifrån det kommer. "330 kr" utan att säga "eget belopp" gjorde det omöjligt
+    // att se på raden att taxan inte längre gällde för klubben.
+    function previewCell(count, manual) {
+        var amount = preview(count, manual);
+        if (amount <= 0) return '<span class="text-muted">0 kr — ingen avgift</span>';
+        return kr(amount) + '<div class="small text-muted">' + (manual !== null ? 'eget belopp' : 'enligt taxan') + '</div>';
+    }
 
     async function load() {
         show($('rfError'), false);
