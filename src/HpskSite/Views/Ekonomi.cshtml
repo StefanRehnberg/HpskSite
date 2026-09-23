@@ -1535,6 +1535,15 @@
                 <div class="ek-alert ek-bad d-none" id="@(uid)_utError"></div>
                 <div class="ek-alert ek-ok d-none" id="@(uid)_utOk"></div>
 
+                @* ⚠️ Kretsavgiften fanns bara på kretsens sida — klubbens kassör fick skriva in
+                   samma räkning för hand. Nu står den här, där den ska betalas. *@
+                <div class="ek-card wide d-none" id="@(uid)_utIncoming" style="margin-bottom:1rem">
+                    <div class="ek-cardh"><h2>Räkningar från kretsen</h2></div>
+                    <table class="t">
+                        <tbody id="@(uid)_utIncomingBody"></tbody>
+                    </table>
+                </div>
+
                 <div class="ek-card wide">
                     <div class="ek-cardh">
                         <h2>Att göra</h2>
@@ -2906,6 +2915,7 @@
 
         expenseRows = d.expenses || [];
         renderExpenses(d);
+        renderIncomingFees(d.incomingRegionFees || []);
 
         if (canWrite) {
             fillSelect(el('uAccount'), d.accounts || []);
@@ -3140,6 +3150,41 @@
     // ⚠️⚠️ ETT NYTT UTLÄGG MÅSTE KÖRA syncExpenseKind. Förut kördes den bara när någon BYTTE slag,
     //    så första gången formuläret öppnades som utlägg var mottagarlistan TOM och förfallodagen
     //    synlig — och Spara nekades med "välj vem som ska ha pengarna" utan att något gick att välja.
+    var incomingFees = [];
+    function renderIncomingFees(list) {
+        incomingFees = list;
+        show(el('utIncoming'), list.length > 0);
+        if (list.length === 0) return;
+
+        var statusLabel = { registered: 'Väntar på attest', approved: 'Attesterad', paid: 'Betald' };
+        el('utIncomingBody').innerHTML = list.map(function (f, i) {
+            var state = f.expenseId
+                ? badge(f.expenseStatus === 'paid' ? 'ok' : 'info', 'Registrerad · ' + (statusLabel[f.expenseStatus] || f.expenseStatus))
+                : (f.paidByUs ? badge('ok', 'Kretsen har kvitterat') + ' ' : '') + badge('wait', 'Inte registrerad');
+            var btn = (!f.expenseId && canWrite)
+                ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-incoming="' + i + '">Registrera som räkning</button>'
+                : '';
+            return '<tr><td>' + esc(f.regionName) + ' <span class="muted">· Kretsavgift ' + f.year
+                 + ' · ' + esc(f.reference) + '</span></td>'
+                 + '<td class="n" style="width:8rem">' + kr(f.amount) + '</td>'
+                 + '<td style="width:17rem">' + state + '</td>'
+                 + '<td class="n" style="width:13rem">' + btn + '</td></tr>';
+        }).join('');
+
+        el('utIncomingBody').querySelectorAll('button[data-incoming]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var f = incomingFees[parseInt(b.dataset.incoming, 10)];
+                openExpenseForm('faktura');
+                el('uDesc').value = 'Kretsavgift ' + f.year + ' (' + f.reference + ')';
+                el('uAmount').value = f.amount;
+                el('uPayeeName').value = f.regionName;
+                if (f.sentDate) setDateField('uDate', String(f.sentDate).substring(0, 10));
+                // Förbunds- och kretsavgifter, om föreningen har kontot.
+                if (el('uAccount').querySelector('option[value="6980"]')) el('uAccount').value = '6980';
+            });
+        });
+    }
+
     function openExpenseForm(kind) {
         resetExpenseForm();
         el('uKind').value = kind === 'faktura' ? 'faktura' : 'utlagg';

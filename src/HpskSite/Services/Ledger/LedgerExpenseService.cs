@@ -1,3 +1,4 @@
+using HpskSite.Models;
 using HpskSite.Models.Ledger;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Infrastructure.Persistence;
@@ -598,5 +599,78 @@ namespace HpskSite.Services.Ledger
             public int Id { get; set; }
             public string Name { get; set; } = "";
         }
+
+        /// <summary>
+        /// Kretsavgifter som kretsen har SKICKAT till klubben — räkningar att betala.
+        ///
+        /// <para><b>⚠️⚠️ KRETSAVGIFTEN FANNS BARA PÅ KRETSENS SIDA.</b> Klubbens kassör fick ett mejl,
+        /// betalade, och fick sedan skriva in samma räkning för hand under Utgifter — med risk att
+        /// den aldrig kom med, eller kom med två gånger. Här visas den där den ska betalas, och
+        /// registreras med ett klick.</para>
+        ///
+        /// <para>⚠️ "Registrerad" känns igen på betalningsreferensen i beskrivningen (KA2026-12) —
+        /// samma sträng som står i mejlet och i bankgiro-QR:en, alltså den kassören ändå skriver.
+        /// Ingen ny kolumn: en avgift som registrerats för hand med referensen räknas också.</para>
+        /// </summary>
+        public List<IncomingRegionFee> IncomingRegionFees(int clubId)
+        {
+            var result = new List<IncomingRegionFee>();
+            if (clubId <= 0) return result;
+
+            using var db = _databaseFactory.CreateDatabase();
+            var charges = db.Fetch<MembershipFeeCharge>(
+                @"SELECT * FROM dbo.MembershipFeeCharge
+                   WHERE IssuerType = @0 AND PayerClubId = @1 AND RequestSentDate IS NOT NULL
+                   ORDER BY Year DESC, Id DESC",
+                MembershipFeeIssuer.Region, clubId);
+
+            if (charges.Count == 0) return result;
+
+            var expenses = db.Fetch<LedgerExpense>(
+                @"SELECT * FROM dbo.LedgerExpense
+                   WHERE IssuerType = 0 AND IssuerId = @0 AND Status <> @1",
+                clubId, LedgerExpenseStatus.Rejected);
+
+            foreach (var c in charges)
+            {
+                var reference = c.PaymentReference;
+                var registered = expenses.FirstOrDefault(e =>
+                    (e.Description ?? "").Contains(reference, StringComparison.OrdinalIgnoreCase));
+
+                result.Add(new IncomingRegionFee
+                {
+                    ChargeId = c.Id,
+                    RegionId = c.RegionId ?? 0,
+                    Year = c.Year,
+                    Amount = c.Amount,
+                    Reference = reference,
+                    SentDate = c.RequestSentDate,
+                    PaidByUs = string.Equals(c.PaymentStatus, "Paid", StringComparison.OrdinalIgnoreCase),
+                    ExpenseId = registered?.Id,
+                    ExpenseStatus = registered?.Status
+                });
+            }
+
+            return result;
+        }
+    }
+
+    /// <summary>En kretsavgift som kretsen har skickat till klubben.</summary>
+    public class IncomingRegionFee
+    {
+        public int ChargeId { get; set; }
+        public int RegionId { get; set; }
+        public string RegionName { get; set; } = "";
+        public int Year { get; set; }
+        public decimal Amount { get; set; }
+        public string Reference { get; set; } = "";
+        public DateTime? SentDate { get; set; }
+
+        /// <summary>Kretsen har kvitterat betalningen.</summary>
+        public bool PaidByUs { get; set; }
+
+        /// <summary>Utgiften den är registrerad som, om den är det.</summary>
+        public int? ExpenseId { get; set; }
+        public string? ExpenseStatus { get; set; }
     }
 }
