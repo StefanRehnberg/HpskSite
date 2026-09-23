@@ -246,10 +246,6 @@
   .ek-page tr.ek-clickable { cursor: pointer; }
   .ek-page tr.ek-clickable:hover td { background: var(--bs-tertiary-bg); }
   .ek-page tr.ek-open td { background: var(--bs-tertiary-bg); font-weight: 600; }
-  /* ⚠️ Lagena bar ORD, aldrig bara farg (WCAG 1.4.1). Fargen ar en andrahandssignal. */
-  .ek-page .st-wait { color: var(--bs-secondary-color); }
-  .ek-page .st-claim { color: var(--ek-attn); font-weight: 600; }
-  .ek-page .st-paid { color: var(--bs-success-text-emphasis); font-weight: 600; }
   /* Rymmer ÅÅÅÅ-MM-DD utan att kapa. Bootstraps width:100% duger inte i en <label>. */
   .ek-page .ek-date { width: 11rem; }
 
@@ -548,7 +544,7 @@
                 <div class="ek-grid">
                     <div class="ek-card">
                         <div class="ek-cardh"><h2>Att få in</h2></div>
-                        <div class="ek-bigbox ek-warn">
+                        <div class="ek-bigbox" id="@(uid)_outBox">
                             <div class="amount" id="@(uid)_outTotal">—</div>
                         </div>
                         <div class="rows" id="@(uid)_outRows" style="margin-top:14px"></div>
@@ -639,7 +635,7 @@
                         <div class="ek-drill d-none" id="@(uid)_perDrill">
                             <div class="ek-cardh">
                                 <h2 id="@(uid)_drillName"></h2>
-                                <button type="button" class="btn btn-sm btn-link"
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
                                         id="@(uid)_drillClose">Stäng listan</button>
                             </div>
                             <div class="ek-alert ek-bad d-none" id="@(uid)_drillError"></div>
@@ -1185,7 +1181,7 @@
                 <div class="ek-card wide d-none" id="@(uid)_verDetail">
                     <div class="ek-cardh">
                         <h2 id="@(uid)_verDetailTitle">Verifikation</h2>
-                        <button type="button" class="btn btn-sm btn-link" id="@(uid)_verClose">Stäng</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="@(uid)_verClose">Stäng</button>
                     </div>
                     <div id="@(uid)_verDetailBody"></div>
                 </div>
@@ -1337,7 +1333,7 @@
                     <div class="amount-row">
                         <label>Från <input type="text" class="form-control ek-date" placeholder="åååå-mm-dd" id="@(uid)_repFrom"></label>
                         <label>Till <input type="text" class="form-control ek-date" placeholder="åååå-mm-dd" id="@(uid)_repTo"></label>
-                        <button type="button" class="btn btn-sm btn-primary" id="@(uid)_repApply">Visa</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="@(uid)_repApply">Visa</button>
                         <button type="button" class="btn btn-sm btn-link" id="@(uid)_repReset">Hela året hittills</button>
                     </div>
                     <div class="why">
@@ -1447,7 +1443,7 @@
 
                     <div class="amount-row" style="margin-top:1rem">
                         <button type="button" class="btn btn-sm btn-primary" id="@(uid)_budSave">Spara utkastet</button>
-                        <button type="button" class="btn btn-sm btn-link" id="@(uid)_budCancel">Stäng</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="@(uid)_budCancel">Stäng</button>
                     </div>
 
                     <div class="ek-cardh" style="margin-top:1.5rem"><h2>Anta budgeten</h2></div>
@@ -1731,7 +1727,7 @@
 
                 <div class="d-none" id="@(uid)_closeWrap">
                     <div class="ek-card wide">
-                        <div class="ek-cardh"><h2>Sju steg</h2>
+                        <div class="ek-cardh"><h2>Stegen</h2>
                             <span class="meta" id="@(uid)_closeMeta"></span></div>
                         <div class="rows" id="@(uid)_closeSteps"></div>
                     </div>
@@ -2424,6 +2420,7 @@
     // ── Data ──────────────────────────────────────────────────────────────────────────────
     function renderOverview(o) {
         el('outTotal').textContent = kr(o.outstandingTotal);
+        el('outBox').classList.toggle('ek-warn', (o.outstandingTotal || 0) > 0);
 
         var groups = o.outstanding || [];
         el('outRows').innerHTML = groups.length === 0
@@ -2680,7 +2677,7 @@
                      + (a.isVoided ? '<div class="muted">Bortkopplad: ' + esc(a.voidReason || '') + '</div>' : '')
                      + '</span>'
                      + (canWrite && !a.isVoided
-                        ? '<button type="button" class="btn btn-sm btn-link" data-void="' + a.id + '">Koppla bort</button>'
+                        ? '<button type="button" class="btn btn-sm btn-outline-danger" data-void="' + a.id + '">Koppla bort…</button>'
                         : '')
                      + '</div>';
             }).join('') + '</div>';
@@ -3670,9 +3667,9 @@
     function stepMark(state) {
         // ⚠️ ORD, inte bara farg (WCAG 1.4.1). Och "omatt" ar ett EGET lage - att visa det som
         //    klart vore falsk trygghet i precis den handling som inte tal sadan.
-        if (state === 1) return '<span class="st-paid">Klart</span>';
-        if (state === 2) return '<span class="st-claim">Omätt</span>';
-        return '<span class="st-wait">Kvar</span>';
+        if (state === 1) return badge('ok', 'Klart');
+        if (state === 2) return badge('off', 'Kan inte mätas');
+        return badge('wait', 'Kvar');
     }
 
     async function loadClosing(yearId) {
@@ -3717,7 +3714,7 @@
 
         el('closeSteps').innerHTML = c.steps.map(function (s, i) {
             var link = (s.goTo && s.state === 0)
-                ? ' <button type="button" class="btn btn-sm btn-link" data-goto-view="'
+                ? ' <button type="button" class="btn btn-sm btn-outline-secondary ms-1" data-goto-view="'
                   + esc(s.goTo) + '">Gå dit</button>' : '';
 
             return '<div><span class="num muted">' + (i + 1) + '</span>'
@@ -4123,9 +4120,9 @@
     var drillKey = '';
 
     function drillState(p) {
-        if (p.confirmedDate) return ['st-paid', 'Betalt'];
-        if (p.claimedDate) return ['st-claim', 'Säger sig ha betalat'];
-        return ['st-wait', 'Väntar'];
+        if (p.confirmedDate) return ['ok', 'Betalt'];
+        if (p.claimedDate) return ['info', 'Säger sig ha betalat'];
+        return ['wait', 'Väntar'];
     }
 
     function openDrill(sourceType, sourceId, name, tr) {
@@ -4195,7 +4192,7 @@
             var amount = (p.confirmedDate && p.actualAmount != null) ? p.actualAmount : p.amount;
 
             return '<tr><td>' + esc(p.payerName || '—') + '</td>'
-                 + '<td class="' + st[0] + '">' + st[1] + '</td>'
+                 + '<td>' + badge(st[0], st[1]) + '</td>'
                  + '<td class="n">' + kr(amount) + '</td>'
                  + '<td class="n">' + kvitto + '</td></tr>';
         }, 'Visa alla {n} betalare');
@@ -4223,7 +4220,7 @@
                  + '<td>' + esc(r.payerName) + ' <span class="muted">· ' + esc(r.description) + '</span></td>'
                  + '<td class="n">' + kr(r.amount) + '</td>'
                  + '<td class="n">' + (canWrite
-                        ? '<button type="button" class="btn btn-sm btn-primary" data-post="' + r.id + '">Bokför</button>'
+                        ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-post="' + r.id + '">Bokför</button>'
                         : '') + '</td>'
                  + '</tr>';
         }, 'Visa alla {n} betalningar att bokföra');
