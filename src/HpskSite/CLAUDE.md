@@ -5023,7 +5023,9 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
   laddad via `window.hpskLoadRegionFees`). **Flyttad från kretsens adminpanel 2026-09-23** (Stefan: ingen bra
   anledning att den låg där), tillsammans med klubbens **Medlemsavgifter** (`ClubFeeManagement.cshtml`, förut en
   modal bakom Medlemmar → Åtgärder). Båda är EN rälspost `data-view="arsavgift"` direkt efter Avgifter, med
-  ordet efter föreningstyp. Adminpanelerna bär bara en länk dit (`&vy=` öppnar vyn direkt). **Behörigheten är
+  ordet efter föreningstyp. **Adminpanelerna har INGET menyval för dem, inte ens en länk** (Stefan 2026-09-23: "Kretsavgift är
+  fortfarande kvar i admin menyn" — en kvarlämnad länk läses som att ingenting flyttats). `&vy=arsavgift`
+  öppnar vyn direkt. **Behörigheten är
   ekonomisidans:** skrivande endpoints som förut (klubb-/kretsadmin = ekonomisidans CanWrite); `GetOverview`,
   `GetRegionOverview` och `PreviewRegionPaymentRequest` godtar LÄSRÄTT (`LedgerAccessService` — styrelsen,
   revisorn), och partialerna har ett läsläge (`ViewData["feesReadOnly"]`) utan en enda skrivknapp. I en
