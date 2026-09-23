@@ -5160,9 +5160,39 @@ projekt 100/100, styrelsens läsrätt 44/44.
 - ⚠️ Under bildtagningen hängde betalsidan på den kända `TrainingMatches`-låsningen (session med
   öppen transaktion efter appstart, se avsnittet om bakgrundssvep). `KILL` på roten löste det.
 
-**Inte byggt, medvetet:** den **betalande klubbens** sida — att kretsavgiften dyker upp som en
-utgift i klubbens egen bokföring. Klubben registrerar den i dag som en leverantörsfaktura under
-Utgifter.
+**Den betalande klubbens sida (2026-09-24):** en SKICKAD kretsavgift syns under klubbens
+**Utgifter → Räkningar från kretsen** (`LedgerExpenseService.IncomingRegionFees`, i
+`GetExpenses`-svaret som `incomingRegionFees`) och registreras förifylld som räkning (6980).
+⚠️ "Registrerad" känns igen på **betalningsreferensen** (`KA2031-632`) i utgiftens beskrivning —
+ingen ny kolumn. Bara klubbens riktiga liggare; en sandlåda får inga. Svit:
+`hpsk-verify/ekonomi-kretsavgift-klubbsida-verify.mjs` 22/22.
+
+## Ekonomigenomgången 2026-09-24 — liggarfel som bara syns över ÅR
+
+Hittat genom att gå igenom ett kassörsår som tre personer (lekmannakassör, ekonom med eget
+program, revisor). Findings och kvarstående förslag: `notes/ekonomi-genomgang-2026-09-24.md`.
+
+- ⚠️⚠️ **Tidigare års resultat härleds** (`LedgerFinancialStatements.PriorResult`). Liggaren gör
+  ingen årsskiftesöverföring, så förra årets överskott stod på tillgångssidan men inte på
+  kapitalsidan — **föreningens ANDRA år gick aldrig ihop och kunde aldrig fastställas.**
+  `BalanceDifference` räknar nu `Assets − (E&L + PriorResult + Result)`. Bygg aldrig en
+  överföringsverifikation "för att laga" — härledningen är avsiktlig, samma skäl som kumulativa saldon.
+- **SIE:** tidigare års resultat bärs in i eget kapitals `#IB`/`#UB`
+  (`LedgerOpeningBalanceService.ResolveEquityAccount`: 2060, annars lägsta 20xx), och ett
+  **balanskonto som inte rörde sig under året tas ändå med** — förut föll bankkontot ur filen.
+- **Ingående balanser** (`LedgerOpeningBalanceService`, Inställningar): kassören anger saldon,
+  eget kapital räknas ut; bokförs på FÖRSTA årets första dag med källtypen `opening-balance`.
+  ⚠️ SIE läser en sådan verifikation på årets första dag som **#IB, inte #VER**. Ändring = rättelse
+  av den gamla + ny. Svit: `ekonomi-ingaende-balanser-verify.mjs` 44/44 (egen sandlåda).
+- ⚠️⚠️ **Fordringsexporten läste bara `LedgerPayment`** — medlems- och kretsavgifterna (i
+  `MembershipFeeCharge`) saknades helt. Fordran uppstår när avgiften skickas, eller vid
+  medlemmens typval om det är senare. Svit: `ekonomi-fordringsexport-avgifter-verify.mjs` 10/10.
+- **Revisorn:** förvalt år = senast avslutade; kontonivå i resultat/balans; SIE-länk;
+  `/revision/berattelse` (utkast, redigerbart, sparas aldrig); `/betalkvitto` följer
+  `LedgerAccessService` (styrelsen och revisorn nekades förut); bankavstämningen per år
+  (`SummaryForYear`); "underlag saknas" räknar även betalda utgifter.
+- **⚠️ Fortfarande obyggt:** tävlingarnas anmälningsavgifter når aldrig liggaren (inget skapar en
+  `LedgerPayment` för en anmälan — P3/P4).
 
 ### ⚠️⚠️ MEDALJREDUKTIONEN MÄTS PÅ MÄSTERSKAPSKLASSEN (2026-09-08)
 
