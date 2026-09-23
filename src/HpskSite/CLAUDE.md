@@ -5020,25 +5020,34 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
 ### Ytorna
 
 - **Kretsens adminpanel → Kretsen → Kretsavgift** (`RegionFeeManagement.cshtml`, lat laddad på
-  click). **⚠️⚠️ Byggd för "Ove, 70, lekmannakassör"** — två tidigare utsågor underkändes som
-  "obegripliga, röriga, för mycket text". Läs vyns huvudkommentar innan du lägger till något:
-  - **Taxan är EN MENING** ("Varje klubb betalar 20 kr + 10 kr per medlem. Ändra"); fälten syns
-    bara när den sätts eller ändras.
-  - **Fyra kolumner, inga inmatningsrutor.** Ett tal ändras genom att man KLICKAR på det. Ändrat
-    belopp = klubbens eget belopp (samma belopp som taxan ger = inte eget); ändrat antal räknas om.
-  - **"Skicka avgiften till N klubbar" = skapa OCH mejla i ett tryck.** `GenerateRegionCharges`
-    returnerar `createdChargeIds`, och `SendRegionPaymentRequests` tar `ChargeIds` så att bara de
-    nya mejlas. Utan listan mejlas alla obetalda — det är **Påminn N klubbar**, ett eget val.
-  - **Betald är en synlig knapp**; allt ovanligt (antal, tilläggsrad, visa mejlet, betallänk, ångra,
-    ta bort) under **⋯**. Ordet "krav" står inte på sidan — sviten assertar det.
-  - **En rad förklarande text.** Lägg inte tillbaka steglistan.
-  - ⚠️ `load()` rör inte beskedet — det körs direkt efter Skicka, och ett tömt besked betyder att
-    kassören aldrig får veta vad som hände.
-  - **⚠️⚠️ Justeringarna före utskicket sparas på SERVERN** (`RegionFeeDraft`, en rad per krets/år/
-    klubb, `SaveRegionDraft`). De låg först bara i webbläsaren och försvann vid årsbyte och omladdning
-    medan skärmen såg sparad ut (rapporterat 2026-09-23). Null = följer registret/taxan; ett värde
-    lika med registret/taxan sparas som null. Raderna raderas när avgiften skapas. Ett rättat antal
-    visar "registret: N" under talet.
+  click). **⚠️⚠️ Byggd för "Ove, 70, lekmannakassör"** — TRE utsågor underkändes (Stefan 2026-09-23):
+  "obegripliga, röriga, för mycket text", och sedan: *"sidan blir helt förändrad så fort jag skickat
+  mejl — först DÅ dyker en konstig symbol och en Betald-knapp upp; varför fanns de inte innan?"*
+  Läs vyns huvudkommentar innan du lägger till något:
+  - **⚠️⚠️ RADEN SER LIKADAN UT FÖRE OCH EFTER UTSKICKET.** Varje rad har alltid **[Betald]** och
+    **[Åtgärder]** (text, aldrig en symbol). Det enda som ändras är Status-kolumnen:
+    *Inte skickad → Skickad 23 sep → ✓ Betald 23 sep*. Allt som går att göra med en skickad avgift
+    (lägga till en lagavgift, visa mejlet, markera betald) går att göra FÖRE.
+  - **⚠️⚠️ "FINNS" OCH "SKICKAD" ÄR TVÅ UPPGIFTER** — `MembershipFeeCharge.RequestSentDate`. Avgiften
+    skapas OSKICKAD när kretsen rör raden (`EnsureRegionCharge`, endpointen med samma namn; bara
+    klubbar i kretsen). Följderna, som alla är bärande:
+    - en oskickad avgift är **ingen fordran** — `LedgerMembershipFeeBridge.Summarise` räknar den inte
+      som obetald (ingen klubb har fått en räkning),
+    - en oskickad avgift **följer taxan** när taxan sparas (eget belopp och tillägg står kvar); en
+      skickad rörs aldrig och behåller sitt pris vid ändrat antal,
+    - **eget belopp** (`SetRegionChargeManualAmount`) bara före utskicket; 0 kr = "Ingen avgift för
+      klubben i år" lagras som en manuell rad på 0 kr, annars räknar nästa taxeändring tillbaka klubben,
+    - **skickad = FAKTISKT skickad**: bara ett mejl som gick fram, eller en kopierad betallänk
+      (`GetPaymentLink`), sätter datumet. Ett mejl som fastnade lämnar raden *Inte skickad*.
+  - **Två knappar, två urval:** "Skicka avgiften till N klubbar" = `mode: unsent` (efter att
+    orörda klubbar fått sin avgift via `GenerateRegionCharges`); "Påminn N klubbar" = `mode: reminder`.
+    `ChargeIds` = en enda klubb ("Skicka mejlet nu"). 0 kr skickas aldrig.
+  - **Taxan är EN MENING**; fälten syns bara när den sätts eller ändras. Ett tal ändras genom att
+    klicka på det. Ett ändrat antal visar "registret: N". Ordet "krav" står inte på sidan.
+  - **Telefon:** status och knappar får en egen rad under klubben (`tr.rf-mrow`); knapparna finns
+    därför två gånger i DOM:en — `td.rf-actions` är datorns.
+  - ⚠️ `load()` rör inte beskedet — det körs direkt efter Skicka.
+  - ⚠️ "Visa mejlet" öppnar fönstret FÖRE `await` — ett `window.open` efter en väntan blockeras.
 - **Betalsidan** säger *Kretsavgift*, kretsen som mottagare, klubben som betalare, och raderna.
   **⚠️ Swish-meddelandet namnger KLUBBEN** (max 50 tecken) — annars står femton likadana
   "Kretsavgift 2026" på kretsens kontoutdrag.
@@ -5050,15 +5059,15 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
   kretsen vägras i `GenerateRegionCharges` och **ingenting** skapas.
 - **Ta bort ett krav** bara så länge klubben varken betalat eller sagt sig ha betalat.
 
-**Operatörssteg:** kör `Migrations/add-region-fee-to-membership-fee.sql` **och
-`Migrations/create-region-fee-draft-table.sql`** (körd i dev 2026-09-23, EJ i prod) **FÖRE deployen** — NPoco
+**Operatörssteg:** kör `Migrations/add-region-fee-to-membership-fee.sql` (bär även `RequestSentDate`) **FÖRE deployen** — NPoco
 genererar `SET IssuerType = …` i varje uppdatering av en avgift så snart POCO:n bär fältet, så utan
 kolumnerna faller **varje klubbs "Markera betald"**, inte bara kretsens. Körd i dev 2026-09-23;
 **EJ körd i prod.** Fildeploy av `KnowledgeBase/docs/kretsavgift.md` (ny). Adds C# → full ombyggnad.
 
-Verifierat **18 enhetstest** (`RegionFeeCalculatorTests`; hela sviten 1447/1447) och **115/115
-`hpsk-verify/kretsavgift-verify.mjs`**, två körningar i rad (efter Ove-omarbetningen; avsnitt 10 kör
-hela skicka-flödet i ytan och avsnitt 8 prövar `ChargeIds` åt båda håll). Sviten hittade att `load()`
+Verifierat **18 enhetstest** (`RegionFeeCalculatorTests`; hela sviten 1447/1447) och **136/136
+`hpsk-verify/kretsavgift-verify.mjs`**, två körningar i rad (avsnitt 5b prövar den oskickade avgiften,
+avsnitt 10 att varje rad bär Åtgärder och Betald oavsett läge — **A/B mot den tidigare vyn: 7 faller**,
+exakt Stefans klagomål). Sviten hittade att `load()`
 tömde beskedet efter Skicka — och att påståendet "Ronneby mejlades inte igen" var vakuöst grönt på
 den tomma texten. Sviten kör mot **Blekinge (3773)** med år
 **2031** — avgifter har ingen sandlåda, så den lade upp en liggare för Blekinge i dev och lämnar en

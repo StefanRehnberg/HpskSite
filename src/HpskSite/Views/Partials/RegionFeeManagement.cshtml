@@ -4,16 +4,21 @@
 @*
     KRETSAVGIFTEN — kretsens årsavgift till sina klubbar.
 
-    ⚠️⚠️ SIDAN ÄR BYGGD FÖR OVE, 70, LEKMANNAKASSÖR (Stefan 2026-09-23, efter två omgångar som var
-    "obegripliga, röriga, för mycket text"). Ove tänker: "klubbarna ska betala årsavgiften — skicka
-    räkningarna och visa vem som betalat". Därför:
+    ⚠️⚠️ SIDAN ÄR BYGGD FÖR OVE, 70, LEKMANNAKASSÖR. Tre utsågor underkändes (Stefan 2026-09-23):
+    "obegripliga, röriga, för mycket text", och sedan: "sidan blir helt förändrad så fort jag skickat
+    mejl — först DÅ dyker en konstig symbol och en Betald-knapp upp; varför fanns de inte innan?"
+    Därför:
+      - ⚠️⚠️ RADEN SER LIKADAN UT FÖRE OCH EFTER UTSKICKET. Varje rad har alltid samma två knappar,
+        [Betald] och [Åtgärder]. Det enda som ändras när mejlet gått är texten i Status-kolumnen:
+        Inte skickad → Skickad 23 sep → ✓ Betald 23 sep. Allt som går att göra med en klubb går att
+        göra INNAN den fått sin räkning — lägga till en lagavgift, titta på mejlet, markera betald.
+        Det är skälet att avgiften skapas (oskickad) så fort kretsen rör raden: EnsureRegionCharge.
+      - Knappen heter "Åtgärder" i klartext, aldrig en symbol. En symbol är obegriplig för Ove.
       - Taxan är EN MENING. Fälten syns bara när den sätts eller ändras.
-      - Listan har fyra kolumner. Inga inmatningsrutor: ett tal ändras genom att man klickar på det.
-        Ändrar man BELOPPET blir det klubbens eget belopp; ändrar man MEDLEMMARNA räknas det om.
-      - "Skapa" och "mejla" är EN knapp. För Ove är det samma sak: att skicka avgiften.
-      - Den vanliga handlingen efteråt — Betald — är en synlig knapp. Allt ovanligt ligger under ⋯.
-      - En rad förklarande text, inte en lista med steg. Lägg inte tillbaka stegen: de var svaret
-        på en rörig sida, inte på Oves fråga.
+      - Ett tal ändras genom att man klickar på det (eller via Åtgärder).
+      - "Skicka avgiften till N klubbar" skickar de som inte gått ut; "Påminn" de som gått ut men
+        inte betalats. Två knappar, två frågor.
+      - En rad förklarande text. Lägg inte tillbaka en steglista.
 
     Samma motor som klubbens medlemsavgift: samma tabell, samma betalsida, samma MarkPaid.
     Knapparna bär id:n och läses med en delegerad lyssnare — aldrig ett klubbnamn i ett onclick.
@@ -25,11 +30,9 @@
     #rfRoot .rf-num-input { width: 6rem; display: inline-block; }
     #rfRoot td, #rfRoot th { vertical-align: middle; }
     #rfRoot .rf-total td { border-top: 2px solid var(--bs-border-color); font-weight: 600; }
-    /* Ett belopp får aldrig brytas mitt i ("200 / kr"). Kolumnbredderna bara där det finns plats. */
+    /* Ett belopp får aldrig brytas mitt i ("200 / kr"). */
     #rfRoot .rf-n { white-space: nowrap; }
-    @@media (min-width: 768px) {
-        #rfRoot .rf-w-count { width: 7rem; } #rfRoot .rf-w-amount { width: 8rem; } #rfRoot .rf-w-paid { width: 14rem; }
-    }
+    @@media (max-width: 575.98px) { #rfRoot tr.rf-main td { border-bottom: 0; padding-bottom: 0; } }
 </style>
 
 <div id="rfRoot">
@@ -76,9 +79,10 @@
             <table class="table align-middle mb-2">
                 <thead><tr>
                     <th>Klubb</th>
-                    <th class="text-end rf-w-count"><span class="d-none d-sm-inline">Medlemmar</span><span class="d-sm-none" title="Medlemmar">Medl.</span></th>
-                    <th class="text-end rf-w-amount">Att betala</th>
-                    <th class="rf-w-paid">Betalt</th>
+                    <th class="text-end"><span class="d-none d-sm-inline">Medlemmar</span><span class="d-sm-none" title="Medlemmar">Medl.</span></th>
+                    <th class="text-end">Att betala</th>
+                    <th class="d-none d-sm-table-cell">Status</th>
+                    <th class="text-end d-none d-sm-table-cell"><span class="visually-hidden">Åtgärder</span></th>
                 </tr></thead>
                 <tbody id="rfRows"></tbody>
             </table>
@@ -98,9 +102,9 @@
     window.__regionFeeInit = true;
 
     var REGION_ID = @feeRegionId;
+    var F = '/umbraco/surface/MembershipFeeAdmin/';
     var data = null;
-    var drafts = {};      // clubId -> { count, manual }  (klubbar som inte fått avgiften än)
-    var editing = null;   // { kind: 'count'|'amount'|'line', id }
+    var editing = null;   // { kind: 'count'|'amount'|'line', id: clubId }
     var MONTHS = ['jan','feb','mar','apr','maj','jun','jul','aug','sep','okt','nov','dec'];
 
     function $(id) { return document.getElementById(id); }
@@ -113,7 +117,7 @@
     function day(iso) { if (!iso) return ''; var p = iso.split('-'); return parseInt(p[2], 10) + ' ' + MONTHS[parseInt(p[1], 10) - 1]; }
     function year() { return parseInt($('rfYear').value, 10); }
     function show(el, on) { if (el) el.classList.toggle('d-none', !on); }
-    // kind: 'ok' | 'warn' | 'error'. En ruta för positiva besked (grön eller gul), en för fel.
+    // En ruta för positiva besked (grön, eller gul när något inte gick fram), en för fel.
     function msg(ok, text, kind) {
         $('rfOk').className = 'alert ' + (kind === 'warn' ? 'alert-warning' : 'alert-success');
         show($('rfOk'), ok && !!text); show($('rfError'), !ok && !!text);
@@ -126,7 +130,7 @@
         return (await (await fetch('/umbraco/surface/Club/GetFormToken', { cache: 'no-store' })).json()).token;
     }
     async function post(url, body) {
-        var r = await fetch(url, { method: 'POST',
+        var r = await fetch(F + url, { method: 'POST',
             headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': await token() },
             body: JSON.stringify(body) });
         var t = await r.text();
@@ -136,17 +140,27 @@
         var fd = new FormData();
         Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
         fd.append('__RequestVerificationToken', await token());
-        return (await fetch(url, { method: 'POST', body: fd })).json();
+        return (await fetch(F + url, { method: 'POST', body: fd })).json();
     }
 
-    // ⚠️ SPEGLAR RegionFeeCalculator.Lines — bara för klubbar som inte fått avgiften än. Servern räknar
-    //    det riktiga beloppet när avgiften skapas.
-    function draftAmount(d) {
-        if (d.manual !== null) return d.manual;
+    function rowOf(clubId) { return (data.rows || []).find(function (r) { return r.clubId === clubId; }); }
+
+    // ⚠️ Varje handling på en rad börjar här: klubbens avgift skapas OSKICKAD om den inte finns. Det
+    //    är det som gör att raden kan bete sig likadant före och efter utskicket.
+    async function chargeIdFor(clubId) {
+        var r = rowOf(clubId);
+        if (r && r.charge) return r.charge.id;
+        var e = await post('EnsureRegionCharge', { regionId: REGION_ID, year: year(), clubId: clubId });
+        if (!e.success) { msg(false, e.message); return null; }
+        return e.chargeId;
+    }
+
+    // Vad taxan ger för ett antal — speglar RegionFeeCalculator. Bara för att avgöra om ett inskrivet
+    // belopp är "eget"; servern räknar det riktiga beloppet.
+    function byRate(count) {
         var b = data.rate.baseAmount || 0, p = data.rate.perMember || 0;
-        return (b > 0 ? b : 0) + (p > 0 && d.count > 0 ? Math.round(p * d.count * 100) / 100 : 0);
+        return (b > 0 ? b : 0) + (p > 0 && count > 0 ? Math.round(p * count * 100) / 100 : 0);
     }
-
     function rateSentence(r) {
         var b = r.baseAmount || 0, p = r.perMember || 0;
         if (b > 0 && p > 0) return 'Varje klubb betalar ' + kr(b) + ' + ' + kr(p) + ' per medlem.';
@@ -155,60 +169,81 @@
         return '';
     }
 
-    // value = det som står i rutan när man ändrar; label = det som visas (t.ex. "450 kr").
-    function numButton(kind, id, value, title, label) {
-        if (editing && editing.kind === kind && editing.id === id)
+    // Radens läge, en gång, så att render, knapparna och summeringen läser samma sak.
+    function stateOf(r) {
+        var c = r.charge;
+        var lines = c ? (c.lines || []) : [];
+        var manual = lines.some(function (l) { return l.kind === 'manual'; });
+        return {
+            c: c,
+            paid: !!c && c.status === 'Paid',
+            sent: !!c && !!c.requestSentDate,
+            claimed: !!c && !!c.paymentSentDate,
+            amount: c ? c.amount : r.proposedAmount,
+            count: c ? c.memberCount : r.proposedCount,
+            manual: manual,
+            extras: lines.filter(function (l) { return l.kind === 'extra'; })
+        };
+    }
+
+    function numButton(kind, clubId, value, label, title) {
+        if (editing && editing.kind === kind && editing.id === clubId)
             return '<input type="number" min="0" step="1" class="form-control form-control-sm rf-num-input text-end" '
-                 + 'data-rf-input="' + kind + '" data-rf-id="' + id + '" value="' + esc(value) + '" autocomplete="off">';
-        return '<button type="button" class="rf-num" data-rf-edit="' + kind + '" data-rf-id="' + id + '" title="' + title + '">'
-             + esc(label == null ? value : label) + '</button>';
+                 + 'data-rf-input="' + kind + '" data-rf-id="' + clubId + '" value="' + esc(value) + '" autocomplete="off">';
+        return '<button type="button" class="rf-num" data-rf-edit="' + kind + '" data-rf-id="' + clubId + '" title="' + title + '">'
+             + esc(label) + '</button>';
     }
 
-    function menu(c) {
-        var items = [];
-        if (c.status !== 'Paid') {
-            if (!(c.lines || []).some(function (l) { return l.kind === 'manual'; }))
-                items.push(['count', 'Ändra antal medlemmar']);
-            items.push(['line', 'Lägg till en rad, t.ex. lagavgift']);
-            items.push(['preview', 'Visa mejlet']);
+    function statusCell(r, s) {
+        if (s.paid) return '<span class="text-success">✓ Betald' + (s.c.paidDate ? ' ' + day(s.c.paidDate) : '') + '</span>';
+        if (s.claimed) return '<span>Klubben säger att de betalat</span>';
+        if (s.amount <= 0) return '<span class="text-muted">Ingen avgift</span>';
+        if (s.sent) return '<span>Skickad ' + day(s.c.requestSentDate) + '</span>';
+        return '<span class="text-muted">Inte skickad' + (r.hasEmail ? '' : ' · ingen e-post') + '</span>';
+    }
+
+    function item(act, clubId, text, extra) {
+        return '<li><button type="button" class="dropdown-item' + (extra || '') + '" data-rf-act="' + act
+             + '" data-rf-id="' + clubId + '">' + text + '</button></li>';
+    }
+
+    // ⚠️ SAMMA meny före och efter utskicket — det enda som byter ord är "Skicka mejlet" / "igen".
+    function actionsCell(r, s) {
+        var id = r.clubId, items = [];
+        if (s.paid) {
+            items.push(item('unpaid', id, 'Ångra betald'));
         } else {
-            items.push(['unpaid', 'Ångra betald']);
+            items.push(item('count', id, 'Ändra antal medlemmar'));
+            if (!s.sent) items.push(item('amount', id, 'Ändra beloppet'));
+            items.push(item('line', id, 'Lägg till en rad, t.ex. lagavgift'));
+            s.extras.forEach(function (l) {
+                items.push('<li><button type="button" class="dropdown-item" data-rf-act="line-remove" data-rf-id="' + id
+                    + '" data-rf-line="' + l.id + '">Ta bort raden: ' + esc(l.description) + '</button></li>');
+            });
+            items.push('<li><hr class="dropdown-divider"></li>');
+            items.push(item('preview', id, 'Visa mejlet'));
+            if (r.hasEmail && s.amount > 0) items.push(item('send-one', id, s.sent ? 'Skicka mejlet igen' : 'Skicka mejlet nu'));
+            items.push(item('link', id, 'Kopiera betallänk'));
+            if (s.c && !s.claimed) {
+                items.push('<li><hr class="dropdown-divider"></li>');
+                items.push(s.sent ? item('delete', id, 'Ta bort avgiften', ' text-danger')
+                                  : item('zero', id, 'Ingen avgift för klubben i år', ' text-danger'));
+            }
         }
-        items.push(['link', 'Kopiera betallänk']);
-        var del = c.status !== 'Paid' && !c.paymentSentDate
-            ? '<li><hr class="dropdown-divider"></li><li><button type="button" class="dropdown-item text-danger" data-rf-act="delete" data-rf-id="'
-              + c.id + '">Ta bort avgiften</button></li>' : '';
         // ⚠️ strategy:fixed — tabellen ligger i .table-responsive, vars overflow annars klipper menyn.
-        return '<div class="dropdown d-inline-block"><button type="button" class="btn btn-sm btn-link text-secondary px-2" '
-             + 'data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-label="Fler val" title="Fler val">⋯</button>'
-             + '<ul class="dropdown-menu dropdown-menu-end">'
-             + items.map(function (i) {
-                   return '<li><button type="button" class="dropdown-item" data-rf-act="' + i[0] + '" data-rf-id="' + c.id + '">' + i[1] + '</button></li>';
-               }).join('') + del + '</ul></div>';
+        return '<div class="d-inline-flex gap-1 align-items-center">'
+             + (s.paid ? '' : '<button type="button" class="btn btn-sm btn-outline-success" data-rf-act="paid" data-rf-id="' + id + '">Betald</button>')
+             + '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" '
+             + 'data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\'>Åtgärder</button>'
+             + '<ul class="dropdown-menu dropdown-menu-end">' + items.join('') + '</ul></div></div>';
     }
 
-    function paidCell(c) {
-        if (c.status === 'Paid')
-            return '<span class="text-success">✓ Betald' + (c.paidDate ? ' ' + day(c.paidDate) : '') + '</span> ' + menu(c);
-        return '<button type="button" class="btn btn-sm btn-outline-success" data-rf-act="paid" data-rf-id="' + c.id + '">Betald</button> '
-             + menu(c)
-             + (c.paymentSentDate ? '<div class="small text-muted">Klubben säger att de betalat</div>' : '');
-    }
-
-    function extrasText(c) {
-        var extra = (c.lines || []).filter(function (l) { return l.kind === 'extra'; });
-        if (extra.length === 0) return '';
-        return '<div class="small text-muted">inkl. ' + extra.map(function (l) {
-            return esc(l.description.toLowerCase()) + ' ' + kr(l.amount);
-        }).join(', ') + '</div>';
-    }
-
-    function lineEditorRow(c) {
-        return '<tr class="table-light"><td colspan="4"><div class="d-flex flex-wrap gap-2 align-items-center">'
+    function lineEditorRow(clubId) {
+        return '<tr class="table-light"><td colspan="5"><div class="d-flex flex-wrap gap-2 align-items-center">'
              + '<input type="text" maxlength="200" class="form-control form-control-sm" style="max-width:18rem" id="rfLineText" placeholder="Vad gäller det? t.ex. Lagavgift" autocomplete="off">'
-             + '<div class="input-group input-group-sm" style="width:9rem"><input type="number" min="0" step="1" class="form-control" id="rfLineAmount" placeholder="Belopp"><span class="input-group-text">kr</span></div>'
-             + '<button type="button" class="btn btn-sm btn-primary" data-rf-act="line-save" data-rf-id="' + c.id + '">Lägg till</button>'
-             + '<button type="button" class="btn btn-sm btn-link" data-rf-act="cancel">Avbryt</button></div></td></tr>';
+             + '<div class="input-group input-group-sm" style="width:9rem"><input type="number" min="0" step="1" class="form-control" id="rfLineAmount" placeholder="Belopp" autocomplete="off"><span class="input-group-text">kr</span></div>'
+             + '<button type="button" class="btn btn-sm btn-primary" data-rf-act="line-save" data-rf-id="' + clubId + '">Lägg till</button>'
+             + '<button type="button" class="btn btn-sm btn-link" data-rf-act="cancel" data-rf-id="' + clubId + '">Avbryt</button></div></td></tr>';
     }
 
     function render() {
@@ -225,62 +260,55 @@
         if (!hasRate) return;
 
         var rows = data.rows || [];
-        var html = '', total = 0, drafted = 0, draftTotal = 0;
+        var html = '', total = 0, billed = 0, paidCount = 0, paidSum = 0, toSend = 0, noMail = 0, toRemind = 0;
 
         rows.forEach(function (r) {
-            var c = r.charge;
-            if (c) {
-                total += c.amount;
-                var count = c.memberCount != null
-                    ? (c.status === 'Paid' ? esc(c.memberCount) : numButton('count', c.id, c.memberCount, 'Ändra antal medlemmar'))
-                    : '<span class="text-muted">—</span>';
-                html += '<tr><td>' + esc(r.clubName)
-                      + (!r.hasEmail && c.status !== 'Paid' ? ' <span class="small text-muted">(ingen e-post)</span>' : '')
-                      + extrasText(c) + '</td>'
-                      + '<td class="text-end rf-n">' + count + '</td>'
-                      + '<td class="text-end rf-n">' + kr(c.amount) + '</td>'
-                      + '<td>' + paidCell(c) + '</td></tr>';
-                if (editing && editing.kind === 'line' && editing.id === c.id) html += lineEditorRow(c);
-                return;
-            }
+            var s = stateOf(r);
+            total += s.amount;
+            if (s.amount > 0) billed++;
+            if (s.paid) { paidCount++; paidSum += s.amount; }
+            if (!s.paid && !s.sent && s.amount > 0) { if (r.hasEmail) toSend++; else noMail++; }
+            if (!s.paid && s.sent) toRemind++;
 
-            var d = drafts[r.clubId];
-            var amount = draftAmount(d);
-            total += amount; drafted++; draftTotal += amount;
-            html += '<tr><td>' + esc(r.clubName) + '</td>'
-                  + '<td class="text-end rf-n">' + numButton('dcount', r.clubId, d.count, 'Ändra antal medlemmar')
-                  // Ett rättat antal säger vad registret säger, så ändringen syns och går att jämföra.
-                  + (d.count !== r.proposedCount ? '<div class="small text-muted">registret: ' + r.proposedCount + '</div>' : '')
+            var editable = !s.paid;
+            var countLabel = s.count == null ? '—' : s.count;
+            var count = editable
+                ? numButton('count', r.clubId, s.count == null ? r.proposedCount : s.count, countLabel, 'Ändra antal medlemmar')
+                : esc(countLabel);
+            var amount = editable && !s.sent
+                ? numButton('amount', r.clubId, s.amount, kr(s.amount), 'Ändra beloppet för den här klubben')
+                : kr(s.amount);
+
+            html += '<tr class="rf-main"><td>' + esc(r.clubName)
+                  + (s.extras.length ? '<div class="small text-muted">inkl. ' + s.extras.map(function (l) {
+                        return esc(l.description.toLowerCase()) + ' ' + kr(l.amount); }).join(', ') + '</div>' : '')
                   + '</td>'
-                  + '<td class="text-end rf-n">' + numButton('damount', r.clubId, amount, 'Ändra beloppet för den här klubben', kr(amount))
-                  + (d.manual !== null ? '<div class="small text-muted">eget belopp</div>' : '') + '</td>'
-                  + '<td class="text-muted small">Inte skickad</td></tr>';
+                  + '<td class="text-end rf-n">' + count
+                  + (s.count != null && s.count !== r.proposedCount ? '<div class="small text-muted">registret: ' + r.proposedCount + '</div>' : '')
+                  + '</td>'
+                  + '<td class="text-end rf-n">' + amount + (s.manual ? '<div class="small text-muted">eget belopp</div>' : '') + '</td>'
+                  + '<td class="small d-none d-sm-table-cell">' + statusCell(r, s) + '</td>'
+                  + '<td class="text-end rf-n rf-actions d-none d-sm-table-cell">' + actionsCell(r, s) + '</td></tr>'
+                  // På telefon ryms inte fem kolumner: status och knappar får en egen rad under klubben.
+                  + '<tr class="rf-mrow d-sm-none"><td colspan="3"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2 small">'
+                  + statusCell(r, s) + actionsCell(r, s) + '</div></td></tr>';
+            if (editing && editing.kind === 'line' && editing.id === r.clubId) html += lineEditorRow(r.clubId);
         });
 
-        html += '<tr class="rf-total"><td>Totalt</td><td></td><td class="text-end rf-n">' + kr(total) + '</td><td></td></tr>';
+        html += '<tr class="rf-total"><td>Totalt</td><td></td><td class="text-end rf-n">' + kr(total) + '</td><td class="d-none d-sm-table-cell"></td><td class="d-none d-sm-table-cell"></td></tr>';
         $('rfRows').innerHTML = html;
 
-        var sent = rows.filter(function (r) { return r.charge; });
-        var paid = sent.filter(function (r) { return r.charge.status === 'Paid'; });
-        var unpaid = sent.length - paid.length;
-        $('rfSummary').textContent = sent.length === 0 ? ''
-            : paid.length + ' av ' + sent.length + ' klubbar har betalat · '
-              + kr(paid.reduce(function (a, r) { return a + r.charge.amount; }, 0)) + ' av '
-              + kr(sent.reduce(function (a, r) { return a + r.charge.amount; }, 0));
+        // Samma rad hela året: hur många av klubbarna som betalat, av vad kretsen ska ha in.
+        $('rfSummary').textContent = paidCount + ' av ' + billed + ' klubbar har betalat · ' + kr(paidSum) + ' av ' + kr(total);
 
-        // Skicka: bara klubbar som inte fått avgiften och vars belopp är större än noll.
-        var sendable = rows.filter(function (r) { return !r.charge && draftAmount(drafts[r.clubId]) > 0; });
-        show($('rfSend'), sendable.length > 0);
-        $('rfSend').textContent = 'Skicka avgiften till ' + sendable.length + (sendable.length === 1 ? ' klubb' : ' klubbar');
+        show($('rfSend'), toSend > 0);
+        $('rfSend').textContent = 'Skicka avgiften till ' + toSend + (toSend === 1 ? ' klubb' : ' klubbar');
+        show($('rfRemind'), toRemind > 0);
+        $('rfRemind').textContent = 'Påminn ' + toRemind + (toRemind === 1 ? ' klubb' : ' klubbar') + ' som inte betalat';
 
-        show($('rfRemind'), unpaid > 0);
-        $('rfRemind').textContent = 'Påminn ' + unpaid + (unpaid === 1 ? ' klubb' : ' klubbar') + ' som inte betalat';
-
-        // ⚠️ EN rad text, och bara det Ove behöver veta för att trycka på knappen.
-        var noMail = sendable.filter(function (r) { return !r.hasEmail; }).length;
-        $('rfHint').textContent = sendable.length === 0 ? ''
-            : 'Klicka på ett tal om du vill ändra det.'
-              + (noMail > 0 ? ' ' + noMail + ' av klubbarna har ingen e-postadress — deras betallänk kopierar du via ⋯ när avgiften är skickad.' : '');
+        // ⚠️ EN rad text, och bara det som behövs för att komma vidare.
+        $('rfHint').textContent = noMail === 0 ? ''
+            : noMail + (noMail === 1 ? ' klubb har' : ' klubbar har') + ' ingen e-postadress. Välj Åtgärder → Kopiera betallänk och skicka länken själv.';
 
         var input = document.querySelector('[data-rf-input]');
         if (input) { input.focus(); input.select(); }
@@ -297,20 +325,9 @@
     // ⚠️ load() rör INTE beskedet. Den körs direkt efter Skicka, och ett tömt besked betyder att
     //    Ove aldrig får veta vad som hände när han tryckte.
     async function load() {
-        var d = await (await fetch('/umbraco/surface/MembershipFeeAdmin/GetRegionOverview?regionId=' + REGION_ID + '&year=' + year(),
-                                   { cache: 'no-store' })).json();
+        var d = await (await fetch(F + 'GetRegionOverview?regionId=' + REGION_ID + '&year=' + year(), { cache: 'no-store' })).json();
         if (!d.success) { msg(false, d.message || 'Kretsavgiften gick inte att läsa.'); return; }
         data = d;
-        // ⚠️ Justeringarna kommer från SERVERN varje gång — de låg först bara här och försvann vid
-        //    årsbyte och omladdning, medan skärmen såg ut som om talet var sparat.
-        drafts = {};
-        (d.rows || []).forEach(function (r) {
-            if (r.charge) return;
-            drafts[r.clubId] = {
-                count: r.draftCount != null ? r.draftCount : r.proposedCount,
-                manual: r.draftManual != null ? r.draftManual : null
-            };
-        });
         show($('rfRateForm'), false);
         render();
     }
@@ -325,76 +342,85 @@
 
         var a = ev.target.closest('[data-rf-act]');
         if (!a) return;
-        var act = a.getAttribute('data-rf-act'), id = parseInt(a.getAttribute('data-rf-id'), 10);
-        var r;
+        var act = a.getAttribute('data-rf-act'), clubId = parseInt(a.getAttribute('data-rf-id'), 10);
+        var row = rowOf(clubId), r, id;
 
         if (act === 'cancel') { editing = null; render(); return; }
-        if (act === 'line') { editing = { kind: 'line', id: id }; render(); var t = $('rfLineText'); if (t) t.focus(); return; }
-        if (act === 'count') { editing = { kind: 'count', id: id }; render(); return; }
-        if (act === 'preview') { window.open('/umbraco/surface/MembershipFeeAdmin/PreviewRegionPaymentRequest?chargeId=' + id, '_blank', 'noopener'); return; }
+        if (act === 'line') { editing = { kind: 'line', id: clubId }; render(); var t = $('rfLineText'); if (t) t.focus(); return; }
+        if (act === 'count' || act === 'amount') { editing = { kind: act, id: clubId }; render(); return; }
 
-        if (act === 'link') {
-            r = await (await fetch('/umbraco/surface/MembershipFeeAdmin/GetPaymentLink?chargeId=' + id, { cache: 'no-store' })).json();
-            if (!r.success) { msg(false, r.message); return; }
-            try { await navigator.clipboard.writeText(r.url); msg(true, 'Betallänken är kopierad. Klistra in den i ett mejl eller sms till klubben.'); }
-            catch (x) { msg(true, 'Betallänk: ' + r.url); }
+        if (act === 'preview') {
+            // ⚠️ Fönstret öppnas FÖRE await — en webbläsare blockerar ett window.open efter en väntan.
+            var w = window.open('about:blank', '_blank');
+            id = await chargeIdFor(clubId);
+            if (!id) { if (w) w.close(); return; }
+            if (w) w.location = F + 'PreviewRegionPaymentRequest?chargeId=' + id;
+            if (!row.charge) load();
             return;
         }
-        if (act === 'paid' || act === 'unpaid') {
-            a.disabled = true;
-            r = await postForm('/umbraco/surface/MembershipFeeAdmin/' + (act === 'paid' ? 'MarkPaid' : 'MarkUnpaid'), { chargeId: id });
-        } else if (act === 'line-save') {
-            r = await post('/umbraco/surface/MembershipFeeAdmin/AddRegionChargeLine',
-                           { chargeId: id, description: $('rfLineText').value, amount: parseFloat($('rfLineAmount').value) || 0 });
-            if (r.success) editing = null;
-        } else if (act === 'delete') {
-            if (!window.confirm('Ta bort avgiften för klubben?')) return;
-            r = await post('/umbraco/surface/MembershipFeeAdmin/DeleteRegionCharge', { chargeId: id });
-        } else return;
+        if (act === 'link') {
+            id = await chargeIdFor(clubId); if (!id) return;
+            r = await (await fetch(F + 'GetPaymentLink?chargeId=' + id, { cache: 'no-store' })).json();
+            if (!r.success) { msg(false, r.message); return; }
+            try { await navigator.clipboard.writeText(r.url); msg(true, 'Betallänken för ' + row.clubName + ' är kopierad. Klistra in den i ett mejl eller sms till klubben.'); }
+            catch (x) { msg(true, 'Betallänk för ' + row.clubName + ': ' + r.url); }
+            load();
+            return;
+        }
+        if (act === 'send-one') {
+            id = await chargeIdFor(clubId); if (!id) return;
+            r = await post('SendRegionPaymentRequests', { regionId: REGION_ID, year: year(), chargeIds: [id] });
+            report(r);
+            load();
+            return;
+        }
 
-        if (!r || !r.success) { msg(false, r && r.message); a.disabled = false; return; }
+        a.disabled = true;
+        if (act === 'paid') {
+            id = await chargeIdFor(clubId);
+            r = id ? await postForm('MarkPaid', { chargeId: id }) : null;
+        } else if (act === 'unpaid') {
+            r = await postForm('MarkUnpaid', { chargeId: row.charge.id });
+        } else if (act === 'line-save') {
+            id = await chargeIdFor(clubId);
+            r = id ? await post('AddRegionChargeLine', { chargeId: id, description: $('rfLineText').value, amount: parseFloat($('rfLineAmount').value) || 0 }) : null;
+            if (r && r.success) editing = null;
+        } else if (act === 'line-remove') {
+            r = await post('RemoveRegionChargeLine', { chargeId: row.charge.id, lineId: parseInt(a.getAttribute('data-rf-line'), 10) });
+        } else if (act === 'zero') {
+            r = await post('SetRegionChargeManualAmount', { chargeId: row.charge.id, manualAmount: 0 });
+        } else if (act === 'delete') {
+            if (!window.confirm('Ta bort avgiften för ' + row.clubName + '? Klubben har redan fått ett mejl om den.')) { a.disabled = false; return; }
+            r = await post('DeleteRegionCharge', { chargeId: row.charge.id });
+        } else { a.disabled = false; return; }
+
+        if (!r || !r.success) { if (r) msg(false, r.message); a.disabled = false; if (!row.charge) load(); return; }
         msg(true, '');
         load();
     });
 
-    // Sparar klubbens justering. Värden lika med registret/taxan skickas som null = "ingen justering".
-    // ⚠️ Går sparningen inte igenom SÄGS det och listan läses om — annars står ett tal på skärmen
-    //    som inte finns någon annanstans.
-    async function saveDraft(clubId) {
-        var row = (data.rows || []).find(function (r) { return r.clubId === clubId; });
-        var d = drafts[clubId];
-        if (!row || !d) return;
-        var r = await post('/umbraco/surface/MembershipFeeAdmin/SaveRegionDraft', {
-            regionId: REGION_ID, year: year(), clubId: clubId,
-            memberCount: d.count === row.proposedCount ? null : d.count,
-            manualAmount: d.manual
-        });
-        if (!r || !r.success) { msg(false, 'Ändringen kunde inte sparas. ' + ((r && r.message) || '')); load(); }
-    }
-
     // ── Ändra ett tal: Enter eller klick utanför sparar, Escape ångrar ─────────────────────
     async function commitInput(input) {
-        var kind = input.getAttribute('data-rf-input'), id = parseInt(input.getAttribute('data-rf-id'), 10);
+        var kind = input.getAttribute('data-rf-input'), clubId = parseInt(input.getAttribute('data-rf-id'), 10);
         var v = Math.max(0, parseFloat(input.value) || 0);
+        var s = stateOf(rowOf(clubId));
         editing = null;
+        render();
 
-        if (kind === 'dcount' || kind === 'damount') {
-            var d = drafts[id];
-            if (kind === 'dcount') { d.count = Math.round(v); d.manual = null; }
-            else {
-                // Samma belopp som taxan ger = inget eget belopp. Annars står "eget belopp" på en klubb
-                // som bara klickade och tryckte Enter.
-                d.manual = v === draftAmount({ count: d.count, manual: null }) ? null : v;
-            }
-            render();
-            await saveDraft(id);
-            return;
-        }
+        var id = await chargeIdFor(clubId);
+        if (!id) { load(); return; }
+        var r;
         if (kind === 'count') {
-            var r = await post('/umbraco/surface/MembershipFeeAdmin/SetRegionChargeMemberCount', { chargeId: id, memberCount: Math.round(v) });
-            if (!r.success) msg(false, r.message);
-            load();
+            r = await post('SetRegionChargeMemberCount', { chargeId: id, memberCount: Math.round(v) });
+        } else {
+            // Samma belopp som taxan ger = inget eget belopp. Annars står "eget belopp" på en klubb
+            // som bara klickade och tryckte Enter.
+            var formula = byRate(s.count == null ? rowOf(clubId).proposedCount : s.count);
+            r = await post('SetRegionChargeManualAmount', { chargeId: id, manualAmount: v === formula ? null : v });
         }
+        // ⚠️ Går sparningen inte igenom SÄGS det — annars står ett tal på skärmen som inte finns.
+        if (!r.success) msg(false, 'Ändringen kunde inte sparas. ' + (r.message || ''));
+        load();
     }
     $('rfRoot').addEventListener('keydown', function (ev) {
         var input = ev.target.closest('[data-rf-input]');
@@ -411,9 +437,8 @@
     $('rfSaveRate').addEventListener('click', async function () {
         var b = parseFloat($('rfBase').value) || 0, p = parseFloat($('rfPer').value) || 0;
         if (b <= 0 && p <= 0) { msg(false, 'Fyll i ett belopp.'); return; }
-        var r = await post('/umbraco/surface/MembershipFeeAdmin/SaveRegionRate', { regionId: REGION_ID, year: year(), baseAmount: b, perMember: p });
+        var r = await post('SaveRegionRate', { regionId: REGION_ID, year: year(), baseAmount: b, perMember: p });
         if (!r.success) { msg(false, r.message); return; }
-        // Utkastens belopp räknas om ur den nya taxan av sig själva; egna belopp står kvar.
         load();
     });
     $('rfCancelRate').addEventListener('click', function () { show($('rfRateForm'), false); });
@@ -421,26 +446,22 @@
     // ── Skicka och påminn ────────────────────────────────────────────────────────────────
     $('rfSend').addEventListener('click', async function () {
         var btn = this;
-        var list = (data.rows || []).filter(function (r) { return !r.charge && draftAmount(drafts[r.clubId]) > 0; });
+        var list = (data.rows || []).filter(function (r) { var s = stateOf(r); return !s.paid && !s.sent && s.amount > 0 && r.hasEmail; });
         if (list.length === 0) return;
-        var sum = list.reduce(function (a, r) { return a + draftAmount(drafts[r.clubId]); }, 0);
-        if (!window.confirm('Skicka kretsavgiften ' + data.year + ' till ' + list.length + ' klubbar, totalt ' + kr(sum) + '?')) return;
+        var sum = list.reduce(function (a, r) { return a + stateOf(r).amount; }, 0);
+        if (!window.confirm('Mejla kretsavgiften ' + data.year + ' till ' + list.length + ' klubbar, totalt ' + kr(sum) + '?')) return;
 
         btn.disabled = true;
-        var g = await post('/umbraco/surface/MembershipFeeAdmin/GenerateRegionCharges', {
-            regionId: REGION_ID, year: year(),
-            clubs: list.map(function (r) {
-                var d = drafts[r.clubId];
-                return { clubId: r.clubId, memberCount: d.count, manualAmount: d.manual };
-            })
-        });
-        if (!g.success) { btn.disabled = false; msg(false, g.message); return; }
-
-        var s = await post('/umbraco/surface/MembershipFeeAdmin/SendRegionPaymentRequests',
-                           { regionId: REGION_ID, year: year(), chargeIds: g.createdChargeIds || [] });
+        // Klubbar som ingen rört har ingen avgift än — den skapas nu, med registrets antal.
+        var missing = (data.rows || []).filter(function (r) { return !r.charge && r.proposedAmount > 0; });
+        if (missing.length > 0) {
+            var g = await post('GenerateRegionCharges', { regionId: REGION_ID, year: year(),
+                clubs: missing.map(function (r) { return { clubId: r.clubId, memberCount: r.proposedCount }; }) });
+            if (!g.success) { btn.disabled = false; msg(false, g.message); return; }
+        }
+        var s = await post('SendRegionPaymentRequests', { regionId: REGION_ID, year: year(), mode: 'unsent' });
         btn.disabled = false;
-        drafts = {};
-        report(g.created, s);
+        report(s);
         load();
     });
 
@@ -448,19 +469,18 @@
         var btn = this;
         if (!window.confirm('Mejla en påminnelse till klubbarna som inte betalat?')) return;
         btn.disabled = true;
-        var s = await post('/umbraco/surface/MembershipFeeAdmin/SendRegionPaymentRequests', { regionId: REGION_ID, year: year() });
+        var s = await post('SendRegionPaymentRequests', { regionId: REGION_ID, year: year(), mode: 'reminder' });
         btn.disabled = false;
-        report(null, s);
+        report(s);
+        load();
     });
 
     // ⚠️ Beskedet säger vad som FAKTISKT hände. Ett "skickat" om ett mejl som aldrig gick är en lögn.
-    function report(created, s) {
-        if (!s || !s.success) { msg(false, 'Avgiften är skapad, men mejlen gick inte att skicka. ' + ((s && s.message) || '')); return; }
-        var parts = [];
-        if (created !== null) parts.push('Avgiften är skickad till ' + created + (created === 1 ? ' klubb.' : ' klubbar.'));
-        parts.push(s.sent + (s.sent === 1 ? ' klubb fick' : ' klubbar fick') + ' ett mejl.');
+    function report(s) {
+        if (!s || !s.success) { msg(false, 'Mejlen gick inte att skicka. ' + ((s && s.message) || '')); return; }
+        var parts = [s.sent + (s.sent === 1 ? ' klubb fick' : ' klubbar fick') + ' ett mejl.'];
         var missed = (s.noEmail || []).concat(s.failed || []);
-        if (missed.length > 0) parts.push('Inget mejl gick till ' + missed.join(', ') + ' — kopiera deras betallänk via ⋯.');
+        if (missed.length > 0) parts.push('Inget mejl gick till ' + missed.join(', ') + '. Välj Åtgärder → Kopiera betallänk och skicka länken själv.');
         msg(true, parts.join(' '), missed.length > 0 ? 'warn' : 'ok');
     }
 
