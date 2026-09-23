@@ -1,0 +1,108 @@
+@model HpskSite.Controllers.RevisionModel
+@{
+    Layout = null;
+
+    var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+    string Kr(decimal v) => v.ToString("#,##0", sv) + " kr";
+    var s = Model.Selected!;
+    var st = Model.Statements;
+    var year = Model.Years.FirstOrDefault(y => y.Id == Model.SelectedYearId);
+    var from = st?.From.ToString("d MMMM yyyy", sv) ?? "";
+    var to = st?.To.ToString("d MMMM yyyy", sv) ?? "";
+    var auditor = string.IsNullOrWhiteSpace(Model.AuditorName) ? "…………………………………" : Model.AuditorName;
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Revisionsberättelse — @s.OwnerName</title>
+    <meta name="robots" content="noindex, nofollow">
+    <style>
+        body { font-family: Georgia, "Times New Roman", serif; background: #eef1f5; margin: 0; color: #111; }
+        .note { max-width: 780px; margin: 18px auto 0; padding: 12px 16px; font-family: system-ui, sans-serif;
+                font-size: 14px; background: #fff7e8; border: 1px solid #f3dcae; border-radius: 8px; }
+        .note button { margin-left: 8px; }
+        .sheet { max-width: 780px; margin: 18px auto 40px; background: #fff; padding: 56px 64px; line-height: 1.55;
+                 box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+        h1 { font-size: 26px; margin: 0 0 4px; }
+        h2 { font-size: 16px; margin: 26px 0 6px; }
+        p { margin: 0 0 10px; }
+        [contenteditable="true"] { outline: 1px dashed transparent; }
+        [contenteditable="true"]:hover, [contenteditable="true"]:focus { outline-color: #9bb7de; }
+        table { border-collapse: collapse; margin: 6px 0 12px; }
+        td { padding: 2px 18px 2px 0; }
+        td.n { text-align: right; font-variant-numeric: tabular-nums; }
+        .sign { display: flex; gap: 48px; margin-top: 48px; }
+        .sign div { flex: 1; border-top: 1px solid #111; padding-top: 6px; font-size: 14px; }
+        @@media print {
+            body { background: #fff; }
+            .note { display: none; }
+            .sheet { box-shadow: none; margin: 0; padding: 0; max-width: none; }
+            [contenteditable="true"] { outline: none !important; }
+        }
+    </style>
+</head>
+<body>
+    @* ⚠️ Ett UTKAST. Texten är den vedertagna för en ideell förening, men uttalandet är
+       revisorns: allt går att skriva om före utskrift, och ingenting sparas. *@
+    <div class="note">
+        <strong>Utkast.</strong> Texten nedan är ett förslag — klicka i den och skriv om det som
+        inte stämmer, till exempel om du har anmärkningar eller inte tillstyrker ansvarsfrihet.
+        Ingenting sparas; skriv ut när texten är din.
+        <button type="button" onclick="window.print()">Skriv ut</button>
+    </div>
+
+    <div class="sheet">
+        <h1>Revisionsberättelse</h1>
+        <p contenteditable="true">
+            Till årsmötet i <strong>@s.OwnerName</strong>@(string.IsNullOrWhiteSpace(Model.OrgNumber) ? "" : ", org.nr " + Model.OrgNumber)
+        </p>
+
+        <h2>Rapport om räkenskaperna</h2>
+        <p contenteditable="true">
+            Jag har granskat räkenskaperna och styrelsens förvaltning i @s.OwnerName för
+            räkenskapsåret @(from) – @(to)@(year is not null && year.Status != "established" ? " (året är ännu inte fastställt)" : "").
+        </p>
+
+        @if (st is not null)
+        {
+            <table>
+                <tr><td>Intäkter</td><td class="n">@Kr(st.RevenueTotal)</td></tr>
+                <tr><td>Kostnader</td><td class="n">@Kr(st.CostTotal)</td></tr>
+                <tr><td><strong>Årets resultat</strong></td><td class="n"><strong>@Kr(st.Result)</strong></td></tr>
+                <tr><td>Tillgångar vid årets slut</td><td class="n">@Kr(st.AssetTotal)</td></tr>
+            </table>
+        }
+
+        <h2>Styrelsens ansvar</h2>
+        <p contenteditable="true">
+            Det är styrelsen som har ansvaret för att räkenskaperna förs och för förvaltningen enligt
+            föreningens stadgar.
+        </p>
+
+        <h2>Revisorns ansvar</h2>
+        <p contenteditable="true">
+            Mitt ansvar är att uttala mig om räkenskaperna och förvaltningen på grundval av min
+            revision. Jag har granskat verifikationer och underlag i den omfattning jag funnit
+            nödvändig, stämt av bokföringen mot kontoutdragen och tagit del av styrelsens protokoll.
+        </p>
+
+        <h2>Uttalanden</h2>
+        <p contenteditable="true">
+            Enligt min uppfattning har räkenskaperna förts på ett tillfredsställande sätt och ger en
+            rättvisande bild av föreningens resultat och ställning. Jag har inte funnit att någon
+            styrelseledamot har handlat i strid med föreningens stadgar.
+        </p>
+        <p contenteditable="true">
+            Jag tillstyrker att årsmötet fastställer resultat- och balansräkningen för räkenskapsåret
+            och beviljar styrelsens ledamöter ansvarsfrihet för samma tid.
+        </p>
+
+        <div class="sign">
+            <div contenteditable="true">Ort och datum</div>
+            <div contenteditable="true">@auditor<br>Revisor</div>
+        </div>
+    </div>
+</body>
+</html>

@@ -179,11 +179,32 @@ namespace HpskSite.Controllers
         /// <summary>Revisionssidan — räkenskaperna för de föreningar man är revisor för.</summary>
         [HttpGet("")]
         public async Task<IActionResult> Index(int? type, int? id, int? year)
+            => View("~/Views/Revision.cshtml", await BuildAsync(type, id, year));
+
+        /// <summary>
+        /// Revisionsberättelsen som utkast: föreningens namn, året, revisorns namn och den
+        /// vedertagna texten, redigerbar på skärmen och sedan utskriven.
+        ///
+        /// <para><b>⚠️ Ett UTKAST, aldrig ett påstående.</b> Uttalandet är revisorns — sidan skriver
+        /// "tillstyrker" som förval eftersom det är det vanliga, men texten går att ändra före
+        /// utskrift, och ingenting sparas. En berättelse som systemet fyllt i och sparat åt
+        /// revisorn vore en handling hen inte skrivit.</para>
+        /// </summary>
+        [HttpGet("berattelse")]
+        public async Task<IActionResult> Berattelse(int? type, int? id, int? year)
+        {
+            var model = await BuildAsync(type, id, year);
+            if (model.NeedsLogin || model.Selected is null)
+                return Redirect("/revision");
+            return View("~/Views/RevisionBerattelse.cshtml", model);
+        }
+
+        private async Task<RevisionModel> BuildAsync(int? type, int? id, int? year)
         {
             var me = await CurrentMemberIdAsync();
 
             if (me <= 0)
-                return View("~/Views/Revision.cshtml", new RevisionModel { NeedsLogin = true });
+                return new RevisionModel { NeedsLogin = true };
 
             var grants = _auditors.GrantsForMember(me);
 
@@ -198,14 +219,16 @@ namespace HpskSite.Controllers
                 }).ToList()
             };
 
-            if (model.Assignments.Count == 0) return View("~/Views/Revision.cshtml", model);
+            model.AuditorName = _memberService.GetById(me)?.Name ?? "";
+
+            if (model.Assignments.Count == 0) return model;
 
             // Förvalet är det enda uppdraget; med flera väljer revisorn.
             var pick = model.Assignments.FirstOrDefault(a =>
                            type.HasValue && id.HasValue && a.OwnerType == type && a.OwnerId == id)
                        ?? (model.Assignments.Count == 1 ? model.Assignments[0] : null);
 
-            if (pick is null) return View("~/Views/Revision.cshtml", model);
+            if (pick is null) return model;
 
             model.Selected = pick;
             pick.FiscalYearId = year;
@@ -218,7 +241,7 @@ namespace HpskSite.Controllers
             if (!access.CanRead)
             {
                 model.Selected = null;
-                return View("~/Views/Revision.cshtml", model);
+                return model;
             }
 
             // ⚠️ Revisorn ska ALDRIG kunna skriva härifrån. Sidan visar inget som skriver, och
@@ -229,8 +252,19 @@ namespace HpskSite.Controllers
             _auditors.Touch(pick.OwnerType, pick.OwnerId, me);
 
             LoadYear(model, pick);
+            model.OrgNumber = OrgNumber(pick.OwnerId);
 
-            return View("~/Views/Revision.cshtml", model);
+            return model;
+        }
+
+        private string OrgNumber(int ownerId)
+        {
+            try
+            {
+                _umbracoContextAccessor.TryGetUmbracoContext(out var ctx);
+                return ctx?.Content?.GetById(ownerId)?.Value<string>("orgNumber") ?? "";
+            }
+            catch { return ""; }
         }
 
         /// <summary>
@@ -263,7 +297,13 @@ namespace HpskSite.Controllers
                     .Select(y => new RevisionYear { Id = y.Id, Year = y.Year, Status = y.Status })
                     .ToList();
 
+                // ⚠️⚠️ FÖRVALET ÄR DET SENAST AVSLUTADE ÅRET, inte det senaste. En revisor granskar
+                //    ett år som är slut; i januari–mars finns innevarande år redan upplagt och tomt,
+                //    och "senaste" landade revisorn där. Finns inget avslutat år visas det senaste.
+                var finished = years.Where(y => y.EndDate.Date < DateTime.Today)
+                                    .OrderByDescending(y => y.Year).FirstOrDefault();
                 var yearId = pick.FiscalYearId
+                             ?? finished?.Id
                              ?? years.OrderByDescending(y => y.Year).Select(y => y.Id).First();
 
                 model.SelectedYearId = yearId;
@@ -472,6 +512,11 @@ namespace HpskSite.Controllers
         public List<RevisionYear> Years { get; set; } = new();
 
         public int SelectedYearId { get; set; }
+
+        /// <summary>Den inloggade revisorns namn — till berättelsens underskrift.</summary>
+        public string AuditorName { get; set; } = "";
+
+        public string OrgNumber { get; set; } = "";
     }
 
     /// <summary>Ett justerat protokoll, så som revisionssidan listar det.</summary>

@@ -32,14 +32,20 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly AdminAuthorizationService _auth;
+        private readonly HpskSite.Services.Ledger.LedgerAccessService _access;
+        private readonly HpskSite.Services.Ledger.LedgerSandboxService _sandbox;
 
         public LedgerReceiptController(
             IUmbracoDatabaseFactory databaseFactory,
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberManager memberManager,
             IMemberService memberService,
-            AdminAuthorizationService auth)
+            AdminAuthorizationService auth,
+            HpskSite.Services.Ledger.LedgerAccessService access,
+            HpskSite.Services.Ledger.LedgerSandboxService sandbox)
         {
+            _access = access;
+            _sandbox = sandbox;
             _databaseFactory = databaseFactory;
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
@@ -79,7 +85,7 @@ namespace HpskSite.Controllers
             var member = _memberService.GetByEmail(current.Email ?? string.Empty);
             var isPayer = member is not null && payment?.PayerMemberId == member.Id;
 
-            if (!isPayer && !await IsIssuerAdminAsync(receipt.IssuerType, receipt.IssuerId))
+            if (!isPayer && !await CanReadIssuerAsync(receipt.IssuerType, receipt.IssuerId))
                 return Forbid();
 
             var model = new LedgerReceiptViewModel
@@ -103,6 +109,34 @@ namespace HpskSite.Controllers
             };
 
             return View("~/Views/LedgerReceipt.cshtml", model);
+        }
+
+        /// <summary>
+        /// Får den inloggade läsa föreningens räkenskaper? <b>Samma regel som resten av ekonomin</b>
+        /// (<see cref="HpskSite.Services.Ledger.LedgerAccessService"/>): kassören, styrelsen och
+        /// revisorn.
+        ///
+        /// <para>⚠️⚠️ Förut bara administratörer. Revisorn — den som ska följa kedjan verifikation →
+        /// underlag → kvitto — nekades vid det sista steget, och styrelsen likaså. En egen,
+        /// smalare regel här var precis den parallella kontroll som glider från den riktiga.</para>
+        /// </summary>
+        private async Task<bool> CanReadIssuerAsync(int issuerType, int issuerId)
+        {
+            var sb = issuerId < 0 ? _sandbox.GetById(issuerId) : null;
+            var ownerType = sb?.OwnerType ?? issuerType;
+            var ownerId = sb?.OwnerId ?? issuerId;
+
+            try
+            {
+                var r = await _access.ResolveAsync(ownerType, ownerId);
+                if (r.CanRead) return true;
+            }
+            catch
+            {
+                // Faller tillbaka på administratörsfrågan nedan.
+            }
+
+            return await IsIssuerAdminAsync(ownerType, ownerId);
         }
 
         private async Task<bool> IsIssuerAdminAsync(int issuerType, int issuerId)

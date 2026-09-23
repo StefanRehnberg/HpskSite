@@ -31,6 +31,12 @@
         .bad  { background: #fdeeee; border: 1px solid #f2c3c3; border-radius: 8px; padding: 14px; }
         .okbx { background: #eef8f0; border: 1px solid #c6e6cf; border-radius: 8px; padding: 14px; }
         h2 { font-size: 19px; font-weight: 700; margin: 0 0 12px; }
+        table.st { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        table.st td { padding: 5px 6px; border-bottom: 1px solid #f0f3f7; }
+        table.st td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        table.st tr.grp td { font-weight: 700; font-size: 13px; text-transform: uppercase; color: #5b6672; padding-top: 14px; }
+        table.st tr.sum td { font-weight: 700; border-top: 1px solid #c9d2dc; }
+        details.stmt summary { cursor: pointer; font-weight: 600; margin-top: 16px; }
 
         @@media (prefers-color-scheme: dark) {
             body { background: #10151b; color: #e7edf3; }
@@ -147,6 +153,46 @@
                         </div>
                     </div>
 
+                    @* ⚠️ Fyra totaler räcker inte för en revisor: hen läser kontona. Hela resultat-
+                       och balansräkningen, med kapitalsidan — samma tal som bokslutsytan. *@
+                    <details class="stmt">
+                        <summary>Resultat- och balansräkningen konto för konto</summary>
+                        <div class="grid" style="margin-top:8px">
+                            <table class="st">
+                                <tr class="grp"><td colspan="3">Intäkter</td></tr>
+                                @foreach (var r in st.Revenue)
+                                {
+                                    <tr><td class="muted" style="width:3.5rem">@r.AccountNumber</td><td>@r.AccountName</td><td class="n">@Kr(r.Amount)</td></tr>
+                                }
+                                <tr class="grp"><td colspan="3">Kostnader</td></tr>
+                                @foreach (var r in st.Costs)
+                                {
+                                    <tr><td class="muted">@r.AccountNumber</td><td>@r.AccountName</td><td class="n">@Kr(r.Amount)</td></tr>
+                                }
+                                <tr class="sum"><td></td><td>Årets resultat</td><td class="n">@Kr(st.Result)</td></tr>
+                            </table>
+                            <table class="st">
+                                <tr class="grp"><td colspan="3">Tillgångar</td></tr>
+                                @foreach (var r in st.Assets)
+                                {
+                                    <tr><td class="muted" style="width:3.5rem">@r.AccountNumber</td><td>@r.AccountName</td><td class="n">@Kr(r.Amount)</td></tr>
+                                }
+                                <tr class="sum"><td></td><td>Summa tillgångar</td><td class="n">@Kr(st.AssetTotal)</td></tr>
+                                <tr class="grp"><td colspan="3">Eget kapital och skulder</td></tr>
+                                @foreach (var r in st.EquityAndLiabilities)
+                                {
+                                    <tr><td class="muted">@r.AccountNumber</td><td>@r.AccountName</td><td class="n">@Kr(r.Amount)</td></tr>
+                                }
+                                @if (st.PriorResult != 0m)
+                                {
+                                    <tr><td></td><td>Tidigare års resultat</td><td class="n">@Kr(st.PriorResult)</td></tr>
+                                }
+                                <tr><td></td><td>Årets resultat</td><td class="n">@Kr(st.Result)</td></tr>
+                                <tr class="sum"><td></td><td>Summa eget kapital och skulder</td><td class="n">@Kr(st.EquityAndLiabilityTotal + st.PriorResult + st.Result)</td></tr>
+                            </table>
+                        </div>
+                    </details>
+
                     <div style="margin-top:16px">
                         @* ⚠️ Balanskontrollen visas ALLTID, också när den går ihop. Det är den
                            enklaste kontrollen som finns och den första en revisor gör. *@
@@ -193,7 +239,7 @@
                         handbokförda poster saknar underlag.
                         @* Rakt in i listan, filtrerad — annars får revisorn leta själv. *@
                         <div style="margin-top:8px">
-                            <a href="/ekonomi?type=@s.OwnerType&id=@s.OwnerId#verifikationer">
+                            <a href="/ekonomi?type=@s.OwnerType&id=@s.OwnerId&vy=verifikationer">
                                 Gå till verifikationerna
                             </a>
                         </div>
@@ -306,7 +352,14 @@
                    årshjul, valberedning — och revisorn har ingen åtkomst dit. Protokollen når hen
                    som färdiga handlingar i listan ovan. En knapp som nekas är sämre än ingen. *@
                 <a class="btn btn-primary mb-2 me-2"
-                   href="/ekonomi?type=@s.OwnerType&id=@s.OwnerId">Verifikationer och huvudbok</a>
+                   href="/ekonomi?type=@s.OwnerType&id=@s.OwnerId&vy=verifikationer">Verifikationer och huvudbok</a>
+                @if (Model.SelectedYearId != 0)
+                {
+                    <a class="btn btn-outline-secondary mb-2 me-2"
+                       href="/umbraco/surface/EkonomiAdmin/ExportSie?issuerType=@s.OwnerType&issuerId=@s.OwnerId&fiscalYearId=@Model.SelectedYearId">Hämta SIE-fil</a>
+                    <a class="btn btn-outline-secondary mb-2 me-2" target="_blank" rel="noopener"
+                       href="/revision/berattelse?type=@s.OwnerType&id=@s.OwnerId&year=@Model.SelectedYearId">Skriv revisionsberättelsen</a>
+                }
             </div>
         }
     }
