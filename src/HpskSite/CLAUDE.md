@@ -5019,8 +5019,17 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
 
 ### Ytorna
 
-- **Kretsens adminpanel → Kretsen → Kretsavgift** (`RegionFeeManagement.cshtml`, lat laddad på
-  click). **⚠️⚠️ Byggd för "Ove, 70, lekmannakassör"** — TRE utsågor underkändes (Stefan 2026-09-23):
+- **⚠️⚠️ Ekonomisidan → Kretsavgift** (`/ekonomi?type=1&id=…&vy=arsavgift`, `RegionFeeManagement.cshtml`, lat
+  laddad via `window.hpskLoadRegionFees`). **Flyttad från kretsens adminpanel 2026-09-23** (Stefan: ingen bra
+  anledning att den låg där), tillsammans med klubbens **Medlemsavgifter** (`ClubFeeManagement.cshtml`, förut en
+  modal bakom Medlemmar → Åtgärder). Båda är EN rälspost `data-view="arsavgift"` direkt efter Avgifter, med
+  ordet efter föreningstyp. Adminpanelerna bär bara en länk dit (`&vy=` öppnar vyn direkt). **Behörigheten är
+  ekonomisidans:** skrivande endpoints som förut (klubb-/kretsadmin = ekonomisidans CanWrite); `GetOverview`,
+  `GetRegionOverview` och `PreviewRegionPaymentRequest` godtar LÄSRÄTT (`LedgerAccessService` — styrelsen,
+  revisorn), och partialerna har ett läsläge (`ViewData["feesReadOnly"]`) utan en enda skrivknapp. I en
+  sandlåda visas en förklaring i stället för listan — avgifterna finns bara i den riktiga bokföringen.
+  ⚠️ Klubbens yta är flyttad men INTE omgjord (samma gamla form som kretsavgiften hade före Ove-omgången).
+  Kretsavgiftsytan: **⚠️⚠️ Byggd för "Ove, 70, lekmannakassör"** — TRE utsågor underkändes (Stefan 2026-09-23):
   "obegripliga, röriga, för mycket text", och sedan: *"sidan blir helt förändrad så fort jag skickat
   mejl — först DÅ dyker en konstig symbol och en Betald-knapp upp; varför fanns de inte innan?"*
   Läs vyns huvudkommentar innan du lägger till något:
@@ -5064,7 +5073,7 @@ genererar `SET IssuerType = …` i varje uppdatering av en avgift så snart POCO
 kolumnerna faller **varje klubbs "Markera betald"**, inte bara kretsens. Körd i dev 2026-09-23;
 **EJ körd i prod.** Fildeploy av `KnowledgeBase/docs/kretsavgift.md` (ny). Adds C# → full ombyggnad.
 
-Verifierat **18 enhetstest** (`RegionFeeCalculatorTests`; hela sviten 1447/1447) och **136/136
+Verifierat **18 enhetstest** (`RegionFeeCalculatorTests`; hela sviten 1447/1447) och **140/140
 `hpsk-verify/kretsavgift-verify.mjs`**, två körningar i rad (avsnitt 5b prövar den oskickade avgiften,
 avsnitt 10 att varje rad bär Åtgärder och Betald oavsett läge — **A/B mot den tidigare vyn: 7 faller**,
 exakt Stefans klagomål). Sviten hittade att `load()`
