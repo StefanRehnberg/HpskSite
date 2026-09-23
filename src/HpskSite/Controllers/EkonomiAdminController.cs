@@ -41,6 +41,7 @@ namespace HpskSite.Controllers
         private readonly LedgerBudgetService _budgetService;
         private readonly LedgerChartService _chartService;
         private readonly LedgerManualPostingService _manualPosting;
+        private readonly LedgerOpeningBalanceService _openingBalances;
         private readonly LedgerMembershipFeeBridge _feeBridge;
         private readonly LedgerSandboxService _sandbox;
         private readonly LedgerAccessService _access;
@@ -85,6 +86,7 @@ namespace HpskSite.Controllers
             LedgerBudgetService budgetService,
             LedgerChartService chartService,
             LedgerManualPostingService manualPosting,
+            LedgerOpeningBalanceService openingBalances,
             LedgerMembershipFeeBridge feeBridge,
             LedgerSandboxService sandbox,
             LedgerAccessService access,
@@ -129,6 +131,7 @@ namespace HpskSite.Controllers
             _attachmentStorage = attachmentStorage;
             _emailService = emailService;
             _manualPosting = manualPosting;
+            _openingBalances = openingBalances;
             _feeBridge = feeBridge;
             _sandbox = sandbox;
             _access = access;
@@ -453,6 +456,70 @@ namespace HpskSite.Controllers
             });
         }
 
+        /// <summary>
+        /// Ingående balanser: första räkenskapsåret, balanskontona och det som redan är inlagt.
+        /// Läsrätt räcker — styrelsen och revisorn ska kunna se vad föreningen började med.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetOpeningBalances(int issuerType, int issuerId)
+        {
+            var r = await ResolveAccessAsync(issuerType, issuerId);
+            if (!r.CanRead) return Json(new { success = false, message = DeniedMessage });
+
+            try
+            {
+                var s = _openingBalances.Get(issuerType, issuerId);
+                return Json(new { success = true, canWrite = r.CanWrite, state = s });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ingående balanser kunde inte läsas för {Typ}/{Id}.", issuerType, issuerId);
+                return Json(new { success = false, message = "De ingående balanserna kunde inte läsas." });
+            }
+        }
+
+        /// <summary>
+        /// Bokför de ingående balanserna. Kassören anger saldon; eget kapital räknas ut. Finns
+        /// det redan en uppsättning rättas den först — ingenting skrivs över.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveOpeningBalances([FromBody] SaveOpeningBalancesRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+
+            var (ok, name) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            try
+            {
+                var result = _openingBalances.Save(request.IssuerType, request.IssuerId,
+                    request.Lines ?? new List<OpeningBalanceLine>(), actorId.Value);
+
+                if (!result.Success) return Json(new { success = false, message = result.Error });
+
+                _logger.LogInformation("Ekonomi: {Forening} lade in ingående balanser (verifikation {EntryId}).",
+                    name, result.EntryId);
+
+                return Json(new
+                {
+                    success = true,
+                    entryId = result.EntryId,
+                    removed = result.Removed,
+                    state = _openingBalances.Get(request.IssuerType, request.IssuerId)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Ingående balanser kunde inte sparas för {Typ}/{Id}.",
+                    request.IssuerType, request.IssuerId);
+                return Json(new { success = false, message = "De ingående balanserna kunde inte sparas." });
+            }
+        }
+
         /// <summary>Var en post som inte är handbokförd rättas — på vanlig svenska.</summary>
         private static string SourceCorrectionHint(string? sourceType) => sourceType switch
         {
@@ -462,6 +529,8 @@ namespace HpskSite.Controllers
                 "Posten kommer från kretsavgiften. Rätta den under Kretsavgift — välj Ångra betald på klubbens rad.",
             LedgerSourceType.AssetDepreciation =>
                 "Posten är en avskrivning från Tillgångar och rättas inte för hand.",
+            LedgerSourceType.OpeningBalance =>
+                "Posten är föreningens ingående balanser. Ändra dem under Inställningar → Ingående balanser.",
             LedgerSourceType.CompetitionRegistration or LedgerSourceType.TeamFee or LedgerSourceType.Event =>
                 "Posten kommer från en anmälningsbetalning. Ångra betalningen där den togs emot.",
             _ => "Posten kommer inte från Bokför och rättas där den skapades."
@@ -2849,6 +2918,13 @@ namespace HpskSite.Controllers
     }
 
     /// <summary>Det köytan skickar när en rad ska bokföras.</summary>
+    public class SaveOpeningBalancesRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public List<OpeningBalanceLine>? Lines { get; set; }
+    }
+
     public class CorrectEntryRequest
     {
         public int IssuerType { get; set; }

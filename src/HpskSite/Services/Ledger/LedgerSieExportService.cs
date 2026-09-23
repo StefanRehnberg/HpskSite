@@ -81,18 +81,50 @@ namespace HpskSite.Services.Ledger
             Post("RAR", "0", SieFormat.Date(year.StartDate), SieFormat.Date(year.EndDate));
 
             // ── Kontoplanen ─────────────────────────────────────────────────────────────────
-            // ⚠️ Bara konton som FAKTISKT används i året. En full kontoplan med 39 rader varav
+            // ⚠️ Bara konton som FAKTISKT används. En full kontoplan med 39 rader varav
             //    tolv används gör filen svårare att läsa utan att tillföra något — och ett
             //    oanvänt konto kan vara ett som klubben stängt.
+            // ⚠️⚠️ "Används" betyder för ett BALANSKONTO att det har ett saldo, inte att det rörde
+            //    sig i år. Ett bankkonto som stod still hela året försvann annars ur filen, och
+            //    med det dess #IB och #UB — föreningens pengar fanns inte i bokslutet.
             var accounts = ldb.Fetch<AccountRow>(
                 @"SELECT DISTINCT l.AccountNumber, MAX(l.AccountName) AS AccountName
                     FROM dbo.LedgerJournalEntryLine l
                     JOIN dbo.LedgerJournalEntry e ON e.Id = l.JournalEntryId
                    WHERE e.IssuerType = @0 AND e.IssuerId = @1
-                     AND e.AccountingDate >= @2 AND e.AccountingDate <= @3
+                     AND e.AccountingDate <= @3
+                     AND (e.AccountingDate >= @2 OR l.AccountNumber < 3000)
                    GROUP BY l.AccountNumber
                    ORDER BY l.AccountNumber",
                 issuerType, issuerId, year.StartDate, year.EndDate);
+
+            // ⚠️⚠️ TIDIGARE ÅRS RESULTAT MÅSTE IN I EGET KAPITALS INGÅENDE BALANS.
+            //    Liggaren gör ingen årsskiftesöverföring (saldona är kumulativa, se
+            //    LedgerFinancialStatements.PriorResult). Utan det här summerar #IB inte till noll
+            //    från och med föreningens andra år — förra årets överskott står på bankkontot men
+            //    ingenstans på kapitalsidan — och ett bokföringsprogram som tar emot filen
+            //    avvisar den eller bokar differensen på ett felkonto.
+            var priorResult = ldb.Fetch<decimal?>(
+                @"SELECT SUM(l.Debit - l.Credit) FROM dbo.LedgerJournalEntryLine l
+                    JOIN dbo.LedgerJournalEntry e ON e.Id = l.JournalEntryId
+                   WHERE e.IssuerType = @0 AND e.IssuerId = @1
+                     AND l.AccountNumber >= 3000 AND e.AccountingDate < @2",
+                issuerType, issuerId, year.StartDate).FirstOrDefault() ?? 0m;
+
+            var equityAccount = 0;
+            string? equityName = null;
+            if (priorResult != 0m)
+            {
+                // Samma kapitalkonto som de ingående balanserna bokförs mot.
+                (equityAccount, equityName) =
+                    LedgerOpeningBalanceService.ResolveEquityAccount(ldb, issuerType, issuerId);
+
+                if (!accounts.Any(a => a.AccountNumber == equityAccount))
+                {
+                    accounts.Add(new AccountRow { AccountNumber = equityAccount, AccountName = equityName });
+                    accounts = accounts.OrderBy(a => a.AccountNumber).ToList();
+                }
+            }
 
             foreach (var a in accounts)
             {
@@ -109,6 +141,12 @@ namespace HpskSite.Services.Ledger
             {
                 var ib = SumBefore(ldb, issuerType, issuerId, a.AccountNumber, year.StartDate);
                 var ub = SumThrough(ldb, issuerType, issuerId, a.AccountNumber, year.EndDate);
+
+                if (a.AccountNumber == equityAccount)
+                {
+                    ib += priorResult;
+                    ub += priorResult;
+                }
 
                 Post("IB", "0", a.AccountNumber.ToString(), SieFormat.Amount(ib));
                 Post("UB", "0", a.AccountNumber.ToString(), SieFormat.Amount(ub));
@@ -130,8 +168,9 @@ namespace HpskSite.Services.Ledger
                     LEFT JOIN dbo.LedgerNumberSeries s ON s.Id = e.SeriesId
                    WHERE e.IssuerType = @0 AND e.IssuerId = @1
                      AND e.AccountingDate >= @2 AND e.AccountingDate <= @3
+                     AND NOT (e.AccountingDate = @2 AND e.SourceType = @4)
                    ORDER BY e.AccountingDate, e.Number",
-                issuerType, issuerId, year.StartDate, year.EndDate);
+                issuerType, issuerId, year.StartDate, year.EndDate, LedgerSourceType.OpeningBalance);
 
             var lines = ldb.Fetch<LineRow>(
                 @"SELECT l.JournalEntryId, l.AccountNumber, l.Debit, l.Credit, l.Text
@@ -139,8 +178,9 @@ namespace HpskSite.Services.Ledger
                     JOIN dbo.LedgerJournalEntry e ON e.Id = l.JournalEntryId
                    WHERE e.IssuerType = @0 AND e.IssuerId = @1
                      AND e.AccountingDate >= @2 AND e.AccountingDate <= @3
+                     AND NOT (e.AccountingDate = @2 AND e.SourceType = @4)
                    ORDER BY l.JournalEntryId, l.LineNumber",
-                issuerType, issuerId, year.StartDate, year.EndDate);
+                issuerType, issuerId, year.StartDate, year.EndDate, LedgerSourceType.OpeningBalance);
 
             var byEntry = lines.GroupBy(l => l.JournalEntryId)
                                .ToDictionary(g => g.Key, g => g.ToList());
@@ -182,8 +222,10 @@ namespace HpskSite.Services.Ledger
                 @"SELECT SUM(l.Debit - l.Credit) FROM dbo.LedgerJournalEntryLine l
                     JOIN dbo.LedgerJournalEntry e ON e.Id = l.JournalEntryId
                    WHERE e.IssuerType = @0 AND e.IssuerId = @1
-                     AND l.AccountNumber = @2 AND e.AccountingDate < @3",
-                t, i, account, from).FirstOrDefault() ?? 0m;
+                     AND l.AccountNumber = @2
+                     AND (e.AccountingDate < @3
+                          OR (e.AccountingDate = @3 AND e.SourceType = @4))",
+                t, i, account, from, LedgerSourceType.OpeningBalance).FirstOrDefault() ?? 0m;
 
         private static decimal SumThrough(LedgerDb ldb, int t, int i, int account, DateTime to)
             => ldb.Fetch<decimal?>(

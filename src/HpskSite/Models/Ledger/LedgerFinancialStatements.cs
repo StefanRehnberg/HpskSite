@@ -37,6 +37,20 @@ namespace HpskSite.Models.Ledger
         public decimal EquityAndLiabilityTotal => EquityAndLiabilities.Sum(r => r.Amount);
 
         /// <summary>
+        /// Tidigare års resultat, ackumulerat — intäkter minus kostnader FÖRE årets början.
+        ///
+        /// <para><b>⚠️⚠️ UTAN DEN HÄR GÅR ÅR TVÅ ALDRIG IHOP.</b> Liggaren gör ingen
+        /// årsskiftesöverföring: förra årets överskott står kvar på tillgångssidan (pengarna finns
+        /// på kontot) men har aldrig bokförts mot eget kapital. Differensen blev exakt förra årets
+        /// resultat, bokslutssteget "balansräkningen går ihop" föll, och därmed gick det andra året
+        /// aldrig att fastställa — för varje förening, från och med dess andra år. Beloppet
+        /// HÄRLEDS ur liggaren i stället för att bokföras, av samma skäl som saldona är
+        /// kumulativa: en överföringsverifikation är en till sak som kan glömmas eller göras två
+        /// gånger.</para>
+        /// </summary>
+        public decimal PriorResult { get; set; }
+
+        /// <summary>
         /// Går balansräkningen ihop?
         ///
         /// <para><b>⚠️⚠️ ÅRETS RESULTAT MÅSTE MED PÅ SKULDSIDAN.</b> Resultatet är inte bokfört mot
@@ -45,7 +59,7 @@ namespace HpskSite.Models.Ledger
         /// årets resultat — varje år, för varje förening — och det ser ut som ett fel i
         /// bokföringen i stället för i jämförelsen.</para>
         /// </summary>
-        public decimal BalanceDifference => AssetTotal - (EquityAndLiabilityTotal + Result);
+        public decimal BalanceDifference => AssetTotal - (EquityAndLiabilityTotal + PriorResult + Result);
 
         /// <summary>
         /// Balanserar den?

@@ -124,6 +124,17 @@ namespace HpskSite.Services.Ledger
                     s.EquityAndLiabilities.Add(row);
             }
 
+            // Tidigare års resultat (se LedgerFinancialStatements.PriorResult). Kredit minus debet,
+            // så ett överskott blir positivt — samma riktning som eget kapital.
+            s.PriorResult = ldb.Fetch<decimal?>(
+                @"SELECT SUM(l.Credit - l.Debit)
+                    FROM dbo.LedgerJournalEntryLine l
+                    JOIN dbo.LedgerJournalEntry e ON e.Id = l.JournalEntryId
+                   WHERE e.IssuerType = @0 AND e.IssuerId = @1
+                     AND e.AccountingDate < @2
+                     AND l.AccountNumber >= 3000",
+                issuerType, issuerId, year.StartDate).FirstOrDefault() ?? 0m;
+
             return s;
         }
 
