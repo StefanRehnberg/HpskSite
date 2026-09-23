@@ -92,8 +92,11 @@
             <div class="modal-body">
                 <p class="text-muted small">Årsmötet bestämmer avgiften. Varje medlem betalar avgiften för sin medlemstyp.
                     En familj betalar en gång, via huvudmedlemmen.</p>
+                <p class="text-muted small"><strong>Medlemmen kan välja</strong> — medlemmen får välja den här medlemstypen själv
+                    på betalsidan, till exempel om hen blivit pensionär. Du ser i listan när en medlem valt själv.
+                    Familj, hedersmedlem och ständig medlem är avstängda från början.</p>
                 <table class="table table-sm align-middle">
-                    <thead><tr><th>Medlemstyp</th><th class="text-end">Avgift</th><th></th></tr></thead>
+                    <thead><tr><th>Medlemstyp</th><th class="text-end">Avgift</th><th class="text-center">Medlemmen kan välja</th><th></th></tr></thead>
                     <tbody id="cfRatesRows"></tbody>
                 </table>
                 <div class="row g-2 align-items-end">
@@ -204,6 +207,8 @@
             claimed: !!c && !!c.paymentSentDate,
             covered: r.kind === 'Covered' || (!!c && c.covered),
             billable: !!c ? (!c.covered && c.amount > 0) : (BILLABLE[r.kind] && r.proposedAmount > 0),
+            // Medlemmen saknar medlemstyp och väljer den på betalsidan — mejlet gäller valet, inte ett belopp.
+            choose: !!c ? !!c.needsTypeChoice : r.kind === 'ChooseType',
             amount: c ? c.amount : r.proposedAmount
         };
     }
@@ -216,11 +221,21 @@
         if (s.covered) return badge('bg-light text-dark border', 'Ingår i familjen', r.coveredBy ? esc(r.coveredBy) + ' betalar' : '');
         if (s.paid) return badge('bg-success', 'Betald', s.c.paidDate ? day(s.c.paidDate) : '');
         if (s.claimed) return badge('bg-info text-dark', 'Uppgett betald', day(s.c.paymentSentDate));
+        if (s.choose) return badge('bg-info text-dark', 'Väljer medlemstyp', s.sent ? 'skickad ' + day(s.c.requestSentDate) : 'på betalsidan');
         if (!s.c && r.kind === 'NoType') return badge('bg-light text-dark border', 'Ingen medlemstyp', 'ange den under Medlemmar');
         if (!s.c && r.kind === 'NoCategory') return badge('bg-light text-dark border', 'Ingen avgift', 'för ' + esc(r.membershipType));
         if (s.amount <= 0) return badge('bg-light text-dark border', 'Ingen avgift');
         if (s.sent) return badge('bg-warning text-dark', 'Väntande', 'skickad ' + day(s.c.requestSentDate));
         return badge('bg-secondary', 'Inte skickad');
+    }
+    // Medlemstypen — och om MEDLEMMEN valt den själv. Kassören ska se det: ett förtroendesystem, inte ett osynligt.
+    function typeCell(r, s) {
+        var t = esc(r.membershipType || '');
+        if (s.choose) return '<span class="text-muted">väljer själv</span>';
+        if (s.c && s.c.memberChosenType)
+            t += ' <span class="badge bg-light text-dark border" title="Medlemmen valde medlemstypen själv på betalsidan'
+               + (s.c.memberChosenAt ? ' ' + day(s.c.memberChosenAt) : '') + '">vald av medlemmen</span>';
+        return t;
     }
     // Vart avgiften mejlas. Saknas adress står det i listan — inte i en text under den.
     function emailCell(r) {
@@ -236,11 +251,14 @@
         if (READONLY || s.covered) return '';
         var id = r.memberId, items = [];
         if (s.paid) items.push(item('unpaid', id, 'Ångra betald'));
-        else if (s.billable) {
+        else if (s.billable || s.choose) {
             // Betald ligger i menyn som allt annat på raden — samma form som resten av sajten.
-            items.push('<li><h6 class="dropdown-header">Betalning</h6></li>');
-            items.push(item('paid', id, 'Markera som betald'));
-            items.push('<li><hr class="dropdown-divider"></li>');
+            // En medlem som väljer medlemstyp har inget belopp än, och kan inte markeras betald.
+            if (!s.choose) {
+                items.push('<li><h6 class="dropdown-header">Betalning</h6></li>');
+                items.push(item('paid', id, 'Markera som betald'));
+                items.push('<li><hr class="dropdown-divider"></li>');
+            }
             items.push('<li><h6 class="dropdown-header">Mejlet</h6></li>');
             items.push(item('preview', id, 'Visa mejlet'));
             if (r.hasEmail) items.push(item('send-one', id, s.sent ? 'Skicka mejlet igen' : 'Skicka mejlet nu'));
@@ -270,12 +288,12 @@
             var s = stateOf(r);
             if (s.billable) { total += s.amount; billed++; }
             if (s.paid && s.billable) { paidCount++; paidSum += s.amount; }
-            if (s.billable && !s.paid && !s.sent) { if (r.hasEmail) toSend++; else noMail++; }
+            if ((s.billable || s.choose) && !s.paid && !s.sent) { if (r.hasEmail) toSend++; else noMail++; }
             if (s.billable && !s.paid && s.sent) toRemind++;
 
             var amount = s.covered ? '<span class="text-muted">—</span>' : (s.billable || s.paid ? kr(s.amount) : '<span class="text-muted">—</span>');
-            html += '<tr class="cf-main"><td>' + esc(r.name) + '<div class="small text-muted d-sm-none">' + esc(r.membershipType || '') + '</div></td>'
-                  + '<td class="d-none d-sm-table-cell">' + esc(r.membershipType || '') + '</td>'
+            html += '<tr class="cf-main"><td>' + esc(r.name) + '<div class="small text-muted d-sm-none">' + typeCell(r, s) + '</div></td>'
+                  + '<td class="d-none d-sm-table-cell">' + typeCell(r, s) + '</td>'
                   + '<td class="d-none d-md-table-cell">' + emailCell(r) + '</td>'
                   + '<td class="text-end cf-n">' + amount + '</td>'
                   + '<td class="small d-none d-sm-table-cell">' + statusCell(r, s) + '</td>'
@@ -307,9 +325,12 @@
         $('cfRatesTitle').textContent = 'Avgift per medlemstyp ' + year();
         $('cfRatesRows').innerHTML = cats.map(function (c) {
             return '<tr><td>' + esc(c.membershipType) + '</td><td class="text-end">' + kr(c.amount) + '</td>'
+                 + '<td class="text-center"><div class="form-check form-switch d-inline-block m-0">'
+                 + '<input class="form-check-input" type="checkbox" role="switch" data-cf-selrate="' + c.id + '"'
+                 + (c.memberSelectable ? ' checked' : '') + ' aria-label="Medlemmen kan välja ' + esc(c.membershipType) + '"></div></td>'
                  + '<td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger" data-cf-delrate="' + c.id
                  + '" title="Ta bort">Ta bort</button></td></tr>';
-        }).join('') || '<tr><td colspan="3" class="text-muted small">Ingen avgift bestämd ännu.</td></tr>';
+        }).join('') || '<tr><td colspan="4" class="text-muted small">Ingen avgift bestämd ännu.</td></tr>';
     }
 
     // ⚠️ load() rör INTE beskedet — det körs direkt efter Skicka.
@@ -350,6 +371,20 @@
         var d = await form('DeleteCategory', { id: b.getAttribute('data-cf-delrate'), clubId: CLUB_ID });
         if (!d.success) { ratesError(d.message || 'Avgiften kunde inte tas bort.'); return; }
         dirty = true;
+        await load();
+    });
+    // "Medlemmen kan välja" — sparas direkt, som resten av dialogen.
+    $('cfRatesRows').addEventListener('change', async function (ev) {
+        var cb = ev.target.closest('[data-cf-selrate]');
+        if (!cb) return;
+        var id = parseInt(cb.getAttribute('data-cf-selrate'), 10);
+        var c = (data.categories || []).find(function (x) { return x.id === id; });
+        if (!c) return;
+        cb.disabled = true;
+        var d = await form('SaveCategory', { id: c.id, clubId: CLUB_ID, year: year(), membershipType: c.membershipType,
+                                             label: c.label || c.membershipType, amount: c.amount, memberSelectable: cb.checked ? '1' : '0' });
+        if (!d.success) { ratesError(d.message || 'Inställningen kunde inte sparas.'); cb.checked = !cb.checked; cb.disabled = false; return; }
+        ratesError(''); dirty = true;
         await load();
     });
     $('cfRatesModal').addEventListener('hidden.bs.modal', function () { if (dirty) { dirty = false; msg(true, ''); } });
@@ -424,10 +459,12 @@
 
     // ── Skicka och påminn ───────────────────────────────────────────────────────────────
     if ($('cfSend')) $('cfSend').addEventListener('click', async function () {
-        var list = (data.rows || []).filter(function (r) { var s = stateOf(r); return s.billable && !s.paid && !s.sent && r.hasEmail; });
+        var list = (data.rows || []).filter(function (r) { var s = stateOf(r); return (s.billable || s.choose) && !s.paid && !s.sent && r.hasEmail; });
         if (list.length === 0) return;
         var sum = list.reduce(function (a, r) { return a + stateOf(r).amount; }, 0);
-        if (!window.confirm('Mejla medlemsavgiften ' + year() + ' till ' + list.length + ' medlemmar, totalt ' + kr(sum) + '?')) return;
+        var choosing = list.filter(function (r) { return stateOf(r).choose; }).length;
+        if (!window.confirm('Mejla medlemsavgiften ' + year() + ' till ' + list.length + ' medlemmar, totalt ' + kr(sum)
+            + (choosing ? ' (' + choosing + ' saknar medlemstyp och får välja den själva)' : '') + '?')) return;
         // Medlemmar som ingen rört har ingen avgift än — den skapas nu, ur samma regel som listan visar.
         var g = await form('GenerateCharges', { clubId: CLUB_ID, year: year() });
         if (!g.success) { msg(false, g.message); return; }

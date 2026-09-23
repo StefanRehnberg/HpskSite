@@ -5093,6 +5093,31 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
       och såg inte bankgiro-QR:en (Stefan). Knapparna landar på `#swish` / `#bankgiro` på betalsidan.
       `hasSwish` prövas med samma regel som betalsidan (`IssuerHasSwish`) — annars erbjuder mejlet en
       Swish-knapp som landar på en sida utan Swish.
+  - **⚠️⚠️ Medlemmen väljer medlemstyp på betalsidan** (Stefan 2026-09-23: "det borde väl va medlemmen själv
+    som bestämmer"). Ingen inloggning — länken är nyckeln, samma modell som "Jag har betalat".
+    - **`MembershipFeeCategory.MemberSelectable`** = "Medlemmen kan välja", en switch per medlemstyp i
+      avgiftsdialogen. **Förvalt AV för Familj, Hedersmedlem och Ständig** (`DefaultMemberSelectable`) —
+      en familj kräver ett hushåll som klubben kopplat ihop, och en avgiftsfri hederstyp ska inte gå att
+      välja sig till. `SaveCategory` tar värdet som STRÄNG (`"1"`/`"0"`; bool-bindningen tappar `"1"`),
+      och utelämnat = behåll.
+    - **Medlem utan medlemstyp → `ClubFeeKind.ChooseType`** (i `ClubFeeProposal`, samma regel för listan och
+      skapandet) när klubben har valbara typer och medlemmen inte står i ett hushåll. Avgiften skapas med
+      **0 kr och `CategoryId = null`** (`NeedsTypeChoice`) — ⚠️ det är INTE "gratis": mejlet ber medlemmen
+      välja och visar inget belopp, betalsidan börjar med valet, och `SetPaymentSent` vägrar ett "Jag har
+      betalat" innan beloppet finns. `SendPaymentRequests` och `GetPaymentLink` släpper igenom just dessa
+      trots 0 kr.
+    - **`MembershipFeeService.ChooseMembershipType`** skriver typen på **klubbmedlemskapet för just den
+      klubben** (aldrig på medlemmen), räknar om avgiften och stämplar **`MemberChosenType`/`MemberChosenAt`**.
+      Kassörens lista visar *vald av medlemmen*. `GetTypeChoice` är ENDA regeln för vem som får välja:
+      låst när avgiften är betald eller medlemmen sagt sig ha betalat, låst för hushåll (huvudmedlem eller
+      delat `HouseholdId`), bara valbara typer. ⚠️ Servern prövar typen mot listan — en förfalskad post
+      med en ovalbar typ vägras (A/B: det påståendet är det enda som faller när prövningen tas bort).
+    - En medlem MED typ ser den i mejlet ("Avgiften gäller medlemstypen Senior … välja rätt medlemstyp på
+      betalsidan") och under beloppet på sidan ("Fel medlemstyp? Välj rätt").
+    - Migrering: `Migrations/add-member-type-choice-to-membership-fee.sql` — **FÖRE deploy** (NPoco skriver
+      de nya kolumnerna vid varje uppdatering). Körd i dev 2026-09-23, **EJ i prod**. Svit:
+      `hpsk-verify/medlemstyp-val-verify.mjs` 32/32 (återställer medlemstyperna ur en kopia i databasen,
+      aldrig genom sqlcmd-text — "Pensionär" hade blivit mojibake).
   - **Telefon:** status och knappar får en egen rad under klubben (`tr.rf-mrow`); knapparna finns
     därför två gånger i DOM:en — `td.rf-actions` är datorns.
   - ⚠️ `load()` rör inte beskedet — det körs direkt efter Skicka.

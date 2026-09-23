@@ -34,5 +34,23 @@ namespace HpskSite.Models
 
         /// <summary>Kretsens nod-id för kretsens taxa.</summary>
         public int? RegionId { get; set; }
+
+        /// <summary>
+        /// Får medlemmen själv välja den här medlemstypen på betalsidan? (Stefan 2026-09-23)
+        ///
+        /// <para>⚠️ Förvalt AV för familj, hedersmedlem och ständig medlem (<see cref="DefaultMemberSelectable"/>):
+        /// en familj kräver att klubben kopplat ihop hushållet, och en avgiftsfri hederstyp ska inte
+        /// gå att välja sig till.</para>
+        /// </summary>
+        public bool MemberSelectable { get; set; } = true;
+
+        /// <summary>Förvalet för en ny medlemstyp — se <see cref="MemberSelectable"/>.</summary>
+        public static bool DefaultMemberSelectable(string? membershipType)
+        {
+            var t = (membershipType ?? "").Trim();
+            return !(t.StartsWith("Famil", StringComparison.OrdinalIgnoreCase)
+                  || t.StartsWith("Heder", StringComparison.OrdinalIgnoreCase)
+                  || t.StartsWith("Ständig", StringComparison.OrdinalIgnoreCase));
+        }
     }
 }

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Web;
 using Umbraco.Extensions;
+using HpskSite.Models;
 using HpskSite.Services;
 
 namespace HpskSite.Controllers
@@ -42,7 +43,7 @@ namespace HpskSite.Controllers
         }
 
         [HttpGet("{token}")]
-        public IActionResult Index(string token)
+        public IActionResult Index(string token, string? medlemstyp = null)
         {
             int chargeId;
             try { chargeId = int.Parse(_protector.Unprotect(token)); }
@@ -52,6 +53,36 @@ namespace HpskSite.Controllers
             if (charge == null)
                 return View("~/Views/MembershipFeePay.cshtml", MembershipFeePayModel.Invalid());
 
+            var model = BuildModel(token, charge);
+            model.ChoiceSaved = medlemstyp == "sparad";
+            return View("~/Views/MembershipFeePay.cshtml", model);
+        }
+
+        /// <summary>
+        /// Medlemmens val av medlemstyp (Stefan 2026-09-23). Ingen inloggning, samma modell som
+        /// "Jag har betalat": länken är nyckeln och gäller bara medlemmens egen avgift.
+        /// </summary>
+        [HttpPost("{token}/medlemstyp")]
+        [IgnoreAntiforgeryToken] // public page, no login → no antiforgery token available
+        public IActionResult ChooseType(string token, string? membershipType)
+        {
+            int chargeId;
+            try { chargeId = int.Parse(_protector.Unprotect(token)); }
+            catch { return View("~/Views/MembershipFeePay.cshtml", MembershipFeePayModel.Invalid()); }
+
+            var error = _feeService.ChooseMembershipType(chargeId, membershipType ?? "");
+            if (error is null) return Redirect($"/medlemsavgift/{token}?medlemstyp=sparad#belopp");
+
+            var charge = _feeService.GetCharge(chargeId);
+            if (charge == null) return View("~/Views/MembershipFeePay.cshtml", MembershipFeePayModel.Invalid());
+            var model = BuildModel(token, charge);
+            model.ChoiceError = error;
+            return View("~/Views/MembershipFeePay.cshtml", model);
+        }
+
+        private MembershipFeePayModel BuildModel(string token, MembershipFeeCharge charge)
+        {
+            var chargeId = charge.Id;
             var model = new MembershipFeePayModel
             {
                 Found = true,
@@ -128,7 +159,21 @@ namespace HpskSite.Controllers
             }
             else model.BgNumber = "";
 
-            return View("~/Views/MembershipFeePay.cshtml", model);
+            if (!charge.IsRegionFee)
+            {
+                var choice = _feeService.GetTypeChoice(charge);
+                model.NeedsTypeChoice = charge.NeedsTypeChoice;
+                model.CanChooseType = choice.CanChoose;
+                model.TypeLockedReason = choice.LockedReason;
+                model.CurrentTypeLabel = choice.CurrentLabel;
+                model.MemberChoseType = !string.IsNullOrEmpty(charge.MemberChosenType);
+                model.TypeOptions = choice.Options
+                    .Select(c => (c.MembershipType, string.IsNullOrWhiteSpace(c.Label) ? c.MembershipType : c.Label, c.Amount,
+                                  c.Id == charge.CategoryId))
+                    .ToList();
+            }
+
+            return model;
         }
 
         [HttpPost("{token}/betalat")]
@@ -180,6 +225,17 @@ namespace HpskSite.Controllers
 
         /// <summary>Kravets rader — vad beloppet består av.</summary>
         public List<(string Description, decimal Amount)> Lines { get; set; } = new();
+
+        // ── Medlemmens val av medlemstyp ─────────────────────────────────────────────────
+        /// <summary>Medlemmen saknar medlemstyp: sidan börjar med valet, inget belopp än.</summary>
+        public bool NeedsTypeChoice { get; set; }
+        public bool CanChooseType { get; set; }
+        public string? TypeLockedReason { get; set; }
+        public string? CurrentTypeLabel { get; set; }
+        public bool MemberChoseType { get; set; }
+        public List<(string Type, string Label, decimal Amount, bool Current)> TypeOptions { get; set; } = new();
+        public string? ChoiceError { get; set; }
+        public bool ChoiceSaved { get; set; }
 
         public static MembershipFeePayModel Invalid() => new MembershipFeePayModel { Found = false };
     }

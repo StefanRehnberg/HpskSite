@@ -73,6 +73,7 @@ namespace HpskSite.Services
                 existing.MembershipType = cat.MembershipType;
                 existing.Label = cat.Label;
                 existing.Amount = cat.Amount;
+                existing.MemberSelectable = cat.MemberSelectable;
                 db.Update(existing);
                 return existing;
             }
@@ -241,7 +242,9 @@ namespace HpskSite.Services
             }
 
             // Huvudmedlemmar och individer först, så att de som ingår i ett hushåll kan peka på dem.
-            foreach (var p in proposal.Values.Where(p => p.Kind is ClubFeeKind.Individual or ClubFeeKind.HouseholdPrimary))
+            // ChooseType: avgiften finns (0 kr, ingen kategori) så att medlemmen kan få en länk och välja
+            // sin medlemstyp på betalsidan — se MembershipFeeCharge.NeedsTypeChoice.
+            foreach (var p in proposal.Values.Where(p => p.Kind is ClubFeeKind.Individual or ClubFeeKind.HouseholdPrimary or ClubFeeKind.ChooseType))
                 if (!existing.ContainsKey(p.MemberId)) Insert(p, p.Amount, null);
 
             foreach (var p in proposal.Values.Where(p => p.Kind == ClubFeeKind.Covered))
@@ -279,6 +282,79 @@ namespace HpskSite.Services
             return covered + rest;
         }
 
+        // ── Medlemmen väljer medlemstyp (Stefan 2026-09-23) ──────────────────────────────────
+        //
+        // ⚠️⚠️ ETT FÖRTROENDESYSTEM, INTE ETT OSYNLIGT. Medlemmen vet om hen är junior eller pensionär,
+        //    så hen får välja på betalsidan — men valet låses så snart hen sagt sig ha betalat eller
+        //    kassören kvitterat, bara typer klubben markerat som valbara erbjuds, en familj väljs aldrig
+        //    (hushållet kopplar klubben ihop), och avgiften bär MemberChosenType så att kassören ser det.
+
+        /// <summary>Kan medlemmen välja medlemstyp för den här avgiften, och bland vilka?</summary>
+        public MemberTypeChoice GetTypeChoice(MembershipFeeCharge charge)
+        {
+            var choice = new MemberTypeChoice();
+            if (charge.IsRegionFee || charge.HouseholdCoveredByChargeId.HasValue) return choice;
+
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+
+            var cats = db.Fetch<MembershipFeeCategory>(
+                "SELECT * FROM MembershipFeeCategory WHERE ClubId = @0 AND Year = @1 AND IssuerType = 0 ORDER BY Amount DESC, MembershipType",
+                charge.ClubId, charge.Year);
+            var current = cats.FirstOrDefault(c => c.Id == charge.CategoryId);
+            choice.CurrentType = current?.MembershipType;
+            choice.CurrentLabel = current is null ? null : (string.IsNullOrWhiteSpace(current.Label) ? current.MembershipType : current.Label);
+            choice.Options = cats.Where(c => c.MemberSelectable).ToList();
+
+            if (charge.PaymentStatus == "Paid") { choice.LockedReason = "Avgiften är betald."; return choice; }
+            if (charge.PaymentSentDate.HasValue)
+            { choice.LockedReason = "Du har markerat att du betalat, så medlemstypen kan inte ändras här. Kontakta klubben om den är fel."; return choice; }
+
+            // Huvudmedlem i ett hushåll: familjens avgift, som klubben har kopplat ihop.
+            var isHouseholdPrimary = db.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM MembershipFeeCharge WHERE HouseholdCoveredByChargeId = @0", charge.Id) > 0;
+            var household = db.ExecuteScalar<int>(
+                @"SELECT COUNT(*) FROM ClubMembership o
+                   JOIN ClubMembership me ON me.ClubId = o.ClubId AND me.MemberId = @1
+                  WHERE o.ClubId = @0 AND ISNULL(me.HouseholdId,'') <> '' AND o.HouseholdId = me.HouseholdId
+                    AND o.MembershipStatus NOT IN (N'Utträdd', N'Avliden')", charge.ClubId, charge.MemberId);
+            if (isHouseholdPrimary || household > 1)
+            { choice.LockedReason = "Du ingår i ett familjemedlemskap. Kontakta klubben om medlemstypen är fel."; return choice; }
+
+            choice.CanChoose = choice.Options.Count > 0;
+            return choice;
+        }
+
+        /// <summary>
+        /// Medlemmens val: skriver medlemstypen på klubbmedlemskapet och räknar om avgiften.
+        /// Returnerar ett felmeddelande, eller null om valet gick igenom.
+        /// </summary>
+        public string? ChooseMembershipType(int chargeId, string membershipType)
+        {
+            var charge = GetCharge(chargeId);
+            if (charge is null || charge.IsRegionFee) return "Avgiften hittades inte.";
+
+            var choice = GetTypeChoice(charge);
+            if (!choice.CanChoose) return choice.LockedReason ?? "Medlemstypen kan inte väljas här. Kontakta klubben.";
+            var cat = choice.Options.FirstOrDefault(c => string.Equals(c.MembershipType, (membershipType ?? "").Trim(), StringComparison.OrdinalIgnoreCase));
+            if (cat is null) return "Välj en av medlemstyperna i listan.";
+
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            // ⚠️ Medlemstypen bor på KLUBBMEDLEMSKAPET för just den här klubben — aldrig på medlemmen.
+            var updated = db.Execute("UPDATE ClubMembership SET MembershipType = @0 WHERE MemberId = @1 AND ClubId = @2",
+                cat.MembershipType, charge.MemberId, charge.ClubId);
+            if (updated == 0) return "Du finns inte i klubbens medlemsregister. Kontakta klubben.";
+
+            var row = db.SingleOrDefaultById<MembershipFeeCharge>(chargeId)!;
+            row.CategoryId = cat.Id;
+            row.Amount = cat.Amount;
+            row.MemberChosenType = cat.MembershipType;
+            row.MemberChosenAt = DateTime.UtcNow;
+            db.Update(row);
+            return null;
+        }
+
         /// <summary>
         /// Payer claim: record that the payer says they've paid. Does NOT set Paid — only the
         /// club admin confirms received (see MarkPaid).
@@ -290,6 +366,8 @@ namespace HpskSite.Services
             var charge = db.SingleOrDefaultById<MembershipFeeCharge>(chargeId);
             if (charge == null) return false;
             if (charge.PaymentStatus == "Paid") return true; // already settled — nothing to claim
+            // ⚠️ Ingen "betalat" innan beloppet finns — medlemmen har inte valt medlemstyp än.
+            if (charge.NeedsTypeChoice) return false;
 
             charge.PaymentSentDate = DateTime.UtcNow;
             charge.PaymentSentBy = sentBy;
@@ -741,6 +819,18 @@ namespace HpskSite.Services
 
         /// <summary>Satt = kretsen har bestämt beloppet för klubben; formeln används inte.</summary>
         public decimal? ManualAmount { get; set; }
+    }
+
+    /// <summary>Vad medlemmen får välja på betalsidan. Se <see cref="MembershipFeeService.GetTypeChoice"/>.</summary>
+    public class MemberTypeChoice
+    {
+        public bool CanChoose { get; set; }
+        /// <summary>Varför valet inte går (betald, uppgett betald, familj) — null när det går.</summary>
+        public string? LockedReason { get; set; }
+        public string? CurrentType { get; set; }
+        public string? CurrentLabel { get; set; }
+        /// <summary>Typerna klubben markerat som valbara för året.</summary>
+        public List<MembershipFeeCategory> Options { get; set; } = new();
     }
 
     public class RegionFeeGenerateResult

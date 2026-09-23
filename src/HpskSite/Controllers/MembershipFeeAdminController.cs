@@ -136,7 +136,8 @@ namespace HpskSite.Controllers
                     c.Id,
                     c.MembershipType,
                     c.Label,
-                    c.Amount
+                    c.Amount,
+                    c.MemberSelectable
                 }),
                 paid = charges.Where(c => c.PaymentStatus == "Paid").Select(ChargeDto),
                 unpaid = charges.Where(c => c.PaymentStatus != "Paid").Select(ChargeDto)
@@ -151,7 +152,12 @@ namespace HpskSite.Controllers
             covered = c.HouseholdCoveredByChargeId.HasValue,
             requestSentDate = c.RequestSentDate?.ToString("yyyy-MM-dd"),
             paymentSentDate = c.PaymentSentDate?.ToString("yyyy-MM-dd"),
-            paidDate = c.PaidDate?.ToString("yyyy-MM-dd")
+            paidDate = c.PaidDate?.ToString("yyyy-MM-dd"),
+            // Medlemmen väljer medlemstyp på betalsidan (0 kr, ingen kategori ännu).
+            needsTypeChoice = c.NeedsTypeChoice,
+            // ⚠️ Kassören ska SE att medlemmen valt själv — ett förtroendesystem, inte ett osynligt.
+            memberChosenType = c.MemberChosenType,
+            memberChosenAt = c.MemberChosenAt?.ToString("yyyy-MM-dd")
         };
 
         /// <summary>Klubbens aktiva medlemmar (utom utträdda och avlidna) som underlag för avgiften.</summary>
@@ -201,13 +207,23 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveCategory(int id, int clubId, int year,
-            string membershipType, string label, decimal amount)
+            string membershipType, string label, decimal amount, string? memberSelectable = null)
         {
             if (!await _auth.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             if (string.IsNullOrWhiteSpace(membershipType))
                 return Json(new { success = false, message = "Medlemstyp måste anges" });
+
+            // ⚠️ "Medlemmen kan välja" som STRÄNG: "1"/"0" binder inte till bool i ASP.NET Core och
+            //    faller tyst tillbaka på default. Utelämnat = behåll (ändring) eller förvalet (ny typ).
+            bool selectable;
+            if (memberSelectable is null)
+            {
+                var existing = id > 0 ? _feeService.GetCategories(clubId, year).FirstOrDefault(c => c.Id == id) : null;
+                selectable = existing?.MemberSelectable ?? MembershipFeeCategory.DefaultMemberSelectable(membershipType);
+            }
+            else selectable = memberSelectable is "1" or "true" or "on";
 
             var cat = new MembershipFeeCategory
             {
@@ -216,7 +232,8 @@ namespace HpskSite.Controllers
                 Year = year,
                 MembershipType = membershipType.Trim(),
                 Label = string.IsNullOrWhiteSpace(label) ? membershipType.Trim() : label.Trim(),
-                Amount = amount
+                Amount = amount,
+                MemberSelectable = selectable
             };
             _feeService.SaveCategory(cat);
             // ⚠️ Oskickade avgifter följer inställningen — ingen medlem har fått dem än.
@@ -270,6 +287,7 @@ namespace HpskSite.Controllers
 
             var proposal = ClubFeeProposal.Build(_feeService.GetCategories(clubId, year), members);
             proposal.TryGetValue(memberId, out var p);
+            // ChooseType går igenom: avgiften skapas (0 kr) så att medlemmen kan välja på betalsidan.
             if (p is null || p.Kind is ClubFeeKind.NoCategory or ClubFeeKind.NoType)
                 return Json(new { success = false, message = string.IsNullOrWhiteSpace(me.MembershipType)
                     ? "Medlemmen har ingen medlemstyp. Ange medlemstypen under Medlemmar först."
@@ -297,9 +315,11 @@ namespace HpskSite.Controllers
 
             var clubName = _clubService.GetClubNameById(charge.ClubId) ?? "Klubben";
             var to = _feeService.GetPayerEmails(MembershipFeeIssuer.Club, charge.ClubId).GetValueOrDefault(charge.MemberId) ?? charge.MemberEmail ?? "";
+            var choice = _feeService.GetTypeChoice(charge);
             var mail = _emailService.PreviewMembershipFeeRequest(to, charge.MemberName ?? "medlem",
                 clubName, charge.Year, charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForClub(charge.ClubId),
-                IssuerBankgiro(charge.ClubId), charge.PaymentReference, IssuerHasSwish(charge.ClubId));
+                IssuerBankgiro(charge.ClubId), charge.PaymentReference, IssuerHasSwish(charge.ClubId),
+                choice.CurrentLabel, charge.NeedsTypeChoice, choice.CanChoose);
             return Content(PreviewPage(mail, to, charge.PaymentStatus == "Paid"), "text/html; charset=utf-8");
         }
 
@@ -346,7 +366,7 @@ namespace HpskSite.Controllers
             // ⚠️ En kretsavgift vars länk kopieras räknas som SKICKAD: kretsen skickar den själv (klubben
             //    saknar ofta e-postadress). Annars står klubben kvar som "Inte skickad" och räknas med i
             //    nästa "Skicka avgiften" fast den redan fått sin räkning.
-            if (charge.Amount > 0) _feeService.MarkRequestSent(chargeId);
+            if (charge.Amount > 0 || charge.NeedsTypeChoice) _feeService.MarkRequestSent(chargeId);
 
             return Json(new { success = true, url = BuildPayUrl(chargeId) });
         }
@@ -374,7 +394,8 @@ namespace HpskSite.Controllers
             {
                 if (charge.IsRegionFee || charge.PaymentStatus == "Paid") continue;
                 if (charge.HouseholdCoveredByChargeId.HasValue) continue; // ingår i huvudmedlemmens avgift
-                if (charge.Amount <= 0) continue;
+                // 0 kr skickas inte — UTOM när medlemmen ska välja medlemstyp; då är det valet mejlet gäller.
+                if (charge.Amount <= 0 && !charge.NeedsTypeChoice) continue;
                 if (only.Count > 0 && !only.Contains(charge.Id)) continue;
                 if (mode == "unsent" && charge.IsRequestSent) continue;
                 if (mode == "reminder" && !charge.IsRequestSent) continue;
@@ -387,9 +408,11 @@ namespace HpskSite.Controllers
                 try
                 {
                     // ⚠️ Svaret hör till KLUBBEN, som är den som kräver avgiften.
+                    var choice = _feeService.GetTypeChoice(charge);
                     ok = await _emailService.SendMembershipFeeRequestAsync(
                         to!, name, clubName, year, charge.Amount, BuildPayUrl(charge.Id),
-                        _replyContacts.ForClub(clubId), bg, charge.PaymentReference, hasSwish);
+                        _replyContacts.ForClub(clubId), bg, charge.PaymentReference, hasSwish,
+                        choice.CurrentLabel, charge.NeedsTypeChoice, choice.CanChoose);
                 }
                 catch (Exception ex)
                 {
