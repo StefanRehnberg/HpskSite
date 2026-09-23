@@ -5020,9 +5020,20 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
 ### Ytorna
 
 - **Kretsens adminpanel → Kretsen → Kretsavgift** (`RegionFeeManagement.cshtml`, lat laddad på
-  click). Taxa, en rad per publicerad klubb med förslag och "Eget belopp", krav med rader och läge,
-  Åtgärder-meny (tillägg, rätta antal, markera betald/obetald, betallänk, ta bort). Panelen för
-  tillägg/antal ligger ÖVER tabellen — ingen `prompt()`.
+  click). **⚠️⚠️ Byggd för "Ove, 70, lekmannakassör"** — två tidigare utsågor underkändes som
+  "obegripliga, röriga, för mycket text". Läs vyns huvudkommentar innan du lägger till något:
+  - **Taxan är EN MENING** ("Varje klubb betalar 20 kr + 10 kr per medlem. Ändra"); fälten syns
+    bara när den sätts eller ändras.
+  - **Fyra kolumner, inga inmatningsrutor.** Ett tal ändras genom att man KLICKAR på det. Ändrat
+    belopp = klubbens eget belopp (samma belopp som taxan ger = inte eget); ändrat antal räknas om.
+  - **"Skicka avgiften till N klubbar" = skapa OCH mejla i ett tryck.** `GenerateRegionCharges`
+    returnerar `createdChargeIds`, och `SendRegionPaymentRequests` tar `ChargeIds` så att bara de
+    nya mejlas. Utan listan mejlas alla obetalda — det är **Påminn N klubbar**, ett eget val.
+  - **Betald är en synlig knapp**; allt ovanligt (antal, tilläggsrad, visa mejlet, betallänk, ångra,
+    ta bort) under **⋯**. Ordet "krav" står inte på sidan — sviten assertar det.
+  - **En rad förklarande text.** Lägg inte tillbaka steglistan.
+  - ⚠️ `load()` rör inte beskedet — det körs direkt efter Skicka, och ett tömt besked betyder att
+    kassören aldrig får veta vad som hände.
 - **Betalsidan** säger *Kretsavgift*, kretsen som mottagare, klubben som betalare, och raderna.
   **⚠️ Swish-meddelandet namnger KLUBBEN** (max 50 tecken) — annars står femton likadana
   "Kretsavgift 2026" på kretsens kontoutdrag.
@@ -5039,8 +5050,11 @@ genererar `SET IssuerType = …` i varje uppdatering av en avgift så snart POCO
 kolumnerna faller **varje klubbs "Markera betald"**, inte bara kretsens. Körd i dev 2026-09-23;
 **EJ körd i prod.** Fildeploy av `KnowledgeBase/docs/kretsavgift.md` (ny). Adds C# → full ombyggnad.
 
-Verifierat **18 enhetstest** (`RegionFeeCalculatorTests`; hela sviten 1447/1447) och **76/76
-`hpsk-verify/kretsavgift-verify.mjs`**, två körningar i rad. Sviten kör mot **Blekinge (3773)** med år
+Verifierat **18 enhetstest** (`RegionFeeCalculatorTests`; hela sviten 1447/1447) och **105/105
+`hpsk-verify/kretsavgift-verify.mjs`**, två körningar i rad (efter Ove-omarbetningen; avsnitt 10 kör
+hela skicka-flödet i ytan och avsnitt 8 prövar `ChargeIds` åt båda håll). Sviten hittade att `load()`
+tömde beskedet efter Skicka — och att påståendet "Ronneby mejlades inte igen" var vakuöst grönt på
+den tomma texten. Sviten kör mot **Blekinge (3773)** med år
 **2031** — avgifter har ingen sandlåda, så den lade upp en liggare för Blekinge i dev och lämnar en
 verifikation per körning där; krav och taxa städas i SQL. **A/B: med medlemsavgiftens källtyp för
 båda formerna faller de tre bokföringspåståendena.** Regression: medlemsavgift 17/17, sidan 59/59,
