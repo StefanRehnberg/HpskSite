@@ -4590,6 +4590,112 @@ The legacy `#finalsStartListSection` markup + `checkFinalsEligibility` / `displa
 - `Views/CompetitionManagement.cshtml` — partial wired in, gated on `numberOfFinalSeries > 0`
 - `Views/Competition.cshtml` — public "Visa finalsstartlista" button gated on `isOfficialFinalsStartList`
 
+## Anläggningsregistret (P9) — vad föreningen äger, och årets avskrivning (2026-09-23)
+
+Bokslutets sista frågetecken. Steget "Avskrivningar" stod som **Unknown** med texten
+*"anläggningsregister finns inte ännu"*; nu finns registret och steget kan svara.
+
+**⚠️⚠️ REGISTRET ÄR DEN ENDA PLATS DÄR ANSKAFFNINGSVÄRDET FINNS KVAR.** Avskrivningen bokförs
+**direkt mot tillgångskontot** (7830 debet / 1220 kredit) i stället för mot ett konto för
+ackumulerade avskrivningar — det är därför kontoplansmallen aldrig haft något 1229, och det ger
+en balansräkning en lekman kan läsa: kontot visar vad utrustningen är värd **nu**. Priset är att
+bokföringen efter några år inte längre vet vad pjäsen **kostade**. Därför **utrangeras** en rad
+här, aldrig raderas.
+
+**⚠️ Kontona väljs PER TILLGÅNG ur föreningens egen kontoplan, inte via roller.** En klubbstuga
+skrivs av mot 7820 och en pistol mot 7830; en roll hade tvingat fram ETT val för hela
+föreningen. Numren lagras på raden, som på en konteringsrad.
+
+### ⚠️⚠️ PERIODBELOPPET ÄR SKILLNADEN MELLAN TVÅ ACKUMULERADE VÄRDEN
+
+`LedgerDepreciation` är **rena funktioner** — ingen databas, inget "nu". Rak avskrivning,
+**proportionerad per månad** (den som köper ett vapenskåp i november ska inte skriva av ett helt
+år, och månadsproportionering är det enda som fungerar när räkenskapsåret inte är ett kalenderår).
+
+`ForPeriod` räknar `AccumulatedThrough(to) − AccumulatedThrough(from−1)` och **aldrig** en egen
+avrundning av periodens egna månader. Skillnaden teleskoperar, så summan över alla perioder blir
+**exakt** det avskrivningsbara beloppet. ⚠️ Första utsågan rundade varje period för sig och
+lämnade ett öre kvar på 10 000 / 36 månader — alltså ett konto som aldrig går att nolla.
+Enhetstestet fångade det innan något wirats in.
+
+- **`InUseDate` är när tillgången TOGS I BRUK**, inte när fakturan betalades. Månaden den togs i
+  bruk räknas MED.
+- **Utrangeringen kapar perioden.** Att fortsätta skriva av något föreningen gjort sig av med hade
+  byggt upp en kostnad för en tillgång som inte finns.
+
+### ⚠️⚠️ "BOKFÖRT I ÅR" ÄR HÄRLETT UR LIGGAREN, aldrig en flagga på raden
+
+`PostedByAsset` summerar **Debit** på verifikationer med `SourceType = "asset-depreciation"` och
+`SourceId = tillgångens id`. Samma princip som medlemsavgifternas "bokförd": en flagga kan
+glömmas, en verifikation kan inte.
+
+**⚠️⚠️ `PostYear` BOKFÖR SKILLNADEN, inte planen.** En verifikation per tillgång, med
+bokföringsdatum = räkenskapsårets slut. Bokför den planen skulle ett andra klick **dubblera**
+årets avskrivning — och en verifikation går inte att ta tillbaka. **A/B: 3 av 58 påståenden
+faller** när `Remaining` byts mot `PlannedThisYear`.
+- Frågar liggaren FÖRST (`PostingBlockedReason`) — inget räkenskapsår, fastställt år, saknad
+  kontoplan.
+- **Problemen SÄGS, aldrig sväljs.** En tillgång som inte gick att bokföra är exakt det som gör
+  bokslutet fel, och den som klickade måste få veta vilken.
+
+### ⚠️ Det bokförda låser planen — men bara planen
+
+Finns en bokförd avskrivning på tillgången vägrar `Save` ändrat **belopp, datum, nyttjandetid och
+konton**; **namn och anteckning är alltid fria** (en felstavning ska gå att rätta). Ytan säger det
+**innan** kassören skriver — servern vägrar ändå, men ett avslag efter ett ifyllt formulär läser
+som en bugg. **A/B: 2 påståenden faller** när låsningen tas bort.
+
+**⚠️⚠️ SLUTBOKFÖRINGEN VID UTRANGERING GÖRS INTE ÅT DEM, och det SÄGS.** En försäljning ger en
+intäkt och ett restvärde som ska bort — belopp vi inte känner. Att tyst hoppa över det hade lämnat
+ett värde kvar på tillgångskontot som ingen letar efter. Skälet till utrangeringen är
+**obligatoriskt**.
+
+### Bokslutssteget
+
+`LedgerClosingService` läser registret: **inget att bokföra ⇒ Done**, annars **Todo** med antal
+och belopp, och `GoTo = "tillgangar"`.
+
+**⚠️⚠️ ETT TOMT REGISTER ÄR "KLART", INTE "OKÄNT".** De allra flesta föreningar har ingenting att
+skriva av — ett evigt frågetecken där hade lärt kassören att stegen inte går att lita på. Men
+texten säger att registret ÄR tomt, så skillnaden mot "vi har inte tittat" står på skärmen.
+
+### Ytan
+
+Rälspost **Tillgångar** (pane `tillgangar`), lat laddad. **⚠️ INTE gated på `CanWrite`** — revisorn
+måste kunna läsa registret, eftersom det är enda platsen anskaffningsvärdet finns kvar och
+avskrivningarna annars inte går att granska. Skrivkontrollerna inuti är gatede.
+- Knappen *"Bokför årets avskrivningar (X kr)"* renderas **bara när något återstår**. En knapp som
+  inte gör något lär kassören att sluta läsa knapparna.
+- En utrangerad rad **står kvar** och märks ut, med sitt skäl.
+- Kontoväljarna fylls ur `GetChart` (balanskonton respektive kostnadskonton), med **hela
+  kontoplanen som reserv** när filtret är tomt: en tom rullgardin ser ut som ett produktfel.
+
+**Operatörssteg:** kör `Migrations/create-ledger-asset-table.sql` — **FÖRE deployen**, som alltid
+när NPoco får en ny POCO. Körd i dev 2026-09-23; **EJ körd i prod.** Adds C# → full ombyggnad.
+Ingen doctype-egenskap, ingen Umbraco-nod.
+
+**⛔ Ingenting av ekonomidelen deployas till prod** förrän klubbarna kan prova i sandlådan — se
+`sandbox-issuer-before-first-real-entry`.
+
+Verifierat **16 enhetstest** (`LedgerDepreciationTests` — A/B: 10 faller när periodbeloppet räknas
+per period i stället för som en skillnad) och **58/58
+`hpsk-verify/ekonomi-tillgangar-verify.mjs`**. **A/B mot en byggd mutation: 5 av 58 faller**, exakt
+de påståenden som beskriver de två reglerna ovan.
+
+⚠️ **Sviten kör i en EGEN SANDLÅDA som den skapar själv, och det är nödvändigt, inte försiktigt:**
+den BOKFÖR, och en verifikation går inte att ta tillbaka. Mot den levande liggaren hade den lämnat
+riktiga verifikationer i klubbens bokföring för alltid. Sandlådan överges efteråt, aldrig raderas.
+⚠️ Den bär **kontrollprov åt båda håll** — att ett tomt register ger Done (annars går övergången
+Todo → Done inte att skilja från "steget svarar alltid Done") och att namnet fortfarande går att
+rätta på en låst tillgång (annars mäter låsningen bara "allt är låst").
+
+**Två föråldrade påståenden i befintliga sviter rättades samtidigt**, båda röda på korrekt kod:
+`ekonomi-bokslut-verify` väntade sig att `depreciation` och `attachments` fortfarande stod som
+OMÄTTA (båda har motor nu — påståendet är vänt), och `ekonomi-page-verify` väntade sig en räls utan
+Verifikationer/Tillgångar/Revisorer plus en kvittolänk i panel 4, som sedan verifikationslistan
+byggdes visar **verifikationsnummer** för en bokförande förening. Regression efteråt: bokslut 25/25,
+ekonomisidan 59/59, enhetstesten 1363/1363.
+
 ### ⚠️⚠️ MEDALJREDUKTIONEN MÄTS PÅ MÄSTERSKAPSKLASSEN (2026-09-08)
 
 **SHB C.3.4.1, ordagrant:** *"Antalet medaljer till de främsta i individuella mästerskap

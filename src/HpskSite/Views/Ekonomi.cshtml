@@ -380,6 +380,7 @@
         <a href="#" class="ek-nav soon" data-view="avstamning">Avstämning</a>
         <a href="#" class="ek-nav" data-view="rapport">Rapport</a>
         <a href="#" class="ek-nav" data-view="avgifter">Avgifter</a>
+        <a href="#" class="ek-nav" data-view="tillgangar">Tillgångar</a>
         <a href="#" class="ek-nav soon" data-view="bokslut">Bokslut</a>
         @if (Model.CanWrite)
         {
@@ -1445,6 +1446,112 @@
                 ⚠️ Ett steg vi inte kan MATA sags vara omatt, inte klart. Ett omatt steg som visas
                 som klart ar varre an inget steg alls.
             *@
+            @*
+                ⚠️⚠️ REGISTRET ÄR DEN ENDA PLATS DÄR ANSKAFFNINGSVÄRDET FINNS KVAR. Avskrivningen
+                bokförs direkt mot tillgångskontot, så liggaren visar NETTO — efter fem år vet
+                bokföringen inte längre vad klubbstugan kostade. Därför utrangeras en rad här,
+                aldrig raderas.
+
+                ⚠️ Kontona väljs PER TILLGÅNG ur föreningens egen kontoplan, inte via roller: en
+                klubbstuga skrivs av mot 7820 och en pistol mot 7830, och en roll hade tvingat
+                fram ETT val för hela föreningen.
+            *@
+            <section data-pane="tillgangar" hidden>
+                <div class="head">
+                    <div><h1>Vad äger föreningen?</h1>
+                        <div class="sub">Klubbstugan, vapenskåpet, tavelställen — och årets avskrivning.</div></div>
+                    <div class="headactions" id="@(uid)_assetActions"></div>
+                </div>
+
+                <div class="ek-alert ek-bad d-none" id="@(uid)_assetError"></div>
+                <div class="ek-alert ek-ok d-none" id="@(uid)_assetOk"></div>
+
+                @* En avskrivning hör till ett räkenskapsår. Utan år går den inte att räkna, och
+                   det sägs i klartext i stället för att visa ett tomt register. *@
+                <div class="soonbox d-none" id="@(uid)_assetNoYear">
+                    <h2>Lägg upp räkenskapsåret först</h2>
+                    <p class="muted">Årets avskrivning räknas från räkenskapsårets början och slut,
+                        så registret behöver veta vilket år ni arbetar i. Det gör ni under
+                        Inställningar.</p>
+                </div>
+
+                <div class="ek-card wide d-none" id="@(uid)_assetListCard">
+                    <div class="ek-cardh">
+                        <h2>Anläggningsregistret</h2>
+                        <div class="muted" id="@(uid)_assetMeta"></div>
+                    </div>
+                    <table class="t">
+                        <thead><tr>
+                            <th>Tillgång</th>
+                            <th style="width:7rem">I bruk</th>
+                            <th class="n" style="width:8rem">Anskaffning</th>
+                            <th class="n" style="width:8rem">Bokfört värde</th>
+                            <th class="n" style="width:8rem">Årets plan</th>
+                            <th class="n" style="width:8rem">Bokfört i år</th>
+                            <th style="width:11rem"></th>
+                        </tr></thead>
+                        <tbody id="@(uid)_assetBody"></tbody>
+                    </table>
+                </div>
+
+                @if (Model.CanWrite)
+                {
+                    <div class="ek-card wide d-none" id="@(uid)_assetFormCard">
+                        <div class="ek-cardh">
+                            <h2 id="@(uid)_assetFormTitle">Lägg till en tillgång</h2>
+                        </div>
+
+                        <p class="muted" style="margin-top:0">
+                            Skriv in vad ni köpte, vad det kostade och hur många år det ska hålla.
+                            Systemet räknar avskrivningen rakt över åren och proportionerar den
+                            efter månaden ni tog den i bruk.
+                        </p>
+
+                        <input type="hidden" id="@(uid)_aId" value="0">
+
+                        <div class="amount-row">
+                            <label style="flex:2 1 260px">Vad är det?
+                                <input type="text" class="form-control" id="@(uid)_aName"
+                                       placeholder="Vapenskåp, klubbstuga, tavelställ" autocomplete="off"></label>
+                            <label style="flex:1 1 180px">Anskaffningsvärde
+                                <input type="number" class="form-control" id="@(uid)_aAmount"
+                                       step="0.01" min="0" placeholder="0"></label>
+                        </div>
+
+                        <div class="amount-row">
+                            @* ⚠️ TOGS I BRUK, inte betalningsdatum. Det är skillnaden som gör att
+                               något som köpts i december inte skrivs av för ett helt år. *@
+                            <label style="flex:1 1 180px">Togs i bruk
+                                <input type="text" class="form-control ek-date" id="@(uid)_aDate"
+                                       placeholder="åååå-mm-dd"></label>
+                            <label style="flex:1 1 160px">Håller i (år)
+                                <input type="number" class="form-control" id="@(uid)_aLife"
+                                       step="1" min="1" value="5"></label>
+                            <label style="flex:1 1 180px">Restvärde
+                                <input type="number" class="form-control" id="@(uid)_aResidual"
+                                       step="0.01" min="0" value="0"></label>
+                        </div>
+
+                        <div class="amount-row">
+                            <label style="flex:1 1 260px">Står på balanskontot
+                                <select class="form-control" id="@(uid)_aAssetAccount"></select></label>
+                            <label style="flex:1 1 260px">Avskrivningen bokförs på
+                                <select class="form-control" id="@(uid)_aDeprAccount"></select></label>
+                        </div>
+
+                        <label class="fieldlabel" for="@(uid)_aNote">Anteckning (frivillig)</label>
+                        <input type="text" class="form-control" id="@(uid)_aNote"
+                               placeholder="Serienummer, var den står, vem som köpte den" autocomplete="off">
+
+                        <div class="amount-row" style="margin-top:12px">
+                            <button type="button" class="btn btn-primary" id="@(uid)_aSave">Spara</button>
+                            <button type="button" class="btn btn-link d-none" id="@(uid)_aCancel">Avbryt</button>
+                            <span class="muted" id="@(uid)_aLocked"></span>
+                        </div>
+                    </div>
+                }
+            </section>
+
             <section data-pane="bokslut" hidden>
                 <div class="head">
                     <div><h1>Stäng räkenskapsåret</h1>
@@ -1527,7 +1634,7 @@
     //    'Y-m-d' betyder att faltets .value fortsatter vara ISO, sa varje lasning och varje
     //    payload nedanfor ar oforandrad. Lagg till ett nytt datumfalt HAR, aldrig som type=date.
     var EK_DATE_FIELDS = ['start', 'end', 'bDate', 'repFrom', 'repTo', 'budDate',
-                          'fordrFrom', 'fordrTo', 'verFrom', 'verTo'];
+                          'fordrFrom', 'fordrTo', 'verFrom', 'verTo', 'aDate'];
     if (window.flatpickr) {
         EK_DATE_FIELDS.forEach(function (n) {
             var f = el(n);
@@ -1616,6 +1723,10 @@
         if (name === 'verifikationer' && !verLoaded) { verLoaded = true; loadJournal(true); }
 
         if (name === 'revisorer' && !revLoaded) { revLoaded = true; loadAuditors(); }
+
+        // ⚠️ Samma skäl som ovan: registret räknar årets plan och läser årets bokförda
+        //    avskrivningar ur liggaren. Varje skrivning hämtar om det själv.
+        if (name === 'tillgangar' && !assetLoaded) { assetLoaded = true; loadAssets(); }
     }
     root.querySelectorAll('[data-view]').forEach(function (a) {
         a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
@@ -2030,6 +2141,262 @@
     // Enter i sökrutan ska söka — annars får man leta efter knappen.
     if (el('verSearch')) el('verSearch').addEventListener('keydown', function (ev) {
         if (ev.key === 'Enter') { ev.preventDefault(); loadJournal(true); }
+    });
+
+
+    // ══ ANLÄGGNINGSREGISTRET ═════════════════════════════════════════════════════════════
+    //
+    // ⚠️⚠️ "BOKFÖRT I ÅR" ÄR HÄRLETT UR LIGGAREN, aldrig en flagga på tillgången. En flagga kan
+    //    glömmas; en verifikation kan inte. Samma princip som medlemsavgifternas "bokförd".
+    var assetLoaded = false;
+    var assetAccounts = null;
+
+    async function loadAssets() {
+        show(el('assetError'), false);
+        show(el('assetOk'), false);
+
+        var d = await fetch('/umbraco/surface/EkonomiAdmin/GetAssets?issuerType=' + issuerType
+                            + '&issuerId=' + issuerId, { cache: 'no-store' })
+            .then(function (r) { return r.json(); });
+
+        if (!d.success) {
+            el('assetError').textContent = d.message || 'Registret gick inte att läsa.';
+            show(el('assetError'), true);
+            return;
+        }
+
+        show(el('assetNoYear'), d.hasFiscalYear === false);
+        show(el('assetListCard'), d.hasFiscalYear !== false);
+        if (el('assetFormCard')) show(el('assetFormCard'), d.hasFiscalYear !== false);
+
+        if (d.hasFiscalYear === false) { el('assetActions').innerHTML = ''; return; }
+
+        renderAssets(d);
+        if (canWrite) loadAssetAccounts();
+    }
+
+    function renderAssets(d) {
+        var rows = d.assets || [];
+
+        el('assetMeta').textContent = rows.length === 0
+            ? 'Räkenskapsåret ' + d.year
+            : rows.length + ' tillgångar · bokfört värde ' + kr(d.bookValueTotal)
+              + ' · räkenskapsåret ' + d.year;
+
+        el('assetBody').innerHTML = rows.length === 0
+            ? '<tr><td colspan="7" class="muted">Registret är tomt. Har föreningen köpt något '
+              + 'som ska hålla i flera år skriver ni in det här.</td></tr>'
+            : rows.map(function (a) {
+                // ⚠️ En utrangerad rad STÅR KVAR och märks ut. Anskaffningsvärdet finns ingen
+                //    annanstans, så en radering hade raderat föreningens enda minne av vad
+                //    pjäsen kostade.
+                var mark = a.isDisposed
+                    ? '<div class="muted">Utrangerad ' + esc(shortDate(a.disposedDate))
+                      + (a.disposalReason ? ' · ' + esc(a.disposalReason) : '') + '</div>'
+                    : (a.isFullyDepreciated
+                        ? '<div class="muted">Färdigavskriven</div>' : '');
+
+                var acts = '';
+                if (canWrite && !a.isDisposed) {
+                    acts = '<button type="button" class="btn btn-sm btn-link" data-asset-edit="' + a.id + '">Ändra</button>'
+                         + '<button type="button" class="btn btn-sm btn-link" data-asset-dispose="' + a.id + '">Utrangera</button>';
+                }
+
+                return '<tr><td><strong>' + esc(a.name) + '</strong>'
+                     + (a.note ? '<div class="muted">' + esc(a.note) + '</div>' : '')
+                     + mark
+                     + '<div class="muted">' + a.assetAccountNumber + ' · ' + esc(a.assetAccountName)
+                     + ' → ' + a.depreciationAccountNumber + ' · ' + esc(a.depreciationAccountName)
+                     + '</div></td>'
+                     + '<td class="muted">' + esc(shortDate(a.inUseDate))
+                     + '<div class="muted">' + a.usefulLifeYears + ' år</div></td>'
+                     + '<td class="n">' + kr(a.acquisitionAmount) + '</td>'
+                     + '<td class="n">' + kr(a.bookValue) + '</td>'
+                     + '<td class="n">' + kr(a.plannedThisYear) + '</td>'
+                     // ⚠️ Skillnaden SÄGS ut. "Bokfört i år" som står under planen utan
+                     //    förklaring läses som ett räknefel, inte som något att göra.
+                     + '<td class="n">' + kr(a.postedThisYear)
+                     + (a.needsPosting ? '<div class="muted">' + kr(a.remaining) + ' kvar</div>' : '')
+                     + '</td>'
+                     + '<td>' + acts + '</td></tr>';
+            }).join('');
+
+        el('assetBody').querySelectorAll('button[data-asset-edit]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var a = (d.assets || []).find(function (x) { return x.id === parseInt(b.dataset.assetEdit, 10); });
+                if (a) fillAssetForm(a);
+            });
+        });
+
+        el('assetBody').querySelectorAll('button[data-asset-dispose]').forEach(function (b) {
+            b.addEventListener('click', function () { disposeAsset(parseInt(b.dataset.assetDispose, 10)); });
+        });
+
+        renderAssetAction(d);
+    }
+
+    function renderAssetAction(d) {
+        if (!canWrite || (d.toPostCount || 0) === 0) { el('assetActions').innerHTML = ''; return; }
+
+        el('assetActions').innerHTML = '<button type="button" class="btn btn-primary" id="'
+            + uid + '_aPost">Bokför årets avskrivningar (' + kr(d.toPost) + ')</button>';
+
+        el('aPost').addEventListener('click', function () {
+            var btn = this;
+            btn.disabled = true;
+            show(el('assetError'), false);
+            show(el('assetOk'), false);
+
+            postJson('/umbraco/surface/EkonomiAdmin/PostDepreciation', {
+                issuerType: issuerType, issuerId: issuerId
+            }).then(function (j) {
+                btn.disabled = false;
+
+                // ⚠️ Problemen SÄGS, aldrig sväljs. En tillgång som inte gick att bokföra är
+                //    exakt det som gör bokslutet fel.
+                if (j.problems && j.problems.length) {
+                    el('assetError').innerHTML = esc(j.message || '') + '<br>'
+                        + j.problems.map(esc).join('<br>');
+                    show(el('assetError'), true);
+                } else if (!j.success) {
+                    el('assetError').textContent = j.message || 'Avskrivningarna gick inte att bokföra.';
+                    show(el('assetError'), true);
+                } else {
+                    el('assetOk').textContent = j.message;
+                    show(el('assetOk'), true);
+                }
+
+                loadAssets();
+            }).catch(function (e) {
+                btn.disabled = false;
+                el('assetError').textContent = e.message;
+                show(el('assetError'), true);
+            });
+        });
+    }
+
+    // ⚠️ Kontoplanen hämtas EN gång. Den ändras inte medan kassören skriver in ett vapenskåp.
+    function loadAssetAccounts() {
+        if (assetAccounts) return Promise.resolve();
+
+        return fetch('/umbraco/surface/EkonomiAdmin/GetChart?issuerType=' + issuerType
+                     + '&issuerId=' + issuerId, { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) return;
+                assetAccounts = d.accounts || [];
+
+                var balance = assetAccounts.filter(function (a) { return a.isBalance; });
+                var result = assetAccounts.filter(function (a) { return !a.isBalance && !a.isIncome; });
+
+                // ⚠️ Faller tillbaka på HELA kontoplanen när filtret är tomt. En tom rullgardin
+                //    ser ut som ett fel i produkten; en bred lista går alltid att välja i.
+                fillSelect(el('aAssetAccount'), balance.length ? balance : assetAccounts);
+                fillSelect(el('aDeprAccount'), result.length ? result : assetAccounts);
+            });
+    }
+
+    function fillAssetForm(a) {
+        el('assetFormTitle').textContent = 'Ändra ' + a.name;
+        el('aId').value = a.id;
+        el('aName').value = a.name || '';
+        el('aNote').value = a.note || '';
+        el('aAmount').value = a.acquisitionAmount;
+        el('aLife').value = a.usefulLifeYears;
+        el('aResidual').value = a.residualValue;
+        setDateField('aDate', String(a.inUseDate).substring(0, 10));
+
+        loadAssetAccounts().then(function () {
+            el('aAssetAccount').value = String(a.assetAccountNumber);
+            el('aDeprAccount').value = String(a.depreciationAccountNumber);
+        });
+
+        // ⚠️⚠️ ETT BOKFÖRT BELOPP LÅSER PLANEN, och det sägs INNAN kassören skriver. Servern
+        //    vägrar ändå, men ett avslag efter att formuläret fyllts läser som en bugg.
+        el('aLocked').textContent = a.postedThisYear > 0
+            ? 'Avskrivningar är redan bokförda på den här tillgången, så belopp, datum, '
+              + 'nyttjandetid och konton går inte att ändra. Namn och anteckning går.'
+            : '';
+
+        show(el('aCancel'), true);
+        el('aName').focus();
+    }
+
+    function resetAssetForm() {
+        el('assetFormTitle').textContent = 'Lägg till en tillgång';
+        el('aId').value = '0';
+        el('aName').value = '';
+        el('aNote').value = '';
+        el('aAmount').value = '';
+        el('aLife').value = '5';
+        el('aResidual').value = '0';
+        setDateField('aDate', '');
+        el('aLocked').textContent = '';
+        show(el('aCancel'), false);
+    }
+
+    function disposeAsset(id) {
+        var reason = window.prompt(
+            'Vad hände med tillgången? Såld, skrotad eller stulen.\n\n'
+            + 'Raden står kvar i registret — den skrivs bara inte av längre.');
+
+        if (reason === null) return;
+
+        show(el('assetError'), false);
+        show(el('assetOk'), false);
+
+        postJson('/umbraco/surface/EkonomiAdmin/DisposeAsset', {
+            issuerType: issuerType, issuerId: issuerId, assetId: id,
+            when: new Date().toISOString().substring(0, 10), reason: reason
+        }).then(function (j) {
+            if (!j.success) {
+                el('assetError').textContent = j.message;
+                show(el('assetError'), true);
+                return;
+            }
+            el('assetOk').textContent = j.message;
+            show(el('assetOk'), true);
+            loadAssets();
+        });
+    }
+
+    if (el('aCancel')) el('aCancel').addEventListener('click', resetAssetForm);
+
+    if (el('aSave')) el('aSave').addEventListener('click', function () {
+        var btn = this;
+        btn.disabled = true;
+        show(el('assetError'), false);
+        show(el('assetOk'), false);
+
+        postJson('/umbraco/surface/EkonomiAdmin/SaveAsset', {
+            issuerType: issuerType, issuerId: issuerId,
+            id: parseInt(el('aId').value, 10) || 0,
+            name: el('aName').value,
+            note: el('aNote').value,
+            assetAccountNumber: parseInt(el('aAssetAccount').value, 10) || 0,
+            depreciationAccountNumber: parseInt(el('aDeprAccount').value, 10) || 0,
+            inUseDate: el('aDate').value,
+            acquisitionAmount: parseFloat(el('aAmount').value) || 0,
+            usefulLifeYears: parseInt(el('aLife').value, 10) || 0,
+            residualValue: parseFloat(el('aResidual').value) || 0
+        }).then(function (j) {
+            btn.disabled = false;
+
+            if (!j.success) {
+                el('assetError').textContent = j.message;
+                show(el('assetError'), true);
+                return;
+            }
+
+            el('assetOk').textContent = j.message;
+            show(el('assetOk'), true);
+            resetAssetForm();
+            loadAssets();
+        }).catch(function (e) {
+            btn.disabled = false;
+            el('assetError').textContent = e.message;
+            show(el('assetError'), true);
+        });
     });
 
     // ══ REVISORERNA ══════════════════════════════════════════════════════════════════════
