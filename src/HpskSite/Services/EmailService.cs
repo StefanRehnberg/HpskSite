@@ -2594,5 +2594,57 @@ namespace HpskSite.Services
 
             await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
+
+        /// <summary>
+        /// Kretsavgiftens betalkrav till en klubb. <b>Raderna står i mejlet</b> — en klubbkassör som
+        /// får "460 kr" utan att se att det är 23 medlemmar à 20 kr kan inte avgöra om beloppet är
+        /// rätt, och det är just medlemsantalet klubben kan ha synpunkter på.
+        ///
+        /// <para>⚠️ Returnerar om mejlet FAKTISKT skickades. Medlemsavgiftens metod ovan kastar bort
+        /// svaret, och det är den lögnen ("skickad" om ett mejl som aldrig gick) ytorna här inte får
+        /// ärva.</para>
+        /// </summary>
+        public async Task<bool> SendRegionFeeRequestAsync(
+            string clubEmail,
+            string clubName,
+            string regionName,
+            int year,
+            IReadOnlyList<(string Description, decimal Amount)> lines,
+            decimal total,
+            string payUrl,
+            MailReplyTo replyTo)
+        {
+            var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+            string Kr(decimal d) => d.ToString("N0", sv) + " kr";
+            var enc = new Func<string, string>(System.Net.WebUtility.HtmlEncode);
+
+            var subject = $"Kretsavgift {year} – {regionName}";
+            var rows = string.Join("", lines.Select(l =>
+                $"<tr><td style='padding:4px 12px 4px 0'>{enc(l.Description)}</td>"
+              + $"<td style='padding:4px 0;text-align:right;white-space:nowrap'>{Kr(l.Amount)}</td></tr>"));
+
+            var body = $@"<html>
+<body style='font-family:Arial,sans-serif;line-height:1.5;color:#333'>
+    <div style='max-width:560px;margin:0 auto;padding:16px'>
+        <div style='background:#0d6efd;color:#fff;padding:18px;border-radius:5px 5px 0 0'>
+            <h2 style='margin:0;font-size:20px'>Kretsavgift {year}</h2>
+        </div>
+        <div style='background:#f8f9fa;border:1px solid #dee2e6;padding:24px;border-radius:0 0 5px 5px'>
+            <p>Hej {enc(clubName)}!</p>
+            <p>Här är kretsavgiften till <strong>{enc(regionName)}</strong> för {year}.</p>
+            <table style='border-collapse:collapse;margin:8px 0 4px'>{rows}
+                <tr><td style='padding:8px 12px 0 0;border-top:1px solid #ccc'><strong>Att betala</strong></td>
+                    <td style='padding:8px 0 0;border-top:1px solid #ccc;text-align:right'><strong>{Kr(total)}</strong></td></tr>
+            </table>
+            <p>Öppna betalsidan för att betala med Swish. Har klubben ett annat antal medlemmar än det
+               som står ovan kan ni svara på det här mejlet — svaret går till kretsen.</p>
+            <p><a href='{payUrl}' style='display:inline-block;background:#0d6efd;color:#fff;text-decoration:none;padding:12px 22px;border-radius:6px'>Öppna betalsidan</a></p>
+        </div>
+    </div>
+</body>
+</html>";
+
+            return await SendEmailAsync(clubEmail, subject, body, replyTo);
+        }
     }
 }

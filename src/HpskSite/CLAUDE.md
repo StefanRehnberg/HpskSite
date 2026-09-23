@@ -4961,6 +4961,102 @@ skrivs som SQL i `sbx.LedgerPayment` och bokförs genom den **riktiga** efterbok
 `ledger-needs-project-dimension`) — tävlingsavgifter postar inte till liggaren förrän P3/P4 är byggd,
 så det finns inget utfall att visa ännu.
 
+## Kretsavgiften — samma motor som medlemsavgiften (2026-09-23)
+
+Kvar-listans post 2 (P5:s andra halva). Kretsen kunde inte ta betalt av sina klubbar:
+`LedgerSourceType.RegionFee` och rollen `revenue-region-fee` fanns, men ingenting skapade en sådan post.
+
+**⚠️⚠️ PLANENS REGEL: EN MOTOR, TVÅ PARTSTYPER — bygg dem inte som två funktioner.** Kraven ligger i
+`MembershipFeeCharge`, betalas via samma `/medlemsavgift/{token}`, kvitteras med samma `MarkPaid` och
+bokförs av samma `LedgerMembershipFeeBridge`. Det enda som är eget är TAXAN och FÖRSLAGET per klubb.
+
+### Formen i databasen
+
+`MembershipFeeCharge` fick `IssuerType` (0 klubb, 1 krets), `RegionId`, `PayerClubId`, `MemberCount`.
+**⚠️ Ingen backfill, och det är designen:** default 0 = klubbavgift, så prod-raderna rörs inte.
+**⚠️ Inga speglade `IssuerId`/`PayerId`-kolumner:** medlemssammanslagningen flyttar `MemberId`, och
+en kopia av samma uppgift i en annan kolumn hade glidit isär. Använd `IsRegionFee`,
+`IssuerOwnerType` och `IssuerOwnerId` på POCO:n i stället för att läsa formen själv.
+- **`CK_MembershipFeeCharge_Shape`** gör formerna omöjliga att blanda: en kretsavgift har
+  `ClubId = 0` och `MemberId = 0`. Därför syns den **aldrig** i klubbens medlemsavgiftslista (som
+  läser `ClubId`) — strukturellt, inte genom att varje fråga kommer ihåg ett villkor.
+- **`UX_MembershipFeeCharge_RegionClubYear`** (filtrerat): ett krav per klubb, krets och år.
+- `MembershipFeeCategory` fick `IssuerType`/`RegionId`; kretsens taxa är två rader med nycklarna
+  `krets-grund` och `krets-per-medlem` (`RegionFeeCalculator`).
+- `MembershipFeeChargeLine`: kravets rader (`base`, `per-member`, `manual`, `extra`).
+
+**⚠️⚠️ DE FILTRERADE INDEXEN KRÄVER `QUOTED_IDENTIFIER ON` FÖR ALL DML MOT TABELLERNA.** Appen har
+det; `sqlcmd` har det AV som standard. **Det här fällde `ekonomi-medlemsavgift-verify`** (4 röda, dess
+fixtur-INSERT avvisades med Msg 1934) tills dess SQL-hjälpare fick `SET QUOTED_IDENTIFIER ON`. Varje
+drifts- eller testskript som skriver i `MembershipFeeCharge`/`MembershipFeeCategory` måste sätta det.
+Samma avvägning som `MarkenSeries` och `LedgerProject` — garantin i databasen är värd det.
+
+### Beräkningen: `RegionFeeCalculator` (ren funktion)
+
+**Stefan 2026-09-23: alla tre sätten används** — fast belopp per klubb, per medlem, och handskrivet.
+De två första är EN formel (`grund + pris × medlemmar`, den ena delen noll); det tredje ersätter
+formeln för just den klubben. Hallands verkliga siffror (120/280/460) går jämnt upp i 20 kr/medlem.
+- **Kravets `Amount` är ALLTID summan av raderna**, omräknad på ETT ställe
+  (`EditRegionChargeLines`). Ett krav vars rader och belopp säger olika saker går inte att förklara.
+- **Noll kronor blir aldrig ett krav** — avgift 0 är gratis, inte "ofylld". Det SÄGS i svaret.
+- **Ett rättat medlemsantal behåller det pris kravet skapades med**, inte den nuvarande taxan — annars
+  ändras beloppet av något ingen bett om.
+- **Per-medlem-raden heter "Avgift per medlem"**, inte "Medlemsavgift": på kretsens räkning läses det
+  senare som klubbens egen medlemsavgift. Svensk decimalform oavsett serverkultur.
+
+**⚠️ Medlemsantalet är ett FÖRSLAG ur registret** (Stefans beslut): `ClubMembership` utom utträdda och
+avlidna, samma regel som klubbens egen avgiftskörning. Kretsen rättar det, och det rättade talet
+sparas på kravet (`MemberCount`). Ett handskrivet belopp påstår inget antal (`NULL`).
+
+### Bokföringen
+
+En kretsavgift bokförs i **kretsens** liggare, på rollen `revenue-region-fee`, med **egen källtyp**
+`region-fee`. **⚠️ Källtypen är spärren mot dubbelbokföring** (`SourceTypeFor` — en plats, så spärren
+och postningen säger samma sak). Med medlemsavgiftens källtyp hade en bokförd medlemsavgift kunnat se
+ut att täcka en obokförd kretsavgift med samma id. Motparten är **klubben**.
+`/ekonomi` för en krets visar nu avgiftskortet som **Kretsavgifter** (`label` ur servern) och
+efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
+
+### Ytorna
+
+- **Kretsens adminpanel → Kretsen → Kretsavgift** (`RegionFeeManagement.cshtml`, lat laddad på
+  click). Taxa, en rad per publicerad klubb med förslag och "Eget belopp", krav med rader och läge,
+  Åtgärder-meny (tillägg, rätta antal, markera betald/obetald, betallänk, ta bort). Panelen för
+  tillägg/antal ligger ÖVER tabellen — ingen `prompt()`.
+- **Betalsidan** säger *Kretsavgift*, kretsen som mottagare, klubben som betalare, och raderna.
+  **⚠️ Swish-meddelandet namnger KLUBBEN** (max 50 tecken) — annars står femton likadana
+  "Kretsavgift 2026" på kretsens kontoutdrag.
+- **Betalkravsmejlet** (`SendRegionFeeRequestAsync`) visar raderna, har kretsen som svarsadress
+  (`ReplyContactResolver.ForRegion`), och **returnerar om det faktiskt gick iväg** — utskicket
+  räknar och namnger klubbarna som inte nåddes.
+- **Behörighet:** kretsadmin för just den kretsen (`AuthorizeRegionAsync`, koden läses ur noden och
+  skickas oförändrad). `CanManageChargeAsync` är EN fråga för alla kravets endpoints. En klubb utanför
+  kretsen vägras i `GenerateRegionCharges` och **ingenting** skapas.
+- **Ta bort ett krav** bara så länge klubben varken betalat eller sagt sig ha betalat.
+
+**Operatörssteg:** kör `Migrations/add-region-fee-to-membership-fee.sql` **FÖRE deployen** — NPoco
+genererar `SET IssuerType = …` i varje uppdatering av en avgift så snart POCO:n bär fältet, så utan
+kolumnerna faller **varje klubbs "Markera betald"**, inte bara kretsens. Körd i dev 2026-09-23;
+**EJ körd i prod.** Fildeploy av `KnowledgeBase/docs/kretsavgift.md` (ny). Adds C# → full ombyggnad.
+
+Verifierat **18 enhetstest** (`RegionFeeCalculatorTests`; hela sviten 1447/1447) och **76/76
+`hpsk-verify/kretsavgift-verify.mjs`**, två körningar i rad. Sviten kör mot **Blekinge (3773)** med år
+**2031** — avgifter har ingen sandlåda, så den lade upp en liggare för Blekinge i dev och lämnar en
+verifikation per körning där; krav och taxa städas i SQL. **A/B: med medlemsavgiftens källtyp för
+båda formerna faller de tre bokföringspåståendena.** Regression: medlemsavgift 17/17, sidan 59/59,
+projekt 100/100, styrelsens läsrätt 44/44.
+- ⚠️ **Jämjö (2878) är opublicerad** och räknas med rätta inte till kretsen — sviten räknar de
+  förväntade klubbarna ur databasen. Första versionen skrev in 8 och föll.
+- ⚠️ `sqlcmd` gör "ä" i en jämförd sträng till mojibake; jämförelsen görs i SQL med `NCHAR(228)`.
+- ⚠️ Årsväljaren har bara åren kring i år — `selectOption('2031')` är en tyst no-op. Sviten lägger
+  till året och väntar på fixturårets SUMMERING, inte på ett klubbnamn som står i förra årets vy.
+- ⚠️ Under bildtagningen hängde betalsidan på den kända `TrainingMatches`-låsningen (session med
+  öppen transaktion efter appstart, se avsnittet om bakgrundssvep). `KILL` på roten löste det.
+
+**Inte byggt, medvetet:** den **betalande klubbens** sida — att kretsavgiften dyker upp som en
+utgift i klubbens egen bokföring. Klubben registrerar den i dag som en leverantörsfaktura under
+Utgifter.
+
 ### ⚠️⚠️ MEDALJREDUKTIONEN MÄTS PÅ MÄSTERSKAPSKLASSEN (2026-09-08)
 
 **SHB C.3.4.1, ordagrant:** *"Antalet medaljer till de främsta i individuella mästerskap

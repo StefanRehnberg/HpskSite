@@ -42,18 +42,30 @@ namespace HpskSite.Services.Ledger
         /// inte bokförts.
         /// </summary>
         public MembershipFeeLedgerStatus Summarise(int clubId, int? year = null)
+            => Summarise(DocumentOwnerType.Club, clubId, year);
+
+        /// <summary>
+        /// Samma läge för en utställare av någon av formerna: en klubbs medlemsavgifter eller en
+        /// krets avgifter till sina klubbar. <b>En sammanfattning, två partstyper</b> — samma regel
+        /// som motorn själv.
+        /// </summary>
+        public MembershipFeeLedgerStatus Summarise(int ownerType, int ownerId, int? year)
         {
             var status = new MembershipFeeLedgerStatus { Year = year ?? DateTime.Today.Year };
+            var isRegion = ownerType == DocumentOwnerType.Region;
 
             try
             {
                 using var db = _databaseFactory.CreateDatabase();
 
                 var charges = db.Fetch<MembershipFeeCharge>(
-                    @"SELECT * FROM dbo.MembershipFeeCharge
-                       WHERE ClubId = @0 AND Year = @1
-                         AND (HouseholdCoveredByChargeId IS NULL)",
-                    clubId, status.Year);
+                    isRegion
+                        ? @"SELECT * FROM dbo.MembershipFeeCharge
+                             WHERE IssuerType = 1 AND RegionId = @0 AND Year = @1"
+                        : @"SELECT * FROM dbo.MembershipFeeCharge
+                             WHERE IssuerType = 0 AND ClubId = @0 AND Year = @1
+                               AND (HouseholdCoveredByChargeId IS NULL)",
+                    ownerId, status.Year);
 
                 // ⚠️ Familjemedlemmar som täcks av huvudmedlemmens avgift filtreras bort ovan.
                 // Räknas de med blir både kravet och intäkten dubblerad — hushållet betalar EN gång.
@@ -64,7 +76,7 @@ namespace HpskSite.Services.Ledger
                 var paid = charges.Where(c => c.PaymentStatus == "Paid").ToList();
                 if (paid.Count == 0) return status;
 
-                var postedIds = PostedChargeIds(db, paid.Select(c => c.Id));
+                var postedIds = PostedChargeIds(db, paid.Select(c => c.Id), SourceTypeFor(isRegion));
 
                 var unposted = paid.Where(c => !postedIds.Contains(c.Id)).ToList();
                 status.UnpostedCount = unposted.Count;
@@ -72,7 +84,7 @@ namespace HpskSite.Services.Ledger
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Kunde inte sammanfatta medlemsavgifterna för klubb {ClubId}.", clubId);
+                _logger.LogWarning(ex, "Kunde inte sammanfatta avgifterna för {Typ}/{Id}.", ownerType, ownerId);
             }
 
             return status;
@@ -105,17 +117,33 @@ namespace HpskSite.Services.Ledger
                 if (charge.HouseholdCoveredByChargeId is not null) return null;
                 if (charge.Amount <= 0) return null;
 
-                // ⚠️ Spärren mot dubbelbokföring, härledd ur liggaren själv.
-                if (PostedChargeIds(db, new[] { charge.Id }).Count > 0) return null;
+                // ⚠️⚠️ KRETSAVGIFTEN BOKFÖRS I KRETSENS LIGGARE, på rollen för kretsavgift och med
+                //    EGEN källtyp. Samma källtyp för båda hade gjort spärren nedan tvetydig: en
+                //    medlemsavgift och en kretsavgift kan ha samma id-serie men är olika krav, och en
+                //    bokförd medlemsavgift hade då kunnat se ut att täcka en obokförd kretsavgift.
+                var isRegion = charge.IsRegionFee;
+                var ownerType = charge.IssuerOwnerType;
+                var ownerId = charge.IssuerOwnerId;
+                if (ownerId <= 0) return null;
 
-                // LEDGER-SEAM-OK: medlemsavgifter finns BARA i den levande liggaren. En
+                var sourceType = SourceTypeFor(isRegion);
+
+                // ⚠️ Spärren mot dubbelbokföring, härledd ur liggaren själv.
+                if (PostedChargeIds(db, new[] { charge.Id }, sourceType).Count > 0) return null;
+
+                // LEDGER-SEAM-OK: medlems- och kretsavgifter finns BARA i den levande liggaren. En
                 // sandlada har inga MembershipFeeCharge-rader att brygga, och att gora bryggan
                 // schemamedveten hade antytt att den kan kora mot en sandlada.
                 var settings = db.FirstOrDefault<LedgerIssuerSettings>(
                     "SELECT * FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1",
-                    DocumentOwnerType.Club, charge.ClubId);
+                    ownerType, ownerId);
 
                 if (!LedgerIssuerShape.KeepsBooks(settings?.Shape)) return null;
+
+                // Motparten: medlemmen för en medlemsavgift, KLUBBEN för en kretsavgift.
+                var payerName = isRegion
+                    ? db.ExecuteScalar<string>("SELECT text FROM umbracoNode WHERE id = @0", charge.PayerClubId ?? 0)
+                    : charge.MemberName;
 
                 // Betaldagen är bokföringsdagen — kontantmetoden. Saknas den (gammal rad) faller
                 // vi tillbaka på skapandedatumet, aldrig på i dag.
@@ -123,16 +151,16 @@ namespace HpskSite.Services.Ledger
 
                 var result = _posting.Post(new LedgerPostingRequest
                 {
-                    IssuerType = DocumentOwnerType.Club,
-                    IssuerId = charge.ClubId,
+                    IssuerType = ownerType,
+                    IssuerId = ownerId,
                     AccountingDate = date,
                     EventDate = date,
-                    Description = $"Medlemsavgift {charge.Year}",
-                    CounterpartyId = charge.MemberId,
-                    CounterpartyName = charge.MemberName,
+                    Description = isRegion ? $"Kretsavgift {charge.Year}" : $"Medlemsavgift {charge.Year}",
+                    CounterpartyId = isRegion ? charge.PayerClubId : charge.MemberId,
+                    CounterpartyName = payerName,
                     // ⚠️ SourceType/SourceId ÄR spärren mot dubbelbokföring. Ändras de här måste
                     // PostedChargeIds ändras i samma andetag.
-                    SourceType = LedgerSourceType.MembershipFee,
+                    SourceType = sourceType,
                     SourceId = charge.Id,
                     CreatedByMemberId = byMemberId,
                     Lines = new List<LedgerPostingLine>
@@ -140,9 +168,9 @@ namespace HpskSite.Services.Ledger
                         new() { Role = LedgerAccountRoles.BankAccount, Debit = charge.Amount, VatRate = 0 },
                         new()
                         {
-                            Role = LedgerAccountRoles.RevenueMembershipFee,
+                            Role = isRegion ? LedgerAccountRoles.RevenueRegionFee : LedgerAccountRoles.RevenueMembershipFee,
                             Credit = charge.Amount,
-                            Text = charge.MemberName
+                            Text = payerName
                         }
                     }
                 });
@@ -175,20 +203,28 @@ namespace HpskSite.Services.Ledger
         /// </summary>
         /// <returns>Hur många som bokfördes.</returns>
         public int PostPending(int clubId, int year, int byMemberId)
+            => PostPending(DocumentOwnerType.Club, clubId, year, byMemberId);
+
+        /// <summary>Samma sak för en utställare av någon av formerna.</summary>
+        public int PostPending(int ownerType, int ownerId, int year, int byMemberId)
         {
             List<int> ids;
+            var isRegion = ownerType == DocumentOwnerType.Region;
 
             using (var db = _databaseFactory.CreateDatabase())
             {
                 var paid = db.Fetch<MembershipFeeCharge>(
-                    @"SELECT * FROM dbo.MembershipFeeCharge
-                       WHERE ClubId = @0 AND Year = @1 AND PaymentStatus = 'Paid'
-                         AND HouseholdCoveredByChargeId IS NULL",
-                    clubId, year);
+                    isRegion
+                        ? @"SELECT * FROM dbo.MembershipFeeCharge
+                             WHERE IssuerType = 1 AND RegionId = @0 AND Year = @1 AND PaymentStatus = 'Paid'"
+                        : @"SELECT * FROM dbo.MembershipFeeCharge
+                             WHERE IssuerType = 0 AND ClubId = @0 AND Year = @1 AND PaymentStatus = 'Paid'
+                               AND HouseholdCoveredByChargeId IS NULL",
+                    ownerId, year);
 
                 if (paid.Count == 0) return 0;
 
-                var posted = PostedChargeIds(db, paid.Select(c => c.Id));
+                var posted = PostedChargeIds(db, paid.Select(c => c.Id), SourceTypeFor(isRegion));
                 ids = paid.Where(c => !posted.Contains(c.Id)).Select(c => c.Id).ToList();
             }
 
@@ -209,7 +245,7 @@ namespace HpskSite.Services.Ledger
         /// heltal ur databasen, aldrig indata.</para>
         /// </summary>
         private static HashSet<int> PostedChargeIds(
-            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, IEnumerable<int> chargeIds)
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, IEnumerable<int> chargeIds, string sourceType)
         {
             var ids = chargeIds.ToList();
             if (ids.Count == 0) return new HashSet<int>();
@@ -218,9 +254,13 @@ namespace HpskSite.Services.Ledger
                     // LEDGER-SEAM-OK: samma skal som ovan - avgiftsbryggan ar levande-bara.
                     $@"SELECT SourceId FROM dbo.LedgerJournalEntry
                         WHERE SourceType = @0 AND SourceId IN ({string.Join(",", ids)})",
-                    LedgerSourceType.MembershipFee)
+                    sourceType)
                 .ToHashSet();
         }
+
+        /// <summary>Källtypen för en avgift. En plats — spärren och postningen måste säga samma sak.</summary>
+        private static string SourceTypeFor(bool isRegion)
+            => isRegion ? LedgerSourceType.RegionFee : LedgerSourceType.MembershipFee;
     }
 
     /// <summary>Medlemsavgifternas läge, sett från liggaren.</summary>

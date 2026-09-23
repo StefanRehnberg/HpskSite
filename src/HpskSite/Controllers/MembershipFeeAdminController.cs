@@ -180,7 +180,7 @@ namespace HpskSite.Controllers
             var charge = _feeService.GetCharge(chargeId);
             if (charge == null)
                 return Json(new { success = false, message = "Avgiften hittades inte" });
-            if (!await _auth.IsClubAdminForClub(charge.ClubId))
+            if (!await CanManageChargeAsync(charge))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             var byId = await GetCurrentMemberIdAsync();
@@ -195,7 +195,7 @@ namespace HpskSite.Controllers
             var charge = _feeService.GetCharge(chargeId);
             if (charge == null)
                 return Json(new { success = false, message = "Avgiften hittades inte" });
-            if (!await _auth.IsClubAdminForClub(charge.ClubId))
+            if (!await CanManageChargeAsync(charge))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             _feeService.MarkUnpaid(chargeId);
@@ -210,7 +210,7 @@ namespace HpskSite.Controllers
             var charge = _feeService.GetCharge(chargeId);
             if (charge == null)
                 return Json(new { success = false, message = "Avgiften hittades inte" });
-            if (!await _auth.IsClubAdminForClub(charge.ClubId))
+            if (!await CanManageChargeAsync(charge))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             return Json(new { success = true, url = BuildPayUrl(chargeId) });
@@ -253,6 +253,283 @@ namespace HpskSite.Controllers
             return Json(new { success = true, sent });
         }
 
+        // ══ KRETSAVGIFTEN ═══════════════════════════════════════════════════════════════════
+        //
+        // ⚠️ Samma motor, samma betalsida, samma MarkPaid — det här är bara kretsens taxa, förslaget
+        //    per klubb och kravens rader. Behörigheten är kretsadmin för just den kretsen
+        //    (sajtadmin ingår); klubbarna ser inte varandras krav.
+
+        /// <summary>
+        /// Kretsens taxa, förslaget per klubb och de krav som redan finns.
+        ///
+        /// <para><b>⚠️ Medlemsantalet är ett FÖRSLAG ur registret</b> (Stefans beslut 2026-09-23) —
+        /// registret kan vara ofullständigt, så kretsen får rätta talet innan kravet skapas, och det
+        /// rättade talet sparas på kravet.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRegionOverview(int regionId, int year)
+        {
+            var region = await AuthorizeRegionAsync(regionId);
+            if (region is null) return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var (baseAmount, perMember) = _feeService.GetRegionRate(regionId, year);
+            var charges = _feeService.GetChargesForRegionYear(regionId, year)
+                .ToDictionary(c => c.PayerClubId ?? 0);
+
+            var rows = RegionClubs(region.Value.Code).Select(club =>
+            {
+                var count = ActiveMemberCount(club.Id);
+                var proposal = RegionFeeCalculator.Lines(year, baseAmount, perMember, count, null);
+                charges.TryGetValue(club.Id, out var charge);
+
+                return new
+                {
+                    clubId = club.Id,
+                    clubName = club.Name,
+                    hasEmail = !string.IsNullOrWhiteSpace(club.ContactEmail),
+                    proposedCount = count,
+                    proposedAmount = RegionFeeCalculator.Total(proposal),
+                    charge = charge is null ? null : RegionChargeDto(charge)
+                };
+            }).OrderBy(r => r.clubName, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+            var all = charges.Values.ToList();
+            return Json(new
+            {
+                success = true,
+                regionName = region.Value.Name,
+                year,
+                rate = new { baseAmount, perMember },
+                rows,
+                // ⚠️ Krav på klubbar som inte längre finns i kretsen syns ändå — en klubb som bytt
+                //    krets eller lagts ner kan ha en obetald avgift, och den får inte försvinna ur
+                //    listan bara för att klubben gjorde det.
+                orphans = all.Where(c => rows.All(r => r.clubId != (c.PayerClubId ?? 0))).Select(RegionChargeDto),
+                totals = new
+                {
+                    charged = all.Sum(c => c.Amount),
+                    paid = all.Where(c => c.PaymentStatus == "Paid").Sum(c => c.Amount),
+                    outstanding = all.Where(c => c.PaymentStatus != "Paid").Sum(c => c.Amount),
+                    count = all.Count,
+                    paidCount = all.Count(c => c.PaymentStatus == "Paid")
+                }
+            });
+        }
+
+        private static object RegionChargeDto(MembershipFeeCharge c) => new
+        {
+            id = c.Id,
+            clubId = c.PayerClubId,
+            clubName = c.PayerClubName,
+            amount = c.Amount,
+            memberCount = c.MemberCount,
+            status = c.PaymentStatus,
+            paymentSentDate = c.PaymentSentDate?.ToString("yyyy-MM-dd"),
+            paymentSentBy = c.PaymentSentBy,
+            paidDate = c.PaidDate?.ToString("yyyy-MM-dd"),
+            lines = c.Lines.Select(l => new
+            {
+                id = l.Id, kind = l.Kind, description = l.Description,
+                quantity = l.Quantity, unitPrice = l.UnitPrice, amount = l.Amount
+            })
+        };
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveRegionRate([FromBody] RegionRateRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+            if (await AuthorizeRegionAsync(request.RegionId) is null)
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            if (request.BaseAmount < 0 || request.PerMember < 0)
+                return Json(new { success = false, message = "Beloppen kan inte vara negativa." });
+
+            _feeService.SaveRegionRate(request.RegionId, request.Year, request.BaseAmount, request.PerMember);
+            return Json(new
+            {
+                success = true,
+                // ⚠️ Säger uttryckligen att redan skapade krav står kvar — annars tror kassören att
+                //    en höjd taxa slog igenom på de räkningar klubbarna redan fått.
+                message = "Taxan är sparad. Krav som redan skapats ändras inte."
+            });
+        }
+
+        /// <summary>
+        /// Skapar kraven för de klubbar som skickas med. <b>Bara klubbar i kretsen godtas</b> — listan
+        /// kommer från klienten, och en krets får inte ställa ut ett krav på en annan krets klubb.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> GenerateRegionCharges([FromBody] RegionGenerateRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att skapa." });
+            var region = await AuthorizeRegionAsync(request.RegionId);
+            if (region is null) return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var inRegion = RegionClubs(region.Value.Code).Select(c => c.Id).ToHashSet();
+            var foreign = (request.Clubs ?? new()).Count(c => !inRegion.Contains(c.ClubId));
+            if (foreign > 0)
+                return Json(new { success = false, message = "Minst en av klubbarna hör inte till kretsen. Ingenting skapades." });
+
+            var clubs = (request.Clubs ?? new())
+                .Where(c => c.MemberCount >= 0 && (c.ManualAmount is null or >= 0))
+                .ToList();
+
+            var byId = await GetCurrentMemberIdAsync();
+            var result = _feeService.GenerateRegionCharges(request.RegionId, request.Year, clubs, byId);
+
+            var parts = new List<string> { $"{result.Created} krav skapades ({result.TotalAmount:N0} kr)." };
+            if (result.SkippedExisting > 0) parts.Add($"{result.SkippedExisting} klubbar hade redan ett krav för året.");
+            // ⚠️ Nollkraven SÄGS. Utan det ser en klubb som inte fick något krav ut att ha glömts bort.
+            if (result.SkippedZero > 0) parts.Add($"{result.SkippedZero} klubbar fick inget krav eftersom beloppet blev 0 kr.");
+
+            return Json(new { success = true, created = result.Created, message = string.Join(" ", parts) });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddRegionChargeLine([FromBody] RegionChargeLineRequest request)
+        {
+            var byId = await GetCurrentMemberIdAsync();
+            return await EditRegionCharge(request?.ChargeId ?? 0, () =>
+                _feeService.AddRegionChargeLine(request!.ChargeId, request.Description ?? "", request.Amount, byId));
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveRegionChargeLine([FromBody] RegionChargeLineRequest request)
+            => await EditRegionCharge(request?.ChargeId ?? 0, () =>
+                _feeService.RemoveRegionChargeLine(request!.ChargeId, request.LineId));
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetRegionChargeMemberCount([FromBody] RegionChargeLineRequest request)
+            => await EditRegionCharge(request?.ChargeId ?? 0, () =>
+                _feeService.SetRegionChargeMemberCount(request!.ChargeId, request.MemberCount));
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteRegionCharge([FromBody] RegionChargeLineRequest request)
+            => await EditRegionCharge(request?.ChargeId ?? 0, () =>
+                _feeService.DeleteRegionCharge(request!.ChargeId));
+
+        private async Task<IActionResult> EditRegionCharge(int chargeId, Func<string?> edit)
+        {
+            var charge = chargeId == 0 ? null : _feeService.GetCharge(chargeId);
+            if (charge is null || !charge.IsRegionFee)
+                return Json(new { success = false, message = "Kravet hittades inte." });
+            if (!await CanManageChargeAsync(charge))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var error = edit();
+            return Json(error is null ? new { success = true, message = (string?)null } : new { success = false, message = (string?)error });
+        }
+
+        /// <summary>
+        /// Mejlar betalkravet till varje klubb med ett obetalt krav.
+        ///
+        /// <para><b>⚠️ Svaret räknar det som FAKTISKT skickades</b> och namnger klubbarna som inte
+        /// nåddes — både de utan kontaktadress och de där mejlet inte gick iväg. Ett "skickat" om ett
+        /// mejl som aldrig gick är lögnen den här kodbasen redan fått rätta en gång.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SendRegionPaymentRequests([FromBody] RegionRateRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att skicka." });
+            var region = await AuthorizeRegionAsync(request.RegionId);
+            if (region is null) return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var reply = _replyContacts.ForRegion(request.RegionId);
+            var sent = new List<string>();
+            var noEmail = new List<string>();
+            var failed = new List<string>();
+
+            foreach (var charge in _feeService.GetChargesForRegionYear(request.RegionId, request.Year))
+            {
+                if (charge.PaymentStatus == "Paid") continue;
+
+                var club = _clubService.GetClubById(charge.PayerClubId ?? 0);
+                var name = charge.PayerClubName ?? club?.Name ?? $"Klubb {charge.PayerClubId}";
+
+                if (string.IsNullOrWhiteSpace(club?.ContactEmail)) { noEmail.Add(name); continue; }
+
+                bool ok;
+                try
+                {
+                    ok = await _emailService.SendRegionFeeRequestAsync(
+                        club.ContactEmail!, name, region.Value.Name, charge.Year,
+                        charge.Lines.Select(l => (l.Description, l.Amount)).ToList(),
+                        charge.Amount, BuildPayUrl(charge.Id), reply);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Kretsavgiftens betalkrav {ChargeId} kunde inte skickas.", charge.Id);
+                    ok = false;
+                }
+
+                (ok ? sent : failed).Add(name);
+            }
+
+            var parts = new List<string> { $"Betalkravet skickades till {sent.Count} klubbar." };
+            if (noEmail.Count > 0) parts.Add($"Saknar kontaktadress: {string.Join(", ", noEmail)}.");
+            if (failed.Count > 0) parts.Add($"Kunde inte skickas: {string.Join(", ", failed)}.");
+
+            return Json(new
+            {
+                success = true,
+                sent = sent.Count,
+                noEmail,
+                failed,
+                message = string.Join(" ", parts)
+            });
+        }
+
+        /// <summary>
+        /// Får den inloggade hantera kravet? Klubbadmin för en medlemsavgift, kretsadmin för en
+        /// kretsavgift. <b>EN fråga för alla kravets endpoints</b>, så att de två formerna inte kan få
+        /// olika regler på olika knappar.
+        /// </summary>
+        private async Task<bool> CanManageChargeAsync(MembershipFeeCharge charge)
+            => charge.IsRegionFee
+                ? await AuthorizeRegionAsync(charge.RegionId ?? 0) is not null
+                : await _auth.IsClubAdminForClub(charge.ClubId);
+
+        /// <summary>
+        /// Kretsnoden, om den inloggade är kretsadmin för den (sajtadmin ingår). <b>Koden läses ur
+        /// noden</b> och skickas som den står: <c>IsRegionalAdminForRegion</c> jämför gruppnamnet
+        /// EXAKT, och en gemenad kod hade nekats och sett ut som ett behörighetsfel.
+        /// </summary>
+        private async Task<(int Id, string Code, string Name)?> AuthorizeRegionAsync(int regionId)
+        {
+            if (regionId <= 0) return null;
+
+            var node = Services.ContentService.GetById(regionId);
+            if (node is null || node.ContentType.Alias != "regionalPage") return null;
+
+            var code = node.GetValue<string>("regionCode") ?? "";
+            if (!await _auth.IsRegionalAdminForRegion(code)) return null;
+
+            return (node.Id, code, node.GetValue<string>("regionName") ?? node.Name ?? "Kretsen");
+        }
+
+        private List<ClubInfo> RegionClubs(string regionCode)
+            => _auth.GetClubsInRegions(new List<string> { regionCode })
+                .Distinct()
+                .Select(id => _clubService.GetClubById(id))
+                .Where(c => c is not null)
+                .Select(c => c!)
+                .ToList();
+
+        /// <summary>
+        /// Registrets förslag på medlemsantal: klubbens medlemskap utom de som utträtt eller avlidit —
+        /// samma regel som klubbens egen avgiftskörning, så de två inte räknar olika på samma register.
+        /// </summary>
+        private int ActiveMemberCount(int clubId)
+            => _clubMembershipService.GetForClub(clubId)
+                .Count(cm => cm.MembershipStatus != "Utträdd" && cm.MembershipStatus != "Avliden");
+
         // ── Helpers ───────────────────────────────────────────────────
 
         private string BuildPayUrl(int chargeId)
@@ -269,5 +546,29 @@ namespace HpskSite.Controllers
             return data?.Id ?? 0;
         }
 
+    }
+
+    public class RegionRateRequest
+    {
+        public int RegionId { get; set; }
+        public int Year { get; set; }
+        public decimal BaseAmount { get; set; }
+        public decimal PerMember { get; set; }
+    }
+
+    public class RegionGenerateRequest
+    {
+        public int RegionId { get; set; }
+        public int Year { get; set; }
+        public List<RegionFeeClubInput>? Clubs { get; set; }
+    }
+
+    public class RegionChargeLineRequest
+    {
+        public int ChargeId { get; set; }
+        public int LineId { get; set; }
+        public string? Description { get; set; }
+        public decimal Amount { get; set; }
+        public int MemberCount { get; set; }
     }
 }

@@ -1938,8 +1938,12 @@ namespace HpskSite.Controllers
             var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
             if (!ok) return Json(new { success = false, message = DeniedMessage });
 
-            if (issuerType != DocumentOwnerType.Club)
+            // ⚠️ Kretsen har också avgifter nu — kretsavgiften från sina klubbar. Samma motor, samma
+            //    kort; bara rubriken skiljer, och den kommer härifrån så att ytan inte gissar.
+            if (issuerType != DocumentOwnerType.Club && issuerType != DocumentOwnerType.Region)
                 return Json(new { success = true, applicable = false });
+
+            var label = issuerType == DocumentOwnerType.Region ? "Kretsavgifter" : "Medlemsavgifter";
 
             // ⚠️⚠️ SANDLÅDAN SER INGA MEDLEMSAVGIFTER, OCH DET MÅSTE STÅ PÅ SKÄRMEN.
             //    `MembershipFeeCharge` är LIVE-data nycklad på klubbens riktiga nod-id; en
@@ -1956,7 +1960,8 @@ namespace HpskSite.Controllers
                     success = true,
                     applicable = true,
                     sandbox = true,
-                    message = "Medlemsavgifterna ligger i den riktiga bokföringen och följer inte "
+                    label,
+                    message = $"{label} ligger i den riktiga bokföringen och följer inte "
                             + "med hit. En sandlåda får inte bokföra riktiga krav — byt till "
                             + "Riktig bokföring för att se och bokföra dem."
                 });
@@ -1968,7 +1973,8 @@ namespace HpskSite.Controllers
                     success = true,
                     applicable = true,
                     sandbox = false,
-                    fees = _feeBridge.Summarise(issuerId, year)
+                    label,
+                    fees = _feeBridge.Summarise(issuerType, issuerId, year)
                 });
             }
             catch (Exception ex)
@@ -1990,7 +1996,10 @@ namespace HpskSite.Controllers
         {
             if (request is null) return Json(new { success = false, message = "Inget att bokföra." });
 
-            var (ok, name) = await AuthorizeWriteAsync(DocumentOwnerType.Club, request.ClubId);
+            // ⚠️ IssuerType saknas i äldre anrop och är då 0 = klubb, alltså dagens beteende.
+            var ownerType = request.IssuerType == DocumentOwnerType.Region ? DocumentOwnerType.Region : DocumentOwnerType.Club;
+
+            var (ok, name) = await AuthorizeWriteAsync(ownerType, request.ClubId);
             if (!ok) return Json(new { success = false, message = DeniedMessage });
 
             var (actorId, _) = await GetCurrentActorAsync();
@@ -2000,16 +2009,16 @@ namespace HpskSite.Controllers
             try
             {
                 var year = request.Year > 0 ? request.Year : DateTime.Today.Year;
-                var count = _feeBridge.PostPending(request.ClubId, year, actorId.Value);
+                var count = _feeBridge.PostPending(ownerType, request.ClubId, year, actorId.Value);
 
                 _logger.LogInformation(
-                    "Ekonomi: {Forening} efterbokförde {Antal} medlemsavgifter för {Ar}.", name, count, year);
+                    "Ekonomi: {Forening} efterbokförde {Antal} avgifter för {Ar}.", name, count, year);
 
                 return Json(new
                 {
                     success = true,
                     posted = count,
-                    fees = _feeBridge.Summarise(request.ClubId, year)
+                    fees = _feeBridge.Summarise(ownerType, request.ClubId, year)
                 });
             }
             catch (Exception ex)
@@ -2746,8 +2755,12 @@ namespace HpskSite.Controllers
     /// <summary>Det avgiftskortet skickar.</summary>
     public class PostMembershipFeesRequest
     {
+        /// <summary>Utställarens id — klubbens eller, med <see cref="IssuerType"/> = 1, kretsens.</summary>
         public int ClubId { get; set; }
         public int Year { get; set; }
+
+        /// <summary>0 = klubb (standard, äldre anrop), 1 = krets.</summary>
+        public int IssuerType { get; set; }
     }
 
     /// <summary>Det köytan skickar när en rad ska bokföras.</summary>

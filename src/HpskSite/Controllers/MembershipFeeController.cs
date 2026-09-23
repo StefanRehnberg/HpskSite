@@ -64,14 +64,25 @@ namespace HpskSite.Controllers
             };
 
             // Resolve club name + Swish number from the club content node (has UmbracoContext).
+            // ⚠️ För en KRETSAVGIFT är det kretsen som tar emot pengarna — dess namn och Swishnummer —
+            //    och klubben som betalar. Samma sida, samma token, en annan partstyp.
             using (var cref = _umbracoContextFactory.EnsureUmbracoContext())
             {
-                var club = cref.UmbracoContext.Content?.GetById(charge.ClubId);
-                if (club != null)
+                var issuer = cref.UmbracoContext.Content?.GetById(charge.IssuerOwnerId);
+                if (issuer != null)
                 {
-                    model.ClubName = club.Value<string>("clubName") ?? club.Name ?? "";
+                    model.ClubName = charge.IsRegionFee
+                        ? issuer.Value<string>("regionName") ?? issuer.Name ?? ""
+                        : issuer.Value<string>("clubName") ?? issuer.Name ?? "";
                     // NEW club-doctype property the owner will add; read defensively.
-                    model.SwishNumber = (club.HasProperty("swishNumber") ? club.Value<string>("swishNumber") : null) ?? "";
+                    model.SwishNumber = (issuer.HasProperty("swishNumber") ? issuer.Value<string>("swishNumber") : null) ?? "";
+                }
+
+                if (charge.IsRegionFee)
+                {
+                    model.IsRegionFee = true;
+                    model.PayerName = charge.PayerClubName ?? "";
+                    model.Lines = charge.Lines.Select(l => (l.Description, l.Amount)).ToList();
                 }
             }
 
@@ -81,7 +92,13 @@ namespace HpskSite.Controllers
             if (!model.Covered && SwishQrCodeGenerator.IsValidSwishNumber(normalized))
             {
                 var amountStr = charge.Amount.ToString("0.00", CultureInfo.InvariantCulture);
-                var message = $"Medlemsavgift {charge.Year}";
+                // ⚠️ Kretsens meddelande måste namnge KLUBBEN — annars står femton likadana
+                //    "Kretsavgift 2026" på kretsens kontoutdrag och ingen vet vem som betalat.
+                //    Swish tar högst 50 tecken.
+                var message = charge.IsRegionFee
+                    ? $"Kretsavgift {charge.Year} {model.PayerName}"
+                    : $"Medlemsavgift {charge.Year}";
+                if (message.Length > 50) message = message[..50].TrimEnd();
                 try
                 {
                     var png = SwishQrCodeGenerator.GeneratePng(normalized, amountStr, message);
@@ -105,7 +122,8 @@ namespace HpskSite.Controllers
             try { chargeId = int.Parse(_protector.Unprotect(token)); }
             catch { return View("~/Views/MembershipFeePay.cshtml", MembershipFeePayModel.Invalid()); }
 
-            _feeService.SetPaymentSent(chargeId, "Medlem via länk");
+            var charge = _feeService.GetCharge(chargeId);
+            _feeService.SetPaymentSent(chargeId, charge?.IsRegionFee == true ? "Klubben via länk" : "Medlem via länk");
 
             // Redirect back to the pay page (PRG) so a refresh doesn't re-post.
             return Redirect($"/medlemsavgift/{token}");
@@ -128,6 +146,15 @@ namespace HpskSite.Controllers
         public string SwishAppUrl { get; set; } = "";
 
         public bool HasSwish => !string.IsNullOrEmpty(SwishQrDataUri);
+
+        /// <summary>Kretsavgift: kretsen tar emot (<see cref="ClubName"/>), klubben betalar.</summary>
+        public bool IsRegionFee { get; set; }
+
+        /// <summary>Den betalande klubbens namn, för en kretsavgift.</summary>
+        public string PayerName { get; set; } = "";
+
+        /// <summary>Kravets rader — vad beloppet består av.</summary>
+        public List<(string Description, decimal Amount)> Lines { get; set; } = new();
 
         public static MembershipFeePayModel Invalid() => new MembershipFeePayModel { Found = false };
     }
