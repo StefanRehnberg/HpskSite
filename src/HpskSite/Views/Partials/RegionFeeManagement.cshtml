@@ -244,11 +244,14 @@
                 return;
             }
 
-            var d = drafts[r.clubId] || (drafts[r.clubId] = { count: r.proposedCount, manual: null });
+            var d = drafts[r.clubId];
             var amount = draftAmount(d);
             total += amount; drafted++; draftTotal += amount;
             html += '<tr><td>' + esc(r.clubName) + '</td>'
-                  + '<td class="text-end rf-n">' + numButton('dcount', r.clubId, d.count, 'Ändra antal medlemmar') + '</td>'
+                  + '<td class="text-end rf-n">' + numButton('dcount', r.clubId, d.count, 'Ändra antal medlemmar')
+                  // Ett rättat antal säger vad registret säger, så ändringen syns och går att jämföra.
+                  + (d.count !== r.proposedCount ? '<div class="small text-muted">registret: ' + r.proposedCount + '</div>' : '')
+                  + '</td>'
                   + '<td class="text-end rf-n">' + numButton('damount', r.clubId, amount, 'Ändra beloppet för den här klubben', kr(amount))
                   + (d.manual !== null ? '<div class="small text-muted">eget belopp</div>' : '') + '</td>'
                   + '<td class="text-muted small">Inte skickad</td></tr>';
@@ -298,6 +301,16 @@
                                    { cache: 'no-store' })).json();
         if (!d.success) { msg(false, d.message || 'Kretsavgiften gick inte att läsa.'); return; }
         data = d;
+        // ⚠️ Justeringarna kommer från SERVERN varje gång — de låg först bara här och försvann vid
+        //    årsbyte och omladdning, medan skärmen såg ut som om talet var sparat.
+        drafts = {};
+        (d.rows || []).forEach(function (r) {
+            if (r.charge) return;
+            drafts[r.clubId] = {
+                count: r.draftCount != null ? r.draftCount : r.proposedCount,
+                manual: r.draftManual != null ? r.draftManual : null
+            };
+        });
         show($('rfRateForm'), false);
         render();
     }
@@ -344,18 +357,38 @@
         load();
     });
 
+    // Sparar klubbens justering. Värden lika med registret/taxan skickas som null = "ingen justering".
+    // ⚠️ Går sparningen inte igenom SÄGS det och listan läses om — annars står ett tal på skärmen
+    //    som inte finns någon annanstans.
+    async function saveDraft(clubId) {
+        var row = (data.rows || []).find(function (r) { return r.clubId === clubId; });
+        var d = drafts[clubId];
+        if (!row || !d) return;
+        var r = await post('/umbraco/surface/MembershipFeeAdmin/SaveRegionDraft', {
+            regionId: REGION_ID, year: year(), clubId: clubId,
+            memberCount: d.count === row.proposedCount ? null : d.count,
+            manualAmount: d.manual
+        });
+        if (!r || !r.success) { msg(false, 'Ändringen kunde inte sparas. ' + ((r && r.message) || '')); load(); }
+    }
+
     // ── Ändra ett tal: Enter eller klick utanför sparar, Escape ångrar ─────────────────────
     async function commitInput(input) {
         var kind = input.getAttribute('data-rf-input'), id = parseInt(input.getAttribute('data-rf-id'), 10);
         var v = Math.max(0, parseFloat(input.value) || 0);
         editing = null;
 
-        if (kind === 'dcount') { drafts[id].count = Math.round(v); drafts[id].manual = null; render(); return; }
-        if (kind === 'damount') {
-            // Samma belopp som taxan ger = inget eget belopp. Annars står "eget belopp" på en klubb
-            // som bara klickade och tryckte Enter.
-            var d = drafts[id], byRate = draftAmount({ count: d.count, manual: null });
-            d.manual = v === byRate ? null : v; render(); return;
+        if (kind === 'dcount' || kind === 'damount') {
+            var d = drafts[id];
+            if (kind === 'dcount') { d.count = Math.round(v); d.manual = null; }
+            else {
+                // Samma belopp som taxan ger = inget eget belopp. Annars står "eget belopp" på en klubb
+                // som bara klickade och tryckte Enter.
+                d.manual = v === draftAmount({ count: d.count, manual: null }) ? null : v;
+            }
+            render();
+            await saveDraft(id);
+            return;
         }
         if (kind === 'count') {
             var r = await post('/umbraco/surface/MembershipFeeAdmin/SetRegionChargeMemberCount', { chargeId: id, memberCount: Math.round(v) });
@@ -438,6 +471,6 @@
         o.value = y; o.textContent = y; if (y === now) o.selected = true;
         $('rfYear').appendChild(o);
     }
-    $('rfYear').addEventListener('change', function () { editing = null; drafts = {}; msg(true, ''); load(); });
+    $('rfYear').addEventListener('change', function () { editing = null; msg(true, ''); load(); });
 })();
 </script>
