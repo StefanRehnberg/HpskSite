@@ -1531,36 +1531,24 @@
                 <div class="head">
                     <div><h1>Vad ska vi betala?</h1>
                         <div class="sub">Utlägg och räkningar — registrera, attestera, betala.</div></div>
-                    <div class="headactions" id="@(uid)_utActions"></div>
+                    @* ⚠️ Husets form: EN blå Åtgärder uppe till höger för det som gäller hela listan.
+                       Formuläret låg förut som sidinnehåll under listorna. *@
+                    @if (Model.CanWrite)
+                    {
+                        <div class="dropdown">
+                            <button type="button" class="btn btn-primary shadow dropdown-toggle" data-bs-toggle="dropdown"
+                                    aria-expanded="false" id="@(uid)_utMenu"><i class="bi bi-sliders me-1"></i>Åtgärder</button>
+                            <ul class="dropdown-menu dropdown-menu-end" style="min-width:280px">
+                                <li><h6 class="dropdown-header">Registrera</h6></li>
+                                <li><button type="button" class="dropdown-item" id="@(uid)_utNewUtlagg">Ett utlägg — någon har lagt ut egna pengar…</button></li>
+                                <li><button type="button" class="dropdown-item" id="@(uid)_utNewFaktura">En räkning som har kommit…</button></li>
+                            </ul>
+                        </div>
+                    }
                 </div>
 
                 <div class="ek-alert ek-bad d-none" id="@(uid)_utError"></div>
                 <div class="ek-alert ek-ok d-none" id="@(uid)_utOk"></div>
-
-                @* ⚠️ Betalpanelen ligger ÖVER listan, inte i raden. Betalningen behöver ett datum
-                   och ett konto, och ett formulär inuti en tabellrad blir oläsbart på en telefon —
-                   som är där en kassör står när hen betalar räkningarna. *@
-                <div class="ek-card wide d-none" id="@(uid)_utPayPanel">
-                    <div class="ek-cardh"><h2>Betala ut</h2></div>
-                    <p class="muted" style="margin-top:0" id="@(uid)_utPayWhat"></p>
-
-                    <div class="amount-row">
-                        <label style="flex:1 1 180px">Betaldatum
-                            <input type="text" class="form-control ek-date" id="@(uid)_utPayDate"
-                                   placeholder="åååå-mm-dd"></label>
-                        <label style="flex:1 1 240px">Betalades från
-                            <select class="form-control" id="@(uid)_utPayAccount"></select></label>
-                        <button type="button" class="btn btn-primary" id="@(uid)_utPayConfirm">Bokför utbetalningen</button>
-                        <button type="button" class="btn btn-link" id="@(uid)_utPayCancel">Avbryt</button>
-                    </div>
-
-                    @* ⚠️ Kontantmetoden i klartext. En kassör som tror att fakturadatumet gäller
-                       kommer att undra varför decemberfakturan hamnar på det nya året. *@
-                    <p class="muted" style="margin-bottom:0">
-                        Utgiften bokförs på <strong>betaldatumet</strong>, inte på fakturadatumet.
-                        Det är så kontantmetoden fungerar.
-                    </p>
-                </div>
 
                 <div class="ek-card wide">
                     <div class="ek-cardh">
@@ -1597,69 +1585,6 @@
                     </table>
                 </details>
 
-                @if (Model.CanWrite)
-                {
-                    <div class="ek-card wide" id="@(uid)_utFormCard">
-                        <div class="ek-cardh">
-                            <h2 id="@(uid)_utFormTitle">Registrera en utgift</h2>
-                        </div>
-
-                        <input type="hidden" id="@(uid)_uId" value="0">
-
-                        <div class="amount-row">
-                            <label style="flex:1 1 220px">Vad är det?
-                                <select class="form-control" id="@(uid)_uKind">
-                                    <option value="utlagg">Utlägg — någon har lagt ut egna pengar</option>
-                                    <option value="faktura">Leverantörsfaktura — en räkning har kommit</option>
-                                </select></label>
-                            <label style="flex:2 1 260px">Vad avser den?
-                                <input type="text" class="form-control" id="@(uid)_uDesc"
-                                       placeholder="Grus till kulfånget, fika till klubbkvällen" autocomplete="off"></label>
-                            <label style="flex:1 1 150px">Belopp
-                                <input type="number" class="form-control" id="@(uid)_uAmount"
-                                       step="0.01" min="0" placeholder="0"></label>
-                        </div>
-
-                        <div class="amount-row">
-                            @* ⚠️ Mottagaren är en MEDLEM vid utlägg — det är det fältet attestspärren
-                               läser. Fritext där hade gjort det möjligt att godkänna sin egen
-                               utbetalning. Vid faktura är det tvärtom fritext: en leverantör finns
-                               inte i något register hos oss. *@
-                            <label style="flex:1 1 240px" id="@(uid)_uPayeeMemberWrap">Vem ska ha pengarna?
-                                <select class="form-control" id="@(uid)_uPayee"></select></label>
-                            <label class="d-none" style="flex:1 1 240px" id="@(uid)_uPayeeNameWrap">Vilken leverantör?
-                                <input type="text" class="form-control" id="@(uid)_uPayeeName"
-                                       placeholder="Företagets namn" autocomplete="off"></label>
-                            <label style="flex:1 1 160px">Fakturadatum
-                                <input type="text" class="form-control ek-date" id="@(uid)_uDate"
-                                       placeholder="åååå-mm-dd"></label>
-                            <label style="flex:1 1 160px" id="@(uid)_uDueWrap">Förfaller
-                                <input type="text" class="form-control ek-date" id="@(uid)_uDue"
-                                       placeholder="åååå-mm-dd"></label>
-                        </div>
-
-                        <div class="amount-row">
-                            <label style="flex:1 1 260px">Vilket konto?
-                                <select class="form-control" id="@(uid)_uAccount"></select></label>
-                            <label style="flex:1 1 220px">Projekt (frivilligt)
-                                <select class="form-control" id="@(uid)_uProject"></select></label>
-                        </div>
-
-                        @* ⚠️ Kvittot lagras nu men blir en bilaga till VERIFIKATIONEN först vid
-                           betalningen. Attesten sker mot kvittot, alltså innan det finns någon
-                           verifikation att hänga det på. *@
-                        <label class="fieldlabel" for="@(uid)_uReceipt">Kvitto eller faktura (frivilligt)</label>
-                        <input type="file" class="form-control" id="@(uid)_uReceipt"
-                               accept=".pdf,.jpg,.jpeg,.png,.heic,.webp">
-                        <div class="muted" id="@(uid)_uReceiptNow"></div>
-
-                        <div class="amount-row" style="margin-top:12px">
-                            <button type="button" class="btn btn-primary" id="@(uid)_uSave">Spara</button>
-                            <button type="button" class="btn btn-link d-none" id="@(uid)_uCancel">Avbryt</button>
-                            <span class="muted" id="@(uid)_uHint"></span>
-                        </div>
-                    </div>
-                }
             </section>
 
             @*
@@ -1805,7 +1730,17 @@
                 <div class="head">
                     <div><h1>Vad äger föreningen?</h1>
                         <div class="sub">Klubbstugan, vapenskåpet, tavelställen — och årets avskrivning.</div></div>
-                    <div class="headactions" id="@(uid)_assetActions"></div>
+                    @if (Model.CanWrite)
+                    {
+                        <div class="dropdown d-none" id="@(uid)_assetActions">
+                            <button type="button" class="btn btn-primary shadow dropdown-toggle" data-bs-toggle="dropdown"
+                                    aria-expanded="false" id="@(uid)_assetMenu"><i class="bi bi-sliders me-1"></i>Åtgärder</button>
+                            <ul class="dropdown-menu dropdown-menu-end" style="min-width:280px" id="@(uid)_assetMenuList">
+                                <li><h6 class="dropdown-header">Registret</h6></li>
+                                <li><button type="button" class="dropdown-item" id="@(uid)_aNew">Lägg till något föreningen köpt…</button></li>
+                            </ul>
+                        </div>
+                    }
                 </div>
 
                 <div class="ek-alert ek-bad d-none" id="@(uid)_assetError"></div>
@@ -1828,73 +1763,20 @@
                     <table class="t">
                         <thead><tr>
                             <th>Tillgång</th>
-                            <th style="width:7rem">I bruk</th>
-                            <th class="n" style="width:8rem">Anskaffning</th>
-                            <th class="n" style="width:8rem">Bokfört värde</th>
-                            <th class="n" style="width:8rem">Årets plan</th>
+                            <th style="width:7rem">I bruk sedan</th>
+                            <th class="n" style="width:8rem">Köptes för</th>
+                            <th class="n" style="width:8rem">Värde nu</th>
+                            <th class="n" style="width:8rem">Avskrivs i år</th>
                             <th class="n" style="width:8rem">Bokfört i år</th>
-                            <th style="width:11rem"></th>
+                            <th style="width:8rem"></th>
                         </tr></thead>
                         <tbody id="@(uid)_assetBody"></tbody>
                     </table>
+                    <p class="why" style="margin-bottom:0">
+                        Det föreningen köper för att använda i flera år skrivs av — kostnaden fördelas
+                        över åren det håller, i stället för att hela beloppet belastar köpåret.
+                    </p>
                 </div>
-
-                @if (Model.CanWrite)
-                {
-                    <div class="ek-card wide d-none" id="@(uid)_assetFormCard">
-                        <div class="ek-cardh">
-                            <h2 id="@(uid)_assetFormTitle">Lägg till en tillgång</h2>
-                        </div>
-
-                        <p class="muted" style="margin-top:0">
-                            Skriv in vad ni köpte, vad det kostade och hur många år det ska hålla.
-                            Systemet räknar avskrivningen rakt över åren och proportionerar den
-                            efter månaden ni tog den i bruk.
-                        </p>
-
-                        <input type="hidden" id="@(uid)_aId" value="0">
-
-                        <div class="amount-row">
-                            <label style="flex:2 1 260px">Vad är det?
-                                <input type="text" class="form-control" id="@(uid)_aName"
-                                       placeholder="Vapenskåp, klubbstuga, tavelställ" autocomplete="off"></label>
-                            <label style="flex:1 1 180px">Anskaffningsvärde
-                                <input type="number" class="form-control" id="@(uid)_aAmount"
-                                       step="0.01" min="0" placeholder="0"></label>
-                        </div>
-
-                        <div class="amount-row">
-                            @* ⚠️ TOGS I BRUK, inte betalningsdatum. Det är skillnaden som gör att
-                               något som köpts i december inte skrivs av för ett helt år. *@
-                            <label style="flex:1 1 180px">Togs i bruk
-                                <input type="text" class="form-control ek-date" id="@(uid)_aDate"
-                                       placeholder="åååå-mm-dd"></label>
-                            <label style="flex:1 1 160px">Håller i (år)
-                                <input type="number" class="form-control" id="@(uid)_aLife"
-                                       step="1" min="1" value="5"></label>
-                            <label style="flex:1 1 180px">Restvärde
-                                <input type="number" class="form-control" id="@(uid)_aResidual"
-                                       step="0.01" min="0" value="0"></label>
-                        </div>
-
-                        <div class="amount-row">
-                            <label style="flex:1 1 260px">Står på balanskontot
-                                <select class="form-control" id="@(uid)_aAssetAccount"></select></label>
-                            <label style="flex:1 1 260px">Avskrivningen bokförs på
-                                <select class="form-control" id="@(uid)_aDeprAccount"></select></label>
-                        </div>
-
-                        <label class="fieldlabel" for="@(uid)_aNote">Anteckning (frivillig)</label>
-                        <input type="text" class="form-control" id="@(uid)_aNote"
-                               placeholder="Serienummer, var den står, vem som köpte den" autocomplete="off">
-
-                        <div class="amount-row" style="margin-top:12px">
-                            <button type="button" class="btn btn-primary" id="@(uid)_aSave">Spara</button>
-                            <button type="button" class="btn btn-link d-none" id="@(uid)_aCancel">Avbryt</button>
-                            <span class="muted" id="@(uid)_aLocked"></span>
-                        </div>
-                    </div>
-                }
             </section>
 
             <section data-pane="bokslut" hidden>
@@ -1966,6 +1848,247 @@
     </main>
 </div>
 
+@* ══ DIALOGERNA ════════════════════════════════════════════════════════════════════════════
+   ⚠️⚠️ HUSETS FORM (Stefan 2026-09-23/24): ändringar och inställningar görs i en DIALOG — rubrik,
+   fält, Avbryt + blå Spara — aldrig som sidinnehåll och aldrig i window.prompt/alert.
+   ⚠️ Dialogerna ligger UTANFÖR flikarna med flit. En flik göms med attributet hidden, och en dialog
+   inuti en dold flik ärver display:none — den öppnas då osynligt, och ingenting säger ifrån. *@
+<div class="ek-modals">
+    @* Den gemensamma frågedialogen: ett eventuellt fält, en bekräftelse. Ersätter window.prompt,
+       som stoppar hela webbläsaren och inte går att läsa om innan man trycker OK. *@
+    <div class="modal fade" id="@(uid)_askModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_askTitle">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="@(uid)_askTitle"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="@(uid)_askText" style="margin-top:0"></p>
+                    <div id="@(uid)_askFieldWrap" class="d-none">
+                        <label class="form-label" for="@(uid)_askInput" id="@(uid)_askLabel"></label>
+                        <textarea class="form-control d-none" id="@(uid)_askArea" rows="3"></textarea>
+                        <input type="text" class="form-control d-none" id="@(uid)_askInput" autocomplete="off">
+                        <div class="form-text" id="@(uid)_askHelp"></div>
+                    </div>
+                    <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_askError"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                    <button type="button" class="btn btn-primary" id="@(uid)_askOk">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (Model.CanWrite)
+    {
+        @* ── Utgifter: registrera / ändra ── *@
+        <div class="modal fade" id="@(uid)_utFormModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_utFormTitle">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="@(uid)_utFormTitle">Registrera en utgift</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <input type="hidden" id="@(uid)_uId" value="0">
+                        <div class="row g-3">
+                            <div class="col-md-5">
+                                <label class="form-label" for="@(uid)_uKind">Vad är det?</label>
+                                <select class="form-select" id="@(uid)_uKind">
+                                    <option value="utlagg">Utlägg — någon har lagt ut egna pengar</option>
+                                    <option value="faktura">Räkning — en faktura har kommit</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="@(uid)_uDesc">Vad avser den?</label>
+                                <input type="text" class="form-control" id="@(uid)_uDesc"
+                                       placeholder="Tavlor, ammunition, fika" autocomplete="off">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" for="@(uid)_uAmount">Belopp (kr)</label>
+                                <input type="number" class="form-control" id="@(uid)_uAmount" step="0.01" min="0" placeholder="0">
+                            </div>
+
+                            @* ⚠️ Mottagaren är en MEDLEM vid utlägg — det är det fältet attestspärren
+                               läser. Fritext där hade gjort det möjligt att godkänna sin egen
+                               utbetalning. Vid räkning är det tvärtom fritext: en leverantör finns
+                               inte i något register hos oss. *@
+                            <div class="col-md-6" id="@(uid)_uPayeeMemberWrap">
+                                <label class="form-label" for="@(uid)_uPayee">Vem ska ha pengarna?</label>
+                                <select class="form-select" id="@(uid)_uPayee"></select>
+                            </div>
+                            <div class="col-md-6 d-none" id="@(uid)_uPayeeNameWrap">
+                                <label class="form-label" for="@(uid)_uPayeeName">Vem har skickat räkningen?</label>
+                                <input type="text" class="form-control" id="@(uid)_uPayeeName"
+                                       placeholder="Företagets eller föreningens namn" autocomplete="off">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" for="@(uid)_uDate">Datum på kvittot</label>
+                                <input type="text" class="form-control ek-date" id="@(uid)_uDate" placeholder="åååå-mm-dd">
+                            </div>
+                            <div class="col-md-3" id="@(uid)_uDueWrap">
+                                <label class="form-label" for="@(uid)_uDue">Ska betalas senast</label>
+                                <input type="text" class="form-control ek-date" id="@(uid)_uDue" placeholder="åååå-mm-dd">
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label" for="@(uid)_uAccount">Vilket konto?</label>
+                                <select class="form-select" id="@(uid)_uAccount"></select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="@(uid)_uProject">Projekt (frivilligt)</label>
+                                <select class="form-select" id="@(uid)_uProject"></select>
+                            </div>
+
+                            @* ⚠️ Kvittot lagras nu men blir en bilaga till VERIFIKATIONEN först vid
+                               betalningen. Attesten sker mot kvittot, alltså innan det finns någon
+                               verifikation att hänga det på. *@
+                            <div class="col-12">
+                                <label class="form-label" for="@(uid)_uReceipt">Kvitto eller faktura (frivilligt — foto eller PDF)</label>
+                                <input type="file" class="form-control" id="@(uid)_uReceipt" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp">
+                                <div class="form-text" id="@(uid)_uReceiptNow"></div>
+                            </div>
+                        </div>
+                        <div class="form-text mt-3" id="@(uid)_uHint"></div>
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_uError"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="@(uid)_uCancel">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="@(uid)_uSave">Spara</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ── Tillgångar: lägg till / ändra ── *@
+        <div class="modal fade" id="@(uid)_assetFormModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_assetFormTitle">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="@(uid)_assetFormTitle">Lägg till en tillgång</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="muted" style="margin-top:0">
+                            Skriv in vad föreningen köpte, vad det kostade och hur många år det ska hålla.
+                            Avskrivningen räknas ut av sig själv, från den månad den togs i bruk.
+                        </p>
+                        <input type="hidden" id="@(uid)_aId" value="0">
+                        <div class="row g-3">
+                            <div class="col-md-8">
+                                <label class="form-label" for="@(uid)_aName">Vad är det?</label>
+                                <input type="text" class="form-control" id="@(uid)_aName"
+                                       placeholder="Vapenskåp, klubbstuga, tavelställ" autocomplete="off">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="@(uid)_aAmount">Köptes för (kr)</label>
+                                <input type="number" class="form-control" id="@(uid)_aAmount" step="0.01" min="0" placeholder="0">
+                            </div>
+                            @* ⚠️ TOGS I BRUK, inte betalningsdatum. Det är skillnaden som gör att
+                               något som köpts i december inte skrivs av för ett helt år. *@
+                            <div class="col-md-4">
+                                <label class="form-label" for="@(uid)_aDate">Togs i bruk</label>
+                                <input type="text" class="form-control ek-date" id="@(uid)_aDate" placeholder="åååå-mm-dd">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="@(uid)_aLife">Ska hålla i (år)</label>
+                                <input type="number" class="form-control" id="@(uid)_aLife" step="1" min="1" value="5">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="@(uid)_aResidual">Värt när det är uttjänt (kr)</label>
+                                <input type="number" class="form-control" id="@(uid)_aResidual" step="0.01" min="0" value="0">
+                                <div class="form-text">Oftast 0.</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="@(uid)_aAssetAccount">Konto där tillgången står</label>
+                                <select class="form-select" id="@(uid)_aAssetAccount"></select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="@(uid)_aDeprAccount">Konto för årets avskrivning</label>
+                                <select class="form-select" id="@(uid)_aDeprAccount"></select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" for="@(uid)_aNote">Anteckning (frivillig)</label>
+                                <input type="text" class="form-control" id="@(uid)_aNote"
+                                       placeholder="Serienummer, var den står, vem som köpte den" autocomplete="off">
+                            </div>
+                        </div>
+                        <div class="form-text mt-3" id="@(uid)_aLocked"></div>
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_aError"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="@(uid)_aCancel">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="@(uid)_aSave">Spara</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ── Tillgångar: utrangera ── *@
+        <div class="modal fade" id="@(uid)_aDisposeModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_aDisposeTitle">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="@(uid)_aDisposeTitle">Utrangera</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p style="margin-top:0">Raden står kvar i registret — den skrivs bara inte av längre.</p>
+                        @* ⚠️ Datumet var hårdkodat till i dag: en försäljning förra månaden gick inte att föra in. *@
+                        <div class="mb-3">
+                            <label class="form-label" for="@(uid)_aDisposeDate">När lämnade den föreningen?</label>
+                            <input type="text" class="form-control ek-date" id="@(uid)_aDisposeDate" placeholder="åååå-mm-dd">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label" for="@(uid)_aDisposeReason">Vad hände? Såld, skrotad eller stulen.</label>
+                            <textarea class="form-control" id="@(uid)_aDisposeReason" rows="2"></textarea>
+                        </div>
+                        <div class="form-text">Såldes den? Bokför försäljningen själv under Bokför — beloppet vet bara du.</div>
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_aDisposeError"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-danger" id="@(uid)_aDisposeConfirm">Utrangera</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ── Utgifter: betala ut ── *@
+        <div class="modal fade" id="@(uid)_utPayModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_utPayTitle">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="@(uid)_utPayTitle">Betala ut</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p style="margin-top:0" id="@(uid)_utPayWhat"></p>
+                        <div class="mb-3">
+                            <label class="form-label" for="@(uid)_utPayDate">Vilken dag betalades den?</label>
+                            <input type="text" class="form-control ek-date" id="@(uid)_utPayDate" placeholder="åååå-mm-dd">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label" for="@(uid)_utPayAccount">Från vilket konto?</label>
+                            <select class="form-select" id="@(uid)_utPayAccount"></select>
+                        </div>
+                        @* ⚠️ Kontantmetoden i klartext. En kassör som tror att fakturadatumet gäller
+                           kommer att undra varför decemberräkningen hamnar på det nya året. *@
+                        <div class="form-text">Utgiften bokförs den dag den betalas, inte på datumet på räkningen.</div>
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_utPayError"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="@(uid)_utPayCancel">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="@(uid)_utPayConfirm">Bokför utbetalningen</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
 <script>
 (function () {
     var uid = '@uid';
@@ -1980,7 +2103,7 @@
     //    payload nedanfor ar oforandrad. Lagg till ett nytt datumfalt HAR, aldrig som type=date.
     var EK_DATE_FIELDS = ['start', 'end', 'bDate', 'repFrom', 'repTo', 'budDate',
                           'fordrFrom', 'fordrTo', 'verFrom', 'verTo', 'aDate',
-                          'uDate', 'uDue', 'utPayDate', 'pStart', 'pEnd'];
+                          'uDate', 'uDue', 'utPayDate', 'pStart', 'pEnd', 'aDisposeDate'];
     if (window.flatpickr) {
         EK_DATE_FIELDS.forEach(function (n) {
             var f = el(n);
@@ -2049,6 +2172,107 @@
             body.innerHTML = rows.map(renderRow).join(''); more.innerHTML = '';
         });
     }
+
+    // ══ HUSETS BYGGSTENAR ═════════════════════════════════════════════════════════════════
+    // ⚠️⚠️ Stefan 2026-09-23: ekonomiytan ska tala SAJTENS språk. EN blå Åtgärder uppe till höger
+    //    för det som gäller hela listan, radåtgärder i en liten grå meny, ändringar i en dialog,
+    //    status som en bricka. Byggstenarna bor HÄR, så att ingen flik uppfinner en egen form igen.
+    function modalOf(name) {
+        var m = el(name);
+        return m && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(m) : null;
+    }
+    function openModal(name) { var m = modalOf(name); if (m) m.show(); }
+    function closeModal(name) { var m = modalOf(name); if (m) m.hide(); }
+
+    // Brickorna: samma färger som resten av sajten (Anmälningar, Fakturor, avgifterna).
+    var BADGE = {
+        ok: 'bg-success', wait: 'bg-warning text-dark', info: 'bg-info text-dark',
+        off: 'bg-secondary', bad: 'bg-danger', light: 'bg-light text-dark border',
+        miss: 'bg-danger-subtle text-danger-emphasis border'
+    };
+    function badge(kind, text, note) {
+        return '<span class="badge ' + (BADGE[kind] || BADGE.light) + '">' + esc(text) + '</span>'
+             + (note ? ' <span class="muted" style="font-size:.85rem">' + note + '</span>' : '');
+    }
+
+    // Radens Åtgärder: en liten grå meny. Det destruktiva sist, i rött, under en linje.
+    // ⚠️ popper-config "fixed" krävs — tabellerna klipper annars menyn på sista raden.
+    function rowMenu(items) {
+        var list = items.filter(Boolean);
+        if (list.length === 0) return '';
+        var html = '', dangerStarted = false;
+        list.forEach(function (i) {
+            if (i.danger && !dangerStarted && html) { html += '<li><hr class="dropdown-divider"></li>'; }
+            if (i.danger) dangerStarted = true;
+            html += '<li><button type="button" class="dropdown-item' + (i.danger ? ' text-danger' : '') + '"'
+                  + ' data-row-act="' + esc(i.act) + '" data-row-id="' + esc(i.id) + '">' + esc(i.text) + '</button></li>';
+        });
+        return '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle"'
+             + ' data-bs-toggle="dropdown" aria-expanded="false" data-bs-popper-config=\'{"strategy":"fixed"}\'>Åtgärder</button>'
+             + '<ul class="dropdown-menu dropdown-menu-end">' + html + '</ul></div>';
+    }
+    // Delegerad lyssnare: raderna byts ut vid varje omritning, så en lyssnare på raden dör.
+    function onRowAction(container, handlers) {
+        if (!container || container.dataset.rowWired) return;
+        container.dataset.rowWired = '1';
+        container.addEventListener('click', function (ev) {
+            var b = ev.target.closest('[data-row-act]');
+            if (!b || !container.contains(b)) return;
+            var h = handlers[b.dataset.rowAct];
+            if (h) h(b.dataset.rowId, b);
+        });
+    }
+
+    // ⚠️⚠️ ERSÄTTER window.prompt/alert. En prompt stoppar hela webbläsaren, går inte att läsa om
+    //    innan man trycker OK, och har tidigare rapporterats som att "fliken frös".
+    //    ask({ title, text, label, required, multiline, value, help, ok, danger }) → Promise<string|null>
+    //    Utan label är det en ren bekräftelse, och löftet ger '' vid OK.
+    var askResolve = null;
+    function ask(o) {
+        el('askTitle').textContent = o.title || '';
+        el('askText').textContent = o.text || '';
+        show(el('askText'), !!o.text);
+        var hasField = !!o.label;
+        show(el('askFieldWrap'), hasField);
+        var area = el('askArea'), input = el('askInput');
+        show(area, hasField && !!o.multiline);
+        show(input, hasField && !o.multiline);
+        var field = o.multiline ? area : input;
+        field.value = o.value || '';
+        el('askLabel').textContent = o.label || '';
+        el('askLabel').setAttribute('for', field.id);
+        el('askHelp').textContent = o.help || '';
+        show(el('askError'), false);
+        var okBtn = el('askOk');
+        okBtn.textContent = o.ok || 'OK';
+        okBtn.className = 'btn ' + (o.danger ? 'btn-danger' : 'btn-primary');
+        okBtn.dataset.required = o.required ? '1' : '';
+        return new Promise(function (resolve) {
+            askResolve = resolve;
+            openModal('askModal');
+            if (hasField) setTimeout(function () { field.focus(); }, 300);
+        });
+    }
+    el('askOk').addEventListener('click', function () {
+        var area = el('askArea');
+        var field = area.classList.contains('d-none') ? el('askInput') : area;
+        var hasField = !el('askFieldWrap').classList.contains('d-none');
+        var v = hasField ? field.value.trim() : '';
+        if (hasField && this.dataset.required && !v) {
+            el('askError').textContent = 'Fyll i ' + (el('askLabel').textContent || 'fältet').toLowerCase() + ' först.';
+            show(el('askError'), true);
+            return;
+        }
+        var r = askResolve; askResolve = null;
+        closeModal('askModal');
+        if (r) r(v);
+    });
+    el('askModal').addEventListener('hidden.bs.modal', function () {
+        var r = askResolve; askResolve = null;
+        if (r) r(null);
+    });
+    // En bekräftelse eller ett besked utan fält — i stället för window.alert.
+    function tell(title, text) { return ask({ title: title, text: text, ok: 'OK' }); }
 
     function showView(name) {
         root.querySelectorAll('.rail a.ek-nav').forEach(function (a) {
@@ -2569,7 +2793,9 @@
         if (e.rejectedReason)
             extra += '<div class="muted">' + esc(e.rejectedReason) + '</div>';
 
-        return esc(e.statusLabel) + extra;
+        // Status som bricka, i sajtens färger.
+        var kind = { registered: 'wait', approved: 'info', paid: 'ok', rejected: 'off' }[e.status] || 'light';
+        return badge(kind, e.statusLabel) + extra;
     }
 
     function renderExpenses(d) {
@@ -2590,25 +2816,24 @@
 
         el('utTodoBody').innerHTML = todo.length === 0
             ? '<tr><td colspan="6" class="muted">Ingenting väntar. Kommer en räkning eller har '
-              + 'någon lagt ut pengar registrerar du det här.</td></tr>'
+              + 'någon lagt ut pengar registrerar du det under Åtgärder.</td></tr>'
             : todo.map(function (e) {
-                var acts = '';
-                if (canWrite) {
-                    if (e.status === 'registered')
-                        acts += '<button type="button" class="btn btn-sm btn-link" data-exp-approve="' + e.id + '">Attestera</button>';
-                    if (e.canPay)
-                        acts += '<button type="button" class="btn btn-sm btn-link" data-exp-pay="' + e.id + '">Betala</button>';
-                    acts += '<button type="button" class="btn btn-sm btn-link" data-exp-edit="' + e.id + '">Ändra</button>'
-                          + '<button type="button" class="btn btn-sm btn-link" data-exp-reject="' + e.id + '">Avvisa</button>';
-                }
+                // ⚠️ Husets form: EN liten grå Åtgärder per rad, det destruktiva sist och i rött.
+                //    Förut fyra blå textlänkar i rad, där "Avvisa" såg ut som "Ändra".
+                var acts = !canWrite ? '' : rowMenu([
+                    e.status === 'registered' && { act: 'approve', id: e.id, text: 'Attestera…' },
+                    e.canPay && { act: 'pay', id: e.id, text: 'Betala…' },
+                    { act: 'edit', id: e.id, text: 'Ändra…' },
+                    { act: 'reject', id: e.id, text: 'Avvisa…', danger: true }
+                ]);
 
                 // ⚠️ "Saknas" står UT. En tom cell läser som att ingen tittat efter kvittot, och
                 //    det är skillnaden mellan ett underlag som fattas och ett ingen frågat om.
                 var receipt = e.hasReceipt
                     ? '<a href="/umbraco/surface/EkonomiAdmin/GetExpenseReceipt?issuerType=' + issuerType
                       + '&issuerId=' + issuerId + '&expenseId=' + e.id
-                      + '" target="_blank" rel="noopener">Kvitto</a>'
-                    : '<span class="muted">Kvitto saknas</span>';
+                      + '" target="_blank" rel="noopener">Visa kvittot</a>'
+                    : badge('miss', 'Kvitto saknas');
 
                 return '<tr><td><strong>' + esc(e.description) + '</strong>'
                      + '<div class="muted">' + esc(e.kindLabel) + ' · ' + e.accountNumber
@@ -2617,10 +2842,10 @@
                      + '<div class="muted">' + receipt + '</div></td>'
                      + '<td>' + esc(e.payeeName) + '</td>'
                      + '<td class="muted">' + (e.dueDate ? esc(shortDate(e.dueDate)) : '—')
-                     + (e.isOverdue ? '<div class="ek-bad">Förfallen</div>' : '') + '</td>'
+                     + (e.isOverdue ? '<div>' + badge('bad', 'Förfallen') + '</div>' : '') + '</td>'
                      + '<td class="n">' + kr(e.amount) + '</td>'
                      + '<td>' + expenseStatusCell(e) + '</td>'
-                     + '<td>' + acts + '</td></tr>';
+                     + '<td class="n">' + acts + '</td></tr>';
             }).join('');
 
         el('utDoneBody').innerHTML = done.length === 0
@@ -2635,20 +2860,14 @@
                      + '<td class="muted">' + esc(e.journalEntryNumber || '') + '</td></tr>';
             }).join('');
 
-        el('utTodoBody').querySelectorAll('button[data-exp-approve]').forEach(function (b) {
-            b.addEventListener('click', function () { approveExpense(parseInt(b.dataset.expApprove, 10)); });
-        });
-        el('utTodoBody').querySelectorAll('button[data-exp-reject]').forEach(function (b) {
-            b.addEventListener('click', function () { rejectExpense(parseInt(b.dataset.expReject, 10)); });
-        });
-        el('utTodoBody').querySelectorAll('button[data-exp-pay]').forEach(function (b) {
-            b.addEventListener('click', function () { openPayPanel(parseInt(b.dataset.expPay, 10)); });
-        });
-        el('utTodoBody').querySelectorAll('button[data-exp-edit]').forEach(function (b) {
-            b.addEventListener('click', function () {
-                var e = expenseRows.find(function (x) { return x.id === parseInt(b.dataset.expEdit, 10); });
+        onRowAction(el('utTodoBody'), {
+            approve: function (id) { approveExpense(parseInt(id, 10)); },
+            reject: function (id) { rejectExpense(parseInt(id, 10)); },
+            pay: function (id) { openPayPanel(parseInt(id, 10)); },
+            edit: function (id) {
+                var e = expenseRows.find(function (x) { return x.id === parseInt(id, 10); });
                 if (e) fillExpenseForm(e);
-            });
+            }
         });
     }
 
@@ -2666,49 +2885,57 @@
         return true;
     }
 
+    function expenseOf(id) { return expenseRows.find(function (x) { return x.id === id; }); }
+    function expenseWhat(e) { return e ? e.description + ' — ' + kr(e.amount) + ' till ' + e.payeeName : ''; }
+
     function approveExpense(id) {
-        var note = window.prompt(
-            'Attestera utgiften?\n\nDu kan skriva en notering som följer med till verifikationen '
-            + '(frivilligt).');
-
-        if (note === null) return;
-
-        postJson('/umbraco/surface/EkonomiAdmin/ApproveExpense', {
-            issuerType: issuerType, issuerId: issuerId, expenseId: id, text: note
-        }).then(expenseDone);
+        ask({
+            title: 'Attestera utgiften',
+            text: expenseWhat(expenseOf(id)) + '. Att attestera betyder att du godkänner att den betalas.',
+            label: 'Notering (frivilligt)',
+            help: 'Följer med till bokföringen, t.ex. "enligt styrelsebeslut 12 mars".',
+            ok: 'Attestera'
+        }).then(function (note) {
+            if (note === null) return;
+            postJson('/umbraco/surface/EkonomiAdmin/ApproveExpense', {
+                issuerType: issuerType, issuerId: issuerId, expenseId: id, text: note
+            }).then(expenseDone);
+        });
     }
 
     function rejectExpense(id) {
-        var reason = window.prompt(
-            'Varför avvisas utgiften?\n\nDen som lagt ut pengarna ska kunna läsa skälet.');
-
-        if (reason === null) return;
-
-        postJson('/umbraco/surface/EkonomiAdmin/RejectExpense', {
-            issuerType: issuerType, issuerId: issuerId, expenseId: id, text: reason
-        }).then(expenseDone);
+        ask({
+            title: 'Avvisa utgiften',
+            text: expenseWhat(expenseOf(id)) + '.',
+            label: 'Varför avvisas den?',
+            help: 'Den som lagt ut pengarna ska kunna läsa skälet.',
+            multiline: true, required: true,
+            ok: 'Avvisa', danger: true
+        }).then(function (reason) {
+            if (reason === null) return;
+            postJson('/umbraco/surface/EkonomiAdmin/RejectExpense', {
+                issuerType: issuerType, issuerId: issuerId, expenseId: id, text: reason
+            }).then(expenseDone);
+        });
     }
 
     function openPayPanel(id) {
-        var e = expenseRows.find(function (x) { return x.id === id; });
+        var e = expenseOf(id);
         if (!e) return;
 
         payingId = id;
-        el('utPayWhat').textContent = e.description + ' — ' + kr(e.amount) + ' till ' + e.payeeName;
+        el('utPayWhat').textContent = expenseWhat(e);
+        show(el('utPayError'), false);
 
         // ⚠️ Idag som förval, inte fakturadatumet: betaldagen är det som gäller under
         //    kontantmetoden, och kassören betalar nästan alltid samma dag hen klickar.
         if (!el('utPayDate').value)
             setDateField('utPayDate', new Date().toISOString().substring(0, 10));
 
-        show(el('utPayPanel'), true);
-        el('utPayPanel').scrollIntoView({ block: 'nearest' });
+        openModal('utPayModal');
     }
 
-    if (el('utPayCancel')) el('utPayCancel').addEventListener('click', function () {
-        payingId = 0;
-        show(el('utPayPanel'), false);
-    });
+    if (el('utPayModal')) el('utPayModal').addEventListener('hidden.bs.modal', function () { payingId = 0; });
 
     if (el('utPayConfirm')) el('utPayConfirm').addEventListener('click', function () {
         if (!payingId) return;
@@ -2721,14 +2948,14 @@
             paymentAccountNumber: parseInt(el('utPayAccount').value, 10) || 0
         }).then(function (j) {
             btn.disabled = false;
-            if (expenseDone(j)) {
-                payingId = 0;
-                show(el('utPayPanel'), false);
-            }
+            // ⚠️ Dialogen stängs INTE vid fel — annars får man börja om för att läsa vad som gick snett.
+            if (!j.success) { el('utPayError').textContent = j.message; show(el('utPayError'), true); return; }
+            closeModal('utPayModal');
+            expenseDone(j);
         }).catch(function (err) {
             btn.disabled = false;
-            el('utError').textContent = err.message;
-            show(el('utError'), true);
+            el('utPayError').textContent = err.message;
+            show(el('utPayError'), true);
         });
     });
 
@@ -2771,7 +2998,22 @@
 
     if (el('uKind')) el('uKind').addEventListener('change', syncExpenseKind);
 
+    // ⚠️⚠️ ETT NYTT UTLÄGG MÅSTE KÖRA syncExpenseKind. Förut kördes den bara när någon BYTTE slag,
+    //    så första gången formuläret öppnades som utlägg var mottagarlistan TOM och förfallodagen
+    //    synlig — och Spara nekades med "välj vem som ska ha pengarna" utan att något gick att välja.
+    function openExpenseForm(kind) {
+        resetExpenseForm();
+        el('uKind').value = kind === 'faktura' ? 'faktura' : 'utlagg';
+        el('utFormTitle').textContent = kind === 'faktura' ? 'Registrera en räkning' : 'Registrera ett utlägg';
+        syncExpenseKind();
+        openModal('utFormModal');
+        setTimeout(function () { el('uDesc').focus(); }, 300);
+    }
+    if (el('utNewUtlagg')) el('utNewUtlagg').addEventListener('click', function () { openExpenseForm('utlagg'); });
+    if (el('utNewFaktura')) el('utNewFaktura').addEventListener('click', function () { openExpenseForm('faktura'); });
+
     function fillExpenseForm(e) {
+        show(el('uError'), false);
         el('utFormTitle').textContent = 'Ändra ' + e.description;
         el('uId').value = e.id;
         el('uKind').value = e.kind;
@@ -2793,8 +3035,7 @@
             loadPayees().then(function () { el('uPayee').value = String(e.payeeMemberId); });
         }
 
-        show(el('uCancel'), true);
-        el('uDesc').focus();
+        openModal('utFormModal');
     }
 
     function resetExpenseForm() {
@@ -2807,11 +3048,11 @@
         setDateField('uDue', '');
         el('uReceipt').value = '';
         el('uReceiptNow').textContent = '';
-        show(el('uCancel'), false);
+        show(el('uError'), false);
         syncExpenseKind();
     }
 
-    if (el('uCancel')) el('uCancel').addEventListener('click', resetExpenseForm);
+    function expenseFormError(t) { el('uError').textContent = t; show(el('uError'), true); }
 
     if (el('uSave')) el('uSave').addEventListener('click', function () {
         var btn = this;
@@ -2838,12 +3079,10 @@
         }).then(function (j) {
             btn.disabled = false;
 
-            if (!j.success) {
-                el('utError').textContent = j.message;
-                show(el('utError'), true);
-                return;
-            }
+            // ⚠️ Dialogen stängs INTE vid fel — felet visas i den, så man kan rätta och spara igen.
+            if (!j.success) { expenseFormError(j.message); return; }
 
+            closeModal('utFormModal');
             var file = el('uReceipt').files && el('uReceipt').files[0];
             if (!file) { expenseDone(j); resetExpenseForm(); return; }
 
@@ -2870,8 +3109,7 @@
             });
         }).catch(function (err) {
             btn.disabled = false;
-            el('utError').textContent = err.message;
-            show(el('utError'), true);
+            expenseFormError(err.message);
         });
     });
 
@@ -2898,9 +3136,10 @@
 
         show(el('assetNoYear'), d.hasFiscalYear === false);
         show(el('assetListCard'), d.hasFiscalYear !== false);
-        if (el('assetFormCard')) show(el('assetFormCard'), d.hasFiscalYear !== false);
+        // Menyn finns bara när det finns ett år att räkna avskrivningen i.
+        show(el('assetActions'), d.hasFiscalYear !== false);
 
-        if (d.hasFiscalYear === false) { el('assetActions').innerHTML = ''; return; }
+        if (d.hasFiscalYear === false) return;
 
         renderAssets(d);
         if (canWrite) loadAssetAccounts();
@@ -2916,28 +3155,27 @@
 
         el('assetBody').innerHTML = rows.length === 0
             ? '<tr><td colspan="7" class="muted">Registret är tomt. Har föreningen köpt något '
-              + 'som ska hålla i flera år skriver ni in det här.</td></tr>'
+              + 'som ska hålla i flera år lägger du in det under Åtgärder.</td></tr>'
             : rows.map(function (a) {
                 // ⚠️ En utrangerad rad STÅR KVAR och märks ut. Anskaffningsvärdet finns ingen
                 //    annanstans, så en radering hade raderat föreningens enda minne av vad
                 //    pjäsen kostade.
                 var mark = a.isDisposed
-                    ? '<div class="muted">Utrangerad ' + esc(shortDate(a.disposedDate))
-                      + (a.disposalReason ? ' · ' + esc(a.disposalReason) : '') + '</div>'
+                    ? '<div>' + badge('off', 'Utrangerad', esc(shortDate(a.disposedDate))
+                      + (a.disposalReason ? ' · ' + esc(a.disposalReason) : '')) + '</div>'
                     : (a.isFullyDepreciated
-                        ? '<div class="muted">Färdigavskriven</div>' : '');
+                        ? '<div>' + badge('ok', 'Färdigavskriven') + '</div>' : '');
 
-                var acts = '';
-                if (canWrite && !a.isDisposed) {
-                    acts = '<button type="button" class="btn btn-sm btn-link" data-asset-edit="' + a.id + '">Ändra</button>'
-                         + '<button type="button" class="btn btn-sm btn-link" data-asset-dispose="' + a.id + '">Utrangera</button>';
-                }
+                var acts = !(canWrite && !a.isDisposed) ? '' : rowMenu([
+                    { act: 'edit', id: a.id, text: 'Ändra…' },
+                    { act: 'dispose', id: a.id, text: 'Utrangera…', danger: true }
+                ]);
 
                 return '<tr><td><strong>' + esc(a.name) + '</strong>'
                      + (a.note ? '<div class="muted">' + esc(a.note) + '</div>' : '')
                      + mark
-                     + '<div class="muted">' + a.assetAccountNumber + ' · ' + esc(a.assetAccountName)
-                     + ' → ' + a.depreciationAccountNumber + ' · ' + esc(a.depreciationAccountName)
+                     + '<div class="muted">Står på ' + a.assetAccountNumber + ' ' + esc(a.assetAccountName)
+                     + ' · skrivs av mot ' + a.depreciationAccountNumber + ' ' + esc(a.depreciationAccountName)
                      + '</div></td>'
                      + '<td class="muted">' + esc(shortDate(a.inUseDate))
                      + '<div class="muted">' + a.usefulLifeYears + ' år</div></td>'
@@ -2949,28 +3187,35 @@
                      + '<td class="n">' + kr(a.postedThisYear)
                      + (a.needsPosting ? '<div class="muted">' + kr(a.remaining) + ' kvar</div>' : '')
                      + '</td>'
-                     + '<td>' + acts + '</td></tr>';
+                     + '<td class="n">' + acts + '</td></tr>';
             }).join('');
 
-        el('assetBody').querySelectorAll('button[data-asset-edit]').forEach(function (b) {
-            b.addEventListener('click', function () {
-                var a = (d.assets || []).find(function (x) { return x.id === parseInt(b.dataset.assetEdit, 10); });
+        assetRows = d.assets || [];
+        onRowAction(el('assetBody'), {
+            edit: function (id) {
+                var a = assetRows.find(function (x) { return x.id === parseInt(id, 10); });
                 if (a) fillAssetForm(a);
-            });
-        });
-
-        el('assetBody').querySelectorAll('button[data-asset-dispose]').forEach(function (b) {
-            b.addEventListener('click', function () { disposeAsset(parseInt(b.dataset.assetDispose, 10)); });
+            },
+            dispose: function (id) { disposeAsset(parseInt(id, 10)); }
         });
 
         renderAssetAction(d);
     }
+    var assetRows = [];
 
+    // ⚠️ Menyposten FINNS bara när något återstår. En post som inte gör något lär kassören att
+    //    sluta läsa menyn.
     function renderAssetAction(d) {
-        if (!canWrite || (d.toPostCount || 0) === 0) { el('assetActions').innerHTML = ''; return; }
+        if (!canWrite) return;
+        var list = el('assetMenuList');
+        list.querySelectorAll('.ek-post-li').forEach(function (n) { n.remove(); });
+        if ((d.toPostCount || 0) === 0) return;
 
-        el('assetActions').innerHTML = '<button type="button" class="btn btn-primary" id="'
-            + uid + '_aPost">Bokför årets avskrivningar (' + kr(d.toPost) + ')</button>';
+        list.insertAdjacentHTML('beforeend',
+            '<li class="ek-post-li"><hr class="dropdown-divider"></li>'
+            + '<li class="ek-post-li"><h6 class="dropdown-header">Årets avskrivning</h6></li>'
+            + '<li class="ek-post-li"><button type="button" class="dropdown-item" id="' + uid
+            + '_aPost">Bokför årets avskrivningar (' + kr(d.toPost) + ')</button></li>');
 
         el('aPost').addEventListener('click', function () {
             var btn = this;
@@ -3049,8 +3294,8 @@
               + 'nyttjandetid och konton går inte att ändra. Namn och anteckning går.'
             : '';
 
-        show(el('aCancel'), true);
-        el('aName').focus();
+        show(el('aError'), false);
+        openModal('assetFormModal');
     }
 
     function resetAssetForm() {
@@ -3063,35 +3308,49 @@
         el('aResidual').value = '0';
         setDateField('aDate', '');
         el('aLocked').textContent = '';
-        show(el('aCancel'), false);
+        show(el('aError'), false);
     }
 
+    if (el('aNew')) el('aNew').addEventListener('click', function () {
+        resetAssetForm();
+        loadAssetAccounts();
+        openModal('assetFormModal');
+        setTimeout(function () { el('aName').focus(); }, 300);
+    });
+
+    // ⚠️ Utrangeringen tar ett DATUM. Det var hårdkodat till i dag, så en försäljning förra
+    //    månaden gick inte att föra in på rätt dag.
+    var disposingId = 0;
     function disposeAsset(id) {
-        var reason = window.prompt(
-            'Vad hände med tillgången? Såld, skrotad eller stulen.\n\n'
-            + 'Raden står kvar i registret — den skrivs bara inte av längre.');
+        var a = assetRows.find(function (x) { return x.id === id; });
+        disposingId = id;
+        el('aDisposeTitle').textContent = 'Utrangera ' + (a ? a.name : '');
+        el('aDisposeReason').value = '';
+        setDateField('aDisposeDate', new Date().toISOString().substring(0, 10));
+        show(el('aDisposeError'), false);
+        openModal('aDisposeModal');
+    }
 
-        if (reason === null) return;
-
-        show(el('assetError'), false);
-        show(el('assetOk'), false);
-
+    if (el('aDisposeConfirm')) el('aDisposeConfirm').addEventListener('click', function () {
+        var reason = el('aDisposeReason').value.trim();
+        if (!reason) { el('aDisposeError').textContent = 'Skriv vad som hände med den.'; show(el('aDisposeError'), true); return; }
+        var btn = this; btn.disabled = true;
         postJson('/umbraco/surface/EkonomiAdmin/DisposeAsset', {
-            issuerType: issuerType, issuerId: issuerId, assetId: id,
-            when: new Date().toISOString().substring(0, 10), reason: reason
+            issuerType: issuerType, issuerId: issuerId, assetId: disposingId,
+            when: el('aDisposeDate').value, reason: reason
         }).then(function (j) {
-            if (!j.success) {
-                el('assetError').textContent = j.message;
-                show(el('assetError'), true);
-                return;
-            }
+            btn.disabled = false;
+            if (!j.success) { el('aDisposeError').textContent = j.message; show(el('aDisposeError'), true); return; }
+            closeModal('aDisposeModal');
+            show(el('assetError'), false);
             el('assetOk').textContent = j.message;
             show(el('assetOk'), true);
             loadAssets();
+        }).catch(function (e) {
+            btn.disabled = false;
+            el('aDisposeError').textContent = e.message; show(el('aDisposeError'), true);
         });
-    }
-
-    if (el('aCancel')) el('aCancel').addEventListener('click', resetAssetForm);
+    });
 
     if (el('aSave')) el('aSave').addEventListener('click', function () {
         var btn = this;
@@ -3113,20 +3372,17 @@
         }).then(function (j) {
             btn.disabled = false;
 
-            if (!j.success) {
-                el('assetError').textContent = j.message;
-                show(el('assetError'), true);
-                return;
-            }
+            // ⚠️ Dialogen stängs INTE vid fel — felet står i den, så man kan rätta och spara igen.
+            if (!j.success) { el('aError').textContent = j.message; show(el('aError'), true); return; }
 
+            closeModal('assetFormModal');
             el('assetOk').textContent = j.message;
             show(el('assetOk'), true);
             resetAssetForm();
             loadAssets();
         }).catch(function (e) {
             btn.disabled = false;
-            el('assetError').textContent = e.message;
-            show(el('assetError'), true);
+            el('aError').textContent = e.message; show(el('aError'), true);
         });
     });
 
