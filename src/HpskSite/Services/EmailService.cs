@@ -2613,7 +2613,7 @@ namespace HpskSite.Services
                 amountBlock = $"<div class='amount'>{amountLabel}</div>"
                     + (string.IsNullOrWhiteSpace(typeLabel) ? "" :
                        $"<p style='margin-top:-8px'>Avgiften gäller medlemstypen <strong>{enc(typeLabel)}</strong>."
-                       + (canChooseType ? $" Stämmer det inte kan du <a href='{payUrl}'>välja rätt medlemstyp på betalsidan</a>." : "")
+                       + (canChooseType ? $" Har din medlemstyp ändrats, till exempel till veteran eller pensionär, kan du <a href='{payUrl}'>byta medlemstyp på betalsidan</a>." : "")
                        + "</p>");
                 payBlock = PaymentOptionsMailBlock(payUrl, hasSwish, bgNumber, clubName, amountLabel, reference);
             }

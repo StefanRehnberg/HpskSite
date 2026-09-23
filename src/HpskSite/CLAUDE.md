@@ -5112,8 +5112,12 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
       låst när avgiften är betald eller medlemmen sagt sig ha betalat, låst för hushåll (huvudmedlem eller
       delat `HouseholdId`), bara valbara typer. ⚠️ Servern prövar typen mot listan — en förfalskad post
       med en ovalbar typ vägras (A/B: det påståendet är det enda som faller när prövningen tas bort).
-    - En medlem MED typ ser den i mejlet ("Avgiften gäller medlemstypen Senior … välja rätt medlemstyp på
-      betalsidan") och under beloppet på sidan ("Fel medlemstyp? Välj rätt").
+    - En medlem MED typ kan **BYTA** den (Stefan: "hen kan gå från senior till veteran") — mejlet: "Har din
+      medlemstyp ändrats, till exempel till veteran eller pensionär, kan du byta medlemstyp på betalsidan";
+      sidan: "Har din medlemstyp ändrats? Byt medlemstyp". ⚠️ Formulerat som ett BYTE, aldrig "fel
+      medlemstyp" — den som blivit veteran letar inte efter ett fel. ⚠️ Länken visas så snart det finns en
+      ANNAN valbar typ (`TypeOptions.Any(o => !o.Current)`) — även när den nuvarande typen själv inte är
+      valbar. Det gamla villkoret `Count > 1` räknade bort just det fallet (A/B: det påståendet faller).
     - Migrering: `Migrations/add-member-type-choice-to-membership-fee.sql` — **FÖRE deploy** (NPoco skriver
       de nya kolumnerna vid varje uppdatering). Körd i dev 2026-09-23, **EJ i prod**. Svit:
       `hpsk-verify/medlemstyp-val-verify.mjs` 32/32 (återställer medlemstyperna ur en kopia i databasen,
