@@ -1604,28 +1604,26 @@
                     <div><h1>Vad gav projekten?</h1>
                         <div class="sub">Varje tävling och evenemang som haft pengar blir ett projekt av sig självt.
                             Gruppera dem som föreningen vill se dem.</div></div>
-                    <div class="headactions">
+                    <div class="headactions" style="align-items:center">
                         <label class="muted" style="display:flex;gap:.5rem;align-items:center">Period
                             <select class="form-select form-select-sm" id="@(uid)_prYear" style="width:auto"></select></label>
+                        @if (Model.CanWrite)
+                        {
+                            <div class="dropdown">
+                                <button type="button" class="btn btn-primary shadow dropdown-toggle" data-bs-toggle="dropdown"
+                                        aria-expanded="false" id="@(uid)_prMenu"><i class="bi bi-sliders me-1"></i>Åtgärder</button>
+                                <ul class="dropdown-menu dropdown-menu-end" style="min-width:260px">
+                                    <li><h6 class="dropdown-header">Skapa</h6></li>
+                                    <li><button type="button" class="dropdown-item" id="@(uid)_prNewProject">Nytt eget projekt…</button></li>
+                                    <li><button type="button" class="dropdown-item" id="@(uid)_prNewGroup">Ny grupp…</button></li>
+                                </ul>
+                            </div>
+                        }
                     </div>
                 </div>
 
                 <div class="ek-alert ek-bad d-none" id="@(uid)_prError"></div>
                 <div class="ek-alert ek-ok d-none" id="@(uid)_prOk"></div>
-
-                @* ⚠️ Gruppens projektval ligger ÖVER listorna, inte i en rad. En lista med kryssrutor
-                   inuti en tabellrad blir oläsbar på en telefon. *@
-                <div class="ek-card wide d-none" id="@(uid)_prPickPanel">
-                    <div class="ek-cardh"><h2 id="@(uid)_prPickTitle">Projekt i gruppen</h2></div>
-                    <p class="muted" style="margin-top:0">
-                        Kryssa i de projekt som ska ingå. Ett projekt får ligga i flera grupper — det
-                        ändrar ingenting i bokföringen.
-                    </p>
-                    <div id="@(uid)_prPickList"></div>
-                    <div class="amount-row" style="margin-top:12px">
-                        <button type="button" class="btn btn-primary" id="@(uid)_prPickDone">Klar</button>
-                    </div>
-                </div>
 
                 <div class="ek-card wide">
                     <div class="ek-cardh">
@@ -1678,52 +1676,6 @@
                     </p>
                 </div>
 
-                @if (Model.CanWrite)
-                {
-                    <div class="ek-card wide" id="@(uid)_prFormCard">
-                        <div class="ek-cardh"><h2 id="@(uid)_prFormTitle">Nytt eget projekt</h2></div>
-                        <p class="muted" style="margin-top:0">
-                            För det som inte är en tävling: Klubbstugan, Ungdomssektionen, Skjutbanan.
-                            Ett projekt utan slutdatum fungerar som ett kostnadsställe.
-                        </p>
-                        <input type="hidden" id="@(uid)_pId" value="0">
-                        <div class="amount-row">
-                            <label style="flex:2 1 260px">Namn
-                                <input type="text" class="form-control" id="@(uid)_pName" maxlength="120"
-                                       placeholder="Klubbstugan" autocomplete="off"></label>
-                            <label style="flex:1 1 150px">Börjar (frivilligt)
-                                <input type="text" class="form-control ek-date" id="@(uid)_pStart" placeholder="åååå-mm-dd"></label>
-                            <label style="flex:1 1 150px">Slutar (frivilligt)
-                                <input type="text" class="form-control ek-date" id="@(uid)_pEnd" placeholder="åååå-mm-dd"></label>
-                        </div>
-                        <label class="fieldlabel" for="@(uid)_pDesc">Beskrivning (frivilligt)</label>
-                        <input type="text" class="form-control" id="@(uid)_pDesc" maxlength="400" autocomplete="off">
-                        <div class="amount-row" style="margin-top:12px">
-                            <button type="button" class="btn btn-primary" id="@(uid)_pSave">Spara projektet</button>
-                            <button type="button" class="btn btn-link d-none" id="@(uid)_pCancel">Avbryt</button>
-                        </div>
-                    </div>
-
-                    <div class="ek-card wide" id="@(uid)_gFormCard">
-                        <div class="ek-cardh"><h2 id="@(uid)_gFormTitle">Ny grupp</h2></div>
-                        <p class="muted" style="margin-top:0">
-                            Till exempel "Klubbtävlingar 2026" eller "Fältskytte". En tävlingsserie blir en
-                            grupp av sig själv.
-                        </p>
-                        <input type="hidden" id="@(uid)_gId" value="0">
-                        <div class="amount-row">
-                            <label style="flex:2 1 260px">Namn
-                                <input type="text" class="form-control" id="@(uid)_gName" maxlength="120"
-                                       placeholder="Klubbtävlingar 2026" autocomplete="off"></label>
-                            <label style="flex:2 1 260px">Beskrivning (frivilligt)
-                                <input type="text" class="form-control" id="@(uid)_gDesc" maxlength="400" autocomplete="off"></label>
-                        </div>
-                        <div class="amount-row" style="margin-top:12px">
-                            <button type="button" class="btn btn-primary" id="@(uid)_gSave">Spara gruppen</button>
-                            <button type="button" class="btn btn-link d-none" id="@(uid)_gCancel">Avbryt</button>
-                        </div>
-                    </div>
-                }
             </section>
 
             <section data-pane="tillgangar" hidden>
@@ -1957,6 +1909,98 @@
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="@(uid)_uCancel">Avbryt</button>
                         <button type="button" class="btn btn-primary" id="@(uid)_uSave">Spara</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ── Projekt: eget projekt ── *@
+        <div class="modal fade" id="@(uid)_prFormModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_prFormTitle">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="@(uid)_prFormTitle">Nytt eget projekt</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="muted" style="margin-top:0">
+                            För det som inte är en tävling: Klubbstugan, Ungdomssektionen, Skjutbanan.
+                            Ett projekt utan slutdatum fungerar som ett kostnadsställe.
+                        </p>
+                        <input type="hidden" id="@(uid)_pId" value="0">
+                        <div class="mb-3">
+                            <label class="form-label" for="@(uid)_pName">Namn</label>
+                            <input type="text" class="form-control" id="@(uid)_pName" maxlength="120" placeholder="Klubbstugan" autocomplete="off">
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-6">
+                                <label class="form-label" for="@(uid)_pStart">Börjar (frivilligt)</label>
+                                <input type="text" class="form-control ek-date" id="@(uid)_pStart" placeholder="åååå-mm-dd">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label" for="@(uid)_pEnd">Slutar (frivilligt)</label>
+                                <input type="text" class="form-control ek-date" id="@(uid)_pEnd" placeholder="åååå-mm-dd">
+                            </div>
+                        </div>
+                        <label class="form-label" for="@(uid)_pDesc">Beskrivning (frivilligt)</label>
+                        <input type="text" class="form-control" id="@(uid)_pDesc" maxlength="400" autocomplete="off">
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_pError"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="@(uid)_pCancel">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="@(uid)_pSave">Spara projektet</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ── Projekt: grupp ── *@
+        <div class="modal fade" id="@(uid)_gFormModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_gFormTitle">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="@(uid)_gFormTitle">Ny grupp</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="muted" style="margin-top:0">
+                            Till exempel "Klubbtävlingar 2026" eller "Fältskytte". En tävlingsserie blir en
+                            grupp av sig själv.
+                        </p>
+                        <input type="hidden" id="@(uid)_gId" value="0">
+                        <div class="mb-3">
+                            <label class="form-label" for="@(uid)_gName">Namn</label>
+                            <input type="text" class="form-control" id="@(uid)_gName" maxlength="120" placeholder="Klubbtävlingar 2026" autocomplete="off">
+                        </div>
+                        <label class="form-label" for="@(uid)_gDesc">Beskrivning (frivilligt)</label>
+                        <input type="text" class="form-control" id="@(uid)_gDesc" maxlength="400" autocomplete="off">
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_gError"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="@(uid)_gCancel">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="@(uid)_gSave">Spara gruppen</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ── Projekt: välj projekt i en grupp. Kryssrutan skriver direkt. ── *@
+        <div class="modal fade" id="@(uid)_prPickModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_prPickTitle">
+            <div class="modal-dialog modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="@(uid)_prPickTitle">Projekt i gruppen</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="muted" style="margin-top:0">
+                            Kryssa i de projekt som ska ingå. Ett projekt får ligga i flera grupper — det
+                            ändrar ingenting i bokföringen.
+                        </p>
+                        <div id="@(uid)_prPickList"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" data-bs-dismiss="modal" id="@(uid)_prPickDone">Klar</button>
                     </div>
                 </div>
             </div>
@@ -4498,19 +4542,17 @@
     function projectRow(p) {
         var what = (p.sourceLabel || 'Eget projekt') + ' · ' + plural(p.entryCount, 'verifikation', 'verifikationer');
 
-        var acts = '';
-        if (canWrite) {
-            acts = '<button type="button" class="btn btn-sm btn-link" data-pr-edit="' + p.id + '">Ändra</button>'
-                 + '<button type="button" class="btn btn-sm btn-link" data-pr-close="' + p.id + '" data-closed="'
-                 + (p.isClosed ? '0' : '1') + '">' + (p.isClosed ? 'Öppna' : 'Stäng') + '</button>';
-        }
+        var acts = !canWrite ? '' : rowMenu([
+            { act: 'edit', id: p.id, text: 'Ändra…' },
+            { act: 'close', id: p.id, text: p.isClosed ? 'Öppna projektet igen' : 'Stäng projektet' }
+        ]);
 
         return '<tr><td><strong>' + esc(p.name) + '</strong><div class="muted">' + esc(what) + '</div></td>'
              + '<td>' + groupNamesFor(p) + '</td>'
              + '<td class="n">' + kr(p.income) + '</td>'
              + '<td class="n">' + kr(p.costs) + '</td>'
              + '<td class="n">' + netCell(p.net) + '</td>'
-             + '<td>' + acts + '</td></tr>';
+             + '<td class="n">' + acts + '</td></tr>';
     }
 
     function renderProjectRows(d) {
@@ -4524,7 +4566,7 @@
         el('prBody').innerHTML = open.length === 0
             ? '<tr><td colspan="6" class="muted">Inga projekt ännu. När en tävling eller ett evenemang '
               + 'får sin första betalning blir det ett projekt här av sig självt. Egna projekt — '
-              + 'Klubbstugan, Ungdomssektionen — skapar du nedan.</td></tr>'
+              + 'Klubbstugan, Ungdomssektionen — skapar du under Åtgärder.</td></tr>'
             : open.map(projectRow).join('');
 
         el('prClosedBody').innerHTML = closed.length === 0
@@ -4541,8 +4583,8 @@
 
         if (groups.length === 0) {
             el('prGroups').innerHTML = '<p class="muted">Inga grupper ännu. En grupp är ett urval av '
-                + 'projekt, till exempel årets klubbtävlingar — skapa en nedan och välj vilka projekt '
-                + 'som ingår.</p>';
+                + 'projekt, till exempel årets klubbtävlingar — skapa en under Åtgärder och välj vilka '
+                + 'projekt som ingår.</p>';
             return;
         }
 
@@ -4564,28 +4606,27 @@
                          + ' med <strong>' + esc(o.groupName) + '</strong> — lägg inte ihop gruppernas summor.</div>';
                 }).join('');
 
-                var acts = '';
-                if (canWrite) {
-                    acts = '<button type="button" class="btn btn-sm btn-link" data-gr-pick="' + g.id + '">Välj projekt</button>'
-                         + '<button type="button" class="btn btn-sm btn-link" data-gr-edit="' + g.id + '">Döp om</button>'
-                         + '<button type="button" class="btn btn-sm btn-link text-danger" data-gr-delete="' + g.id + '">Ta bort</button>';
-                }
+                var acts = !canWrite ? '' : rowMenu([
+                    { act: 'pick', id: g.id, text: 'Välj projekt…' },
+                    { act: 'edit', id: g.id, text: 'Döp om…' },
+                    { act: 'delete', id: g.id, text: 'Ta bort gruppen…', danger: true }
+                ]);
 
                 return '<tr><td><strong>' + esc(g.name) + '</strong>'
-                     + (g.isFromSeries ? ' <span class="muted">(tävlingsserie)</span>' : '')
+                     + (g.isFromSeries ? ' ' + badge('info', 'tävlingsserie') : '')
                      + (g.description ? '<div class="muted">' + esc(g.description) + '</div>' : '')
                      + '<div class="muted">' + list + '</div>' + overlap + '</td>'
                      + '<td class="n">' + kr(g.income) + '</td>'
                      + '<td class="n">' + kr(g.costs) + '</td>'
                      + '<td class="n">' + netCell(g.net) + '</td>'
-                     + '<td>' + acts + '</td></tr>';
+                     + '<td class="n">' + acts + '</td></tr>';
             }).join('')
             + '</tbody></table>';
     }
 
     function renderPickList() {
         var g = (projData.groups || []).find(function (x) { return x.id === pickingGroupId; });
-        if (!g) { pickingGroupId = 0; show(el('prPickPanel'), false); return; }
+        if (!g) { pickingGroupId = 0; closeModal('prPickModal'); return; }
 
         el('prPickTitle').textContent = 'Projekt i gruppen ' + g.name;
         var inGroup = {};
@@ -4595,74 +4636,70 @@
         el('prPickList').innerHTML = all.length === 0
             ? '<p class="muted">Föreningen har inga projekt ännu.</p>'
             : all.map(function (p) {
-                return '<label style="display:flex;gap:.5rem;align-items:baseline;margin:.25rem 0">'
-                     + '<input type="checkbox" data-pick-project="' + p.id + '"' + (inGroup[p.id] ? ' checked' : '') + '>'
-                     + '<span>' + esc(p.name)
-                     + (p.isClosed ? ' <span class="muted">(stängt)</span>' : '')
-                     + ' <span class="muted">· ' + netCell(p.net) + '</span></span></label>';
+                return '<div class="form-check">'
+                     + '<input class="form-check-input" type="checkbox" id="' + uid + '_pick' + p.id + '" data-pick-project="' + p.id + '"'
+                     + (inGroup[p.id] ? ' checked' : '') + '>'
+                     + '<label class="form-check-label" for="' + uid + '_pick' + p.id + '">' + esc(p.name)
+                     + (p.isClosed ? ' ' + badge('off', 'stängt') : '')
+                     + ' <span class="muted">· ' + netCell(p.net) + '</span></label></div>';
             }).join('');
     }
 
     el('prYear').addEventListener('change', function () { loadProjects(); });
 
-    el('prBody').parentNode.parentNode.addEventListener('click', projRowClick);
-    el('prClosedBody').parentNode.parentNode.addEventListener('click', projRowClick);
-
-    function projRowClick(ev) {
-        var edit = ev.target.closest('button[data-pr-edit]');
-        var close = ev.target.closest('button[data-pr-close]');
-        if (edit) {
-            var p = (projData.projects || []).find(function (x) { return x.id === parseInt(edit.dataset.prEdit, 10); });
+    var projRowHandlers = {
+        edit: function (id) {
+            var p = (projData.projects || []).find(function (x) { return x.id === parseInt(id, 10); });
             if (p) fillProjectForm(p);
-        }
-        if (close) {
-            close.disabled = true;
+        },
+        close: function (id, b) {
+            var p = (projData.projects || []).find(function (x) { return x.id === parseInt(id, 10); });
+            if (!p) return;
+            b.disabled = true;
             postJson('/umbraco/surface/EkonomiAdmin/SetProjectClosed', {
-                issuerType: issuerType, issuerId: issuerId,
-                projectId: parseInt(close.dataset.prClose, 10),
-                closed: close.dataset.closed === '1'
+                issuerType: issuerType, issuerId: issuerId, projectId: p.id, closed: !p.isClosed
             }).then(function (j) {
                 if (projMsg(j)) { loadProjects(); if (canWrite) loadBokfor(); }
-                else close.disabled = false;
-            }).catch(function (e) { close.disabled = false; projMsg({ success: false, message: e.message }); });
+                else b.disabled = false;
+            }).catch(function (e) { b.disabled = false; projMsg({ success: false, message: e.message }); });
         }
-    }
+    };
+    onRowAction(el('prBody'), projRowHandlers);
+    onRowAction(el('prClosedBody'), projRowHandlers);
 
-    el('prGroups').addEventListener('click', function (ev) {
-        var pick = ev.target.closest('button[data-gr-pick]');
-        var edit = ev.target.closest('button[data-gr-edit]');
-        var del = ev.target.closest('button[data-gr-delete]');
-
-        if (pick) {
-            pickingGroupId = parseInt(pick.dataset.grPick, 10);
+    onRowAction(el('prGroups'), {
+        pick: function (id) {
+            pickingGroupId = parseInt(id, 10);
             renderPickList();
-            show(el('prPickPanel'), true);
-            el('prPickPanel').scrollIntoView({ block: 'nearest' });
-        }
-        if (edit) {
-            var g = (projData.groups || []).find(function (x) { return x.id === parseInt(edit.dataset.grEdit, 10); });
+            openModal('prPickModal');
+        },
+        edit: function (id) {
+            var g = (projData.groups || []).find(function (x) { return x.id === parseInt(id, 10); });
             if (g) fillGroupForm(g);
-        }
-        if (del) {
-            var gid = parseInt(del.dataset.grDelete, 10);
+        },
+        delete: function (id) {
+            var gid = parseInt(id, 10);
             var gd = (projData.groups || []).find(function (x) { return x.id === gid; });
+            var n = gd ? (gd.projectIds || []).length : 0;
             // ⚠️ Fråga bara när det finns något att förlora. En tom grupp äger ingenting, och
             //    ingenting annat raderas ens när den är full — men ett kurerat urval av trettio
             //    projekt är kassörens arbete.
-            var n = gd ? (gd.projectIds || []).length : 0;
-            if (n > 0 && !window.confirm('Ta bort gruppen ' + (gd ? gd.name : '') + '?\n\n'
-                    + plural(n, 'projekt', 'projekt') + ' och deras bokföring rörs inte — bara grupperingen försvinner.'))
-                return;
-
-            del.disabled = true;
-            postJson('/umbraco/surface/EkonomiAdmin/DeleteProjectGroup', {
-                issuerType: issuerType, issuerId: issuerId, groupId: gid
-            }).then(function (j) {
-                if (projMsg(j)) {
-                    if (pickingGroupId === gid) { pickingGroupId = 0; show(el('prPickPanel'), false); }
-                    loadProjects();
-                } else del.disabled = false;
-            }).catch(function (e) { del.disabled = false; projMsg({ success: false, message: e.message }); });
+            var go = n === 0 ? Promise.resolve('') : ask({
+                title: 'Ta bort gruppen ' + (gd ? gd.name : ''),
+                text: plural(n, 'projekt', 'projekt') + ' och deras bokföring rörs inte — bara grupperingen försvinner.',
+                ok: 'Ta bort gruppen', danger: true
+            });
+            go.then(function (v) {
+                if (v === null) return;
+                postJson('/umbraco/surface/EkonomiAdmin/DeleteProjectGroup', {
+                    issuerType: issuerType, issuerId: issuerId, groupId: gid
+                }).then(function (j) {
+                    if (projMsg(j)) {
+                        if (pickingGroupId === gid) { pickingGroupId = 0; closeModal('prPickModal'); }
+                        loadProjects();
+                    }
+                }).catch(function (e) { projMsg({ success: false, message: e.message }); });
+            });
         }
     });
 
@@ -4683,10 +4720,7 @@
         });
     });
 
-    el('prPickDone').addEventListener('click', function () {
-        pickingGroupId = 0;
-        show(el('prPickPanel'), false);
-    });
+    if (el('prPickModal')) el('prPickModal').addEventListener('hidden.bs.modal', function () { pickingGroupId = 0; });
 
     function fillProjectForm(p) {
         el('pId').value = String(p.id);
@@ -4697,9 +4731,8 @@
         setDateField('pStart', p.startDate || '');
         setDateField('pEnd', p.endDate || '');
         el('prFormTitle').textContent = 'Ändra projektet';
-        show(el('pCancel'), true);
-        el('prFormCard').scrollIntoView({ block: 'nearest' });
-        el('pName').focus();
+        show(el('pError'), false);
+        openModal('prFormModal');
     }
 
     function resetProjectForm() {
@@ -4709,7 +4742,7 @@
         setDateField('pStart', '');
         setDateField('pEnd', '');
         el('prFormTitle').textContent = 'Nytt eget projekt';
-        show(el('pCancel'), false);
+        show(el('pError'), false);
     }
 
     function fillGroupForm(g) {
@@ -4717,9 +4750,8 @@
         el('gName').value = g.name;
         el('gDesc').value = g.description || '';
         el('gFormTitle').textContent = 'Döp om gruppen';
-        show(el('gCancel'), true);
-        el('gFormCard').scrollIntoView({ block: 'nearest' });
-        el('gName').focus();
+        show(el('gError'), false);
+        openModal('gFormModal');
     }
 
     function resetGroupForm() {
@@ -4727,12 +4759,24 @@
         el('gName').value = '';
         el('gDesc').value = '';
         el('gFormTitle').textContent = 'Ny grupp';
-        show(el('gCancel'), false);
+        show(el('gError'), false);
+    }
+
+    // ⚠️ Felet visas i DIALOGEN, som står kvar öppen — annars får man börja om för att läsa det.
+    function dialogError(name, j) {
+        el(name).textContent = (j && j.message) || 'Det gick inte att spara.';
+        show(el(name), true);
     }
 
     if (canWrite) {
-        el('pCancel').addEventListener('click', resetProjectForm);
-        el('gCancel').addEventListener('click', resetGroupForm);
+        el('prNewProject').addEventListener('click', function () {
+            resetProjectForm(); openModal('prFormModal');
+            setTimeout(function () { el('pName').focus(); }, 300);
+        });
+        el('prNewGroup').addEventListener('click', function () {
+            resetGroupForm(); openModal('gFormModal');
+            setTimeout(function () { el('gName').focus(); }, 300);
+        });
 
         el('pSave').addEventListener('click', function () {
             var btn = this;
@@ -4746,8 +4790,10 @@
                 endDate: el('pEnd').value || null
             }).then(function (j) {
                 btn.disabled = false;
-                if (projMsg(j)) { resetProjectForm(); loadProjects(); loadBokfor(); }
-            }).catch(function (e) { btn.disabled = false; projMsg({ success: false, message: e.message }); });
+                if (!j.success) { dialogError('pError', j); return; }
+                closeModal('prFormModal');
+                projMsg(j); resetProjectForm(); loadProjects(); loadBokfor();
+            }).catch(function (e) { btn.disabled = false; dialogError('pError', { message: e.message }); });
         });
 
         el('gSave').addEventListener('click', function () {
@@ -4760,15 +4806,17 @@
                 description: el('gDesc').value
             }).then(function (j) {
                 btn.disabled = false;
-                if (!projMsg(j)) return;
+                if (!j.success) { dialogError('gError', j); return; }
+                projMsg(j);
                 var wasNew = (parseInt(el('gId').value, 10) || 0) === 0;
+                closeModal('gFormModal');
                 resetGroupForm();
                 // En ny grupp är tom — öppna projektvalet direkt, det är nästa steg.
-                if (wasNew && j.id) pickingGroupId = j.id;
+                var openPick = wasNew && j.id ? j.id : 0;
                 loadProjects().then(function () {
-                    if (pickingGroupId) { show(el('prPickPanel'), true); el('prPickPanel').scrollIntoView({ block: 'nearest' }); }
+                    if (openPick) { pickingGroupId = openPick; renderPickList(); openModal('prPickModal'); }
                 });
-            }).catch(function (e) { btn.disabled = false; projMsg({ success: false, message: e.message }); });
+            }).catch(function (e) { btn.disabled = false; dialogError('gError', { message: e.message }); });
         });
     }
 
