@@ -41,6 +41,52 @@ namespace HpskSite.Models
 
         public DateTime CreatedDate { get; set; }
 
+        // ── Kretsavgiften: samma motor, en annan partstyp (2026-09-23) ──────────────────
+        //
+        // ⚠️⚠️ TVÅ FORMER, OCH DATABASEN HÅLLER ISÄR DEM (CK_MembershipFeeCharge_Shape):
+        //    klubb → medlem:  IssuerType 0, ClubId = klubben, MemberId = medlemmen
+        //    krets → klubb:   IssuerType 1, RegionId = kretsen, PayerClubId = klubben,
+        //                     ClubId = 0 och MemberId = 0
+        //    Därför syns en kretsavgift aldrig i en klubbs medlemsavgiftslista, som läser ClubId.
+        //
+        // ⚠️ Inga speglade IssuerId/PayerId-kolumner. Medlemssammanslagningen flyttar MemberId,
+        //    och en kopia av samma uppgift i en annan kolumn hade glidit isär. Använd
+        //    IssuerOwnerType/IssuerOwnerId och IsRegionFee nedan i stället för att läsa formen själv.
+
+        /// <summary>0 = klubbens medlemsavgift, 1 = kretsens avgift till en klubb.</summary>
+        public int IssuerType { get; set; }
+
+        /// <summary>Kretsens nod-id. Satt bara för en kretsavgift.</summary>
+        public int? RegionId { get; set; }
+
+        /// <summary>Klubben som ska betala. Satt bara för en kretsavgift.</summary>
+        public int? PayerClubId { get; set; }
+
+        /// <summary>
+        /// Antalet medlemmar kravet räknades på. Registrets förslag kan ha rättats av kretsen, och
+        /// det tal som faktiskt låg till grund ska gå att läsa i efterhand.
+        /// </summary>
+        public int? MemberCount { get; set; }
+
+        [Ignore]
+        public bool IsRegionFee => IssuerType == MembershipFeeIssuer.Region;
+
+        /// <summary>Utställarens ägartyp i liggarens mening (<see cref="DocumentOwnerType"/>).</summary>
+        [Ignore]
+        public int IssuerOwnerType => IsRegionFee ? DocumentOwnerType.Region : DocumentOwnerType.Club;
+
+        /// <summary>Utställarens nod-id: kretsen för en kretsavgift, annars klubben.</summary>
+        [Ignore]
+        public int IssuerOwnerId => IsRegionFee ? RegionId ?? 0 : ClubId;
+
+        /// <summary>Kravets rader (grundavgift, per medlem, tillägg). Tom för en medlemsavgift.</summary>
+        [Ignore]
+        public List<MembershipFeeChargeLine> Lines { get; set; } = new();
+
+        /// <summary>Den betalande klubbens namn, för en kretsavgift.</summary>
+        [ResultColumn]
+        public string? PayerClubName { get; set; }
+
         // Display-only (resolved in the service, not mapped to DB columns).
         [ResultColumn]
         public string? MemberName { get; set; }

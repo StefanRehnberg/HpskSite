@@ -10,7 +10,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Medlemsavgift@(Model.Found ? $" {Model.Year}" : "")</title>
+    <title>@(Model.IsRegionFee ? "Kretsavgift" : "Medlemsavgift")@(Model.Found ? $" {Model.Year}" : "")</title>
     <style>
         :root { --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#0d6efd; --ok:#198754; }
         * { box-sizing: border-box; }
@@ -56,7 +56,27 @@
         else
         {
             <p class="club">@Model.ClubName</p>
-            <h1>Medlemsavgift @Model.Year</h1>
+            @if (Model.IsRegionFee)
+            {
+                <h1>Kretsavgift @Model.Year</h1>
+                <p class="notice" style="margin-top:-8px">för @Model.PayerName</p>
+                @* ⚠️ Raderna står på sidan: klubbens kassör ska kunna se att beloppet är 23
+                   medlemmar à 20 kr, och det är medlemsantalet klubben kan ha synpunkter på. *@
+                @if (Model.Lines.Count > 0)
+                {
+                    <table style="margin:12px auto 0;border-collapse:collapse;font-size:15px;text-align:left">
+                        @foreach (var line in Model.Lines)
+                        {
+                            <tr><td style="padding:3px 16px 3px 0">@line.Description</td>
+                                <td style="padding:3px 0;text-align:right;white-space:nowrap">@Kr(line.Amount)</td></tr>
+                        }
+                    </table>
+                }
+            }
+            else
+            {
+                <h1>Medlemsavgift @Model.Year</h1>
+            }
 
             @if (Model.Covered)
             {
@@ -66,7 +86,7 @@
             else if (Model.IsPaid)
             {
                 <div class="paid-box">Betald för @Model.Year ✓</div>
-                <p class="notice">Din medlemsavgift är registrerad som betald. Tack!</p>
+                <p class="notice">@(Model.IsRegionFee ? "Kretsavgiften är registrerad som betald. Tack!" : "Din medlemsavgift är registrerad som betald. Tack!")</p>
             }
             else
             {
@@ -88,12 +108,16 @@
 
                     @if (Model.PaymentClaimed)
                     {
-                        <p class="claimed">Du har markerat att du betalat. Klubben bekräftar när betalningen registrerats.</p>
+                        <p class="claimed">@(Model.IsRegionFee
+                            ? "Ni har markerat att ni betalat. Kretsen bekräftar när betalningen registrerats."
+                            : "Du har markerat att du betalat. Klubben bekräftar när betalningen registrerats.")</p>
                     }
                 }
                 else
                 {
-                    <div class="warn">Klubben har inte konfigurerat Swish ännu — kontakta klubben.</div>
+                    <div class="warn">@(Model.IsRegionFee
+                        ? "Kretsen har inte lagt in något Swishnummer ännu — kontakta kretsen."
+                        : "Klubben har inte konfigurerat Swish ännu — kontakta klubben.")</div>
                 }
             }
         }

@@ -23,5 +23,16 @@ namespace HpskSite.Models
 
         public decimal Amount { get; set; }
         public DateTime CreatedDate { get; set; }
+
+        /// <summary>
+        /// 0 = klubbens kategori (per medlemstyp), 1 = kretsens taxa. För kretsen är
+        /// <see cref="MembershipType"/> en av <see cref="RegionFeeCalculator.BaseCategory"/> och
+        /// <see cref="RegionFeeCalculator.PerMemberCategory"/>, och <see cref="ClubId"/> är 0
+        /// (CK_MembershipFeeCategory_Shape).
+        /// </summary>
+        public int IssuerType { get; set; }
+
+        /// <summary>Kretsens nod-id för kretsens taxa.</summary>
+        public int? RegionId { get; set; }
     }
 }

@@ -593,7 +593,9 @@
                        betalvägg. Kortet finns för att den luckan ska vara SYNLIG, inte tyst. *@
                     <div class="ek-card wide d-none" id="@(uid)_feesCard">
                         <div class="ek-cardh">
-                            <h2>Medlemsavgifter</h2>
+                            @* ⚠️ Rubriken sätts ur svaret: en krets har KRETSavgifter, inte
+                               medlemsavgifter. Samma kort, samma motor, olika ord. *@
+                            <h2 id="@(uid)_feesTitle">@(Model.IssuerType == 1 ? "Kretsavgifter" : "Medlemsavgifter")</h2>
                             <span class="meta" id="@(uid)_feesYear"></span>
                         </div>
 
@@ -1974,6 +1976,11 @@
     //    Flaggan läses explicit ur DOM:en; härledd ur "finns knappen X?" slutar den stämma tyst
     //    den dag knappen döps om.
     var canWrite = root.dataset.canWrite === '1';
+
+    // ⚠️ Avgiftsordet följer utställaren — "Kretsavgifter" för en krets. Deklareras HÄR och inte
+    //    vid avgiftskortet: renderTodo läser det, och körs det före en senare `var`-rad är värdet
+    //    undefined och .toLowerCase() fäller hela sidan. Sätts om ur servern i loadFees.
+    var feeLabel = issuerType === 1 ? 'Kretsavgifter' : 'Medlemsavgifter';
     var show = function (n, on) { if (n) n.classList.toggle('d-none', !on); };
 
     var ROLE_NAMES = {
@@ -2066,9 +2073,9 @@
         if (todo.missingSources > 0)
             items.push([todo.missingSources, 'tävlingar saknar avgifter', 'Visa', 'avgifter']);
         if (todo.unpaidFees > 0)
-            items.push([todo.unpaidFees, 'medlemsavgifter har inte kommit in', 'Visa', 'avgifter']);
+            items.push([todo.unpaidFees, feeLabel.toLowerCase() + ' har inte kommit in', 'Visa', 'avgifter']);
         if (todo.unpostedFees > 0)
-            items.push([todo.unpostedFees, 'betalda medlemsavgifter är obokförda', 'Bokför', 'avgifter']);
+            items.push([todo.unpostedFees, 'betalda ' + feeLabel.toLowerCase() + ' är obokförda', 'Bokför', 'avgifter']);
 
         el('todoCount').textContent = items.length === 0 ? 'Inget just nu'
             : items.length + (items.length === 1 ? ' sak' : ' saker');
@@ -4484,6 +4491,7 @@
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (!d.success || !d.applicable) return;
+                if (d.label) { feeLabel = d.label; el('feesTitle').textContent = d.label; }
 
                 // ⚠️ I en sandlåda finns inga avgifter att visa. Kortet visas ändå — med SKÄLET
                 //    i stället för nollor, och utan siffror som inte betyder något.
@@ -4509,7 +4517,8 @@
         errBox.classList.add('d-none'); okBox.classList.add('d-none');
         btn.disabled = true;
 
-        postJson('/umbraco/surface/EkonomiAdmin/PostMembershipFees', { clubId: issuerId, year: feeYear })
+        postJson('/umbraco/surface/EkonomiAdmin/PostMembershipFees',
+                 { clubId: issuerId, year: feeYear, issuerType: issuerType })
             .then(function (d) {
                 btn.disabled = false;
                 if (!d.success) {
@@ -4517,7 +4526,7 @@
                     errBox.classList.remove('d-none');
                     return;
                 }
-                okBox.textContent = d.posted + ' medlemsavgifter bokfördes.';
+                okBox.textContent = d.posted + ' ' + feeLabel.toLowerCase() + ' bokfördes.';
                 okBox.classList.remove('d-none');
                 if (d.fees) renderFees(d.fees);
                 loadBokfor();

@@ -229,6 +229,35 @@ namespace HpskSite.Services.Mail
         }
 
         /// <summary>
+        /// Kretsens kontaktadress, med kretsens namn som visningsnamn — för besked som kommer FRÅN
+        /// kretsen som organisation, t.ex. kretsavgiftens betalkrav. En klubbkassör som svarar
+        /// "vi har bara fyra aktiva i år" ska nå kretsen, inte sajtägaren.
+        /// </summary>
+        public MailReplyTo ForRegion(int regionId)
+        {
+            if (regionId <= 0) return MailReplyTo.SiteAdmin;
+
+            try
+            {
+                var region = _content.GetById(regionId);
+                if (region is null || region.ContentType.Alias != "regionalPage")
+                {
+                    _logger.LogDebug("ReplyContactResolver: krets {Id} hittades inte.", regionId);
+                    return MailReplyTo.SiteAdmin;
+                }
+
+                return MailReplyTo.FromClub(
+                    region.GetValue<string>("regionName") ?? region.Name ?? "",
+                    region.GetValue<string>("contactEmail") ?? "");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ReplyContactResolver: kunde inte läsa krets {Id}.", regionId);
+                return MailReplyTo.SiteAdmin;
+            }
+        }
+
+        /// <summary>
         /// Kretsnoden för en regionkod.
         ///
         /// <para>Samma uppslagning som <c>ReceiptModelBuilder.FindRegionByCode</c>. Jämförelsen är

@@ -215,6 +215,7 @@
                     <option value="/styrelse?type=1&id=@regionContentId">Styrelsearbete ↗</option>
                     <option value="/ekonomi?type=1&id=@regionContentId">Ekonomi ↗</option>
                     <option value="#regionInvoicesTab">Fakturor</option>
+                    <option value="#regionFeesTab">Kretsavgift</option>
                     <option value="#regionSettingsTab">Inställningar</option>
                     <option value="#regionDocumentsTab" selected>Dokument</option>
                     <option value="#regionStatsTab">Statistik</option>
@@ -269,6 +270,11 @@
                 </a>
                 <button class="nav-link" id="regionInvoices-tab" data-bs-toggle="tab" data-bs-target="#regionInvoicesTab" type="button" role="tab" aria-controls="regionInvoicesTab" aria-selected="false">
                     <i class="bi bi-receipt me-2"></i>Fakturor
+                </button>
+                @* Kretsavgiften: kretsens avgift till sina klubbar. Samma motor som klubbens
+                   medlemsavgift — se RegionFeeManagement.cshtml. Laddas lat vid första öppningen. *@
+                <button class="nav-link" id="regionFees-tab" data-bs-toggle="tab" data-bs-target="#regionFeesTab" type="button" role="tab" aria-controls="regionFeesTab" aria-selected="false">
+                    <i class="bi bi-cash-stack me-2"></i>Kretsavgift
                 </button>
                 <button class="nav-link" id="regionSettings-tab" data-bs-toggle="tab" data-bs-target="#regionSettingsTab" type="button" role="tab" aria-controls="regionSettingsTab" aria-selected="false">
                     <i class="bi bi-gear me-2"></i>Inställningar
@@ -340,6 +346,21 @@
                 };
             }
             @await Html.PartialAsync("AdminInvoicesList", regionInvoicesVD)
+        </div>
+
+        <div class="tab-pane fade" id="regionFeesTab">
+            @await Html.PartialAsync("RegionFeeManagement")
+            <script>
+                // ⚠️ Lat och EN gång per sidladdning: förslaget läser varje klubbs medlemsregister.
+                //    Bunden på CLICK (inte bara shown.bs.tab) — mobilväljaren klickar knappen, och
+                //    kretsens Tävlingar-flik har visat att shown-händelsen inte alltid når fram.
+                (function () {
+                    var loaded = false;
+                    var btn = document.getElementById('regionFees-tab');
+                    function go() { if (loaded || !window.hpskLoadRegionFees) return; loaded = true; window.hpskLoadRegionFees(); }
+                    if (btn) { btn.addEventListener('click', go); btn.addEventListener('shown.bs.tab', go); }
+                })();
+            </script>
         </div>
 
         <!-- Competitions Sub-Tab -->
