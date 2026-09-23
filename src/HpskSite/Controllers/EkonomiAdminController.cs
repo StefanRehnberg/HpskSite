@@ -47,6 +47,8 @@ namespace HpskSite.Controllers
         private readonly LedgerClosingService _closingService;
         private readonly LedgerSieExportService _sieService;
         private readonly LedgerReceivableExportService _receivableService;
+        private readonly LedgerJournalService _journalService;
+        private readonly LedgerAttachmentService _attachmentService;
 
         /// <summary>
         /// Taket för ett uppladdat kontoutdrag.
@@ -81,6 +83,8 @@ namespace HpskSite.Controllers
             LedgerClosingService closingService,
             LedgerSieExportService sieService,
             LedgerReceivableExportService receivableService,
+            LedgerJournalService journalService,
+            LedgerAttachmentService attachmentService,
             IMemberManager memberManager,
             IMemberService memberService,
             ILogger<EkonomiAdminController> logger)
@@ -97,6 +101,8 @@ namespace HpskSite.Controllers
             _closingService = closingService;
             _sieService = sieService;
             _receivableService = receivableService;
+            _journalService = journalService;
+            _attachmentService = attachmentService;
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
             _sandbox = sandbox;
@@ -281,6 +287,183 @@ namespace HpskSite.Controllers
 
                 return Json(new { success = false, message = "Översikten gick inte att läsa just nu." });
             }
+        }
+
+        // ══ VERIFIKATIONERNA OCH UNDERLAGEN ═══════════════════════════════════
+        //
+        // ⚠️⚠️ DEN HÄR GRUPPEN ÄR REVISIONENS RYGGRAD. Skatteverket kräver att revisorn
+        //    självständigt kan följa *bokförd transaktion → verifikation → faktisk betalning* åt
+        //    båda hållen. Alla tre leden fanns i databasen; det som saknades var en väg att gå dem.
+
+        /// <summary>Verifikationslistan — i nummerordning, med bilagor och bankmatchning per rad.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetJournal(
+            int issuerType, int issuerId,
+            int? fiscalYearId = null, string? from = null, string? to = null,
+            int? accountNumber = null, string? search = null,
+            int skip = 0, int take = 50)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            try
+            {
+                var page = _journalService.List(
+                    issuerType, issuerId, fiscalYearId,
+                    ParseDate(from), ParseDate(to), accountNumber, search, skip, take);
+
+                return Json(new
+                {
+                    success = true,
+                    total = page.TotalCount,
+                    skip = page.Skip,
+                    take = page.Take,
+                    // ⚠️ Luckkontrollen är ett eget fält, inte en rad i listan. Numreringen påstås
+                    //    vara luckfri; det påståendet är värdelöst om det inte går att pröva.
+                    hasGaps = page.HasGaps,
+                    series = page.Series,
+                    rows = page.Rows
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Verifikationslistan gick inte att läsa för {Typ}/{Id}.", issuerType, issuerId);
+                return Json(new { success = false, message = "Verifikationslistan gick inte att läsa just nu." });
+            }
+        }
+
+        /// <summary>En verifikation med rader, underlag och de kontoutdragsrader som matchar den.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetJournalEntry(int issuerType, int issuerId, int entryId)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var detail = _journalService.Detail(issuerType, issuerId, entryId);
+
+            if (detail is null)
+                return Json(new { success = false, message = "Verifikationen finns inte." });
+
+            return Json(new
+            {
+                success = true,
+                head = detail.Head,
+                lines = detail.Lines,
+                attachments = detail.Attachments,
+                bankRows = detail.BankRows,
+                debitTotal = detail.DebitTotal,
+                creditTotal = detail.CreditTotal,
+                balances = detail.Balances
+            });
+        }
+
+        /// <summary>Huvudboken för ett konto — rader i datumordning med löpande saldo.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetAccountLedger(
+            int issuerType, int issuerId, int accountNumber, string? from = null, string? to = null)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var status = _setupService.GetStatus(issuerType, issuerId);
+            var (f, t) = ResolvePeriod(from, to, status);
+
+            var ledger = _journalService.AccountLedger(issuerType, issuerId, accountNumber, f, t);
+
+            if (ledger is null)
+                return Json(new { success = false, message = "Huvudboken gick inte att läsa." });
+
+            return Json(new
+            {
+                success = true,
+                from = f,
+                to = t,
+                account = new { number = ledger.AccountNumber, name = ledger.AccountName },
+                openingBalance = ledger.OpeningBalance,
+                closingBalance = ledger.ClosingBalance,
+                debitTotal = ledger.DebitTotal,
+                creditTotal = ledger.CreditTotal,
+                rows = ledger.Rows
+            });
+        }
+
+        /// <summary>
+        /// Kopplar ett underlag till en verifikation.
+        ///
+        /// <para>⚠️ Kräver SKRIVRÄTT. Styrelsen får läsa bokföringen men inte lagga underlag i
+        /// den — och en inbjuden revisor allra minst.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UploadAttachment(
+            int issuerType, int issuerId, int entryId, IFormFile? file)
+        {
+            var (ok, _) = await AuthorizeWriteAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            if (file is null || file.Length == 0)
+                return Json(new { success = false, message = "Välj en fil." });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            await using var stream = file.OpenReadStream();
+
+            var (saved, error) = await _attachmentService.AddAsync(
+                issuerType, issuerId, entryId, stream, file.FileName, file.Length, actorId.Value);
+
+            return Json(saved
+                ? new { success = true, message = "Underlaget är kopplat till verifikationen." }
+                : new { success = false, message = error! });
+        }
+
+        /// <summary>
+        /// Strömmar ett underlag.
+        ///
+        /// <para>⚠️ LÄSRÄTT räcker — det är hela poängen för en revisor. Filerna ligger under
+        /// <c>App_Data</c> och nås bara härifrån; en direktlänk finns inte.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetAttachment(int issuerType, int issuerId, int attachmentId)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Content(DeniedMessage);
+
+            var (path, fileName, contentType) =
+                _attachmentService.Resolve(issuerType, issuerId, attachmentId);
+
+            if (path is null) return Content("Underlaget hittades inte.");
+
+            // ⚠️ Inline, inte attachment: revisorn ska kunna bläddra genom kvitton utan att ladda
+            //    ner tjugo filer. Filnamnet följer ändå med för den som sparar.
+            Response.Headers.ContentDisposition =
+                $"inline; filename=\"{Uri.EscapeDataString(fileName)}\"";
+
+            return PhysicalFile(path, contentType);
+        }
+
+        /// <summary>Kopplar bort ett underlag. Raderar aldrig — se <see cref="LedgerAttachmentService"/>.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> VoidAttachment([FromBody] VoidAttachmentRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att göra." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var (done, error) = _attachmentService.Void(
+                request.IssuerType, request.IssuerId, request.AttachmentId,
+                request.Reason ?? "", actorId.Value);
+
+            return Json(done
+                ? new { success = true, message = "Underlaget är bortkopplat." }
+                : new { success = false, message = error! });
         }
 
         // ══ FORDRINGSEXPORTEN ════════════════════════════════════════════════════════════════
@@ -1681,6 +1864,20 @@ namespace HpskSite.Controllers
     public class PostPendingRequest
     {
         public int PaymentId { get; set; }
+    }
+
+    /// <summary>
+    /// Bortkoppling av ett underlag.
+    /// <para>⚠️ <see cref="Reason"/> är obligatoriskt och prövas i tjänsten, inte här — en
+    /// bortkopplad bilaga utan skäl går inte att bedöma i efterhand, och det är en revisor som
+    /// kommer att ställa frågan.</para>
+    /// </summary>
+    public class VoidAttachmentRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int AttachmentId { get; set; }
+        public string? Reason { get; set; }
     }
 
     /// <summary>En rad i kön "att bokföra", så som ytan behöver den.</summary>

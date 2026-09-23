@@ -77,7 +77,10 @@ namespace HpskSite.Services.Ledger
             // ⚠️ Budgetens spärr hör hit av samma skäl som de andra: utan den är
             // "en antagen budget kan inte skrivas om" en överenskommelse, inte en garanti.
             "TR_LedgerBudget_AdoptedIsFinal",
-            "TR_LedgerBudgetLine_AdoptedIsFinal"
+            "TR_LedgerBudgetLine_AdoptedIsFinal",
+            // ⚠️ Bilagan har samma krav: underlaget är räkenskapsinformation och bevaras i sju
+            // år. Utan den här raden ser en prod som saknar migreringen fullständigt frisk ut.
+            "TR_LedgerAttachment_NoDelete"
         };
 
         /// <summary>
@@ -94,7 +97,8 @@ namespace HpskSite.Services.Ledger
             "TR_sbx_LedgerJournalEntryLine_NoUpdateDelete",
             "TR_sbx_LedgerReceipt_NoUpdateDelete",
             "TR_sbx_LedgerBudget_AdoptedIsFinal",
-            "TR_sbx_LedgerBudgetLine_AdoptedIsFinal"
+            "TR_sbx_LedgerBudgetLine_AdoptedIsFinal",
+            "TR_sbx_LedgerAttachment_NoDelete"
         };
 
         // Båda skripten namnges: en saknad momskolumn kommer ur det andra, och ett meddelande som
