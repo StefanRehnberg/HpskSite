@@ -460,6 +460,47 @@ namespace HpskSite.Services.Ledger
         /// än"</i> — och den får ALDRIG säga "0 kr, allt stämmer" på en avstämning som inte
         /// gjorts. Se panelens egen regel: noll fel ska visas lika stort som fel.</para>
         /// </summary>
+        /// <summary>
+        /// Avstämningsläget för ETT räkenskapsår: raderna på kontoutdragen som ligger i året.
+        ///
+        /// <para>⚠️ Revisorn granskar ett bestämt år. Den osprungliga läsningen tog det SENASTE
+        /// inlästa utdraget, så en revisor som granskade förra året i mars fick innevarande års
+        /// två veckor av kontoutdrag — "alla 14 rader har en motpart" om fel år.</para>
+        /// </summary>
+        public (DateTime? PeriodTo, int Unmatched, int Rows)? SummaryForYear(
+            int issuerType, int issuerId, DateTime from, DateTime to)
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                var ldb = new LedgerDb(db, issuerId);
+
+                var r = ldb.Fetch<YearSummaryRow>(
+                    @"SELECT COUNT(*) AS Rows_,
+                             SUM(CASE WHEN r.MatchedLineId IS NULL THEN 1 ELSE 0 END) AS Unmatched,
+                             MAX(r.BookedDate) AS LastDate
+                        FROM dbo.LedgerBankRow r
+                       WHERE r.IssuerType = @0 AND r.IssuerId = @1
+                         AND r.BookedDate >= @2 AND r.BookedDate <= @3",
+                    issuerType, issuerId, from.Date, to.Date).FirstOrDefault();
+
+                if (r is null || r.Rows_ == 0) return null;
+                return (r.LastDate, r.Unmatched ?? 0, r.Rows_);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte läsa avstämningsläget för {Typ}/{Id}.", issuerType, issuerId);
+                return null;
+            }
+        }
+
+        private class YearSummaryRow
+        {
+            public int Rows_ { get; set; }
+            public int? Unmatched { get; set; }
+            public DateTime? LastDate { get; set; }
+        }
+
         public (DateTime? PeriodTo, int Unmatched, int Rows)? Summary(int issuerType, int issuerId)
         {
             try

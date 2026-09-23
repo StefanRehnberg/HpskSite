@@ -317,7 +317,8 @@ namespace HpskSite.Controllers
 
                 LoadProtokoll(model, pick);
 
-                var summary = _bank.Summary(pick.OwnerType, pick.OwnerId);
+                var fy = years.First(y => y.Id == yearId);
+                var summary = _bank.SummaryForYear(pick.OwnerType, pick.OwnerId, fy.StartDate, fy.EndDate);
                 if (summary is not null)
                 {
                     model.BankRows = summary.Value.Rows;
