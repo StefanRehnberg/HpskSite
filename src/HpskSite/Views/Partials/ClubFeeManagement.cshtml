@@ -1,81 +1,124 @@
 @{
     var feeClubId = ViewBag.clubId as int? ?? 0;
-    // Läsläge för styrelsen och revisorn på ekonomisidan: samma listor, inga knappar.
+    // Läsläge för styrelsen och revisorn på ekonomisidan: samma lista, inga knappar.
     var feeReadOnly = ViewData["feesReadOnly"] as bool? ?? false;
 }
-@* Medlemsavgifter — klubbens avgift till sina medlemmar. See Documentation/MEMBER_DATABASE.md §4.
-   Endpoints: /umbraco/surface/MembershipFeeAdmin/... Reuses the club's Swish number.
+@*
+    MEDLEMSAVGIFTER — klubbens årsavgift till sina medlemmar. Bor på ekonomisidan (rälsposten
+    Medlemsavgifter). See Documentation/MEMBER_DATABASE.md §4.
 
-   ⚠️ BOR PÅ EKONOMISIDAN (/ekonomi, rälsposten Medlemsavgifter) sedan 2026-09-23 — tidigare en
-   modal i klubbens adminpanel. Det är kassörens arbete, och ekonomisidan har rätt behörighet:
-   kassören skriver, styrelsen och revisorn läser (feesReadOnly). Adminpanelen länkar hit.
-   ⚠️ Inga alert()/prompt(): en blockerande dialog har redan rapporterats som att sidan "frös".
-   Beskeden står i #feeActionMsg. *@
-<div id="clubFeeRoot">
-    <div class="d-flex align-items-center gap-2 mb-3">
-        <label class="form-label mb-0 fw-bold" for="feeYear">År</label>
-        <select id="feeYear" class="form-select form-select-sm" style="width:auto;"></select>
-    </div>
+    ⚠️⚠️ SAMMA FORM SOM KRETSAVGIFTEN, OCH SAJTENS FORMSPRÅK (Stefan 2026-09-23). Den gamla ytan
+    började med en helsida inställningar och en knapp "Generera avgifter…" som ingen förstod — Ove
+    vill bara skicka ut uppmaningen att betala. Därför:
+      - Listan ÄR sidan: en rad per medlem, vad hen ska betala och Status.
+      - "Generera" finns inte som begrepp. Avgiften skapas när den skickas (eller när raden rörs),
+        ur SAMMA regel som listan visar (ClubFeeProposal).
+      - Avgiften per medlemstyp är en INSTÄLLNING — en dialog bakom sidans Åtgärder.
+      - EN blå Åtgärder uppe till höger: Skicka, Påminn, Inställningar. Per rad [Betald] + grå Åtgärder.
+      - Raden ser likadan ut före och efter utskicket; bara Status ändras.
+    ⚠️ Inga alert()/prompt(): en blockerande dialog har redan rapporterats som att sidan "frös".
+*@
+<style>
+    #cfRoot td, #cfRoot th { vertical-align: middle; }
+    #cfRoot .cf-total td { border-top: 2px solid var(--bs-border-color); font-weight: 600; }
+    #cfRoot .cf-n { white-space: nowrap; }
+    @@media (max-width: 575.98px) { #cfRoot tr.cf-main td { border-bottom: 0; padding-bottom: 0; } }
+</style>
 
-    <div class="alert alert-info d-none small" id="feeActionMsg" role="status"></div>
-
-    <h6 class="text-primary">Avgiftskategorier</h6>
-    <p class="text-muted small">Sätts av klubben (årsmötet). En kategori per medlemstyp och år.</p>
-    <div class="table-responsive mb-2">
-        <table class="table table-sm align-middle">
-            <thead><tr><th>Medlemstyp</th><th>Etikett</th><th>Belopp (kr)</th><th></th></tr></thead>
-            <tbody id="feeCategoryRows"></tbody>
-        </table>
-    </div>
-    @if (!feeReadOnly)
-    {
-    <div class="row g-2 align-items-end mb-4">
-        <div class="col-md-3">
-            <label class="form-label small mb-0" for="feeCatType">Medlemstyp</label>
-            <select id="feeCatType" class="form-select form-select-sm">
-                <option>Senior</option><option>Pensionär</option><option>Junior</option><option>Familj</option>
-                <option>Hedersmedlem</option><option>Ständig</option><option>Stödjande</option>
-            </select>
+<div id="cfRoot">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+        <div>
+            <div class="fw-semibold" id="cfRateLine"></div>
+            <div class="small text-muted" id="cfSummary"></div>
         </div>
-        <div class="col-md-4">
-            <label class="form-label small mb-0" for="feeCatLabel">Etikett (valfri)</label>
-            <input id="feeCatLabel" class="form-control form-control-sm" placeholder="t.ex. Seniormedlem" autocomplete="off">
-        </div>
-        <div class="col-md-3">
-            <label class="form-label small mb-0" for="feeCatAmount">Belopp (kr)</label>
-            <input id="feeCatAmount" type="number" min="0" step="1" class="form-control form-control-sm" autocomplete="off">
-        </div>
-        <div class="col-md-2">
-            <button type="button" class="btn btn-success btn-sm w-100" onclick="feeSaveCategory()">Lägg till</button>
+        <div class="d-flex align-items-center gap-2">
+            <select id="cfYear" class="form-select" style="width:auto" aria-label="År"></select>
+            @if (!feeReadOnly)
+            {
+            <div class="dropdown">
+                <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" id="cfPageMenu">
+                    <i class="bi bi-sliders me-2"></i>Åtgärder
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" style="min-width:280px">
+                    <li><h6 class="dropdown-header">Skicka</h6></li>
+                    <li><button class="dropdown-item" type="button" id="cfSend"><i class="bi bi-envelope me-2"></i><span></span></button></li>
+                    <li><button class="dropdown-item" type="button" id="cfRemind"><i class="bi bi-bell me-2"></i><span></span></button></li>
+                    <li><span class="dropdown-item-text small text-muted d-none" id="cfNothingToSend"></span></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">Inställningar</h6></li>
+                    <li><button class="dropdown-item" type="button" id="cfEditRates"><i class="bi bi-cash-coin me-2"></i><span>Avgift per medlemstyp</span></button></li>
+                </ul>
+            </div>
+            }
         </div>
     </div>
 
-    <hr>
+    <div class="alert alert-danger d-none" id="cfError"></div>
+    <div class="alert alert-success d-none" id="cfOk"></div>
 
-    <div class="d-flex flex-wrap gap-2 mb-3">
-        <button type="button" class="btn btn-primary btn-sm" onclick="feeGenerate()">
-            <i class="bi bi-people me-1"></i>Generera avgifter för alla medlemmar
-        </button>
-        <button type="button" class="btn btn-outline-primary btn-sm" onclick="feeSendRequests()">
-            <i class="bi bi-envelope me-1"></i>Skicka betalningsbegäran (e-post)
-        </button>
-    </div>
-    }
-
-    <h6 class="text-danger">Ej betalda <span id="feeUnpaidCount" class="badge bg-danger"></span></h6>
-    <div class="table-responsive mb-3">
-        <table class="table table-sm align-middle">
-            <thead><tr><th>Medlem</th><th>Belopp</th><th>Status</th><th>@(feeReadOnly ? "" : "Åtgärder")</th></tr></thead>
-            <tbody id="feeUnpaidRows"></tbody>
-        </table>
+    <div class="text-center py-4 d-none" id="cfNoRate">
+        <p class="mb-3" id="cfNoRateText"></p>
+        @if (!feeReadOnly)
+        {
+        <button type="button" class="btn btn-primary" id="cfNoRateBtn">Bestäm avgiften</button>
+        }
     </div>
 
-    <h6 class="text-success">Betalda <span id="feePaidCount" class="badge bg-success"></span></h6>
-    <div class="table-responsive">
-        <table class="table table-sm align-middle">
-            <thead><tr><th>Medlem</th><th>Belopp</th><th>Betald</th><th></th></tr></thead>
-            <tbody id="feePaidRows"></tbody>
-        </table>
+    <div id="cfListWrap" class="d-none">
+        <div class="table-responsive">
+            <table class="table align-middle mb-2">
+                <thead><tr>
+                    <th>Medlem</th>
+                    <th class="d-none d-sm-table-cell">Medlemstyp</th>
+                    <th class="text-end">Att betala</th>
+                    <th class="d-none d-sm-table-cell">Status</th>
+                    <th class="text-end d-none d-sm-table-cell"><span class="visually-hidden">Åtgärder</span></th>
+                </tr></thead>
+                <tbody id="cfRows"></tbody>
+            </table>
+        </div>
+        <div class="small text-muted" id="cfHint"></div>
+    </div>
+</div>
+
+@* Inställningen: avgift per medlemstyp. Ändringar sparas direkt; "Klar" stänger. *@
+<div class="modal fade" id="cfRatesModal" tabindex="-1" aria-hidden="true" aria-labelledby="cfRatesTitle">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="cfRatesTitle">Avgift per medlemstyp</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Årsmötet bestämmer avgiften. Varje medlem betalar avgiften för sin medlemstyp.
+                    En familj betalar en gång, via huvudmedlemmen.</p>
+                <table class="table table-sm align-middle">
+                    <thead><tr><th>Medlemstyp</th><th class="text-end">Avgift</th><th></th></tr></thead>
+                    <tbody id="cfRatesRows"></tbody>
+                </table>
+                <div class="row g-2 align-items-end">
+                    <div class="col-6">
+                        <label class="form-label small mb-0" for="cfNewType">Medlemstyp</label>
+                        <select id="cfNewType" class="form-select form-select-sm">
+                            <option>Senior</option><option>Pensionär</option><option>Junior</option><option>Familj</option>
+                            <option>Hedersmedlem</option><option>Ständig</option><option>Stödjande</option>
+                        </select>
+                    </div>
+                    <div class="col-3">
+                        <label class="form-label small mb-0" for="cfNewAmount">Avgift</label>
+                        <input id="cfNewAmount" type="number" min="0" step="1" class="form-control form-control-sm" autocomplete="off">
+                    </div>
+                    <div class="col-3">
+                        <button type="button" class="btn btn-primary btn-sm w-100" id="cfAddRate">Lägg till</button>
+                    </div>
+                </div>
+                <p class="text-muted small mt-3 mb-0">Avgifter som redan skickats ändras inte.</p>
+                <div class="alert alert-danger d-none mt-3 mb-0" id="cfRatesError"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Klar</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -84,143 +127,283 @@
     if (window.__clubFeeInit) return;
     window.__clubFeeInit = true;
 
-    var FEE_CLUB_ID = @feeClubId;
+    var CLUB_ID = @feeClubId;
     var READONLY = @(feeReadOnly ? "true" : "false");
+    var F = '/umbraco/surface/MembershipFeeAdmin/';
+    var data = null, dirty = false;
+    var MONTHS = ['jan','feb','mar','apr','maj','jun','jul','aug','sep','okt','nov','dec'];
 
-    async function feeToken() {
-        var el = document.querySelector('input[name="__RequestVerificationToken"]');
-        if (el && el.value) return el.value;
-        return (await (await fetch('/umbraco/surface/Club/GetFormToken', { cache: 'no-store' })).json()).token;
-    }
-    function feeYearVal() { return document.getElementById('feeYear').value; }
-    function feeEsc(s) {
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
         return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
         });
     }
-    function feeMsg(text, bad) {
-        var m = document.getElementById('feeActionMsg');
-        m.className = 'alert small ' + (bad ? 'alert-danger' : 'alert-info') + (text ? '' : ' d-none');
-        m.textContent = text || '';
+    function kr(n) { return (Math.round((n || 0) * 100) / 100).toLocaleString('sv-SE', { maximumFractionDigits: 2 }) + ' kr'; }
+    function day(iso) { if (!iso) return ''; var p = iso.split('-'); return parseInt(p[2], 10) + ' ' + MONTHS[parseInt(p[1], 10) - 1]; }
+    function year() { return parseInt($('cfYear').value, 10); }
+    function show(el, on) { if (el) el.classList.toggle('d-none', !on); }
+    function msg(ok, text, kind) {
+        $('cfOk').className = 'alert ' + (kind === 'warn' ? 'alert-warning' : 'alert-success');
+        show($('cfOk'), ok && !!text); show($('cfError'), !ok && !!text);
+        $(ok ? 'cfOk' : 'cfError').textContent = text || '';
     }
-    async function feeForm(action, fields) {
+    async function token() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        if (el && el.value) return el.value;
+        return (await (await fetch('/umbraco/surface/Club/GetFormToken', { cache: 'no-store' })).json()).token;
+    }
+    async function form(action, fields) {
         var fd = new FormData();
         Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
-        fd.append('__RequestVerificationToken', await feeToken());
-        var r = await fetch('/umbraco/surface/MembershipFeeAdmin/' + action, { method: 'POST', body: fd });
+        fd.append('__RequestVerificationToken', await token());
+        var r = await fetch(F + action, { method: 'POST', body: fd });
         try { return await r.json(); } catch (e) { return { success: false, message: 'Något gick fel (' + r.status + ').' }; }
     }
 
-    function feeInitYears() {
-        var sel = document.getElementById('feeYear');
-        if (sel.options.length) return;
-        var now = new Date().getFullYear();
-        for (var y = now + 1; y >= now - 3; y--) {
-            var o = document.createElement('option');
-            o.value = y; o.textContent = y;
-            if (y === now) o.selected = true;
-            sel.appendChild(o);
+    function rowOf(memberId) { return (data.rows || []).find(function (r) { return r.memberId === memberId; }); }
+    var BILLABLE = { Individual: true, HouseholdPrimary: true };
+
+    // ⚠️ Varje handling på en rad börjar här: avgiften skapas oskickad om den inte finns.
+    async function chargeIdFor(memberId) {
+        var r = rowOf(memberId);
+        if (r && r.charge) return r.charge.id;
+        var e = await form('EnsureClubCharge', { clubId: CLUB_ID, year: year(), memberId: memberId });
+        if (!e.success) { msg(false, e.message); return null; }
+        return e.chargeId;
+    }
+
+    function stateOf(r) {
+        var c = r.charge;
+        return {
+            c: c,
+            paid: !!c && c.status === 'Paid',
+            sent: !!c && !!c.requestSentDate,
+            claimed: !!c && !!c.paymentSentDate,
+            covered: r.kind === 'Covered' || (!!c && c.covered),
+            billable: !!c ? (!c.covered && c.amount > 0) : (BILLABLE[r.kind] && r.proposedAmount > 0),
+            amount: c ? c.amount : r.proposedAmount
+        };
+    }
+
+    function statusCell(r, s) {
+        if (s.covered) return '<span class="text-muted">Ingår i familjens avgift' + (r.coveredBy ? ' (' + esc(r.coveredBy) + ')' : '') + '</span>';
+        if (s.paid) return '<span class="text-success">✓ Betald' + (s.c.paidDate ? ' ' + day(s.c.paidDate) : '') + '</span>';
+        if (s.claimed) return '<span>Medlemmen säger att hen betalat</span>';
+        if (!s.c && r.kind === 'NoType') return '<span class="text-muted">Ingen medlemstyp — ange den under Medlemmar</span>';
+        if (!s.c && r.kind === 'NoCategory') return '<span class="text-muted">Ingen avgift för ' + esc(r.membershipType) + '</span>';
+        if (s.amount <= 0) return '<span class="text-muted">Ingen avgift</span>';
+        if (s.sent) return '<span>Skickad ' + day(s.c.requestSentDate) + '</span>';
+        return '<span class="text-muted">Inte skickad' + (r.hasEmail ? '' : ' · ingen e-post') + '</span>';
+    }
+
+    function item(act, id, text, extra) {
+        return '<li><button type="button" class="dropdown-item' + (extra || '') + '" data-cf-act="' + act
+             + '" data-cf-id="' + id + '">' + text + '</button></li>';
+    }
+    function actionsCell(r, s) {
+        // Ingen meny när det som saknas är medlemstypen: den rättas i medlemsregistret, inte här.
+        if (READONLY || s.covered || (!s.c && r.kind === 'NoType')) return '';
+        var id = r.memberId, items = [];
+        if (s.paid) items.push(item('unpaid', id, 'Ångra betald'));
+        else if (!s.billable) items.push(item('rates', id, 'Avgift per medlemstyp…'));
+        else {
+            items.push('<li><h6 class="dropdown-header">Mejlet</h6></li>');
+            items.push(item('preview', id, 'Visa mejlet'));
+            if (r.hasEmail) items.push(item('send-one', id, s.sent ? 'Skicka mejlet igen' : 'Skicka mejlet nu'));
+            items.push(item('link', id, 'Kopiera betallänk'));
         }
-        sel.addEventListener('change', function () { feeMsg(''); feeLoadOverview(); });
+        return '<div class="d-inline-flex gap-1 align-items-center">'
+             + (!s.paid && s.billable ? '<button type="button" class="btn btn-sm btn-outline-success" data-cf-act="paid" data-cf-id="' + id + '">Betald</button>' : '')
+             + '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" '
+             + 'data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\'>Åtgärder</button>'
+             + '<ul class="dropdown-menu dropdown-menu-end">' + items.join('') + '</ul></div></div>';
     }
 
-    window.feeLoadOverview = function () {
-        fetch('/umbraco/surface/MembershipFeeAdmin/GetOverview?clubId=' + FEE_CLUB_ID + '&year=' + feeYearVal(), { cache: 'no-store' })
-            .then(function (r) { return r.json(); })
-            .then(function (d) {
-                if (!d.success) { feeMsg(d.message || 'Medlemsavgifterna gick inte att läsa.', true); return; }
-                feeRenderCategories(d.categories || []);
-                feeRenderCharges('feeUnpaidRows', d.unpaid || [], false);
-                feeRenderCharges('feePaidRows', d.paid || [], true);
-                document.getElementById('feeUnpaidCount').textContent = (d.unpaid || []).length;
-                document.getElementById('feePaidCount').textContent = (d.paid || []).length;
-            });
-    };
+    function render() {
+        var cats = data.categories || [];
+        var hasRate = cats.length > 0;
+        var yr = year();
+        $('cfRateLine').textContent = hasRate
+            ? 'Avgiften ' + yr + ': ' + cats.map(function (c) { return c.membershipType + ' ' + kr(c.amount); }).join(' · ') : '';
+        show($('cfNoRate'), !hasRate);
+        $('cfNoRateText').textContent = 'Klubben har inte bestämt medlemsavgiften för ' + yr + ' än.';
+        show($('cfListWrap'), hasRate);
+        if ($('cfEditRates')) $('cfEditRates').querySelector('span').textContent = 'Avgift per medlemstyp ' + yr + '…';
 
-    function feeRenderCategories(cats) {
-        var html = cats.map(function (c) {
-            return '<tr><td>' + feeEsc(c.membershipType) + '</td><td>' + feeEsc(c.label) + '</td><td>' +
-                feeEsc(c.amount) + '</td><td>' + (READONLY ? '' : '<button class="btn btn-outline-danger btn-sm" onclick="feeDeleteCategory(' +
-                c.id + ')" title="Ta bort kategorin"><i class="bi bi-trash"></i></button>') + '</td></tr>';
-        }).join('');
-        document.getElementById('feeCategoryRows').innerHTML = html || '<tr><td colspan="4" class="text-muted small">Inga kategorier ännu.</td></tr>';
-    }
+        var rows = data.rows || [];
+        var html = '', total = 0, billed = 0, paidCount = 0, paidSum = 0, toSend = 0, noMail = 0, toRemind = 0;
+        rows.forEach(function (r) {
+            var s = stateOf(r);
+            if (s.billable) { total += s.amount; billed++; }
+            if (s.paid && s.billable) { paidCount++; paidSum += s.amount; }
+            if (s.billable && !s.paid && !s.sent) { if (r.hasEmail) toSend++; else noMail++; }
+            if (s.billable && !s.paid && s.sent) toRemind++;
 
-    function feeRenderCharges(targetId, charges, paid) {
-        var html = charges.map(function (c) {
-            var actions;
-            if (paid) {
-                actions = READONLY ? '' : '<button class="btn btn-outline-secondary btn-sm" onclick="feeMarkUnpaid(' + c.id + ')">Ångra betald</button>';
-                return '<tr><td>' + feeEsc(c.memberName) + '</td><td>' + feeEsc(c.amount) + ' kr</td><td>' +
-                    feeEsc(c.paidDate || '') + '</td><td>' + actions + '</td></tr>';
-            }
-            if (c.covered) {
-                // Familjeavgift: covered by the household's primary member — no separate fee.
-                return '<tr class="text-muted"><td>' + feeEsc(c.memberName) + '</td><td>0 kr</td>' +
-                    '<td><span class="badge bg-info text-dark">Ingår i familj</span></td><td></td></tr>';
-            }
-            var claim = c.paymentSentDate ? '<span class="badge bg-warning text-dark" title="Medlem har uppgett betalning ' +
-                feeEsc(c.paymentSentDate) + '">Uppgett betald</span> ' : '';
-            actions = READONLY ? '' :
-                '<button class="btn btn-success btn-sm me-1" onclick="feeMarkPaid(' + c.id + ')">Markera betald</button>' +
-                '<button class="btn btn-outline-primary btn-sm" onclick="feeCopyLink(' + c.id + ')">Kopiera länk</button>';
-            return '<tr><td>' + feeEsc(c.memberName) + (c.hasEmail ? '' : ' <i class="bi bi-envelope-slash text-muted" title="Saknar e-post"></i>') +
-                '</td><td>' + feeEsc(c.amount) + ' kr</td><td>' + claim + '</td><td>' + actions + '</td></tr>';
-        }).join('');
-        document.getElementById(targetId).innerHTML = html || '<tr><td colspan="4" class="text-muted small">Inga poster.</td></tr>';
-    }
-
-    window.feeSaveCategory = async function () {
-        var d = await feeForm('SaveCategory', {
-            id: 0, clubId: FEE_CLUB_ID, year: feeYearVal(),
-            membershipType: document.getElementById('feeCatType').value,
-            label: document.getElementById('feeCatLabel').value,
-            amount: document.getElementById('feeCatAmount').value || '0'
+            var amount = s.covered ? '<span class="text-muted">—</span>' : (s.billable || s.paid ? kr(s.amount) : '<span class="text-muted">—</span>');
+            html += '<tr class="cf-main"><td>' + esc(r.name) + '<div class="small text-muted d-sm-none">' + esc(r.membershipType || '') + '</div></td>'
+                  + '<td class="d-none d-sm-table-cell">' + esc(r.membershipType || '') + '</td>'
+                  + '<td class="text-end cf-n">' + amount + '</td>'
+                  + '<td class="small d-none d-sm-table-cell">' + statusCell(r, s) + '</td>'
+                  + '<td class="text-end cf-n cf-actions d-none d-sm-table-cell">' + actionsCell(r, s) + '</td></tr>'
+                  + '<tr class="cf-mrow d-sm-none"><td colspan="2"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2 small">'
+                  + statusCell(r, s) + actionsCell(r, s) + '</div></td></tr>';
         });
-        if (!d.success) { feeMsg(d.message || 'Kategorin kunde inte sparas.', true); return; }
-        document.getElementById('feeCatAmount').value = ''; document.getElementById('feeCatLabel').value = '';
-        feeMsg(''); feeLoadOverview();
-    };
+        html += '<tr class="cf-total"><td>Totalt</td><td class="d-none d-sm-table-cell"></td><td class="text-end cf-n">' + kr(total)
+              + '</td><td class="d-none d-sm-table-cell"></td><td class="d-none d-sm-table-cell"></td></tr>';
+        $('cfRows').innerHTML = html;
 
-    window.feeDeleteCategory = async function (id) {
-        var d = await feeForm('DeleteCategory', { id: id, clubId: FEE_CLUB_ID });
-        if (!d.success) feeMsg(d.message || 'Kategorin kunde inte tas bort.', true);
-        feeLoadOverview();
-    };
+        $('cfSummary').textContent = hasRate
+            ? paidCount + ' av ' + billed + ' medlemmar har betalat · ' + kr(paidSum) + ' av ' + kr(total) : '';
 
-    window.feeGenerate = async function () {
-        feeMsg('Genererar…');
-        var d = await feeForm('GenerateCharges', { clubId: FEE_CLUB_ID, year: feeYearVal() });
-        feeMsg(d.success ? (d.created + ' nya avgifter skapade.') : (d.message || 'Avgifterna kunde inte skapas.'), !d.success);
-        feeLoadOverview();
-    };
+        if ($('cfSend')) {
+            $('cfSend').querySelector('span').textContent = 'Skicka avgiften till ' + toSend + (toSend === 1 ? ' medlem' : ' medlemmar');
+            $('cfRemind').querySelector('span').textContent = 'Påminn ' + toRemind + (toRemind === 1 ? ' medlem' : ' medlemmar') + ' som inte betalat';
+            show($('cfSend').parentElement, hasRate && toSend > 0);
+            show($('cfRemind').parentElement, hasRate && toRemind > 0);
+            show($('cfNothingToSend'), !(hasRate && (toSend > 0 || toRemind > 0)));
+            $('cfNothingToSend').textContent = hasRate ? 'Alla medlemmar har fått avgiften.' : 'Bestäm avgiften först.';
+        }
+        $('cfHint').textContent = noMail === 0 || READONLY ? ''
+            : noMail + (noMail === 1 ? ' medlem har' : ' medlemmar har') + ' ingen e-postadress. Välj Åtgärder → Kopiera betallänk på raden och skicka länken själv.';
 
-    window.feeSendRequests = async function () {
-        if (!confirm('Skicka betalningsbegäran via e-post till alla med obetald avgift?')) return;
-        feeMsg('Skickar…');
-        var d = await feeForm('SendPaymentRequests', { clubId: FEE_CLUB_ID, year: feeYearVal() });
-        feeMsg(d.success ? (d.sent + ' e-post skickade.') : (d.message || 'Mejlen kunde inte skickas.'), !d.success);
-    };
-
-    window.feeMarkPaid = function (chargeId) { feePost('MarkPaid', chargeId); };
-    window.feeMarkUnpaid = function (chargeId) { feePost('MarkUnpaid', chargeId); };
-    async function feePost(action, chargeId) {
-        var d = await feeForm(action, { chargeId: chargeId });
-        if (!d.success) feeMsg(d.message || 'Det gick inte.', true);
-        feeLoadOverview();
+        renderRates();
     }
 
-    window.feeCopyLink = function (chargeId) {
-        fetch('/umbraco/surface/MembershipFeeAdmin/GetPaymentLink?chargeId=' + chargeId, { cache: 'no-store' })
-            .then(function (r) { return r.json(); })
-            .then(async function (d) {
-                if (!d.success) { feeMsg(d.message || 'Betallänken gick inte att hämta.', true); return; }
-                try { await navigator.clipboard.writeText(d.url); feeMsg('Betallänken är kopierad.'); }
-                catch (e) { feeMsg('Betallänk: ' + d.url); }
-            });
-    };
+    function renderRates() {
+        var cats = (data && data.categories) || [];
+        $('cfRatesTitle').textContent = 'Avgift per medlemstyp ' + year();
+        $('cfRatesRows').innerHTML = cats.map(function (c) {
+            return '<tr><td>' + esc(c.membershipType) + '</td><td class="text-end">' + kr(c.amount) + '</td>'
+                 + '<td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger" data-cf-delrate="' + c.id
+                 + '" title="Ta bort">Ta bort</button></td></tr>';
+        }).join('') || '<tr><td colspan="3" class="text-muted small">Ingen avgift bestämd ännu.</td></tr>';
+    }
+
+    // ⚠️ load() rör INTE beskedet — det körs direkt efter Skicka.
+    // ⚠️ Ett svar som kommer efter ett årsbyte gäller fel år och får INTE skriva över listan.
+    var loadSeq = 0;
+    async function load() {
+        var mine = ++loadSeq;
+        var d = await (await fetch(F + 'GetOverview?clubId=' + CLUB_ID + '&year=' + year(), { cache: 'no-store' })).json();
+        if (mine !== loadSeq) return;
+        if (!d.success) { msg(false, d.message || 'Medlemsavgifterna gick inte att läsa.'); return; }
+        data = d;
+        render();
+    }
+
+    // ── Inställningen ───────────────────────────────────────────────────────────────────
+    function openRates() {
+        show($('cfRatesError'), false);
+        renderRates();
+        bootstrap.Modal.getOrCreateInstance($('cfRatesModal')).show();
+    }
+    if ($('cfEditRates')) $('cfEditRates').addEventListener('click', openRates);
+    if ($('cfNoRateBtn')) $('cfNoRateBtn').addEventListener('click', openRates);
+    function ratesError(t) { $('cfRatesError').textContent = t || ''; show($('cfRatesError'), !!t); }
+    $('cfAddRate').addEventListener('click', async function () {
+        var amount = parseFloat($('cfNewAmount').value);
+        if (isNaN(amount) || amount < 0) { ratesError('Fyll i en avgift.'); return; }
+        var type = $('cfNewType').value;
+        var existing = (data.categories || []).find(function (c) { return c.membershipType === type; });
+        var d = await form('SaveCategory', { id: existing ? existing.id : 0, clubId: CLUB_ID, year: year(),
+                                             membershipType: type, label: type, amount: amount });
+        if (!d.success) { ratesError(d.message || 'Avgiften kunde inte sparas.'); return; }
+        ratesError(''); $('cfNewAmount').value = ''; dirty = true;
+        await load();
+    });
+    $('cfRatesRows').addEventListener('click', async function (ev) {
+        var b = ev.target.closest('[data-cf-delrate]');
+        if (!b) return;
+        var d = await form('DeleteCategory', { id: b.getAttribute('data-cf-delrate'), clubId: CLUB_ID });
+        if (!d.success) { ratesError(d.message || 'Avgiften kunde inte tas bort.'); return; }
+        dirty = true;
+        await load();
+    });
+    $('cfRatesModal').addEventListener('hidden.bs.modal', function () { if (dirty) { dirty = false; msg(true, ''); } });
+
+    // ── Klick i listan ──────────────────────────────────────────────────────────────────
+    $('cfRoot').addEventListener('click', async function (ev) {
+        var a = ev.target.closest('[data-cf-act]');
+        if (!a) return;
+        var act = a.getAttribute('data-cf-act'), memberId = parseInt(a.getAttribute('data-cf-id'), 10);
+        var row = rowOf(memberId), r, id;
+
+        if (act === 'rates') { openRates(); return; }
+        if (act === 'preview') {
+            // ⚠️ Fönstret öppnas FÖRE await — ett window.open efter en väntan blockeras.
+            var w = window.open('about:blank', '_blank');
+            id = await chargeIdFor(memberId);
+            if (!id) { if (w) w.close(); return; }
+            if (w) w.location = F + 'PreviewClubPaymentRequest?chargeId=' + id;
+            if (!row.charge) load();
+            return;
+        }
+        if (act === 'link') {
+            id = await chargeIdFor(memberId); if (!id) return;
+            r = await (await fetch(F + 'GetPaymentLink?chargeId=' + id, { cache: 'no-store' })).json();
+            if (!r.success) { msg(false, r.message); return; }
+            try { await navigator.clipboard.writeText(r.url); msg(true, 'Betallänken för ' + row.name + ' är kopierad.'); }
+            catch (x) { msg(true, 'Betallänk för ' + row.name + ': ' + r.url); }
+            load();
+            return;
+        }
+        if (act === 'send-one') {
+            id = await chargeIdFor(memberId); if (!id) return;
+            report(await form('SendPaymentRequests', { clubId: CLUB_ID, year: year(), chargeIds: String(id) }));
+            load();
+            return;
+        }
+
+        a.disabled = true;
+        if (act === 'paid') {
+            id = await chargeIdFor(memberId);
+            r = id ? await form('MarkPaid', { chargeId: id }) : null;
+        } else if (act === 'unpaid') {
+            r = await form('MarkUnpaid', { chargeId: row.charge.id });
+        } else { a.disabled = false; return; }
+
+        if (!r || !r.success) { if (r) msg(false, r.message); a.disabled = false; if (!row.charge) load(); return; }
+        msg(true, '');
+        load();
+    });
+
+    // ── Skicka och påminn ───────────────────────────────────────────────────────────────
+    if ($('cfSend')) $('cfSend').addEventListener('click', async function () {
+        var list = (data.rows || []).filter(function (r) { var s = stateOf(r); return s.billable && !s.paid && !s.sent && r.hasEmail; });
+        if (list.length === 0) return;
+        var sum = list.reduce(function (a, r) { return a + stateOf(r).amount; }, 0);
+        if (!window.confirm('Mejla medlemsavgiften ' + year() + ' till ' + list.length + ' medlemmar, totalt ' + kr(sum) + '?')) return;
+        // Medlemmar som ingen rört har ingen avgift än — den skapas nu, ur samma regel som listan visar.
+        var g = await form('GenerateCharges', { clubId: CLUB_ID, year: year() });
+        if (!g.success) { msg(false, g.message); return; }
+        report(await form('SendPaymentRequests', { clubId: CLUB_ID, year: year(), mode: 'unsent' }));
+        load();
+    });
+    if ($('cfRemind')) $('cfRemind').addEventListener('click', async function () {
+        if (!window.confirm('Mejla en påminnelse till medlemmarna som inte betalat?')) return;
+        report(await form('SendPaymentRequests', { clubId: CLUB_ID, year: year(), mode: 'reminder' }));
+        load();
+    });
+
+    // ⚠️ Beskedet säger vad som FAKTISKT hände.
+    function report(s) {
+        if (!s || !s.success) { msg(false, 'Mejlen gick inte att skicka. ' + ((s && s.message) || '')); return; }
+        var parts = [s.sent + (s.sent === 1 ? ' medlem fick' : ' medlemmar fick') + ' ett mejl.'];
+        var missed = (s.noEmail || []).concat(s.failed || []);
+        if (missed.length > 0) parts.push('Inget mejl gick till ' + missed.join(', ') + '. Välj Åtgärder → Kopiera betallänk på raden och skicka länken själv.');
+        msg(true, parts.join(' '), missed.length > 0 ? 'warn' : 'ok');
+    }
+
+    var now = new Date().getFullYear();
+    for (var y = now + 1; y >= now - 3; y--) {
+        var o = document.createElement('option');
+        o.value = y; o.textContent = y; if (y === now) o.selected = true;
+        $('cfYear').appendChild(o);
+    }
+    $('cfYear').addEventListener('change', function () { msg(true, ''); load(); });
 
     // Laddas lat när ekonomisidans rälspost öppnas.
-    window.hpskLoadClubFees = function () { feeInitYears(); window.feeLoadOverview(); };
+    window.hpskLoadClubFees = load;
 })();
 </script>

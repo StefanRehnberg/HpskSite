@@ -65,7 +65,16 @@ namespace HpskSite.Services
 
             if (cat.Id > 0)
             {
-                db.Update(cat);
+                // ⚠️ Ändra den BEFINTLIGA raden. Anroparen bygger en ny POCO utan CreatedDate, och en
+                //    Update med den föll på NOT NULL — att ändra en avgift har alltså aldrig fungerat
+                //    (den gamla ytan kunde bara lägga till). Blottat av dialogen 2026-09-23.
+                var existing = db.SingleOrDefaultById<MembershipFeeCategory>(cat.Id);
+                if (existing is null || existing.ClubId != cat.ClubId) return cat;
+                existing.MembershipType = cat.MembershipType;
+                existing.Label = cat.Label;
+                existing.Amount = cat.Amount;
+                db.Update(existing);
+                return existing;
             }
             else
             {
@@ -73,6 +82,13 @@ namespace HpskSite.Services
                 db.Insert(cat);
             }
             return cat;
+        }
+
+        /// <summary>Vilket år en avgiftskategori gäller (null om den inte finns).</summary>
+        public int? GetCategoryYear(int id)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.SingleOrDefaultById<MembershipFeeCategory>(id)?.Year;
         }
 
         public bool DeleteCategory(int id)
@@ -168,116 +184,73 @@ namespace HpskSite.Services
             var db = scope.Database;
 
             var categories = db.Fetch<MembershipFeeCategory>(
-                "SELECT * FROM MembershipFeeCategory WHERE ClubId = @0 AND Year = @1", clubId, year);
+                "SELECT * FROM MembershipFeeCategory WHERE ClubId = @0 AND Year = @1 AND IssuerType = 0", clubId, year);
             if (categories.Count == 0) return 0;
 
-            // Case-insensitive lookup: membershipType -> category.
-            var catByType = new Dictionary<string, MembershipFeeCategory>(StringComparer.OrdinalIgnoreCase);
-            foreach (var c in categories)
-                if (!string.IsNullOrWhiteSpace(c.MembershipType))
-                    catByType[c.MembershipType.Trim()] = c;
+            // ⚠️ SAMMA förslag som listan visar (ClubFeeProposal) — skapandet får aldrig räkna själv.
+            var proposal = ClubFeeProposal.Build(categories, members);
 
-            // Members that already have a charge this year (skip them).
-            var existingMemberIds = db.Fetch<int>(
-                "SELECT MemberId FROM MembershipFeeCharge WHERE ClubId = @0 AND Year = @1", clubId, year)
-                .ToHashSet();
-
-            var memberList = members.ToList();
+            var existing = db.Fetch<MembershipFeeCharge>(
+                    "SELECT * FROM MembershipFeeCharge WHERE ClubId = @0 AND Year = @1 AND IssuerType = 0", clubId, year)
+                .ToDictionary(c => c.MemberId);
             var created = 0;
 
-            // Household groups: members with a non-empty HouseholdId, billed together.
-            var households = memberList
-                .Where(m => !string.IsNullOrWhiteSpace(m.HouseholdId))
-                .GroupBy(m => m.HouseholdId!.Trim(), StringComparer.OrdinalIgnoreCase)
-                .Where(g => g.Count() > 1); // a lone member in a "household" is just an individual
-
-            var householdMemberIds = new HashSet<int>();
-            foreach (var group in households)
+            MembershipFeeCharge Insert(ClubFeeProposalRow p, decimal amount, int? coveredBy)
             {
-                // Primary = the flagged member, else the lowest MemberId (deterministic).
-                var primary = group.FirstOrDefault(m => m.HouseholdPrimary)
-                              ?? group.OrderBy(m => m.MemberId).First();
-                var primaryType = (primary.MembershipType ?? "").Trim();
-                if (string.IsNullOrEmpty(primaryType) || !catByType.TryGetValue(primaryType, out var famCat))
-                    continue; // no category for the household's membership type → leave as individuals
-
-                foreach (var m in group) householdMemberIds.Add(m.MemberId);
-
-                // Ensure the primary has a charge, and capture its id to link the covered members.
-                int primaryChargeId;
-                var existingPrimary = db.FirstOrDefault<MembershipFeeCharge>(
-                    "SELECT * FROM MembershipFeeCharge WHERE MemberId = @0 AND ClubId = @1 AND Year = @2",
-                    primary.MemberId, clubId, year);
-                if (existingPrimary != null)
-                {
-                    primaryChargeId = existingPrimary.Id;
-                }
-                else
-                {
-                    var primaryCharge = new MembershipFeeCharge
-                    {
-                        MemberId = primary.MemberId,
-                        ClubId = clubId,
-                        Year = year,
-                        CategoryId = famCat.Id,
-                        Amount = famCat.Amount,
-                        PaymentStatus = "Pending",
-                        CreatedDate = DateTime.UtcNow
-                    };
-                    db.Insert(primaryCharge);
-                    primaryChargeId = primaryCharge.Id;
-                    existingMemberIds.Add(primary.MemberId);
-                    created++;
-                }
-
-                // Covered members: 0 kr charge referencing the primary's charge.
-                foreach (var m in group)
-                {
-                    if (m.MemberId == primary.MemberId) continue;
-                    if (existingMemberIds.Contains(m.MemberId)) continue;
-                    var covered = new MembershipFeeCharge
-                    {
-                        MemberId = m.MemberId,
-                        ClubId = clubId,
-                        Year = year,
-                        CategoryId = famCat.Id,
-                        Amount = 0m,
-                        PaymentStatus = "Pending",
-                        HouseholdCoveredByChargeId = primaryChargeId,
-                        CreatedDate = DateTime.UtcNow
-                    };
-                    db.Insert(covered);
-                    existingMemberIds.Add(m.MemberId);
-                    created++;
-                }
-            }
-
-            // Individuals (no household, or household without a matching category).
-            foreach (var m in memberList)
-            {
-                if (householdMemberIds.Contains(m.MemberId)) continue;
-                if (existingMemberIds.Contains(m.MemberId)) continue;
-
-                var type = (m.MembershipType ?? "").Trim();
-                if (string.IsNullOrEmpty(type)) continue;
-                if (!catByType.TryGetValue(type, out var cat)) continue; // no matching category → skip
-
                 var charge = new MembershipFeeCharge
                 {
-                    MemberId = m.MemberId,
+                    MemberId = p.MemberId,
                     ClubId = clubId,
                     Year = year,
-                    CategoryId = cat.Id,
-                    Amount = cat.Amount,
+                    CategoryId = p.CategoryId,
+                    Amount = amount,
                     PaymentStatus = "Pending",
+                    HouseholdCoveredByChargeId = coveredBy,
                     CreatedDate = DateTime.UtcNow
                 };
                 db.Insert(charge);
-                existingMemberIds.Add(m.MemberId);
+                existing[p.MemberId] = charge;
                 created++;
+                return charge;
+            }
+
+            // Huvudmedlemmar och individer först, så att de som ingår i ett hushåll kan peka på dem.
+            foreach (var p in proposal.Values.Where(p => p.Kind is ClubFeeKind.Individual or ClubFeeKind.HouseholdPrimary))
+                if (!existing.ContainsKey(p.MemberId)) Insert(p, p.Amount, null);
+
+            foreach (var p in proposal.Values.Where(p => p.Kind == ClubFeeKind.Covered))
+            {
+                if (existing.ContainsKey(p.MemberId)) continue;
+                if (p.PrimaryMemberId is not int primary || !existing.TryGetValue(primary, out var primaryCharge)) continue;
+                Insert(p, 0m, primaryCharge.Id);
             }
 
             return created;
+        }
+
+        /// <summary>
+        /// Tar bort klubbens OSKICKADE, obetalda avgifter för året — anropas när avgiften per
+        /// medlemstyp ändras.
+        ///
+        /// <para><b>⚠️ En oskickad avgift följer inställningen</b>, precis som kretsavgiften: ingen
+        /// medlem har fått den, så den ska räknas om. Listan visar förslaget igen, och avgiften skapas
+        /// på nytt vid utskicket. Skickade, betalda och de medlemmen sagt sig ha betalat rörs aldrig.</para>
+        /// </summary>
+        public int ClearUnsentClubCharges(int clubId, int year)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            // Hushållens "ingår"-rader först — de pekar på huvudmedlemmens avgift.
+            var covered = scope.Database.Execute(
+                @"DELETE FROM MembershipFeeCharge WHERE IssuerType = 0 AND ClubId = @0 AND Year = @1
+                    AND RequestSentDate IS NULL AND PaymentStatus <> 'Paid' AND PaymentSentDate IS NULL
+                    AND HouseholdCoveredByChargeId IS NOT NULL", clubId, year);
+            var rest = scope.Database.Execute(
+                @"DELETE c FROM MembershipFeeCharge c WHERE c.IssuerType = 0 AND c.ClubId = @0 AND c.Year = @1
+                    AND c.RequestSentDate IS NULL AND c.PaymentStatus <> 'Paid' AND c.PaymentSentDate IS NULL
+                    AND c.HouseholdCoveredByChargeId IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM MembershipFeeCharge x WHERE x.HouseholdCoveredByChargeId = c.Id)",
+                clubId, year);
+            return covered + rest;
         }
 
         /// <summary>
@@ -501,12 +474,12 @@ namespace HpskSite.Services
             });
 
         /// <summary>Markerar att betalningsuppmaningen gått ut. Första datumet står kvar vid påminnelser.</summary>
-        public void MarkRegionRequestSent(int chargeId)
+        public void MarkRequestSent(int chargeId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             scope.Database.Execute(
-                "UPDATE MembershipFeeCharge SET RequestSentDate = @1 WHERE Id = @0 AND IssuerType = @2 AND RequestSentDate IS NULL",
-                chargeId, DateTime.UtcNow, MembershipFeeIssuer.Region);
+                "UPDATE MembershipFeeCharge SET RequestSentDate = @1 WHERE Id = @0 AND RequestSentDate IS NULL",
+                chargeId, DateTime.UtcNow);
         }
 
         /// <summary>

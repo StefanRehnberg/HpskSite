@@ -5030,8 +5030,24 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
   `GetRegionOverview` och `PreviewRegionPaymentRequest` godtar LÄSRÄTT (`LedgerAccessService` — styrelsen,
   revisorn), och partialerna har ett läsläge (`ViewData["feesReadOnly"]`) utan en enda skrivknapp. I en
   sandlåda visas en förklaring i stället för listan — avgifterna finns bara i den riktiga bokföringen.
-  ⚠️ Klubbens yta är flyttad men INTE omgjord (samma gamla form som kretsavgiften hade före Ove-omgången).
-  Kretsavgiftsytan: **⚠️⚠️ Byggd för "Ove, 70, lekmannakassör"** — TRE utsågor underkändes (Stefan 2026-09-23):
+  **⚠️⚠️ BÅDA YTORNA HAR SAMMA FORM, OCH DET ÄR SAJTENS FORM** (Stefan 2026-09-23: *"jag gillar inte att det
+  grafiska språket har ändrats"* — understrukna klickbara tal, en "Ändra"-länk och knappar under listan fanns
+  ingen annanstans). Förlagan är Klubbvapen/Anmälningar: **EN blå Åtgärder uppe till höger**
+  (`btn-primary shadow`, `bi-sliders`, grupperna *Skicka* och *Inställningar*), per rad **[Betald] + grå
+  Åtgärder**, och **ändringar och inställningar i en MODAL**. På sidan står inställningen bara som text.
+  **Medlemsavgifter** har samma form som kretsavgiften: en rad per aktiv medlem med förslaget ur
+  **`ClubFeeProposal.Build`** — EN regel för listan OCH skapandet (`GenerateChargesForClub` använder den), så
+  de kan inte säga olika saker; familjen betalar via huvudmedlemmen, övriga "ingår". "Generera" finns inte
+  som begrepp: avgiften skapas vid Skicka eller när raden rörs (`EnsureClubCharge`, hela hushållet).
+  En ändrad avgift per medlemstyp tar bort klubbens **oskickade** avgifter (`ClearUnsentClubCharges`), så att
+  de räknas om. ⚠️ `SaveCategory` kunde aldrig UPPDATERA en kategori (NOT NULL CreatedDate) — rättat; den
+  gamla ytan kunde bara lägga till. Mejlet (`SendMembershipFeeRequestAsync`) returnerar nu `bool` och har en
+  förhandsvisning (`PreviewClubPaymentRequest`); fotnoten "Svara ej" är borttagen (svaret går till klubben).
+  ⚠️ Klubbens befintliga avgifter fick `RequestSentDate = CreatedDate` av migreringen (inne i samma IF som
+  kolumnen), så en ändrad avgift aldrig raderar en redan mejlad betallänk.
+  ⚠️ Båda vyerna kastar ett svar som kommer efter ett årsbyte (`loadSeq`) — annars står förra årets siffror
+  under det nya året. Hittat av sviten, inte av ögat.
+  Kretsavgiftsytan: **⚠️⚠️ Byggd för "Ove, 70, lekmannakassör"** — FYRA utsågor underkändes (Stefan 2026-09-23):
   "obegripliga, röriga, för mycket text", och sedan: *"sidan blir helt förändrad så fort jag skickat
   mejl — först DÅ dyker en konstig symbol och en Betald-knapp upp; varför fanns de inte innan?"*
   Läs vyns huvudkommentar innan du lägger till något:
@@ -5053,8 +5069,8 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
   - **Två knappar, två urval:** "Skicka avgiften till N klubbar" = `mode: unsent` (efter att
     orörda klubbar fått sin avgift via `GenerateRegionCharges`); "Påminn N klubbar" = `mode: reminder`.
     `ChargeIds` = en enda klubb ("Skicka mejlet nu"). 0 kr skickas aldrig.
-  - **Taxan är EN MENING**; fälten syns bara när den sätts eller ändras. Ett tal ändras genom att
-    klicka på det. Ett ändrat antal visar "registret: N". Ordet "krav" står inte på sidan.
+  - **Taxan är EN MENING** (ren text); den ändras i en dialog via sidans Åtgärder. Antal och belopp ändras
+    i en dialog via radens Åtgärder. Ett ändrat antal visar "registret: N". Ordet "krav" står inte på sidan.
   - **Telefon:** status och knappar får en egen rad under klubben (`tr.rf-mrow`); knapparna finns
     därför två gånger i DOM:en — `td.rf-actions` är datorns.
   - ⚠️ `load()` rör inte beskedet — det körs direkt efter Skicka.
@@ -5075,8 +5091,8 @@ genererar `SET IssuerType = …` i varje uppdatering av en avgift så snart POCO
 kolumnerna faller **varje klubbs "Markera betald"**, inte bara kretsens. Körd i dev 2026-09-23;
 **EJ körd i prod.** Fildeploy av `KnowledgeBase/docs/kretsavgift.md` (ny). Adds C# → full ombyggnad.
 
-Verifierat **18 enhetstest** (`RegionFeeCalculatorTests`; hela sviten 1447/1447) och **140/140
-`hpsk-verify/kretsavgift-verify.mjs`**, två körningar i rad (avsnitt 5b prövar den oskickade avgiften,
+Verifierat **18 enhetstest** (`RegionFeeCalculatorTests`; hela sviten 1447/1447) och **144/144
+`hpsk-verify/kretsavgift-verify.mjs`** (+ **28/28 `medlemsavgift-yta-verify.mjs`** för klubbens yta), två körningar i rad (avsnitt 5b prövar den oskickade avgiften,
 avsnitt 10 att varje rad bär Åtgärder och Betald oavsett läge — **A/B mot den tidigare vyn: 7 faller**,
 exakt Stefans klagomål). Sviten hittade att `load()`
 tömde beskedet efter Skicka — och att påståendet "Ronneby mejlades inte igen" var vakuöst grönt på
