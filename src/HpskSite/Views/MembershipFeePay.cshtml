@@ -48,6 +48,15 @@
         table.bg { margin: 0 auto 8px; border-collapse: collapse; font-size: 15px; text-align: left; }
         table.bg td { padding: 3px 12px 3px 0; }
         table.bg td:first-child { color: var(--muted); }
+        .types { max-width: 320px; margin: 8px auto 0; text-align: left; }
+        .type-opt { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line);
+                    border-radius: 10px; margin-bottom: 8px; cursor: pointer; font-size: 16px; }
+        .type-opt input { width: 20px; height: 20px; margin: 0; }
+        .type-kr { margin-left: auto; color: var(--muted); white-space: nowrap; }
+        .types .btn { display: block; width: 100%; margin: 12px 0 0; }
+        details.change-type { margin: 4px 0 16px; }
+        details.change-type summary { color: var(--accent); cursor: pointer; font-size: 14px; }
+        .saved { background:#e8f5ec; border:1px solid #b7e0c4; color: var(--ok); border-radius: 10px; padding: 10px 14px; font-size: 15px; }
     </style>
 </head>
 <body>
@@ -92,9 +101,68 @@
                 <div class="paid-box">Betald för @Model.Year ✓</div>
                 <p class="notice">@(Model.IsRegionFee ? "Kretsavgiften är registrerad som betald. Tack!" : "Din medlemsavgift är registrerad som betald. Tack!")</p>
             }
+            else if (Model.NeedsTypeChoice)
+            {
+                @* ⚠️⚠️ MEDLEMMEN SAKNAR MEDLEMSTYP (Stefan 2026-09-23): sidan börjar med valet, och inget
+                   belopp eller betalsätt visas förrän det är gjort — ett 0 kr-belopp läses som "gratis". *@
+                @if (!string.IsNullOrEmpty(Model.ChoiceError))
+                {
+                    <div class="warn">@Model.ChoiceError</div>
+                }
+                @if (Model.CanChooseType)
+                {
+                    <h2 class="pay-h">Välj din medlemstyp</h2>
+                    <p class="notice" style="margin-top:0">Klubben har ingen medlemstyp registrerad för dig. Välj den som gäller, så visas din avgift.</p>
+                    <form method="post" action="/medlemsavgift/@Model.Token/medlemstyp" class="types">
+                        @foreach (var o in Model.TypeOptions)
+                        {
+                            <label class="type-opt"><input type="radio" name="membershipType" value="@o.Type" required />
+                                <span>@o.Label</span><span class="type-kr">@Kr(o.Amount)</span></label>
+                        }
+                        <button type="submit" class="btn btn-swish" style="margin-top:12px">Välj och visa avgiften</button>
+                    </form>
+                    <p class="hint">Är du osäker på vilken medlemstyp som gäller — svara på mejlet från klubben.</p>
+                }
+                else
+                {
+                    <div class="warn">Klubben har inte angett din medlemstyp ännu. Kontakta klubben, så får du din avgift.</div>
+                }
+            }
             else
             {
-                <div class="amount">@Kr(Model.Amount)</div>
+                @if (Model.ChoiceSaved)
+                {
+                    <p class="saved">Medlemstypen är sparad: <strong>@Model.CurrentTypeLabel</strong>.</p>
+                }
+                <div class="amount" id="belopp">@Kr(Model.Amount)</div>
+
+                @if (!Model.IsRegionFee && !string.IsNullOrEmpty(Model.CurrentTypeLabel))
+                {
+                    <p class="notice" style="margin-top:-12px">Medlemstyp: <strong>@Model.CurrentTypeLabel</strong>@(Model.MemberChoseType ? " (vald av dig)" : "")</p>
+                    @if (!string.IsNullOrEmpty(Model.ChoiceError))
+                    {
+                        <div class="warn">@Model.ChoiceError</div>
+                    }
+                    @if (Model.CanChooseType && Model.TypeOptions.Count > 1)
+                    {
+                        <details class="change-type" @(string.IsNullOrEmpty(Model.ChoiceError) ? "" : "open")>
+                            <summary>Fel medlemstyp? Välj rätt</summary>
+                            <form method="post" action="/medlemsavgift/@Model.Token/medlemstyp" class="types">
+                                @foreach (var o in Model.TypeOptions)
+                                {
+                                    <label class="type-opt"><input type="radio" name="membershipType" value="@o.Type" required checked="@o.Current" />
+                                        <span>@o.Label</span><span class="type-kr">@Kr(o.Amount)</span></label>
+                                }
+                                <button type="submit" class="btn" style="margin-top:12px">Spara medlemstypen</button>
+                            </form>
+                            <p class="hint">Avgiften räknas om direkt. Klubben ser att du valt medlemstypen själv.</p>
+                        </details>
+                    }
+                    else if (!string.IsNullOrEmpty(Model.TypeLockedReason) && !Model.PaymentClaimed)
+                    {
+                        <p class="hint">@Model.TypeLockedReason</p>
+                    }
+                }
 
                 @* ⚠️⚠️ SWISH ELLER BANKGIRO — många klubbar och kretsar betalar via bankgiro (Stefan
                    2026-09-23). Båda visas när föreningen har båda, och "Jag har betalat" gäller båda.

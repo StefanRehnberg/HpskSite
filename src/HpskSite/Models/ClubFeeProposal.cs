@@ -14,7 +14,12 @@ namespace HpskSite.Models
         /// <summary>Klubben har ingen avgift för medlemmens medlemstyp i år.</summary>
         NoCategory,
         /// <summary>Medlemmen saknar medlemstyp i klubbens register.</summary>
-        NoType
+        NoType,
+        /// <summary>
+        /// Medlemmen saknar medlemstyp men kan välja en själv på betalsidan (klubben har typer
+        /// medlemmen får välja, och medlemmen står inte i ett hushåll). Beloppet är okänt tills dess.
+        /// </summary>
+        ChooseType
     }
 
     public record ClubFeeProposalRow(int MemberId, ClubFeeKind Kind, decimal Amount, int? CategoryId,
@@ -43,12 +48,16 @@ namespace HpskSite.Models
 
             var list = members.ToList();
             var result = new Dictionary<int, ClubFeeProposalRow>();
+            var anySelectable = catByType.Values.Any(c => c.MemberSelectable);
+            // ⚠️ En medlem i ett hushåll väljer aldrig själv — familjen är klubbens att koppla ihop.
+            var inHousehold = new HashSet<int>();
 
             foreach (var group in list
                          .Where(m => !string.IsNullOrWhiteSpace(m.HouseholdId))
                          .GroupBy(m => m.HouseholdId!.Trim(), StringComparer.OrdinalIgnoreCase)
                          .Where(g => g.Count() > 1))
             {
+                foreach (var m in group) inHousehold.Add(m.MemberId);
                 var primary = group.FirstOrDefault(m => m.HouseholdPrimary) ?? group.OrderBy(m => m.MemberId).First();
                 var type = (primary.MembershipType ?? "").Trim();
                 if (type.Length == 0 || !catByType.TryGetValue(type, out var fam)) continue;
@@ -64,7 +73,9 @@ namespace HpskSite.Models
             {
                 var type = (m.MembershipType ?? "").Trim();
                 if (type.Length == 0)
-                    result[m.MemberId] = new ClubFeeProposalRow(m.MemberId, ClubFeeKind.NoType, 0m, null, null, null);
+                    result[m.MemberId] = new ClubFeeProposalRow(m.MemberId,
+                        anySelectable && !inHousehold.Contains(m.MemberId) ? ClubFeeKind.ChooseType : ClubFeeKind.NoType,
+                        0m, null, null, null);
                 else if (!catByType.TryGetValue(type, out var cat))
                     result[m.MemberId] = new ClubFeeProposalRow(m.MemberId, ClubFeeKind.NoCategory, 0m, null, type, null);
                 else

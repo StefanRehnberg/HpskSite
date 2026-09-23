@@ -2552,19 +2552,25 @@ namespace HpskSite.Services
             MailReplyTo replyTo,
             string? bgNumber = null,
             string? reference = null,
-            bool hasSwish = true)
+            bool hasSwish = true,
+            string? typeLabel = null,
+            bool needsTypeChoice = false,
+            bool canChooseType = false)
         {
             // ⚠️ Returnerar om mejlet FAKTISKT skickades — ytan markerar avgiften som skickad bara då.
-            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference, hasSwish);
+            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference, hasSwish,
+                typeLabel, needsTypeChoice, canChooseType);
             return await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>Exakt det mejl <see cref="SendMembershipFeeRequestAsync"/> skickar, utan att skicka.</summary>
         public RegionFeeMailPreview PreviewMembershipFeeRequest(
             string memberEmail, string memberName, string clubName, int year, decimal amount, string payUrl, MailReplyTo replyTo,
-            string? bgNumber = null, string? reference = null, bool hasSwish = true)
+            string? bgNumber = null, string? reference = null, bool hasSwish = true,
+            string? typeLabel = null, bool needsTypeChoice = false, bool canChooseType = false)
         {
-            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference, hasSwish);
+            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl, bgNumber, reference, hasSwish,
+                typeLabel, needsTypeChoice, canChooseType);
             var reply = ResolveReplyAddress(replyTo);
             return new RegionFeeMailPreview
             {
@@ -2582,11 +2588,35 @@ namespace HpskSite.Services
         /// svarsfoten säger det. De två raderna sa emot varandra.
         /// </summary>
         private static (string Subject, string Body) BuildMembershipFeeRequestBody(
-            string memberName, string clubName, int year, decimal amount, string payUrl, string? bgNumber, string? reference, bool hasSwish)
+            string memberName, string clubName, int year, decimal amount, string payUrl, string? bgNumber, string? reference, bool hasSwish,
+            string? typeLabel, bool needsTypeChoice, bool canChooseType)
         {
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
             var amountLabel = Math.Round(amount).ToString("N0", sv) + " kr";
-            var payBlock = PaymentOptionsMailBlock(payUrl, hasSwish, bgNumber, clubName, amountLabel, reference);
+            var enc = new Func<string, string>(System.Net.WebUtility.HtmlEncode);
+            const string btn = "display:inline-block;background:#0d6efd;color:#fff;text-decoration:none;padding:11px 20px;border-radius:6px;font-size:15px";
+
+            // ⚠️⚠️ MEDLEMSTYPEN (Stefan 2026-09-23). Saknas den ska medlemmen VÄLJA på betalsidan — mejlet visar
+            //    då inget belopp och inga betalsätt (ett 0 kr-belopp läses som "gratis"). Finns den står den
+            //    intill beloppet, med en väg att rätta den när klubben låter medlemmen välja.
+            string amountBlock, payBlock;
+            if (needsTypeChoice)
+            {
+                amountBlock = "";
+                payBlock = canChooseType
+                    ? "<p>Klubben har ingen medlemstyp registrerad för dig. Öppna betalsidan och välj din medlemstyp — då ser du avgiften och kan betala med en gång.</p>"
+                      + $"<p><a href='{payUrl}' style='{btn}'>Välj medlemstyp och betala</a></p>"
+                    : "<p>Klubben har ingen medlemstyp registrerad för dig. Svara på det här mejlet, så får du din avgift.</p>";
+            }
+            else
+            {
+                amountBlock = $"<div class='amount'>{amountLabel}</div>"
+                    + (string.IsNullOrWhiteSpace(typeLabel) ? "" :
+                       $"<p style='margin-top:-8px'>Avgiften gäller medlemstypen <strong>{enc(typeLabel)}</strong>."
+                       + (canChooseType ? $" Stämmer det inte kan du <a href='{payUrl}'>välja rätt medlemstyp på betalsidan</a>." : "")
+                       + "</p>");
+                payBlock = PaymentOptionsMailBlock(payUrl, hasSwish, bgNumber, clubName, amountLabel, reference);
+            }
             var subject = $"Medlemsavgift {year} – {clubName}";
 
             var body = $@"<html>
@@ -2609,7 +2639,7 @@ namespace HpskSite.Services
             <p>Hej {System.Net.WebUtility.HtmlEncode(memberName)}!</p>
             <p>Det är dags att betala medlemsavgiften till
                <strong>{System.Net.WebUtility.HtmlEncode(clubName)}</strong> för {year}.</p>
-            <div class='amount'>{amountLabel}</div>
+            {amountBlock}
             {payBlock}
             <p style='font-size:13px;color:#6c757d;'>När du har betalat kan du trycka <em>Jag har betalat</em> på betalsidan. Har du redan betalat ser du det där.</p>
         </div>

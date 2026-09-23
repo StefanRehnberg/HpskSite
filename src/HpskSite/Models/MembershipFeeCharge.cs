@@ -82,6 +82,22 @@ namespace HpskSite.Models
         public bool IsRequestSent => RequestSentDate.HasValue;
 
         /// <summary>
+        /// Medlemstypen MEDLEMMEN själv valde på betalsidan (null = klubbens register gällde).
+        /// Finns för att kassören ska se att valet gjordes av medlemmen — det är ett förtroendesystem,
+        /// men inte ett osynligt.
+        /// </summary>
+        public string? MemberChosenType { get; set; }
+        public DateTime? MemberChosenAt { get; set; }
+
+        /// <summary>
+        /// Medlemmen saknar medlemstyp och ska välja en på betalsidan innan beloppet är känt.
+        /// Avgiften finns då med 0 kr och utan kategori — aldrig "gratis".
+        /// </summary>
+        [Ignore]
+        public bool NeedsTypeChoice =>
+            !IsRegionFee && CategoryId == null && Amount == 0 && HouseholdCoveredByChargeId == null && PaymentStatus != "Paid";
+
+        /// <summary>
         /// Referensen vid betalning via bankgiro — "KA2026-123" (kretsavgift) / "MA2026-123"
         /// (medlemsavgift). <b>EN plats</b>: betalsidan, bankgiro-QR:en och mejlet visar samma, annars
         /// går en inbetalning inte att para ihop med avgiften. Max 25 tecken (bankgiro-QR:ens iref).
