@@ -384,7 +384,13 @@ namespace HpskSite.Controllers
             // ⚠️ Nollkraven SÄGS. Utan det ser en klubb som inte fick något krav ut att ha glömts bort.
             if (result.SkippedZero > 0) parts.Add($"{result.SkippedZero} klubbar fick ingen avgift eftersom beloppet blev 0 kr.");
 
-            return Json(new { success = true, created = result.Created, message = string.Join(" ", parts) });
+            return Json(new
+            {
+                success = true,
+                created = result.Created,
+                createdChargeIds = result.CreatedChargeIds,
+                message = string.Join(" ", parts)
+            });
         }
 
         [HttpPost]
@@ -435,7 +441,7 @@ namespace HpskSite.Controllers
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SendRegionPaymentRequests([FromBody] RegionRateRequest request)
+        public async Task<IActionResult> SendRegionPaymentRequests([FromBody] RegionSendRequest request)
         {
             if (request is null) return Json(new { success = false, message = "Inget att skicka." });
             var region = await AuthorizeRegionAsync(request.RegionId);
@@ -446,9 +452,14 @@ namespace HpskSite.Controllers
             var noEmail = new List<string>();
             var failed = new List<string>();
 
+            // ⚠️ Med ChargeIds mejlas BARA de avgifterna (de som just skapades). Utan listan mejlas
+            //    alla obetalda — det är påminnelsen, och den är ett eget, uttryckligt val i ytan.
+            var only = request.ChargeIds is { Count: > 0 } ? request.ChargeIds.ToHashSet() : null;
+
             foreach (var charge in _feeService.GetChargesForRegionYear(request.RegionId, request.Year))
             {
                 if (charge.PaymentStatus == "Paid") continue;
+                if (only is not null && !only.Contains(charge.Id)) continue;
 
                 var club = _clubService.GetClubById(charge.PayerClubId ?? 0);
                 var name = charge.PayerClubName ?? club?.Name ?? $"Klubb {charge.PayerClubId}";
@@ -601,6 +612,15 @@ namespace HpskSite.Controllers
         public int Year { get; set; }
         public decimal BaseAmount { get; set; }
         public decimal PerMember { get; set; }
+    }
+
+    public class RegionSendRequest
+    {
+        public int RegionId { get; set; }
+        public int Year { get; set; }
+
+        /// <summary>Tom = alla obetalda (påminnelse). Satt = bara de här avgifterna.</summary>
+        public List<int>? ChargeIds { get; set; }
     }
 
     public class RegionGenerateRequest

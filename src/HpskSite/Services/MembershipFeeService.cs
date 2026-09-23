@@ -486,6 +486,7 @@ namespace HpskSite.Services
 
                 existing.Add(club.ClubId);
                 result.Created++;
+                result.CreatedChargeIds.Add(charge.Id);
                 result.TotalAmount += charge.Amount;
             }
 
@@ -625,6 +626,13 @@ namespace HpskSite.Services
     public class RegionFeeGenerateResult
     {
         public int Created { get; set; }
+
+        /// <summary>
+        /// De avgifter som skapades nu — så att ytan kan mejla JUST dem. "Skicka" ska inte mejla om
+        /// klubbar som redan fått sin avgift; det är en påminnelse, och den är ett eget val.
+        /// </summary>
+        public List<int> CreatedChargeIds { get; } = new();
+
         public int SkippedExisting { get; set; }
         public int SkippedZero { get; set; }
         public decimal TotalAmount { get; set; }
