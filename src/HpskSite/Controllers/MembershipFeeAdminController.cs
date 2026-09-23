@@ -13,6 +13,7 @@ using Umbraco.Extensions;
 using HpskSite.Models;
 using HpskSite.Services.Mail;
 using HpskSite.Services;
+using HpskSite.Services.Ledger;
 
 namespace HpskSite.Controllers
 {
@@ -32,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly EmailService _emailService;
         private readonly ReplyContactResolver _replyContacts;
+        private readonly LedgerAccessService _ledgerAccess;
         private readonly IDataProtector _protector;
         private readonly ILogger<MembershipFeeAdminController> _logger;
 
@@ -53,6 +55,7 @@ namespace HpskSite.Controllers
             ClubService clubService,
             EmailService emailService,
             ReplyContactResolver replyContacts,
+            LedgerAccessService ledgerAccess,
             IDataProtectionProvider dataProtectionProvider,
             ILogger<MembershipFeeAdminController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -65,6 +68,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _emailService = emailService;
             _replyContacts = replyContacts;
+            _ledgerAccess = ledgerAccess;
             _protector = dataProtectionProvider.CreateProtector(ProtectorPurpose);
             _logger = logger;
         }
@@ -74,7 +78,9 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetOverview(int clubId, int year)
         {
-            if (!await _auth.IsClubAdminForClub(clubId))
+            // ⚠️ LÄSRÄTT räcker (styrelsen, revisorn) — ytan bor på ekonomisidan, där styrelsen läser
+            //    och kassören skriver. Samma upplösning som sidan själv (LedgerAccessService).
+            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, clubId)).CanRead)
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             var categories = _feeService.GetCategories(clubId, year);
@@ -274,7 +280,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetRegionOverview(int regionId, int year)
         {
-            var region = await AuthorizeRegionAsync(regionId);
+            var region = await AuthorizeRegionAsync(regionId, readOnly: true);
             if (region is null) return Json(new { success = false, message = "Åtkomst nekad" });
 
             var (baseAmount, perMember) = _feeService.GetRegionRate(regionId, year);
@@ -556,7 +562,7 @@ namespace HpskSite.Controllers
             var charge = chargeId == 0 ? null : _feeService.GetCharge(chargeId);
             if (charge is null || !charge.IsRegionFee)
                 return Content("Kravet hittades inte.");
-            var region = await AuthorizeRegionAsync(charge.RegionId ?? 0);
+            var region = await AuthorizeRegionAsync(charge.RegionId ?? 0, readOnly: true);
             if (region is null) return Content("Åtkomst nekad.");
 
             var club = _clubService.GetClubById(charge.PayerClubId ?? 0);
@@ -605,7 +611,7 @@ namespace HpskSite.Controllers
         /// noden</b> och skickas som den står: <c>IsRegionalAdminForRegion</c> jämför gruppnamnet
         /// EXAKT, och en gemenad kod hade nekats och sett ut som ett behörighetsfel.
         /// </summary>
-        private async Task<(int Id, string Code, string Name)?> AuthorizeRegionAsync(int regionId)
+        private async Task<(int Id, string Code, string Name)?> AuthorizeRegionAsync(int regionId, bool readOnly = false)
         {
             if (regionId <= 0) return null;
 
@@ -613,7 +619,12 @@ namespace HpskSite.Controllers
             if (node is null || node.ContentType.Alias != "regionalPage") return null;
 
             var code = node.GetValue<string>("regionCode") ?? "";
-            if (!await _auth.IsRegionalAdminForRegion(code)) return null;
+            // ⚠️ Skriva = kretsadmin (samma som ekonomisidans skrivrätt). LÄSA = ekonomisidans
+            //    läsrätt: även kretsens styrelse och revisor, som ser avgifterna men inte ändrar dem.
+            var allowed = readOnly
+                ? (await _ledgerAccess.ResolveAsync(DocumentOwnerType.Region, regionId)).CanRead
+                : await _auth.IsRegionalAdminForRegion(code);
+            if (!allowed) return null;
 
             return (node.Id, code, node.GetValue<string>("regionName") ?? node.Name ?? "Kretsen");
         }

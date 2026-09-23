@@ -5,6 +5,8 @@
     var Model = ViewData["EkonomiData"] as HpskSite.Controllers.EkonomiPageModel
                 ?? new HpskSite.Controllers.EkonomiPageModel();
     var uid = $"ek{Model.IssuerType}_{Model.IssuerId}";
+    // Ordet för föreningens årsavgift: kretsen tar kretsavgift av klubbarna, klubben medlemsavgift.
+    var feeWord = Model.IssuerType == 1 ? "Kretsavgift" : "Medlemsavgifter";
 }
 @*
     Kassorens arbetsyta. Innehallet foljer Ekonomi Exempel/Ekonomi_Wireframes.pdf - oppna den
@@ -392,6 +394,9 @@
            skrivrätt. Skrivkontrollerna inuti är det. *@
         <a href="#" class="ek-nav" data-view="projekt">Projekt</a>
         <a href="#" class="ek-nav" data-view="avgifter">Avgifter</a>
+        @* ⚠️ Årsavgiften bodde förut i klubbens/kretsens ADMINPANEL (flyttad 2026-09-23). Det är
+           kassörens arbete, och här har den rätt behörighet: kassören skriver, styrelsen läser. *@
+        <a href="#" class="ek-nav" data-view="arsavgift">@feeWord</a>
         <a href="#" class="ek-nav" data-view="utgifter">Utgifter</a>
         <a href="#" class="ek-nav" data-view="tillgangar">Tillgångar</a>
         <a href="#" class="ek-nav soon" data-view="bokslut">Bokslut</a>
@@ -621,6 +626,9 @@
                                 </div>
                             </div>
                         </div>
+                        <div style="margin-top:12px">
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-view="arsavgift">Öppna @feeWord.ToLower()</button>
+                        </div>
                         <div class="ek-alert ek-ok d-none" id="@(uid)_feesOk" style="margin-top:14px"></div>
                         <div class="ek-alert ek-bad d-none" id="@(uid)_feesError" style="margin-top:14px"></div>
                     </div>
@@ -718,6 +726,36 @@
                             <span class="muted" id="@(uid)_fordrWarn"></span>
                         </div>
                     </div>
+                </div>
+            </section>
+
+            @* ── Årsavgiften: kretsavgift (krets → klubb) eller medlemsavgifter (klubb → medlem) ──
+               ⚠️ Samma partialer som förut låg i adminpanelerna — flyttade, inte kopierade.
+               ⚠️ Avgifterna finns bara i den RIKTIGA bokföringen (ingen sandlåda); i en sandlåda
+                  säger panelen det i stället för att visa en tom lista som ser betald ut. *@
+            <section data-pane="arsavgift" hidden>
+                <div class="head">
+                    <div>
+                        <h1>@feeWord</h1>
+                        <div class="sub">@(Model.IssuerType == 1 ? "Kretsens årsavgift till klubbarna, och vilka som betalat." : "Klubbens avgift till medlemmarna, och vilka som betalat.")</div>
+                    </div>
+                </div>
+                <div class="ek-card">
+                    @if (Model.IsSandbox)
+                    {
+                        <div class="ek-alert ek-warn">
+                            @feeWord finns bara i den riktiga bokföringen, inte i sandlådan.
+                            <a href="/ekonomi?type=@Model.IssuerType&id=@Model.OwnerId&vy=arsavgift">Gå till den riktiga bokföringen</a>.
+                        </div>
+                    }
+                    else if (Model.IssuerType == 1)
+                    {
+                        @await Html.PartialAsync("RegionFeeManagement", new Microsoft.AspNetCore.Mvc.ViewFeatures.ViewDataDictionary(ViewData) { ["regionContentId"] = Model.OwnerId, ["feesReadOnly"] = !Model.CanWrite })
+                    }
+                    else
+                    {
+                        @await Html.PartialAsync("ClubFeeManagement", new Microsoft.AspNetCore.Mvc.ViewFeatures.ViewDataDictionary(ViewData) { ["clubId"] = Model.OwnerId, ["feesReadOnly"] = !Model.CanWrite })
+                    }
                 </div>
             </section>
 
@@ -2048,10 +2086,24 @@
         // ⚠️ Samma skäl: summeringen läser varje projektmärkt rad i hela liggaren. Varje
         //    skrivning hämtar om den själv.
         if (name === 'projekt' && !projLoaded) { projLoaded = true; loadProjects(); }
+
+        // Årsavgiften: partialen exporterar sin egen laddare. EN gång — varje skrivning i den läser om själv.
+        if (name === 'arsavgift' && !annualFeeLoaded) {
+            var loader = window.hpskLoadRegionFees || window.hpskLoadClubFees;
+            if (loader) { annualFeeLoaded = true; loader(); }
+        }
     }
+    var annualFeeLoaded = false;
     root.querySelectorAll('[data-view]').forEach(function (a) {
         a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
     });
+    // ?vy=arsavgift öppnar en viss vy direkt — adminpanelernas länk till årsavgiften. Körs EFTER
+    // resten av skriptet (setTimeout 0), eftersom vyernas laddare definieras längre ned.
+    (function () {
+        var want = (new URLSearchParams(location.search).get('vy') || '').replace(/[^a-z]/g, '');
+        if (want && root.querySelector('[data-pane="' + want + '"]'))
+            setTimeout(function () { showView(want); }, 0);
+    })();
 
     var DAYS = ['Söndag','Måndag','Tisdag','Onsdag','Torsdag','Fredag','Lördag'];
     var FULLMONTH = ['januari','februari','mars','april','maj','juni','juli','augusti','september','oktober','november','december'];
@@ -2073,7 +2125,7 @@
         if (todo.missingSources > 0)
             items.push([todo.missingSources, 'tävlingar saknar avgifter', 'Visa', 'avgifter']);
         if (todo.unpaidFees > 0)
-            items.push([todo.unpaidFees, feeLabel.toLowerCase() + ' har inte kommit in', 'Visa', 'avgifter']);
+            items.push([todo.unpaidFees, feeLabel.toLowerCase() + ' har inte kommit in', 'Visa', 'arsavgift']);
         if (todo.unpostedFees > 0)
             items.push([todo.unpostedFees, 'betalda ' + feeLabel.toLowerCase() + ' är obokförda', 'Bokför', 'avgifter']);
 

@@ -1,5 +1,7 @@
 @{
     var feeRegionId = ViewBag.regionContentId as int? ?? 0;
+    // Läsläge för styrelsen och revisorn på ekonomisidan: samma lista, inga knappar.
+    var feeReadOnly = ViewData["feesReadOnly"] as bool? ?? false;
 }
 @*
     KRETSAVGIFTEN — kretsens årsavgift till sina klubbar.
@@ -36,9 +38,12 @@
 </style>
 
 <div id="rfRoot">
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-        <h5 class="mb-0">Kretsavgift <span id="rfTitleYear"></span></h5>
-        <select id="rfYear" class="form-select form-select-sm" style="width:auto" aria-label="År"></select>
+    @* Rubriken "Kretsavgift" står på ekonomisidan ovanför; här bara året. rfTitleYear finns kvar
+       (dold) — sviten och render() läser vilket år som visas. *@
+    <div class="d-flex align-items-center gap-2 mb-2">
+        <label class="form-label mb-0 fw-bold" for="rfYear">År</label>
+        <select id="rfYear" class="form-select form-select-sm" style="width:auto"></select>
+        <span id="rfTitleYear" class="d-none"></span>
     </div>
 
     <div class="alert alert-danger d-none" id="rfError"></div>
@@ -102,6 +107,7 @@
     window.__regionFeeInit = true;
 
     var REGION_ID = @feeRegionId;
+    var READONLY = @(feeReadOnly ? "true" : "false");
     var F = '/umbraco/surface/MembershipFeeAdmin/';
     var data = null;
     var editing = null;   // { kind: 'count'|'amount'|'line', id: clubId }
@@ -209,6 +215,7 @@
 
     // ⚠️ SAMMA meny före och efter utskicket — det enda som byter ord är "Skicka mejlet" / "igen".
     function actionsCell(r, s) {
+        if (READONLY) return '';
         var id = r.clubId, items = [];
         if (s.paid) {
             items.push(item('unpaid', id, 'Ångra betald'));
@@ -252,10 +259,10 @@
         var sentence = rateSentence(data.rate);
         var hasRate = sentence !== '';
         $('rfRateLine').innerHTML = hasRate
-            ? esc(sentence) + ' <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="rfEditRate">Ändra</button>'
-            : '';
-        show($('rfRateLine'), hasRate);
-        if (!hasRate) openRateForm(false);
+            ? esc(sentence) + (READONLY ? '' : ' <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="rfEditRate">Ändra</button>')
+            : (READONLY ? 'Kretsen har inte bestämt någon avgift för ' + data.year + ' än.' : '');
+        show($('rfRateLine'), hasRate || READONLY);
+        if (!hasRate && !READONLY) openRateForm(false);
         show($('rfListWrap'), hasRate);
         if (!hasRate) return;
 
@@ -270,7 +277,7 @@
             if (!s.paid && !s.sent && s.amount > 0) { if (r.hasEmail) toSend++; else noMail++; }
             if (!s.paid && s.sent) toRemind++;
 
-            var editable = !s.paid;
+            var editable = !s.paid && !READONLY;
             var countLabel = s.count == null ? '—' : s.count;
             var count = editable
                 ? numButton('count', r.clubId, s.count == null ? r.proposedCount : s.count, countLabel, 'Ändra antal medlemmar')
@@ -301,13 +308,13 @@
         // Samma rad hela året: hur många av klubbarna som betalat, av vad kretsen ska ha in.
         $('rfSummary').textContent = paidCount + ' av ' + billed + ' klubbar har betalat · ' + kr(paidSum) + ' av ' + kr(total);
 
-        show($('rfSend'), toSend > 0);
+        show($('rfSend'), toSend > 0 && !READONLY);
         $('rfSend').textContent = 'Skicka avgiften till ' + toSend + (toSend === 1 ? ' klubb' : ' klubbar');
-        show($('rfRemind'), toRemind > 0);
+        show($('rfRemind'), toRemind > 0 && !READONLY);
         $('rfRemind').textContent = 'Påminn ' + toRemind + (toRemind === 1 ? ' klubb' : ' klubbar') + ' som inte betalat';
 
         // ⚠️ EN rad text, och bara det som behövs för att komma vidare.
-        $('rfHint').textContent = noMail === 0 ? ''
+        $('rfHint').textContent = noMail === 0 || READONLY ? ''
             : noMail + (noMail === 1 ? ' klubb har' : ' klubbar har') + ' ingen e-postadress. Välj Åtgärder → Kopiera betallänk och skicka länken själv.';
 
         var input = document.querySelector('[data-rf-input]');
