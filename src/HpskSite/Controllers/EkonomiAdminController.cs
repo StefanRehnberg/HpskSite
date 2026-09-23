@@ -682,8 +682,29 @@ namespace HpskSite.Controllers
                 paymentAccounts = context.PaymentAccounts.Select(a => new { number = a.Number, name = a.Name }),
 
                 projects = _projectService.List(issuerType, issuerId)
-                    .Select(p => new { id = p.Id, name = p.Name })
+                    .Select(p => new { id = p.Id, name = p.Name }),
+
+                // Räkningar från kretsen. Bara för klubbens riktiga bokföring — en sandlåda är
+                // kladdpapper och ska inte påstå att kretsen skickat den något.
+                incomingRegionFees = IncomingRegionFeesFor(issuerType, issuerId)
             });
+        }
+
+        private List<IncomingRegionFee> IncomingRegionFeesFor(int issuerType, int issuerId)
+        {
+            if (issuerType != (int)DocumentOwnerType.Club || issuerId <= 0) return new();
+            try
+            {
+                var list = _expenseService.IncomingRegionFees(issuerId);
+                foreach (var f in list)
+                    f.RegionName = Services.ContentService.GetById(f.RegionId)?.Name ?? "Kretsen";
+                return list;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kretsavgifterna till klubb {Club} kunde inte läsas.", issuerId);
+                return new();
+            }
         }
 
         /// <summary>
