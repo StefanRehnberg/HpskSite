@@ -867,6 +867,22 @@
                         <div id="@(uid)_accountSummary">—</div></div>
 
                     @*
+                        ⚠️⚠️ INGÅENDE BALANSER. Utan dem börjar varje förening på noll kronor — en
+                        klubb som funnits i femtio år har pengar på kontot och kanske en klubbstuga.
+                        Bara för en förening som bokför här; de andra har sina balanser i sitt program.
+                    *@
+                    <div class="ek-card wide d-none" id="@(uid)_obCard">
+                        <div class="ek-cardh">
+                            <h2>Ingående balanser</h2>
+                            <span class="meta" id="@(uid)_obMeta"></span>
+                        </div>
+                        <div id="@(uid)_obBody" class="muted">Hämtar…</div>
+                        <div class="ek-alert ek-ok d-none" id="@(uid)_obOk" style="margin-top:12px"></div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary d-none mt-2"
+                                id="@(uid)_obOpen">Lägg in ingående balanser…</button>
+                    </div>
+
+                    @*
                         ⚠️⚠️ HETTE "KONTOROLLER" OCH VISADE "12 mappade".
                         Stefan under provning: "Jag förstår inte vad 'Kontoroller' är för nåt och
                         vad de 12 mappade är, men jag förstår inte bokföring…" — och det är exakt
@@ -1912,6 +1928,32 @@
             </div>
         </div>
 
+        @* ── Ingående balanser ── *@
+        <div class="modal fade" id="@(uid)_obModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_obModalTitle">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="@(uid)_obModalTitle">Ingående balanser</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="muted" style="margin-top:0" id="@(uid)_obIntro"></p>
+                        <div id="@(uid)_obRows"></div>
+                        <div class="ek-bigbox" style="margin-top:14px">
+                            <div class="lead">Föreningens eget kapital blir</div>
+                            <div class="amount" id="@(uid)_obEquity">0 kr</div>
+                            <div class="muted" style="font-size:.85rem">Räknas ut: det föreningen äger minus det den är skyldig.</div>
+                        </div>
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_obErr"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="@(uid)_obSave">Spara</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         @* ── Projekt: eget projekt ── *@
         <div class="modal fade" id="@(uid)_prFormModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_prFormTitle">
             <div class="modal-dialog">
@@ -2384,7 +2426,7 @@
     // ⚠️ BARA SAKER SOM FAKTISKT MÄTS. Skissen listar även utlägg utan attest och poster utan
     //    underlag; de lagren finns inte, och en rad som alltid säger noll lär kassören att inte
     //    läsa panelen.
-    var todo = { outstandingCount: 0, unposted: 0, missingSources: 0, unpaidFees: 0, unpostedFees: 0 };
+    var todo = { outstandingCount: 0, unposted: 0, missingSources: 0, unpaidFees: 0, unpostedFees: 0, noOpening: false };
 
     function renderTodo() {
         var items = [];
@@ -2398,6 +2440,9 @@
             items.push([todo.unpaidFees, feeLabel.toLowerCase() + ' har inte kommit in', 'Visa', 'arsavgift']);
         if (todo.unpostedFees > 0)
             items.push([todo.unpostedFees, 'betalda ' + feeLabel.toLowerCase() + ' är obokförda', 'Bokför', 'avgifter']);
+
+        if (todo.noOpening)
+            items.push([1, 'Ingående balanser är inte inlagda', 'Lägg in', 'installningar']);
 
         el('todoCount').textContent = items.length === 0 ? 'Inget just nu'
             : items.length + (items.length === 1 ? ' sak' : ' saker');
@@ -3763,9 +3808,13 @@
             + stmtRows(s.assets, s.assetTotal, 'Summa tillgångar')
             + '<tr class="grp"><td colspan="3">Eget kapital och skulder</td></tr>'
             + stmtRows(s.equityAndLiabilities, s.equityAndLiabilityTotal, 'Summa')
+            // ⚠️ Tidigare års resultat har aldrig bokförts mot eget kapital — det härleds. Utan
+            //    raden går balansräkningen aldrig ihop från och med föreningens andra år.
+            + (s.priorResult ? '<tr><td></td><td>Tidigare års resultat</td><td class="n">'
+                + kr(s.priorResult) + '</td></tr>' : '')
             + '<tr><td></td><td>Årets resultat</td><td class="n">' + kr(s.result) + '</td></tr>'
             + '<tr class="sum"><td></td><td><strong>Summa eget kapital och skulder</strong></td>'
-            + '<td class="n"><strong>' + kr(s.equityAndLiabilityTotal + s.result) + '</strong></td></tr>'
+            + '<td class="n"><strong>' + kr(s.equityAndLiabilityTotal + (s.priorResult || 0) + s.result) + '</strong></td></tr>'
             + diff;
     }
 
@@ -4278,6 +4327,10 @@
         el('roleSummary').style.color = missing.length === 0 ? '' : '#b02a37';
 
         if (canWrite) loadChart();
+
+        show(el('obCard'), status.shape === 'full');
+        if (status.shape === 'full') loadOpeningBalances();
+        else { todo.noOpening = false; renderTodo(); }
 
         // ⚠️⚠️ ÅRSFÄLTET MÅSTE FÖLJA ARBETSÅRET. Det stod på dagens år oavsett vad föreningen
         //    lagt upp — så en förening som arbetar i 2025 och trycker "Spara uppsättningen" för
@@ -5571,6 +5624,132 @@
                     el('roleError').textContent = e.message; show(el('roleError'), true);
                 });
             });
+        });
+    }
+
+    // ══ INGÅENDE BALANSER ═════════════════════════════════════════════════════════════════
+    // ⚠️ Kassören anger SALDON, inte debet och kredit — eget kapital räknas ut. Samma regel som
+    //    Bokför: "på föreningskontot fanns 48 312 kr" är en fråga hen kan svara på.
+    var obState = null;
+
+    function obNum(v) {
+        var t = String(v == null ? '' : v).replace(/\s/g, '').replace(/\u2212/g, '-').replace(',', '.');
+        if (t === '' || t === '-') return 0;
+        var n = Number(t);
+        return isNaN(n) ? NaN : n;
+    }
+
+    function loadOpeningBalances() {
+        return fetch('/umbraco/surface/EkonomiAdmin/GetOpeningBalances?issuerType=' + issuerType
+                     + '&issuerId=' + issuerId, { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) throw new Error(d.message || 'De ingående balanserna gick inte att läsa.');
+                obState = d.state;
+                renderOpeningBalances();
+            })
+            .catch(function (e) { el('obBody').textContent = e.message; });
+    }
+
+    function renderOpeningBalances() {
+        var s = obState, btn = el('obOpen');
+        if (!s || !s.fiscalYearId) {
+            el('obMeta').innerHTML = '';
+            el('obBody').textContent = 'Lägg upp räkenskapsåret först.';
+            show(btn, false);
+            todo.noOpening = false; renderTodo();
+            return;
+        }
+
+        var date = shortDate(s.date);
+        if (s.existingEntryId) {
+            var assets = s.existingLines.filter(function (l) { return l.accountNumber < 2000; })
+                .reduce(function (a, l) { return a + l.amount; }, 0);
+            el('obMeta').innerHTML = badge('ok', 'Inlagda');
+            el('obBody').innerHTML = 'Per ' + esc(date) + ': tillgångar ' + kr(assets)
+                + ', eget kapital ' + kr(s.existingEquity) + '.';
+            btn.textContent = 'Ändra ingående balanser…';
+        } else {
+            el('obMeta').innerHTML = badge('wait', 'Inte inlagda');
+            el('obBody').innerHTML = 'Vad hade föreningen den ' + esc(date) + ', när bokföringen började här? '
+                + 'Pengar på kontot, i kassan och på Swish, och det föreningen äger eller är skyldig. '
+                + 'Utan dem börjar balansräkningen på noll.';
+            btn.textContent = 'Lägg in ingående balanser…';
+        }
+
+        show(btn, canWrite && s.yearIsOpen);
+        if (!s.yearIsOpen && !s.existingEntryId)
+            el('obBody').innerHTML += ' <span class="muted">Året ' + s.year + ' är fastställt, så de kan inte längre läggas in.</span>';
+
+        todo.noOpening = !s.existingEntryId && s.yearIsOpen;
+        renderTodo();
+    }
+
+    function obRowsHtml(list, title, prefill) {
+        if (list.length === 0) return '';
+        return '<h6 class="mt-2">' + esc(title) + '</h6>'
+            + '<table class="t"><tbody>' + list.map(function (a) {
+                var v = prefill[a.number];
+                return '<tr><td class="muted" style="width:4rem">' + a.number + '</td>'
+                     + '<td>' + esc(a.name) + '</td>'
+                     + '<td class="n" style="width:11rem"><input type="text" inputmode="decimal" autocomplete="off"'
+                     + ' class="form-control form-control-sm text-end" data-ob-acc="' + a.number + '"'
+                     + ' value="' + (v ? String(v).replace('.', ',') : '') + '"></td></tr>';
+            }).join('') + '</tbody></table>';
+    }
+
+    function obRecalc() {
+        var eq = 0, bad = false;
+        el('obRows').querySelectorAll('input[data-ob-acc]').forEach(function (inp) {
+            var n = obNum(inp.value), acc = parseInt(inp.dataset.obAcc, 10);
+            inp.classList.toggle('is-invalid', isNaN(n));
+            if (isNaN(n)) { bad = true; return; }
+            eq += acc < 2000 ? n : -n;
+        });
+        el('obEquity').textContent = bad ? '—' : kr(Math.round(eq * 100) / 100);
+        return !bad;
+    }
+
+    function openOpeningBalances() {
+        var s = obState; if (!s) return;
+        var prefill = {};
+        (s.existingLines || []).forEach(function (l) { prefill[l.accountNumber] = l.amount; });
+
+        el('obIntro').textContent = 'Skriv saldona som de stod den ' + shortDate(s.date)
+            + ' — kontoutdraget och kassaboken säger det. Tomma rader betyder noll. '
+            + (s.existingEntryId ? 'De tidigare uppgifterna rättas och ersätts; ingenting skrivs över.' : '');
+        el('obRows').innerHTML =
+              obRowsHtml(s.accounts.filter(function (a) { return a.isAsset; }), 'Det föreningen äger', prefill)
+            + obRowsHtml(s.accounts.filter(function (a) { return !a.isAsset; }), 'Det föreningen är skyldig', prefill);
+        show(el('obErr'), false);
+        obRecalc();
+        openModal('obModal');
+    }
+
+    if (el('obOpen')) {
+        el('obOpen').addEventListener('click', openOpeningBalances);
+        el('obRows').addEventListener('input', obRecalc);
+        el('obSave').addEventListener('click', function () {
+            if (!obRecalc()) { dialogError('obErr', { message: 'Ett belopp går inte att läsa. Skriv bara siffror, t.ex. 48 312,50.' }); return; }
+            var lines = [];
+            el('obRows').querySelectorAll('input[data-ob-acc]').forEach(function (inp) {
+                var n = obNum(inp.value);
+                if (n !== 0) lines.push({ accountNumber: parseInt(inp.dataset.obAcc, 10), amount: n });
+            });
+            var b = el('obSave'); b.disabled = true;
+            postJson('/umbraco/surface/EkonomiAdmin/SaveOpeningBalances',
+                     { issuerType: issuerType, issuerId: issuerId, lines: lines })
+                .then(function (j) {
+                    b.disabled = false;
+                    if (!j.success) { dialogError('obErr', j); return; }
+                    closeModal('obModal');
+                    obState = j.state;
+                    renderOpeningBalances();
+                    el('obOk').textContent = j.removed ? 'De ingående balanserna är borttagna.'
+                        : 'De ingående balanserna är bokförda.';
+                    show(el('obOk'), true);
+                })
+                .catch(function (e) { b.disabled = false; dialogError('obErr', { message: e.message }); });
         });
     }
 
