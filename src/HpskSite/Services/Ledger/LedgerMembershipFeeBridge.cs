@@ -252,12 +252,68 @@ namespace HpskSite.Services.Ledger
             var ids = chargeIds.ToList();
             if (ids.Count == 0) return new HashSet<int>();
 
+            // ⚠️⚠️ BARA POSTER SOM STÅR KVAR. En rättelse bär originalets SourceType och SourceId,
+            //    så utan villkoren nedan räknades både den ångrade posten och dess rättelse som
+            //    "bokförd" — och en avgift som ångrats och sedan betalats igen bokfördes aldrig.
             return db.Fetch<int>(
                     // LEDGER-SEAM-OK: samma skal som ovan - avgiftsbryggan ar levande-bara.
-                    $@"SELECT SourceId FROM dbo.LedgerJournalEntry
-                        WHERE SourceType = @0 AND SourceId IN ({string.Join(",", ids)})",
+                    $@"SELECT e.SourceId FROM dbo.LedgerJournalEntry e
+                        WHERE e.SourceType = @0 AND e.SourceId IN ({string.Join(",", ids)})
+                          AND e.CorrectsEntryId IS NULL
+                          AND NOT EXISTS (SELECT 1 FROM dbo.LedgerJournalEntry c WHERE c.CorrectsEntryId = e.Id)",
                     sourceType)
                 .ToHashSet();
+        }
+
+        /// <summary>
+        /// Tar ut avgiftens bokföring när betalningen ångras ("Ångra betald").
+        ///
+        /// <para><b>⚠️⚠️ FÖRUT RÖRDE "ÅNGRA BETALD" BARA STATUSEN.</b> Verifikationen låg kvar, så
+        /// intäkten stod i bokföringen medan avgiftslistan sa obetald — och markerades avgiften sedan
+        /// betald igen såg spärren den gamla posten och bokförde ingenting. Hittat under
+        /// kassörsgenomgången 2026-09-24.</para>
+        ///
+        /// <para>Rättelsen är en NY verifikation med omkastade rader, daterad i dag; originalet rörs
+        /// aldrig. Finns ingen bokförd post (föreningen bokför inte här, eller den bokfördes aldrig)
+        /// finns inget att ta ut, och det är ett lyckat utfall.</para>
+        /// </summary>
+        /// <returns>Null när det gick; annars skälet, på svenska.</returns>
+        public string? ReverseCharge(int chargeId, int byMemberId)
+        {
+            try
+            {
+                List<int> live;
+                string what;
+                using (var db = _databaseFactory.CreateDatabase())
+                {
+                    var charge = db.SingleOrDefault<MembershipFeeCharge>(
+                        "SELECT * FROM dbo.MembershipFeeCharge WHERE Id = @0", chargeId);
+                    if (charge is null) return null;
+
+                    what = charge.IsRegionFee ? "kretsavgift" : "medlemsavgift";
+
+                    // LEDGER-SEAM-OK: samma skal som ovan - avgiftsbryggan ar levande-bara.
+                    live = db.Fetch<int>(
+                        @"SELECT e.Id FROM dbo.LedgerJournalEntry e
+                           WHERE e.SourceType = @0 AND e.SourceId = @1 AND e.CorrectsEntryId IS NULL
+                             AND NOT EXISTS (SELECT 1 FROM dbo.LedgerJournalEntry c WHERE c.CorrectsEntryId = e.Id)",
+                        SourceTypeFor(charge.IsRegionFee), charge.Id);
+                }
+
+                // ⚠️ Scopet/anslutningen ovan är STÄNGD innan rättelsen skrivs — rättelsen öppnar en
+                //    egen anslutning, och en andra inuti någon annans är en låsning som väntar.
+                foreach (var entryId in live)
+                {
+                    var r = _posting.CreateCorrection(entryId, byMemberId, $"Ångrad betalning av {what}");
+                    if (!r.Success) return r.Error ?? "Rättelsen kunde inte bokföras.";
+                }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Bokföringen av avgift {ChargeId} kunde inte tas ut.", chargeId);
+                return "Bokföringen kunde inte rättas. Försök igen.";
+            }
         }
 
         /// <summary>Källtypen för en avgift. En plats — spärren och postningen måste säga samma sak.</summary>

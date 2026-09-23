@@ -348,8 +348,11 @@ namespace HpskSite.Controllers
             if (!await CanManageChargeAsync(charge))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
-            _feeService.MarkUnpaid(chargeId);
-            return Json(new { success = true });
+            // ⚠️ Bokföringen tas ut samtidigt — går det inte står avgiften kvar som betald, och skälet sägs.
+            var error = _feeService.MarkUnpaid(chargeId, await GetCurrentMemberIdAsync());
+            return Json(error is null
+                ? new { success = true, message = (string?)null }
+                : new { success = false, message = (string?)error });
         }
 
         // ── Payment links ─────────────────────────────────────────────

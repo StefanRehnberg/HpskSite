@@ -109,6 +109,17 @@ namespace HpskSite.Models.Ledger
     {
         public LedgerJournalRow Head { get; set; } = new();
 
+        /// <summary>
+        /// Rättelsen som tar ut den här posten, om någon finns. ⚠️ Visas i detaljen: en rättad post
+        /// som ser ut som vilken post som helst läses som att felet står kvar, och den som letar
+        /// bokför om den en gång till.
+        /// </summary>
+        public int? CorrectedByEntryId { get; set; }
+        public string? CorrectedByNumber { get; set; }
+
+        /// <summary>Numret på posten den här rättar, när den själv är en rättelse.</summary>
+        public string? CorrectsNumber { get; set; }
+
         public List<LedgerJournalEntryLine> Lines { get; } = new();
 
         public List<LedgerAttachmentView> Attachments { get; } = new();

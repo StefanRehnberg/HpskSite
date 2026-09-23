@@ -378,9 +378,94 @@ namespace HpskSite.Controllers
                 bankRows = detail.BankRows,
                 debitTotal = detail.DebitTotal,
                 creditTotal = detail.CreditTotal,
-                balances = detail.Balances
+                balances = detail.Balances,
+                correctedByEntryId = detail.CorrectedByEntryId,
+                correctedByNumber = detail.CorrectedByNumber,
+                correctsNumber = detail.CorrectsNumber,
+                // Bara en handbokförd post rättas härifrån — se CorrectEntry.
+                canCorrect = detail.Head.SourceType == LedgerSourceType.Manual
+                             && detail.CorrectedByEntryId is null && detail.Head.CorrectsEntryId is null
             });
         }
+
+        /// <summary>
+        /// Rättar en handbokförd verifikation: en NY verifikation med omkastade rader tar ut den
+        /// gamla, som står kvar. Sedan bokför kassören den rätta posten som vanligt.
+        ///
+        /// <para><b>⚠️⚠️ BARA HANDBOKFÖRDA POSTER.</b> En post som kommer ur en medlemsavgift, en utgift
+        /// eller en avskrivning har en källa som fortfarande säger "betald" eller "bokförd" — rättas
+        /// bara verifikationen säger bokföringen och källan olika saker, och ingenting sköter det åt
+        /// kassören. De rättas vid källan (t.ex. "Ångra betald").</para>
+        ///
+        /// <para>⚠️ Utställaren prövas genom <see cref="LedgerJournalService.Detail"/>, som läser
+        /// med utställaren i WHERE — <c>CreateCorrection</c> själv läser bara på id.</para>
+        ///
+        /// <para>Rättelsen bokförs I DAG som förval: perioden då felet upptäcktes är den som är sann,
+        /// och originalets år kan vara fastställt. Ett annat datum går att ange.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CorrectEntry([FromBody] CorrectEntryRequest request)
+        {
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            if (string.IsNullOrWhiteSpace(request.Reason))
+                return Json(new { success = false, message = "Skriv varför posten rättas — det är det som gör rättelsen begriplig i efterhand." });
+
+            var detail = _journalService.Detail(request.IssuerType, request.IssuerId, request.EntryId);
+            if (detail is null)
+                return Json(new { success = false, message = "Verifikationen finns inte." });
+
+            if (detail.CorrectedByEntryId is not null)
+                return Json(new { success = false, message = $"Posten är redan rättad av {detail.CorrectedByNumber}." });
+
+            if (detail.Head.CorrectsEntryId is not null)
+                return Json(new { success = false, message = "Det här är själv en rättelse. Bokför den rätta posten under Bokför i stället." });
+
+            if (detail.Head.SourceType != LedgerSourceType.Manual)
+                return Json(new { success = false, message = SourceCorrectionHint(detail.Head.SourceType) });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            DateTime? date = null;
+            if (!string.IsNullOrWhiteSpace(request.Date))
+            {
+                if (!DateTime.TryParse(request.Date, out var d))
+                    return Json(new { success = false, message = "Datumet går inte att läsa. Skriv det som åååå-mm-dd." });
+                date = d.Date;
+            }
+
+            var result = _postingService.CreateCorrection(request.EntryId, actorId.Value, request.Reason.Trim(), date);
+            if (!result.Success)
+                return Json(new { success = false, message = result.Error ?? "Rättelsen kunde inte bokföras." });
+
+            var after = _journalService.Detail(request.IssuerType, request.IssuerId, request.EntryId);
+            return Json(new
+            {
+                success = true,
+                entryId = result.EntryId,
+                number = after?.CorrectedByNumber,
+                message = $"Posten är rättad{(after?.CorrectedByNumber is string n ? " av " + n : "")}. "
+                        + "Den gamla står kvar och är nu utjämnad. Bokför den rätta posten under Bokför."
+            });
+        }
+
+        /// <summary>Var en post som inte är handbokförd rättas — på vanlig svenska.</summary>
+        private static string SourceCorrectionHint(string? sourceType) => sourceType switch
+        {
+            LedgerSourceType.MembershipFee =>
+                "Posten kommer från en medlemsavgift. Rätta den under Medlemsavgifter — välj Ångra betald på medlemmens rad.",
+            LedgerSourceType.RegionFee =>
+                "Posten kommer från kretsavgiften. Rätta den under Kretsavgift — välj Ångra betald på klubbens rad.",
+            LedgerSourceType.AssetDepreciation =>
+                "Posten är en avskrivning från Tillgångar och rättas inte för hand.",
+            LedgerSourceType.CompetitionRegistration or LedgerSourceType.TeamFee or LedgerSourceType.Event =>
+                "Posten kommer från en anmälningsbetalning. Ångra betalningen där den togs emot.",
+            _ => "Posten kommer inte från Bokför och rättas där den skapades."
+        };
 
         /// <summary>Huvudboken för ett konto — rader i datumordning med löpande saldo.</summary>
         [HttpGet]
@@ -2764,6 +2849,16 @@ namespace HpskSite.Controllers
     }
 
     /// <summary>Det köytan skickar när en rad ska bokföras.</summary>
+    public class CorrectEntryRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int EntryId { get; set; }
+        public string? Reason { get; set; }
+        /// <summary>Rättelsens bokföringsdatum; tomt = i dag.</summary>
+        public string? Date { get; set; }
+    }
+
     public class PostPendingRequest
     {
         public int PaymentId { get; set; }
