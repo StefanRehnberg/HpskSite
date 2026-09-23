@@ -86,9 +86,46 @@ namespace HpskSite.Controllers
             var categories = _feeService.GetCategories(clubId, year);
             var charges = _feeService.GetChargesForClubYear(clubId, year);
 
+            // ⚠️⚠️ EN RAD PER MEDLEM, med förslaget från SAMMA regel som skapandet (ClubFeeProposal).
+            //    Listan ska se likadan ut före och efter utskicket — samma form som kretsavgiften.
+            var members = ActiveFeeMembers(clubId);
+            var proposal = ClubFeeProposal.Build(categories, members);
+            var chargeByMember = charges.GroupBy(c => c.MemberId).ToDictionary(g => g.Key, g => g.First());
+            var info = MemberInfo(members.Select(m => m.MemberId).Concat(charges.Select(c => c.MemberId)).Distinct());
+
+            var rows = members.Select(m =>
+            {
+                proposal.TryGetValue(m.MemberId, out var p);
+                chargeByMember.TryGetValue(m.MemberId, out var c);
+                info.TryGetValue(m.MemberId, out var mi);
+                string? primaryName = null;
+                if (p?.PrimaryMemberId is int pm && info.TryGetValue(pm, out var pmi)) primaryName = pmi.Name;
+                return new
+                {
+                    memberId = m.MemberId,
+                    name = mi.Name ?? c?.MemberName ?? $"Medlem {m.MemberId}",
+                    hasEmail = !string.IsNullOrWhiteSpace(mi.Email),
+                    membershipType = m.MembershipType ?? "",
+                    kind = (p?.Kind ?? ClubFeeKind.NoType).ToString(),
+                    proposedAmount = p?.Amount ?? 0m,
+                    coveredBy = primaryName,
+                    charge = c is null ? null : ClubChargeDto(c)
+                };
+            })
+            .OrderBy(x => x.name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
             return Json(new
             {
                 success = true,
+                rows,
+                // Avgifter på medlemmar som inte längre finns i registret (utträdda) syns ändå —
+                // en obetald avgift får inte försvinna bara för att medlemmen gick ur.
+                orphans = charges.Where(c => members.All(m => m.MemberId != c.MemberId)).Select(c => new
+                {
+                    memberId = c.MemberId, name = c.MemberName ?? $"Medlem {c.MemberId}",
+                    hasEmail = !string.IsNullOrWhiteSpace(c.MemberEmail), charge = ClubChargeDto(c)
+                }),
                 categories = categories.Select(c => new
                 {
                     c.Id,
@@ -99,6 +136,44 @@ namespace HpskSite.Controllers
                 paid = charges.Where(c => c.PaymentStatus == "Paid").Select(ChargeDto),
                 unpaid = charges.Where(c => c.PaymentStatus != "Paid").Select(ChargeDto)
             });
+        }
+
+        private static object ClubChargeDto(MembershipFeeCharge c) => new
+        {
+            id = c.Id,
+            amount = c.Amount,
+            status = c.PaymentStatus,
+            covered = c.HouseholdCoveredByChargeId.HasValue,
+            requestSentDate = c.RequestSentDate?.ToString("yyyy-MM-dd"),
+            paymentSentDate = c.PaymentSentDate?.ToString("yyyy-MM-dd"),
+            paidDate = c.PaidDate?.ToString("yyyy-MM-dd")
+        };
+
+        /// <summary>Klubbens aktiva medlemmar (utom utträdda och avlidna) som underlag för avgiften.</summary>
+        private List<MemberFeeInput> ActiveFeeMembers(int clubId)
+            => _clubMembershipService.GetForClub(clubId)
+                .Where(cm => cm.MembershipStatus != "Utträdd" && cm.MembershipStatus != "Avliden")
+                .Select(cm => new MemberFeeInput
+                {
+                    MemberId = cm.MemberId,
+                    MembershipType = cm.MembershipType ?? "",
+                    HouseholdId = cm.HouseholdId ?? "",
+                    HouseholdPrimary = cm.HouseholdPrimary
+                })
+                .ToList();
+
+        /// <summary>Namn och e-post för många medlemmar i ETT uppslag (inte ett per rad).</summary>
+        private Dictionary<int, (string? Name, string? Email)> MemberInfo(IEnumerable<int> ids)
+        {
+            var list = ids.Where(i => i > 0).Distinct().ToArray();
+            var result = new Dictionary<int, (string? Name, string? Email)>();
+            if (list.Length == 0) return result;
+            foreach (var m in _memberService.GetAllMembers(list))
+            {
+                var name = $"{m.GetValue<string>("firstName")} {m.GetValue<string>("lastName")}".Trim();
+                result[m.Id] = (string.IsNullOrEmpty(name) ? m.Name : name, m.Email);
+            }
+            return result;
         }
 
         private static object ChargeDto(MembershipFeeCharge c) => new
@@ -139,6 +214,8 @@ namespace HpskSite.Controllers
                 Amount = amount
             };
             _feeService.SaveCategory(cat);
+            // ⚠️ Oskickade avgifter följer inställningen — ingen medlem har fått dem än.
+            _feeService.ClearUnsentClubCharges(clubId, year);
             return Json(new { success = true, data = new { cat.Id } });
         }
 
@@ -149,7 +226,9 @@ namespace HpskSite.Controllers
             if (!await _auth.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
+            var year = _feeService.GetCategoryYear(id);
             _feeService.DeleteCategory(id);
+            if (year is int y) _feeService.ClearUnsentClubCharges(clubId, y);
             return Json(new { success = true });
         }
 
@@ -164,19 +243,57 @@ namespace HpskSite.Controllers
 
             // Bill from the per-club membership records (ClubMembership). Exclude members who
             // have left or are deceased; membership type drives which fee category applies.
-            var members = _clubMembershipService.GetForClub(clubId)
-                .Where(cm => cm.MembershipStatus != "Utträdd" && cm.MembershipStatus != "Avliden")
-                .Select(cm => new MemberFeeInput
-                {
-                    MemberId = cm.MemberId,
-                    MembershipType = cm.MembershipType ?? "",
-                    HouseholdId = cm.HouseholdId ?? "",
-                    HouseholdPrimary = cm.HouseholdPrimary
-                })
-                .ToList();
-
-            var created = _feeService.GenerateChargesForClub(clubId, year, members);
+            var created = _feeService.GenerateChargesForClub(clubId, year, ActiveFeeMembers(clubId));
             return Json(new { success = true, created });
+        }
+
+        /// <summary>
+        /// Medlemmens avgift för året — skapas (oskickad) om den inte finns. Varje handling på en rad
+        /// (Betald, kopiera länk, visa/skicka mejlet) börjar här, så raden beter sig likadant före och
+        /// efter utskicket. Ett hushåll skapas i sin helhet, så "ingår"-raderna pekar rätt.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> EnsureClubCharge(int clubId, int year, int memberId)
+        {
+            if (!await _auth.IsClubAdminForClub(clubId))
+                return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var members = ActiveFeeMembers(clubId);
+            var me = members.FirstOrDefault(m => m.MemberId == memberId);
+            if (me is null) return Json(new { success = false, message = "Medlemmen finns inte i klubbens register." });
+
+            var proposal = ClubFeeProposal.Build(_feeService.GetCategories(clubId, year), members);
+            proposal.TryGetValue(memberId, out var p);
+            if (p is null || p.Kind is ClubFeeKind.NoCategory or ClubFeeKind.NoType)
+                return Json(new { success = false, message = string.IsNullOrWhiteSpace(me.MembershipType)
+                    ? "Medlemmen har ingen medlemstyp. Ange medlemstypen under Medlemmar först."
+                    : $"Klubben har ingen avgift för medlemstypen {me.MembershipType} i år. Lägg till den under Åtgärder → Avgift per medlemstyp." });
+            if (p.Kind == ClubFeeKind.Covered)
+                return Json(new { success = false, message = "Medlemmen ingår i familjens avgift, som huvudmedlemmen betalar." });
+
+            var household = string.IsNullOrWhiteSpace(me.HouseholdId)
+                ? new List<MemberFeeInput> { me }
+                : members.Where(m => string.Equals((m.HouseholdId ?? "").Trim(), me.HouseholdId!.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+            _feeService.GenerateChargesForClub(clubId, year, household);
+
+            var charge = _feeService.GetChargeForMemberYear(memberId, clubId, year);
+            return Json(charge is null ? new { success = false, chargeId = (int?)null, message = (string?)"Avgiften kunde inte skapas." }
+                                       : new { success = true, chargeId = (int?)charge.Id, message = (string?)null });
+        }
+
+        /// <summary>Medlemsavgiftsmejlet som det skulle skickas — samma byggväg som utskicket.</summary>
+        [HttpGet]
+        public async Task<IActionResult> PreviewClubPaymentRequest(int chargeId)
+        {
+            var charge = chargeId == 0 ? null : _feeService.GetCharge(chargeId);
+            if (charge is null || charge.IsRegionFee) return Content("Avgiften hittades inte.");
+            if (!(await _ledgerAccess.ResolveAsync(DocumentOwnerType.Club, charge.ClubId)).CanRead) return Content("Åtkomst nekad.");
+
+            var clubName = _clubService.GetClubNameById(charge.ClubId) ?? "Klubben";
+            var mail = _emailService.PreviewMembershipFeeRequest(charge.MemberEmail ?? "", charge.MemberName ?? "medlem",
+                clubName, charge.Year, charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForClub(charge.ClubId));
+            return Content(PreviewPage(mail, charge.MemberEmail, charge.PaymentStatus == "Paid"), "text/html; charset=utf-8");
         }
 
         [HttpPost]
@@ -222,46 +339,58 @@ namespace HpskSite.Controllers
             // ⚠️ En kretsavgift vars länk kopieras räknas som SKICKAD: kretsen skickar den själv (klubben
             //    saknar ofta e-postadress). Annars står klubben kvar som "Inte skickad" och räknas med i
             //    nästa "Skicka avgiften" fast den redan fått sin räkning.
-            if (charge.IsRegionFee) _feeService.MarkRegionRequestSent(chargeId);
+            if (charge.Amount > 0) _feeService.MarkRequestSent(chargeId);
 
             return Json(new { success = true, url = BuildPayUrl(chargeId) });
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SendPaymentRequests(int clubId, int year)
+        public async Task<IActionResult> SendPaymentRequests(int clubId, int year, string? mode = null, string? chargeIds = null)
         {
             if (!await _auth.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             var clubName = _clubService.GetClubNameById(clubId) ?? "Klubben";
-            var charges = _feeService.GetChargesForClubYear(clubId, year);
+            // ⚠️ Samma tre urval som kretsavgiften: chargeIds = bara de, "unsent" = de som inte gått
+            //    ut, "reminder" = de som gått ut men inte betalats. Inget = alla obetalda.
+            var only = (chargeIds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => int.TryParse(x, out var i) ? i : 0).Where(i => i > 0).ToHashSet();
 
-            var sent = 0;
-            foreach (var charge in charges)
+            var sent = new List<string>();
+            var noEmail = new List<string>();
+            var failed = new List<string>();
+            foreach (var charge in _feeService.GetChargesForClubYear(clubId, year))
             {
-                if (charge.PaymentStatus == "Paid") continue;
-                if (charge.HouseholdCoveredByChargeId.HasValue) continue; // covered by the primary's charge
-                if (string.IsNullOrWhiteSpace(charge.MemberEmail)) continue;
+                if (charge.IsRegionFee || charge.PaymentStatus == "Paid") continue;
+                if (charge.HouseholdCoveredByChargeId.HasValue) continue; // ingår i huvudmedlemmens avgift
+                if (charge.Amount <= 0) continue;
+                if (only.Count > 0 && !only.Contains(charge.Id)) continue;
+                if (mode == "unsent" && charge.IsRequestSent) continue;
+                if (mode == "reminder" && !charge.IsRequestSent) continue;
 
-                var payUrl = BuildPayUrl(charge.Id);
+                var name = charge.MemberName ?? $"Medlem {charge.MemberId}";
+                if (string.IsNullOrWhiteSpace(charge.MemberEmail)) { noEmail.Add(name); continue; }
+
+                bool ok;
                 try
                 {
-                    // ⚠️ Svaret hör till KLUBBEN, som är den som kräver avgiften. Ett vanligt svar
-                    // på ett avgiftskrav är "jag har flyttat, vill avsluta medlemskapet" — och det
-                    // är klubbens kassör som kan göra något med det.
-                    await _emailService.SendMembershipFeeRequestAsync(
-                        charge.MemberEmail!, charge.MemberName ?? "medlem", clubName, year, charge.Amount, payUrl,
+                    // ⚠️ Svaret hör till KLUBBEN, som är den som kräver avgiften.
+                    ok = await _emailService.SendMembershipFeeRequestAsync(
+                        charge.MemberEmail!, name, clubName, year, charge.Amount, BuildPayUrl(charge.Id),
                         _replyContacts.ForClub(clubId));
-                    sent++;
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to send membership fee request for charge {ChargeId}", charge.Id);
+                    ok = false;
                 }
+                (ok ? sent : failed).Add(name);
+                // ⚠️ Bara ett mejl som FAKTISKT gick räknas som skickat.
+                if (ok) _feeService.MarkRequestSent(charge.Id);
             }
 
-            return Json(new { success = true, sent });
+            return Json(new { success = true, sent = sent.Count, noEmail, failed });
         }
 
         // ══ KRETSAVGIFTEN ═══════════════════════════════════════════════════════════════════
@@ -532,7 +661,7 @@ namespace HpskSite.Controllers
                 (ok ? sent : failed).Add(name);
                 // ⚠️ Bara ett mejl som FAKTISKT gick räknas som skickat. Annars står klubben som
                 //    "Skickad" utan att ha fått något.
-                if (ok) _feeService.MarkRegionRequestSent(charge.Id);
+                if (ok) _feeService.MarkRequestSent(charge.Id);
             }
 
             var parts = new List<string> { $"Betalningsuppmaningen mejlades till {sent.Count} klubbar." };
@@ -574,6 +703,13 @@ namespace HpskSite.Controllers
                 charge.Lines.Select(l => (l.Description, l.Amount)).ToList(),
                 charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForRegion(region.Value.Id));
 
+            return Content(PreviewPage(mail, to, charge.PaymentStatus == "Paid"), "text/html; charset=utf-8");
+        }
+
+        /// <summary>Förhandsvisningens sida: mejlets eget dokument, med kuvertet i en ram ovanför.</summary>
+        private static string PreviewPage(RegionFeeMailPreview mail, string? to, bool paid)
+        {
+            to ??= "";
             var enc = new Func<string?, string>(s => System.Net.WebUtility.HtmlEncode(s ?? ""));
             var envelope =
                 "<div style=\"font-family:Arial,sans-serif;font-size:13px;max-width:560px;margin:16px auto;"
@@ -581,10 +717,9 @@ namespace HpskSite.Controllers
               + "<div style=\"font-weight:bold;margin-bottom:6px\">Förhandsvisning — inget har skickats</div>"
               + $"<div><b>Från:</b> {enc(mail.FromName)} &lt;{enc(mail.FromAddress)}&gt;</div>"
               + $"<div><b>Svar till:</b> {(mail.ReplyTo is null ? "<i>ingen svarsadress</i>" : enc(mail.ReplyTo))}</div>"
-              + $"<div><b>Till:</b> {(to.Length == 0 ? "<i style=\"color:#b45309\">klubben saknar kontaktadress — mejlet skickas inte</i>" : enc(to))}</div>"
+              + $"<div><b>Till:</b> {(to.Length == 0 ? "<i style=\"color:#b45309\">ingen e-postadress — mejlet skickas inte</i>" : enc(to))}</div>"
               + $"<div><b>Ämne:</b> {enc(mail.Subject)}</div>"
-              + (charge.PaymentStatus == "Paid"
-                    ? "<div style=\"color:#b45309;margin-top:6px\">Kravet är betalt och ingår inte i ett utskick.</div>" : "")
+              + (paid ? "<div style=\"color:#b45309;margin-top:6px\">Avgiften är betald och ingår inte i ett utskick.</div>" : "")
               + "</div>";
 
             // Kuvertet läggs in direkt efter <body>, så mejlets eget dokument står orört under det.
@@ -592,8 +727,7 @@ namespace HpskSite.Controllers
             var bodyAt = html.IndexOf("<body", StringComparison.OrdinalIgnoreCase);
             var bodyEnd = bodyAt < 0 ? -1 : html.IndexOf('>', bodyAt);
             html = bodyEnd < 0 ? envelope + html : html.Insert(bodyEnd + 1, envelope);
-
-            return Content(html, "text/html; charset=utf-8");
+            return html;
         }
 
         /// <summary>

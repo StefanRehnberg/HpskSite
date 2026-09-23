@@ -69,8 +69,9 @@ namespace HpskSite.Services.Ledger
 
                 // ⚠️ Familjemedlemmar som täcks av huvudmedlemmens avgift filtreras bort ovan.
                 // Räknas de med blir både kravet och intäkten dubblerad — hushållet betalar EN gång.
-                // ⚠️ En kretsavgift som inte skickats är ingen fordran — ingen klubb har fått en räkning.
-                var unpaid = charges.Where(c => c.PaymentStatus != "Paid" && (!isRegion || c.IsRequestSent)).ToList();
+                // ⚠️ En avgift som inte skickats är ingen fordran — ingen har fått en räkning. Gäller
+                //    båda formerna; klubbens äldre avgifter fick ett skickat-datum av migreringen.
+                var unpaid = charges.Where(c => c.PaymentStatus != "Paid" && c.IsRequestSent).ToList();
                 status.UnpaidCount = unpaid.Count;
                 status.UnpaidAmount = unpaid.Sum(c => c.Amount);
 

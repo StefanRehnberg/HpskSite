@@ -2542,7 +2542,7 @@ namespace HpskSite.Services
         /// <see cref="SendPaymentConfirmationAsync"/>: the shooter opens the link, sees the
         /// Swish QR + amount, and — if they've already paid — the "Betald" state.
         /// </summary>
-        public async Task SendMembershipFeeRequestAsync(
+        public async Task<bool> SendMembershipFeeRequestAsync(
             string memberEmail,
             string memberName,
             string clubName,
@@ -2551,12 +2551,35 @@ namespace HpskSite.Services
             string payUrl,
             MailReplyTo replyTo)
         {
-            if (string.IsNullOrEmpty(_smtpHost))
-            {
-                _logger.LogWarning("SMTP host not configured. Membership fee request not sent to {Email}", memberEmail);
-                return;
-            }
+            // ⚠️ Returnerar om mejlet FAKTISKT skickades — ytan markerar avgiften som skickad bara då.
+            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl);
+            return await SendEmailAsync(memberEmail, subject, body, replyTo);
+        }
 
+        /// <summary>Exakt det mejl <see cref="SendMembershipFeeRequestAsync"/> skickar, utan att skicka.</summary>
+        public RegionFeeMailPreview PreviewMembershipFeeRequest(
+            string memberEmail, string memberName, string clubName, int year, decimal amount, string payUrl, MailReplyTo replyTo)
+        {
+            var (subject, body) = BuildMembershipFeeRequestBody(memberName, clubName, year, amount, payUrl);
+            var reply = ResolveReplyAddress(replyTo);
+            return new RegionFeeMailPreview
+            {
+                To = memberEmail,
+                FromName = string.IsNullOrWhiteSpace(replyTo?.FromDisplayName) ? _fromName : replyTo!.FromDisplayName!,
+                FromAddress = _fromAddress,
+                ReplyTo = reply is null ? null : $"{reply.Value.Name} <{reply.Value.Email}>",
+                Subject = subject,
+                Html = AppendReplyFooter(body, replyTo)
+            };
+        }
+
+        /// <summary>
+        /// ⚠️ Fotnoten "Svara ej på detta mejl" är borttagen: svaret går till klubben (Reply-To), och
+        /// svarsfoten säger det. De två raderna sa emot varandra.
+        /// </summary>
+        private static (string Subject, string Body) BuildMembershipFeeRequestBody(
+            string memberName, string clubName, int year, decimal amount, string payUrl)
+        {
             var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
             var amountLabel = Math.Round(amount).ToString("N0", sv) + " kr";
             var subject = $"Medlemsavgift {year} – {clubName}";
@@ -2587,12 +2610,11 @@ namespace HpskSite.Services
             <p><a class='btn' href='{payUrl}'>Betala medlemsavgift</a></p>
             <p style='font-size:13px;color:#6c757d;'>Har du redan betalat ser du det på sidan.</p>
         </div>
-        <div class='footer'>Pistol.nu — automatiskt utskick. Svara ej på detta mejl.</div>
     </div>
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body, replyTo);
+            return (subject, body);
         }
 
         /// <summary>
