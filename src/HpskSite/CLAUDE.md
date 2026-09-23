@@ -4692,11 +4692,26 @@ attest + attesterade) och *Avklarat* i en `<details>`.
 - Formen styr fälten: utlägg visar medlemsväljaren och gömmer förfallodagen, faktura tvärtom — och
   **förfallodagen nollställs** vid byte, annars vägrar servern på något användaren inte ser.
 
-**Operatörssteg:** kör `Migrations/create-ledger-expense-table.sql` — **FÖRE deployen**, som alltid
-när NPoco får en ny POCO. Körd i dev 2026-09-23; **EJ körd i prod.** Både `LedgerAsset` och
-`LedgerExpense` är tillagda i `LedgerSchemaInspector`, så en saknad tabell larmar vid start i stället
-för att fälla varje skrivning tyst. Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen
-Umbraco-nod.
+### ⚠️⚠️ STARTKONTROLLEN HITTADE ATT BÅDA NYA TABELLERNA SAKNADE SANDLÅDESPÄRREN
+
+I samma sekund `LedgerAsset` och `LedgerExpense` lades till i `LedgerSchemaInspector` svarade
+`/health/ledger` **FAIL** och namngav fyra saknade CHECK-villkor. Båda tabellerna hade skapats utan
+`IssuerId > 0` (dbo) respektive `IssuerId < 0` (sbx) — **utan dem är isoleringen en överenskommelse i
+koden i stället för en garanti i databasen**, och en bugg i en WHERE-sats hade räckt för att skriva
+en sandlåderad i den riktiga bokföringen, tyst.
+
+Rättat i `Migrations/add-sandbox-guards-to-asset-and-expense.sql` **och** i de två
+skapandeskripten — en ny databas får dem därmed direkt. Att bara lägga dem i följdmigreringen är
+exakt hur `create-precision-result-entry-tables.sql` återinförde sin egen bugg i varje ny databas.
+
+**Lägg till en ny liggartabell? Tre saker i SAMMA omgång:** migreringen (båda schemana), typen i
+`LedgerSchemaInspector.LedgerTypes`, och CHECK-villkoren. Startkontrollen fångar den tredje åt dig —
+men bara om du gjort den andra.
+
+**Operatörssteg:** kör `Migrations/create-ledger-expense-table.sql` **och**
+`Migrations/add-sandbox-guards-to-asset-and-expense.sql` — **FÖRE deployen**, som alltid när NPoco
+får en ny POCO. Körda i dev 2026-09-23; **EJ körda i prod.** Efter dem svarar `/health/ledger`
+`tables=22 sandbox=22`. Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod.
 
 **⛔ Ingenting av ekonomidelen deployas till prod** förrän klubbarna kan prova i sandlådan.
 
@@ -4795,8 +4810,10 @@ avskrivningarna annars inte går att granska. Skrivkontrollerna inuti är gatede
 - Kontoväljarna fylls ur `GetChart` (balanskonton respektive kostnadskonton), med **hela
   kontoplanen som reserv** när filtret är tomt: en tom rullgardin ser ut som ett produktfel.
 
-**Operatörssteg:** kör `Migrations/create-ledger-asset-table.sql` — **FÖRE deployen**, som alltid
-när NPoco får en ny POCO. Körd i dev 2026-09-23; **EJ körd i prod.** Adds C# → full ombyggnad.
+**Operatörssteg:** kör `Migrations/create-ledger-asset-table.sql` **och**
+`Migrations/add-sandbox-guards-to-asset-and-expense.sql` — **FÖRE deployen**, som alltid när NPoco
+får en ny POCO. Körda i dev 2026-09-23; **EJ körda i prod.** ⚠️ Tabellen skapades först utan
+sandlådespärren; se utgiftssidans avsnitt ovan för vad startkontrollen fångade. Adds C# → full ombyggnad.
 Ingen doctype-egenskap, ingen Umbraco-nod.
 
 **⛔ Ingenting av ekonomidelen deployas till prod** förrän klubbarna kan prova i sandlådan — se
