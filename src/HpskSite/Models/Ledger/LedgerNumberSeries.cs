@@ -83,5 +83,19 @@ namespace HpskSite.Models.Ledger
 
         /// <summary>Ingående balanser vid anslutning, eller årsskiftets överföring.</summary>
         public const string OpeningBalance = "opening-balance";
+
+        /// <summary>
+        /// Årets avskrivning på en tillgång i anläggningsregistret.
+        /// <para>⚠️ <c>SourceId</c> är tillgångens id — det är den nyckeln "bokfört i år" härleds
+        /// ur, så strängen får inte ändras.</para>
+        /// </summary>
+        public const string AssetDepreciation = "asset-depreciation";
+
+        /// <summary>
+        /// En utbetald utgift: ett utlägg eller en leverantörsfaktura.
+        /// <para>⚠️ Verifikationen skrivs vid BETALNINGEN, inte vid registreringen — föreningen
+        /// bokför enligt kontantmetoden. <c>SourceId</c> är utgiftens id.</para>
+        /// </summary>
+        public const string Expense = "expense";
     }
 }

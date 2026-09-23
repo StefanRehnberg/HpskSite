@@ -380,6 +380,7 @@
         <a href="#" class="ek-nav soon" data-view="avstamning">Avstämning</a>
         <a href="#" class="ek-nav" data-view="rapport">Rapport</a>
         <a href="#" class="ek-nav" data-view="avgifter">Avgifter</a>
+        <a href="#" class="ek-nav" data-view="utgifter">Utgifter</a>
         <a href="#" class="ek-nav" data-view="tillgangar">Tillgångar</a>
         <a href="#" class="ek-nav soon" data-view="bokslut">Bokslut</a>
         @if (Model.CanWrite)
@@ -1456,6 +1457,149 @@
                 klubbstuga skrivs av mot 7820 och en pistol mot 7830, och en roll hade tvingat
                 fram ETT val för hela föreningen.
             *@
+            @*
+                ⚠️⚠️ ATT REGISTRERA EN UTGIFT BOKFÖR INGENTING. Föreningen bokför enligt
+                kontantmetoden, så verifikationen skrivs när utgiften BETALAS. Den här ytan är
+                alltså en arbetslista och en attestkedja — bokföringen sker i ett enda steg.
+
+                ⚠️ Ett utlägg och en leverantörsfaktura är SAMMA FORM: ett åtagande som uppstod
+                före pengarna. Skillnaden är motparten.
+            *@
+            <section data-pane="utgifter" hidden>
+                <div class="head">
+                    <div><h1>Vad ska vi betala?</h1>
+                        <div class="sub">Utlägg och räkningar — registrera, attestera, betala.</div></div>
+                    <div class="headactions" id="@(uid)_utActions"></div>
+                </div>
+
+                <div class="ek-alert ek-bad d-none" id="@(uid)_utError"></div>
+                <div class="ek-alert ek-ok d-none" id="@(uid)_utOk"></div>
+
+                @* ⚠️ Betalpanelen ligger ÖVER listan, inte i raden. Betalningen behöver ett datum
+                   och ett konto, och ett formulär inuti en tabellrad blir oläsbart på en telefon —
+                   som är där en kassör står när hen betalar räkningarna. *@
+                <div class="ek-card wide d-none" id="@(uid)_utPayPanel">
+                    <div class="ek-cardh"><h2>Betala ut</h2></div>
+                    <p class="muted" style="margin-top:0" id="@(uid)_utPayWhat"></p>
+
+                    <div class="amount-row">
+                        <label style="flex:1 1 180px">Betaldatum
+                            <input type="text" class="form-control ek-date" id="@(uid)_utPayDate"
+                                   placeholder="åååå-mm-dd"></label>
+                        <label style="flex:1 1 240px">Betalades från
+                            <select class="form-control" id="@(uid)_utPayAccount"></select></label>
+                        <button type="button" class="btn btn-primary" id="@(uid)_utPayConfirm">Bokför utbetalningen</button>
+                        <button type="button" class="btn btn-link" id="@(uid)_utPayCancel">Avbryt</button>
+                    </div>
+
+                    @* ⚠️ Kontantmetoden i klartext. En kassör som tror att fakturadatumet gäller
+                       kommer att undra varför decemberfakturan hamnar på det nya året. *@
+                    <p class="muted" style="margin-bottom:0">
+                        Utgiften bokförs på <strong>betaldatumet</strong>, inte på fakturadatumet.
+                        Det är så kontantmetoden fungerar.
+                    </p>
+                </div>
+
+                <div class="ek-card wide">
+                    <div class="ek-cardh">
+                        <h2>Att göra</h2>
+                        <div class="muted" id="@(uid)_utTodoMeta"></div>
+                    </div>
+                    <table class="t">
+                        <thead><tr>
+                            <th>Utgift</th>
+                            <th style="width:11rem">Mottagare</th>
+                            <th style="width:8rem">Förfaller</th>
+                            <th class="n" style="width:8rem">Belopp</th>
+                            <th style="width:13rem">Läge</th>
+                            <th style="width:15rem"></th>
+                        </tr></thead>
+                        <tbody id="@(uid)_utTodoBody"></tbody>
+                    </table>
+                </div>
+
+                @* Avklarat göms, men rubriken står kvar — sortera, göm inte. *@
+                <details class="ek-card wide" id="@(uid)_utDoneCard">
+                    <summary class="ek-cardh"><h2 style="display:inline">Avklarat</h2>
+                        <span class="muted" id="@(uid)_utDoneMeta"></span></summary>
+                    <table class="t">
+                        <thead><tr>
+                            <th>Utgift</th>
+                            <th style="width:11rem">Mottagare</th>
+                            <th style="width:8rem">Betald</th>
+                            <th class="n" style="width:8rem">Belopp</th>
+                            <th style="width:13rem">Läge</th>
+                            <th style="width:8rem">Verifikation</th>
+                        </tr></thead>
+                        <tbody id="@(uid)_utDoneBody"></tbody>
+                    </table>
+                </details>
+
+                @if (Model.CanWrite)
+                {
+                    <div class="ek-card wide" id="@(uid)_utFormCard">
+                        <div class="ek-cardh">
+                            <h2 id="@(uid)_utFormTitle">Registrera en utgift</h2>
+                        </div>
+
+                        <input type="hidden" id="@(uid)_uId" value="0">
+
+                        <div class="amount-row">
+                            <label style="flex:1 1 220px">Vad är det?
+                                <select class="form-control" id="@(uid)_uKind">
+                                    <option value="utlagg">Utlägg — någon har lagt ut egna pengar</option>
+                                    <option value="faktura">Leverantörsfaktura — en räkning har kommit</option>
+                                </select></label>
+                            <label style="flex:2 1 260px">Vad avser den?
+                                <input type="text" class="form-control" id="@(uid)_uDesc"
+                                       placeholder="Grus till kulfånget, fika till klubbkvällen" autocomplete="off"></label>
+                            <label style="flex:1 1 150px">Belopp
+                                <input type="number" class="form-control" id="@(uid)_uAmount"
+                                       step="0.01" min="0" placeholder="0"></label>
+                        </div>
+
+                        <div class="amount-row">
+                            @* ⚠️ Mottagaren är en MEDLEM vid utlägg — det är det fältet attestspärren
+                               läser. Fritext där hade gjort det möjligt att godkänna sin egen
+                               utbetalning. Vid faktura är det tvärtom fritext: en leverantör finns
+                               inte i något register hos oss. *@
+                            <label style="flex:1 1 240px" id="@(uid)_uPayeeMemberWrap">Vem ska ha pengarna?
+                                <select class="form-control" id="@(uid)_uPayee"></select></label>
+                            <label class="d-none" style="flex:1 1 240px" id="@(uid)_uPayeeNameWrap">Vilken leverantör?
+                                <input type="text" class="form-control" id="@(uid)_uPayeeName"
+                                       placeholder="Företagets namn" autocomplete="off"></label>
+                            <label style="flex:1 1 160px">Fakturadatum
+                                <input type="text" class="form-control ek-date" id="@(uid)_uDate"
+                                       placeholder="åååå-mm-dd"></label>
+                            <label style="flex:1 1 160px" id="@(uid)_uDueWrap">Förfaller
+                                <input type="text" class="form-control ek-date" id="@(uid)_uDue"
+                                       placeholder="åååå-mm-dd"></label>
+                        </div>
+
+                        <div class="amount-row">
+                            <label style="flex:1 1 260px">Vilket konto?
+                                <select class="form-control" id="@(uid)_uAccount"></select></label>
+                            <label style="flex:1 1 220px">Projekt (frivilligt)
+                                <select class="form-control" id="@(uid)_uProject"></select></label>
+                        </div>
+
+                        @* ⚠️ Kvittot lagras nu men blir en bilaga till VERIFIKATIONEN först vid
+                           betalningen. Attesten sker mot kvittot, alltså innan det finns någon
+                           verifikation att hänga det på. *@
+                        <label class="fieldlabel" for="@(uid)_uReceipt">Kvitto eller faktura (frivilligt)</label>
+                        <input type="file" class="form-control" id="@(uid)_uReceipt"
+                               accept=".pdf,.jpg,.jpeg,.png,.heic,.webp">
+                        <div class="muted" id="@(uid)_uReceiptNow"></div>
+
+                        <div class="amount-row" style="margin-top:12px">
+                            <button type="button" class="btn btn-primary" id="@(uid)_uSave">Spara</button>
+                            <button type="button" class="btn btn-link d-none" id="@(uid)_uCancel">Avbryt</button>
+                            <span class="muted" id="@(uid)_uHint"></span>
+                        </div>
+                    </div>
+                }
+            </section>
+
             <section data-pane="tillgangar" hidden>
                 <div class="head">
                     <div><h1>Vad äger föreningen?</h1>
@@ -1634,7 +1778,8 @@
     //    'Y-m-d' betyder att faltets .value fortsatter vara ISO, sa varje lasning och varje
     //    payload nedanfor ar oforandrad. Lagg till ett nytt datumfalt HAR, aldrig som type=date.
     var EK_DATE_FIELDS = ['start', 'end', 'bDate', 'repFrom', 'repTo', 'budDate',
-                          'fordrFrom', 'fordrTo', 'verFrom', 'verTo', 'aDate'];
+                          'fordrFrom', 'fordrTo', 'verFrom', 'verTo', 'aDate',
+                          'uDate', 'uDue', 'utPayDate'];
     if (window.flatpickr) {
         EK_DATE_FIELDS.forEach(function (n) {
             var f = el(n);
@@ -1727,6 +1872,10 @@
         // ⚠️ Samma skäl som ovan: registret räknar årets plan och läser årets bokförda
         //    avskrivningar ur liggaren. Varje skrivning hämtar om det själv.
         if (name === 'tillgangar' && !assetLoaded) { assetLoaded = true; loadAssets(); }
+
+        // ⚠️ Samma skäl som ovan: listan läser hela utgiftsregistret plus kontoplanen. Varje
+        //    skrivning hämtar om den själv.
+        if (name === 'utgifter' && !expenseLoaded) { expenseLoaded = true; loadExpenses(); }
     }
     root.querySelectorAll('[data-view]').forEach(function (a) {
         a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
@@ -2143,6 +2292,364 @@
         if (ev.key === 'Enter') { ev.preventDefault(); loadJournal(true); }
     });
 
+
+
+    // ══ UTGIFTSSIDAN ═════════════════════════════════════════════════════════════════════
+    //
+    // ⚠️⚠️ REGISTRERING BOKFÖR INGENTING. Föreningen bokför enligt kontantmetoden, så
+    //    verifikationen skrivs när utgiften BETALAS — och det sker på exakt ett ställe här nere
+    //    (payExpense). Allt annat är arbetslista och attest.
+    var expenseLoaded = false;
+    var expensePayees = null;
+    var expenseRows = [];
+    var payingId = 0;
+
+    async function loadExpenses() {
+        show(el('utError'), false);
+
+        var d = await fetch('/umbraco/surface/EkonomiAdmin/GetExpenses?issuerType=' + issuerType
+                            + '&issuerId=' + issuerId, { cache: 'no-store' })
+            .then(function (r) { return r.json(); });
+
+        if (!d.success) {
+            el('utError').textContent = d.message || 'Utgifterna gick inte att läsa.';
+            show(el('utError'), true);
+            return;
+        }
+
+        expenseRows = d.expenses || [];
+        renderExpenses(d);
+
+        if (canWrite) {
+            fillSelect(el('uAccount'), d.accounts || []);
+            fillSelect(el('utPayAccount'), d.paymentAccounts || []);
+
+            // ⚠️ Projektet är FRIVILLIGT, så listan måste bära ett tomt val. Utan det blir varje
+            //    utgift märkt med det första projektet i listan, tyst.
+            el('uProject').innerHTML = '<option value="0">Inget projekt</option>'
+                + (d.projects || []).map(function (p) {
+                    return '<option value="' + p.id + '">' + esc(p.name) + '</option>';
+                }).join('');
+        }
+    }
+
+    function expenseStatusCell(e) {
+        var extra = '';
+
+        // ⚠️ Attesten SÄGS med namn. "Attesterad" utan vem är inte en internkontroll, det är en
+        //    bock — och det är just namnet revisorn frågar efter.
+        if (e.approvedByName)
+            extra += '<div class="muted">Attesterad av ' + esc(e.approvedByName)
+                   + (e.approvedBySelf ? ' (som också registrerade den)' : '') + '</div>';
+
+        if (e.rejectedReason)
+            extra += '<div class="muted">' + esc(e.rejectedReason) + '</div>';
+
+        return esc(e.statusLabel) + extra;
+    }
+
+    function renderExpenses(d) {
+        var todo = expenseRows.filter(function (e) {
+            return e.status === 'registered' || e.status === 'approved';
+        });
+        var done = expenseRows.filter(function (e) {
+            return e.status === 'paid' || e.status === 'rejected';
+        });
+
+        el('utTodoMeta').textContent = todo.length === 0 ? ''
+            : (d.toApprove || 0) + ' väntar på attest · ' + (d.toPay || 0) + ' att betala ('
+              + kr(d.toPayAmount) + ')'
+              + ((d.overdue || 0) > 0 ? ' · ' + d.overdue + ' förfallna' : '');
+
+        el('utDoneMeta').textContent = done.length === 0 ? ' — inget ännu'
+                                                         : ' — ' + done.length + ' utgifter';
+
+        el('utTodoBody').innerHTML = todo.length === 0
+            ? '<tr><td colspan="6" class="muted">Ingenting väntar. Kommer en räkning eller har '
+              + 'någon lagt ut pengar registrerar du det här.</td></tr>'
+            : todo.map(function (e) {
+                var acts = '';
+                if (canWrite) {
+                    if (e.status === 'registered')
+                        acts += '<button type="button" class="btn btn-sm btn-link" data-exp-approve="' + e.id + '">Attestera</button>';
+                    if (e.canPay)
+                        acts += '<button type="button" class="btn btn-sm btn-link" data-exp-pay="' + e.id + '">Betala</button>';
+                    acts += '<button type="button" class="btn btn-sm btn-link" data-exp-edit="' + e.id + '">Ändra</button>'
+                          + '<button type="button" class="btn btn-sm btn-link" data-exp-reject="' + e.id + '">Avvisa</button>';
+                }
+
+                // ⚠️ "Saknas" står UT. En tom cell läser som att ingen tittat efter kvittot, och
+                //    det är skillnaden mellan ett underlag som fattas och ett ingen frågat om.
+                var receipt = e.hasReceipt
+                    ? '<a href="/umbraco/surface/EkonomiAdmin/GetExpenseReceipt?issuerType=' + issuerType
+                      + '&issuerId=' + issuerId + '&expenseId=' + e.id
+                      + '" target="_blank" rel="noopener">Kvitto</a>'
+                    : '<span class="muted">Kvitto saknas</span>';
+
+                return '<tr><td><strong>' + esc(e.description) + '</strong>'
+                     + '<div class="muted">' + esc(e.kindLabel) + ' · ' + e.accountNumber
+                     + ' ' + esc(e.accountName)
+                     + (e.projectName ? ' · ' + esc(e.projectName) : '') + '</div>'
+                     + '<div class="muted">' + receipt + '</div></td>'
+                     + '<td>' + esc(e.payeeName) + '</td>'
+                     + '<td class="muted">' + (e.dueDate ? esc(shortDate(e.dueDate)) : '—')
+                     + (e.isOverdue ? '<div class="ek-bad">Förfallen</div>' : '') + '</td>'
+                     + '<td class="n">' + kr(e.amount) + '</td>'
+                     + '<td>' + expenseStatusCell(e) + '</td>'
+                     + '<td>' + acts + '</td></tr>';
+            }).join('');
+
+        el('utDoneBody').innerHTML = done.length === 0
+            ? '<tr><td colspan="6" class="muted">Inget avklarat ännu.</td></tr>'
+            : done.map(function (e) {
+                return '<tr><td>' + esc(e.description)
+                     + '<div class="muted">' + esc(e.kindLabel) + '</div></td>'
+                     + '<td>' + esc(e.payeeName) + '</td>'
+                     + '<td class="muted">' + (e.paidDate ? esc(shortDate(e.paidDate)) : '—') + '</td>'
+                     + '<td class="n">' + kr(e.amount) + '</td>'
+                     + '<td>' + expenseStatusCell(e) + '</td>'
+                     + '<td class="muted">' + esc(e.journalEntryNumber || '') + '</td></tr>';
+            }).join('');
+
+        el('utTodoBody').querySelectorAll('button[data-exp-approve]').forEach(function (b) {
+            b.addEventListener('click', function () { approveExpense(parseInt(b.dataset.expApprove, 10)); });
+        });
+        el('utTodoBody').querySelectorAll('button[data-exp-reject]').forEach(function (b) {
+            b.addEventListener('click', function () { rejectExpense(parseInt(b.dataset.expReject, 10)); });
+        });
+        el('utTodoBody').querySelectorAll('button[data-exp-pay]').forEach(function (b) {
+            b.addEventListener('click', function () { openPayPanel(parseInt(b.dataset.expPay, 10)); });
+        });
+        el('utTodoBody').querySelectorAll('button[data-exp-edit]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var e = expenseRows.find(function (x) { return x.id === parseInt(b.dataset.expEdit, 10); });
+                if (e) fillExpenseForm(e);
+            });
+        });
+    }
+
+    function expenseDone(j, reload) {
+        if (!j.success) {
+            el('utError').textContent = j.message;
+            show(el('utError'), true);
+            show(el('utOk'), false);
+            return false;
+        }
+        el('utOk').textContent = j.message;
+        show(el('utOk'), true);
+        show(el('utError'), false);
+        if (reload !== false) loadExpenses();
+        return true;
+    }
+
+    function approveExpense(id) {
+        var note = window.prompt(
+            'Attestera utgiften?\n\nDu kan skriva en notering som följer med till verifikationen '
+            + '(frivilligt).');
+
+        if (note === null) return;
+
+        postJson('/umbraco/surface/EkonomiAdmin/ApproveExpense', {
+            issuerType: issuerType, issuerId: issuerId, expenseId: id, text: note
+        }).then(expenseDone);
+    }
+
+    function rejectExpense(id) {
+        var reason = window.prompt(
+            'Varför avvisas utgiften?\n\nDen som lagt ut pengarna ska kunna läsa skälet.');
+
+        if (reason === null) return;
+
+        postJson('/umbraco/surface/EkonomiAdmin/RejectExpense', {
+            issuerType: issuerType, issuerId: issuerId, expenseId: id, text: reason
+        }).then(expenseDone);
+    }
+
+    function openPayPanel(id) {
+        var e = expenseRows.find(function (x) { return x.id === id; });
+        if (!e) return;
+
+        payingId = id;
+        el('utPayWhat').textContent = e.description + ' — ' + kr(e.amount) + ' till ' + e.payeeName;
+
+        // ⚠️ Idag som förval, inte fakturadatumet: betaldagen är det som gäller under
+        //    kontantmetoden, och kassören betalar nästan alltid samma dag hen klickar.
+        if (!el('utPayDate').value)
+            setDateField('utPayDate', new Date().toISOString().substring(0, 10));
+
+        show(el('utPayPanel'), true);
+        el('utPayPanel').scrollIntoView({ block: 'nearest' });
+    }
+
+    if (el('utPayCancel')) el('utPayCancel').addEventListener('click', function () {
+        payingId = 0;
+        show(el('utPayPanel'), false);
+    });
+
+    if (el('utPayConfirm')) el('utPayConfirm').addEventListener('click', function () {
+        if (!payingId) return;
+        var btn = this;
+        btn.disabled = true;
+
+        postJson('/umbraco/surface/EkonomiAdmin/PayExpense', {
+            issuerType: issuerType, issuerId: issuerId, expenseId: payingId,
+            paidDate: el('utPayDate').value,
+            paymentAccountNumber: parseInt(el('utPayAccount').value, 10) || 0
+        }).then(function (j) {
+            btn.disabled = false;
+            if (expenseDone(j)) {
+                payingId = 0;
+                show(el('utPayPanel'), false);
+            }
+        }).catch(function (err) {
+            btn.disabled = false;
+            el('utError').textContent = err.message;
+            show(el('utError'), true);
+        });
+    });
+
+    // ⚠️ Mottagarlistan hämtas LAT, först när någon väljer Utlägg. Klubbgrenen går genom hela
+    //    medlemsregistret, och det ska inte ligga i varje sidladdning av ekonomiytan.
+    function loadPayees() {
+        if (expensePayees) return Promise.resolve();
+
+        return fetch('/umbraco/surface/EkonomiAdmin/GetExpensePayees?issuerType=' + issuerType
+                     + '&issuerId=' + issuerId, { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) return;
+                expensePayees = d.payees || [];
+
+                el('uPayee').innerHTML = expensePayees.map(function (m) {
+                    return '<option value="' + m.id + '">' + esc(m.name) + '</option>';
+                }).join('');
+
+                // ⚠️ Avgränsningen sägs ut. En lista som bara innehåller kretsens styrelse, utan
+                //    att något förklarar varför, läser som att medlemmarna saknas.
+                if (d.note) el('uHint').textContent = d.note;
+            });
+    }
+
+    function syncExpenseKind() {
+        var isUtlagg = el('uKind').value === 'utlagg';
+
+        show(el('uPayeeMemberWrap'), isUtlagg);
+        show(el('uPayeeNameWrap'), !isUtlagg);
+        show(el('uDueWrap'), !isUtlagg);
+
+        if (isUtlagg) {
+            // ⚠️ Förfallodagen NOLLSTÄLLS vid byte till utlägg. Ett utlägg har ingen, och servern
+            //    vägrar — ett kvarglömt datum hade gett ett avslag på något användaren inte ser.
+            setDateField('uDue', '');
+            loadPayees();
+        }
+    }
+
+    if (el('uKind')) el('uKind').addEventListener('change', syncExpenseKind);
+
+    function fillExpenseForm(e) {
+        el('utFormTitle').textContent = 'Ändra ' + e.description;
+        el('uId').value = e.id;
+        el('uKind').value = e.kind;
+        el('uDesc').value = e.description || '';
+        el('uAmount').value = e.amount;
+        setDateField('uDate', String(e.expenseDate).substring(0, 10));
+        setDateField('uDue', e.dueDate ? String(e.dueDate).substring(0, 10) : '');
+        el('uPayeeName').value = e.kind === 'faktura' ? (e.payeeName || '') : '';
+        el('uAccount').value = String(e.accountNumber);
+        el('uProject').value = String(e.projectId || 0);
+
+        el('uReceiptNow').textContent = e.hasReceipt
+            ? 'Kvitto: ' + e.receiptFileName + '. Väljer du en ny fil ersätts den.'
+            : '';
+
+        syncExpenseKind();
+
+        if (e.kind === 'utlagg' && e.payeeMemberId) {
+            loadPayees().then(function () { el('uPayee').value = String(e.payeeMemberId); });
+        }
+
+        show(el('uCancel'), true);
+        el('uDesc').focus();
+    }
+
+    function resetExpenseForm() {
+        el('utFormTitle').textContent = 'Registrera en utgift';
+        el('uId').value = '0';
+        el('uDesc').value = '';
+        el('uAmount').value = '';
+        el('uPayeeName').value = '';
+        setDateField('uDate', '');
+        setDateField('uDue', '');
+        el('uReceipt').value = '';
+        el('uReceiptNow').textContent = '';
+        show(el('uCancel'), false);
+        syncExpenseKind();
+    }
+
+    if (el('uCancel')) el('uCancel').addEventListener('click', resetExpenseForm);
+
+    if (el('uSave')) el('uSave').addEventListener('click', function () {
+        var btn = this;
+        btn.disabled = true;
+
+        var isUtlagg = el('uKind').value === 'utlagg';
+
+        postJson('/umbraco/surface/EkonomiAdmin/SaveExpense', {
+            issuerType: issuerType, issuerId: issuerId,
+            id: parseInt(el('uId').value, 10) || 0,
+            kind: el('uKind').value,
+            payeeMemberId: isUtlagg ? (parseInt(el('uPayee').value, 10) || 0) : 0,
+            // ⚠️ Vid utlägg är NAMNET mottagarens, taget ur väljaren — inte fritextfältet, som
+            //    hör till leverantörsgrenen. Blandas de ihop sparas ett tomt mottagarnamn.
+            payeeName: isUtlagg
+                ? (el('uPayee').selectedOptions[0] ? el('uPayee').selectedOptions[0].textContent : '')
+                : el('uPayeeName').value,
+            description: el('uDesc').value,
+            amount: parseFloat(el('uAmount').value) || 0,
+            expenseDate: el('uDate').value,
+            dueDate: isUtlagg ? '' : el('uDue').value,
+            accountNumber: parseInt(el('uAccount').value, 10) || 0,
+            projectId: parseInt(el('uProject').value, 10) || 0
+        }).then(function (j) {
+            btn.disabled = false;
+
+            if (!j.success) {
+                el('utError').textContent = j.message;
+                show(el('utError'), true);
+                return;
+            }
+
+            var file = el('uReceipt').files && el('uReceipt').files[0];
+            if (!file) { expenseDone(j); resetExpenseForm(); return; }
+
+            // ⚠️ Kvittot laddas upp EFTER sparningen — id:t finns inte förrän raden gör det. Ett
+            //    misslyckat kvitto får inte rapporteras som en misslyckad sparning: utgiften ÄR
+            //    registrerad, och ett felmeddelande som antyder motsatsen får kassören att skriva
+            //    in den en gång till.
+            var fd = new FormData();
+            fd.append('issuerType', issuerType);
+            fd.append('issuerId', issuerId);
+            fd.append('expenseId', j.id);
+            fd.append('file', file);
+
+            postForm('/umbraco/surface/EkonomiAdmin/UploadExpenseReceipt', fd).then(function (u) {
+                if (!u.success) {
+                    el('utError').textContent = 'Utgiften är sparad, men kvittot kunde inte kopplas: '
+                        + u.message;
+                    show(el('utError'), true);
+                } else {
+                    expenseDone(j, false);
+                }
+                resetExpenseForm();
+                loadExpenses();
+            });
+        }).catch(function (err) {
+            btn.disabled = false;
+            el('utError').textContent = err.message;
+            show(el('utError'), true);
+        });
+    });
 
     // ══ ANLÄGGNINGSREGISTRET ═════════════════════════════════════════════════════════════
     //

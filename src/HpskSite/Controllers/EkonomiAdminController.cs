@@ -52,6 +52,10 @@ namespace HpskSite.Controllers
         private readonly LedgerAttachmentService _attachmentService;
         private readonly LedgerAuditorService _auditorService;
         private readonly LedgerAssetService _assetService;
+        private readonly LedgerExpenseService _expenseService;
+        private readonly BoardRoleService _boardRoles;
+        private readonly LedgerProjectService _projectService;
+        private readonly LedgerAttachmentStorage _attachmentStorage;
         private readonly EmailService _emailService;
 
         /// <summary>
@@ -91,6 +95,10 @@ namespace HpskSite.Controllers
             LedgerAttachmentService attachmentService,
             LedgerAuditorService auditorService,
             LedgerAssetService assetService,
+            LedgerExpenseService expenseService,
+            BoardRoleService boardRoles,
+            LedgerProjectService projectService,
+            LedgerAttachmentStorage attachmentStorage,
             EmailService emailService,
             IMemberManager memberManager,
             IMemberService memberService,
@@ -112,6 +120,10 @@ namespace HpskSite.Controllers
             _attachmentService = attachmentService;
             _auditorService = auditorService;
             _assetService = assetService;
+            _expenseService = expenseService;
+            _boardRoles = boardRoles;
+            _projectService = projectService;
+            _attachmentStorage = attachmentStorage;
             _emailService = emailService;
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
@@ -474,6 +486,318 @@ namespace HpskSite.Controllers
             return Json(done
                 ? new { success = true, message = "Underlaget är bortkopplat." }
                 : new { success = false, message = error! });
+        }
+
+        // ══ UTGIFTSSIDAN ═════════════════════════════════════════════════════════════════════
+        //
+        // ⚠️⚠️ ATT REGISTRERA EN UTGIFT BOKFÖR INGENTING. Föreningen bokför enligt kontantmetoden,
+        //    så verifikationen skrivs vid BETALNINGEN. Endpointarna här hanterar alltså en
+        //    arbetslista och en attestkedja — bokföringen sker i exakt en av dem.
+
+        /// <summary>Utgifterna, med kontoplanen och projekten ytan behöver.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetExpenses(int issuerType, int issuerId, bool includeSettled = true)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var today = DateTime.Today;
+            var expenses = _expenseService.List(issuerType, issuerId, today, includeSettled);
+            var context = _manualPosting.BuildContext(issuerType, issuerId);
+
+            return Json(new
+            {
+                success = true,
+                expenses,
+
+                // Sammanfattningen som driver rubrikerna: vad väntar på mig just nu?
+                toApprove = expenses.Count(e => e.Status == LedgerExpenseStatus.Registered),
+                toPay = expenses.Count(e => e.CanPay),
+                toPayAmount = expenses.Where(e => e.CanPay).Sum(e => e.Amount),
+                overdue = expenses.Count(e => e.IsOverdue),
+
+                // ⚠️ Bara KOSTNADSkonton erbjuds. Ett intäktskonto här ger en resultatrapport där
+                //    utgiften ökar intäkterna, och felet syns först när någon läser rapporten.
+                accounts = context.Accounts
+                    .Where(a => LedgerAccountClass.Of(a.Number) is >= 4 and <= 8)
+                    .Select(a => new { number = a.Number, name = a.Name }),
+
+                paymentAccounts = context.PaymentAccounts.Select(a => new { number = a.Number, name = a.Name }),
+
+                projects = _projectService.List(issuerType, issuerId)
+                    .Select(p => new { id = p.Id, name = p.Name })
+            });
+        }
+
+        /// <summary>
+        /// Vilka som kan ta emot ett utlägg.
+        ///
+        /// <para><b>⚠️⚠️ BÅDA VÄRDFORMERNA, PÅ ETT STÄLLE.</b> En klubb har MEDLEMMAR; en krets har
+        /// KLUBBAR, inte medlemmar — dess utlägg görs i praktiken av dess egen styrelse. Skrivs
+        /// regeln i klienten eller per anropsplats blir kretsens lista tom, och då ser
+        /// utläggsformuläret trasigt ut i stället för att vara avgränsat. Den här kodbasen har
+        /// skrivit värdkontrollen för hand och fått den fel fyra gånger; det här är samma familj.</para>
+        ///
+        /// <para>⚠️ Läses LAT, först när någon väljer "Utlägg" i formuläret. Klubbgrenen går genom
+        /// hela medlemsregistret, och det ska inte ligga i varje sidladdning av ekonomiytan.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetExpensePayees(int issuerType, int issuerId)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            // ⚠️ ÄGAREN, aldrig utställaren. En sandlåda har ett negativt id och inga medlemmar —
+            //    dess utlägg görs av föreningens folk, precis som den riktiga liggarens. Samma
+            //    uppsättning som behörigheten gör några rader upp.
+            var issuer = _sandbox.GetById(issuerId);
+            var ownerType = issuer?.OwnerType ?? issuerType;
+            var ownerId = issuer?.OwnerId ?? issuerId;
+
+            try
+            {
+                if (ownerType == (int)DocumentOwnerType.Region)
+                {
+                    var board = _boardRoles.GetBoardMembers(ownerType, ownerId)
+                        .Select(r => r.MemberId)
+                        .Distinct()
+                        .Select(id => _memberService.GetById(id))
+                        .Where(m => m is not null)
+                        .Select(m => new { id = m!.Id, name = m.Name ?? "" })
+                        .OrderBy(m => m.name)
+                        .ToList();
+
+                    return Json(new
+                    {
+                        success = true,
+                        payees = board,
+                        // ⚠️ Avgränsningen SÄGS. En lista som bara innehåller styrelsen, utan att
+                        //    något förklarar varför, läser som att medlemmarna saknas.
+                        note = "En krets har klubbar, inte medlemmar — listan visar kretsens styrelse."
+                    });
+                }
+
+                var members = _memberService.GetAll(0, int.MaxValue, out _)
+                    .Where(m => m.GetValue("primaryClubId")?.ToString() == ownerId.ToString()
+                                || (m.GetValue("memberClubIds")?.ToString() ?? "")
+                                    .Split(',')
+                                    .Any(id => id.Trim() == ownerId.ToString()))
+                    .Select(m => new { id = m.Id, name = m.Name ?? "" })
+                    .OrderBy(m => m.name)
+                    .ToList();
+
+                return Json(new { success = true, payees = members, note = (string?)null });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Mottagarlistan gick inte att läsa för {Typ}/{Id}.",
+                    issuerType, issuerId);
+
+                return Json(new { success = false, message = "Mottagarlistan gick inte att läsa." });
+            }
+        }
+
+        /// <summary>Lägger till eller ändrar en utgift.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveExpense([FromBody] SaveExpenseRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var date = ParseDate(request.ExpenseDate);
+            if (date is null) return Json(new { success = false, message = "Ange vilket datum utgiften gäller." });
+
+            var (saved, error, id, dropped) = _expenseService.Save(new LedgerExpense
+            {
+                Id = request.Id,
+                IssuerType = request.IssuerType,
+                IssuerId = request.IssuerId,
+                Kind = request.Kind ?? LedgerExpenseKind.Utlagg,
+                PayeeMemberId = request.PayeeMemberId,
+                PayeeName = request.PayeeName ?? "",
+                Description = request.Description ?? "",
+                Amount = request.Amount,
+                ExpenseDate = date.Value,
+                DueDate = ParseDate(request.DueDate),
+                AccountNumber = request.AccountNumber,
+                // ⚠️ `!= 0`, av samma skäl som ovan: ett projekt i sandlådan har negativt id,
+                //    och `> 0` hade gjort det omöjligt att märka en utgift med det — tyst.
+                ProjectId = request.ProjectId != 0 ? request.ProjectId : null
+            }, actorId.Value);
+
+            return Json(saved
+                ? new
+                {
+                    success = true,
+                    id,
+                    // ⚠️ En ändring som river attesten måste SÄGAS. Ett tyst "sparad" hade lämnat
+                    //    kassören i tron att utgiften fortfarande var godkänd.
+                    message = dropped
+                        ? "Utgiften är sparad. Attesten föll eftersom beloppet eller kontot ändrades "
+                          + "— den behöver godkännas på nytt."
+                        : "Utgiften är sparad."
+                }
+                : new { success = false, id = 0, message = error! });
+        }
+
+        /// <summary>
+        /// Laddar upp kvittot till en utgift.
+        ///
+        /// <para><b>⚠️ Filen lagras nu, men blir en bilaga till verifikationen först vid
+        /// betalningen.</b> Attesten sker mot kvittot, alltså innan det finns någon verifikation
+        /// att hänga det på.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UploadExpenseReceipt(
+            int issuerType, int issuerId, int expenseId, IFormFile? file)
+        {
+            var (ok, _) = await AuthorizeWriteAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            if (file is null || file.Length == 0)
+                return Json(new { success = false, message = "Välj en fil." });
+
+            var (valid, validationError) = _attachmentStorage.Validate(file.FileName, file.Length);
+            if (!valid) return Json(new { success = false, message = validationError! });
+
+            var expense = _expenseService.Get(issuerType, issuerId, expenseId);
+            if (expense is null) return Json(new { success = false, message = "Utgiften finns inte." });
+
+            try
+            {
+                await using var stream = file.OpenReadStream();
+                var (storedAs, size) = await _attachmentStorage.SaveAsync(stream, file.FileName);
+
+                var (linked, error) = _expenseService.SetReceipt(
+                    issuerType, issuerId, expenseId, file.FileName, storedAs, size);
+
+                return Json(linked
+                    ? new { success = true, message = "Kvittot är kopplat till utgiften." }
+                    : new { success = false, message = error! });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kvittot kunde inte sparas för utgift {Id}.", expenseId);
+                return Json(new { success = false, message = "Kvittot kunde inte sparas. Försök igen." });
+            }
+        }
+
+        /// <summary>Visar kvittot. Läsrätt räcker — revisorn ska kunna se underlaget.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetExpenseReceipt(int issuerType, int issuerId, int expenseId)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Content(DeniedMessage);
+
+            var expense = _expenseService.Get(issuerType, issuerId, expenseId);
+            if (expense?.ReceiptStoredAs is null) return Content("Kvittot hittades inte.");
+
+            var path = _attachmentStorage.GetFilePath(expense.ReceiptStoredAs);
+            if (path is null) return Content("Kvittot hittades inte på disk.");
+
+            // ⚠️ Inline, inte attachment: attestanten ska kunna titta på kvittot utan att ladda ner
+            //    det. Samma val som verifikationernas underlag.
+            Response.Headers.ContentDisposition =
+                $"inline; filename=\"{Uri.EscapeDataString(expense.ReceiptFileName ?? "kvitto")}\"";
+
+            return PhysicalFile(path, LedgerAttachmentStorage.ContentTypeFor(expense.ReceiptStoredAs));
+        }
+
+        /// <summary>Attesterar en utgift.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApproveExpense([FromBody] ExpenseActionRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att attestera." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var (approved, error, bySelf) = _expenseService.Approve(
+                request.IssuerType, request.IssuerId, request.ExpenseId, actorId.Value, request.Text);
+
+            return Json(approved
+                ? new
+                {
+                    success = true,
+                    bySelf,
+                    // ⚠️ Varningen om att man attesterat sin egen registrering SÄGS, men stoppar
+                    //    ingenting. En liten förening har ofta en enda person, och en spärr där
+                    //    hade gjort funktionen oanvändbar för just dem.
+                    message = bySelf
+                        ? "Utgiften är attesterad. Du registrerade den själv, och det noteras på "
+                          + "verifikationen — be gärna någon annan i styrelsen attestera nästa gång."
+                        : "Utgiften är attesterad och kan betalas."
+                }
+                : new { success = false, bySelf = false, message = error! });
+        }
+
+        /// <summary>Avvisar en utgift. Skälet är obligatoriskt.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RejectExpense([FromBody] ExpenseActionRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att avvisa." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var (rejected, error) = _expenseService.Reject(
+                request.IssuerType, request.IssuerId, request.ExpenseId, actorId.Value, request.Text ?? "");
+
+            return Json(rejected
+                ? new { success = true, message = "Utgiften är avvisad." }
+                : new { success = false, message = error! });
+        }
+
+        /// <summary>
+        /// Betalar ut en utgift och bokför den.
+        ///
+        /// <para><b>⚠️ Det är HÄR verifikationen skrivs</b> — och bokföringsdatumet är
+        /// betaldatumet, inte fakturadatumet. Det är hela kontantmetoden.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PayExpense([FromBody] PayExpenseRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att betala." });
+
+            var (ok, name) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var paid = ParseDate(request.PaidDate);
+            if (paid is null) return Json(new { success = false, message = "Ange vilket datum utgiften betalades." });
+
+            var (done, error, entryId) = _expenseService.Pay(
+                request.IssuerType, request.IssuerId, request.ExpenseId,
+                paid.Value, request.PaymentAccountNumber, actorId.Value);
+
+            if (done)
+            {
+                _logger.LogInformation(
+                    "Ekonomi: {Forening} betalade utgift {Id} och bokförde den som {Entry}.",
+                    name, request.ExpenseId, entryId);
+            }
+
+            return Json(done
+                ? new { success = true, entryId, message = "Utgiften är betald och bokförd." }
+                : new { success = false, entryId, message = error! });
         }
 
         // ══ ANLÄGGNINGSREGISTRET ═════════════════════════════════════════════════════════════
@@ -2165,6 +2489,47 @@ namespace HpskSite.Controllers
     public class PostPendingRequest
     {
         public int PaymentId { get; set; }
+    }
+
+    /// <summary>En utgift: ett utlägg eller en leverantörsfaktura.</summary>
+    public class SaveExpenseRequest
+    {
+        public int Id { get; set; }
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+
+        /// <summary>Ur <see cref="LedgerExpenseKind"/>.</summary>
+        public string? Kind { get; set; }
+
+        /// <summary>Medlemmen som ska ha pengarna. 0 för en leverantör.</summary>
+        public int PayeeMemberId { get; set; }
+
+        public string? PayeeName { get; set; }
+        public string? Description { get; set; }
+        public decimal Amount { get; set; }
+        public string? ExpenseDate { get; set; }
+        public string? DueDate { get; set; }
+        public int AccountNumber { get; set; }
+        public int ProjectId { get; set; }
+    }
+
+    /// <summary>Attest eller avslag. <c>Text</c> är noteringen respektive skälet.</summary>
+    public class ExpenseActionRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int ExpenseId { get; set; }
+        public string? Text { get; set; }
+    }
+
+    /// <summary>Utbetalningen — den enda av utgiftssidans handlingar som bokför något.</summary>
+    public class PayExpenseRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int ExpenseId { get; set; }
+        public string? PaidDate { get; set; }
+        public int PaymentAccountNumber { get; set; }
     }
 
     /// <summary>En tillgång i anläggningsregistret.</summary>
