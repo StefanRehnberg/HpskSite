@@ -5087,6 +5087,12 @@ efterbokför med `IssuerType` i begäran (utan fältet = klubb, som förut).
       (`BankgiroQrCodeGenerator`). Referensen är `MembershipFeeCharge.PaymentReference` = `KA{år}-{id}` /
       `MA{år}-{id}` — **samma sträng på sidan, i mejlet och i BG-QR:en**, annars går betalningen inte att
       stämma av. "Jag har betalat" visas när Swish ELLER bankgiro finns.
+    - **⚠️ Mejlet visar betalsätten som JÄMBÖRDIGA SEKTIONER med en knapp var**
+      (`EmailService.PaymentOptionsMailBlock`, delad av båda avgiftsmejlen). En knapp följd av "du kan
+      också betala till bankgiro" lästes som att knappen var Swish, så bankgirobetalare klickade aldrig
+      och såg inte bankgiro-QR:en (Stefan). Knapparna landar på `#swish` / `#bankgiro` på betalsidan.
+      `hasSwish` prövas med samma regel som betalsidan (`IssuerHasSwish`) — annars erbjuder mejlet en
+      Swish-knapp som landar på en sida utan Swish.
   - **Telefon:** status och knappar får en egen rad under klubben (`tr.rf-mrow`); knapparna finns
     därför två gånger i DOM:en — `td.rf-actions` är datorns.
   - ⚠️ `load()` rör inte beskedet — det körs direkt efter Skicka.

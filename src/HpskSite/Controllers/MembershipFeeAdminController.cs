@@ -299,7 +299,7 @@ namespace HpskSite.Controllers
             var to = _feeService.GetPayerEmails(MembershipFeeIssuer.Club, charge.ClubId).GetValueOrDefault(charge.MemberId) ?? charge.MemberEmail ?? "";
             var mail = _emailService.PreviewMembershipFeeRequest(to, charge.MemberName ?? "medlem",
                 clubName, charge.Year, charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForClub(charge.ClubId),
-                IssuerBankgiro(charge.ClubId), charge.PaymentReference);
+                IssuerBankgiro(charge.ClubId), charge.PaymentReference, IssuerHasSwish(charge.ClubId));
             return Content(PreviewPage(mail, to, charge.PaymentStatus == "Paid"), "text/html; charset=utf-8");
         }
 
@@ -369,6 +369,7 @@ namespace HpskSite.Controllers
             var failed = new List<string>();
             var feeEmails = _feeService.GetPayerEmails(MembershipFeeIssuer.Club, clubId);
             var bg = IssuerBankgiro(clubId);
+            var hasSwish = IssuerHasSwish(clubId);
             foreach (var charge in _feeService.GetChargesForClubYear(clubId, year))
             {
                 if (charge.IsRegionFee || charge.PaymentStatus == "Paid") continue;
@@ -388,7 +389,7 @@ namespace HpskSite.Controllers
                     // ⚠️ Svaret hör till KLUBBEN, som är den som kräver avgiften.
                     ok = await _emailService.SendMembershipFeeRequestAsync(
                         to!, name, clubName, year, charge.Amount, BuildPayUrl(charge.Id),
-                        _replyContacts.ForClub(clubId), bg, charge.PaymentReference);
+                        _replyContacts.ForClub(clubId), bg, charge.PaymentReference, hasSwish);
                 }
                 catch (Exception ex)
                 {
@@ -646,6 +647,7 @@ namespace HpskSite.Controllers
             var only = request.ChargeIds is { Count: > 0 } ? request.ChargeIds.ToHashSet() : null;
             var feeEmails = _feeService.GetPayerEmails(MembershipFeeIssuer.Region, request.RegionId);
             var bg = IssuerBankgiro(request.RegionId);
+            var hasSwish = IssuerHasSwish(request.RegionId);
 
             foreach (var charge in _feeService.GetChargesForRegionYear(request.RegionId, request.Year))
             {
@@ -668,7 +670,7 @@ namespace HpskSite.Controllers
                     ok = await _emailService.SendRegionFeeRequestAsync(
                         to!, name, region.Value.Name, charge.Year,
                         charge.Lines.Select(l => (l.Description, l.Amount)).ToList(),
-                        charge.Amount, BuildPayUrl(charge.Id), reply, bg, charge.PaymentReference);
+                        charge.Amount, BuildPayUrl(charge.Id), reply, bg, charge.PaymentReference, hasSwish);
                 }
                 catch (Exception ex)
                 {
@@ -721,7 +723,7 @@ namespace HpskSite.Controllers
                 to, name, region.Value.Name, charge.Year,
                 charge.Lines.Select(l => (l.Description, l.Amount)).ToList(),
                 charge.Amount, BuildPayUrl(charge.Id), _replyContacts.ForRegion(region.Value.Id),
-                IssuerBankgiro(region.Value.Id), charge.PaymentReference);
+                IssuerBankgiro(region.Value.Id), charge.PaymentReference, IssuerHasSwish(region.Value.Id));
 
             return Content(PreviewPage(mail, to, charge.PaymentStatus == "Paid"), "text/html; charset=utf-8");
         }
@@ -838,6 +840,18 @@ namespace HpskSite.Controllers
             var node = Services.ContentService.GetById(nodeId);
             var bg = node is not null && node.HasProperty("bgNumber") ? node.GetValue<string>("bgNumber") : null;
             return BankgiroQrCodeGenerator.IsValidBankgiro(bg) ? BankgiroQrCodeGenerator.FormatAccount(bg) : null;
+        }
+
+        /// <summary>
+        /// Har utställaren ett giltigt Swishnummer? Samma prövning som betalsidan gör innan den visar
+        /// Swish-QR:en — annars erbjuder mejlet en Swish-knapp som landar på en sida utan Swish.
+        /// </summary>
+        private bool IssuerHasSwish(int nodeId)
+        {
+            var node = Services.ContentService.GetById(nodeId);
+            var sw = node is not null && node.HasProperty("swishNumber") ? node.GetValue<string>("swishNumber") : null;
+            var normalized = (sw ?? "").Trim().Replace(" ", "").Replace("-", "");
+            return SwishQrCodeGenerator.IsValidSwishNumber(normalized);
         }
 
         // ── Helpers ───────────────────────────────────────────────────
