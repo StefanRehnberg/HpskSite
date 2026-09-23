@@ -258,24 +258,56 @@
             }
 
             <div class="card2">
+                <h2>Protokoll</h2>
+                @* ⚠️ Bara JUSTERADE protokoll. Ett ojusterat kan fortfarande ändras — att visa
+                   det för en revisor vore att visa något som inte är en handling än. *@
+                @if (Model.Protokoll.Count == 0)
+                {
+                    <p class="muted" style="margin:0">Inga justerade protokoll ännu.</p>
+                }
+                else
+                {
+                    foreach (var pr in Model.Protokoll)
+                    {
+                        <div class="step">
+                            <div style="width:96px" class="muted">@pr.MeetingDate.ToString("d MMM yyyy", sv)</div>
+                            <div style="flex:1">
+                                <a href="/styrelse/protokoll/@pr.Id" target="_blank" rel="noopener">@pr.Title</a>
+                                <div class="muted" style="font-size:14px">@pr.TypeLabel</div>
+                            </div>
+                        </div>
+                    }
+                }
+
+                @* ⚠️⚠️ ANTALET OJUSTERADE SÄGS. En lista som tyst utelämnar möten läses som
+                   komplett, och då upptäcker revisorn aldrig att det finns beslut hen inte sett. *@
+                @if (Model.ProtokollPending < 0)
+                {
+                    <div class="warn" style="margin-top:12px">
+                        Vi kunde inte läsa om det finns ojusterade protokoll.
+                    </div>
+                }
+                else if (Model.ProtokollPending > 0)
+                {
+                    <div class="warn" style="margin-top:12px">
+                        <strong>@Model.ProtokollPending hållna möten</strong> har ännu inte justerats
+                        och visas därför inte här. Be styrelsen justera dem, eller om underlaget.
+                    </div>
+                }
+            </div>
+
+            <div class="card2">
                 <h2>Gå vidare i granskningen</h2>
                 <p class="muted">
                     Härifrån följer du kedjan: en bokförd post → dess underlag → raden på
                     kontoutdraget.
                 </p>
+                @* ⚠️ INGEN länk till /styrelse. Den sidan är styrelsens arbetsyta — dagordningar,
+                   årshjul, valberedning — och revisorn har ingen åtkomst dit. Protokollen når hen
+                   som färdiga handlingar i listan ovan. En knapp som nekas är sämre än ingen. *@
                 <a class="btn btn-primary mb-2 me-2"
                    href="/ekonomi?type=@s.OwnerType&id=@s.OwnerId">Verifikationer och huvudbok</a>
-                <a class="btn btn-outline-secondary mb-2 me-2"
-                   href="/styrelse?type=@s.OwnerType&id=@s.OwnerId">Protokoll</a>
             </div>
-
-            @* ⚠️ Protokollen är ännu INTE öppna för revisorn — /styrelse har sin egen grind
-               (CanAccessBoardWork) och den känner inte till revisorsuppdrag. Att låtsas att
-               länken fungerar vore värre än att säga det. *@
-            <p class="muted" style="font-size:14px">
-                Protokollen kräver i dag att föreningen delar dem separat — vi öppnar dem för
-                revisorn härnäst.
-            </p>
         }
     }
 </div>

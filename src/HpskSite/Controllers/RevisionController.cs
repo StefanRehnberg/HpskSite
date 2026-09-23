@@ -45,6 +45,7 @@ namespace HpskSite.Controllers
         private readonly LedgerSetupService _setup;
         private readonly LedgerBankImportService _bank;
         private readonly LedgerAttachmentService _attachments;
+        private readonly BoardMeetingService _meetings;
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
@@ -57,6 +58,7 @@ namespace HpskSite.Controllers
             LedgerSetupService setup,
             LedgerBankImportService bank,
             LedgerAttachmentService attachments,
+            BoardMeetingService meetings,
             IMemberService memberService,
             IMemberManager memberManager,
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -68,6 +70,7 @@ namespace HpskSite.Controllers
             _setup = setup;
             _bank = bank;
             _attachments = attachments;
+            _meetings = meetings;
             _memberService = memberService;
             _memberManager = memberManager;
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -272,6 +275,8 @@ namespace HpskSite.Controllers
                 model.AttachmentsMissing = missing;
                 model.AttachmentsTotal = total;
 
+                LoadProtokoll(model, pick);
+
                 var summary = _bank.Summary(pick.OwnerType, pick.OwnerId);
                 if (summary is not null)
                 {
@@ -286,6 +291,51 @@ namespace HpskSite.Controllers
                     pick.OwnerType, pick.OwnerId);
 
                 model.Problem = "Räkenskaperna kunde inte läsas just nu.";
+            }
+        }
+
+        /// <summary>
+        /// Protokollen revisorn får läsa.
+        ///
+        /// <para><b>⚠️⚠️ BARA JUSTERADE.</b> Ett ojusterat protokoll kan fortfarande ändras, och
+        /// att visa det för en revisor är att visa något som inte är en handling än. Samma regel
+        /// som kodbasen har överallt: publicerad startlista, officiell resultatlista, antagen
+        /// budget.</para>
+        ///
+        /// <para><b>⚠️ Antalet ojusterade SÄGS.</b> En lista som tyst utelämnar möten läses som
+        /// komplett — och då upptäcker revisorn aldrig att det finns beslut hen inte sett.</para>
+        /// </summary>
+        private void LoadProtokoll(RevisionModel model, RevisionAssignment pick)
+        {
+            try
+            {
+                var all = _meetings.GetMeetings(pick.OwnerType, pick.OwnerId) ?? new List<BoardMeeting>();
+
+                model.Protokoll = all
+                    .Where(m => m.IsActive && m.Status == "Justerat")
+                    .OrderByDescending(m => m.MeetingDate)
+                    .Take(40)
+                    .Select(m => new RevisionProtokoll
+                    {
+                        Id = m.Id,
+                        Title = string.IsNullOrWhiteSpace(m.Title) ? m.TypeLabel : m.Title,
+                        TypeLabel = m.TypeLabel,
+                        MeetingDate = m.MeetingDate
+                    })
+                    .ToList();
+
+                // ⚠️ Räknar bara möten som HÅLLITS. Ett planerat möte i framtiden är inte ett
+                //    ojusterat protokoll, och att räkna det hade gett ett larm om ingenting.
+                model.ProtokollPending = all.Count(m =>
+                    m.IsActive && m.Status != "Justerat" && m.MeetingDate.Date <= DateTime.Today);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Protokollen kunde inte läsas för {Typ}/{Id}.",
+                    pick.OwnerType, pick.OwnerId);
+
+                // ⚠️ -1 = gick inte att läsa. Aldrig 0, som betyder "inga ojusterade".
+                model.ProtokollPending = -1;
             }
         }
 
@@ -414,9 +464,23 @@ namespace HpskSite.Controllers
 
         public string? Problem { get; set; }
 
+        public List<RevisionProtokoll> Protokoll { get; set; } = new();
+
+        /// <summary>Hållna möten som ännu inte justerats. −1 = gick inte att läsa.</summary>
+        public int ProtokollPending { get; set; }
+
         public List<RevisionYear> Years { get; set; } = new();
 
         public int SelectedYearId { get; set; }
+    }
+
+    /// <summary>Ett justerat protokoll, så som revisionssidan listar det.</summary>
+    public class RevisionProtokoll
+    {
+        public int Id { get; set; }
+        public string Title { get; set; } = "";
+        public string TypeLabel { get; set; } = "";
+        public DateTime MeetingDate { get; set; }
     }
 
     /// <summary>En förening man är revisor för.</summary>

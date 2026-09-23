@@ -14,15 +14,18 @@ namespace HpskSite.Services.Ledger
     {
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly LedgerBankImportService _bank;
+        private readonly LedgerAttachmentService _attachments;
         private readonly ILogger<LedgerClosingService> _logger;
 
         public LedgerClosingService(
             IUmbracoDatabaseFactory databaseFactory,
             LedgerBankImportService bank,
+            LedgerAttachmentService attachments,
             ILogger<LedgerClosingService> logger)
         {
             _databaseFactory = databaseFactory;
             _bank = bank;
+            _attachments = attachments;
             _logger = logger;
         }
 
@@ -165,26 +168,60 @@ namespace HpskSite.Services.Ledger
                             && i.PeriodFrom.HasValue && i.PeriodFrom.Value <= s.To)
                 .ToList();
 
+            // ⚠️⚠️ ETT INLÄST UTDRAG ÄR INTE ETT AVSTÄMT UTDRAG. Fram till 2026-09-23 kryssades
+            //    steget så snart ett täckande utdrag FANNS, utan att titta på om raderna var
+            //    matchade — så en klubb som läst in decemberutdraget och inte rört det fick
+            //    "avstämt". Avstämningsytan har haft den riktiga regeln hela tiden ("allt
+            //    stämmer" kräver noll omatchade); det var checklistan som inte läste den.
+            //    Det här är den uppgift en revisor lutar sig mot.
+            var unmatched = imports.Count == 0
+                ? 0
+                : _bank.UnmatchedInImports(issuerId, imports.Select(i => i.Id).ToList());
+
             list.Steps.Add(new()
             {
                 Key = "reconciled",
                 Title = "Kontoutdraget avstämt",
-                State = imports.Count > 0 ? LedgerClosingChecklist.StepState.Done
-                                          : LedgerClosingChecklist.StepState.Todo,
-                Detail = imports.Count > 0 ? ""
-                    : "Inget inläst kontoutdrag som täcker årets slut.",
+                State = imports.Count == 0 ? LedgerClosingChecklist.StepState.Todo
+                      // ⚠️ -1 = gick inte att räkna. "Vet inte" är ett eget svar, aldrig "klart".
+                      : unmatched < 0 ? LedgerClosingChecklist.StepState.Unknown
+                      : unmatched == 0 ? LedgerClosingChecklist.StepState.Done
+                      : LedgerClosingChecklist.StepState.Todo,
+                Detail = imports.Count == 0
+                    ? "Inget inläst kontoutdrag som täcker årets slut."
+                    : unmatched < 0 ? "Antalet omatchade rader gick inte att läsa."
+                    : unmatched == 0 ? ""
+                    : $"{unmatched} rader i kontoutdraget saknar motpart i bokföringen.",
                 GoTo = "avstamning"
             });
 
             // 3 — Underlag på plats.
-            // ⚠️ UNKNOWN, inte Done. Bilagorna har en tabell men ingen uppladdningsyta ännu, så
-            //    "noll saknade bilagor" vore sant och samtidigt meningslöst.
+            // ⚠️ Steget stod som UNKNOWN fram till 2026-09-23, med texten "kontrollera pärmen för
+            //    hand". Det var ärligt så länge bilagorna inte gick att ladda upp; nu gör de det.
+            //
+            // ⚠️⚠️ BARA HANDBOKFÖRDA POSTER RÄKNAS. En medlemsavgift som föll ut ur avgiftsmodulen
+            //    har sitt underlag i anmälan och betalningsraden, inte i ett papper någon ska
+            //    fotografera. Att kräva en bilaga där hade gjort steget permanent rött för varje
+            //    förening som använder avgiftsdelen — alltså en varning som slutar betyda något.
+            var (missingDocs, totalDocs) = _attachments.MissingForYear(issuerType, issuerId, fiscalYearId);
+
             list.Steps.Add(new()
             {
                 Key = "attachments",
                 Title = "Underlag på plats",
-                State = LedgerClosingChecklist.StepState.Unknown,
-                Detail = "Bilagor går ännu inte att ladda upp — kontrollera pärmen för hand."
+                // ⚠️ -1 betyder "gick inte att räkna", aldrig "inga saknas". Ett tyst noll hade
+                //    kryssat av en kontroll ingen gjort.
+                State = missingDocs < 0 ? LedgerClosingChecklist.StepState.Unknown
+                      : missingDocs == 0 ? LedgerClosingChecklist.StepState.Done
+                      : LedgerClosingChecklist.StepState.Todo,
+                Detail = missingDocs < 0
+                    ? "Underlagsläget gick inte att läsa."
+                    : missingDocs == 0
+                        ? (totalDocs == 0
+                            ? "Inga handbokförda poster i året — avgifternas underlag är anmälan."
+                            : "")
+                        : $"{missingDocs} av {totalDocs} handbokförda poster saknar underlag.",
+                GoTo = "verifikationer"
             });
 
             // 4 — Obetalda avgifter som kundfordran.
