@@ -95,9 +95,6 @@
   .ek-page .ek-issuer.live::before { content: "⬤ "; color: var(--bs-secondary-color); font-size: .7em; }
   .ek-page .ek-issuer-head { font-size: .7rem; letter-spacing: .05em; text-transform: uppercase;
       color: var(--bs-secondary-color); padding: 0 8px 4px; }
-  .ek-page .ek-issuer-new { display: block; width: 100%; text-align: left; margin-top: 6px;
-      font: inherit; font-size: .85rem; padding: 4px 8px; border: 1px solid var(--bs-border-color);
-      border-radius: 6px; background: none; color: var(--bs-body-color); cursor: pointer; }
   .ek-page .ek-issuer-why { font-size: .75rem; color: var(--bs-secondary-color); margin-top: 6px; }
 
   /* ⚠️⚠️ `flex: 1 1 auto` MASTE staa uttryckligen. Sajtens layout satter `main { flex: 1 0 auto }`
@@ -135,8 +132,6 @@
       margin-bottom: .5rem; }
   .ek-page .todo .n { font-size: 1.1rem; font-weight: 700; min-width: 2rem; text-align: right; }
   .ek-page .todo .t { flex-grow: 1; }
-  .ek-page .todo .a { color: var(--ek-attn); font-weight: 700; font-size: .9rem;
-      background: none; border: 0; cursor: pointer; white-space: nowrap; }
   .ek-page .todo.done { background: var(--bs-success-bg-subtle);
       border-color: var(--bs-success-border-subtle); }
 
@@ -279,16 +274,7 @@
   .ek-page .amount-in { font-size: 1.8rem; font-weight: 700; width: 12rem; padding: .5rem .9rem;
       border-width: 2px; border-color: var(--bs-primary); font-variant-numeric: tabular-nums; }
   .ek-page .kr-unit { color: var(--bs-secondary-color); }
-  .ek-page .seg { display: flex; border: 1px solid var(--bs-border-color);
-      border-radius: .5rem; overflow: hidden; }
-  .ek-page .segbtn { font: inherit; padding: .55rem 1rem; border: 0;
-      background: var(--bs-body-bg); color: var(--bs-body-color); cursor: pointer; }
-  .ek-page .segbtn.on { background: var(--bs-primary); color: #fff; font-weight: 600; }
   .ek-page .chips { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .5rem; }
-  .ek-page .chip { font: inherit; font-size: .85rem; padding: .25rem .8rem;
-      border: 1px solid var(--bs-border-color); border-radius: 2rem;
-      background: var(--bs-body-bg); color: var(--bs-body-color); cursor: pointer; }
-  .ek-page .chip:hover { border-color: var(--bs-primary); color: var(--bs-primary-text-emphasis); }
   .ek-page .preview { margin-top: 1.25rem; border-top: 1px solid var(--bs-border-color);
       padding-top: .9rem; }
 
@@ -298,7 +284,7 @@
         gap: .3rem; align-items: center; }
     .ek-page .rail .club, .ek-page .rail .role { width: 100%; margin-bottom: .3rem; }
     .ek-page .rail a.ek-nav { border-left: 0; }
-    .ek-page .rail a.ek-nav.on { border-left: 0; box-shadow: inset 0 -3px 0 var(--ek-attn); }
+    .ek-page .rail a.ek-nav.on { border-left: 0; box-shadow: inset 0 -3px 0 var(--bs-primary); }
     .ek-page .rail .foot { width: 100%; }
     .ek-page .ek-grid, .ek-page .bokfor-grid { grid-template-columns: 1fr; }
     .ek-page .amount-in { width: 100%; }
@@ -387,7 +373,7 @@
            går för att LETA REDA PÅ en post — "vad var det där på 3 400 i mars?" — och det är en
            daglig fråga, inte en årlig. *@
         <a href="#" class="ek-nav" data-view="verifikationer">Verifikationer</a>
-        <a href="#" class="ek-nav soon" data-view="avstamning">Avstämning</a>
+        <a href="#" class="ek-nav" data-view="avstamning">Avstämning</a>
         <a href="#" class="ek-nav" data-view="rapport">Rapport</a>
         @* ⚠️ Projekt ligger intill Rapport: det är samma sorts fråga ("vad gav tävlingen?") och
            läses av styrelsen och revisorn lika mycket som av kassören — därför INTE gated på
@@ -399,7 +385,7 @@
         <a href="#" class="ek-nav" data-view="arsavgift">@feeWord</a>
         <a href="#" class="ek-nav" data-view="utgifter">Utgifter</a>
         <a href="#" class="ek-nav" data-view="tillgangar">Tillgångar</a>
-        <a href="#" class="ek-nav soon" data-view="bokslut">Bokslut</a>
+        <a href="#" class="ek-nav" data-view="bokslut">Bokslut</a>
         @if (Model.CanWrite)
         {
             <a href="#" class="ek-nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
@@ -450,9 +436,10 @@
                         <h1>Är något fel?</h1>
                         <div class="sub" id="@(uid)_today"></div>
                     </div>
+                    @* Vad inställningen ÄR, som text. Ändras under Inställningar — aldrig härifrån. *@
                     <div class="pills">
-                        <a href="#" class="pill" data-view="installningar" id="@(uid)_shapeBadge">@Model.ShapeLabel</a>
-                        <a href="#" class="pill strong" data-view="installningar">Räkenskapsår @Model.CurrentYear</a>
+                        <span class="badge bg-light text-dark border fw-normal" style="font-size:.9rem" id="@(uid)_shapeBadge">@Model.ShapeLabel</span>
+                        <span class="badge bg-primary-subtle text-primary-emphasis border fw-semibold" style="font-size:.9rem">Räkenskapsår @Model.CurrentYear</span>
                     </div>
                 </div>
 
@@ -477,15 +464,11 @@
                         <div class="ek-bigbox ek-warn" id="@(uid)_recPanel">
                             <div class="lead" id="@(uid)_recPanelLead">Inte avstämt mot banken än</div>
                             <div class="note" id="@(uid)_recPanelNote">
-                                Avstämningen läser in ert kontoutdrag och matchar rad för rad.
+                                Avstämningen läser in vårt kontoutdrag och matchar rad för rad.
                                 Tills någon gjort det vet vi vad som bokförts — inte att det är komplett.
                             </div>
-                            <button type="button" class="btn btn-sm btn-link" style="padding:0"
+                            <button type="button" class="btn btn-sm btn-outline-secondary mt-2"
                                     data-view="avstamning" id="@(uid)_recPanelGo">Gå till Avstämning</button>
-                        </div>
-                        <div class="why">
-                            Noll fel ska visas lika stort som fel. Därför står det inte "0 kr" här
-                            förrän någon faktiskt stämt av.
                         </div>
                     </div>
 
@@ -520,7 +503,7 @@
                                 Budget mot utfall kräver en antagen budget.
                                 @if (Model.CanWrite)
                                 {
-                                    <button type="button" class="linkbtn" data-view="rapport">Lägg in den under Rapport</button><text>.</text>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-view="rapport">Lägg in budgeten</button>
                                 }
                                 else
                                 {
@@ -876,7 +859,7 @@
 
                     <div style="display:flex;align-items:center;gap:14px;margin-top:18px">
                         <button type="button" class="btn btn-primary" id="@(uid)_saveBtn">Spara uppsättningen</button>
-                        <span class="d-none" style="color:var(--ok);font-weight:600" id="@(uid)_saveOk"></span>
+                        <span class="d-none" style="color:var(--bs-success-text-emphasis);font-weight:600" id="@(uid)_saveOk"></span>
                     </div>
                     <div class="ek-alert ek-bad d-none" id="@(uid)_saveError" style="margin-top:14px"></div>
                 </div>
@@ -1029,14 +1012,14 @@
                             @* ⚠️ Riktningen anges med knappen, ALDRIG med ett minustecken. Ett negativt
                                belopp vänder bara konteringen och ger en verifikation som balanserar men
                                betyder motsatsen till vad kassören menade. *@
-                            <div class="seg">
-                                <button type="button" class="segbtn on" id="@(uid)_bPaid">Vi betalade</button>
-                                <button type="button" class="segbtn" id="@(uid)_bGot">Vi fick in</button>
+                            <div class="btn-group" role="group" aria-label="Riktning">
+                                <button type="button" class="btn btn-outline-primary active" aria-pressed="true" id="@(uid)_bPaid">Vi betalade</button>
+                                <button type="button" class="btn btn-outline-primary" aria-pressed="false" id="@(uid)_bGot">Vi fick in</button>
                             </div>
                         </div>
 
                         <label class="fieldlabel" for="@(uid)_bDate">När?</label>
-                        <input type="text" class="form-control ek-date" placeholder="åååå-mm-dd" id="@(uid)_bDate" class="wide-in">
+                        <input type="text" class="form-control ek-date" placeholder="åååå-mm-dd" id="@(uid)_bDate">
                         @* ⚠️⚠️ ÅRET MÅSTE STÅ SKRIVET intill datumet. Ligger i dag utanför
                            räkenskapsåret förifylls ett datum INNE i året — och en kassör som ser
                            2025-12-31 dyka upp utan förklaring läser det som ett fel. Värre: en
@@ -1075,25 +1058,26 @@
                                 <tbody id="@(uid)_bPreview"></tbody>
                             </table>
                             <p class="why">
-                                Kontot väljer du själv ur föreningens kontoplan. Konteringen byggs av
-                                beloppet och riktningen — du behöver inte kunna debet och kredit.
+                                Du behöver inte kunna debet och kredit — konteringen byggs av beloppet och
+                                riktningen. Debet och kredit är bokföringens två sidor; varje post står på båda.
                             </p>
                         </div>
 
-                        <div class="ek-alert ek-bad d-none" id="@(uid)_bError"></div>
-                        <div class="ek-alert ek-ok d-none" id="@(uid)_bOk"></div>
+                        @* ⚠️⚠️ KVITTOT HÖR TILL POSTEN. Förut stod "Kvittobilden kommer" här — fast
+                           uppladdningen fanns sedan länge på verifikationen. Ove ska inte behöva leta upp
+                           posten i Verifikationer efteråt för att fästa kvittot han håller i handen.
+                           Filen laddas upp EFTER bokföringen: verifikationen måste finnas först. *@
+                        <label class="fieldlabel" for="@(uid)_bReceipt">Kvitto (frivilligt — foto eller PDF)</label>
+                        <input type="file" class="form-control wide-in" id="@(uid)_bReceipt"
+                               accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" capture="environment">
+                        <div class="why" style="margin-top:.25rem">På telefonen kan du fotografera kvittot direkt.</div>
+
+                        <div class="ek-alert ek-bad d-none" id="@(uid)_bError" style="margin-top:12px"></div>
+                        <div class="ek-alert ek-ok d-none" id="@(uid)_bOk" style="margin-top:12px"></div>
 
                         <div style="display:flex;gap:12px;align-items:center;margin-top:16px">
                             <button type="button" class="btn btn-primary" id="@(uid)_bSave">Bokför</button>
                         </div>
-
-                        @* Bilagan kräver en lagringsväg som inte finns. Säg det — en attrapp som
-                           inte sparar något är värre än en tom ruta. *@
-                        <p class="why" style="margin-top:18px">
-                            <strong>Kvittobilden kommer.</strong> Att fotografera kvittot med telefonen
-                            kräver en lagringsyta som ännu inte är byggd; tabellen finns
-                            (<code>LedgerAttachment</code>), vägen dit inte.
-                        </p>
                     </div>
 
                     <div>
@@ -1103,10 +1087,11 @@
                                 En rättelse skapar en <strong>ny rad</strong> som tar ut den gamla. Den
                                 gamla står kvar — så ska det vara, och det är inget du gjort fel.
                             </p>
-                            <p class="why">
-                                Rättelseytan byggs tillsammans med Avstämning. Motorn finns redan
-                                (<code>CreateCorrection</code>) och används när en betalning ångras.
+                            <p class="muted" style="margin-bottom:0">
+                                Öppna posten under <strong>Verifikationer</strong> och välj
+                                <em>Rätta den här posten</em>. Bokför sedan den rätta posten här.
                             </p>
+                            <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-view="verifikationer">Gå till Verifikationer</button>
                         </div>
 
                         <div class="ek-card">
@@ -2228,7 +2213,7 @@
     function capList(body, more, rows, cap, renderRow, labelAll) {
         body.innerHTML = rows.slice(0, cap).map(renderRow).join('');
         if (rows.length <= cap) { more.innerHTML = ''; return; }
-        more.innerHTML = '<button type="button">' + labelAll.replace('{n}', rows.length) + '</button>';
+        more.innerHTML = '<button type="button" class="btn btn-sm btn-link p-0">' + labelAll.replace('{n}', rows.length) + '</button>';
         more.querySelector('button').addEventListener('click', function () {
             body.innerHTML = rows.map(renderRow).join(''); more.innerHTML = '';
         });
@@ -2309,7 +2294,7 @@
         okBtn.className = 'btn ' + (o.danger ? 'btn-danger' : 'btn-primary');
         okBtn.dataset.required = o.required ? '1' : '';
         return new Promise(function (resolve) {
-            askResolve = resolve;
+            askResolve = resolve; askAnswer = null;
             openModal('askModal');
             if (hasField) setTimeout(function () { field.focus(); }, 300);
         });
@@ -2324,13 +2309,17 @@
             show(el('askError'), true);
             return;
         }
-        var r = askResolve; askResolve = null;
+        // ⚠️ Svaret lämnas först när dialogen är HELT stängd. Följer ett besked direkt på en fråga
+        //    (ask → tell) öppnades annars samma dialog medan den fortfarande stängdes, och den
+        //    andra öppningen gick inte att klicka i.
+        askAnswer = v;
         closeModal('askModal');
-        if (r) r(v);
     });
+    var askAnswer = null;
     el('askModal').addEventListener('hidden.bs.modal', function () {
-        var r = askResolve; askResolve = null;
-        if (r) r(null);
+        var r = askResolve, v = askAnswer;
+        askResolve = null; askAnswer = null;
+        if (r) r(v);
     });
     // En bekräftelse eller ett besked utan fält — i stället för window.alert.
     function tell(title, text) { return ask({ title: title, text: text, ok: 'OK' }); }
@@ -2424,7 +2413,7 @@
 
         el('todo').innerHTML = items.map(function (i) {
             return '<div class="todo"><div class="n">' + i[0] + '</div><div class="t">' + esc(i[1]) + '</div>'
-                 + '<button class="a" data-goto="' + i[3] + '">' + esc(i[2]) + '</button></div>';
+                 + '<button type="button" class="btn btn-sm btn-outline-secondary" data-goto="' + i[3] + '">' + esc(i[2]) + '</button></div>';
         }).join('');
 
         el('todo').querySelectorAll('button[data-goto]').forEach(function (b) {
@@ -2438,7 +2427,7 @@
 
         var groups = o.outstanding || [];
         el('outRows').innerHTML = groups.length === 0
-            ? '<div style="color:var(--ok);font-weight:600">Inget utestående.</div>'
+            ? '<div style="color:var(--bs-success-text-emphasis);font-weight:600">Inget utestående.</div>'
             : groups.map(function (g) {
                 return '<div><span class="grow">' + esc(g.label) + ', ' + g.count + '</span>'
                      + '<span class="num">' + kr(g.amount) + '</span></div>';
@@ -2488,7 +2477,7 @@
                 panel.classList.add('ek-warn');
                 el('recPanelLead').textContent = 'Inte avstämt mot banken än';
                 el('recPanelNote').textContent =
-                    'Avstämningen läser in ert kontoutdrag och matchar rad för rad. Tills någon '
+                    'Avstämningen läser in vårt kontoutdrag och matchar rad för rad. Tills någon '
                     + 'gjort det vet vi vad som bokförts — inte att det är komplett.';
             } else if (rs.unmatched === 0) {
                 panel.classList.remove('ek-warn');
@@ -2706,11 +2695,31 @@
             + 'Lägg till underlag</button></div>'
             + '<div class="ek-alert ek-bad d-none" id="' + uid + '_verUploadErr" style="margin-top:.5rem"></div>';
 
+        // ⚠️⚠️ RÄTTELSEKEDJAN SYNS ÅT BÅDA HÅLLEN. En rättad post som ser ut som vilken post som
+        //    helst läses som att felet står kvar — och den som letar bokför om den en gång till.
+        var chain = '';
+        if (d.correctedByNumber)
+            chain += '<div class="ek-alert">' + badge('off', 'Rättad') + ' Posten är utjämnad av '
+                   + '<strong>' + esc(d.correctedByNumber) + '</strong>. Den står kvar i bokföringen, '
+                   + 'men påverkar inte längre resultatet.</div>';
+        if (d.correctsNumber)
+            chain += '<div class="ek-alert">' + badge('info', 'Rättelse') + ' Den här posten rättar '
+                   + '<strong>' + esc(d.correctsNumber) + '</strong>.</div>';
+
+        var correctBtn = (canWrite && d.canCorrect)
+            ? '<div style="margin-top:.75rem"><button type="button" class="btn btn-sm btn-outline-secondary" id="'
+              + uid + '_verCorrect">Rätta den här posten…</button>'
+              + ' <span class="muted" style="font-size:.85rem">Blev något fel? Posten tas ut med en rättelse, '
+              + 'och du bokför den rätta posten igen.</span></div>'
+            : '';
+
         el('verDetailBody').innerHTML =
             '<p class="muted" style="margin-top:0">' + esc(shortDate(d.head.accountingDate))
             + ' · ' + esc(d.head.description)
             + (d.head.counterparty ? ' · ' + esc(d.head.counterparty) : '') + '</p>'
+            + chain
             + rader
+            + correctBtn
             + '<h3 style="margin-top:1.25rem">Underlag</h3>' + underlag + uppladdning
             + '<h3 style="margin-top:1.25rem">Betalningen på banken</h3>' + bank;
 
@@ -2721,6 +2730,29 @@
     }
 
     function wireEntryActions(entryId, row) {
+        var cb = el('verCorrect');
+        if (cb) cb.addEventListener('click', function () {
+            ask({
+                title: 'Rätta posten',
+                text: 'Posten tas ut med en rättelse som bokförs i dag. Den gamla står kvar — så ska '
+                    + 'det vara, och det är inget du gjort fel. Efteråt bokför du den rätta posten under Bokför.',
+                label: 'Vad var fel?',
+                help: 'Till exempel "fel belopp, ska vara 340 kr" eller "fel konto".',
+                multiline: true, required: true,
+                ok: 'Rätta posten'
+            }).then(function (reason) {
+                if (reason === null) return;
+                postJson('/umbraco/surface/EkonomiAdmin/CorrectEntry', {
+                    issuerType: issuerType, issuerId: issuerId, entryId: entryId, reason: reason
+                }).then(function (j) {
+                    if (!j.success) { tell('Posten rättades inte', j.message); return; }
+                    loadJournal(true).then(function () { openEntry(row); });
+                    loadOverview();
+                    tell('Posten är rättad', j.message);
+                });
+            });
+        });
+
         var up = el('verUpload');
         if (up) up.addEventListener('click', function () {
             var input = el('verFile');
@@ -4392,8 +4424,10 @@
 
     function setDirection(received) {
         weReceived = received;
-        el('bPaid').classList.toggle('on', !received);
-        el('bGot').classList.toggle('on', received);
+        el('bPaid').classList.toggle('active', !received);
+        el('bGot').classList.toggle('active', received);
+        el('bPaid').setAttribute('aria-pressed', String(!received));
+        el('bGot').setAttribute('aria-pressed', String(received));
         pickAccountForDirection();
         renderPreview();
     }
@@ -4406,10 +4440,10 @@
     });
 
     el('bChips').innerHTML = CHIPS.map(function (c) {
-        return '<button type="button" class="chip">' + esc(c) + '</button>';
+        return '<button type="button" class="btn btn-sm btn-outline-secondary rounded-pill ek-chip">' + esc(c) + '</button>';
     }).join('');
     el('bChips').addEventListener('click', function (ev) {
-        var b = ev.target.closest('.chip');
+        var b = ev.target.closest('.ek-chip');
         if (b) { el('bText').value = b.textContent; el('bText').focus(); }
     });
 
@@ -4483,8 +4517,29 @@
                 okBox.textContent = 'Bokfört som ' + (d.number || ('#' + d.entryId)) + '.';
                 okBox.classList.remove('d-none');
 
+                // ⚠️ Ett misslyckat kvitto får inte se ut som en misslyckad bokföring — posten ÄR
+                //    bokförd, och ett felmeddelande som antyder motsatsen får kassören att bokföra
+                //    den en gång till.
+                var file = el('bReceipt').files && el('bReceipt').files[0];
+                if (file && d.entryId) {
+                    var fd = new FormData();
+                    fd.append('issuerType', issuerType);
+                    fd.append('issuerId', issuerId);
+                    fd.append('entryId', d.entryId);
+                    fd.append('file', file);
+                    postForm('/umbraco/surface/EkonomiAdmin/UploadAttachment', fd).then(function (u) {
+                        if (u.success) okBox.textContent = 'Bokfört som ' + (d.number || ('#' + d.entryId)) + ', med kvittot.';
+                        else {
+                            err.textContent = 'Posten är bokförd, men kvittot kunde inte fästas: ' + u.message
+                                + ' Fäst det under Verifikationer.';
+                            err.classList.remove('d-none');
+                        }
+                    });
+                }
+
                 el('bAmount').value = '';
                 el('bText').value = '';
+                el('bReceipt').value = '';
                 if (d.context) renderBokforContext(d.context);
                 loadOverview();
             })

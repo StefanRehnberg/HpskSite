@@ -203,6 +203,28 @@ namespace HpskSite.Services.Ledger
 
                 var detail = new LedgerJournalDetail { Head = ToRow(head) };
 
+                // Rättelsekedjan åt båda hållen, i samma utställare.
+                var correctedBy = ldb.Fetch<JournalListRow>(
+                    @"SELECT TOP 1 e.Id, e.Number, s.Prefix FROM dbo.LedgerJournalEntry e
+                        JOIN dbo.LedgerNumberSeries s ON s.Id = e.SeriesId
+                       WHERE e.CorrectsEntryId = @0 AND e.IssuerType = @1 AND e.IssuerId = @2
+                       ORDER BY e.Id",
+                    entryId, issuerType, issuerId).FirstOrDefault();
+                if (correctedBy is not null)
+                {
+                    detail.CorrectedByEntryId = correctedBy.Id;
+                    detail.CorrectedByNumber = LedgerNumberAllocator.Format(correctedBy.Prefix, correctedBy.Number);
+                }
+                if (head.CorrectsEntryId is int orig)
+                {
+                    var o = ldb.Fetch<JournalListRow>(
+                        @"SELECT e.Id, e.Number, s.Prefix FROM dbo.LedgerJournalEntry e
+                            JOIN dbo.LedgerNumberSeries s ON s.Id = e.SeriesId
+                           WHERE e.Id = @0 AND e.IssuerType = @1 AND e.IssuerId = @2",
+                        orig, issuerType, issuerId).FirstOrDefault();
+                    if (o is not null) detail.CorrectsNumber = LedgerNumberAllocator.Format(o.Prefix, o.Number);
+                }
+
                 detail.Lines.AddRange(ldb.Fetch<LedgerJournalEntryLine>(
                     "SELECT * FROM dbo.LedgerJournalEntryLine WHERE JournalEntryId = @0 ORDER BY LineNumber",
                     entryId));

@@ -415,18 +415,40 @@ namespace HpskSite.Services
             return true;
         }
 
-        public bool MarkUnpaid(int chargeId)
+        /// <summary>
+        /// "Ångra betald". Returnerar null när det gick, annars skälet.
+        ///
+        /// <para><b>⚠️⚠️ BOKFÖRINGEN TAS UT FÖRST, statusen ändras sedan</b> — samma ordning som när en
+        /// betalning ångras i liggaren. Går rättelsen inte igenom (t.ex. ett fastställt år) står
+        /// avgiften kvar som betald, i stället för att listan säger obetald medan intäkten ligger
+        /// kvar i bokföringen.</para>
+        /// </summary>
+        public string? MarkUnpaid(int chargeId, int byMemberId)
         {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var charge = db.SingleOrDefaultById<MembershipFeeCharge>(chargeId);
-            if (charge == null) return false;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                var charge = scope.Database.SingleOrDefaultById<MembershipFeeCharge>(chargeId);
+                if (charge == null) return "Avgiften hittades inte.";
+                if (charge.PaymentStatus != "Paid") return null;
+            }
 
-            charge.PaymentStatus = "Pending";
-            charge.PaidDate = null;
-            charge.PaidConfirmedByMemberId = null;
-            db.Update(charge);
-            return true;
+            // ⚠️ Utanför scopet — bryggan öppnar en egen anslutning (se MarkPaid).
+            var reversal = _ledgerBridge.Value.ReverseCharge(chargeId, byMemberId);
+            if (reversal is not null)
+                return "Betalningen ångrades inte: " + reversal;
+
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                var db = scope.Database;
+                var charge = db.SingleOrDefaultById<MembershipFeeCharge>(chargeId);
+                if (charge == null) return "Avgiften hittades inte.";
+
+                charge.PaymentStatus = "Pending";
+                charge.PaidDate = null;
+                charge.PaidConfirmedByMemberId = null;
+                db.Update(charge);
+            }
+            return null;
         }
 
         // ══ KRETSAVGIFTEN ═══════════════════════════════════════════════════════════════════
