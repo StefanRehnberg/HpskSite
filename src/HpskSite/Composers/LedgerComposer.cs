@@ -24,6 +24,10 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<LedgerSetupService>();
             builder.Services.AddScoped<LedgerPostingService>();
             builder.Services.AddScoped<LedgerProjectService>();
+            // Projektgrupperna och projektet ur källan (första kronan). Resolvern anropas inifrån
+            // LedgerPostingService.Post — den enda vägen in i liggaren.
+            builder.Services.AddScoped<LedgerProjectGroupService>();
+            builder.Services.AddScoped<LedgerSourceProjectResolver>();
             builder.Services.AddScoped<LedgerDraftService>();
             builder.Services.AddScoped<LedgerIssuerResolver>();
             builder.Services.AddScoped<LedgerPaymentService>();

@@ -66,6 +66,13 @@ namespace HpskSite.Models.Ledger
     /// Var posten kommer ifrån. <b>Löst kopplat</b> — ingen foreign key, ingen kaskad: källan får
     /// försvinna, verifikationen står kvar.
     /// <para>⚠️ Nycklarna ligger i databasen. Lägg till nya, men döp aldrig om en befintlig.</para>
+    ///
+    /// <para><b>⚠️⚠️ FÖR <see cref="CompetitionRegistration"/>, <see cref="TeamFee"/> OCH
+    /// <see cref="Event"/> ÄR <c>SourceId</c> TÄVLINGENS RESPEKTIVE HÄNDELSENS NOD-ID</b> — aldrig
+    /// anmälans eller lagets. Tre saker vilar på det: översiktens panel 3 grupperar per källa,
+    /// avprickningslistan (<c>ForSource</c>) läser per källa, och det automatiska projektet
+    /// (<see cref="LedgerProjectSource.For"/>) nycklas på den. Ett anmälnings-id här hade gett ett
+    /// projekt och en panelrad per skytt. Vem som betalade bär betalningsraden i sina egna fält.</para>
     /// </summary>
     public static class LedgerSourceType
     {

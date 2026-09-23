@@ -300,6 +300,14 @@
     .ek-page .rail .foot { width: 100%; }
     .ek-page .ek-grid, .ek-page .bokfor-grid { grid-template-columns: 1fr; }
     .ek-page .amount-in { width: 100%; }
+    /* ⚠️⚠️ UTTRYCKLIG BREDD, och min-width:0 räcker inte. I kolumnläget ärver .wrap
+       `align-items: flex-start` från datorlayouten, så .ek-main fick sitt INNEHÅLLS minsta bredd —
+       och en tabell med fasta kolumnbredder gjorde den bredare än skärmen. Mätt 2026-09-23 på 390 px:
+       sex av tio flikar rullade i sidled (Bokslut 764, Tillgångar 634, Projekt 568). Med bredden
+       satt får tabellen i stället rulla INUTI sitt kort. Inga rullgardinsmenyer ligger i korten,
+       så overflow klipper ingenting — lägg aldrig en dit utan att ta bort den här regeln. */
+    .ek-page .ek-main { width: 100%; }
+    .ek-page .ek-card { overflow-x: auto; }
   }
 </style>
 
@@ -379,6 +387,10 @@
         <a href="#" class="ek-nav" data-view="verifikationer">Verifikationer</a>
         <a href="#" class="ek-nav soon" data-view="avstamning">Avstämning</a>
         <a href="#" class="ek-nav" data-view="rapport">Rapport</a>
+        @* ⚠️ Projekt ligger intill Rapport: det är samma sorts fråga ("vad gav tävlingen?") och
+           läses av styrelsen och revisorn lika mycket som av kassören — därför INTE gated på
+           skrivrätt. Skrivkontrollerna inuti är det. *@
+        <a href="#" class="ek-nav" data-view="projekt">Projekt</a>
         <a href="#" class="ek-nav" data-view="avgifter">Avgifter</a>
         <a href="#" class="ek-nav" data-view="utgifter">Utgifter</a>
         <a href="#" class="ek-nav" data-view="tillgangar">Tillgångar</a>
@@ -1015,6 +1027,16 @@
                         <label class="fieldlabel" for="@(uid)_bPayAccount">Hur rörde sig pengarna?</label>
                         <select id="@(uid)_bPayAccount" class="form-select wide-in"></select>
 
+                        @* ⚠️ Projektet är FRIVILLIGT och står därför med "(inget projekt)" överst.
+                           Utan det tomma valet blir varje post märkt med det första projektet i
+                           listan, tyst — och märkningen på en bokförd rad går aldrig att ändra. *@
+                        <label class="fieldlabel" for="@(uid)_bProject">Hör det till ett projekt? (frivilligt)</label>
+                        <select id="@(uid)_bProject" class="form-select wide-in"></select>
+                        <div class="why">
+                            Avgifter för tävlingar och evenemang märks med sitt projekt av sig själva.
+                            Här väljer du bara för det du bokför för hand — tavlorna, gravyren, fikat.
+                        </div>
+
                         @* ⚠️ "Så bokförs det" visas ALLTID, utfälld. Skissen: "Vi gömmer inte, vi
                            sorterar." Konteringen som står här är exakt den BuildLines skapar — det
                            kassören godkänner är det som bokförs. *@
@@ -1600,6 +1622,145 @@
                 }
             </section>
 
+            @*
+                PROJEKTEN.
+
+                ⚠️⚠️ MARKERA FINAST, GRUPPERA EFTERÅT. En tävling eller ett evenemang blir ett projekt
+                AV SIG SJÄLV vid första kronan — den som skapade tävlingen gjorde aldrig något val,
+                och kassören behöver inte heller göra det i förväg. Märkningen på raden är fryst;
+                grupperingen här ovanpå får ändras för alltid.
+
+                ⚠️⚠️ INGEN TOTALSUMMA ÖVER GRUPPER. Ett projekt kan ligga i flera grupper, och då
+                vore en summa över dem ett tal som inte finns. Varje grupp säger i stället vilka
+                den delar projekt med.
+            *@
+            <section data-pane="projekt" hidden>
+                <div class="head">
+                    <div><h1>Vad gav projekten?</h1>
+                        <div class="sub">Varje tävling och evenemang som haft pengar blir ett projekt av sig självt.
+                            Gruppera dem som föreningen vill se dem.</div></div>
+                    <div class="headactions">
+                        <label class="muted" style="display:flex;gap:.5rem;align-items:center">Period
+                            <select class="form-select form-select-sm" id="@(uid)_prYear" style="width:auto"></select></label>
+                    </div>
+                </div>
+
+                <div class="ek-alert ek-bad d-none" id="@(uid)_prError"></div>
+                <div class="ek-alert ek-ok d-none" id="@(uid)_prOk"></div>
+
+                @* ⚠️ Gruppens projektval ligger ÖVER listorna, inte i en rad. En lista med kryssrutor
+                   inuti en tabellrad blir oläsbar på en telefon. *@
+                <div class="ek-card wide d-none" id="@(uid)_prPickPanel">
+                    <div class="ek-cardh"><h2 id="@(uid)_prPickTitle">Projekt i gruppen</h2></div>
+                    <p class="muted" style="margin-top:0">
+                        Kryssa i de projekt som ska ingå. Ett projekt får ligga i flera grupper — det
+                        ändrar ingenting i bokföringen.
+                    </p>
+                    <div id="@(uid)_prPickList"></div>
+                    <div class="amount-row" style="margin-top:12px">
+                        <button type="button" class="btn btn-primary" id="@(uid)_prPickDone">Klar</button>
+                    </div>
+                </div>
+
+                <div class="ek-card wide">
+                    <div class="ek-cardh">
+                        <h2>Projekt</h2>
+                        <div class="muted" id="@(uid)_prMeta"></div>
+                    </div>
+                    <table class="t">
+                        <thead><tr>
+                            <th>Projekt</th>
+                            <th style="width:14rem">Grupper</th>
+                            <th class="n" style="width:8rem">Intäkter</th>
+                            <th class="n" style="width:8rem">Kostnader</th>
+                            <th class="n" style="width:8rem">Resultat</th>
+                            <th style="width:10rem"></th>
+                        </tr></thead>
+                        <tbody id="@(uid)_prBody"></tbody>
+                    </table>
+                </div>
+
+                @* Stängda göms, men rubriken står kvar — sortera, göm inte. *@
+                <details class="ek-card wide" id="@(uid)_prClosedCard">
+                    <summary class="ek-cardh"><h2 style="display:inline">Stängda projekt</h2>
+                        <span class="muted" id="@(uid)_prClosedMeta"></span></summary>
+                    <p class="muted">Ett stängt projekt syns inte när någon bokför, men finns kvar här
+                        och i rapporterna. Projekt raderas aldrig.</p>
+                    <table class="t">
+                        <thead><tr>
+                            <th>Projekt</th>
+                            <th style="width:14rem">Grupper</th>
+                            <th class="n" style="width:8rem">Intäkter</th>
+                            <th class="n" style="width:8rem">Kostnader</th>
+                            <th class="n" style="width:8rem">Resultat</th>
+                            <th style="width:10rem"></th>
+                        </tr></thead>
+                        <tbody id="@(uid)_prClosedBody"></tbody>
+                    </table>
+                </details>
+
+                <div class="ek-card wide">
+                    <div class="ek-cardh">
+                        <h2>Grupper</h2>
+                        <div class="muted" id="@(uid)_prGroupMeta"></div>
+                    </div>
+                    <div id="@(uid)_prGroups"></div>
+                    @* ⚠️ Förklaringen till att det inte finns någon summarad — annars letar kassören
+                       efter den och tror att den saknas. *@
+                    <p class="why" style="margin-bottom:0">
+                        Grupperna får överlappa, så det finns ingen summa över dem. Läs en grupp i taget.
+                        Att ta bort en grupp tar inte bort några projekt.
+                    </p>
+                </div>
+
+                @if (Model.CanWrite)
+                {
+                    <div class="ek-card wide" id="@(uid)_prFormCard">
+                        <div class="ek-cardh"><h2 id="@(uid)_prFormTitle">Nytt eget projekt</h2></div>
+                        <p class="muted" style="margin-top:0">
+                            För det som inte är en tävling: Klubbstugan, Ungdomssektionen, Skjutbanan.
+                            Ett projekt utan slutdatum fungerar som ett kostnadsställe.
+                        </p>
+                        <input type="hidden" id="@(uid)_pId" value="0">
+                        <div class="amount-row">
+                            <label style="flex:2 1 260px">Namn
+                                <input type="text" class="form-control" id="@(uid)_pName" maxlength="120"
+                                       placeholder="Klubbstugan" autocomplete="off"></label>
+                            <label style="flex:1 1 150px">Börjar (frivilligt)
+                                <input type="text" class="form-control ek-date" id="@(uid)_pStart" placeholder="åååå-mm-dd"></label>
+                            <label style="flex:1 1 150px">Slutar (frivilligt)
+                                <input type="text" class="form-control ek-date" id="@(uid)_pEnd" placeholder="åååå-mm-dd"></label>
+                        </div>
+                        <label class="fieldlabel" for="@(uid)_pDesc">Beskrivning (frivilligt)</label>
+                        <input type="text" class="form-control" id="@(uid)_pDesc" maxlength="400" autocomplete="off">
+                        <div class="amount-row" style="margin-top:12px">
+                            <button type="button" class="btn btn-primary" id="@(uid)_pSave">Spara projektet</button>
+                            <button type="button" class="btn btn-link d-none" id="@(uid)_pCancel">Avbryt</button>
+                        </div>
+                    </div>
+
+                    <div class="ek-card wide" id="@(uid)_gFormCard">
+                        <div class="ek-cardh"><h2 id="@(uid)_gFormTitle">Ny grupp</h2></div>
+                        <p class="muted" style="margin-top:0">
+                            Till exempel "Klubbtävlingar 2026" eller "Fältskytte". En tävlingsserie blir en
+                            grupp av sig själv.
+                        </p>
+                        <input type="hidden" id="@(uid)_gId" value="0">
+                        <div class="amount-row">
+                            <label style="flex:2 1 260px">Namn
+                                <input type="text" class="form-control" id="@(uid)_gName" maxlength="120"
+                                       placeholder="Klubbtävlingar 2026" autocomplete="off"></label>
+                            <label style="flex:2 1 260px">Beskrivning (frivilligt)
+                                <input type="text" class="form-control" id="@(uid)_gDesc" maxlength="400" autocomplete="off"></label>
+                        </div>
+                        <div class="amount-row" style="margin-top:12px">
+                            <button type="button" class="btn btn-primary" id="@(uid)_gSave">Spara gruppen</button>
+                            <button type="button" class="btn btn-link d-none" id="@(uid)_gCancel">Avbryt</button>
+                        </div>
+                    </div>
+                }
+            </section>
+
             <section data-pane="tillgangar" hidden>
                 <div class="head">
                     <div><h1>Vad äger föreningen?</h1>
@@ -1779,7 +1940,7 @@
     //    payload nedanfor ar oforandrad. Lagg till ett nytt datumfalt HAR, aldrig som type=date.
     var EK_DATE_FIELDS = ['start', 'end', 'bDate', 'repFrom', 'repTo', 'budDate',
                           'fordrFrom', 'fordrTo', 'verFrom', 'verTo', 'aDate',
-                          'uDate', 'uDue', 'utPayDate'];
+                          'uDate', 'uDue', 'utPayDate', 'pStart', 'pEnd'];
     if (window.flatpickr) {
         EK_DATE_FIELDS.forEach(function (n) {
             var f = el(n);
@@ -1876,6 +2037,10 @@
         // ⚠️ Samma skäl som ovan: listan läser hela utgiftsregistret plus kontoplanen. Varje
         //    skrivning hämtar om den själv.
         if (name === 'utgifter' && !expenseLoaded) { expenseLoaded = true; loadExpenses(); }
+
+        // ⚠️ Samma skäl: summeringen läser varje projektmärkt rad i hela liggaren. Varje
+        //    skrivning hämtar om den själv.
+        if (name === 'projekt' && !projLoaded) { projLoaded = true; loadProjects(); }
     }
     root.querySelectorAll('[data-view]').forEach(function (a) {
         a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
@@ -3757,6 +3922,16 @@
         // Förvalet sätts EFTER att listan fyllts, annars finns inget att välja bland.
         pickAccountForDirection();
 
+        // ⚠️ Valet står KVAR efter en bokföring. En kassör som bokför fem kvitton till samma
+        //    tävling ska inte behöva välja om projektet fem gånger — och valet syns i fältet.
+        var projSel = el('bProject');
+        var keep = projSel.value;
+        projSel.innerHTML = '<option value="0">(inget projekt)</option>'
+            + (c.projects || []).map(function (p) {
+                return '<option value="' + p.id + '">' + esc(p.name) + '</option>';
+            }).join('');
+        if (keep && projSel.querySelector('option[value="' + keep + '"]')) projSel.value = keep;
+
         el('bSeries').textContent = c.seriesLabel || '';
 
         var recent = c.recent || [];
@@ -3891,7 +4066,9 @@
             date: el('bDate').value || null,
             description: el('bText').value,
             accountNumber: parseInt(el('bAccount').value, 10) || 0,
-            paymentAccountNumber: parseInt(el('bPayAccount').value, 10) || 0
+            paymentAccountNumber: parseInt(el('bPayAccount').value, 10) || 0,
+            // ⚠️ 0 = "(inget projekt)" → null. Ett sandlådeprojekt har NEGATIVT id och är giltigt.
+            projectId: parseInt(el('bProject').value, 10) || null
         })
             .then(function (d) {
                 btn.disabled = false;
@@ -3919,6 +4096,365 @@
             .then(function (r) { return r.json(); })
             .then(function (d) { if (d.success && d.context) renderBokforContext(d.context); })
             .catch(function () { });
+    }
+
+    // ══ Projekten ════════════════════════════════════════════════════════════════════════
+    //
+    // ⚠️⚠️ INGEN SUMMA ÖVER GRUPPER, NÅGONSIN. Grupperna får överlappa; en summarad hade varit ett
+    //    tal som inte finns. Varje grupp säger i stället vilka den delar projekt med.
+    //
+    // ⚠️ Knapparna bär ett id och läses med en DELEGERAD lyssnare på behållaren. Raderna ritas om
+    //    vid varje skrivning, så en direktbunden lyssnare hade slutat fungera efter första klicket
+    //    — och ett projektnamn i ett onclick-attribut är samma lucka som gav kodexekvering i
+    //    Fältskyttes "lägg till skytt".
+    var projLoaded = false;
+    var projData = null;
+    var pickingGroupId = 0;
+
+    function projMsg(j, okText) {
+        if (!j || !j.success) {
+            el('prError').textContent = (j && j.message) || 'Det gick inte att spara.';
+            show(el('prError'), true);
+            show(el('prOk'), false);
+            return false;
+        }
+        var text = okText || j.message;
+        el('prOk').textContent = text || '';
+        show(el('prOk'), !!text);
+        show(el('prError'), false);
+        return true;
+    }
+
+    function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+    function netCell(n) {
+        // ⚠️ Tecknet står UTSKRIVET. Färg ensam bär aldrig informationen (WCAG 1.4.1) — ett
+        //    underskott ska gå att läsa i en svartvit utskrift till årsmötet.
+        var style = n < 0 ? ' style="color:var(--bs-danger-text-emphasis)"' : '';
+        return '<strong' + style + '>' + (n > 0 ? '+' : '') + kr(n) + '</strong>';
+    }
+
+    async function loadProjects() {
+        show(el('prError'), false);
+
+        var yr = el('prYear').value;
+        var url = '/umbraco/surface/EkonomiAdmin/GetProjects?issuerType=' + issuerType
+                + '&issuerId=' + issuerId + (yr ? '&fiscalYearId=' + encodeURIComponent(yr) : '');
+
+        var d;
+        try {
+            d = await fetch(url, { cache: 'no-store' }).then(function (r) { return r.json(); });
+        } catch (e) {
+            d = { success: false, message: 'Projekten gick inte att läsa.' };
+        }
+
+        if (!d.success) {
+            el('prError').textContent = d.message || 'Projekten gick inte att läsa.';
+            show(el('prError'), true);
+            return;
+        }
+
+        projData = d;
+        renderProjectYears(d);
+        renderProjectRows(d);
+        renderProjectGroups(d);
+        if (pickingGroupId) renderPickList();
+    }
+
+    function renderProjectYears(d) {
+        var sel = el('prYear');
+        // ⚠️ Förvalet är projektets HELA tid, inte i år. Ett projekt vill ha ett slutresultat —
+        //    en tävling vars fakturor kom i januari ska inte se ut att ha gått med vinst i december.
+        sel.innerHTML = '<option value="">Hela projektets tid</option>'
+            + (d.fiscalYears || []).map(function (y) {
+                return '<option value="' + y.id + '">Räkenskapsår ' + y.year + '</option>';
+            }).join('');
+        // Servern ekar det år den faktiskt räknade på — ett okänt år blir null, alltså "hela tiden".
+        sel.value = d.fiscalYearId != null ? String(d.fiscalYearId) : '';
+    }
+
+    function groupNamesFor(p) {
+        var byId = {};
+        (projData.groups || []).forEach(function (g) { byId[g.id] = g.name; });
+        var names = (p.groupIds || []).map(function (id) { return byId[id]; }).filter(Boolean);
+        return names.length ? names.map(esc).join(', ') : '<span class="muted">—</span>';
+    }
+
+    function projectRow(p) {
+        var what = (p.sourceLabel || 'Eget projekt') + ' · ' + plural(p.entryCount, 'verifikation', 'verifikationer');
+
+        var acts = '';
+        if (canWrite) {
+            acts = '<button type="button" class="btn btn-sm btn-link" data-pr-edit="' + p.id + '">Ändra</button>'
+                 + '<button type="button" class="btn btn-sm btn-link" data-pr-close="' + p.id + '" data-closed="'
+                 + (p.isClosed ? '0' : '1') + '">' + (p.isClosed ? 'Öppna' : 'Stäng') + '</button>';
+        }
+
+        return '<tr><td><strong>' + esc(p.name) + '</strong><div class="muted">' + esc(what) + '</div></td>'
+             + '<td>' + groupNamesFor(p) + '</td>'
+             + '<td class="n">' + kr(p.income) + '</td>'
+             + '<td class="n">' + kr(p.costs) + '</td>'
+             + '<td class="n">' + netCell(p.net) + '</td>'
+             + '<td>' + acts + '</td></tr>';
+    }
+
+    function renderProjectRows(d) {
+        var all = d.projects || [];
+        var open = all.filter(function (p) { return !p.isClosed; });
+        var closed = all.filter(function (p) { return p.isClosed; });
+
+        el('prMeta').textContent = open.length === 0 ? '' : plural(open.length, 'projekt', 'projekt');
+        el('prClosedMeta').textContent = closed.length === 0 ? ' — inga' : ' — ' + closed.length;
+
+        el('prBody').innerHTML = open.length === 0
+            ? '<tr><td colspan="6" class="muted">Inga projekt ännu. När en tävling eller ett evenemang '
+              + 'får sin första betalning blir det ett projekt här av sig självt. Egna projekt — '
+              + 'Klubbstugan, Ungdomssektionen — skapar du nedan.</td></tr>'
+            : open.map(projectRow).join('');
+
+        el('prClosedBody').innerHTML = closed.length === 0
+            ? '<tr><td colspan="6" class="muted">Inga stängda projekt.</td></tr>'
+            : closed.map(projectRow).join('');
+    }
+
+    function renderProjectGroups(d) {
+        var groups = d.groups || [];
+        var nameOf = {};
+        (d.projects || []).forEach(function (p) { nameOf[p.id] = p.name; });
+
+        el('prGroupMeta').textContent = groups.length === 0 ? '' : plural(groups.length, 'grupp', 'grupper');
+
+        if (groups.length === 0) {
+            el('prGroups').innerHTML = '<p class="muted">Inga grupper ännu. En grupp är ett urval av '
+                + 'projekt, till exempel årets klubbtävlingar — skapa en nedan och välj vilka projekt '
+                + 'som ingår.</p>';
+            return;
+        }
+
+        el('prGroups').innerHTML = '<table class="t"><thead><tr><th>Grupp</th>'
+            + '<th class="n" style="width:8rem">Intäkter</th><th class="n" style="width:8rem">Kostnader</th>'
+            + '<th class="n" style="width:8rem">Resultat</th><th style="width:14rem"></th></tr></thead><tbody>'
+            + groups.map(function (g) {
+                var names = (g.projectIds || []).map(function (id) { return nameOf[id]; }).filter(Boolean);
+                var list = names.length === 0 ? 'Inga projekt i gruppen ännu.'
+                    : plural(names.length, 'projekt', 'projekt') + ': '
+                      + names.slice(0, 4).map(esc).join(', ')
+                      + (names.length > 4 ? ' och ' + (names.length - 4) + ' till' : '');
+
+                // ⚠️⚠️ Överlappet SÄGS på gruppens egen rad. Två gruppers summor som delar ett
+                //    projekt går inte att lägga ihop, och det enda som hindrar någon från att göra
+                //    det i huvudet är att det står här.
+                var overlap = (g.overlaps || []).map(function (o) {
+                    return '<div class="muted">Delar ' + plural(o.sharedProjects, 'projekt', 'projekt')
+                         + ' med <strong>' + esc(o.groupName) + '</strong> — lägg inte ihop gruppernas summor.</div>';
+                }).join('');
+
+                var acts = '';
+                if (canWrite) {
+                    acts = '<button type="button" class="btn btn-sm btn-link" data-gr-pick="' + g.id + '">Välj projekt</button>'
+                         + '<button type="button" class="btn btn-sm btn-link" data-gr-edit="' + g.id + '">Döp om</button>'
+                         + '<button type="button" class="btn btn-sm btn-link text-danger" data-gr-delete="' + g.id + '">Ta bort</button>';
+                }
+
+                return '<tr><td><strong>' + esc(g.name) + '</strong>'
+                     + (g.isFromSeries ? ' <span class="muted">(tävlingsserie)</span>' : '')
+                     + (g.description ? '<div class="muted">' + esc(g.description) + '</div>' : '')
+                     + '<div class="muted">' + list + '</div>' + overlap + '</td>'
+                     + '<td class="n">' + kr(g.income) + '</td>'
+                     + '<td class="n">' + kr(g.costs) + '</td>'
+                     + '<td class="n">' + netCell(g.net) + '</td>'
+                     + '<td>' + acts + '</td></tr>';
+            }).join('')
+            + '</tbody></table>';
+    }
+
+    function renderPickList() {
+        var g = (projData.groups || []).find(function (x) { return x.id === pickingGroupId; });
+        if (!g) { pickingGroupId = 0; show(el('prPickPanel'), false); return; }
+
+        el('prPickTitle').textContent = 'Projekt i gruppen ' + g.name;
+        var inGroup = {};
+        (g.projectIds || []).forEach(function (id) { inGroup[id] = true; });
+
+        var all = (projData.projects || []);
+        el('prPickList').innerHTML = all.length === 0
+            ? '<p class="muted">Föreningen har inga projekt ännu.</p>'
+            : all.map(function (p) {
+                return '<label style="display:flex;gap:.5rem;align-items:baseline;margin:.25rem 0">'
+                     + '<input type="checkbox" data-pick-project="' + p.id + '"' + (inGroup[p.id] ? ' checked' : '') + '>'
+                     + '<span>' + esc(p.name)
+                     + (p.isClosed ? ' <span class="muted">(stängt)</span>' : '')
+                     + ' <span class="muted">· ' + netCell(p.net) + '</span></span></label>';
+            }).join('');
+    }
+
+    el('prYear').addEventListener('change', function () { loadProjects(); });
+
+    el('prBody').parentNode.parentNode.addEventListener('click', projRowClick);
+    el('prClosedBody').parentNode.parentNode.addEventListener('click', projRowClick);
+
+    function projRowClick(ev) {
+        var edit = ev.target.closest('button[data-pr-edit]');
+        var close = ev.target.closest('button[data-pr-close]');
+        if (edit) {
+            var p = (projData.projects || []).find(function (x) { return x.id === parseInt(edit.dataset.prEdit, 10); });
+            if (p) fillProjectForm(p);
+        }
+        if (close) {
+            close.disabled = true;
+            postJson('/umbraco/surface/EkonomiAdmin/SetProjectClosed', {
+                issuerType: issuerType, issuerId: issuerId,
+                projectId: parseInt(close.dataset.prClose, 10),
+                closed: close.dataset.closed === '1'
+            }).then(function (j) {
+                if (projMsg(j)) { loadProjects(); if (canWrite) loadBokfor(); }
+                else close.disabled = false;
+            }).catch(function (e) { close.disabled = false; projMsg({ success: false, message: e.message }); });
+        }
+    }
+
+    el('prGroups').addEventListener('click', function (ev) {
+        var pick = ev.target.closest('button[data-gr-pick]');
+        var edit = ev.target.closest('button[data-gr-edit]');
+        var del = ev.target.closest('button[data-gr-delete]');
+
+        if (pick) {
+            pickingGroupId = parseInt(pick.dataset.grPick, 10);
+            renderPickList();
+            show(el('prPickPanel'), true);
+            el('prPickPanel').scrollIntoView({ block: 'nearest' });
+        }
+        if (edit) {
+            var g = (projData.groups || []).find(function (x) { return x.id === parseInt(edit.dataset.grEdit, 10); });
+            if (g) fillGroupForm(g);
+        }
+        if (del) {
+            var gid = parseInt(del.dataset.grDelete, 10);
+            var gd = (projData.groups || []).find(function (x) { return x.id === gid; });
+            // ⚠️ Fråga bara när det finns något att förlora. En tom grupp äger ingenting, och
+            //    ingenting annat raderas ens när den är full — men ett kurerat urval av trettio
+            //    projekt är kassörens arbete.
+            var n = gd ? (gd.projectIds || []).length : 0;
+            if (n > 0 && !window.confirm('Ta bort gruppen ' + (gd ? gd.name : '') + '?\n\n'
+                    + plural(n, 'projekt', 'projekt') + ' och deras bokföring rörs inte — bara grupperingen försvinner.'))
+                return;
+
+            del.disabled = true;
+            postJson('/umbraco/surface/EkonomiAdmin/DeleteProjectGroup', {
+                issuerType: issuerType, issuerId: issuerId, groupId: gid
+            }).then(function (j) {
+                if (projMsg(j)) {
+                    if (pickingGroupId === gid) { pickingGroupId = 0; show(el('prPickPanel'), false); }
+                    loadProjects();
+                } else del.disabled = false;
+            }).catch(function (e) { del.disabled = false; projMsg({ success: false, message: e.message }); });
+        }
+    });
+
+    el('prPickList').addEventListener('change', function (ev) {
+        var cb = ev.target.closest('input[data-pick-project]');
+        if (!cb || !pickingGroupId) return;
+        cb.disabled = true;
+        postJson('/umbraco/surface/EkonomiAdmin/SetProjectGroupMember', {
+            issuerType: issuerType, issuerId: issuerId, groupId: pickingGroupId,
+            projectId: parseInt(cb.dataset.pickProject, 10), member: cb.checked
+        }).then(function (j) {
+            // ⚠️ Vid fel ska kryssrutan visa det som faktiskt gäller, inte det användaren tryckte.
+            if (!projMsg(j, '')) { cb.checked = !cb.checked; cb.disabled = false; return; }
+            loadProjects();
+        }).catch(function (e) {
+            cb.checked = !cb.checked; cb.disabled = false;
+            projMsg({ success: false, message: e.message });
+        });
+    });
+
+    el('prPickDone').addEventListener('click', function () {
+        pickingGroupId = 0;
+        show(el('prPickPanel'), false);
+    });
+
+    function fillProjectForm(p) {
+        el('pId').value = String(p.id);
+        el('pName').value = p.name;
+        // ⚠️ Alla fält förifylls. Sparningen skriver ALLA, så ett tomt fält här hade tömt
+        //    projektets beskrivning och datum vid ett rent namnbyte.
+        el('pDesc').value = p.description || '';
+        setDateField('pStart', p.startDate || '');
+        setDateField('pEnd', p.endDate || '');
+        el('prFormTitle').textContent = 'Ändra projektet';
+        show(el('pCancel'), true);
+        el('prFormCard').scrollIntoView({ block: 'nearest' });
+        el('pName').focus();
+    }
+
+    function resetProjectForm() {
+        el('pId').value = '0';
+        el('pName').value = '';
+        el('pDesc').value = '';
+        setDateField('pStart', '');
+        setDateField('pEnd', '');
+        el('prFormTitle').textContent = 'Nytt eget projekt';
+        show(el('pCancel'), false);
+    }
+
+    function fillGroupForm(g) {
+        el('gId').value = String(g.id);
+        el('gName').value = g.name;
+        el('gDesc').value = g.description || '';
+        el('gFormTitle').textContent = 'Döp om gruppen';
+        show(el('gCancel'), true);
+        el('gFormCard').scrollIntoView({ block: 'nearest' });
+        el('gName').focus();
+    }
+
+    function resetGroupForm() {
+        el('gId').value = '0';
+        el('gName').value = '';
+        el('gDesc').value = '';
+        el('gFormTitle').textContent = 'Ny grupp';
+        show(el('gCancel'), false);
+    }
+
+    if (canWrite) {
+        el('pCancel').addEventListener('click', resetProjectForm);
+        el('gCancel').addEventListener('click', resetGroupForm);
+
+        el('pSave').addEventListener('click', function () {
+            var btn = this;
+            btn.disabled = true;
+            postJson('/umbraco/surface/EkonomiAdmin/SaveProject', {
+                issuerType: issuerType, issuerId: issuerId,
+                id: parseInt(el('pId').value, 10) || 0,
+                name: el('pName').value,
+                description: el('pDesc').value,
+                startDate: el('pStart').value || null,
+                endDate: el('pEnd').value || null
+            }).then(function (j) {
+                btn.disabled = false;
+                if (projMsg(j)) { resetProjectForm(); loadProjects(); loadBokfor(); }
+            }).catch(function (e) { btn.disabled = false; projMsg({ success: false, message: e.message }); });
+        });
+
+        el('gSave').addEventListener('click', function () {
+            var btn = this;
+            btn.disabled = true;
+            postJson('/umbraco/surface/EkonomiAdmin/SaveProjectGroup', {
+                issuerType: issuerType, issuerId: issuerId,
+                id: parseInt(el('gId').value, 10) || 0,
+                name: el('gName').value,
+                description: el('gDesc').value
+            }).then(function (j) {
+                btn.disabled = false;
+                if (!projMsg(j)) return;
+                var wasNew = (parseInt(el('gId').value, 10) || 0) === 0;
+                resetGroupForm();
+                // En ny grupp är tom — öppna projektvalet direkt, det är nästa steg.
+                if (wasNew && j.id) pickingGroupId = j.id;
+                loadProjects().then(function () {
+                    if (pickingGroupId) { show(el('prPickPanel'), true); el('prPickPanel').scrollIntoView({ block: 'nearest' }); }
+                });
+            }).catch(function (e) { btn.disabled = false; projMsg({ success: false, message: e.message }); });
+        });
     }
 
     // ══ Medlemsavgifter ══════════════════════════════════════════════════════════════════

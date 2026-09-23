@@ -55,6 +55,7 @@ namespace HpskSite.Controllers
         private readonly LedgerExpenseService _expenseService;
         private readonly BoardRoleService _boardRoles;
         private readonly LedgerProjectService _projectService;
+        private readonly LedgerProjectGroupService _projectGroups;
         private readonly LedgerAttachmentStorage _attachmentStorage;
         private readonly EmailService _emailService;
 
@@ -98,6 +99,7 @@ namespace HpskSite.Controllers
             LedgerExpenseService expenseService,
             BoardRoleService boardRoles,
             LedgerProjectService projectService,
+            LedgerProjectGroupService projectGroups,
             LedgerAttachmentStorage attachmentStorage,
             EmailService emailService,
             IMemberManager memberManager,
@@ -123,6 +125,7 @@ namespace HpskSite.Controllers
             _expenseService = expenseService;
             _boardRoles = boardRoles;
             _projectService = projectService;
+            _projectGroups = projectGroups;
             _attachmentStorage = attachmentStorage;
             _emailService = emailService;
             _manualPosting = manualPosting;
@@ -798,6 +801,268 @@ namespace HpskSite.Controllers
             return Json(done
                 ? new { success = true, entryId, message = "Utgiften är betald och bokförd." }
                 : new { success = false, entryId, message = error! });
+        }
+
+        // ══ PROJEKTEN ════════════════════════════════════════════════════════════════════════
+        //
+        // ⚠️⚠️ MARKERA FINAST, GRUPPERA EFTERÅT. Tävlingarnas och evenemangens projekt föds av sig
+        //    själva vid första kronan (LedgerPostingService.Post). Här skapar kassören sina EGNA
+        //    projekt (Klubbstugan, Ungdomssektionen) och grupperar — och grupperingen rör aldrig en
+        //    bokförd rad, så den får ändras hur ofta som helst.
+        //
+        // ⚠️ Varje id i en skrivbegäran prövas mot FÖRENINGEN innan något ändras. Projekt- och
+        //    grupp-id kommer från klienten, och tjänsterna tar dem som de är.
+
+        /// <summary>
+        /// Projekten med utfall, grupperna med sina summor, och räkenskapsåren att filtrera på.
+        ///
+        /// <para>⚠️ LÄSRÄTT räcker. Styrelsen och revisorn ska kunna se vad tävlingarna gav.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetProjects(int issuerType, int issuerId, int? fiscalYearId = null)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            try
+            {
+                // ⚠️ Ett år som inte hör till föreningen är ett påhittat filter — ignorera det
+                //    hellre än att visa nollor som ser ut som ett svar.
+                var years = _setupService.GetStatus(issuerType, issuerId).FiscalYears;
+                if (fiscalYearId is int fy && years.All(y => y.Id != fy)) fiscalYearId = null;
+
+                var summaries = _projectService.Summarise(issuerType, issuerId, fiscalYearId);
+                var groups = _projectGroups.List(issuerType, issuerId);
+                var members = _projectGroups.Members(issuerType, issuerId);
+
+                var report = LedgerProjectGroupReport.Build(groups, members,
+                    summaries.Select(s => new ProjectFigures
+                    {
+                        ProjectId = s.ProjectId, Name = s.ProjectName, Income = s.Income, Costs = s.Costs
+                    }));
+
+                var groupsOf = members
+                    .GroupBy(m => m.ProjectId)
+                    .ToDictionary(g => g.Key, g => g.Select(m => m.GroupId).ToList());
+
+                // ⚠️ Beskrivning och datum följer med, fast summeringen inte behöver dem:
+                //    redigeringen skriver alla fält, och ett formulär som förifylls utan dem hade
+                //    TÖMT beskrivningen och datumen vid varje namnbyte.
+                var details = _projectService.List(issuerType, issuerId, includeClosed: true)
+                    .ToDictionary(p => p.Id);
+
+                return Json(new
+                {
+                    success = true,
+                    fiscalYearId,
+                    fiscalYears = years.OrderByDescending(y => y.Year)
+                                       .Select(y => new { id = y.Id, year = y.Year }),
+                    projects = summaries.Select(s => new
+                    {
+                        id = s.ProjectId,
+                        name = s.ProjectName,
+                        isClosed = s.IsClosed,
+                        description = details.TryGetValue(s.ProjectId, out var dp) ? dp.Description : null,
+                        startDate = dp?.StartDate?.ToString("yyyy-MM-dd"),
+                        endDate = dp?.EndDate?.ToString("yyyy-MM-dd"),
+                        // ⚠️ Vad projektet ÄR, i klartext — ett automatiskt projekt ska gå att
+                        //    skilja från kassörens egna utan att man läser databasen.
+                        sourceKind = s.SourceType,
+                        sourceLabel = s.SourceType switch
+                        {
+                            LedgerProjectSource.Competition => "Tävling",
+                            LedgerProjectSource.Event => "Evenemang",
+                            _ => null
+                        },
+                        income = s.Income,
+                        costs = s.Costs,
+                        net = s.Net,
+                        entryCount = s.EntryCount,
+                        groupIds = groupsOf.TryGetValue(s.ProjectId, out var gids) ? gids : new List<int>()
+                    }),
+                    // ⚠️⚠️ INGEN TOTALSUMMA ÖVER GRUPPER, och det är strukturellt, inte en
+                    //    försummelse. Grupper får överlappa; en summa över dem vore ett tal som
+                    //    inte finns. Varje grupp bär i stället sina överlapp.
+                    groups = report.Select(g => new
+                    {
+                        id = g.GroupId,
+                        name = g.Name,
+                        description = g.Description,
+                        isFromSeries = g.IsFromSeries,
+                        projectIds = g.ProjectIds,
+                        income = g.Income,
+                        costs = g.Costs,
+                        net = g.Net,
+                        overlaps = g.Overlaps.Select(o => new
+                        {
+                            groupId = o.GroupId, groupName = o.GroupName, sharedProjects = o.SharedProjects
+                        })
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Projekten gick inte att läsa för {Typ}/{Id}.", issuerType, issuerId);
+                return Json(new { success = false, message = "Projekten gick inte att läsa just nu." });
+            }
+        }
+
+        /// <summary>Skapar eller ändrar ett projekt. Historiken följer med ett namnbyte.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveProject([FromBody] SaveProjectRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var start = ParseDate(request.StartDate);
+            var end = ParseDate(request.EndDate);
+
+            // ⚠️ `== 0` är ett NYTT projekt. Ett sandlådeprojekt har negativt id och är ett
+            //    befintligt — `<= 0` hade skapat en dubblett vid varje sparning i sandlådan.
+            if (request.Id == 0)
+            {
+                var created = _projectService.Create(request.IssuerType, request.IssuerId,
+                    request.Name ?? "", actorId.Value, request.Description, start, end);
+
+                return Json(created.Success
+                    ? new { success = true, id = created.Project!.Id, message = "Projektet är skapat." }
+                    : (object)new { success = false, message = created.Error });
+            }
+
+            if (!OwnsProject(request.Id, request.IssuerType, request.IssuerId))
+                return Json(new { success = false, message = "Projektet hittades inte." });
+
+            var updated = _projectService.Update(request.Id, request.Name ?? "", request.Description, start, end);
+
+            return Json(updated.Success
+                ? new { success = true, id = request.Id, message = "Projektet är sparat. Alla bokförda rader följer med." }
+                : (object)new { success = false, message = updated.Error });
+        }
+
+        /// <summary>
+        /// Stänger eller öppnar ett projekt. Stängt = visas inte i väljarna; rapporterna läser det
+        /// ändå, och projekt raderas aldrig.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetProjectClosed([FromBody] ProjectClosedRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att göra." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            if (!OwnsProject(request.ProjectId, request.IssuerType, request.IssuerId))
+                return Json(new { success = false, message = "Projektet hittades inte." });
+
+            var result = _projectService.SetClosed(request.ProjectId, request.Closed);
+
+            return Json(result.Success
+                ? new
+                {
+                    success = true,
+                    message = request.Closed
+                        ? "Projektet är stängt. Det syns inte längre när någon bokför, men finns kvar i rapporterna."
+                        : "Projektet är öppet igen."
+                }
+                : (object)new { success = false, message = result.Error });
+        }
+
+        /// <summary>Skapar eller döper om en grupp.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveProjectGroup([FromBody] SaveProjectGroupRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            if (request.Id == 0)
+            {
+                var created = _projectGroups.Create(request.IssuerType, request.IssuerId,
+                    request.Name ?? "", actorId.Value, request.Description);
+
+                return Json(created.Success
+                    ? new { success = true, id = created.Group!.Id, message = "Gruppen är skapad. Lägg till projekt i den." }
+                    : (object)new { success = false, message = created.Error });
+            }
+
+            if (!OwnsGroup(request.Id, request.IssuerType, request.IssuerId))
+                return Json(new { success = false, message = "Gruppen hittades inte." });
+
+            var updated = _projectGroups.Update(request.Id, request.Name ?? "", request.Description);
+
+            return Json(updated.Success
+                ? new { success = true, id = request.Id, message = "Gruppen är sparad." }
+                : (object)new { success = false, message = updated.Error });
+        }
+
+        /// <summary>Raderar en grupp. Projekten och deras bokföring rörs inte.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteProjectGroup([FromBody] ProjectGroupRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att göra." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            if (!OwnsGroup(request.GroupId, request.IssuerType, request.IssuerId))
+                return Json(new { success = false, message = "Gruppen hittades inte." });
+
+            var done = _projectGroups.Delete(request.GroupId);
+
+            return Json(done
+                ? new { success = true, message = "Gruppen är borttagen. Projekten och deras bokföring är orörda." }
+                : new { success = false, message = "Gruppen gick inte att ta bort." });
+        }
+
+        /// <summary>Lägger till eller tar bort ett projekt ur en grupp.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetProjectGroupMember([FromBody] ProjectGroupMemberRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att göra." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            // ⚠️ BÅDA måste höra till föreningen. Annars kunde en annan förenings projekt hamna i
+            //    vår grupp och dess siffror synas här.
+            if (!OwnsGroup(request.GroupId, request.IssuerType, request.IssuerId)
+                || !OwnsProject(request.ProjectId, request.IssuerType, request.IssuerId))
+                return Json(new { success = false, message = "Gruppen eller projektet hittades inte." });
+
+            _projectGroups.SetMember(request.GroupId, request.ProjectId, request.Member, actorId.Value);
+
+            return Json(new { success = true });
+        }
+
+        private bool OwnsProject(int projectId, int issuerType, int issuerId)
+        {
+            if (projectId == 0) return false;
+            var p = _projectService.Get(projectId);
+            return p is not null && p.IssuerType == issuerType && p.IssuerId == issuerId;
+        }
+
+        private bool OwnsGroup(int groupId, int issuerType, int issuerId)
+        {
+            if (groupId == 0) return false;
+            var g = _projectGroups.Get(groupId);
+            return g is not null && g.IssuerType == issuerType && g.IssuerId == issuerId;
         }
 
         // ══ ANLÄGGNINGSREGISTRET ═════════════════════════════════════════════════════════════
@@ -2489,6 +2754,57 @@ namespace HpskSite.Controllers
     public class PostPendingRequest
     {
         public int PaymentId { get; set; }
+    }
+
+    /// <summary>Ett projekt. <c>Id = 0</c> = nytt.</summary>
+    public class SaveProjectRequest
+    {
+        public int Id { get; set; }
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+        public string? StartDate { get; set; }
+        public string? EndDate { get; set; }
+    }
+
+    public class ProjectClosedRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int ProjectId { get; set; }
+        public bool Closed { get; set; }
+    }
+
+    /// <summary>En projektgrupp. <c>Id = 0</c> = ny.</summary>
+    public class SaveProjectGroupRequest
+    {
+        public int Id { get; set; }
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+    }
+
+    public class ProjectGroupRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int GroupId { get; set; }
+    }
+
+    public class ProjectGroupMemberRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int GroupId { get; set; }
+        public int ProjectId { get; set; }
+
+        /// <summary>
+        /// ⚠️ Skickas som JSON-boolean (<c>true</c>/<c>false</c>) i en [FromBody]-kropp, där
+        /// System.Text.Json binder den rätt — till skillnad från formulärbindningens "1"/"0"-fälla.
+        /// </summary>
+        public bool Member { get; set; }
     }
 
     /// <summary>En utgift: ett utlägg eller en leverantörsfaktura.</summary>

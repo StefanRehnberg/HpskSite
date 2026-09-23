@@ -76,6 +76,16 @@ namespace HpskSite.Services.Ledger
                 });
             }
 
+            // ⚠️ Bara ÖPPNA projekt erbjuds — stängt betyder "visa mig inte i väljaren". En sen
+            //    kostnad på ett stängt projekt går ändå att bokföra via utgifterna; här hålls
+            //    listan kort, eftersom en förening med fyrtio tävlingar annars får fyrtio rader.
+            ctx.Projects.AddRange(ldb.Fetch<LedgerProject>(
+                    @"SELECT * FROM dbo.LedgerProject
+                       WHERE IssuerType = @0 AND IssuerId = @1 AND IsClosed = 0
+                       ORDER BY Name",
+                    issuerType, issuerId)
+                .Select(p => new ProjectOption { Id = p.Id, Name = p.Name }));
+
             var series = ldb.FirstOrDefault<LedgerNumberSeries>(
                 @"SELECT TOP 1 * FROM dbo.LedgerNumberSeries
                    WHERE IssuerType = @0 AND IssuerId = @1 AND Kind = @2
@@ -147,7 +157,9 @@ namespace HpskSite.Services.Ledger
                 Description = r.Description.Trim(),
                 SourceType = LedgerSourceType.Manual,
                 CreatedByMemberId = byMemberId,
-                ProjectId = r.ProjectId,
+                // ⚠️ `!= 0`, aldrig `> 0`: ett sandlådeprojekt har NEGATIVT id. Noll är väljarens
+                //    "(inget projekt)" och får inte nå liggaren, som då svarar "projektet 0 finns inte".
+                ProjectId = r.ProjectId is int p && p != 0 ? p : null,
                 Lines = lines
             });
 
@@ -283,6 +295,15 @@ namespace HpskSite.Services.Ledger
         public string SeriesLabel { get; set; } = "";
 
         public List<RecentEntry> Recent { get; } = new();
+
+        /// <summary>Föreningens öppna projekt. Fältet är aldrig obligatoriskt.</summary>
+        public List<ProjectOption> Projects { get; } = new();
+    }
+
+    public class ProjectOption
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
     }
 
     public class AccountOption

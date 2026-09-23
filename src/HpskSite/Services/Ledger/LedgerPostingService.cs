@@ -22,15 +22,18 @@ namespace HpskSite.Services.Ledger
     {
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly LedgerNumberAllocator _allocator;
+        private readonly LedgerSourceProjectResolver _sourceProjects;
         private readonly ILogger<LedgerPostingService> _logger;
 
         public LedgerPostingService(
             IUmbracoDatabaseFactory databaseFactory,
             LedgerNumberAllocator allocator,
+            LedgerSourceProjectResolver sourceProjects,
             ILogger<LedgerPostingService> logger)
         {
             _databaseFactory = databaseFactory;
             _allocator = allocator;
+            _sourceProjects = sourceProjects;
             _logger = logger;
         }
 
@@ -40,6 +43,28 @@ namespace HpskSite.Services.Ledger
         /// </summary>
         public LedgerPostingResult Post(LedgerPostingRequest request)
         {
+            // ── Projektet ur källan — FÖRST, före anslutningen öppnas ─────────────────────────
+            //
+            // ⚠️⚠️ HÄR föds tävlingens och evenemangets projekt: vid första kronan, i den enda
+            //    vägen in i liggaren. Då kan ingen anropare glömma det, och en avgiftsfri tävling
+            //    får aldrig något projekt eftersom den aldrig postar.
+            //
+            // ⚠️ Bara när anroparen INTE redan valt. Ett uttryckligt projekt (Bokför, utgiften)
+            //    vinner alltid.
+            //
+            // ⚠️ ALDRIG på en rättelse. Rättelsen bär originalets projekt PER RAD; att fylla i ett
+            //    projekt på begäran hade gett originalets omärkta rader ett projekt i rättelsen,
+            //    och då går projektets resultat inte längre ihop med bokföringens.
+            //
+            // ⚠️ Före transaktionen och före `db` öppnas: uppslaget läser innehållsträdet och kan
+            //    skapa ett projekt, och ingenting sådant får ligga innanför numreringens UPDLOCK.
+            if (request.ProjectId is null && request.CorrectsEntryId is null)
+            {
+                request.ProjectId = _sourceProjects.Resolve(
+                    request.IssuerType, request.IssuerId, request.SourceType, request.SourceId,
+                    request.CreatedByMemberId);
+            }
+
             using var db = _databaseFactory.CreateDatabase();
 
             // ── Före transaktionen: allt som går att räkna ut ────────────────────────────────

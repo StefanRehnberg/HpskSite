@@ -4838,6 +4838,129 @@ Verifikationer/Tillgångar/Revisorer plus en kvittolänk i panel 4, som sedan ve
 byggdes visar **verifikationsnummer** för en bokförande förening. Regression efteråt: bokslut 25/25,
 ekonomisidan 59/59, enhetstesten 1363/1363.
 
+## Projektdimensionen — tävlingar och evenemang blir projekt (2026-09-23)
+
+Kvar-listans post 1. `LedgerProject` och `ProjectId` på konteringsraden fanns sedan 2026-09-18, men
+**inget skapade ett projekt**: ingen endpoint, ingen väljare i Bokför, och `EnsureForSource` hade noll
+anropare. En klubb som ville se vad SSM-25 kostade kunde alltså inte märka något.
+
+### ⚠️⚠️ MARKERA FINAST, GRUPPERA EFTERÅT — och varför det är den enda formen som håller
+
+`ProjectId` sitter på raden, och raderna är oföränderliga. **Det som märks vid bokföringen kan aldrig
+ändras** — och avgifter bokförs långt innan någon kassör tänker på projekt. Märkningen måste därför
+vara något som inte KAN bli fel: *den här raden hör till den här tävlingen*. Det är ett faktum
+systemet redan känner genom `SourceType`/`SourceId`. **Information går att aggregera, aldrig att
+återskapa.**
+
+| Nivå | Vad | När | Vem beslutar |
+|---|---|---|---|
+| Raden | Tävlingen/evenemanget | Vid bokföring, fryst | ingen — det är ett faktum |
+| Projektet | = tävlingen/evenemanget | **Lat, vid första kronan** | ingen |
+| Projektgruppen | Föreningens indelning, **ett sparat urval** | När som helst, för alltid | kassören |
+
+### Första kronan: `LedgerPostingService.Post` → `LedgerSourceProjectResolver`
+
+- **⚠️⚠️ Anropet ligger i `Post`, den enda vägen in i liggaren** — aldrig i tävlingsskapandet (Stefans
+  beslut: avgiftsfri tävling får inget projekt). Då kan ingen anropare glömma det, och
+  efterbokföringen (`PostPending`) får det gratis.
+- **Bara när `ProjectId` är null OCH `CorrectsEntryId` är null.** Ett uttryckligt val vinner. En
+  rättelse bär originalets projekt PER RAD; att fylla i projektet på begäran hade gett originalets
+  omärkta rader ett projekt i rättelsen, och då går projektets resultat inte längre ihop med
+  bokföringens.
+- **Före `db` öppnas och före transaktionen.** Uppslaget läser innehållsträdet och kan skapa ett
+  projekt — ingenting sådant får ligga innanför numreringens `UPDLOCK`.
+- **Ett fel stoppar aldrig bokföringen.** Pengarna är redan mottagna. Felet loggas som ERROR, eftersom
+  raden är fryst och inte kan märkas i efterhand.
+- `LedgerProjectSource.For` (ren funktion) avgör källan: `competition-registration` och `team-fee` →
+  **samma** tävlingsprojekt, `event` → evenemangsprojekt, allt annat → inget.
+
+**⚠️⚠️ `SourceId` på `competition-registration`/`team-fee`/`event` ÄR TÄVLINGENS/HÄNDELSENS NOD-ID**,
+aldrig anmälans. Dokumenterat på `LedgerSourceType`. Tre saker vilar på det: översiktens panel 3,
+avprickningslistan och projektnyckeln. **När P3/P4 bygger anmälningsvägen: bryt inte det.**
+
+### ⚠️⚠️ Namnkrocken får ALDRIG slå ihop två källor
+
+`EnsureForSource`s första version föll tillbaka på "finns det ett projekt med samma namn, ta det".
+Men klubben kopierar "Nybörjarkväll" varje vecka — den andra veckans avgifter hade hamnat på den
+förstas projekt, frusna. Nu prövas en **namnkedja** (`LedgerProjectSource.NameCandidates`):
+namn + årtal → namn + datum → namn + (#id), och ett befintligt projekt med samma namn tas bara över
+när det är **handskapat och obundet** — då BINDS det (`WHERE SourceType IS NULL`), så nästa källa inte
+kan ta det också.
+- **Årtal läggs bara till när namnet inte redan bär ETT** — "Årsmöte 2027" som hålls 2026 blir inte
+  "Årsmöte 2027 2026" (hittat i dev-data, händelse 9055).
+- **En raderad nod** ger `Borttagen händelse (#id)` / `Borttagen tävling (#id)` — samma form som
+  översikten. Det vanliga fallet är en betalning som bekräftades före raderingen och bokförs efteråt;
+  den hette först bara "Evenemang" (hittat i dev: två sådana gick inte att skilja åt).
+- **`UX_LedgerProject_Source`** (filtrerat, unikt) gör två projekt för samma källa omöjligt i
+  databasen — två betalningar som bekräftas samma sekund. **⚠️ Filtrerat index ⇒ varje sqlcmd-skript
+  som skriver i `LedgerProject` måste sätta `QUOTED_IDENTIFIER ON`.**
+
+### Projektgruppen: `LedgerProjectGroup` + `LedgerProjectGroupMember`
+
+**⚠️⚠️ ETT SPARAT URVAL, INTE `ParentProjectId`.** En förälder är ett träd: då kan samma projekt inte
+ingå i både "Klubbtävlingar" och "Fältskytte". Många-till-många, rör aldrig konteringsraden, och att
+radera en grupp raderar ingenting annat (FK-kaskad bara till medlemsraderna).
+- **Serien är förvald grupp** — skapas lat när seriens FÖRSTA projekt föds, och projektet läggs in
+  bara vid **födseln**. Har kassören tagit ut det ur seriegruppen lägger nästa krona inte tillbaka det.
+- **⚠️⚠️ INGEN TOTALSUMMA ÖVER GRUPPER, strukturellt.** `LedgerProjectGroupReport.Build` (ren funktion)
+  producerar aldrig en, och varje grupp bär sina **överlapp** ("Delar 1 projekt med X — lägg inte ihop
+  gruppernas summor"). Ytan förklarar varför summaraden saknas, annars letar kassören efter den.
+- Gruppen har ingen egen bokföring, budget eller livscykel — den summerar sina medlemmar.
+- Ligger ändå i schemasömmen (dbo/sbx) — inte för att den är bokföring, utan för att den pekar på
+  projekt, och en sandlådas projekt finns bara i `sbx`. Gruppen bär `IssuerId` och sandlådespärren;
+  medlemsraden har inget `IssuerId` och hålls i rätt schema av sina FK.
+
+### Ytan
+
+Rälspost **Projekt**, direkt efter Rapport — **inte gated på skrivrätt** (styrelsen och revisorn ska
+se vad tävlingarna gav). Projekt med intäkter/kostnader/resultat (tecknet utskrivet — WCAG 1.4.1),
+stängda i en `<details>`, grupperna med sina överlapp, formulär för eget projekt och ny grupp.
+**Förvald period är projektets HELA tid**, inte i år — ett projekt vill ha ett slutresultat.
+- **Bokför** fick väljaren "(inget projekt)" överst + öppna projekt. `0` → null i både klient och
+  `LedgerManualPostingService` (`!= 0`, aldrig `> 0` — sandlådeprojekt har negativt id).
+- **⚠️ `Summarise` hade två fel, rättade:** årsfiltret låg i WHERE, så varje projekt utan rader just
+  det året FÖLL BORT ur listan; och `SUM` utan `ISNULL` gav NULL för ett projekt utan rader.
+- **⚠️ Redigeringen skriver ALLA fält**, så `GetProjects` bär beskrivning och datum fast summeringen
+  inte behöver dem — utan dem hade ett namnbyte tömt dem.
+- **Endpoints:** `GetProjects` (läs), `SaveProject`, `SetProjectClosed`, `SaveProjectGroup`,
+  `DeleteProjectGroup`, `SetProjectGroupMember` (skriv). **Varje projekt- och grupp-id prövas mot
+  föreningen** (`OwnsProject`/`OwnsGroup`) — tjänsterna tar id:t som det är.
+
+### ⚠️ Fynd på vägen: hela ekonomiytan rullade i sidled på telefon
+
+Sex av tio flikar på 390 px (Bokslut 764, Tillgångar 634, Projekt 568). I kolumnläget ärvde `.wrap`
+`align-items: flex-start` från datorlayouten, så `.ek-main` fick innehållets minsta bredd. Rättat i
+telefonregeln: `.ek-main { width: 100% }` + `.ek-card { overflow-x: auto }` — alla tio flikar 390 px,
+datorn oförändrad. **Lägg aldrig en rullgardinsmeny i ett ek-card utan att ta bort den regeln.**
+
+### ⚠️ `ekonomi-page-verify` efterbokför den LEVANDE dev-liggarens kö
+
+Förbefintligt, men nu skapar det projekt i dbo: två betalningar från 2026-09-20 för sedan raderade
+händelser (9320/9321) bokfördes och fick projekt 31/32 i den levande dev-liggaren. Ofarligt i dev,
+men värt att veta när projektlistan för klubb 2604 plötsligt har rader.
+
+**Operatörssteg:** kör `Migrations/create-ledger-project-group-tables.sql` **FÖRE deployen** (båda
+schemana, spärrarna, källindexet; `@@TRANCOUNT` sist). Körd i dev 2026-09-23; **EJ körd i prod.**
+Efter den: `/health/ledger` = `tables=24 sandbox=24`. Adds C# → full ombyggnad. Ingen
+doctype-egenskap, ingen Umbraco-nod.
+
+**⛔ Ingenting av ekonomidelen deployas till prod** förrän allt i kvar-listan är klart.
+
+Verifierat **31 enhetstest** (`LedgerProjectSourceTests`, `LedgerProjectGroupReportTests`; hela sviten
+1429/1429) och **100/100 `hpsk-verify/ekonomi-projekt-verify.mjs`** i en egen sandlåda. Betalningarna
+skrivs som SQL i `sbx.LedgerPayment` och bokförs genom den **riktiga** efterbokföringen
+(`PostPending`) — evenemangsbetalningar går annars alltid till den levande utställaren.
+**A/B: med resolvern avstängd faller 20 påståenden**, och sviten avbryter när seriegruppen saknas.
+- ⚠️ Två av svitens första röda var **testfel**: grupp A delar tävlingen med B *och* med seriegruppen,
+  så "exakt ett överlapp" var fel förväntan; och en väntan matchade fel rad ("ZZP Städning" står också i
+  en annan grupps överlapptext), så SQL-kontrollen körde innan skrivningen var klar. Identifiera en rad
+  på dess rubrik, aldrig på hela radtexten.
+- ⚠️ `sqlcmd -Q` via `execSync` går genom cmd:s kodsida — betalarnamn i fixturen är ASCII.
+
+**Kvar, medvetet inte byggt:** tävlingstavlans HÄRLEDDA utfall (`WorkBreakdown`, se
+`ledger-needs-project-dimension`) — tävlingsavgifter postar inte till liggaren förrän P3/P4 är byggd,
+så det finns inget utfall att visa ännu.
+
 ### ⚠️⚠️ MEDALJREDUKTIONEN MÄTS PÅ MÄSTERSKAPSKLASSEN (2026-09-08)
 
 **SHB C.3.4.1, ordagrant:** *"Antalet medaljer till de främsta i individuella mästerskap

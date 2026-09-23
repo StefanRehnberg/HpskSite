@@ -138,38 +138,97 @@ namespace HpskSite.Services.Ledger
         ///
         /// <para>Namnet används bara när projektet skapas. Har föreningen döpt om det sedan dess
         /// behålls deras namn — deras ord vinner alltid över vårt.</para>
+        ///
+        /// <para><b>⚠️⚠️ NAMNKROCKEN FÅR ALDRIG KOPPLA IHOP TVÅ OLIKA KÄLLOR.</b> Första versionen
+        /// föll tillbaka på "finns det ett projekt med samma namn, ta det". Men klubben kopierar
+        /// "Nybörjarkväll" varje vecka, och "Klubbmästerskap" finns varje år — så den andra
+        /// händelsens rader hade hamnat på den förstas projekt, frusna, för alltid. Nu prövas
+        /// <paramref name="nameCandidates"/> i ordning (<see cref="LedgerProjectSource.NameCandidates"/>),
+        /// och ett befintligt projekt med samma namn tas bara över om det är ett som kassören skapat
+        /// för hand och som ännu inte hör till någon källa. Då BINDS det, så nästa källa med samma
+        /// namn inte kan ta det också.</para>
         /// </summary>
-        public LedgerProject? EnsureForSource(
+        /// <returns>Projektet, och om det skapades nu. <c>null</c> om inget gick att skapa.</returns>
+        public (LedgerProject Project, bool Created)? EnsureForSource(
             int issuerType,
             int issuerId,
             string sourceType,
             int sourceId,
-            string name,
+            IReadOnlyList<string> nameCandidates,
             int byMemberId)
         {
-            using (var db = _databaseFactory.CreateDatabase())
+            var bySource = FindBySource(issuerType, issuerId, sourceType, sourceId);
+            if (bySource is not null) return (bySource, false);
+
+            foreach (var raw in nameCandidates)
             {
-                var ldb = new LedgerDb(db, issuerId);
+                var name = (raw ?? "").Trim();
+                if (name.Length == 0) continue;
 
-                var existing = ldb.FirstOrDefault<LedgerProject>(
-                    @"SELECT * FROM dbo.LedgerProject
-                       WHERE IssuerType = @0 AND IssuerId = @1 AND SourceType = @2 AND SourceId = @3",
-                    issuerType, issuerId, sourceType, sourceId);
+                using (var db = _databaseFactory.CreateDatabase())
+                {
+                    var ldb = new LedgerDb(db, issuerId);
 
-                if (existing is not null) return existing;
+                    var sameName = ldb.FirstOrDefault<LedgerProject>(
+                        "SELECT * FROM dbo.LedgerProject WHERE IssuerType = @0 AND IssuerId = @1 AND Name = @2",
+                        issuerType, issuerId, name);
+
+                    if (sameName is not null)
+                    {
+                        // Hör det redan till en källa (en annan tävling) är namnet upptaget — pröva
+                        // nästa kandidat. Aldrig "ta det ändå".
+                        if (!string.IsNullOrEmpty(sameName.SourceType)) continue;
+
+                        // Ett handskapat, obundet projekt med exakt det namnet: kassören förutsåg
+                        // tävlingen. Bind det. ⚠️ Villkoret i WHERE är spärren — två samtidiga
+                        // postningar får inte båda binda samma projekt till var sin källa.
+                        var bound = ldb.Execute(
+                            @"UPDATE dbo.LedgerProject SET SourceType = @1, SourceId = @2
+                               WHERE Id = @0 AND SourceType IS NULL",
+                            sameName.Id, sourceType, sourceId);
+
+                        if (bound == 1)
+                        {
+                            sameName.SourceType = sourceType;
+                            sameName.SourceId = sourceId;
+                            _logger.LogInformation(
+                                "Projektet {Namn} ({Id}) kopplades till {Typ}/{KallId} — kassören hade skapat det i förväg.",
+                                name, sameName.Id, sourceType, sourceId);
+                            return (sameName, false);
+                        }
+
+                        // Någon annan hann före; kanske med just vår källa.
+                        var raced = FindBySource(issuerType, issuerId, sourceType, sourceId);
+                        if (raced is not null) return (raced, false);
+                        continue;
+                    }
+                }
+
+                var created = Create(issuerType, issuerId, name, byMemberId,
+                                     sourceType: sourceType, sourceId: sourceId);
+
+                if (created.Success) return (created.Project!, true);
+
+                // Misslyckades skapandet kan det vara en samtidig postning för SAMMA källa som hann
+                // före (det unika indexet på källan). Då finns projektet nu.
+                var afterFail = FindBySource(issuerType, issuerId, sourceType, sourceId);
+                if (afterFail is not null) return (afterFail, false);
             }
 
-            var created = Create(issuerType, issuerId, name, byMemberId,
-                                 sourceType: sourceType, sourceId: sourceId);
+            _logger.LogWarning(
+                "Inget projekt kunde skapas för {Typ}/{KallId} hos utställare {IssuerType}/{IssuerId} — "
+                + "alla {Antal} namnförslag var upptagna eller föll.",
+                sourceType, sourceId, issuerType, issuerId, nameCandidates.Count);
+            return null;
+        }
 
-            if (created.Success) return created.Project;
-
-            // Namnkrocken är det troliga felet: föreningen har redan ett projekt med samma namn som
-            // de skapat för hand. Koppla ihop det i stället för att skapa ett andra med samma namn.
-            using var db2 = _databaseFactory.CreateDatabase();
-            return new LedgerDb(db2, issuerId).FirstOrDefault<LedgerProject>(
-                "SELECT * FROM dbo.LedgerProject WHERE IssuerType = @0 AND IssuerId = @1 AND Name = @2",
-                issuerType, issuerId, (name ?? "").Trim());
+        private LedgerProject? FindBySource(int issuerType, int issuerId, string sourceType, int sourceId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return new LedgerDb(db, issuerId).FirstOrDefault<LedgerProject>(
+                @"SELECT * FROM dbo.LedgerProject
+                   WHERE IssuerType = @0 AND IssuerId = @1 AND SourceType = @2 AND SourceId = @3",
+                issuerType, issuerId, sourceType, sourceId);
         }
 
         /// <summary>
@@ -257,6 +316,15 @@ namespace HpskSite.Services.Ledger
         /// <para>Bara resultatkonton räknas: klass 3 och 8 på intäktssidan, klass 4–7 på
         /// kostnadssidan. Balanskonton (1 och 2) kan bära ett projekt — en projektspecifik
         /// bankdragning gör det — men de hör inte hemma i ett resultat.</para>
+        ///
+        /// <para><b>⚠️ Utan år är det projektets HELA resultat</b> — och det är standardfallet. Ett
+        /// projekt är tidsbegränsat och vill ha ett slutresultat för hela sin livstid, inte per
+        /// år; en tävling vars fakturor kommer i januari ska inte se ut att ha gått med vinst i
+        /// december.</para>
+        ///
+        /// <para>⚠️ Årsfiltret ligger i JOIN:en, inte i WHERE. I WHERE föll varje projekt utan
+        /// rader just det året bort ur listan helt — ett projekt som finns ska synas med noll, inte
+        /// försvinna.</para>
         /// </summary>
         public List<LedgerProjectSummary> Summarise(int issuerType, int issuerId, int? fiscalYearId = null)
         {
@@ -266,21 +334,26 @@ namespace HpskSite.Services.Ledger
             var sql = @"SELECT p.Id AS ProjectId,
                                p.Name AS ProjectName,
                                p.IsClosed,
-                               SUM(CASE WHEN l.AccountNumber BETWEEN 3000 AND 3999
-                                          OR l.AccountNumber BETWEEN 8000 AND 8999
-                                        THEN l.Credit - l.Debit ELSE 0 END) AS Income,
-                               SUM(CASE WHEN l.AccountNumber BETWEEN 4000 AND 7999
-                                        THEN l.Debit - l.Credit ELSE 0 END) AS Costs,
-                               COUNT(DISTINCT l.JournalEntryId) AS EntryCount
+                               p.SourceType,
+                               p.SourceId,
+                               ISNULL(SUM(CASE WHEN x.AccountNumber BETWEEN 3000 AND 3999
+                                                 OR x.AccountNumber BETWEEN 8000 AND 8999
+                                               THEN x.Credit - x.Debit ELSE 0 END), 0) AS Income,
+                               ISNULL(SUM(CASE WHEN x.AccountNumber BETWEEN 4000 AND 7999
+                                               THEN x.Debit - x.Credit ELSE 0 END), 0) AS Costs,
+                               COUNT(DISTINCT x.JournalEntryId) AS EntryCount
                           FROM dbo.LedgerProject p
-                          LEFT JOIN dbo.LedgerJournalEntryLine l ON l.ProjectId = p.Id
-                          LEFT JOIN dbo.LedgerJournalEntry e ON e.Id = l.JournalEntryId
+                          LEFT JOIN (SELECT l.ProjectId, l.AccountNumber, l.Debit, l.Credit, l.JournalEntryId
+                                       FROM dbo.LedgerJournalEntryLine l
+                                       JOIN dbo.LedgerJournalEntry e ON e.Id = l.JournalEntryId
+                                      WHERE @2 IS NULL OR e.FiscalYearId = @2) x
+                                 ON x.ProjectId = p.Id
                          WHERE p.IssuerType = @0 AND p.IssuerId = @1
-                           AND (@2 IS NULL OR e.FiscalYearId = @2)
-                         GROUP BY p.Id, p.Name, p.IsClosed
+                         GROUP BY p.Id, p.Name, p.IsClosed, p.SourceType, p.SourceId
                          ORDER BY p.IsClosed, p.Name";
 
-            return ldb.Fetch<LedgerProjectSummary>(sql, issuerType, issuerId, fiscalYearId);
+            return ldb.Fetch<LedgerProjectSummary>(sql, issuerType, issuerId,
+                (object?)fiscalYearId ?? DBNull.Value);
         }
     }
 
@@ -304,6 +377,11 @@ namespace HpskSite.Services.Ledger
         public string ProjectName { get; set; } = "";
 
         public bool IsClosed { get; set; }
+
+        /// <summary>Satt för ett automatiskt projekt: <see cref="LedgerProjectSource"/>.</summary>
+        public string? SourceType { get; set; }
+
+        public int? SourceId { get; set; }
 
         public decimal Income { get; set; }
 

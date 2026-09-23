@@ -68,7 +68,13 @@ namespace HpskSite.Services.Ledger
             //    tabell fäller varje skrivning. Startkontrollen är det som gör den saknaden
             //    högljudd i stället för tyst.
             typeof(LedgerAsset),
-            typeof(LedgerExpense)
+            typeof(LedgerExpense),
+
+            // ⚠️ Projektgrupperna. Rör aldrig bokföringen, men pekar på projekt och bor därför i
+            //    samma schemasöm. Gruppen bär IssuerId och får alltså sandlådespärren; medlemsraden
+            //    har inget IssuerId (som konteringsraden) och hålls i rätt schema av sina FK.
+            typeof(LedgerProjectGroup),
+            typeof(LedgerProjectGroupMember)
         };
 
         /// <summary>
@@ -113,7 +119,8 @@ namespace HpskSite.Services.Ledger
         public const string MigrationScript =
             "Migrations/create-ledger-tables.sql + add-vat-to-ledger.sql + create-ledger-draft-tables.sql "
             + "+ create-ledger-payment-tables.sql + add-project-dimension-to-ledger.sql "
-            + "+ create-ledger-budget-tables.sql";
+            + "+ create-ledger-budget-tables.sql + create-ledger-expense-table.sql "
+            + "+ create-ledger-asset-table.sql + create-ledger-project-group-tables.sql";
 
         /// <summary>Skriptet som skapar sandlådans schema. Ett eget svar kräver ett eget skript.</summary>
         public const string SandboxMigrationScript =
