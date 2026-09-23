@@ -259,7 +259,16 @@
       .ek-page .wrap { display: block; }
       .ek-page .ek-card { border: 0; padding: 0; }
       .ek-page table.t tr.sum td { background: none; }
+      .ek-page .ek-noprint { display: none !important; }
+      /* Sajtens ram hör inte till handlingen. */
+      body > header, body > footer, #cookieConsentBanner, body .position-fixed,
+      .chat-toggle-btn, .chat-panel,
+      .ek-page section[data-pane="bokslut"] > .head { display: none !important; }
+      .ek-page .ek-printonly { display: block !important; }
+      .ek-page .ek-grid { display: block; }
+      .ek-page .ek-grid > .ek-card { margin-bottom: 1.5rem; break-inside: avoid; }
   }
+  .ek-page .ek-printonly { display: none; }
 
   /* ── Bokför ──────────────────────────────────────────────────────────────── */
   .ek-page .bokfor-grid { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1rem;
@@ -1751,7 +1760,13 @@
                 </div>
 
                 <div class="d-none" id="@(uid)_closeWrap">
-                    <div class="ek-card wide">
+                    @* ⚠️ Handlingarna till årsmötet: papperet ska säga VEMS och VILKET år — en
+                       resultaträkning utan föreningens namn är ett lösblad. *@
+                    <div class="ek-printonly" style="margin-bottom:1rem">
+                        <h1 style="font-size:1.4rem;margin:0">@Model.IssuerName</h1>
+                        <div id="@(uid)_printYear" style="font-size:1.05rem"></div>
+                    </div>
+                    <div class="ek-card wide ek-noprint">
                         <div class="ek-cardh"><h2>Stegen</h2>
                             <span class="meta" id="@(uid)_closeMeta"></span></div>
                         <div class="rows" id="@(uid)_closeSteps"></div>
@@ -1778,7 +1793,7 @@
                     @* ⚠️ Fastställandet ligger SIST och efter handlingarna. Det ar en enkelriktad
                        handling, och den som trycker ska ha resultat- och balansrakningen pa
                        skarmen nar hen gor det. *@
-                    <div class="ek-card wide" style="margin-top:1rem" id="@(uid)_establishCard">
+                    <div class="ek-card wide ek-noprint" style="margin-top:1rem" id="@(uid)_establishCard">
                         <div class="ek-cardh"><h2>Fastställ året</h2></div>
                         <p class="muted" style="margin-top:0">
                             <strong>Efter det här tar året inte emot bokföring.</strong>
@@ -3788,7 +3803,14 @@
             }).join('') + '</select>'
             + '<a class="btn btn-outline-secondary" id="' + uid + '_sieLink" href="'
             + '/umbraco/surface/EkonomiAdmin/ExportSie?issuerType=' + issuerType
-            + '&issuerId=' + issuerId + '&fiscalYearId=' + closeYearId + '">Hämta SIE-fil</a>';
+            + '&issuerId=' + issuerId + '&fiscalYearId=' + closeYearId + '">Hämta SIE-fil</a>'
+            + '<button type="button" class="btn btn-outline-secondary" id="' + uid + '_closePrint">'
+            + '<i class="bi bi-printer me-1"></i>Skriv ut handlingarna</button>';
+
+        var yr = (d.years || []).find(function (y) { return y.id === closeYearId; });
+        el('printYear').textContent = 'Resultat- och balansräkning för räkenskapsåret ' + (yr ? yr.year : '')
+            + (d.checklist.status === 'established' ? '' : ' — ej fastställd');
+        el('closePrint').addEventListener('click', function () { window.print(); });
 
         var pick = el('closeYear');
         if (pick) pick.addEventListener('change', function () { loadClosing(pick.value); });
