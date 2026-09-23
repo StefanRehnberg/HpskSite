@@ -316,6 +316,61 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Inbjudan till en revisor.
+        ///
+        /// <para><b>⚠️ Svarsadressen är FÖRENINGEN, inte sajten.</b> En revisor som svarar på
+        /// inbjudan har en fråga till den som utsett hen — inte till oss. Att låta svaret landa
+        /// hos sajtägaren är precis det fel hela Reply-To-arbetet byggde bort.</para>
+        ///
+        /// <para><b>⚠️ Länken är en bärarnyckel och skrivs därför bara som en länk</b> — aldrig
+        /// som klartext att kopiera, och aldrig upprepad i fotnoten. Den som vidarebefordrar
+        /// mejlet vidarebefordrar åtkomsten, och det säger texten rakt ut.</para>
+        /// </summary>
+        public async Task<bool> SendAuditorInviteAsync(
+            string auditorEmail, string auditorName, string ownerName,
+            string inviteUrl, DateTime expiresLocal, MailReplyTo replyTo)
+        {
+            var subject = $"Du är utsedd till revisor för {ownerName}";
+
+            var body = $@"
+<html>
+<body>
+    <h2>Hej {auditorName},</h2>
+    <p><strong>{ownerName}</strong> har utsett dig till revisor och ger dig läsrätt till
+       föreningens räkenskaper på pistol.nu.</p>
+
+    <p style=""margin:26px 0"">
+        <a href=""{inviteUrl}""
+           style=""background:#0b63ce;color:#fff;padding:12px 22px;border-radius:6px;
+                  text-decoration:none;font-weight:600;display:inline-block"">
+            Ta emot uppdraget
+        </a>
+    </p>
+
+    <p><strong>Du kommer åt:</strong></p>
+    <ul>
+        <li>Resultat- och balansräkning, och bokslutets steg</li>
+        <li>Varje verifikation med sitt underlag — kvitton och fakturor</li>
+        <li>Avstämningen mot bankens kontoutdrag</li>
+        <li>Budget mot utfall</li>
+    </ul>
+
+    <p>Du kan läsa allt och ladda ner underlagen, men inte ändra någonting.</p>
+
+    <p>Inbjudan gäller till <strong>{expiresLocal:d MMMM yyyy}</strong> — ett revisorsuppdrag
+       löper till nästa årsmöte. Föreningen kan avsluta åtkomsten när som helst.</p>
+
+    <p style=""color:#5b6672"">Länken är personlig. Skicka den inte vidare — den som öppnar den
+       kan ta emot uppdraget i ditt ställe.</p>
+
+    <p>Med vänliga hälsningar,<br/>{ownerName} via Pistol.nu</p>
+</body>
+</html>";
+
+            return await SendEmailAsync(auditorEmail, subject, body, replyTo);
+        }
+
+        /// <summary>
         /// Send welcome email for quick-created members (created by admin at competition).
         /// Includes temporary password.
         /// </summary>

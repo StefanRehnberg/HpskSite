@@ -44,6 +44,7 @@ namespace HpskSite.Composers
             builder.Services.AddSingleton<LedgerAttachmentStorage>();
             builder.Services.AddScoped<LedgerAttachmentService>();
             builder.Services.AddScoped<LedgerJournalService>();
+            builder.Services.AddScoped<LedgerAuditorService>();
             builder.Services.AddHostedService<LedgerSchemaGuardHostedService>();
         }
     }

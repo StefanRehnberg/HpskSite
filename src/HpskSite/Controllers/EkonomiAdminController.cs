@@ -1,3 +1,4 @@
+using HpskSite.Services.Mail;
 using HpskSite.Models;
 using HpskSite.Models.Ledger;
 using HpskSite.Services;
@@ -49,6 +50,8 @@ namespace HpskSite.Controllers
         private readonly LedgerReceivableExportService _receivableService;
         private readonly LedgerJournalService _journalService;
         private readonly LedgerAttachmentService _attachmentService;
+        private readonly LedgerAuditorService _auditorService;
+        private readonly EmailService _emailService;
 
         /// <summary>
         /// Taket för ett uppladdat kontoutdrag.
@@ -85,6 +88,8 @@ namespace HpskSite.Controllers
             LedgerReceivableExportService receivableService,
             LedgerJournalService journalService,
             LedgerAttachmentService attachmentService,
+            LedgerAuditorService auditorService,
+            EmailService emailService,
             IMemberManager memberManager,
             IMemberService memberService,
             ILogger<EkonomiAdminController> logger)
@@ -103,6 +108,8 @@ namespace HpskSite.Controllers
             _receivableService = receivableService;
             _journalService = journalService;
             _attachmentService = attachmentService;
+            _auditorService = auditorService;
+            _emailService = emailService;
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
             _sandbox = sandbox;
@@ -463,6 +470,137 @@ namespace HpskSite.Controllers
 
             return Json(done
                 ? new { success = true, message = "Underlaget är bortkopplat." }
+                : new { success = false, message = error! });
+        }
+
+        // ══ REVISORNS ÅTKOMST ════════════════════════════════════════════════════════════════
+        //
+        // ⚠️⚠️ ÄGAREN, ALDRIG UTSTÄLLAREN. Man är revisor för en FÖRENING, inte för en sandlåda.
+        //    Endpointarna tar därför ownerType/ownerId och grindar på skrivrätt i den föreningen
+        //    — den som får bokföra får också bjuda in, och inbjudan loggas med vem och när.
+
+        /// <summary>Föreningens revisorer — inklusive återkallade och utgångna.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetAuditors(int ownerType, int ownerId)
+        {
+            var (ok, _) = await AuthorizeWriteAsync(ownerType, ownerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var rows = _auditorService.ListForOwner(ownerType, ownerId);
+
+            return Json(new
+            {
+                success = true,
+                // ⚠️ TokenHash lämnar ALDRIG servern. Den är inte hemlig i sig, men den har inget
+                //    här att göra och ett fält som finns blir förr eller senare använt.
+                auditors = rows.Select(r => new
+                {
+                    id = r.Id,
+                    name = r.Name,
+                    email = r.Email,
+                    status = r.StatusLabel,
+                    isActive = r.IsActive,
+                    invitedUtc = r.InvitedUtc,
+                    expiresUtc = r.ExpiresUtc,
+                    acceptedUtc = r.AcceptedUtc,
+                    lastSeenUtc = r.LastSeenUtc,
+                    revokeReason = r.RevokeReason
+                })
+            });
+        }
+
+        /// <summary>
+        /// Bjuder in en revisor och mejlar länken.
+        ///
+        /// <para><b>⚠️ Token visas EN gång i svaret.</b> Går mejlet inte fram ska föreningen kunna
+        /// lämna länken på annat sätt — men den lagras bara som hash, så den kan aldrig hämtas
+        /// igen. Svaret säger det.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> InviteAuditor([FromBody] InviteAuditorRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att skicka." });
+
+            var (ok, ownerName) = await AuthorizeWriteAsync(request.OwnerType, request.OwnerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, actorName) = await GetCurrentActorAsync();
+            if (actorId is null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var (made, error, token, grantId) = _auditorService.Invite(
+                request.OwnerType, request.OwnerId,
+                request.Email ?? "", request.Name ?? "", actorId.Value);
+
+            if (!made) return Json(new { success = false, message = error! });
+
+            var url = $"{Request.Scheme}://{Request.Host}/revision/inbjudan?t={token}";
+            var expires = DateTime.UtcNow.AddMonths(LedgerAuditorService.GrantMonths).ToLocalTime();
+
+            // ⚠️⚠️ SVARSADRESSEN ÄR FÖRENINGEN, inte sajten. En revisor som svarar på inbjudan
+            //    har en fråga till den som utsett hen — inte till oss. Reply-To pekar därför på
+            //    den som bjöd in.
+            //    ⚠️ Saknas adressen faller vi tillbaka på sajtens, UTTRYCKLIGEN. Ett tomt
+            //    Reply-To hade tyst gjort mejlet obesvarbart, vilket är sämre än fel mottagare.
+            var actorEmail = await CurrentActorEmailAsync();
+
+            var replyTo = string.IsNullOrWhiteSpace(actorEmail)
+                ? MailReplyTo.SiteAdmin
+                : MailReplyTo.To(actorEmail, actorName ?? ownerName);
+
+            bool sent;
+            try
+            {
+                sent = await _emailService.SendAuditorInviteAsync(
+                    request.Email!.Trim(), request.Name!.Trim(), ownerName, url, expires, replyTo);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Revisorsinbjudan {Id} gick inte att mejla.", grantId);
+                sent = false;
+            }
+
+            _logger.LogInformation(
+                "Ekonomi: {Forening} bjöd in {Revisor} som revisor (uppdrag {Id}, mejl {Mejl}).",
+                ownerName, request.Email, grantId, sent ? "skickat" : "MISSLYCKADES");
+
+            return Json(new
+            {
+                success = true,
+                sent,
+                // ⚠️ Länken returneras så att föreningen kan lämna den för hand när mejlet inte
+                //    går fram. Den går aldrig att hämta igen — hashen är allt vi sparar.
+                url,
+                message = sent
+                    ? $"Inbjudan är skickad till {request.Email}."
+                    : "Inbjudan är skapad, men mejlet gick INTE att skicka. Lämna länken nedan till revisorn på annat sätt — den går inte att hämta igen."
+            });
+        }
+
+        /// <summary>Återkallar en revisors åtkomst. Raden står kvar.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RevokeAuditor([FromBody] RevokeAuditorRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att göra." });
+
+            var (ok, ownerName) = await AuthorizeWriteAsync(request.OwnerType, request.OwnerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null)
+                return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var (done, error) = _auditorService.Revoke(
+                request.OwnerType, request.OwnerId, request.GrantId, request.Reason, actorId.Value);
+
+            if (done)
+                _logger.LogInformation("Ekonomi: {Forening} återkallade revisorsuppdrag {Id}.",
+                    ownerName, request.GrantId);
+
+            return Json(done
+                ? new { success = true, message = "Åtkomsten är återkallad." }
                 : new { success = false, message = error! });
         }
 
@@ -1326,6 +1464,24 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Resolverar inloggad medlem till id — verifikationen ska bära vem som bokförde.
         /// </summary>
+        /// <summary>
+        /// Den inloggades e-postadress, för svarsadressen på ett utgående mejl.
+        /// <para>⚠️ Tom sträng när den inte går att läsa — anroparen måste välja vad det betyder,
+        /// och den som mejlar får aldrig gissa en adress.</para>
+        /// </summary>
+        private async Task<string> CurrentActorEmailAsync()
+        {
+            try
+            {
+                var current = await _memberManager.GetCurrentMemberAsync();
+                return current?.Email ?? "";
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
         private async Task<(int? id, string? name)> GetCurrentActorAsync()
         {
             try
@@ -1864,6 +2020,24 @@ namespace HpskSite.Controllers
     public class PostPendingRequest
     {
         public int PaymentId { get; set; }
+    }
+
+    /// <summary>Inbjudan av en revisor. Ägaren, aldrig utställaren.</summary>
+    public class InviteAuditorRequest
+    {
+        public int OwnerType { get; set; }
+        public int OwnerId { get; set; }
+        public string? Email { get; set; }
+        public string? Name { get; set; }
+    }
+
+    /// <summary>Återkallning av en revisors åtkomst.</summary>
+    public class RevokeAuditorRequest
+    {
+        public int OwnerType { get; set; }
+        public int OwnerId { get; set; }
+        public int GrantId { get; set; }
+        public string? Reason { get; set; }
     }
 
     /// <summary>

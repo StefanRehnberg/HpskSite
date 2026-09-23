@@ -1,0 +1,205 @@
+@model HpskSite.Controllers.RevisionInviteModel
+@{
+    Layout = null;
+
+    // ⚠️ Fristående sida utan Umbraco-nod, som /styrelse/justera och /valvet. Master.cshtml
+    //    förutsätter en IPublishedContent-modell och kan därför inte användas här.
+    var uid = "ri" + Guid.NewGuid().ToString("N")[..6];
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Inbjudan som revisor — pistol.nu</title>
+    @* ⚠️ En inbjudningslänk får ALDRIG indexeras. Den är en bärarnyckel. *@
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <style>
+        body { background: #f4f6f9; }
+        .wrap { max-width: 560px; margin: 4vh auto; padding: 0 16px; }
+        .card { border: 1px solid #dde3ea; border-radius: 10px; background: #fff; padding: 28px; }
+        .brand { font-weight: 800; font-size: 20px; letter-spacing: -.3px; }
+        .brand span { color: #0b63ce; }
+        .lead-name { font-size: 24px; font-weight: 700; margin: 0 0 4px; }
+        .muted { color: #5b6672; }
+        .rule { border-top: 1px solid #eef1f5; margin: 20px 0; }
+        ul.what { padding-left: 18px; }
+        ul.what li { margin-bottom: 6px; }
+
+        @@media (prefers-color-scheme: dark) {
+            body { background: #10151b; color: #e7edf3; }
+            .card { background: #171e26; border-color: #27313d; }
+            .muted { color: #9fb0c0; }
+            .rule { border-color: #27313d; }
+        }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="brand">pistol<span>.nu</span></div>
+    <p class="muted" style="margin-bottom:18px">Inbjudan som revisor</p>
+
+    <div class="card">
+        @if (Model.Problem is not null)
+        {
+            <p class="lead-name">Det går inte att fortsätta</p>
+            <p>@Model.Problem</p>
+            <p class="muted" style="margin-bottom:0">
+                Hör av dig till föreningen så skickar de en ny länk.
+            </p>
+        }
+        else
+        {
+            <p class="lead-name">@Model.OwnerName</p>
+            <p class="muted">
+                har bjudit in dig som revisor och ger dig <strong>läsrätt</strong> till föreningens
+                räkenskaper.
+            </p>
+
+            <div class="rule"></div>
+
+            <p style="margin-bottom:8px"><strong>Det här får du se</strong></p>
+            <ul class="what">
+                <li>Resultat- och balansräkning, och bokslutets steg</li>
+                <li>Varje verifikation med sitt underlag — kvitton och fakturor</li>
+                <li>Avstämningen mot bankens kontoutdrag</li>
+                <li>Budget mot utfall</li>
+            </ul>
+
+            @* ⚠️ Vad hen INTE kan göra sägs lika tydligt. En revisor som är osäker på om hen kan
+               råka ändra något vågar inte klicka sig fram — och då granskar hen sämre. *@
+            <p class="muted">
+                Du kan läsa allt och ladda ner underlagen. Du kan inte ändra någonting —
+                inga knappar som bokför eller rättar finns på din sida.
+            </p>
+
+            <div class="rule"></div>
+
+            <p class="muted">
+                Inbjudan gäller till
+                <strong>@(Model.ExpiresUtc?.ToLocalTime().ToString("d MMMM yyyy",
+                          System.Globalization.CultureInfo.GetCultureInfo("sv-SE")))</strong>
+                — ett revisorsuppdrag löper till nästa årsmöte. Föreningen kan när som helst
+                avsluta den.
+            </p>
+
+            <div class="rule"></div>
+
+            <form id="@(uid)_form" novalidate>
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="token" value="@Model.Token">
+
+                <label class="form-label">Din e-postadress</label>
+                <input type="email" class="form-control" value="@Model.InvitedEmail" disabled>
+                <div class="form-text" style="margin-bottom:16px">
+                    Inbjudan gäller den här adressen. Är den fel — hör av dig till föreningen.
+                </div>
+
+                @if (Model.AccountExists)
+                {
+                    @* ⚠️ Adressen har redan ett konto. Vi rör det INTE: inget lösenord sätts om,
+                       ingen grupp läggs till. Det tillhör en människa som kan vara medlem i en
+                       annan klubb, och en inbjudan får aldrig ändra någons befintliga konto. *@
+                    <div class="alert alert-info">
+                        Du har redan en inloggning på pistol.nu med den här adressen. Logga in som
+                        vanligt — vi kopplar uppdraget till ditt konto.
+                    </div>
+
+                    @if (Model.SignedInMemberId > 0)
+                    {
+                        <button type="submit" class="btn btn-primary w-100">Ta emot uppdraget</button>
+                    }
+                    else
+                    {
+                        <a class="btn btn-primary w-100"
+                           href="/login-&-register/?tab=login&returnUrl=@Uri.EscapeDataString("/revision/inbjudan?t=" + Model.Token)">
+                            Logga in och ta emot uppdraget
+                        </a>
+                    }
+                }
+                else
+                {
+                    <label class="form-label">Välj ett lösenord</label>
+                    <input type="password" class="form-control" id="@(uid)_pw" minlength="8"
+                           autocomplete="new-password">
+                    <div class="form-text" style="margin-bottom:16px">Minst 8 tecken.</div>
+
+                    <button type="submit" class="btn btn-primary w-100">
+                        Skapa inloggning och ta emot uppdraget
+                    </button>
+                }
+
+                <div class="alert alert-danger d-none" id="@(uid)_err" style="margin-top:14px"></div>
+                <div class="alert alert-success d-none" id="@(uid)_ok" style="margin-top:14px"></div>
+            </form>
+        }
+    </div>
+
+    <p class="muted" style="margin-top:14px;font-size:13px">
+        Du får det här mejlet för att @Model.OwnerName har utsett dig till revisor.
+    </p>
+</div>
+
+<script>
+(function () {
+    var form = document.getElementById('@(uid)_form');
+    if (!form) return;
+
+    var err = document.getElementById('@(uid)_err');
+    var ok = document.getElementById('@(uid)_ok');
+    var pw = document.getElementById('@(uid)_pw');
+
+    form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        err.classList.add('d-none');
+
+        var btn = form.querySelector('button[type=submit]');
+        if (btn) btn.disabled = true;
+
+        var fd = new FormData();
+        fd.append('token', form.querySelector('input[name=token]').value);
+        if (pw) fd.append('password', pw.value);
+
+        // ⚠️ Antiforgery-token tas ur formuläret, inte ur en extra hämtning: sidan är
+        //    fristående och har ingen surface-controller att fråga.
+        var tok = form.querySelector('input[name=__RequestVerificationToken]');
+
+        fetch('/revision/inbjudan', {
+            method: 'POST',
+            headers: { 'RequestVerificationToken': tok ? tok.value : '' },
+            body: fd
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (btn) btn.disabled = false;
+
+                if (!j.success) {
+                    err.textContent = j.message || 'Det gick inte just nu.';
+                    err.classList.remove('d-none');
+                    return;
+                }
+
+                // ⚠️ Den som just SKAPAT ett konto är inte inloggad än. Att skicka hen rakt till
+                //    /revision hade gett "ingen behörighet" på första klicket.
+                ok.textContent = j.needsLogin
+                    ? 'Klart. Logga in med din e-postadress och ditt lösenord.'
+                    : 'Klart — vi tar dig till räkenskaperna.';
+                ok.classList.remove('d-none');
+
+                setTimeout(function () {
+                    window.location = j.needsLogin
+                        ? '/login-&-register/?tab=login&returnUrl=' + encodeURIComponent('/revision')
+                        : (j.url || '/revision');
+                }, 1200);
+            })
+            .catch(function (e) {
+                if (btn) btn.disabled = false;
+                err.textContent = e.message;
+                err.classList.remove('d-none');
+            });
+    });
+})();
+</script>
+</body>
+</html>

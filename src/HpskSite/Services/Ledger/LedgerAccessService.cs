@@ -32,6 +32,7 @@ namespace HpskSite.Services.Ledger
     {
         private readonly AdminAuthorizationService _auth;
         private readonly BoardRoleService _boardRoles;
+        private readonly LedgerAuditorService _auditors;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
@@ -39,12 +40,14 @@ namespace HpskSite.Services.Ledger
         public LedgerAccessService(
             AdminAuthorizationService auth,
             BoardRoleService boardRoles,
+            LedgerAuditorService auditors,
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberManager memberManager,
             IMemberService memberService)
         {
             _auth = auth;
             _boardRoles = boardRoles;
+            _auditors = auditors;
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -94,14 +97,27 @@ namespace HpskSite.Services.Ledger
 
             // ── Styrelsen läser ──────────────────────────────────────────────────────────
             // ⚠️ IsBoardMemberOf kräver IsActive = 1 OCH IsBoardMember = 1. Revisorn och
-            // valberedningen är alltså UTE — de har IsBoardMember = 0, och deras åtkomst är en
-            // egen fråga som ska lösas med en delbar handling, inte genom att vidga den här.
+            // valberedningen är alltså UTE här — de har IsBoardMember = 0.
+            // ⚠️ REVISORN LÖSTES 2026-09-23, i den EGNA grenen nedan (LedgerAuditorService), inte
+            // genom att vidga den här. Valberedningen har fortfarande ingen åtkomst till
+            // ekonomin, och ska inte ha det: de bereder val, de granskar inte räkenskaper.
             // ⚠️ Ett utgånget mandat revoquerar inte: en styrelse sitter kvar till nästa årsmöte,
             // och en lucka där hade lämnat föreningen utan läsare i just det fönstret. Samma
             // resonemang som vapenregistrets behörighet.
             var memberId = await CurrentMemberIdAsync();
             if (memberId > 0 && _boardRoles.IsBoardMemberOf(ownerType, ownerId, memberId))
                 return new LedgerAccessResult(LedgerAccess.Read, name);
+
+            // ── Revisorn läser också ──────────────────────────────────────────────────────
+            // ⚠️⚠️ EN EGEN GREN, ALDRIG EN VIDGNING AV IsBoardMemberOf. Den frågan kräver
+            // IsBoardMember = 1, och den flaggan styr också vilka som seedas som närvarande på
+            // styrelsemöten och RÄKNAS I BESLUTSFÖRHETEN. En revisor som blir beslutsför i den
+            // styrelse hen granskar är ett allvarligare fel än det man löste.
+            //
+            // ⚠️ Uppdraget är scopat till EN förening och har en utgångstid — se
+            // LedgerAuditorGrant.IsActive. Ett fel i uppslaget betyder NEKAD, aldrig öppet.
+            if (memberId > 0 && _auditors.HasAccess(ownerType, ownerId, memberId))
+                return new LedgerAccessResult(LedgerAccess.Read, name, isAuditor: true);
 
             return new LedgerAccessResult(LedgerAccess.None, name);
         }
@@ -127,11 +143,21 @@ namespace HpskSite.Services.Ledger
 
     public readonly struct LedgerAccessResult
     {
-        public LedgerAccessResult(LedgerAccess access, string ownerName)
+        public LedgerAccessResult(LedgerAccess access, string ownerName, bool isAuditor = false)
         {
             Access = access;
             OwnerName = ownerName;
+            IsAuditor = isAuditor;
         }
+
+        /// <summary>
+        /// Sant när läsrätten kommer från ett REVISORSUPPDRAG och inte från styrelsen.
+        ///
+        /// <para><b>⚠️ Ytan måste kunna skilja dem åt.</b> Båda läser, men revisorn ska mötas av
+        /// revisionssidan — räkenskaper, verifikationer och protokoll samlade — medan
+        /// styrelseledamoten möts av kassörsappen i läsläge. Samma rättighet, olika ärende.</para>
+        /// </summary>
+        public bool IsAuditor { get; }
 
         public LedgerAccess Access { get; }
 

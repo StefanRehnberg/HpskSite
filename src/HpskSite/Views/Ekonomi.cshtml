@@ -384,6 +384,7 @@
         @if (Model.CanWrite)
         {
             <a href="#" class="ek-nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
+            <a href="#" class="ek-nav" data-view="revisorer">Revisorer</a>
         }
 
         @* ⚠️ Växlaren ligger SIST och lågmält. Att byta liggare är sällsynt och allvarligt;
@@ -914,6 +915,65 @@
             </section>
 
             @* ══ ÄNNU INTE BYGGDA — ärliga, aldrig fejkade ═════════════════════════ *@
+            @*
+                ⚠️⚠️ REVISORN ÄR INTE STYRELSEN. Uppdraget är ett EGET objekt med utgångstid och
+                återkallning — aldrig ett styrelseuppdrag, eftersom `IsBoardMember` också avgör
+                vilka som räknas i beslutsförhet på styrelsemöten.
+
+                ⚠️ Kortet ligger på Inställningar och inte på Översikt: att utse revisor är något
+                man gör en gång om året, efter årsmötet.
+            *@
+            <section data-pane="revisorer" hidden>
+                <div class="head">
+                    <div><h1>Vem granskar oss?</h1>
+                        <div class="sub">Revisorn får läsa räkenskaperna — aldrig ändra dem.</div></div>
+                </div>
+
+                <div class="ek-card wide">
+                    <div class="ek-cardh">
+                        <h2>Bjud in en revisor</h2>
+                    </div>
+                    <p class="muted" style="margin-top:0">
+                        Revisorn behöver inget konto sedan tidigare. Hen får en länk och skapar sin
+                        inloggning själv — och blir aldrig medlem i föreningen.
+                    </p>
+
+                    <div class="amount-row">
+                        <label style="flex:1 1 200px">Namn
+                            <input type="text" class="form-control" id="@(uid)_revName"
+                                   placeholder="Revisorns namn" autocomplete="off"></label>
+                        <label style="flex:1 1 240px">E-post
+                            <input type="email" class="form-control" id="@(uid)_revEmail"
+                                   placeholder="revisor@@example.se" autocomplete="off"></label>
+                        <button type="button" class="btn btn-primary" id="@(uid)_revInvite">
+                            Skicka inbjudan</button>
+                    </div>
+
+                    <div class="ek-alert ek-ok d-none" id="@(uid)_revOk" style="margin-top:12px"></div>
+                    <div class="ek-alert ek-bad d-none" id="@(uid)_revErr" style="margin-top:12px"></div>
+
+                    @* ⚠️ Länken visas EN gång. Den lagras bara som hash och går aldrig att hämta
+                       igen — rutan säger det, så ingen tror att den finns kvar någonstans. *@
+                    <div class="ek-alert ek-warn d-none" id="@(uid)_revLink" style="margin-top:12px"></div>
+                </div>
+
+                <div class="ek-card wide">
+                    <div class="ek-cardh">
+                        <h2>Våra revisorer</h2>
+                    </div>
+                    <table class="t">
+                        <thead><tr>
+                            <th>Revisor</th>
+                            <th style="width:9rem">Läge</th>
+                            <th style="width:8rem">Gäller till</th>
+                            <th style="width:9rem">Senast inne</th>
+                            <th style="width:7rem"></th>
+                        </tr></thead>
+                        <tbody id="@(uid)_revBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
             <section data-pane="bokfor" hidden>
                 <div class="head"><div><h1>Bokför något</h1>
                     <div class="sub">Ett kvitto, en kontant insättning, en korrigering.</div></div></div>
@@ -1554,6 +1614,8 @@
 
         // ⚠️ Samma skäl som ovan: listan läser hela årets verifikationer för luckkontrollen.
         if (name === 'verifikationer' && !verLoaded) { verLoaded = true; loadJournal(true); }
+
+        if (name === 'revisorer' && !revLoaded) { revLoaded = true; loadAuditors(); }
     }
     root.querySelectorAll('[data-view]').forEach(function (a) {
         a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
@@ -1968,6 +2030,112 @@
     // Enter i sökrutan ska söka — annars får man leta efter knappen.
     if (el('verSearch')) el('verSearch').addEventListener('keydown', function (ev) {
         if (ev.key === 'Enter') { ev.preventDefault(); loadJournal(true); }
+    });
+
+    // ══ REVISORERNA ══════════════════════════════════════════════════════════════════════
+    var revLoaded = false;
+
+    // ⚠️⚠️ ÄGAREN, ALDRIG UTSTÄLLAREN. Man är revisor för en FÖRENING; en sandlåda har negativt
+    //    id och kan inte ha revisorer. Kortet ska därför visa samma revisorer oavsett vilken
+    //    liggare kassören råkar titta i.
+    //
+    // ⚠️ TYPEN är densamma för en sandlåda och dess ägare — en klubbs sandlåda är fortfarande
+    //    Club — så `issuerType` duger. ID:T gör det INTE: `issuerId` är sandlådans negativa id,
+    //    och `ownerId` är föreningens riktiga nod-id. Att ta issuerId här hade skapat
+    //    revisorsuppdrag på en kastbar liggare, som ingen kan återkalla från föreningens sida.
+    var ownerType = issuerType;
+    var ownerId = parseInt(root.dataset.ownerId, 10);
+
+    async function loadAuditors() {
+        var d = await fetch('/umbraco/surface/EkonomiAdmin/GetAuditors?ownerType=' + ownerType
+                            + '&ownerId=' + ownerId, { cache: 'no-store' })
+            .then(function (r) { return r.json(); });
+
+        if (!d.success) {
+            el('revBody').innerHTML = '<tr><td colspan="5" class="muted">'
+                + esc(d.message || 'Listan gick inte att läsa.') + '</td></tr>';
+            return;
+        }
+
+        var rows = d.auditors || [];
+
+        el('revBody').innerHTML = rows.length === 0
+            ? '<tr><td colspan="5" class="muted">Ingen revisor är inbjuden än.</td></tr>'
+            : rows.map(function (a) {
+                return '<tr><td>' + esc(a.name)
+                     + '<div class="muted">' + esc(a.email) + '</div></td>'
+                     + '<td>' + esc(a.status)
+                     + (a.revokeReason ? '<div class="muted">' + esc(a.revokeReason) + '</div>' : '')
+                     + '</td>'
+                     + '<td class="muted">' + esc(shortDate(a.expiresUtc)) + '</td>'
+                     // ⚠️ "Aldrig" sägs ut. En tom cell läser som att uppgiften saknas, inte som
+                     //    att revisorn faktiskt inte varit inne — och det är en skillnad
+                     //    föreningen vill se.
+                     + '<td class="muted">' + (a.lastSeenUtc ? esc(shortDate(a.lastSeenUtc)) : 'Aldrig') + '</td>'
+                     + '<td>' + (a.isActive || a.status === 'Inbjuden, inte öppnad'
+                        ? '<button type="button" class="btn btn-sm btn-link" data-revoke="' + a.id + '">Avsluta</button>'
+                        : '') + '</td></tr>';
+            }).join('');
+
+        el('revBody').querySelectorAll('button[data-revoke]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var reason = window.prompt(
+                    'Varför avslutas åtkomsten? Texten sparas i föreningens historik.\n\n'
+                    + 'Revisorn kommer inte längre åt räkenskaperna.');
+
+                if (reason === null) return;
+
+                postJson('/umbraco/surface/EkonomiAdmin/RevokeAuditor', {
+                    ownerType: ownerType, ownerId: ownerId,
+                    grantId: parseInt(b.dataset.revoke, 10), reason: reason
+                }).then(function (j) {
+                    if (!j.success) { alert(j.message); return; }
+                    loadAuditors();
+                });
+            });
+        });
+    }
+
+    if (el('revInvite')) el('revInvite').addEventListener('click', function () {
+        var btn = this;
+        show(el('revErr'), false);
+        show(el('revOk'), false);
+        show(el('revLink'), false);
+
+        btn.disabled = true;
+
+        postJson('/umbraco/surface/EkonomiAdmin/InviteAuditor', {
+            ownerType: ownerType, ownerId: ownerId,
+            name: el('revName').value, email: el('revEmail').value
+        }).then(function (j) {
+            btn.disabled = false;
+
+            if (!j.success) {
+                el('revErr').textContent = j.message;
+                show(el('revErr'), true);
+                return;
+            }
+
+            el('revOk').textContent = j.message;
+            show(el('revOk'), true);
+
+            // ⚠️⚠️ GICK MEJLET INTE FRAM MÅSTE LÄNKEN VISAS — den går aldrig att hämta igen,
+            //    eftersom bara hashen sparas. Ett tyst "inbjudan skapad" hade lämnat föreningen
+            //    med ett uppdrag ingen kan ta emot.
+            if (!j.sent) {
+                el('revLink').innerHTML = 'Mejlet gick inte fram. Ge den här länken till revisorn '
+                    + 'på annat sätt — den visas bara en gång:<br><code>' + esc(j.url) + '</code>';
+                show(el('revLink'), true);
+            }
+
+            el('revName').value = '';
+            el('revEmail').value = '';
+            loadAuditors();
+        }).catch(function (e) {
+            btn.disabled = false;
+            el('revErr').textContent = e.message;
+            show(el('revErr'), true);
+        });
     });
 
     // ══ FORDRINGSEXPORTEN ════════════════════════════════════════════════════════════════
