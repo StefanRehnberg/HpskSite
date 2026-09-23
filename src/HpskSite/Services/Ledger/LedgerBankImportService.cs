@@ -489,6 +489,39 @@ namespace HpskSite.Services.Ledger
             }
         }
 
+        /// <summary>
+        /// Omatchade rader i en bestämd uppsättning kontoutdrag.
+        ///
+        /// <para><b>⚠️ Skild från <see cref="Summary"/>, som bara ser det SENASTE utdraget.</b>
+        /// Bokslutet frågar om de utdrag som täcker årets slut, och det kan vara flera — ett per
+        /// konto, eller ett delat i två filer. Att läsa det senaste räcker inte där.</para>
+        /// </summary>
+        public int UnmatchedInImports(int issuerId, IReadOnlyCollection<int> importIds)
+        {
+            if (importIds is null || importIds.Count == 0) return 0;
+
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                var ldb = new LedgerDb(db, issuerId);
+
+                // ⚠️ Id:n är int och kommer ur vår egen fråga, så listan kan byggas i strängen.
+                //    Antalet utdrag som täcker ett årsskifte är en handfull — parametertaket
+                //    (~2100) kan aldrig nås härifrån.
+                return ldb.ExecuteScalar<int>(
+                    $@"SELECT COUNT(*) FROM dbo.LedgerBankRow
+                        WHERE ImportId IN ({string.Join(",", importIds)})
+                          AND MatchedLineId IS NULL");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte räkna omatchade rader för {Id}.", issuerId);
+
+                // ⚠️ -1 betyder "vet inte", aldrig "inga". Bokslutssteget måste kunna skilja dem.
+                return -1;
+            }
+        }
+
         public List<LedgerBankImport> List(int issuerType, int issuerId)
         {
             try

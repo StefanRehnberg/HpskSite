@@ -36,7 +36,8 @@ namespace HpskSite.Controllers
             BoardRoleService boardRoleService,
             BoardMeetingService meetingService,
             BoardGovernanceService gov,
-            ClubService clubService)
+            ClubService clubService,
+            HpskSite.Services.Ledger.LedgerAuditorService auditors)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
@@ -46,6 +47,7 @@ namespace HpskSite.Controllers
             _meetingService = meetingService;
             _gov = gov;
             _clubService = clubService;
+            _auditors = auditors;
         }
 
         [HttpGet("")]
@@ -125,8 +127,16 @@ namespace HpskSite.Controllers
                 return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/styrelse/{mode}/{meetingId}")}");
 
             bool isSiteAdmin = await _auth.IsCurrentUserAdminAsync();
-            if (!await CanAccessScopeAsync(meeting.OwnerType, meeting.OwnerId, isSiteAdmin))
-                return Forbid();
+
+            // ⚠️⚠️ REVISORN SLÄPPS IN PÅ PROTOKOLLET, ALDRIG PÅ DAGORDNINGEN. Dagordningen är
+            //    arbetsmaterial som skickas ut FÖRE mötet — den säger ingenting om vad styrelsen
+            //    beslutade och hör inte till en revision. Protokollet gör det, och bara när det
+            //    är justerat (se CanReadProtokollAsync).
+            var allowed = mode == "protokoll"
+                ? await CanReadProtokollAsync(meeting, isSiteAdmin)
+                : await CanAccessScopeAsync(meeting.OwnerType, meeting.OwnerId, isSiteAdmin);
+
+            if (!allowed) return Forbid();
 
             var attendees = _meetingService.GetAttendees(meetingId);
             var agenda = _meetingService.GetAgenda(meetingId);
@@ -228,6 +238,8 @@ namespace HpskSite.Controllers
             return null;
         }
 
+        private readonly HpskSite.Services.Ledger.LedgerAuditorService _auditors;
+
         private async Task<bool> CanAccessScopeAsync(int ownerType, int ownerId, bool isSiteAdmin)
         {
             if (isSiteAdmin) return true;
@@ -252,6 +264,34 @@ namespace HpskSite.Controllers
         /// and the valförslag print open for valberedning members (the UI then limits them to the
         /// Valberedning tab). Note: protokoll/dagordning prints stay on the stricter CanAccessScopeAsync.
         /// </summary>
+        /// <summary>
+        /// Full styrelseåtkomst ELLER ett aktivt revisorsuppdrag för föreningen.
+        ///
+        /// <para><b>⚠️⚠️ ANVÄNDS BARA FÖR ETT JUSTERAT PROTOKOLL.</b> Skatteverket kräver att
+        /// revisorn når protokollen — revisionen omfattar hur styrelsen skött sitt uppdrag, inte
+        /// bara om siffrorna stämmer. Men det är en <b>läsning av en färdig handling</b>, inte en
+        /// nyckel till styrelsearbetet: dagordningar, årshjul, valberedning och själva
+        /// /styrelse-sidan ligger kvar bakom <see cref="CanAccessScopeAsync"/>.</para>
+        ///
+        /// <para><b>⚠️ Justerat, aldrig ett utkast.</b> Ett ojusterat protokoll kan fortfarande
+        /// ändras, och att visa det för en revisor är att visa något som inte är en handling än.
+        /// Samma regel som kodbasen har överallt annars: publicerad startlista, officiell
+        /// resultatlista, antagen budget.</para>
+        /// </summary>
+        private async Task<bool> CanReadProtokollAsync(BoardMeeting meeting, bool isSiteAdmin)
+        {
+            if (await CanAccessScopeAsync(meeting.OwnerType, meeting.OwnerId, isSiteAdmin))
+                return true;
+
+            if (meeting.Status != "Justerat") return false;
+
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var memberId = currentMember?.Email != null
+                ? (_memberService.GetByEmail(currentMember.Email)?.Id ?? 0) : 0;
+
+            return memberId > 0 && _auditors.HasAccess(meeting.OwnerType, meeting.OwnerId, memberId);
+        }
+
         private async Task<bool> CanAccessValberedningAsync(int ownerType, int ownerId, bool isSiteAdmin)
         {
             if (await CanAccessScopeAsync(ownerType, ownerId, isSiteAdmin)) return true;
