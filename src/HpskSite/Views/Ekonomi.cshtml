@@ -424,7 +424,7 @@
                     @(i.IsSandbox ? (string.IsNullOrWhiteSpace(i.Label) ? "Sandlåda" : i.Label) : "Riktig bokföring")
                 </a>
             }
-            <button type="button" class="ek-issuer-new" id="@(uid)_newSandbox">
+            <button type="button" class="btn btn-sm btn-outline-secondary w-100 text-start mt-2" id="@(uid)_newSandbox">
                 @(Model.Issuers.Any(i => i.IsSandbox) ? "Börja om i ny sandlåda" : "Skapa en sandlåda")
             </button>
             <div class="ek-issuer-why">
@@ -981,35 +981,19 @@
                 <div class="head">
                     <div><h1>Vem granskar oss?</h1>
                         <div class="sub">Revisorn får läsa räkenskaperna — aldrig ändra dem.</div></div>
+                    <div class="dropdown">
+                        <button type="button" class="btn btn-primary shadow dropdown-toggle" data-bs-toggle="dropdown"
+                                aria-expanded="false" id="@(uid)_revMenu"><i class="bi bi-sliders me-1"></i>Åtgärder</button>
+                        <ul class="dropdown-menu dropdown-menu-end" style="min-width:240px">
+                            <li><button type="button" class="dropdown-item" id="@(uid)_revNew">Bjud in en revisor…</button></li>
+                        </ul>
+                    </div>
                 </div>
 
-                <div class="ek-card wide">
-                    <div class="ek-cardh">
-                        <h2>Bjud in en revisor</h2>
-                    </div>
-                    <p class="muted" style="margin-top:0">
-                        Revisorn behöver inget konto sedan tidigare. Hen får en länk och skapar sin
-                        inloggning själv — och blir aldrig medlem i föreningen.
-                    </p>
-
-                    <div class="amount-row">
-                        <label style="flex:1 1 200px">Namn
-                            <input type="text" class="form-control" id="@(uid)_revName"
-                                   placeholder="Revisorns namn" autocomplete="off"></label>
-                        <label style="flex:1 1 240px">E-post
-                            <input type="email" class="form-control" id="@(uid)_revEmail"
-                                   placeholder="revisor@@example.se" autocomplete="off"></label>
-                        <button type="button" class="btn btn-primary" id="@(uid)_revInvite">
-                            Skicka inbjudan</button>
-                    </div>
-
-                    <div class="ek-alert ek-ok d-none" id="@(uid)_revOk" style="margin-top:12px"></div>
-                    <div class="ek-alert ek-bad d-none" id="@(uid)_revErr" style="margin-top:12px"></div>
-
-                    @* ⚠️ Länken visas EN gång. Den lagras bara som hash och går aldrig att hämta
-                       igen — rutan säger det, så ingen tror att den finns kvar någonstans. *@
-                    <div class="ek-alert ek-warn d-none" id="@(uid)_revLink" style="margin-top:12px"></div>
-                </div>
+                <div class="ek-alert ek-ok d-none" id="@(uid)_revOk"></div>
+                @* ⚠️ Länken visas EN gång. Den lagras bara som hash och går aldrig att hämta
+                   igen — rutan säger det, så ingen tror att den finns kvar någonstans. *@
+                <div class="ek-alert ek-warn d-none" id="@(uid)_revLink"></div>
 
                 <div class="ek-card wide">
                     <div class="ek-cardh">
@@ -1021,10 +1005,14 @@
                             <th style="width:9rem">Läge</th>
                             <th style="width:8rem">Gäller till</th>
                             <th style="width:9rem">Senast inne</th>
-                            <th style="width:7rem"></th>
+                            <th style="width:8rem"></th>
                         </tr></thead>
                         <tbody id="@(uid)_revBody"></tbody>
                     </table>
+                    <p class="why" style="margin-bottom:0">
+                        Revisorn behöver inget konto sedan tidigare. Hen får en länk och skapar sin
+                        inloggning själv — och blir aldrig medlem i föreningen. Uppdraget gäller i 13 månader.
+                    </p>
                 </div>
             </section>
 
@@ -1914,6 +1902,35 @@
             </div>
         </div>
 
+        @* ── Revisorer: bjud in ── *@
+        <div class="modal fade" id="@(uid)_revModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_revModalTitle">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="@(uid)_revModalTitle">Bjud in en revisor</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="muted" style="margin-top:0">
+                            Revisorn får en länk i mejlet och skapar sin inloggning själv. Hen kan läsa
+                            räkenskaperna men aldrig ändra något.
+                        </p>
+                        <div class="mb-3">
+                            <label class="form-label" for="@(uid)_revName">Revisorns namn</label>
+                            <input type="text" class="form-control" id="@(uid)_revName" autocomplete="off">
+                        </div>
+                        <label class="form-label" for="@(uid)_revEmail">E-post</label>
+                        <input type="email" class="form-control" id="@(uid)_revEmail" placeholder="revisor@@example.se" autocomplete="off">
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_revErr"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="@(uid)_revInvite">Skicka inbjudan</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         @* ── Projekt: eget projekt ── *@
         <div class="modal fade" id="@(uid)_prFormModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_prFormTitle">
             <div class="modal-dialog">
@@ -2628,7 +2645,7 @@
                             + '&issuerId=' + issuerId + '&entryId=' + v.entryId, { cache: 'no-store' })
             .then(function (r) { return r.json(); });
 
-        if (!d.success) { alert(d.message || 'Verifikationen gick inte att läsa.'); return; }
+        if (!d.success) { tell('Verifikationen gick inte att läsa', d.message || ''); return; }
 
         el('verDetailTitle').textContent = 'Verifikation ' + d.head.number;
 
@@ -2751,18 +2768,22 @@
             b.addEventListener('click', function () {
                 // ⚠️ Skälet är obligatoriskt och prövas på servern också. En bortkopplad
                 //    bilaga utan skäl går inte att bedöma i efterhand.
-                var reason = window.prompt(
-                    'Varför kopplas underlaget bort? Texten syns för revisorn.\n\n'
-                    + 'Filen raderas inte — den är räkenskapsinformation.');
-
-                if (reason === null) return;
-
-                postJson('/umbraco/surface/EkonomiAdmin/VoidAttachment', {
-                    issuerType: issuerType, issuerId: issuerId,
-                    attachmentId: parseInt(b.dataset.void, 10), reason: reason
-                }).then(function (j) {
-                    if (!j.success) { alert(j.message); return; }
-                    loadJournal(true).then(function () { openEntry(row); });
+                ask({
+                    title: 'Koppla bort underlaget',
+                    text: 'Filen raderas inte — den är räkenskapsinformation och finns kvar i historiken.',
+                    label: 'Varför kopplas det bort?',
+                    help: 'Texten syns för revisorn.',
+                    multiline: true, required: true,
+                    ok: 'Koppla bort', danger: true
+                }).then(function (reason) {
+                    if (reason === null) return;
+                    postJson('/umbraco/surface/EkonomiAdmin/VoidAttachment', {
+                        issuerType: issuerType, issuerId: issuerId,
+                        attachmentId: parseInt(b.dataset.void, 10), reason: reason
+                    }).then(function (j) {
+                        if (!j.success) { tell('Underlaget kopplades inte bort', j.message); return; }
+                        loadJournal(true).then(function () { openEntry(row); });
+                    });
                 });
             });
         });
@@ -3462,7 +3483,7 @@
             : rows.map(function (a) {
                 return '<tr><td>' + esc(a.name)
                      + '<div class="muted">' + esc(a.email) + '</div></td>'
-                     + '<td>' + esc(a.status)
+                     + '<td>' + badge(a.isActive ? 'ok' : (/Inbjuden/.test(a.status || '') ? 'wait' : 'off'), a.status)
                      + (a.revokeReason ? '<div class="muted">' + esc(a.revokeReason) + '</div>' : '')
                      + '</td>'
                      + '<td class="muted">' + esc(shortDate(a.expiresUtc)) + '</td>'
@@ -3470,29 +3491,40 @@
                      //    att revisorn faktiskt inte varit inne — och det är en skillnad
                      //    föreningen vill se.
                      + '<td class="muted">' + (a.lastSeenUtc ? esc(shortDate(a.lastSeenUtc)) : 'Aldrig') + '</td>'
-                     + '<td>' + (a.isActive || a.status === 'Inbjuden, inte öppnad'
-                        ? '<button type="button" class="btn btn-sm btn-link" data-revoke="' + a.id + '">Avsluta</button>'
+                     + '<td class="n">' + (a.isActive || /Inbjuden/.test(a.status || '')
+                        ? rowMenu([{ act: 'revoke', id: a.id, text: 'Avsluta åtkomsten…', danger: true }])
                         : '') + '</td></tr>';
             }).join('');
 
-        el('revBody').querySelectorAll('button[data-revoke]').forEach(function (b) {
-            b.addEventListener('click', function () {
-                var reason = window.prompt(
-                    'Varför avslutas åtkomsten? Texten sparas i föreningens historik.\n\n'
-                    + 'Revisorn kommer inte längre åt räkenskaperna.');
-
-                if (reason === null) return;
-
-                postJson('/umbraco/surface/EkonomiAdmin/RevokeAuditor', {
-                    ownerType: ownerType, ownerId: ownerId,
-                    grantId: parseInt(b.dataset.revoke, 10), reason: reason
-                }).then(function (j) {
-                    if (!j.success) { alert(j.message); return; }
-                    loadAuditors();
+        onRowAction(el('revBody'), {
+            revoke: function (id) {
+                var a = rows.find(function (x) { return String(x.id) === String(id); });
+                ask({
+                    title: 'Avsluta ' + (a ? a.name : 'revisorns') + ' åtkomst',
+                    text: 'Revisorn kommer inte längre åt räkenskaperna.',
+                    label: 'Varför avslutas den?',
+                    help: 'Texten sparas i föreningens historik.',
+                    multiline: true, required: true,
+                    ok: 'Avsluta åtkomsten', danger: true
+                }).then(function (reason) {
+                    if (reason === null) return;
+                    postJson('/umbraco/surface/EkonomiAdmin/RevokeAuditor', {
+                        ownerType: ownerType, ownerId: ownerId, grantId: parseInt(id, 10), reason: reason
+                    }).then(function (j) {
+                        if (!j.success) { tell('Åtkomsten avslutades inte', j.message); return; }
+                        loadAuditors();
+                    });
                 });
-            });
+            }
         });
     }
+
+    if (el('revNew')) el('revNew').addEventListener('click', function () {
+        el('revName').value = ''; el('revEmail').value = '';
+        show(el('revErr'), false);
+        openModal('revModal');
+        setTimeout(function () { el('revName').focus(); }, 300);
+    });
 
     if (el('revInvite')) el('revInvite').addEventListener('click', function () {
         var btn = this;
@@ -3508,12 +3540,14 @@
         }).then(function (j) {
             btn.disabled = false;
 
+            // ⚠️ Dialogen stängs INTE vid fel — felet står i den.
             if (!j.success) {
                 el('revErr').textContent = j.message;
                 show(el('revErr'), true);
                 return;
             }
 
+            closeModal('revModal');
             el('revOk').textContent = j.message;
             show(el('revOk'), true);
 
@@ -3734,9 +3768,13 @@
     }
 
     async function establishYear() {
-        if (!window.confirm('Fastställ året? Efter det tar det inte emot bokföring. '
-                          + 'Ett fel som hittas senare rättas som en ny verifikation i ett öppet år.'))
-            return;
+        var go = await ask({
+            title: 'Fastställ året',
+            text: 'Efter det tar året inte emot bokföring. Ett fel som hittas senare rättas som en '
+                + 'ny verifikation i ett öppet år. Det här går inte att ångra.',
+            ok: 'Fastställ året', danger: true
+        });
+        if (go === null) return;
 
         try {
             var d = await postJson('/umbraco/surface/EkonomiAdmin/SetFiscalYearStatus', {
@@ -4384,11 +4422,16 @@
         var btn = this, err = el('sandboxError');
         err.classList.add('d-none');
 
-        // ⚠️ prompt() och inte en tyst skapelse: att byta liggare ska kräva ett medvetet
+        // ⚠️ En fråga och inte en tyst skapelse: att byta liggare ska kräva ett medvetet
         // ögonblick. Ett namn gör dessutom att kassören kan skilja två försök åt i efterhand.
-        var label = window.prompt(
-            'Vad ska sandlådan heta? (t.ex. "Test 1" eller "Provade bokslut")\n\n'
-            + 'En eventuell tidigare sandlåda lämnas — ingenting raderas.', '');
+        ask({
+            title: 'Skapa en sandlåda',
+            text: 'En sandlåda är en övningsbokföring. Inget i den blir riktig bokföring, och en '
+                + 'eventuell tidigare sandlåda lämnas kvar — ingenting raderas.',
+            label: 'Vad ska den heta?',
+            help: 'Till exempel "Test 1" eller "Provade bokslutet".',
+            ok: 'Skapa sandlådan'
+        }).then(function (label) {
         if (label === null) return;
 
         btn.disabled = true;
@@ -4411,6 +4454,7 @@
                 btn.disabled = false;
                 err.textContent = e.message; err.classList.remove('d-none');
             });
+        });
     });
 
     el('bSave').addEventListener('click', function () {
