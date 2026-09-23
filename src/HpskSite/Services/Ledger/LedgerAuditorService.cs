@@ -14,6 +14,9 @@ namespace HpskSite.Services.Ledger
     /// inte via <see cref="LedgerDb"/>. Skulle den gå genom schemaväljaren hade en sandlåda fått
     /// sina egna revisorer, som ingen kan återkalla från föreningens sida.</para>
     ///
+    /// <para>LEDGER-SEAM-OK: revisorsuppdraget nycklas på FÖRENINGEN (OwnerType/OwnerId), aldrig
+    /// på en utställare, och finns därför bara i den skarpa tabellen.</para>
+    ///
     /// <para><b>⚠️ Inbjudan är en bärarnyckel.</b> Den som har länken kan ta emot den, så den
     /// lagras som hash, har en utgångstid och kan återkallas. Vad den ger är dessutom
     /// <b>läsning av EN förening</b> — inget mer.</para>
