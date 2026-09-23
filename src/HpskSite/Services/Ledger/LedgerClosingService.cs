@@ -15,17 +15,20 @@ namespace HpskSite.Services.Ledger
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly LedgerBankImportService _bank;
         private readonly LedgerAttachmentService _attachments;
+        private readonly LedgerAssetService _assets;
         private readonly ILogger<LedgerClosingService> _logger;
 
         public LedgerClosingService(
             IUmbracoDatabaseFactory databaseFactory,
             LedgerBankImportService bank,
             LedgerAttachmentService attachments,
+            LedgerAssetService assets,
             ILogger<LedgerClosingService> logger)
         {
             _databaseFactory = databaseFactory;
             _bank = bank;
             _attachments = attachments;
+            _assets = assets;
             _logger = logger;
         }
 
@@ -247,15 +250,29 @@ namespace HpskSite.Services.Ledger
             });
 
             // 5 — Avskrivningar.
-            // ⚠️ UNKNOWN. Anläggningsregistret är P9 och finns inte; vi kan varken påstå att det
-            //    är gjort eller att det behövs.
+            // ⚠️ Steget stod som UNKNOWN fram till 2026-09-23 med texten "anläggningsregister
+            //    finns inte ännu". Nu finns det, och steget kan svara.
+            //
+            // ⚠️⚠️ ETT TOMT REGISTER ÄR "KLART", INTE "OKÄNT". De allra flesta föreningar har
+            //    ingenting att skriva av — en evig frågetecken där hade lärt kassören att stegen
+            //    inte går att lita på. Men texten säger att registret ÄR tomt, så skillnaden mot
+            //    "vi har inte tittat" står på skärmen.
+            var assets = _assets.List(issuerType, issuerId, s.From, s.To);
+            var needing = assets.Where(a => a.NeedsPosting).ToList();
+            var toPost = needing.Sum(a => a.Remaining);
+
             list.Steps.Add(new()
             {
                 Key = "depreciation",
                 Title = "Avskrivningar",
-                State = LedgerClosingChecklist.StepState.Unknown,
-                Detail = "Anläggningsregister finns inte ännu — har föreningen tillgångar att "
-                       + "skriva av måste det bokföras för hand."
+                State = needing.Count == 0 ? LedgerClosingChecklist.StepState.Done
+                                           : LedgerClosingChecklist.StepState.Todo,
+                Detail = assets.Count == 0
+                    ? "Anläggningsregistret är tomt — föreningen har inget att skriva av."
+                    : needing.Count == 0
+                        ? ""
+                        : $"{needing.Count} tillgångar har {toPost:N0} kr kvar att skriva av för året.",
+                GoTo = "tillgangar"
             });
 
             // 6 — Resultat- och balansräkning. Klar när den BALANSERAR.

@@ -51,6 +51,7 @@ namespace HpskSite.Controllers
         private readonly LedgerJournalService _journalService;
         private readonly LedgerAttachmentService _attachmentService;
         private readonly LedgerAuditorService _auditorService;
+        private readonly LedgerAssetService _assetService;
         private readonly EmailService _emailService;
 
         /// <summary>
@@ -89,6 +90,7 @@ namespace HpskSite.Controllers
             LedgerJournalService journalService,
             LedgerAttachmentService attachmentService,
             LedgerAuditorService auditorService,
+            LedgerAssetService assetService,
             EmailService emailService,
             IMemberManager memberManager,
             IMemberService memberService,
@@ -109,6 +111,7 @@ namespace HpskSite.Controllers
             _journalService = journalService;
             _attachmentService = attachmentService;
             _auditorService = auditorService;
+            _assetService = assetService;
             _emailService = emailService;
             _manualPosting = manualPosting;
             _feeBridge = feeBridge;
@@ -471,6 +474,148 @@ namespace HpskSite.Controllers
             return Json(done
                 ? new { success = true, message = "Underlaget är bortkopplat." }
                 : new { success = false, message = error! });
+        }
+
+        // ══ ANLÄGGNINGSREGISTRET ═════════════════════════════════════════════════════════════
+        //
+        // ⚠️⚠️ REGISTRET ÄR DEN ENDA PLATS DÄR ANSKAFFNINGSVÄRDET FINNS KVAR. Avskrivningen
+        //    bokförs direkt mot tillgångskontot, så liggaren visar NETTO — och efter några år
+        //    vet bokföringen inte längre vad pjäsen kostade. Därför utrangeras en rad, aldrig
+        //    raderas.
+
+        /// <summary>Registret för ett räkenskapsår, med plan och utfall per tillgång.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetAssets(int issuerType, int issuerId, int? year = null)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var fy = ResolveFiscalYear(issuerType, issuerId, year);
+
+            if (fy is null)
+                return Json(new { success = true, hasFiscalYear = false, assets = Array.Empty<object>() });
+
+            var assets = _assetService.List(issuerType, issuerId, fy.StartDate, fy.EndDate);
+
+            return Json(new
+            {
+                success = true,
+                hasFiscalYear = true,
+                year = fy.Year,
+                from = fy.StartDate,
+                to = fy.EndDate,
+                assets,
+                // Sammanfattningen som driver knappen: vad är kvar att bokföra för året?
+                toPost = assets.Where(a => a.NeedsPosting).Sum(a => a.Remaining),
+                toPostCount = assets.Count(a => a.NeedsPosting),
+                bookValueTotal = assets.Where(a => !a.IsDisposed).Sum(a => a.BookValue)
+            });
+        }
+
+        /// <summary>Lägger till eller ändrar en tillgång.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveAsset([FromBody] SaveAssetRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var date = ParseDate(request.InUseDate);
+            if (date is null) return Json(new { success = false, message = "Ange när tillgången togs i bruk." });
+
+            var (saved, error, _) = _assetService.Save(new LedgerAsset
+            {
+                Id = request.Id,
+                IssuerType = request.IssuerType,
+                IssuerId = request.IssuerId,
+                Name = request.Name ?? "",
+                Note = request.Note,
+                AssetAccountNumber = request.AssetAccountNumber,
+                DepreciationAccountNumber = request.DepreciationAccountNumber,
+                InUseDate = date.Value,
+                AcquisitionAmount = request.AcquisitionAmount,
+                UsefulLifeYears = request.UsefulLifeYears,
+                ResidualValue = request.ResidualValue
+            }, actorId.Value);
+
+            return Json(saved
+                ? new { success = true, message = "Tillgången är sparad." }
+                : new { success = false, message = error! });
+        }
+
+        /// <summary>Utrangerar en tillgång — raden står kvar.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DisposeAsset([FromBody] DisposeAssetRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att göra." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var when = ParseDate(request.When) ?? DateTime.Today;
+
+            var (done, error) = _assetService.Dispose(
+                request.IssuerType, request.IssuerId, request.AssetId,
+                when, request.Reason ?? "", actorId.Value);
+
+            return Json(done
+                ? new
+                {
+                    success = true,
+                    // ⚠️⚠️ SLUTBOKFÖRINGEN GÖRS INTE ÅT DEM, och det SÄGS. En försäljning ger en
+                    //    intäkt och ett restvärde som ska bort — belopp vi inte känner. Att tyst
+                    //    hoppa över det hade lämnat ett värde kvar på kontot som ingen letar efter.
+                    message = "Tillgången är utrangerad och skrivs inte av längre. "
+                            + "Finns ett bokfört värde kvar, eller såldes den, bokför du det själv "
+                            + "under Bokför."
+                }
+                : new { success = false, message = error! });
+        }
+
+        /// <summary>Bokför årets avskrivningar — en verifikation per tillgång.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PostDepreciation([FromBody] PostDepreciationRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att bokföra." });
+
+            var (ok, name) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var fy = ResolveFiscalYear(request.IssuerType, request.IssuerId, request.Year);
+            if (fy is null) return Json(new { success = false, message = "Lägg upp räkenskapsåret först." });
+
+            var (posted, amount, problems) = _assetService.PostYear(
+                request.IssuerType, request.IssuerId, fy.StartDate, fy.EndDate, actorId.Value);
+
+            _logger.LogInformation(
+                "Ekonomi: {Forening} bokförde {Antal} avskrivningar på {Belopp} kr för {Ar}.",
+                name, posted, amount, fy.Year);
+
+            return Json(new
+            {
+                success = posted > 0 || problems.Count == 0,
+                posted,
+                amount,
+                // ⚠️ Problemen SÄGS, aldrig sväljs. En tillgång som inte gick att bokföra är
+                //    exakt det som gör bokslutet fel, och den som klickade måste få veta vilken.
+                problems,
+                message = posted == 0 && problems.Count == 0
+                    ? "Ingenting återstod att bokföra för året."
+                    : $"{posted} avskrivningar bokförda, {amount:N0} kr."
+            });
         }
 
         // ══ REVISORNS ÅTKOMST ════════════════════════════════════════════════════════════════
@@ -2020,6 +2165,40 @@ namespace HpskSite.Controllers
     public class PostPendingRequest
     {
         public int PaymentId { get; set; }
+    }
+
+    /// <summary>En tillgång i anläggningsregistret.</summary>
+    public class SaveAssetRequest
+    {
+        public int Id { get; set; }
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public string? Name { get; set; }
+        public string? Note { get; set; }
+        public int AssetAccountNumber { get; set; }
+        public int DepreciationAccountNumber { get; set; }
+        public string? InUseDate { get; set; }
+        public decimal AcquisitionAmount { get; set; }
+        public int UsefulLifeYears { get; set; }
+        public decimal ResidualValue { get; set; }
+    }
+
+    /// <summary>Utrangering. <b>Skälet är obligatoriskt</b> — prövas i tjänsten.</summary>
+    public class DisposeAssetRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int AssetId { get; set; }
+        public string? When { get; set; }
+        public string? Reason { get; set; }
+    }
+
+    /// <summary>Bokföring av årets avskrivningar.</summary>
+    public class PostDepreciationRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int? Year { get; set; }
     }
 
     /// <summary>Inbjudan av en revisor. Ägaren, aldrig utställaren.</summary>
