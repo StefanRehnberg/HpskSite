@@ -532,6 +532,8 @@ namespace HpskSite.Controllers
                 "Posten kommer från kretsavgiften. Rätta den under Kretsavgift — välj Ångra betald på klubbens rad.",
             LedgerSourceType.AssetDepreciation =>
                 "Posten är en avskrivning från Tillgångar och rättas inte för hand.",
+            LedgerSourceType.AssetDisposal =>
+                "Posten är en utrangering från Tillgångar och rättas inte för hand.",
             LedgerSourceType.OpeningBalance =>
                 "Posten är föreningens ingående balanser. Ändra dem under Inställningar → Ingående balanser.",
             HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge.SourceType =>
@@ -1314,10 +1316,9 @@ namespace HpskSite.Controllers
 
         // ══ ANLÄGGNINGSREGISTRET ═════════════════════════════════════════════════════════════
         //
-        // ⚠️⚠️ REGISTRET ÄR DEN ENDA PLATS DÄR ANSKAFFNINGSVÄRDET FINNS KVAR. Avskrivningen
-        //    bokförs direkt mot tillgångskontot, så liggaren visar NETTO — och efter några år
-        //    vet bokföringen inte längre vad pjäsen kostade. Därför utrangeras en rad, aldrig
-        //    raderas.
+        // ⚠️⚠️ ANSKAFFNINGSVÄRDET STÅR KVAR PÅ TILLGÅNGSKONTOT; avskrivningen samlas på ett
+        //    minuskonto (1229). Så sedan 2026-09-24 — se LedgerAsset för varför direktmodellen
+        //    togs bort. En rad utrangeras (och det bokförs), den raderas aldrig.
 
         /// <summary>Registret för ett räkenskapsår, med plan och utfall per tillgång.</summary>
         [HttpGet]
@@ -1344,7 +1345,12 @@ namespace HpskSite.Controllers
                 // Sammanfattningen som driver knappen: vad är kvar att bokföra för året?
                 toPost = assets.Where(a => a.NeedsPosting).Sum(a => a.Remaining),
                 toPostCount = assets.Count(a => a.NeedsPosting),
-                bookValueTotal = assets.Where(a => !a.IsDisposed).Sum(a => a.BookValue)
+                bookValueTotal = assets.Where(a => !a.IsDisposed).Sum(a => a.BookValue),
+                // Mallens minus- och förlustkonton föreningen saknar. Formuläret erbjuder dem med
+                // "läggs till" — de skapas först när tillgången sparas eller utrangeras.
+                missingAccounts = _assetService.MissingAssetTemplateAccounts(issuerType, issuerId)
+                    .Select(a => new { number = a.Number, name = a.Name }),
+                disposalLossAccount = LedgerChartTemplate.DisposalLossAccount
             });
         }
 
@@ -1373,6 +1379,7 @@ namespace HpskSite.Controllers
                 Note = request.Note,
                 AssetAccountNumber = request.AssetAccountNumber,
                 DepreciationAccountNumber = request.DepreciationAccountNumber,
+                AccumulatedDepreciationAccountNumber = request.AccumulatedDepreciationAccountNumber,
                 InUseDate = date.Value,
                 AcquisitionAmount = request.AcquisitionAmount,
                 UsefulLifeYears = request.UsefulLifeYears,
@@ -1401,18 +1408,19 @@ namespace HpskSite.Controllers
 
             var (done, error) = _assetService.Dispose(
                 request.IssuerType, request.IssuerId, request.AssetId,
-                when, request.Reason ?? "", actorId.Value);
+                when, request.Reason ?? "",
+                request.LossAccountNumber > 0 ? request.LossAccountNumber : LedgerChartTemplate.DisposalLossAccount,
+                actorId.Value);
 
             return Json(done
                 ? new
                 {
                     success = true,
-                    // ⚠️⚠️ SLUTBOKFÖRINGEN GÖRS INTE ÅT DEM, och det SÄGS. En försäljning ger en
-                    //    intäkt och ett restvärde som ska bort — belopp vi inte känner. Att tyst
-                    //    hoppa över det hade lämnat ett värde kvar på kontot som ingen letar efter.
-                    message = "Tillgången är utrangerad och skrivs inte av längre. "
-                            + "Finns ett bokfört värde kvar, eller såldes den, bokför du det själv "
-                            + "under Bokför."
+                    // ⚠️ Försäljningen SÄGS. Utrangeringen tar bort tillgången ur balansräkningen,
+                    //    men en köpeskilling är en intäkt vi inte känner beloppet på.
+                    message = "Tillgången är utrangerad och bokförd: anskaffningsvärdet och "
+                            + "avskrivningarna är borttagna, och det som återstod är bokfört som "
+                            + "förlust. Såldes den bokför du försäljningen under Bokför."
                 }
                 : new { success = false, message = error! });
         }
@@ -3309,6 +3317,8 @@ namespace HpskSite.Controllers
         public string? Note { get; set; }
         public int AssetAccountNumber { get; set; }
         public int DepreciationAccountNumber { get; set; }
+        /// <summary>0 = förslaget (tillgångskontot med 9 sist).</summary>
+        public int AccumulatedDepreciationAccountNumber { get; set; }
         public string? InUseDate { get; set; }
         public decimal AcquisitionAmount { get; set; }
         public int UsefulLifeYears { get; set; }
@@ -3323,6 +3333,8 @@ namespace HpskSite.Controllers
         public int AssetId { get; set; }
         public string? When { get; set; }
         public string? Reason { get; set; }
+        /// <summary>Kontot för det bokförda värde som återstår. 0 = mallens förslag.</summary>
+        public int LossAccountNumber { get; set; }
     }
 
     /// <summary>Bokföring av årets avskrivningar.</summary>

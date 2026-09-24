@@ -4735,16 +4735,28 @@ vapenregistret.
 Bokslutets sista frågetecken. Steget "Avskrivningar" stod som **Unknown** med texten
 *"anläggningsregister finns inte ännu"*; nu finns registret och steget kan svara.
 
-**⚠️⚠️ REGISTRET ÄR DEN ENDA PLATS DÄR ANSKAFFNINGSVÄRDET FINNS KVAR.** Avskrivningen bokförs
-**direkt mot tillgångskontot** (7830 debet / 1220 kredit) i stället för mot ett konto för
-ackumulerade avskrivningar — det är därför kontoplansmallen aldrig haft något 1229, och det ger
-en balansräkning en lekman kan läsa: kontot visar vad utrustningen är värd **nu**. Priset är att
-bokföringen efter några år inte längre vet vad pjäsen **kostade**. Därför **utrangeras** en rad
-här, aldrig raderas.
+**⚠️⚠️ ANSKAFFNINGSVÄRDET STÅR KVAR PÅ TILLGÅNGSKONTOT (ändrat 2026-09-24).** Avskrivningen
+bokförs mot ett **minuskonto för ackumulerade avskrivningar** — 7830 debet / **1229** kredit
+(1119 för byggnader, 1159 för markanläggningar). Balansräkningen visar 1220 och −1229 intill
+varandra (klass 1 är debet-positiv och sorteras på nummer), och skillnaden är det bokförda värdet.
+
+⚠️ **Första versionen (2026-09-23) bokförde DIREKT mot 1220** "så att en lekman kan läsa
+balansräkningen". Michael Henriksson (Åmåls PK) rättade oss: *"Man tar inte bort inköpssumman och
+minskar den med avskrivningen."* Direktmodellen tappade anskaffningsvärdet ur liggaren (bara
+registret hade det), och den **krockade med SIE-importen**: en förening som tar in sin kontoplan
+får med 1229 och dess #IB, och då låg två modeller i samma bok. **Återinför den inte** — `Save`
+vägrar ett minuskonto som är samma konto som tillgången.
 
 **⚠️ Kontona väljs PER TILLGÅNG ur föreningens egen kontoplan, inte via roller.** En klubbstuga
-skrivs av mot 7820 och en pistol mot 7830; en roll hade tvingat fram ETT val för hela
-föreningen. Numren lagras på raden, som på en konteringsrad.
+skrivs av mot 7820/1119 och en pistol mot 7830/1229; en roll hade tvingat fram ETT val för hela
+föreningen. Numren lagras på raden (`AccumulatedDepreciationAccountNumber`), som på en
+konteringsrad. Förslaget är `LedgerDepreciation.AccumulatedAccountFor` = tillgångskontot med 9
+sist.
+
+**⚠️ Minus- och förlustkontot läggs till ur mallen VID BEHOV** (`EnsureAccount` i `Save`,
+`PostYear` och `Dispose`). Mallen kopieras bara in när föreningen sätts upp, så en förening som
+satts upp innan 1229 fanns i mallen hade annars inte kunnat skriva av. Bara saknade konton läggs
+till.
 
 ### ⚠️⚠️ PERIODBELOPPET ÄR SKILLNADEN MELLAN TVÅ ACKUMULERADE VÄRDEN
 
@@ -4785,10 +4797,20 @@ konton**; **namn och anteckning är alltid fria** (en felstavning ska gå att r�
 **innan** kassören skriver — servern vägrar ändå, men ett avslag efter ett ifyllt formulär läser
 som en bugg. **A/B: 2 påståenden faller** när låsningen tas bort.
 
-**⚠️⚠️ SLUTBOKFÖRINGEN VID UTRANGERING GÖRS INTE ÅT DEM, och det SÄGS.** En försäljning ger en
-intäkt och ett restvärde som ska bort — belopp vi inte känner. Att tyst hoppa över det hade lämnat
-ett värde kvar på tillgångskontot som ingen letar efter. Skälet till utrangeringen är
-**obligatoriskt**.
+**⚠️⚠️ UTRANGERINGEN BOKFÖRS AV OSS (sedan 2026-09-24).** Med ett minuskonto ska både
+anskaffningsvärdet och det ackumulerade bort — belopp kassören annars får räkna fram för hand.
+Två verifikationer: (1) utrangeringsårets återstående avskrivning fram till dagen
+(`asset-depreciation`), (2) utrangeringen (`asset-disposal`, **egen källtyp** — annars räknas
+minuskontots debet som årets avskrivning i `PostedByAsset`): minuskontot debet med det
+ackumulerade, förlustkontot (förslag **7970**) debet med det bokförda värdet, tillgångskontot
+kredit med **hela** anskaffningsvärdet. **Försäljningen** är en egen intäkt (t.ex. 1930 / 3970)
+kassören bokför under Bokför. Skälet är **obligatoriskt**.
+- **Vägrar** om ett tidigare räkenskapsår hos oss saknar sin avskrivning (då blir 1229 negativt)
+  och om en avskrivning redan är bokförd EFTER utrangeringsdagen. År före föreningens första
+  räkenskapsår hos oss antas ligga i den ingående balansen.
+- **Tål att köras om** — stegen är ingen transaktion, men (1) bokför bara det som återstår, (2)
+  hoppas över om utrangeringen redan ligger, och flaggan sätts sist.
+- ⚠️ Läsfasens anslutning STÄNGS innan något bokförs — `Post` öppnar sin egen.
 
 ### Bokslutssteget
 

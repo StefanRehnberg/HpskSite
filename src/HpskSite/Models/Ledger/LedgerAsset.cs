@@ -5,16 +5,21 @@ namespace HpskSite.Models.Ledger
     /// <summary>
     /// En anläggningstillgång — klubbstugan, tavelställen, vapenskåpet.
     ///
-    /// <para><b>⚠️⚠️ REGISTRET ÄR DEN ENDA PLATS DÄR ANSKAFFNINGSVÄRDET FINNS KVAR.</b> Vi bokför
-    /// avskrivningen DIREKT mot tillgångskontot (7830 debet / 1220 kredit) i stället för mot ett
-    /// konto för ackumulerade avskrivningar — det är därför kontoplansmallen aldrig haft något
-    /// 1229, och det ger en balansräkning en lekman kan läsa: kontot visar vad utrustningen är
-    /// värd nu. Priset är att bokföringen efter några år inte längre vet vad pjäsen KOSTADE.
-    /// Därför raderas en rad här aldrig — den utrangeras.</para>
+    /// <para><b>⚠️⚠️ ANSKAFFNINGSVÄRDET STÅR KVAR PÅ TILLGÅNGSKONTOT.</b> Avskrivningen bokförs mot
+    /// ett eget konto för ackumulerade avskrivningar (7830 debet / <b>1229</b> kredit), aldrig
+    /// direkt mot 1220. Balansräkningen visar då båda — vad pjäsen kostade och vad som skrivits av
+    /// — och skillnaden är det bokförda värdet. Det är BAS-praxis och det revisorn förväntar sig.</para>
+    ///
+    /// <para>⚠️ Fram till 2026-09-24 bokförde vi DIREKT mot 1220 "så att en lekman kan läsa
+    /// balansräkningen". Michael Henriksson (Åmåls PK) rättade oss: <i>"Man tar inte bort
+    /// inköpssumman och minskar den med avskrivningen."</i> Direktmodellen tappade
+    /// anskaffningsvärdet ur liggaren, och den krockade med SIE-importen: en förening som tar in
+    /// sin kontoplan får med 1229 och dess ingående saldo, och då låg två modeller i samma bok.
+    /// Återinför den inte.</para>
     ///
     /// <para><b>⚠️ Kontona väljs PER TILLGÅNG ur föreningens egen kontoplan, inte via roller.</b>
-    /// En klubbstuga skrivs av mot 7820 och en pistol mot 7830; en roll hade tvingat fram ett val
-    /// för hela föreningen. Numren lagras på raden, som på en konteringsrad.</para>
+    /// En klubbstuga skrivs av mot 7820/1119 och en pistol mot 7830/1229; en roll hade tvingat
+    /// fram ett val för hela föreningen. Numren lagras på raden, som på en konteringsrad.</para>
     /// </summary>
     [TableName("LedgerAsset")]
     [PrimaryKey("Id", AutoIncrement = true)]
@@ -35,6 +40,13 @@ namespace HpskSite.Models.Ledger
 
         /// <summary>Kostnadskontot avskrivningen bokförs på, t.ex. 7830.</summary>
         public int DepreciationAccountNumber { get; set; }
+
+        /// <summary>
+        /// Balanskontot de ackumulerade avskrivningarna samlas på, t.ex. 1229 — ett minuskonto
+        /// under <see cref="AssetAccountNumber"/>. Förslaget är
+        /// <see cref="LedgerDepreciation.AccumulatedAccountFor"/>.
+        /// </summary>
+        public int AccumulatedDepreciationAccountNumber { get; set; }
 
         /// <summary>
         /// När tillgången TOGS I BRUK — inte när fakturan betalades.
@@ -124,6 +136,55 @@ namespace HpskSite.Models.Ledger
         public static decimal BookValue(LedgerAsset asset, DateTime through) =>
             asset.AcquisitionAmount - AccumulatedThrough(asset, through);
 
+        /// <summary>
+        /// Förslaget på konto för ackumulerade avskrivningar: tillgångskontots grupp med 9 sist.
+        /// 1220 → 1229, 1221 → 1229, 1110 → 1119, 1150 → 1159 — BAS-konventionens minuskonto.
+        /// <para>⚠️ Bara ett FÖRSLAG. Kassören väljer, och en förening med egen kontoplan kan ha
+        /// lagt kontot någon annanstans.</para>
+        /// </summary>
+        public static int AccumulatedAccountFor(int assetAccountNumber) =>
+            assetAccountNumber / 10 * 10 + 9;
+
+        /// <summary>
+        /// Beloppen i utrangeringens verifikation, om tillgången lämnar föreningen på
+        /// <paramref name="when"/>.
+        ///
+        /// <para><b>⚠️⚠️ HELA ANSKAFFNINGSVÄRDET BORT FRÅN TILLGÅNGSKONTOT, HELA DET ACKUMULERADE
+        /// BORT FRÅN MINUSKONTOT.</b> Står något kvar på något av dem ligger en tillgång i
+        /// balansräkningen som föreningen inte har. Det som återstår — det bokförda värdet — är en
+        /// förlust. En försäljning är en egen intäkt; beloppet vet bara kassören.</para>
+        ///
+        /// <para>Det ackumulerade är PLANENS, räknat fram till utrangeringsdagen. Det förutsätter
+        /// att varje års avskrivning är bokförd; tjänsten vägrar innan den kommer hit om den inte
+        /// är det.</para>
+        /// </summary>
+        public static (decimal Accumulated, decimal BookValue) Disposal(LedgerAsset asset, DateTime when)
+        {
+            var disposed = CopyDisposedOn(asset, when);
+            var accumulated = AccumulatedThrough(disposed, when.Date);
+            return (accumulated, asset.AcquisitionAmount - accumulated);
+        }
+
+        /// <summary>
+        /// En kopia utrangerad på <paramref name="when"/>. Planen kapas vid utrangeringen, så
+        /// beloppen för utrangeringsåret räknas på kopian medan raden ännu inte är utrangerad.
+        /// </summary>
+        public static LedgerAsset CopyDisposedOn(LedgerAsset a, DateTime when) => new()
+        {
+            Id = a.Id,
+            IssuerType = a.IssuerType,
+            IssuerId = a.IssuerId,
+            Name = a.Name,
+            AssetAccountNumber = a.AssetAccountNumber,
+            DepreciationAccountNumber = a.DepreciationAccountNumber,
+            AccumulatedDepreciationAccountNumber = a.AccumulatedDepreciationAccountNumber,
+            InUseDate = a.InUseDate,
+            AcquisitionAmount = a.AcquisitionAmount,
+            UsefulLifeYears = a.UsefulLifeYears,
+            ResidualValue = a.ResidualValue,
+            DisposedDate = when.Date
+        };
+
         /// <summary>Datumet då tillgången är färdigavskriven.</summary>
         public static DateTime FullyDepreciatedOn(LedgerAsset asset) =>
             asset.InUseDate.Date.AddMonths(Max(asset.UsefulLifeYears, 0) * 12).AddDays(-1);
@@ -179,6 +240,10 @@ namespace HpskSite.Models.Ledger
         public int DepreciationAccountNumber { get; set; }
 
         public string DepreciationAccountName { get; set; } = "";
+
+        public int AccumulatedDepreciationAccountNumber { get; set; }
+
+        public string AccumulatedDepreciationAccountName { get; set; } = "";
 
         public DateTime InUseDate { get; set; }
 

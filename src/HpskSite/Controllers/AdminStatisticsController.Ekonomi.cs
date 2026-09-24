@@ -38,6 +38,7 @@ namespace HpskSite.Controllers
             LedgerSourceType.Expense,
             LedgerSourceType.SieImport,
             LedgerSourceType.AssetDepreciation,
+            LedgerSourceType.AssetDisposal,
             LedgerSourceType.OpeningBalance
         };
 
