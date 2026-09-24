@@ -9765,3 +9765,45 @@ tävlingar som legacy — kör den i deployfönstret). Körd i dev, TranCount 0.
 **Sviter:** `hpsk-verify/tavlingsavgift-verify.mjs` **67/67** (A/B: med spärren i PaymentService
 avstängd faller "inga gamla fakturor skapades"), `tavlingsavgift-ui-verify.mjs <tävling>` **21/21**
 med skärmdumpar. Enhetstester 1484.
+
+## SIE-importen — en förening flyttar hit mitt i året (P10.2, 2026-09-24)
+
+Kvar-listans post 3. Behovet (F11, revisorn): *"en klubb som byter till oss mitt i ett år behöver få
+in sina ingående balanser och gärna tidigare verifikationer"* — och *"SIE-filer är standard i
+branschen"*. Utan import kan en klubb bara ansluta vid ett årsskifte.
+
+**Stefans beslut 2026-09-24:** kontoplan + `#IB` + årets `#VER` · **originalnumren i en egen serie**
+· **saknade konton stoppar** och kassören frågas · förhandsgranska, **prova i en sandlåda först**.
+
+- **`SieParser`** (ren funktion, `SieParserTests` 11). ⚠️ **`#RTRANS`/`#BTRANS` läses inte som
+  rader** — SIE 4B följer en tillagd rad med en identisk `#TRANS`, så båda hade dubblerat den.
+  ⚠️ **Kodsidan väljs efter svenska bokstäver**: CP437 enligt standarden, men flera program skriver
+  Windows-1252 och sätter ändå `#FORMAT PC8`.
+- **`LedgerSieImportService`**: `Preview` skriver ingenting (år, konton, `#IB`, serier, luckor,
+  motsägelser, överlapp med egna poster, fel organisationsnummer); `Import` kör förhandsgranskningen
+  igen på servern. **Idempotent per verifikation** — samma serie+nummer+datum+belopp hoppas över
+  (en export i april och en i maj fungerar, en avbruten import går att köra om); samma nummer med
+  annat innehåll stoppar allt.
+- **Egen serie**: `LedgerPostingRequest.ImportSeries/ImportNumber` → serien `import-A`, prefix `IA`,
+  med filens nummer. Föreningens egen serie förblir obruten. ⚠️ Importerade poster **avrundas aldrig**
+  och får **`VatRate = 0`** — filens momsrader står redan där; kontots förvalda moms hade annars
+  delat beloppet en gång till.
+- **`#IB`** bara på föreningens **första** år, **exakt som filen** (eget kapital inräknat —
+  `LedgerOpeningBalanceService.SaveFromImport`), inte uträknat som i handinmatningen. Tidigare
+  balanser rättas, raderas aldrig.
+- **Luckor** i det gamla programmets serier kräver en förklaring och skrivs i `LedgerNumberGap`
+  (BFNAR 2013:2). Verifikationslistans luckkontroll räknar dem som förklarade (`LedgerSeriesSpan.Documented`).
+- **Saknade konton** namnges; "Lägg upp dem med filens namn" (`AddSieAccounts`) är kassörens
+  uttryckliga svar — importen skapar aldrig ett konto själv.
+- Importerade verifikationer (`SourceType = sie-import`) **rättas i Bokför** som handbokförda.
+- Ytan: Inställningar → "Flytta hit bokföringen från ett annat program" (bara formen `full`).
+
+**Ingen migrering** — `LedgerNumberGap` byggdes i förväg för just det här.
+
+⚠️ **Inte täckt:** Excel-bokföring (Hallandskretsen 2025) har ingen SIE-fil — den vägen är
+handinmatningen av ingående balanser. `#OBJEKT`/`#DIM` (kostnadsställen) läses inte in; det sägs i
+förhandsgranskningen.
+
+**Svit:** `hpsk-verify/ekonomi-sie-import-verify.mjs` **41/41** i egen sandlåda. A/B: utan
+`VatRate = 0` faller momspåståendet (⚠️ fixturen ger 3010 förvald moms — utan den kunde påståendet
+aldrig falla), utan de förklarade luckorna faller luckkontrollen.
