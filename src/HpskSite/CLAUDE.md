@@ -4935,8 +4935,28 @@ riktningen).
 föreningar momsar bara en del (kiosken, sponsringen — inte startavgifterna). Satsen sätts i
 kontoplanen (25/12/6, bara klass 3–7); Bokför förväljer kontots sats och kassören ändrar bara när
 en post avviker (`ManualEntryRequest.VatRate`: null = kontots, 0 = ingen).
-- **Riktningen följer KNAPPEN**, inte kontoklassen: `VatIsOutgoing = WeReceived`. En återbetalning
-  på ett intäktskonto är pengar UT och ska ha ingående moms — kontoklassens gissning gav utgående.
+- **⚠️⚠️ Riktningen följer KONTOKLASSEN** (klass 3 = utgående, annars ingående) — bokföringens
+  egen regel. Första versionen satte `VatIsOutgoing = WeReceived` ("följer knappen") och det var
+  FEL: en återbetald försäljning ("Vi betalade" på 3040) blev ingående moms, när den ska MINSKA den
+  utgående (debet 2610). Rätt netto, fel rutor i momsdeklarationen. Upptäckt samma dag, när
+  deklarationsunderlaget byggdes; `LedgerVatTests` pinnar den rätta regeln.
+
+### Momsdeklarationens underlag (2026-09-24)
+
+Fliken **Moms** (bara registrerad förening, alla som läser): ruta 05, 10, 11, 12, 48, 49 för
+räkenskapsåret, ett kvartal eller en månad — **räknat från räkenskapsårets start**.
+`LedgerVatReturnCalculator` (rena funktioner) + `LedgerVatReturnService`.
+- **⚠️⚠️ Rättelser** bär ingen moms på källraden (nollad med flit). De räknas som **originalets
+  momsrader med omvänt tecken** via `CorrectsEntryId`, i rättelsens period. A/B: utan det faller
+  `Rattelse_vander_originalets_rutor`.
+- **⚠️⚠️ Momskontona är kontrollen** och visas alltid: 2610-rörelsen mot ruta 10–12, 2640 mot 48.
+  En post direkt på momskontot (SIE-import, handbokfört) syns som differens — rutorna kan inte
+  veta satsen.
+- **Exakt belopp med ören + "I rutan" i hela kronor (örena stryks).** Ruta 49 ur rutornas hela
+  kronor. ⚠️ `kr()` i vyn avrundar — den exakta kolumnen använder egen örformatering.
+- **Ett underlag, ingen deklaration** — inget skickas till Skatteverket, och momsens avräkning mot
+  2650 bokförs inte (eget steg om det efterfrågas).
+- Svit: `ekonomi-moms-verify.mjs` avsnitt 3b — försäljning, återbetalning, inköp, rättelse, kvartal.
 - **Förhandsvisningen räknas av servern** (`PreviewManual` → `LedgerPostingService.Preview`, samma
   `BuildLines`) när föreningen är registrerad. Sats, riktning, registrering och öresavrundning är
   fyra saker att hålla lika på två ställen. Utan moms kvarstår JS-speglingen.

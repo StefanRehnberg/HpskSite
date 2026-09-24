@@ -504,6 +504,11 @@
         <a href="#" class="ek-nav" data-view="verifikationer">Verifikationer</a>
         <a href="#" class="ek-nav" data-view="avstamning">Avstämning</a>
         <a href="#" class="ek-nav" data-view="rapport">Rapport</a>
+        @* Bara för en momsregistrerad förening — för alla andra finns inget att deklarera. *@
+        @if (Model.IsVatRegistered)
+        {
+            <a href="#" class="ek-nav" data-view="moms">Moms</a>
+        }
         @* ⚠️ Projekt ligger intill Rapport: det är samma sorts fråga ("vad gav tävlingen?") och
            läses av styrelsen och revisorn lika mycket som av kassören — därför INTE gated på
            skrivrätt. Skrivkontrollerna inuti är det. *@
@@ -1446,6 +1451,63 @@
                         hen får en länk, skapar sin inloggning själv och blir aldrig medlem i föreningen.
                         En inbjudan gäller i 13 månader.
                     </p>
+                </div>
+            </section>
+
+            @*
+                MOMSDEKLARATIONENS UNDERLAG (2026-09-24). Rutorna Skatteverket frågar efter,
+                räknade ur bokföringen — LedgerVatReturnCalculator.
+
+                ⚠️⚠️ ETT UNDERLAG, INTE EN DEKLARATION — föreningen lämnar den själv, och det sägs.
+                ⚠️⚠️ KONTROLLEN MOT MOMSKONTONA visas alltid, också när den stämmer. Står något på
+                momskontot som inte kommer från en momsrad (SIE-import, handbokfört) går rutorna inte
+                ihop med bokföringen — det är precis det en kassör måste se innan hen deklarerar.
+                ⚠️ Både exakt belopp och rutans hela kronor (örena stryks). Kassören skriver det
+                senare, men ska kunna se att det är samma tal.
+            *@
+            <section data-pane="moms" hidden>
+                <div class="head">
+                    <div><h1>Momsdeklaration</h1>
+                        <div class="sub">Underlaget. Deklarationen lämnar föreningen själv hos Skatteverket.</div></div>
+                    <div class="headactions">
+                        <select class="form-select" id="@(uid)_vatPeriod" style="width:14rem">
+                            <option value="year">Hela räkenskapsåret</option>
+                            <option value="q1">Kvartal 1</option><option value="q2">Kvartal 2</option>
+                            <option value="q3">Kvartal 3</option><option value="q4">Kvartal 4</option>
+                            @for (var mi = 1; mi <= 12; mi++)
+                            {
+                                <option value="m@(mi)">Månad @mi av räkenskapsåret</option>
+                            }
+                        </select>
+                        <button type="button" class="btn btn-outline-secondary" id="@(uid)_vatPrint">Skriv ut</button>
+                    </div>
+                </div>
+
+                <div class="ek-alert ek-bad d-none" id="@(uid)_vatRepError"></div>
+
+                <div class="ek-card wide">
+                    <div class="ek-cardh">
+                        <h2 id="@(uid)_vatRepTitle">Rutorna</h2>
+                        <span class="meta" id="@(uid)_vatRepMeta"></span>
+                    </div>
+                    <table class="t">
+                        <thead><tr>
+                            <th style="width:5rem">Ruta</th>
+                            <th>Vad</th>
+                            <th class="n" style="width:9rem">Belopp</th>
+                            <th class="n" style="width:9rem">I rutan</th>
+                        </tr></thead>
+                        <tbody id="@(uid)_vatRepBody"></tbody>
+                    </table>
+                    <p class="why" style="margin-bottom:0">
+                        "I rutan" är beloppet i hela kronor — örena stryks, som Skatteverket vill ha det.
+                        Ruta 49 räknas ur rutornas hela kronor.
+                    </p>
+                </div>
+
+                <div class="ek-bigbox" id="@(uid)_vatRepCheck" style="margin-top:1rem">
+                    <div class="lead" id="@(uid)_vatRepCheckLead"></div>
+                    <div class="note" id="@(uid)_vatRepCheckNote"></div>
                 </div>
             </section>
 
@@ -2959,6 +3021,7 @@
 
         if (name === 'revisorer' && !revLoaded) { revLoaded = true; loadAuditors(); }
         if (name === 'behorigheter' && !wgLoaded) { wgLoaded = true; loadGrants(); }
+        if (name === 'moms' && !vatRepLoaded) { vatRepLoaded = true; loadVatReturn(); }
 
         // ⚠️ Samma skäl som ovan: registret räknar årets plan och läser årets bokförda
         //    avskrivningar ur liggaren. Varje skrivning hämtar om det själv.
@@ -4225,6 +4288,66 @@
             el('aError').textContent = e.message; show(el('aError'), true);
         });
     });
+
+    // ══ MOMSDEKLARATIONENS UNDERLAG ══════════════════════════════════════════════════════
+    // ⚠️ Rutorna och kontrollen kommer ur SERVERN (LedgerVatReturnCalculator) — sidan räknar
+    //    ingenting själv utom ruta 49 i hela kronor, som per definition är rutornas summa.
+    var vatRepLoaded = false;
+
+    async function loadVatReturn() {
+        show(el('vatRepError'), false);
+        var d = await fetch('/umbraco/surface/EkonomiAdmin/GetVatReturn?issuerType=' + issuerType + '&issuerId=' + issuerId
+                            + '&period=' + encodeURIComponent(el('vatPeriod').value), { cache: 'no-store' })
+            .then(function (r) { return r.json(); });
+
+        if (!d.success) { el('vatRepError').textContent = d.message || 'Underlaget gick inte att läsa.'; show(el('vatRepError'), true); return; }
+        if (d.hasFiscalYear === false) {
+            el('vatRepBody').innerHTML = '<tr><td colspan="4" class="muted">Lägg upp räkenskapsåret först.</td></tr>';
+            return;
+        }
+
+        var b = d.boxes;
+        el('vatRepTitle').textContent = d.label;
+        el('vatRepMeta').textContent = d.from + ' – ' + d.to + (d.vatNumber ? ' · ' + d.vatNumber : '')
+            + ' · ' + d.entryCount + ' verifikationer med moms';
+
+        var k49 = b.k10 + b.k11 + b.k12 - b.k48;
+        // ⚠️ Det exakta beloppet MED ören. kr() avrundar till hela kronor, och då visade kolumnen
+        //    13 kr för 12,99 medan "I rutan" sa 12 — två tal som ser ut att motsäga varandra.
+        var ore = function (n) { return (n || 0).toLocaleString('sv-SE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kr'; };
+        var row = function (box, what, exact, whole, strong) {
+            return '<tr' + (strong ? ' style="font-weight:700"' : '') + ' data-box="' + box + '"><td>' + box + '</td><td>' + what + '</td>'
+                 + '<td class="n">' + ore(exact) + '</td><td class="n">' + kr(whole) + '</td></tr>';
+        };
+        el('vatRepBody').innerHTML =
+              row('05', 'Momspliktig försäljning (exklusive moms)', b.b05, b.k05)
+            + row('10', 'Utgående moms 25 %', b.b10, b.k10)
+            + row('11', 'Utgående moms 12 %', b.b11, b.k11)
+            + row('12', 'Utgående moms 6 %', b.b12, b.k12)
+            + row('48', 'Ingående moms att dra av', b.b48, b.k48)
+            + row('49', k49 >= 0 ? 'Moms att betala' : 'Moms att få tillbaka', b.b49, k49, true);
+
+        // ⚠️⚠️ Kontrollen visas ALLTID — "stämmer" är också ett besked kassören ska få se.
+        var box = el('vatRepCheck');
+        box.classList.toggle('ek-warn', !d.reconciles);
+        if (d.reconciles) {
+            el('vatRepCheckLead').textContent = 'Stämmer med bokföringen';
+            el('vatRepCheckNote').textContent = 'Konto ' + d.outputAccount + ' (utgående moms) rörde sig ' + ore(d.ledgerOutput)
+                + ' och konto ' + d.inputAccount + ' (ingående moms) ' + ore(d.ledgerInput) + ' under perioden — samma som rutorna.';
+        } else {
+            el('vatRepCheckLead').textContent = 'Stämmer inte med bokföringen';
+            var parts = [];
+            if (Math.abs(d.outputDifference) >= 0.005)
+                parts.push('Konto ' + d.outputAccount + ' har ' + ore(d.outputDifference) + ' utgående moms som inte kommer från en momsrad');
+            if (Math.abs(d.inputDifference) >= 0.005)
+                parts.push('konto ' + d.inputAccount + ' har ' + ore(d.inputDifference) + ' ingående moms som inte kommer från en momsrad');
+            el('vatRepCheckNote').textContent = parts.join(', och ') + '. Det är oftast en post bokförd direkt på momskontot '
+                + 'eller inläst från ett annat program. Rutorna vet inte vilken sats den hör till — kontrollera den innan du deklarerar.';
+        }
+    }
+
+    if (el('vatPeriod')) el('vatPeriod').addEventListener('change', loadVatReturn);
+    if (el('vatPrint')) el('vatPrint').addEventListener('click', function () { window.print(); });
 
     // ══ VILKA ARBETAR MED EKONOMIN? ══════════════════════════════════════════════════════
     // ⚠️ ÄGAREN, aldrig utställaren (samma regel som revisorerna nedan): rätten gäller
