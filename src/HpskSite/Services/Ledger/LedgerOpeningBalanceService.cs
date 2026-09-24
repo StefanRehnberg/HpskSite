@@ -175,6 +175,61 @@ namespace HpskSite.Services.Ledger
         }
 
         /// <summary>
+        /// Ingående balanser UR EN SIE-FIL (<c>#IB 0</c>) — exakt som filen säger, eget kapital
+        /// inräknat.
+        ///
+        /// <para><b>⚠️ Skild från <see cref="Save"/>, med flit.</b> Handinmatningen RÄKNAR UT eget
+        /// kapital, eftersom kassören inte kan läsa av det på något papper. Filen bär däremot eget
+        /// kapital som egna rader (2010, 2060, 2099 …) — att räkna ut det igen hade slagit ihop
+        /// föreningens kapitalkonton till ett, och balansräkningen hade inte längre sett ut som den
+        /// årsmötet fastställde.</para>
+        ///
+        /// <para>SIE:s tecken: positivt = debet, negativt = kredit. Filen måste summera till noll —
+        /// gör den inte det är den inte en balans, och vi rättar den inte åt någon.</para>
+        /// </summary>
+        public OpeningBalanceResult SaveFromImport(int issuerType, int issuerId, IReadOnlyDictionary<int, decimal> balances, int byMemberId)
+        {
+            var lines = balances.Where(kv => kv.Value != 0m).OrderBy(kv => kv.Key).ToList();
+            if (lines.Sum(kv => kv.Value) != 0m)
+                return OpeningBalanceResult.Fail(
+                    $"Filens ingående balanser summerar inte till noll ({lines.Sum(kv => kv.Value):N2} kr).");
+            if (lines.Any(kv => kv.Key >= 3000))
+                return OpeningBalanceResult.Fail("Ingående balanser får bara stå på balanskonton (1000–2999).");
+
+            var state = Get(issuerType, issuerId);
+            if (state.Date is null) return OpeningBalanceResult.Fail("Lägg upp räkenskapsåret först.");
+            if (!state.YearIsOpen)
+                return OpeningBalanceResult.Fail(
+                    $"Räkenskapsåret {state.Year} är fastställt och tar inte emot bokföring.");
+
+            if (state.ExistingEntryId is int oldId)
+            {
+                var corr = _posting.CreateCorrection(oldId, byMemberId, "Ingående balanser ersatta av SIE-import", state.Date);
+                if (!corr.Success)
+                    return OpeningBalanceResult.Fail(corr.Error ?? "De tidigare ingående balanserna kunde inte rättas.");
+            }
+            if (lines.Count == 0) return new OpeningBalanceResult { Success = true, Removed = state.ExistingEntryId != null };
+
+            var result = _posting.Post(new LedgerPostingRequest
+            {
+                IssuerType = issuerType,
+                IssuerId = issuerId,
+                AccountingDate = state.Date.Value.Date,
+                EventDate = state.Date.Value.Date,
+                Description = "Ingående balanser (SIE-import)",
+                SourceType = LedgerSourceType.OpeningBalance,
+                CreatedByMemberId = byMemberId,
+                Lines = lines.Select(kv => kv.Value > 0
+                        ? new LedgerPostingLine { AccountNumber = kv.Key, Debit = kv.Value, Text = "Ingående balans", VatRate = 0 }
+                        : new LedgerPostingLine { AccountNumber = kv.Key, Credit = -kv.Value, Text = "Ingående balans", VatRate = 0 })
+                    .ToList()
+            });
+            return result.Success
+                ? new OpeningBalanceResult { Success = true, EntryId = result.EntryId }
+                : OpeningBalanceResult.Fail(result.Error ?? "De ingående balanserna kunde inte bokföras.");
+        }
+
+        /// <summary>
         /// Konteringen, som en ren funktion. Tillgångar i debet, skulder i kredit, och eget kapital
         /// som den rad som gör att verifikationen balanserar.
         /// </summary>

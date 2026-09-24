@@ -119,5 +119,12 @@ namespace HpskSite.Models.Ledger
         /// projekt, samma intäktsroll. Fakturan bär betalningsraden i <c>ChargeId</c>.</para>
         /// </summary>
         public const string CompetitionInvoice = "competition-invoice";
+
+        /// <summary>
+        /// En verifikation inläst ur föreningens tidigare program (SIE-import). Numret är
+        /// originalets, i en egen serie (prefix I + serien).
+        /// <para>Rättas som en handbokförd post — den har ingen källa hos oss som kan säga emot.</para>
+        /// </summary>
+        public const string SieImport = "sie-import";
     }
 }

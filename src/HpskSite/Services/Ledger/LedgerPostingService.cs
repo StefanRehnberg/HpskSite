@@ -97,6 +97,10 @@ namespace HpskSite.Services.Ledger
             if (buildError is not null) return LedgerPostingResult.Failed(buildError);
 
             var imbalance = LedgerAmounts.Imbalance(built);
+            if (imbalance != 0 && !string.IsNullOrEmpty(request.ImportSeries))
+                return LedgerPostingResult.Failed(
+                    $"Den importerade verifikationen {request.ImportSeries}{request.ImportNumber} går inte ihop "
+                    + $"(debet minus kredit är {imbalance:0.00} kr). Importerade poster avrundas aldrig.");
             if (imbalance != 0)
             {
                 if (!LedgerAmounts.IsRoundable(imbalance))
@@ -121,9 +125,13 @@ namespace HpskSite.Services.Ledger
             {
                 using var tx = db.GetTransaction();
 
-                var (seriesId, number, prefix) = _allocator.Allocate(
-                    db, request.IssuerType, request.IssuerId, fiscalYear.Year,
-                    LedgerSeriesKind.JournalEntry);
+                // Importen behåller originalnumret i en egen serie; allt annat får nästa nummer.
+                var (seriesId, number, prefix) = !string.IsNullOrEmpty(request.ImportSeries) && request.ImportNumber is int importNo
+                    ? _allocator.ImportSeries(db, request.IssuerType, request.IssuerId, fiscalYear.Year,
+                        request.ImportSeries!, importNo)
+                    : _allocator.Allocate(
+                        db, request.IssuerType, request.IssuerId, fiscalYear.Year,
+                        LedgerSeriesKind.JournalEntry);
 
                 var entry = new LedgerJournalEntry
                 {

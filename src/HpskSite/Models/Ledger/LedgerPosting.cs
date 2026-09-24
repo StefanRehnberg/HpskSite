@@ -63,6 +63,21 @@
         /// </summary>
         public int? CorrectsEntryId { get; set; }
 
+        /// <summary>
+        /// SIE-importens serie ur det tidigare programmet ("A"). Satt = verifikationen får
+        /// <see cref="ImportNumber"/> i en EGEN importserie (prefix "I" + serien) i stället för nästa
+        /// nummer i föreningens serie.
+        /// <para>⚠️⚠️ Stefans beslut 2026-09-24: importen behåller ORIGINALNUMREN i en egen serie.
+        /// Då är historiken spårbar åt båda hållen mot det gamla programmet, och föreningens egen
+        /// serie förblir obruten — den börjar på 1 den dag bokföringen flyttade hit.</para>
+        /// <para>⚠️ En importerad verifikation avrundas ALDRIG. Går den inte ihop är filen fel, och
+        /// en öresrad vi hittade på hade blivit en post föreningen aldrig bokfört.</para>
+        /// </summary>
+        public string? ImportSeries { get; set; }
+
+        /// <summary>Originalnumret. Bara tillsammans med <see cref="ImportSeries"/>.</summary>
+        public int? ImportNumber { get; set; }
+
         public List<LedgerPostingLine> Lines { get; set; } = new();
     }
 
