@@ -212,5 +212,74 @@ namespace HpskSite.Tests.Services
 
             BankStatementFormat.FindHeaderRow(rows).Should().Be(-1);
         }
+
+        // ── Hela filen, som banken lämnar den ───────────────────────────────────────────────
+
+        /// <summary>
+        /// Swedbanks export (<c>Transaktioner_2026-09-24_16-41-33.csv</c>): en informationsrad
+        /// UTAN avgränsare överst, sedan kommaseparerade rubriker och decimalpunkt.
+        ///
+        /// <para>⚠️⚠️ Felrapporten 2026-09-24: avgränsaren mättes mot FÖRSTA radens kolumnantal.
+        /// Informationsraden har en kolumn med varje avgränsare, så alla vägrades, filen lästes
+        /// som en enda kolumn och mappningen visade bara "— saknas —". Testet ovan med redan
+        /// uppdelade rader kunde inte falla på det — därför läses hela filen här.</para>
+        /// </summary>
+        private const string Swedbank =
+              "* Transaktioner Period 2026-01-01 – 2026-09-24 Skapad 2026-09-24 16:41 CEST\n"
+            + "Radnummer,Clearingnummer,Kontonummer,Produkt,Valuta,Bokföringsdag,Transaktionsdag,Valutadag,Referens,Beskrivning,Belopp,Bokfört saldo\n"
+            + "1,8327-9,123456789,Företagskonto,SEK,2026-09-23,2026-09-23,2026-09-23,\"Swish\",\"Kalle Karlsson\",270.00,5270.00\n"
+            + "2,8327-9,123456789,Företagskonto,SEK,2026-09-20,2026-09-19,2026-09-20,\"Kortköp\",\"ICA Kvantum\",-120.50,5000.00\n"
+            + "3,8327-9,123456789,Företagskonto,SEK,2026-09-18,2026-09-18,2026-09-18,\"Bg 1234-5678\",\"Anmälningsavgift\",1250.00,5120.50\n";
+
+        [Fact]
+        public void Informationsrad_utan_avgransare_overst_faller_inte_avgransaren()
+            => BankStatementFormat.SniffDelimiter(Swedbank).Should().Be(',');
+
+        /// <summary>
+        /// ⚠️ Motprovet till regeln ovan: i en semikolonfil med decimalkomma delar KOMMA också
+        /// varje datarad lika många gånger. Semikolon måste ändå vinna — rubrikraden och det
+        /// större kolumnantalet avgör.
+        /// </summary>
+        [Fact]
+        public void Semikolonfil_med_decimalkomma_och_informationsrad_forblir_semikolon()
+        {
+            var csv = "Kontonummer 1234-5678\n"
+                    + "Bokföringsdag;Text;Belopp;Saldo\n"
+                    + "2026-09-01;Swish;270,00;5270,00\n"
+                    + "2026-09-02;Kort;-120,50;5149,50\n"
+                    + "2026-09-03;Bg;1250,00;6399,50\n";
+
+            BankStatementFormat.SniffDelimiter(csv).Should().Be(';');
+        }
+
+        [Fact]
+        public void Swedbanks_fil_forhandslases_med_rubriker_och_forslag()
+        {
+            var svc = new HpskSite.Services.Ledger.LedgerBankImportService(null!, null!);
+            var (map, sample, header) = svc.Preview(Encoding.UTF8.GetBytes(Swedbank));
+
+            header.Should().HaveCount(12);
+            map.HeaderRow.Should().Be(1);
+            map.Delimiter.Should().Be(',');
+            map.Date.Should().Be(5);      // Bokföringsdag
+            map.Amount.Should().Be(10);   // Belopp
+            map.Balance.Should().Be(11);  // Bokfört saldo
+            sample.Should().HaveCount(3);
+        }
+
+        [Fact]
+        public void Swedbanks_fil_lases_in_med_ratt_belopp()
+        {
+            var svc = new HpskSite.Services.Ledger.LedgerBankImportService(null!, null!);
+            var bytes = Encoding.UTF8.GetBytes(Swedbank);
+            var (map, _, _) = svc.Preview(bytes);
+
+            var parsed = svc.Parse(bytes, map);
+
+            parsed.Skipped.Should().BeEmpty();
+            parsed.Rows.Select(r => r.Amount).Should().Equal(270.00m, -120.50m, 1250.00m);
+            parsed.Rows[0].BookedDate.Should().Be(new DateTime(2026, 9, 23));
+            parsed.Rows[0].Balance.Should().Be(5270.00m);
+        }
     }
 }

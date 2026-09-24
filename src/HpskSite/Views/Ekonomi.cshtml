@@ -4389,8 +4389,12 @@
             syncImportButton();
 
             if (!d.usable) {
-                el('bankError').textContent =
-                    'Vi hittade ingen datum- eller beloppskolumn. Peka ut dem själv nedan.';
+                // ⚠️ Utan rubrikrad finns inga kolumner att välja bland - då vore "peka ut dem
+                //    själv" ett löfte ytan inte kan hålla (felrapport 2026-09-24).
+                el('bankError').textContent = (d.header || []).length === 0
+                    ? 'Vi kunde inte dela upp filen i kolumner. Kontrollera att det är en CSV-fil '
+                      + 'från internetbanken, eller skicka in en felrapport så lägger vi till er banks format.'
+                    : 'Vi hittade ingen datum- eller beloppskolumn. Peka ut dem själv nedan.';
                 show(el('bankError'), true);
             }
         } catch (e) {

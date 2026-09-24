@@ -68,6 +68,12 @@ namespace HpskSite.Models.Ledger
         /// <para>⚠️ Mäter <b>stabiliteten</b> i kolumnantalet, inte hur många tecken som finns.
         /// En beskrivningstext innehåller ofta komma ("Swish, Kalle"), så ren räkning väljer
         /// komma i en semikolonfil. Rätt avgränsare ger samma antal fält på rad efter rad.</para>
+        ///
+        /// <para><b>⚠️⚠️ Mät mot det VANLIGASTE kolumnantalet, aldrig mot första raden.</b>
+        /// Swedbanks export inleds med en informationsrad utan avgränsare
+        /// (<c>* Transaktioner Period …</c>). Mätt mot den fick varje avgränsare en kolumn och
+        /// vägrades, filen lästes som en enda kolumn och mappningen visade bara "— saknas —"
+        /// (felrapport 2026-09-24).</para>
         /// </summary>
         public static char SniffDelimiter(string text)
         {
@@ -80,12 +86,17 @@ namespace HpskSite.Models.Ledger
             foreach (var d in Delimiters)
             {
                 var counts = lines.Select(l => SplitLine(l, d).Length).ToList();
-                var columns = counts[0];
 
-                // En avgränsare som inte delar något alls är inte en avgränsare.
-                if (columns < 2) continue;
+                // En avgränsare som inte delar något alls är inte en avgränsare. Vid lika många
+                // rader vinner det större antalet — informationsraderna är de korta.
+                var modal = counts.Where(c => c >= 2)
+                    .GroupBy(c => c)
+                    .OrderByDescending(g => g.Count()).ThenByDescending(g => g.Key)
+                    .FirstOrDefault();
+                if (modal == null) continue;
 
-                var stable = counts.Count(c => c == columns);
+                var columns = modal.Key;
+                var stable = modal.Count();
 
                 // Fler kolumner bryter lika — en semikolonfil läst som komma ger färre.
                 var score = stable * 100 + columns;
