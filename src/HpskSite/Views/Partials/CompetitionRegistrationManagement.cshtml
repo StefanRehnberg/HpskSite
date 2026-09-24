@@ -2,9 +2,15 @@
  * Competition-Specific Registration Management Partial View
  * Focused on managing registrations for a single competition
 *@
+@inject HpskSite.Services.CompetitionFees.CompetitionPaymentModelService PaymentModels
 
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
+    // ⚠️⚠️ VÄXELN PER TÄVLING (P3/P4). "ledger" = avgifterna ligger i liggaren: betalningarna
+    // sköts av competition-fees.js (samma avprickning som i Ekonomi), och fakturaåtgärderna här
+    // nedan (samlingsfaktura, påminnelser, bokföringsunderlag, saknade fakturor) finns inte.
+    var feeModel = int.TryParse(competitionId, out var feeCompId) ? PaymentModels.Get(feeCompId) : "legacy";
+    var isLedgerFees = feeModel == HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Ledger;
     var availableShootingClasses = ViewData["AvailableShootingClasses"] ?? new List<object>();
     var availableShootingClassesJson = System.Text.Json.JsonSerializer.Serialize(availableShootingClasses);
 
@@ -105,7 +111,7 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 
-<div class="competition-registration-management" data-competition-id="@competitionId" data-competition-club-id="@(ViewData["CompetitionClubId"]?.ToString() ?? "")">
+<div class="competition-registration-management" data-competition-id="@competitionId" data-fee-model="@feeModel" data-competition-club-id="@(ViewData["CompetitionClubId"]?.ToString() ?? "")">
     <!-- Header Section -->
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h4 class="mb-0"><i class="bi bi-people me-2"></i>Anmälningar</h4>
@@ -147,20 +153,41 @@
                 }
                 <li><hr class="dropdown-divider"></li>
                 <li><h6 class="dropdown-header">Betalningar</h6></li>
-                @* The organiser-side samlingsfaktura. Until 2026-08-20 only the PAYING club could build
-                   one, on its own klubbsida — the page the clubs who most need it have never opened. *@
-                <li>
-                    <button class="dropdown-item" type="button" onclick="openOrganiserConsolidateModal()">
-                        <i class="bi bi-receipt-cutoff me-2 text-primary"></i>Samlingsfaktura – en räkning till en klubb
-                    </button>
-                </li>
+                @if (isLedgerFees)
+                {
+                    @* Den nya modellen: en faktura till en klubb över dess öppna avgifter — samma handling
+                       som i Ekonomi. Klubben loggar aldrig in; mejlet bär en länk till fakturan. *@
+                    <li>
+                        <button class="dropdown-item" type="button" onclick="HpskFees.openInvoiceClub(@competitionId, feesChanged)">
+                            <i class="bi bi-receipt-cutoff me-2 text-primary"></i>Fakturera en klubb
+                        </button>
+                    </li>
+                    <li>
+                        <button class="dropdown-item" type="button" onclick="document.getElementById('competitionFeesCard')?.scrollIntoView({behavior:'smooth'})">
+                            <i class="bi bi-cash-coin me-2 text-primary"></i>Avgifter och fakturor
+                        </button>
+                    </li>
+                }
+                else
+                {
+                    @* The organiser-side samlingsfaktura. Until 2026-08-20 only the PAYING club could build
+                       one, on its own klubbsida — the page the clubs who most need it have never opened. *@
+                    <li>
+                        <button class="dropdown-item" type="button" onclick="openOrganiserConsolidateModal()">
+                            <i class="bi bi-receipt-cutoff me-2 text-primary"></i>Samlingsfaktura – en räkning till en klubb
+                        </button>
+                    </li>
+                }
                 <li><hr class="dropdown-divider"></li>
                 <li><h6 class="dropdown-header">Kommunikation</h6></li>
-                <li>
-                    <button class="dropdown-item" type="button" onclick="openSendRemindersModal()">
-                        <i class="bi bi-envelope-exclamation me-2 text-warning"></i>Påminnelser – välj mottagare innan du skickar
-                    </button>
-                </li>
+                @if (!isLedgerFees)
+                {
+                    <li>
+                        <button class="dropdown-item" type="button" onclick="openSendRemindersModal()">
+                            <i class="bi bi-envelope-exclamation me-2 text-warning"></i>Påminnelser – välj mottagare innan du skickar
+                        </button>
+                    </li>
+                }
                 <li>
                     <button class="dropdown-item" type="button" onclick="openParticipantEmails()">
                         <i class="bi bi-envelope me-2 text-primary"></i>E-postlista – adresser att klistra in
@@ -168,11 +195,14 @@
                 </li>
                 <li><hr class="dropdown-divider"></li>
                 <li><h6 class="dropdown-header">Listor</h6></li>
-                <li>
-                    <button class="dropdown-item" type="button" onclick="openBokforingsUnderlag()">
-                        <i class="bi bi-file-earmark-text me-2 text-success"></i>Bokföringsunderlag – utskriftsvänligt
-                    </button>
-                </li>
+                @if (!isLedgerFees)
+                {
+                    <li>
+                        <button class="dropdown-item" type="button" onclick="openBokforingsUnderlag()">
+                            <i class="bi bi-file-earmark-text me-2 text-success"></i>Bokföringsunderlag – utskriftsvänligt
+                        </button>
+                    </li>
+                }
                 <li>
                     <button class="dropdown-item" type="button" onclick="exportCompetitionRegistrations()">
                         <i class="bi bi-download me-2 text-secondary"></i>Exportera CSV – anmälningar och betalningar
@@ -262,6 +292,23 @@
             </div>
         </div>
     </div>
+
+    @if (isLedgerFees)
+    {
+        @* ⚠️ Den nya modellen: arrangörens avprickning och fakturorna till klubbar. SAMMA modul och
+           samma data som Ekonomi → Avgifter (Stefans beslut 2026-09-24) — en bekräftelse här syns där. *@
+        <div class="card mb-3" id="competitionFeesCard">
+            <div class="card-header d-flex justify-content-between align-items-center" role="button"
+                 data-bs-toggle="collapse" data-bs-target="#competitionFeesCollapse" aria-expanded="true">
+                <span class="fw-semibold"><i class="bi bi-cash-coin me-2"></i>Avgifter och fakturor</span>
+                <i class="bi bi-chevron-down"></i>
+            </div>
+            <div class="collapse show" id="competitionFeesCollapse">
+                <div class="card-body" id="competitionFeesPanel"></div>
+            </div>
+        </div>
+        <script src="/js/competition-fees.js?v=@DateTime.Now.Ticks"></script>
+    }
 
     @* "Saknar faktura" used to be a permanent sixth card showing 0 almost always. It is now an
        exception row that appears only when there is something to repair — but the repair itself
@@ -1556,11 +1603,29 @@ function updateCompetitionSortIndicators() {
     });
 }
 
+// ⚠️ Den nya modellen (P3/P4) — "ledger" när tävlingens avgifter ligger i liggaren. Radåtgärderna
+// nedan går då till competition-fees.js i stället för fakturavägen.
+window.hpskFeeModel = $('.competition-registration-management').data('fee-model') || 'legacy';
+function isLedgerFees() { return window.hpskFeeModel === 'ledger'; }
+function feesCompetitionId() { return parseInt($('.competition-registration-management').data('competition-id'), 10); }
+// Både tabellen och avgiftspanelen laddas om efter en betalning — annars säger de olika saker.
+function feesChanged() {
+    if (typeof loadCompetitionRegistrations === 'function') loadCompetitionRegistrations();
+    const panel = document.getElementById('competitionFeesPanel');
+    if (panel && window.HpskFees) HpskFees.renderOrganiserPanel(panel, feesCompetitionId(), { onChange: () => loadCompetitionRegistrations() });
+}
+$(function () {
+    const panel = document.getElementById('competitionFeesPanel');
+    if (panel && window.HpskFees) HpskFees.renderOrganiserPanel(panel, feesCompetitionId(), { onChange: () => loadCompetitionRegistrations() });
+});
+
 // Helper function to get payment status badge class
 function getPaymentStatusBadgeClass(status) {
     switch(status) {
         case 'Paid':
             return 'bg-success';
+        case 'Invoiced':
+            return 'bg-primary';
         case 'Pending':
             return 'bg-warning';
         case 'Failed':
@@ -1583,6 +1648,8 @@ function getPaymentStatusText(status) {
             return 'Betald';
         case 'Pending':
             return 'Väntande';
+        case 'Invoiced':
+            return 'Fakturerad klubben';
         case 'Failed':
             return 'Misslyckad';
         case 'Cancelled':
@@ -2371,6 +2438,10 @@ async function deleteTeamById(teamId) {
 function showPaymentOptionsForTeam(teamId) {
     const team = competitionTeams.find(t => t.id === teamId);
     if (!team) { alert('Laget hittades inte'); return; }
+    if (isLedgerFees()) {
+        HpskFees.openItemModal(feesCompetitionId(), 'team-fee', teamId, null, 'Lagavgift — ' + (team.teamName || ''), feesChanged);
+        return;
+    }
 
     currentManageInvoiceReg = {
         isTeam: true,
@@ -2409,6 +2480,10 @@ function showPaymentOptionsForTeam(teamId) {
 // Direct "Markera som betald" for a team (the green check button) — ensures the invoice then
 // opens the mark-as-paid modal, skipping the options chooser.
 async function markTeamAsPaid(teamId) {
+    if (isLedgerFees()) {
+        HpskFees.openReceivePayment(feesCompetitionId(), 'team-fee', teamId, feesChanged);
+        return;
+    }
     const team = competitionTeams.find(t => t.id === teamId);
     if (team) await openMarkAsPaidForTeam(team);
 }
@@ -3310,7 +3385,8 @@ function updatePaymentSummary() {
     document.getElementById('summaryPendingAmount').textContent = `${Math.round(pendingAmount)} kr`;
     document.getElementById('summaryNoInvoiceCount').textContent = noInvoiceCount;
     // Only surface the exception row when there is actually something to repair.
-    document.getElementById('missingInvoiceRow')?.classList.toggle('d-none', noInvoiceCount === 0);
+    // Den nya modellen har inga fakturor att sakna — raden gäller bara den gamla.
+    document.getElementById('missingInvoiceRow')?.classList.toggle('d-none', noInvoiceCount === 0 || isLedgerFees());
     cards.style.display = '';
 }
 
@@ -4733,6 +4809,10 @@ function markAsPaid(registrationId) {
         alert('Kunde inte hitta anmälan i listan.');
         return;
     }
+    if (isLedgerFees()) {
+        HpskFees.openReceivePayment(feesCompetitionId(), 'competition-registration', registrationId, feesChanged);
+        return;
+    }
     if (!reg.invoiceId) {
         alert('Det finns ingen betalning för denna anmälan. Använd plånboksknappen för att starta en betalning först.');
         return;
@@ -4995,6 +5075,11 @@ function showPaymentOptionsForRegistration(registrationId) {
     const registration = competitionRegistrations.find(r => r.id === registrationId);
     if (!registration) {
         alert('Anmälan hittades inte');
+        return;
+    }
+    if (isLedgerFees()) {
+        HpskFees.openItemModal(feesCompetitionId(), 'competition-registration', registrationId,
+            registration.memberId, 'Betalning — ' + (registration.memberName || ''), feesChanged);
         return;
     }
     currentManageInvoiceReg = registration;

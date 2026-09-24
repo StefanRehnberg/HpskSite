@@ -1785,6 +1785,7 @@ function deletePracticeRow(id) {
 </style>
 
 @* Chart.js Library *@
+<script src="/js/competition-fees.js?v=@DateTime.Now.Ticks"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -5218,6 +5219,10 @@ function renderCompetitionsTable() {
                                             <li><a class="dropdown-item" href="/kvitto/${comp.invoiceId}" target="_blank" rel="noopener">
                                                 <i class="bi bi-receipt me-2 text-secondary"></i>Skriv ut kvitto</a></li>
                                         ` : ''}
+                                        ${comp.paymentModel === 'ledger' && comp.receiptId ? `
+                                            <li><a class="dropdown-item" href="/betalkvitto/${comp.receiptId}" target="_blank" rel="noopener">
+                                                <i class="bi bi-receipt me-2 text-secondary"></i>Skriv ut kvitto</a></li>
+                                        ` : ''}
                                         ${comp.canUnregister ? `
                                             <li><hr class="dropdown-divider"></li>
                                             <li><button class="dropdown-item text-danger" type="button" onclick="unregisterFromCompetition(${comp.registrationId}, '${escapeHtml(comp.competitionName)}')">
@@ -5276,6 +5281,11 @@ function renderCompetitionsCards() {
                                     <i class="bi bi-receipt"></i> Skriv ut kvitto
                                 </a>
                             ` : ''}
+                            ${comp.paymentModel === 'ledger' && comp.receiptId ? `
+                                <a href="/betalkvitto/${comp.receiptId}" target="_blank" rel="noopener" class="btn btn-outline-secondary">
+                                    <i class="bi bi-receipt"></i> Skriv ut kvitto
+                                </a>
+                            ` : ''}
                             ${comp.canUnregister ? `
                                 <button class="btn btn-outline-danger" onclick="unregisterFromCompetition(${comp.registrationId}, '${escapeHtml(comp.competitionName)}')">
                                     <i class="bi bi-x-circle"></i> Avanmäl
@@ -5299,7 +5309,9 @@ function renderPaymentBadge(status, amount) {
         'paid': '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Betald</span>',
         'pending': `<span class="badge bg-warning text-dark"><i class="bi bi-clock"></i> Väntande (${amount ? amount + ' kr' : ''})</span>`,
         'unpaid': `<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle"></i> Obetald (${amount ? amount + ' kr' : ''})</span>`,
-        'no_invoice': '<span class="badge bg-secondary"><i class="bi bi-dash-circle"></i> Ingen avgift</span>'
+        'no_invoice': '<span class="badge bg-secondary"><i class="bi bi-dash-circle"></i> Ingen avgift</span>',
+        // Den nya modellen: klubben betalar (faktureras eller fakturerad) — skytten har inget att betala.
+        'club': '<span class="badge bg-info text-dark"><i class="bi bi-people"></i> Klubben betalar</span>'
     };
     return badges[status] || '<span class="badge bg-secondary">Okänd</span>';
 }
@@ -5366,6 +5378,18 @@ function applyCompetitionFiltersDebounced() {
 }
 
 function payInvoice(competitionId, invoiceId) {
+    // ⚠️ Den nya modellen (P3/P4): ingen faktura — betalsteget ur competition-fees.js.
+    // Frågan ställs till servern, aldrig gissad ur att invoiceId saknas.
+    if (window.HpskFees) {
+        HpskFees.get('GetMyFees', { competitionId }).then(d => {
+            if (d.success && d.model === 'ledger') {
+                HpskFees.openPayModal(competitionId, null, () => { if (typeof loadCompetitionRegistrations === 'function') loadCompetitionRegistrations(); });
+            } else {
+                showSwishPaymentModal(competitionId, invoiceId);
+            }
+        });
+        return;
+    }
     // Show Swish QR code modal
     showSwishPaymentModal(competitionId, invoiceId);
 }

@@ -1880,6 +1880,13 @@ namespace HpskSite.Controllers
                 // 5. Map to response objects with competition details, payment status
                 var results = new List<CompetitionRegistrationDto>();
 
+                // Den nya modellen (P3/P4): avgiftsraderna läses EN gång per tävling, aldrig per anmälan.
+                var feeModels = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.CompetitionPaymentModelService))
+                    as HpskSite.Services.CompetitionFees.CompetitionPaymentModelService;
+                var feeService = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.CompetitionFeeService))
+                    as HpskSite.Services.CompetitionFees.CompetitionFeeService;
+                var ledgerRows = new Dictionary<int, (List<HpskSite.Models.Ledger.LedgerPayment> Rows, Dictionary<int, HpskSite.Services.CompetitionFees.ChargeCoverage> Cover)>();
+
                 foreach (var reg in myRegistrations)
                 {
                     try
@@ -1912,6 +1919,42 @@ namespace HpskSite.Controllers
                             ? invoice
                             : (isPayable ? "unpaid" : "no_invoice", isPayable ? compFee : 0m, false, (int?)null);
 
+                        string paymentModel = "legacy";
+                        int? receiptId = null;
+                        string? feeLabel = null;
+                        if (feeModels != null && feeService != null && feeModels.IsLedger(competitionId))
+                        {
+                            paymentModel = "ledger";
+                            if (!ledgerRows.TryGetValue(competitionId, out var lr))
+                            {
+                                var rows = feeService.LoadFeeRows(competitionId);
+                                lr = (rows, feeService.LoadCoverage(rows));
+                                ledgerRows[competitionId] = lr;
+                            }
+                            var mine = lr.Rows.Where(r => r.SourceType == HpskSite.Models.Ledger.LedgerSourceType.CompetitionRegistration
+                                                          && r.SourceItemId == reg.Id).ToList();
+                            var classIds = classes;
+                            var fee = RegistrationFeeCalculator.Calculate(competition, classIds,
+                                reg.HasProperty("isSubCompetition") && reg.GetValue<bool>("isSubCompetition"));
+                            var st = HpskSite.Services.CompetitionFees.FeeItemStatus.For(fee, mine, lr.Cover);
+                            feeLabel = HpskSite.Services.CompetitionFees.FeeStatusKeys.Label(st.Key);
+                            var toPay = mine.Where(r => r.VoidedUtc == null && r.ConfirmedUtc == null && r.ClaimedUtc == null
+                                                        && r.FeePart != HpskSite.Models.CompetitionFees.CompetitionFeePart.Club).Sum(r => r.Amount);
+                            var ledgerStatus = st.Key switch
+                            {
+                                HpskSite.Services.CompetitionFees.FeeStatusKeys.Paid => "paid",
+                                HpskSite.Services.CompetitionFees.FeeStatusKeys.Overpaid => "paid",
+                                HpskSite.Services.CompetitionFees.FeeStatusKeys.NoFee => "no_invoice",
+                                HpskSite.Services.CompetitionFees.FeeStatusKeys.Claimed => "pending",
+                                HpskSite.Services.CompetitionFees.FeeStatusKeys.Invoiced => "club",
+                                HpskSite.Services.CompetitionFees.FeeStatusKeys.AwaitingInvoice => "club",
+                                _ => "unpaid"
+                            };
+                            paymentInfo = (ledgerStatus, toPay > 0 ? toPay : st.Open + st.Missing, false, (int?)null);
+                            isPayable = toPay > 0;
+                            receiptId = mine.Where(r => r.IsMoney && r.ReceiptId != null).Select(r => r.ReceiptId).LastOrDefault();
+                        }
+
                         results.Add(new CompetitionRegistrationDto
                         {
                             RegistrationId = reg.Id,
@@ -1928,7 +1971,10 @@ namespace HpskSite.Controllers
                             IsPayable = isPayable,
                             RegistrationFee = compFee,
                             CanUnregister = CanUnregister(competitionDate, paymentInfo.Item1),
-                            RegistrationDate = reg.CreateDate
+                            RegistrationDate = reg.CreateDate,
+                            PaymentModel = paymentModel,
+                            ReceiptId = receiptId,
+                            FeeStatusLabel = feeLabel
                         });
                     }
                     catch (Exception ex)
@@ -3513,6 +3559,12 @@ namespace HpskSite.Controllers
         public decimal RegistrationFee { get; set; }
         public bool CanUnregister { get; set; }
         public DateTime RegistrationDate { get; set; }
+
+        /// <summary>"ledger" = avgiften i liggaren (P3/P4); betalning och kvitto går då genom
+        /// competition-fees.js och /betalkvitto, inte /kvitto/{faktura}.</summary>
+        public string PaymentModel { get; set; } = "legacy";
+        public int? ReceiptId { get; set; }
+        public string? FeeStatusLabel { get; set; }
     }
 
     public class QuickCreateMemberRequest

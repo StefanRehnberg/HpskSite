@@ -10,6 +10,7 @@
 @inject HpskSite.Services.AdminAuthorizationService AuthService
 @inject HpskSite.Services.ClubService ClubService
 @inject Umbraco.Cms.Core.Services.IContentService ContentService
+@inject HpskSite.Services.CompetitionFees.CompetitionPaymentModelService PaymentModels
 @inject Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory DbFactory
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
@@ -1985,7 +1986,30 @@ window.CompetitionConfig = {
     </div>
 </div>
 
-@if (regMemberId > 0)
+@{
+    // ⚠️ Den nya modellen (P3/P4): avgiften bor i liggaren. Samma knapp, men betalsteget kommer ur
+    // competition-fees.js — gamla GetUnpaidInvoices ser inga fakturor för en sådan tävling.
+    var ledgerFees = PaymentModels.IsLedger(Model.Id);
+}
+<script src="/js/competition-fees.js?v=@DateTime.Now.Ticks"></script>
+@if (regMemberId > 0 && ledgerFees)
+{
+    <script>
+    (async function () {
+        const cid = @Model.Id;
+        const d = await HpskFees.get('GetMyFees', { competitionId: cid });
+        if (!d.success || d.model !== 'ledger') return;
+        const owes = (d.registrations || []).some(r => (r.toPay || []).length > 0);
+        if (!owes) return;
+        const btn = document.getElementById('unpaidInvoicesButtonContainer');
+        if (btn) btn.style.display = 'block';
+        document.getElementById('unpaidInvoicesModal')?.addEventListener('show.bs.modal', function () {
+            HpskFees.renderPayStep(document.getElementById('unpaidInvoicesModalBody'), { competitionId: cid });
+        });
+    })();
+    </script>
+}
+@if (regMemberId > 0 && !ledgerFees)
 {
     <script>
     (function() {

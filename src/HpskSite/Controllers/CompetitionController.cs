@@ -1764,6 +1764,37 @@ namespace HpskSite.Controllers
                     _logger.LogWarning(ex, "Failed to load reminder audit events for competition {CompetitionId}", competitionId.Value);
                 }
 
+                // ── Den nya modellen (P3/P4): betalstatus ur LIGGAREN, inte ur fakturor ──────────
+                // En tävling i den nya modellen har inga fakturor alls, så varje rad hade stått som
+                // "Saknar faktura". Läget härleds i stället ur avgiftsraderna — samma källa som
+                // arrangörens avprickning och Ekonomi, så de tre ytorna kan inte säga olika saker.
+                string paymentModel = "legacy";
+                var ledgerStatus = new Dictionary<int, HpskSite.Services.CompetitionFees.FeeItemStatus>();
+                var ledgerClaimed = new Dictionary<int, DateTime>();
+                try
+                {
+                    var models = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.CompetitionPaymentModelService))
+                        as HpskSite.Services.CompetitionFees.CompetitionPaymentModelService;
+                    var fees = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.CompetitionFeeService))
+                        as HpskSite.Services.CompetitionFees.CompetitionFeeService;
+                    if (models != null && fees != null && models.IsLedger(competitionId.Value))
+                    {
+                        paymentModel = "ledger";
+                        foreach (var item in fees.BuildOverview(competitionId.Value).Items
+                                     .Where(i => i.ItemType == HpskSite.Models.Ledger.LedgerSourceType.CompetitionRegistration))
+                        {
+                            ledgerStatus[item.ItemId] = item.Status;
+                            var claim = item.Rows.Where(r => r.ClaimedUtc != null && r.ConfirmedUtc == null && r.VoidedUtc == null)
+                                .Select(r => r.ClaimedUtc!.Value).OrderByDescending(d => d).FirstOrDefault();
+                            if (claim != default) ledgerClaimed[item.ItemId] = claim;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not read ledger fee status for competition {CompetitionId}", competitionId);
+                }
+
                 // PERFORMANCE FIX: Batch load club names - collect all unique club IDs first
                 var clubIdsToLoad = new HashSet<int>();
                 var memberIdsNeedingClubLookup = new List<(Umbraco.Cms.Core.Models.IContent content, int memberId)>();
@@ -1937,6 +1968,37 @@ namespace HpskSite.Controllers
                         if (paymentStatus == "No Invoice")
                             paymentStatus = paymentAmount > 0m ? "No Invoice" : "No Fee";
 
+                        // Den nya modellen: läget ur liggaren. De gamla statussträngarna behålls där
+                        // de betyder samma sak, så tabellen och summakorten fungerar oförändrade;
+                        // "Invoiced" är ny (fakturerad klubben, obetald).
+                        string? feeStatusKey = null, feeStatusLabel = null;
+                        if (paymentModel == "ledger")
+                        {
+                            var fs = ledgerStatus.TryGetValue(content.Id, out var st)
+                                ? st : HpskSite.Services.CompetitionFees.FeeItemStatus.For(fullFee,
+                                    new List<HpskSite.Models.Ledger.LedgerPayment>(),
+                                    new Dictionary<int, HpskSite.Services.CompetitionFees.ChargeCoverage>());
+                            feeStatusKey = fs.Key;
+                            feeStatusLabel = HpskSite.Services.CompetitionFees.FeeStatusKeys.Label(fs.Key);
+                            paymentStatus = fs.Key switch
+                            {
+                                HpskSite.Services.CompetitionFees.FeeStatusKeys.Paid => "Paid",
+                                HpskSite.Services.CompetitionFees.FeeStatusKeys.Overpaid => "Paid",
+                                HpskSite.Services.CompetitionFees.FeeStatusKeys.Invoiced => "Invoiced",
+                                HpskSite.Services.CompetitionFees.FeeStatusKeys.NoFee => "No Fee",
+                                _ => "Pending"
+                            };
+                            invoiceId = 0;
+                            invoiceNumber = "";
+                            paidAmount = fs.Paid + fs.InvoicePaid;
+                            pendingAmount = fs.Open + fs.Missing + fs.AwaitingInvoice + fs.Claimed + fs.Invoiced;
+                            outstandingAmount = Math.Max(0m, fullFee - paidAmount);
+                            paymentAmount = fs.Open + fs.Missing + fs.AwaitingInvoice;
+                            hasVariance = fs.Overpaid > 0;
+                            paymentSentDate = ledgerClaimed.TryGetValue(content.Id, out var cd) ? cd : null;
+                            paymentSentBy = paymentSentDate != null ? "betalaren" : null;
+                        }
+
                         // Convert class IDs to display names
                         var shootingClassesWithNames = shootingClasses.Select(sc => new
                         {
@@ -1980,7 +2042,9 @@ namespace HpskSite.Controllers
                             reminderCount = reminderCount,
                             // "Can we push to this shooter right now" — true when they have at least one
                             // browser subscribed. Not a competition-specific opt-in; see WebPushService.
-                            hasPushSubscription = memberId > 0 && pushEnabledMemberIds.Contains(memberId)
+                            hasPushSubscription = memberId > 0 && pushEnabledMemberIds.Contains(memberId),
+                            feeStatusKey,
+                            feeStatusLabel
                         };
                     })
                     .OrderBy(r => r.memberName)
@@ -2016,7 +2080,9 @@ namespace HpskSite.Controllers
                     // Name of the optional sub-competition (Deltävling), empty when the
                     // competition has none. Lets the Anmälningar tab show a Deltävling column
                     // (with a check on rows where the shooter opted in) only when relevant.
-                    subCompetitionName = competition.Value<string>("subCompetitionName") ?? ""
+                    subCompetitionName = competition.Value<string>("subCompetitionName") ?? "",
+                    // "ledger" = avgifterna i liggaren (P3/P4). Anmälningar-flikens JS väljer väg på den.
+                    paymentModel
                 });
             }
             catch (Exception ex)

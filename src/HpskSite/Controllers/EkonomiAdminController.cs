@@ -531,6 +531,8 @@ namespace HpskSite.Controllers
                 "Posten är en avskrivning från Tillgångar och rättas inte för hand.",
             LedgerSourceType.OpeningBalance =>
                 "Posten är föreningens ingående balanser. Ändra dem under Inställningar → Ingående balanser.",
+            HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge.SourceType =>
+                "Posten kommer från en betald faktura i det gamla fakturasättet. Rätta den med en rättelseverifikation.",
             LedgerSourceType.CompetitionRegistration or LedgerSourceType.TeamFee
                 or LedgerSourceType.CompetitionInvoice or LedgerSourceType.Event =>
                 "Posten kommer från en anmälningsbetalning. Ångra betalningen där den togs emot.",
@@ -687,8 +689,74 @@ namespace HpskSite.Controllers
 
                 // Räkningar från kretsen. Bara för klubbens riktiga bokföring — en sandlåda är
                 // kladdpapper och ska inte påstå att kretsen skickat den något.
-                incomingRegionFees = IncomingRegionFeesFor(issuerType, issuerId)
+                incomingRegionFees = IncomingRegionFeesFor(issuerType, issuerId),
+
+                // Fakturor från andra arrangörer i pistol.nu (P3/P4) — samma mönster som kretsavgiften.
+                incomingInvoices = IncomingInvoicesFor(issuerType, issuerId)
             });
+        }
+
+        /// <summary>
+        /// Fakturor som andra föreningar ställt ut till klubben för anmälningar — räkningar att betala.
+        /// <para>⚠️ Samma regel som kretsavgiften: "registrerad" känns igen på fakturans REFERENS i
+        /// utgiftens beskrivning. Ingen ny kolumn, och en räkning som registrerats för hand med
+        /// referensen räknas också. Bara den riktiga bokföringen — en sandlåda är kladdpapper.</para>
+        /// </summary>
+        private List<object> IncomingInvoicesFor(int issuerType, int issuerId)
+        {
+            if (issuerType != (int)DocumentOwnerType.Club || issuerId <= 0) return new();
+            try
+            {
+                var charges = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.LedgerChargeService))
+                    as HpskSite.Services.CompetitionFees.LedgerChargeService;
+                var protection = HttpContext.RequestServices.GetService(typeof(Microsoft.AspNetCore.DataProtection.IDataProtectionProvider))
+                    as Microsoft.AspNetCore.DataProtection.IDataProtectionProvider;
+                if (charges == null) return new();
+                var protector = protection == null ? null : ClubInvoiceDocumentController.CreateProtector(protection);
+
+                var list = charges.ListForRecipient((int)DocumentOwnerType.Club, issuerId).Where(v => !v.Charge.IsVoided).ToList();
+                if (list.Count == 0) return new();
+
+                List<ExpenseRef> expenses;
+                using (var db = DatabaseFactory.CreateDatabase())
+                    expenses = db.Fetch<ExpenseRef>(
+                        "SELECT Id, Status, Description FROM dbo.LedgerExpense WHERE IssuerType = 0 AND IssuerId = @0 AND Status <> @1",
+                        issuerId, LedgerExpenseStatus.Rejected);
+
+                return list.Select(v =>
+                {
+                    var reg = expenses.FirstOrDefault(e => (e.Description ?? "").Contains(v.Charge.Reference, StringComparison.OrdinalIgnoreCase));
+                    return (object)new
+                    {
+                        chargeId = v.Charge.Id,
+                        number = v.Charge.NumberText,
+                        reference = v.Charge.Reference,
+                        issuerName = v.Charge.IssuerName,
+                        competitionName = v.Charge.SourceName,
+                        amount = v.Charge.Amount + v.Balance.Credited,
+                        outstanding = v.Balance.Outstanding,
+                        issueDate = v.Charge.IssueDate.ToString("yyyy-MM-dd"),
+                        dueDate = v.Charge.DueDate?.ToString("yyyy-MM-dd"),
+                        settled = v.Balance.IsSettled,
+                        documentUrl = protector == null ? null
+                            : $"/klubbfaktura/{v.Charge.Id}?t={Uri.EscapeDataString(Microsoft.AspNetCore.DataProtection.DataProtectionCommonExtensions.Protect(protector, v.Charge.Id.ToString()))}",
+                        expenseId = reg?.Id,
+                        expenseStatus = reg?.Status
+                    };
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Fakturorna till klubb {Club} kunde inte läsas.", issuerId);
+                return new();
+            }
+        }
+
+        private class ExpenseRef
+        {
+            public int Id { get; set; }
+            public string Status { get; set; } = "";
+            public string? Description { get; set; }
         }
 
         private List<IncomingRegionFee> IncomingRegionFeesFor(int issuerType, int issuerId)
@@ -2332,6 +2400,58 @@ namespace HpskSite.Controllers
         /// måste göras mot betalningen som faktiskt ligger i databasen, annars kan vem som helst
         /// med ett giltigt id bokföra i en annan förenings liggare.</para>
         /// </summary>
+        /// <summary>
+        /// GET GetLegacyInvoicesToPost — betalda fakturor i den GAMLA modellen som inte är bokförda
+        /// (läsbryggan, Stefans beslut 2026-09-24). Tom för en förening som inte bokför här.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetLegacyInvoicesToPost(int issuerType, int issuerId)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+            // Gamla fakturor finns bara i den riktiga bokföringen — en sandlåda har inga.
+            if (issuerId < 0) return Json(new { success = true, invoices = Array.Empty<object>() });
+
+            var bridge = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge))
+                as HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge;
+            if (bridge == null) return Json(new { success = true, invoices = Array.Empty<object>() });
+
+            var list = bridge.Unposted(issuerType, issuerId);
+            return Json(new
+            {
+                success = true,
+                total = list.Sum(i => i.Amount),
+                invoices = list.Select(i => new
+                {
+                    invoiceId = i.InvoiceId, number = i.InvoiceNumber, payer = i.PayerName,
+                    competition = i.CompetitionName, amount = i.Amount, paidDate = i.PaidDate.ToString("yyyy-MM-dd")
+                })
+            });
+        }
+
+        /// <summary>POST PostLegacyInvoices — bokför dem, med betaldagen som bokföringsdag.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PostLegacyInvoices([FromBody] FiscalYearStatusRequest request)
+        {
+            var (ok, name) = await AuthorizeWriteAsync(request?.IssuerType ?? 0, request?.IssuerId ?? 0);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+            var bridge = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge))
+                as HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge;
+            if (bridge == null) return Json(new { success = false, message = "Bryggan saknas." });
+
+            var before = bridge.Unposted(request!.IssuerType, request.IssuerId).Count;
+            var posted = bridge.PostAll(request.IssuerType, request.IssuerId, await CurrentMemberIdAsync());
+            _logger.LogInformation("Ekonomi: {Forening} bokförde {Antal} gamla fakturor.", name, posted);
+            return Json(new
+            {
+                success = posted == before,
+                message = posted == before
+                    ? $"{posted} betalda fakturor är bokförda."
+                    : $"{posted} av {before} bokfördes. De övriga ligger kvar — se om räkenskapsåret är öppet och kontona finns."
+            });
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> PostPending([FromBody] PostPendingRequest request)
