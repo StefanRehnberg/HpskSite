@@ -9807,3 +9807,28 @@ förhandsgranskningen.
 **Svit:** `hpsk-verify/ekonomi-sie-import-verify.mjs` **41/41** i egen sandlåda. A/B: utan
 `VatRate = 0` faller momspåståendet (⚠️ fixturen ger 3010 förvald moms — utan den kunde påståendet
 aldrig falla), utan de förklarade luckorna faller luckkontrollen.
+
+## Ekonomistatistiken på /admin-page → Statistik (2026-09-24)
+
+Sektion M, laddad från en EGEN endpoint (`AdminStatistics/GetEkonomiStats`, partial-filen
+`AdminStatisticsController.Ekonomi.cs`) så att liggarfrågorna aldrig håller tillbaka resten av sidan.
+Helt härledd, ingen lagring. Plus en `Ekonomi`-hink (`/ekonomi%`, inloggningskrävd) i besöksstatistiken.
+
+- **⚠️⚠️ ATT HA LIGGARDATA ÄR INTE ATT ANVÄNDA LIGGAREN.** Varje förening med inställningar har en skarp
+  utställare, och avgifter bokförs automatiskt vid bekräftelse. Allt räknas därför i **egna**
+  källtyper (`EkonomiOwnSources`: manual, bank-import, expense, sie-import, asset-depreciation,
+  opening-balance) skilt från automatiska. "Använder skarpt" = någon mänsklig handling i den skarpa
+  liggaren (`EkSide.HasHumanActivity`).
+- **⚠️⚠️ SANDLÅDANS RADER LIGGER I `sbx`**, inte i `dbo`. Varje utställarscopad fråga körs mot båda
+  (`Both` → `LedgerSchema.Sql(-1, sql)`); bara `LedgerIssuer` och `LedgerAuditorGrant` finns enbart i
+  dbo. Mätt i dev: en dbo-läsande tjänst hade gett 8 egna sandlådeposter i stället för 408.
+- **Sandlåda avgörs av `LedgerIssuer.Kind`, aldrig av id-intervallet** — dev har både ≥1 000 000 och
+  negativa sandlåde-id:n. Ett negativt id som saknas i `LedgerIssuer` hoppas över.
+- Demoklubben exkluderas via `ComputeDemoExclusions`, som resten av sidan.
+- Egna projekt = `LedgerProject` med annan källa än competition/event (de skapas vid första kronan).
+- **Omätt:** SIE-export och fordringsexport lämnar inga spår, så exportklubbarna syns bara via sina
+  betalningar. Att lägga en `LedgerAuditEvent`-rad vid export (i ekonomitjänsterna) är nästa steg.
+
+**Svit:** `hpsk-verify/ekonomi-statistik-verify.mjs` **29/29** (läser bara) — mäter varje siffra mot
+oberoende SQL, med kontrollprov att sandlådepåståendet skiljer en dbo-läsande tjänst från en riktig.
+`ekonomi-statistik-shot.mjs` tar en skärmdump av sektionen. Adds C# → full ombyggnad. Ingen SQL.

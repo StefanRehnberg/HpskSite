@@ -19,7 +19,7 @@ using HpskSite.Services.Firearms;
 
 namespace HpskSite.Controllers
 {
-    public class AdminStatisticsController : SurfaceController
+    public partial class AdminStatisticsController : SurfaceController
     {
         private readonly IMemberService _memberService;
         private readonly AdminAuthorizationService _authService;
@@ -212,7 +212,7 @@ namespace HpskSite.Controllers
                 // "engaged session" filter (≥ 2 distinct paths in the window, same as the
                 // daily/weekly charts) exists to stop cookie-blind scrapers inflating the
                 // PUBLIC buckets — so it is applied to those only. The login-gated pages
-                // (Styrelse, Fältkonfig, Resultatinmatning, Mitt schema) can't be reached by a
+                // (Styrelse, Fältkonfig, Resultatinmatning, Mitt schema, Ekonomi) can't be reached by a
                 // scraper at all, and a station tablet or a shooter opening a QR/push link
                 // often logs exactly ONE path for a whole day — filtering those would report
                 // zero usage for pages that were used all day. Paths come from the route table
@@ -236,12 +236,14 @@ namespace HpskSite.Controllers
                                   WHEN LOWER(v.[Path]) LIKE '/live%'          THEN 'Live-resultat'
                                   WHEN LOWER(v.[Path]) LIKE '/station%'       THEN 'Resultatinmatning'
                                   WHEN LOWER(v.[Path]) LIKE '/mitt-schema%'   THEN 'Mitt schema'
+                                  WHEN LOWER(v.[Path]) LIKE '/ekonomi%'       THEN 'Ekonomi'
                                   ELSE NULL
                               END AS Feature,
                               CASE WHEN LOWER(v.[Path]) LIKE '/styrelse%'
                                      OR LOWER(v.[Path]) LIKE '/faltkonfig%'
                                      OR LOWER(v.[Path]) LIKE '/station%'
                                      OR LOWER(v.[Path]) LIKE '/mitt-schema%'
+                                     OR LOWER(v.[Path]) LIKE '/ekonomi%'
                                    THEN 1 ELSE 0 END AS LoginGated,
                               CASE WHEN e.SessionHash IS NULL THEN 0 ELSE 1 END AS Engaged
                           FROM [VisitorLogs] v
