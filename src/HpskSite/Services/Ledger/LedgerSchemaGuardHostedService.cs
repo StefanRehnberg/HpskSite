@@ -4,6 +4,8 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
+using HpskSite.Services.Hosting;
+
 namespace HpskSite.Services.Ledger
 {
     /// <summary>
@@ -28,7 +30,7 @@ namespace HpskSite.Services.Ledger
     /// vars hela syfte är att fånga tystnad. Det är precis därför <c>/health/ledger</c> finns:
     /// den svarar på begäran i stället för att skrika en gång och sedan tiga.</para>
     /// </summary>
-    public class LedgerSchemaGuardHostedService : BackgroundService
+    public class LedgerSchemaGuardHostedService : IsolatedBackgroundService
     {
         /// <summary>Låt sajten starta klart först — databasen kan ännu inte vara nåbar.</summary>
         private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(1);
@@ -44,7 +46,7 @@ namespace HpskSite.Services.Ledger
             _logger = logger;
         }
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override async Task ExecuteIsolatedAsync(CancellationToken stoppingToken)
         {
             try
             {

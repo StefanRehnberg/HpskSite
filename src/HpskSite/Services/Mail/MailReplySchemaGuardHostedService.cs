@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 
+using HpskSite.Services.Hosting;
+
 namespace HpskSite.Services.Mail
 {
     /// <summary>
@@ -25,7 +27,7 @@ namespace HpskSite.Services.Mail
     ///
     /// <para>Kör EN gång vid start — schemat ändras inte under en process.</para>
     /// </summary>
-    public class MailReplySchemaGuardHostedService : BackgroundService
+    public class MailReplySchemaGuardHostedService : IsolatedBackgroundService
     {
         /// <summary>Låt sajten starta klart först — databasen kan ännu inte vara nåbar.</summary>
         private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(1);
@@ -41,7 +43,7 @@ namespace HpskSite.Services.Mail
             _logger = logger;
         }
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override async Task ExecuteIsolatedAsync(CancellationToken stoppingToken)
         {
             try
             {

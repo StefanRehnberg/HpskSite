@@ -1,5 +1,7 @@
 using Umbraco.Cms.Infrastructure.Persistence;
 
+using HpskSite.Services.Hosting;
+
 namespace HpskSite.Services
 {
     /// <summary>
@@ -35,7 +37,7 @@ namespace HpskSite.Services
     /// i en övergiven transaktion. En schemakontroll behöver inget scope: den ställer två skalära
     /// frågor och ska inte delta i någon transaktion alls.</para>
     /// </summary>
-    public class EkonomiEnkatSchemaGuardHostedService : BackgroundService
+    public class EkonomiEnkatSchemaGuardHostedService : IsolatedBackgroundService
     {
         /// <summary>Låt sajten starta klart först — databasen kan ännu inte vara nåbar.</summary>
         private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(1);
@@ -51,7 +53,7 @@ namespace HpskSite.Services
             _logger = logger;
         }
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override async Task ExecuteIsolatedAsync(CancellationToken stoppingToken)
         {
             try
             {

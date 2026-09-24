@@ -1,10 +1,12 @@
+using HpskSite.Services.Hosting;
+
 namespace HpskSite.Services.Ranking
 {
     /// <summary>
     /// Builds the Träningsmatch ranking snapshot nightly (~03:00) and once shortly after startup,
     /// so the board is never empty after a deploy. Reads always come from the persisted snapshot.
     /// </summary>
-    public class RankingSnapshotHostedService : BackgroundService
+    public class RankingSnapshotHostedService : IsolatedBackgroundService
     {
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<RankingSnapshotHostedService> _logger;
@@ -18,7 +20,7 @@ namespace HpskSite.Services.Ranking
             _logger = logger;
         }
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override async Task ExecuteIsolatedAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("RankingSnapshotHostedService started.");
 

@@ -1,13 +1,15 @@
 using NPoco;
 using Umbraco.Cms.Infrastructure.Scoping;
 
+using HpskSite.Services.Hosting;
+
 namespace HpskSite.Services;
 
 /// <summary>
 /// Background service that automatically deletes target photos from matches
 /// that have been completed for longer than the configured retention period.
 /// </summary>
-public class TargetPhotoCleanupService : BackgroundService
+public class TargetPhotoCleanupService : IsolatedBackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IWebHostEnvironment _environment;
@@ -29,7 +31,7 @@ public class TargetPhotoCleanupService : BackgroundService
         _configuration = configuration;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteIsolatedAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("TargetPhotoCleanupService started. Will run cleanup every {Interval} hours", CleanupInterval.TotalHours);
 

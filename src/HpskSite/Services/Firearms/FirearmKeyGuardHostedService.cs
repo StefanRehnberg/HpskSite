@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 
+using HpskSite.Services.Hosting;
+
 namespace HpskSite.Services.Firearms
 {
     /// <summary>
@@ -20,7 +22,7 @@ namespace HpskSite.Services.Firearms
     /// <para>Kör EN gång vid start. Nycklarna kommer ur konfigurationen och ändras inte under en
     /// process, så en återkommande svepning skulle bara upprepa samma svar.</para>
     /// </summary>
-    public class FirearmKeyGuardHostedService : BackgroundService
+    public class FirearmKeyGuardHostedService : IsolatedBackgroundService
     {
         /// <summary>Låt sajten starta klart först — databasen kan ännu inte vara nåbar.</summary>
         private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(1);
@@ -36,7 +38,7 @@ namespace HpskSite.Services.Firearms
             _logger = logger;
         }
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override async Task ExecuteIsolatedAsync(CancellationToken stoppingToken)
         {
             try
             {
@@ -56,7 +58,7 @@ namespace HpskSite.Services.Firearms
                 foreach (var error in keyRing.ConfigurationErrors)
                     _logger.LogError("Vapenregistret: felaktig nyckelkonfiguration — {Error}", error);
 
-                var inventory = vault.TryGetInventory();
+                var inventory = vault.GetInventory();
 
                 if (inventory is null)
                 {
