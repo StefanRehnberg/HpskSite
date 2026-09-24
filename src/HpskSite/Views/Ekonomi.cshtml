@@ -7,6 +7,8 @@
     var uid = $"ek{Model.IssuerType}_{Model.IssuerId}";
     // Ordet för föreningens årsavgift: kretsen tar kretsavgift av klubbarna, klubben medlemsavgift.
     var feeWord = Model.IssuerType == 1 ? "Kretsavgift" : "Medlemsavgifter";
+    // Sandlådornas id räknas NEDÅT, så den nyaste har det lägsta id:t.
+    var newestSandbox = Model.Issuers.Where(i => i.IsSandbox).OrderBy(i => i.Id).FirstOrDefault();
 }
 @*
     Kassorens arbetsyta. Innehallet foljer Ekonomi Exempel/Ekonomi_Wireframes.pdf - oppna den
@@ -187,6 +189,15 @@
       color: var(--ek-attn); }
   .ek-page .ek-alert.ek-bad { border-color: var(--bs-danger-border-subtle);
       background: var(--bs-danger-bg-subtle); color: var(--bs-danger-text-emphasis); }
+  /* Under test-rutan: rubriken är alltid synlig, innehållet går att fälla ihop. */
+  /* ⚠️ Specificiteten måste slå .ek-alert.ek-warn — annars blir hela texten i
+     varningsfärgen, och tre stycken orange text är tunga att läsa. Bara rubriken bär färgen. */
+  .ek-page .ek-alert.ek-beta { color: var(--bs-body-color); margin-bottom: 1.25rem; }
+  .ek-page .ek-beta summary { cursor: pointer; color: var(--ek-attn); }
+  .ek-page .ek-beta[open] summary { margin-bottom: .5rem; }
+  .ek-page .ek-beta-body ol { padding-left: 1.25rem; margin-bottom: .6rem; }
+  .ek-page .ek-beta-body li { margin-bottom: .5rem; }
+  .ek-page .ek-beta-body p { margin-bottom: .5rem; }
   .ek-page .ek-alert.ek-ok { border-color: var(--bs-success-border-subtle);
       background: var(--bs-success-bg-subtle); color: var(--bs-success-text-emphasis); }
 
@@ -343,6 +354,79 @@
      id="@uid" data-issuer-type="@Model.IssuerType" data-issuer-id="@Model.IssuerId"
      data-owner-id="@Model.OwnerId" data-sandbox="@(Model.IsSandbox ? "1" : "0")"
      data-can-write="@(Model.CanWrite ? "1" : "0")">
+
+@* ══ UNDER TEST ═══════════════════════════════════════════════════════════════════════
+           Stefan 2026-09-24: ekonomidelen är ny, och så många som möjligt ska hjälpa till att
+           testa — i en sandlåda. Tre varianter, för att rådet måste gå att följa för den som läser:
+             · kassören i den riktiga bokföringen: skapa (eller öppna) en sandlåda,
+             · kassören i en sandlåda: vad som är värt att prova och hur man rapporterar,
+             · en läsare (styrelse/revisor): sandlådan är kassörens, men felrapporten är allas.
+           ⚠️ Knapparna står I RUTAN, intill texten som ber om handlingen — ett råd som pekar på en
+              knapp någon annanstans är ett råd ingen hittar ([[en-text-far-inte-hanvisa-till-det-osynliga]]).
+           ⚠️ Rutan går att FÄLLA IHOP men aldrig ta bort: rubriken står kvar, så beskedet att delen
+              är under test följer med varje besök. Läget minns per webbläsare (localStorage i
+              try/catch — sidan fungerar utan). *@
+        <details class="ek-alert ek-warn ek-beta" id="@(uid)_beta" open>
+            <summary><strong>Ekonomidelen är ny och testas just nu</strong>@(Model.IsSandbox ? " — tack för att du provar!" : "")</summary>
+            <div class="ek-beta-body">
+                @if (!Model.IsSandbox)
+                {
+                    <p>Pistol.nu:s ekonomidel fungerar, men den har bara använts av ett fåtal föreningar.
+                       Fel hittas när fler provar, så pistol.nu vill att så många som möjligt testar den.</p>
+                }
+                @if (Model.CanWrite && !Model.IsSandbox)
+                {
+                    <p class="mb-1"><strong>Så här provar du utan risk:</strong></p>
+                    <ol>
+                        <li><strong>Skapa en sandlåda.</strong> En sandlåda är en övningsbokföring: allt fungerar
+                            som på riktigt, men ingenting blir vår riktiga bokföring. Styrelsen och revisorn ser
+                            den inte.
+                            <div class="mt-2">
+                                @if (newestSandbox is null)
+                                {
+                                    <button type="button" class="btn btn-sm btn-primary" id="@(uid)_betaCreate">Skapa en sandlåda</button>
+                                }
+                                else
+                                {
+                                    <a class="btn btn-sm btn-primary" href="/ekonomi?type=@Model.IssuerType&id=@Model.OwnerId&issuer=@newestSandbox.Id">Öppna vår sandlåda</a>
+                                }
+                            </div>
+                        </li>
+                        <li><strong>Gör det du brukar göra under ett år.</strong> Lägg in ingående balanser, bokför
+                            några kvitton och utlägg, läs in ett kontoutdrag, gör en budget och prova bokslutet.</li>
+                        <li><strong>Säg till när något är fel, konstigt eller svårt att förstå.</strong> Skriv vad du
+                            gjorde och vad du väntade dig — en skärmbild hjälper.
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#bugReportModal">Rapportera fel</button>
+                            </div>
+                        </li>
+                    </ol>
+                    <p class="small mb-0">Avgifter, fakturor och @feeWord.ToLowerInvariant() finns bara i den riktiga
+                       bokföringen och går inte att prova i sandlådan.</p>
+                }
+                else if (Model.IsSandbox)
+                {
+                    <p>Allt du gör här är övning och kan kastas. Prova gärna det du brukar göra under ett år:
+                       ingående balanser, kvitton och utlägg, ett kontoutdrag, en budget och bokslutet.</p>
+                    <p>Hittar du något som är fel, konstigt eller svårt att förstå, skriv vad du gjorde och vad
+                       du väntade dig — en skärmbild hjälper.</p>
+                    <p class="mb-2">
+                        <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#bugReportModal">Rapportera fel</button>
+                    </p>
+                    <p class="small mb-0">Avgifter, fakturor och @feeWord.ToLowerInvariant() finns bara i den riktiga
+                       bokföringen. Dit kommer du tillbaka under <strong>Du arbetar i</strong> längst ned i menyn.
+                       Vill du börja om skapar du en ny sandlåda där.</p>
+                }
+                else
+                {
+                    <p>Kassören kan prova allt i en sandlåda, en övningsbokföring som bara hen ser. Ser du något
+                       som är fel, konstigt eller svårt att förstå, skriv vad du gjorde och vad du väntade dig.</p>
+                    <p class="mb-0">
+                        <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#bugReportModal">Rapportera fel</button>
+                    </p>
+                }
+            </div>
+        </details>
 
 <div class="wrap">
 
@@ -4838,6 +4922,20 @@
     // ⚠️ Sätts om i render() så fort statusen är läst — då vet vi vilket räkenskapsår
     //    föreningen arbetar i. Det här är bara ett värde att stå med innan dess.
     setDateField('bDate', new Date().toISOString().slice(0, 10));
+
+    // ── Under test-rutan ────────────────────────────────────────────────────────────────────
+    // ⚠️ "Skapa en sandlåda" i rutan går SAMMA väg som knappen i menyn (bekräftelse, fel, omladdning)
+    //    — två vägar att skapa en sandlåda hade kunnat säga olika saker om vad en sandlåda är.
+    (function () {
+        var beta = el('beta'), key = 'hpsk_ek_beta_closed';
+        if (!beta) return;
+        try { if (localStorage.getItem(key) === '1') beta.removeAttribute('open'); } catch (e) { }
+        beta.addEventListener('toggle', function () {
+            try { localStorage.setItem(key, beta.open ? '0' : '1'); } catch (e) { }
+        });
+        var create = el('betaCreate');
+        if (create && el('newSandbox')) create.addEventListener('click', function () { el('newSandbox').click(); });
+    })();
 
     // ── Ny sandlåda ───────────────────────────────────────────────────────────────────────
     if (canWrite) el('newSandbox').addEventListener('click', function () {
