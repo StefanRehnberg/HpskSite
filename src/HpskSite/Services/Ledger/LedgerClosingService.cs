@@ -242,12 +242,33 @@ namespace HpskSite.Services.Ledger
             });
 
             // 4 — Obetalda avgifter som kundfordran.
+            // ⚠️ Betalningen AV en faktura (competition-invoice) räknas inte här — fakturan räknas
+            //    för sig nedan, och en påstådd betalning på den hade annars räknats två gånger.
             var outstanding = ldb.Fetch<decimal?>(
                 @"SELECT SUM(Amount) FROM dbo.LedgerPayment
                    WHERE IssuerType = @0 AND IssuerId = @1
                      AND ConfirmedUtc IS NULL AND VoidedUtc IS NULL
+                     AND SourceType <> @3
                      AND CreatedUtc <= @2",
-                issuerType, issuerId, s.To.AddDays(1)).FirstOrDefault() ?? 0m;
+                issuerType, issuerId, s.To.AddDays(1), LedgerSourceType.CompetitionInvoice).FirstOrDefault() ?? 0m;
+
+            // ⚠️⚠️ UTFÄRDADE, OBETALDA FAKTUROR TILL KLUBBAR (P3/P4). Avgifterna som buntades in är
+            //    makulerade (de täcks av fakturan), så utan de här raderna försvann varje fakturerad
+            //    avgift ur kundfordringarna — precis de som verkligen är fordringar vid årsskiftet.
+            //    Saldot = fakturan + dess kreditnotor − mottagna betalningar, allt till och med årets slut.
+            outstanding += ldb.Fetch<decimal?>(
+                @"SELECT SUM(x.Rest) FROM (
+                    SELECT c.Amount
+                         + ISNULL((SELECT SUM(k.Amount) FROM dbo.LedgerCharge k
+                                    WHERE k.CreditsChargeId = c.Id AND k.VoidedUtc IS NULL AND k.IssueDate <= @2), 0)
+                         - ISNULL((SELECT SUM(ISNULL(p.ActualAmount, p.Amount)) FROM dbo.LedgerPayment p
+                                    WHERE p.ChargeId = c.Id AND p.ConfirmedUtc IS NOT NULL AND p.VoidedUtc IS NULL
+                                      AND p.ConfirmedUtc < @3), 0) AS Rest
+                      FROM dbo.LedgerCharge c
+                     WHERE c.IssuerType = @0 AND c.IssuerId = @1 AND c.Kind = 'invoice'
+                       AND c.VoidedUtc IS NULL AND c.IssueDate <= @2) x
+                   WHERE x.Rest > 0",
+                issuerType, issuerId, s.To.Date, s.To.Date.AddDays(1)).FirstOrDefault() ?? 0m;
 
             list.Steps.Add(new()
             {
