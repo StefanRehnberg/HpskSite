@@ -104,6 +104,15 @@ namespace HpskSite.Services.Ledger
                 return new LedgerAccessResult(LedgerAccess.Read, name, isAuditor: true,
                                               basis: LedgerAccessBasis.Auditor);
 
+            // ── Sajtens administratör skriver ──────────────────────────────────────────────
+            // ⚠️ Stefans beslut 2026-09-24: sajtadmin ska kunna bokföra även där föreningen har
+            //    en kassör — det är supportvägen när en förening ber om hjälp. Efter revisorn (en
+            //    revisor bokför aldrig) men före kassörsregeln, som annars gör sajtadmin till läsare.
+            //    ⚠️ BARA sajtadmin, inte krets- eller klubbadmin: IsClubAdminForClub viker in dem
+            //    alla, därför en egen fråga här.
+            if (await _auth.IsCurrentUserAdminAsync())
+                return new LedgerAccessResult(LedgerAccess.Write, name, basis: LedgerAccessBasis.SiteAdmin);
+
             // ── Kassören skriver ───────────────────────────────────────────────────────────
             // ⚠️⚠️ SKRIVRÄTTEN FÖLJER KASSÖRSUPPDRAGET (2026-09-24, Michael Henriksson: "Kassören
             //    borde vara den enda som kan komma in och göra allt i bokföringen"). Förut skrev
@@ -187,7 +196,9 @@ namespace HpskSite.Services.Ledger
         /// <summary>Administratör när föreningen har en kassör — läser.</summary>
         Admin,
         /// <summary>Revisor (vald eller inbjuden) — läser, skriver aldrig.</summary>
-        Auditor
+        Auditor,
+        /// <summary>Sajtens administratör — skriver alltid (support), utom som revisor.</summary>
+        SiteAdmin
     }
 
     public readonly struct LedgerAccessResult
