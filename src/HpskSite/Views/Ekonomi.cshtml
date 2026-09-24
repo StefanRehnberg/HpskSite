@@ -531,13 +531,32 @@
             <section data-pane="oversikt">
                 <div class="head">
                     <div>
-                        <h1>Är något fel?</h1>
+                        @* ⚠️ Hette "Är något fel?" (skissens rubrik) — lästes som ett larm av den som öppnar
+                           sidan första gången (Stefan 2026-09-24). Rubriken säger VAR man är, samma ord
+                           som menyvalet; frågorna står på korten, var och en med sitt svar intill. *@
+                        <h1>Översikt</h1>
                         <div class="sub" id="@(uid)_today"></div>
                     </div>
                     @* Vad inställningen ÄR, som text. Ändras under Inställningar — aldrig härifrån. *@
+                    @* ⚠️ En bricka utan fråga är en gåta. Den bar bara "Hel bokföring" — eller, före
+                       uppsättningen, "Inte uppsatt" utan förklaring, vilket lästes som ett fel (Stefan
+                       2026-09-24: "Ove 72 år blir rädd"). Nu står frågan intill svaret, och före
+                       uppsättningen ersätts brickan av vägen framåt. Räkenskapsåret visas bara när ett
+                       år finns — annars påstår brickan ett år som inte är upplagt. *@
                     <div class="pills">
-                        <span class="badge bg-light text-dark border fw-normal" style="font-size:.9rem" id="@(uid)_shapeBadge">@Model.ShapeLabel</span>
-                        <span class="badge bg-primary-subtle text-primary-emphasis border fw-semibold" style="font-size:.9rem">Räkenskapsår @Model.CurrentYear</span>
+                        <span class="ek-shape-wrap @(Model.IsSetUp ? "" : "d-none")" id="@(uid)_shapeWrap">
+                            <span class="muted small">Vi använder pistol.nu till:</span>
+                            <span class="badge bg-light text-dark border fw-normal" style="font-size:.9rem" id="@(uid)_shapeBadge">@Model.ShapeLabel</span>
+                        </span>
+                        @if (Model.CanWrite)
+                        {
+                            <button type="button" class="btn btn-sm btn-primary @(Model.IsSetUp ? "d-none" : "")" id="@(uid)_setupStart">Kom igång: välj hur vi använder ekonomin</button>
+                        }
+                        else
+                        {
+                            <span class="muted small @(Model.IsSetUp ? "d-none" : "")" id="@(uid)_setupPending">Kassören har inte valt hur vi använder ekonomin än.</span>
+                        }
+                        <span class="badge bg-primary-subtle text-primary-emphasis border fw-semibold @(Model.IsSetUp ? "" : "d-none")" style="font-size:.9rem" id="@(uid)_yearBadge">Räkenskapsår @Model.CurrentYear</span>
                     </div>
                 </div>
 
@@ -4706,7 +4725,11 @@
         var setUp = status.isSetUp && status.shape;
         el('shapeBadge').textContent = status.shape === 'full' ? 'Hel bokföring'
             : status.shape === 'export' ? 'Avgifter och export'
-            : status.shape === 'fees' ? 'Avgifter och kontroll' : 'Inte uppsatt';
+            : status.shape === 'fees' ? 'Avgifter och kontroll' : '';
+        show(el('shapeWrap'), !!setUp);
+        show(el('yearBadge'), !!setUp);
+        show(el('setupStart'), !setUp);
+        show(el('setupPending'), !setUp);
 
         if (!setUp) {
             el('setupTitle').textContent = 'Kom igång med ekonomin';
@@ -4937,6 +4960,9 @@
         beta.addEventListener('toggle', function () {
             try { localStorage.setItem(key, beta.open ? '0' : '1'); } catch (e) { }
         });
+        // "Kom igång" i Översiktens rubrikrad öppnar Inställningar — samma väg som menyvalet.
+        var start = el('setupStart');
+        if (start && el('toggleSetup')) start.addEventListener('click', function () { el('toggleSetup').click(); });
         var create = el('betaCreate');
         if (create && el('newSandbox')) create.addEventListener('click', function () { el('newSandbox').click(); });
     })();
