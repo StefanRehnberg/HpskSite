@@ -42,6 +42,7 @@ namespace HpskSite.Tests
         [InlineData(LedgerSourceType.RegionFee)]
         [InlineData(LedgerSourceType.Expense)]
         [InlineData(LedgerSourceType.AssetDepreciation)]
+        [InlineData(LedgerSourceType.AssetDisposal)]
         [InlineData(LedgerSourceType.BankImport)]
         [InlineData(LedgerSourceType.OpeningBalance)]
         [InlineData("okand-kalla")]

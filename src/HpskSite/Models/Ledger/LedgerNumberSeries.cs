@@ -107,6 +107,15 @@ namespace HpskSite.Models.Ledger
         public const string AssetDepreciation = "asset-depreciation";
 
         /// <summary>
+        /// Utrangeringen av en tillgång: anskaffningsvärdet och det ackumulerade bort, resten
+        /// som förlust. <c>SourceId</c> är tillgångens id.
+        /// <para>⚠️ EGEN källtyp, aldrig <see cref="AssetDepreciation"/>. "Bokfört i år" summerar
+        /// debet i avskrivningsposterna — med utrangeringen där hade minuskontots debet räknats
+        /// som årets avskrivning.</para>
+        /// </summary>
+        public const string AssetDisposal = "asset-disposal";
+
+        /// <summary>
         /// En utbetald utgift: ett utlägg eller en leverantörsfaktura.
         /// <para>⚠️ Verifikationen skrivs vid BETALNINGEN, inte vid registreringen — föreningen
         /// bokför enligt kontantmetoden. <c>SourceId</c> är utgiftens id.</para>

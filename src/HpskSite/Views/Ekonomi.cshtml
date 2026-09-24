@@ -1837,10 +1837,9 @@
                 som klart ar varre an inget steg alls.
             *@
             @*
-                ⚠️⚠️ REGISTRET ÄR DEN ENDA PLATS DÄR ANSKAFFNINGSVÄRDET FINNS KVAR. Avskrivningen
-                bokförs direkt mot tillgångskontot, så liggaren visar NETTO — efter fem år vet
-                bokföringen inte längre vad klubbstugan kostade. Därför utrangeras en rad här,
-                aldrig raderas.
+                ⚠️⚠️ ANSKAFFNINGSVÄRDET STÅR KVAR PÅ TILLGÅNGSKONTOT. Avskrivningen samlas på ett
+                minuskonto (7830 debet / 1229 kredit) — BAS-praxis. Direktmodellen (kredit 1220)
+                togs bort 2026-09-24, se LedgerAsset. Utrangeringen bokförs, och raden står kvar.
 
                 ⚠️ Kontona väljs PER TILLGÅNG ur föreningens egen kontoplan, inte via roller: en
                 klubbstuga skrivs av mot 7820 och en pistol mot 7830, och en roll hade tvingat
@@ -2451,6 +2450,14 @@
                                 <label class="form-label" for="@(uid)_aDeprAccount">Konto för årets avskrivning</label>
                                 <select class="form-select" id="@(uid)_aDeprAccount"></select>
                             </div>
+                            @* ⚠️⚠️ Minuskontot. Anskaffningsvärdet står kvar på tillgångskontot och
+                               avskrivningarna samlas här (1220 → 1229) — BAS-praxis, rättat efter
+                               Michael Henriksson 2026-09-24. Förslaget följer tillgångskontot. *@
+                            <div class="col-md-6">
+                                <label class="form-label" for="@(uid)_aAccAccount">Konto där avskrivningarna samlas</label>
+                                <select class="form-select" id="@(uid)_aAccAccount"></select>
+                                <div class="form-text">Inköpsvärdet står kvar på tillgångens konto. Balansräkningen visar båda, och skillnaden är värdet nu.</div>
+                            </div>
                             <div class="col-12">
                                 <label class="form-label" for="@(uid)_aNote">Anteckning (frivillig)</label>
                                 <input type="text" class="form-control" id="@(uid)_aNote"
@@ -2477,7 +2484,8 @@
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
                     </div>
                     <div class="modal-body">
-                        <p style="margin-top:0">Raden står kvar i registret — den skrivs bara inte av längre.</p>
+                        <p style="margin-top:0">Utrangeringen bokförs: inköpsvärdet och avskrivningarna tas bort,
+                            och det värde som återstår blir en förlust. Raden står kvar i registret.</p>
                         @* ⚠️ Datumet var hårdkodat till i dag: en försäljning förra månaden gick inte att föra in. *@
                         <div class="mb-3">
                             <label class="form-label" for="@(uid)_aDisposeDate">När lämnade den föreningen?</label>
@@ -2487,7 +2495,12 @@
                             <label class="form-label" for="@(uid)_aDisposeReason">Vad hände? Såld, skrotad eller stulen.</label>
                             <textarea class="form-control" id="@(uid)_aDisposeReason" rows="2"></textarea>
                         </div>
-                        <div class="form-text">Såldes den? Bokför försäljningen själv under Bokför — beloppet vet bara du.</div>
+                        <div class="mb-2" id="@(uid)_aDisposeLossWrap">
+                            <label class="form-label" for="@(uid)_aDisposeLoss">Konto för värdet som återstår</label>
+                            <select class="form-select" id="@(uid)_aDisposeLoss"></select>
+                        </div>
+                        <div class="form-text">Såldes den? Bokför försäljningen själv under Bokför, t.ex. mot 3970 — beloppet vet bara du.
+                            Utrangeringen går inte att ångra; ett fel rättas med en ny verifikation.</div>
                         <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_aDisposeError"></div>
                     </div>
                     <div class="modal-footer">
@@ -3716,8 +3729,33 @@
 
         if (d.hasFiscalYear === false) return;
 
+        assetMissing = d.missingAccounts || [];
+        assetLossDefault = d.disposalLossAccount || 0;
+
         renderAssets(d);
         if (canWrite) loadAssetAccounts();
+    }
+
+    // Mallens minus- och förlustkonton föreningen ännu saknar. De skapas när tillgången sparas.
+    var assetMissing = [], assetLossDefault = 0;
+    var ADDED = ' (läggs till)';
+
+    function withMissing(list, pick) {
+        var have = {};
+        list.forEach(function (a) { have[a.number] = true; });
+        return list.concat(assetMissing.filter(function (m) { return pick(m.number) && !have[m.number]; })
+                                       .map(function (m) { return { number: m.number, name: m.name + ADDED }; }))
+                   .sort(function (a, b) { return a.number - b.number; });
+    }
+
+    // ⚠️ Förslaget är tillgångskontot med 9 sist (1220 → 1229). Bara ett förslag — finns det
+    //    inte i listan lämnas valet orört.
+    function proposeAccAccount() {
+        var n = parseInt(el('aAssetAccount').value, 10);
+        if (!n) return;
+        var want = String(Math.floor(n / 10) * 10 + 9);
+        var sel = el('aAccAccount');
+        if (Array.prototype.some.call(sel.options, function (o) { return o.value === want; })) sel.value = want;
     }
 
     function renderAssets(d) {
@@ -3732,9 +3770,8 @@
             ? '<tr><td colspan="7" class="muted">Registret är tomt. Har föreningen köpt något '
               + 'som ska hålla i flera år lägger du in det under Åtgärder.</td></tr>'
             : rows.map(function (a) {
-                // ⚠️ En utrangerad rad STÅR KVAR och märks ut. Anskaffningsvärdet finns ingen
-                //    annanstans, så en radering hade raderat föreningens enda minne av vad
-                //    pjäsen kostade.
+                // ⚠️ En utrangerad rad STÅR KVAR och märks ut. Den är underlaget till
+                //    utrangeringens verifikation — revisorn ska kunna se vad som togs bort.
                 var mark = a.isDisposed
                     ? '<div>' + badge('off', 'Utrangerad', esc(shortDate(a.disposedDate))
                       + (a.disposalReason ? ' · ' + esc(a.disposalReason) : '')) + '</div>'
@@ -3751,6 +3788,8 @@
                      + mark
                      + '<div class="muted">Står på ' + a.assetAccountNumber + ' ' + esc(a.assetAccountName)
                      + ' · skrivs av mot ' + a.depreciationAccountNumber + ' ' + esc(a.depreciationAccountName)
+                     + ' · avskrivningarna samlas på ' + a.accumulatedDepreciationAccountNumber
+                     + (a.accumulatedDepreciationAccountName ? ' ' + esc(a.accumulatedDepreciationAccountName) : '')
                      + '</div></td>'
                      + '<td class="muted">' + esc(shortDate(a.inUseDate))
                      + '<div class="muted">' + a.usefulLifeYears + ' år</div></td>'
@@ -3839,13 +3878,24 @@
 
                 var balance = assetAccounts.filter(function (a) { return a.isBalance; });
                 var result = assetAccounts.filter(function (a) { return !a.isBalance && !a.isIncome; });
+                var classOne = function (n) { return n >= 1000 && n < 2000; };
+                var cost = function (n) { return n >= 4000 && n < 8000; };
 
                 // ⚠️ Faller tillbaka på HELA kontoplanen när filtret är tomt. En tom rullgardin
                 //    ser ut som ett fel i produkten; en bred lista går alltid att välja i.
-                fillSelect(el('aAssetAccount'), balance.length ? balance : assetAccounts);
-                fillSelect(el('aDeprAccount'), result.length ? result : assetAccounts);
+                // ⚠️ Förval: inventarier (1220 / 7830), det vanligaste. Listans första konto gav
+                //    1110 + 4010 Ammunition — en avskrivning på ammunitionskontot.
+                fillSelect(el('aAssetAccount'), balance.length ? balance : assetAccounts, 1220);
+                fillSelect(el('aDeprAccount'), result.length ? result : assetAccounts, 7830);
+                fillSelect(el('aAccAccount'), withMissing(
+                    assetAccounts.filter(function (a) { return classOne(a.number); }), classOne));
+                fillSelect(el('aDisposeLoss'), withMissing(
+                    assetAccounts.filter(function (a) { return cost(a.number); }), cost), assetLossDefault);
+                proposeAccAccount();
             });
     }
+
+    if (el('aAssetAccount')) el('aAssetAccount').addEventListener('change', proposeAccAccount);
 
     function fillAssetForm(a) {
         el('assetFormTitle').textContent = 'Ändra ' + a.name;
@@ -3860,6 +3910,7 @@
         loadAssetAccounts().then(function () {
             el('aAssetAccount').value = String(a.assetAccountNumber);
             el('aDeprAccount').value = String(a.depreciationAccountNumber);
+            el('aAccAccount').value = String(a.accumulatedDepreciationAccountNumber);
         });
 
         // ⚠️⚠️ ETT BOKFÖRT BELOPP LÅSER PLANEN, och det sägs INNAN kassören skriver. Servern
@@ -3888,7 +3939,12 @@
 
     if (el('aNew')) el('aNew').addEventListener('click', function () {
         resetAssetForm();
-        loadAssetAccounts();
+        loadAssetAccounts().then(function () {
+            // Ett nytt formulär börjar på förvalet, inte på förra tillgångens konton.
+            fillSelectValue(el('aAssetAccount'), 1220);
+            fillSelectValue(el('aDeprAccount'), 7830);
+            proposeAccAccount();
+        });
         openModal('assetFormModal');
         setTimeout(function () { el('aName').focus(); }, 300);
     });
@@ -3902,8 +3958,18 @@
         el('aDisposeTitle').textContent = 'Utrangera ' + (a ? a.name : '');
         el('aDisposeReason').value = '';
         setDateField('aDisposeDate', new Date().toISOString().substring(0, 10));
+        // Förlustkontot behövs bara när något värde återstår. Färdigavskrivet = inget att välja.
+        show(el('aDisposeLossWrap'), !a || a.bookValue > 0);
+        loadAssetAccounts().then(function () {
+            if (assetLossDefault) fillSelectValue(el('aDisposeLoss'), assetLossDefault);
+        });
         show(el('aDisposeError'), false);
         openModal('aDisposeModal');
+    }
+
+    function fillSelectValue(sel, v) {
+        if (Array.prototype.some.call(sel.options, function (o) { return o.value === String(v); }))
+            sel.value = String(v);
     }
 
     if (el('aDisposeConfirm')) el('aDisposeConfirm').addEventListener('click', function () {
@@ -3912,10 +3978,13 @@
         var btn = this; btn.disabled = true;
         postJson('/umbraco/surface/EkonomiAdmin/DisposeAsset', {
             issuerType: issuerType, issuerId: issuerId, assetId: disposingId,
-            when: el('aDisposeDate').value, reason: reason
+            when: el('aDisposeDate').value, reason: reason,
+            lossAccountNumber: parseInt(el('aDisposeLoss').value, 10) || 0
         }).then(function (j) {
             btn.disabled = false;
             if (!j.success) { el('aDisposeError').textContent = j.message; show(el('aDisposeError'), true); return; }
+            // Ett konto ur mallen kan ha lagts till — hämta kontoplanen på nytt nästa gång.
+            assetAccounts = null;
             closeModal('aDisposeModal');
             show(el('assetError'), false);
             el('assetOk').textContent = j.message;
@@ -3940,6 +4009,7 @@
             note: el('aNote').value,
             assetAccountNumber: parseInt(el('aAssetAccount').value, 10) || 0,
             depreciationAccountNumber: parseInt(el('aDeprAccount').value, 10) || 0,
+            accumulatedDepreciationAccountNumber: parseInt(el('aAccAccount').value, 10) || 0,
             inUseDate: el('aDate').value,
             acquisitionAmount: parseFloat(el('aAmount').value) || 0,
             usefulLifeYears: parseInt(el('aLife').value, 10) || 0,
@@ -3954,6 +4024,8 @@
             el('assetOk').textContent = j.message;
             show(el('assetOk'), true);
             resetAssetForm();
+            // Minuskontot kan ha lagts till ur mallen — hämta kontoplanen på nytt.
+            assetAccounts = null;
             loadAssets();
         }).catch(function (e) {
             btn.disabled = false;

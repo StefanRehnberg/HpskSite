@@ -195,5 +195,98 @@ namespace HpskSite.Tests
 
             total.Should().Be(10000m);
         }
+
+        // ── Minuskontot (ändrat 2026-09-24) ─────────────────────────────────────────────
+
+        [Theory]
+        [InlineData(1220, 1229)]
+        [InlineData(1221, 1229)]   // klubbvapen är ett underkonto till inventarierna
+        [InlineData(1110, 1119)]
+        [InlineData(1150, 1159)]
+        public void Minuskontot_foreslas_som_tillgangskontot_med_nio_sist(int asset, int expected)
+            => LedgerDepreciation.AccumulatedAccountFor(asset).Should().Be(expected);
+
+        /// <summary>
+        /// ⚠️ Varje tillgångskonto i mallen måste ha sitt minuskonto I mallen. Annars föreslår
+        /// formuläret ett konto som inte finns, och `EnsureAccount` vägrar skapa det.
+        /// </summary>
+        [Fact]
+        public void Varje_anlaggningskonto_i_mallen_har_sitt_minuskonto_i_mallen()
+        {
+            var numbers = LedgerChartTemplate.Accounts.Select(a => a.Number).ToHashSet();
+
+            var missing = LedgerChartTemplate.Accounts
+                .Where(a => a.Number is >= 1100 and < 1300 && a.Number % 10 != 9)
+                .Where(a => !numbers.Contains(LedgerDepreciation.AccumulatedAccountFor(a.Number)))
+                .Select(a => a.Number)
+                .ToList();
+
+            missing.Should().BeEmpty();
+        }
+
+        [Fact]
+        public void Forlustkontot_for_utrangering_finns_i_mallen_och_ar_en_kostnad()
+        {
+            LedgerChartTemplate.Find(LedgerChartTemplate.DisposalLossAccount).Should().NotBeNull();
+            LedgerAccountClass.Of(LedgerChartTemplate.DisposalLossAccount).Should().BeInRange(4, 7);
+        }
+
+        // ── Utrangeringen ───────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// ⚠️⚠️ Utrangeringen måste gå jämnt upp: det ackumulerade + det bokförda värdet =
+        /// hela anskaffningsvärdet. Annars står något kvar på 1220 eller 1229 för en tillgång
+        /// föreningen inte har.
+        /// </summary>
+        [Fact]
+        public void Utrangering_mitt_i_planen_delar_anskaffningsvardet_jamnt()
+        {
+            // 60 000 över 5 år = 1 000/mån. I bruk jan 2026, utrangerad juni 2027 = 18 månader.
+            var (acc, book) = LedgerDepreciation.Disposal(Asset(), new DateTime(2027, 6, 15));
+
+            acc.Should().Be(18000m);
+            book.Should().Be(42000m);
+            (acc + book).Should().Be(60000m);
+        }
+
+        [Fact]
+        public void Fardigavskriven_utrangering_har_inget_bokfort_varde()
+        {
+            var (acc, book) = LedgerDepreciation.Disposal(Asset(), new DateTime(2035, 1, 1));
+
+            acc.Should().Be(60000m);
+            book.Should().Be(0m);
+        }
+
+        [Fact]
+        public void Restvardet_ar_kvar_som_bokfort_varde_vid_utrangering()
+        {
+            // Restvärdet skrivs aldrig av — det är det som återstår när planen är slut.
+            var (acc, book) = LedgerDepreciation.Disposal(
+                Asset(amount: 60000m, residual: 6000m), new DateTime(2035, 1, 1));
+
+            acc.Should().Be(54000m);
+            book.Should().Be(6000m);
+        }
+
+        [Fact]
+        public void Utrangeringens_kopia_ror_inte_originalet()
+        {
+            var a = Asset();
+            LedgerDepreciation.Disposal(a, new DateTime(2027, 6, 15));
+            a.DisposedDate.Should().BeNull();
+        }
+
+        /// <summary>
+        /// Utrangeringsårets återstående avskrivning räknas på den utrangerade kopian: planen
+        /// kapas vid utrangeringen, så juni-utrangering ger sex månader, inte tolv.
+        /// </summary>
+        [Fact]
+        public void Utrangeringsaret_skrivs_av_fram_till_utrangeringen()
+        {
+            var copy = LedgerDepreciation.CopyDisposedOn(Asset(), new DateTime(2027, 6, 15));
+            var (f, t) = Year(2027);
+            LedgerDepreciation.ForPeriod(copy, f, t).Should().Be(6000m);
+        }
     }
 }

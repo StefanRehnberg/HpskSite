@@ -39,10 +39,15 @@ namespace HpskSite.Models.Ledger
         public static readonly TemplateAccount[] Accounts =
         {
             // 1 — Tillgångar
+            // ⚠️ Varje tillgångskonto har sitt minuskonto (x9) för ackumulerade avskrivningar.
+            //    Anskaffningsvärdet står kvar på tillgångskontot — se LedgerAsset.
             new(1110, "Klubbstuga och byggnader"),
+            new(1119, "Ackumulerade avskrivningar byggnader"),
             new(1150, "Markanläggningar och skjutvallar"),
+            new(1159, "Ackumulerade avskrivningar markanläggningar"),
             new(1220, "Inventarier och utrustning"),
             new(1221, "Klubbvapen"),
+            new(1229, "Ackumulerade avskrivningar inventarier"),
             new(1510, "Kundfordringar"),
             new(1910, "Kontantkassa"),
             new(1920, "Plusgiro"),
@@ -68,6 +73,7 @@ namespace HpskSite.Models.Ledger
             new(3050, "Sponsring"),
             new(3060, "Bidrag"),
             new(3890, "Övriga intäkter"),
+            new(3970, "Vinst vid försäljning av anläggningstillgångar"),
 
             // 4–7 — Kostnader
             new(4010, "Ammunition och skjutmateriel"),
@@ -87,12 +93,24 @@ namespace HpskSite.Models.Ledger
             new(6990, "Licensavgifter till förbundet"),
             new(7820, "Avskrivningar byggnader och mark"),
             new(7830, "Avskrivningar inventarier"),
+            new(7970, "Förlust vid utrangering av anläggningstillgångar"),
 
             // 8 — Finansiellt
             new(8310, "Ränteintäkter"),
             new(8410, "Räntekostnader"),
             new(8999, "Öresavrundning")
         };
+
+        /// <summary>
+        /// Förslaget på konto för förlusten när en tillgång utrangeras med ett bokfört värde kvar.
+        /// <para>⚠️ Ett FÖRSLAG i utrangeringsdialogen, aldrig ett konto koden bokför på utan att
+        /// kassören sett det — samma princip som tillgångens egna konton.</para>
+        /// </summary>
+        public const int DisposalLossAccount = 7970;
+
+        /// <summary>Mallens konto med numret, eller null.</summary>
+        public static TemplateAccount? Find(int number)
+            => Accounts.Any(a => a.Number == number) ? Accounts.First(a => a.Number == number) : null;
 
         /// <summary>
         /// Förvalsmappningen roll → kontonummer.
