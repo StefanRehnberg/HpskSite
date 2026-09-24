@@ -22,6 +22,12 @@ namespace HpskSite.Models
         /// <summary>Kategorinyckeln för priset per medlem.</summary>
         public const string PerMemberCategory = "krets-per-medlem";
 
+        /// <summary>Priset per start i de valda tävlingarna. Kategorins Label bär radens namn.</summary>
+        public const string PerStartCategory = "krets-per-start";
+
+        /// <summary>Priset per vald tävling där klubben hade minst en start. Label = radens namn.</summary>
+        public const string PerCompetitionCategory = "krets-per-tavling";
+
         /// <summary>
         /// Raderna för en klubb. <paramref name="manualAmount"/> satt ersätter formeln helt — kretsen
         /// har bestämt beloppet för just den klubben, och att dessutom lägga på grundavgiften vore
@@ -29,7 +35,18 @@ namespace HpskSite.Models
         /// </summary>
         public static List<MembershipFeeChargeLine> Lines(
             int year, decimal baseAmount, decimal perMember, int memberCount, decimal? manualAmount)
+            => Lines(year, new RegionFeeRate(baseAmount, perMember), memberCount, 0, 0, manualAmount);
+
+        /// <summary>
+        /// Raderna med hela taxan: grund, per medlem, per start och per tävling (Hallands tre rader:
+        /// årsavgift per medlem, lagavgift per tävling, startavgifter per start). En del som är noll,
+        /// eller vars antal är noll, ger ingen rad.
+        /// </summary>
+        public static List<MembershipFeeChargeLine> Lines(
+            int year, RegionFeeRate rate, int memberCount, int startCount, int competitionCount, decimal? manualAmount)
         {
+            var baseAmount = rate.BaseAmount;
+            var perMember = rate.PerMember;
             var lines = new List<MembershipFeeChargeLine>();
 
             if (manualAmount is decimal manual)
@@ -66,7 +83,78 @@ namespace HpskSite.Models
                     Amount = Round(perMember * memberCount)
                 });
 
+            // Samma regel som per medlem: ingen rad för "0 starter à 20 kr".
+            if (rate.PerCompetition > 0 && competitionCount > 0)
+                lines.Add(CountLine(MembershipFeeLineKind.PerCompetition, year, rate.CompetitionLabel,
+                    competitionCount, CompetitionUnit(competitionCount), rate.PerCompetition));
+
+            if (rate.PerStart > 0 && startCount > 0)
+                lines.Add(CountLine(MembershipFeeLineKind.PerStart, year, rate.StartLabel,
+                    startCount, StartUnit(startCount), rate.PerStart));
+
             return Number(lines);
+        }
+
+        /// <summary>
+        /// Räknar om start- och tävlingsraderna när kretsen rättar antalen på en SKICKAD avgift — med
+        /// det pris avgiften skickades med, precis som <see cref="SetMemberCount"/>. Övriga rader står kvar.
+        /// </summary>
+        /// <returns>Felet i klartext, eller null när det gick.</returns>
+        public static string? SetCompetitionCounts(
+            List<MembershipFeeChargeLine> lines, int year, RegionFeeRate rate, int startCount, int competitionCount)
+        {
+            if (startCount < 0 || competitionCount < 0) return "Antalet kan inte vara negativt.";
+            if (lines.Any(l => l.Kind == MembershipFeeLineKind.Manual))
+                return "Beloppet för klubben är skrivet för hand och räknas inte på starter. "
+                     + "Ta bort det egna beloppet först.";
+
+            var oldComp = lines.FirstOrDefault(l => l.Kind == MembershipFeeLineKind.PerCompetition);
+            var oldStart = lines.FirstOrDefault(l => l.Kind == MembershipFeeLineKind.PerStart);
+            var compPrice = oldComp?.UnitPrice ?? rate.PerCompetition;
+            var startPrice = oldStart?.UnitPrice ?? rate.PerStart;
+            var compLabel = oldComp is null ? rate.CompetitionLabel : LabelOf(oldComp.Description, rate.CompetitionLabel);
+            var startLabel = oldStart is null ? rate.StartLabel : LabelOf(oldStart.Description, rate.StartLabel);
+
+            // Raderna står efter grund/per medlem och före tilläggen.
+            lines.RemoveAll(l => l.Kind is MembershipFeeLineKind.PerCompetition or MembershipFeeLineKind.PerStart);
+            var at = lines.FindIndex(l => l.Kind == MembershipFeeLineKind.Extra);
+            if (at < 0) at = lines.Count;
+
+            var add = new List<MembershipFeeChargeLine>();
+            if (compPrice > 0 && competitionCount > 0)
+                add.Add(CountLine(MembershipFeeLineKind.PerCompetition, year, compLabel, competitionCount, CompetitionUnit(competitionCount), compPrice));
+            if (startPrice > 0 && startCount > 0)
+                add.Add(CountLine(MembershipFeeLineKind.PerStart, year, startLabel, startCount, StartUnit(startCount), startPrice));
+            lines.InsertRange(at, add);
+
+            Number(lines);
+            return null;
+        }
+
+        private static MembershipFeeChargeLine CountLine(string kind, int year, string label, int count, string unit, decimal price)
+            => new()
+            {
+                Kind = kind,
+                Description = CountText(year, label, count, unit, price),
+                Quantity = count,
+                UnitPrice = price,
+                Amount = Round(price * count)
+            };
+
+        /// <summary>"Startavgifter 2024, 140 starter à 20 kr" — samma form som per-medlem-raden.</summary>
+        public static string CountText(int year, string label, int count, string unit, decimal price)
+            => $"{(string.IsNullOrWhiteSpace(label) ? "Avgift" : label.Trim())} {year}, {count} {unit} à "
+             + price.ToString("0.##", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")) + " kr";
+
+        public static string StartUnit(int n) => n == 1 ? "start" : "starter";
+        public static string CompetitionUnit(int n) => n == 1 ? "tävling" : "tävlingar";
+
+        // Etiketten ur en befintlig rad ("Startavgifter 2024, 140 …" → "Startavgifter"), så att en
+        // skickad räkning behåller sitt namn när bara antalet rättas.
+        private static string LabelOf(string description, string fallback)
+        {
+            var i = description.LastIndexOf(' ', Math.Max(0, description.IndexOf(',') - 1));
+            return i > 0 ? description[..i] : fallback;
         }
 
         /// <summary>

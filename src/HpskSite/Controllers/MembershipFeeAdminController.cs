@@ -26,6 +26,7 @@ namespace HpskSite.Controllers
     public class MembershipFeeAdminController : SurfaceController
     {
         private readonly MembershipFeeService _feeService;
+        private readonly RegionFeeCompetitionService _regionCompetitions;
         private readonly ClubMembershipService _clubMembershipService;
         private readonly AdminAuthorizationService _auth;
         private readonly IMemberService _memberService;
@@ -48,6 +49,7 @@ namespace HpskSite.Controllers
             IProfilingLogger profilingLogger,
             IPublishedUrlProvider publishedUrlProvider,
             MembershipFeeService feeService,
+            RegionFeeCompetitionService regionCompetitions,
             ClubMembershipService clubMembershipService,
             AdminAuthorizationService auth,
             IMemberService memberService,
@@ -61,6 +63,7 @@ namespace HpskSite.Controllers
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _feeService = feeService;
+            _regionCompetitions = regionCompetitions;
             _clubMembershipService = clubMembershipService;
             _auth = auth;
             _memberService = memberService;
@@ -449,15 +452,17 @@ namespace HpskSite.Controllers
             var region = await AuthorizeRegionAsync(regionId, readOnly: true);
             if (region is null) return Json(new { success = false, message = "Åtkomst nekad" });
 
-            var (baseAmount, perMember) = _feeService.GetRegionRate(regionId, year);
+            var rate = _feeService.GetRegionRate(regionId, year);
             var charges = _feeService.GetChargesForRegionYear(regionId, year)
                 .ToDictionary(c => c.PayerClubId ?? 0);
             var feeEmails = _feeService.GetPayerEmails(MembershipFeeIssuer.Region, regionId);
+            var (counts, selection) = RegionStarts(regionId, year, region.Value.Code);
 
             var rows = RegionClubs(region.Value.Code).Select(club =>
             {
                 var count = ActiveMemberCount(club.Id);
-                var proposal = RegionFeeCalculator.Lines(year, baseAmount, perMember, count, null);
+                var starts = counts.GetValueOrDefault(club.Id);
+                var proposal = RegionFeeCalculator.Lines(year, rate, count, starts?.Starts ?? 0, starts?.Competitions ?? 0, null);
                 charges.TryGetValue(club.Id, out var charge);
 
                 return new
@@ -470,6 +475,11 @@ namespace HpskSite.Controllers
                     defaultEmail = club.ContactEmail ?? "",
                     hasEmail = !string.IsNullOrWhiteSpace(feeEmails.GetValueOrDefault(club.Id) ?? club.ContactEmail),
                     proposedCount = count,
+                    // pistol.nu:s räkning i de valda tävlingarna, med underlaget per tävling.
+                    proposedStarts = starts?.Starts ?? 0,
+                    proposedCompetitions = starts?.Competitions ?? 0,
+                    startsByCompetition = (starts?.ByCompetition ?? new Dictionary<int, int>())
+                        .Select(kv => new { competitionId = kv.Key, starts = kv.Value }),
                     proposedAmount = RegionFeeCalculator.Total(proposal),
                     charge = charge is null ? null : RegionChargeDto(charge)
                 };
@@ -481,7 +491,14 @@ namespace HpskSite.Controllers
                 success = true,
                 regionName = region.Value.Name,
                 year,
-                rate = new { baseAmount, perMember },
+                rate = new
+                {
+                    baseAmount = rate.BaseAmount, perMember = rate.PerMember,
+                    perStart = rate.PerStart, perCompetition = rate.PerCompetition,
+                    startLabel = rate.StartLabel, competitionLabel = rate.CompetitionLabel
+                },
+                // Tävlingarna som ingår, med namn — underlaget per klubb läses mot dem.
+                competitions = selection.Select(c => new { id = c.Id, name = c.Name, date = c.Date.ToString("yyyy-MM-dd") }),
                 rows,
                 // ⚠️ Krav på klubbar som inte längre finns i kretsen syns ändå — en klubb som bytt
                 //    krets eller lagts ner kan ha en obetald avgift, och den får inte försvinna ur
@@ -505,6 +522,9 @@ namespace HpskSite.Controllers
             clubName = c.PayerClubName,
             amount = c.Amount,
             memberCount = c.MemberCount,
+            // Antal kretsen skrivit för hand; null = följer pistol.nu:s räkning.
+            startCount = c.StartCount,
+            competitionCount = c.CompetitionCount,
             status = c.PaymentStatus,
             requestSentDate = c.RequestSentDate?.ToString("yyyy-MM-dd"),
             paymentSentDate = c.PaymentSentDate?.ToString("yyyy-MM-dd"),
@@ -525,10 +545,16 @@ namespace HpskSite.Controllers
             if (await AuthorizeRegionAsync(request.RegionId) is null)
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
-            if (request.BaseAmount < 0 || request.PerMember < 0)
+            if (request.BaseAmount < 0 || request.PerMember < 0 || request.PerStart < 0 || request.PerCompetition < 0)
                 return Json(new { success = false, message = "Beloppen kan inte vara negativa." });
 
-            _feeService.SaveRegionRate(request.RegionId, request.Year, request.BaseAmount, request.PerMember);
+            var rateRegion = await AuthorizeRegionAsync(request.RegionId);
+            var (counts, _) = RegionStarts(request.RegionId, request.Year, rateRegion!.Value.Code);
+            _feeService.SaveRegionRate(request.RegionId, request.Year,
+                new RegionFeeRate(request.BaseAmount, request.PerMember, request.PerStart, request.PerCompetition,
+                    request.StartLabel ?? RegionFeeRate.DefaultStartLabel,
+                    request.CompetitionLabel ?? RegionFeeRate.DefaultCompetitionLabel),
+                counts);
             return Json(new
             {
                 success = true,
@@ -558,6 +584,16 @@ namespace HpskSite.Controllers
             var clubs = (request.Clubs ?? new())
                 .Where(c => c.MemberCount >= 0 && (c.ManualAmount is null or >= 0))
                 .ToList();
+
+            // ⚠️ Starterna räknas av SERVERN. Klientens lista bär bara klubb och medlemsantal — ett
+            //    antal starter ur en webbläsare vore ett belopp på en räkning som ingen räknat.
+            var (counts, _) = RegionStarts(request.RegionId, request.Year, region.Value.Code, useCache: false);
+            foreach (var c in clubs)
+            {
+                var s = counts.GetValueOrDefault(c.ClubId);
+                c.Starts = s?.Starts ?? 0;
+                c.Competitions = s?.Competitions ?? 0;
+            }
 
             var byId = await GetCurrentMemberIdAsync();
             var result = _feeService.GenerateRegionCharges(request.RegionId, request.Year, clubs, byId);
@@ -591,8 +627,9 @@ namespace HpskSite.Controllers
             if (!RegionClubs(region.Value.Code).Any(c => c.Id == request.ClubId))
                 return Json(new { success = false, message = "Klubben hör inte till kretsen." });
 
+            var (counts, _) = RegionStarts(request.RegionId, request.Year, region.Value.Code);
             var (id, error) = _feeService.EnsureRegionCharge(request.RegionId, request.Year, request.ClubId,
-                ActiveMemberCount(request.ClubId), await GetCurrentMemberIdAsync());
+                ActiveMemberCount(request.ClubId), counts.GetValueOrDefault(request.ClubId), await GetCurrentMemberIdAsync());
             return Json(error is null ? new { success = true, chargeId = id, message = (string?)null }
                                       : new { success = false, chargeId = (int?)null, message = (string?)error });
         }
@@ -602,8 +639,8 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> SetRegionChargeManualAmount([FromBody] RegionChargeLineRequest request)
         {
             if (request?.ManualAmount < 0) return Json(new { success = false, message = "Beloppet kan inte vara negativt." });
-            return await EditRegionCharge(request?.ChargeId ?? 0, () =>
-                _feeService.SetRegionChargeManualAmount(request!.ChargeId, request.ManualAmount));
+            return await EditRegionCharge(request?.ChargeId ?? 0, charge =>
+                _feeService.SetRegionChargeManualAmount(request!.ChargeId, request.ManualAmount, StartsForCharge(charge)));
         }
 
         [HttpPost]
@@ -611,29 +648,96 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> AddRegionChargeLine([FromBody] RegionChargeLineRequest request)
         {
             var byId = await GetCurrentMemberIdAsync();
-            return await EditRegionCharge(request?.ChargeId ?? 0, () =>
+            return await EditRegionCharge(request?.ChargeId ?? 0, _ =>
                 _feeService.AddRegionChargeLine(request!.ChargeId, request.Description ?? "", request.Amount, byId));
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RemoveRegionChargeLine([FromBody] RegionChargeLineRequest request)
-            => await EditRegionCharge(request?.ChargeId ?? 0, () =>
+            => await EditRegionCharge(request?.ChargeId ?? 0, _ =>
                 _feeService.RemoveRegionChargeLine(request!.ChargeId, request.LineId));
 
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SetRegionChargeMemberCount([FromBody] RegionChargeLineRequest request)
-            => await EditRegionCharge(request?.ChargeId ?? 0, () =>
-                _feeService.SetRegionChargeMemberCount(request!.ChargeId, request.MemberCount));
+            => await EditRegionCharge(request?.ChargeId ?? 0, charge =>
+                _feeService.SetRegionChargeMemberCount(request!.ChargeId, request.MemberCount, StartsForCharge(charge)));
+
+        /// <summary>
+        /// Rättar antalet starter och tävlingar för en klubb. Tomt fält = följ pistol.nu:s räkning igen.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetRegionChargeCompetitionCounts([FromBody] RegionChargeLineRequest request)
+            => await EditRegionCharge(request?.ChargeId ?? 0, charge =>
+                _feeService.SetRegionChargeCompetitionCounts(request!.ChargeId, request.StartCount, request.CompetitionCount,
+                    StartsForCharge(charge)));
+
+        /// <summary>
+        /// Kretsens tävlingar för avgiftsåret att välja bland, och vilka som är valda.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRegionFeeCompetitions(int regionId, int year)
+        {
+            var region = await AuthorizeRegionAsync(regionId, readOnly: true);
+            if (region is null) return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var clubIds = RegionClubs(region.Value.Code).Select(c => c.Id).ToHashSet();
+            var selected = _regionCompetitions.GetSelection(regionId, year).ToHashSet();
+            var candidates = _regionCompetitions.GetCandidates(region.Value.Code, clubIds, year);
+            return Json(new
+            {
+                success = true,
+                year,
+                competitions = candidates.Select(c => new
+                {
+                    id = c.Id, name = c.Name, date = c.Date.ToString("yyyy-MM-dd"), series = c.SeriesName,
+                    type = c.TypeLabel, host = c.HostName, takesFee = c.TakesFee, selected = selected.Contains(c.Id)
+                }),
+                // ⚠️ Ett val som inte längre finns bland kandidaterna (tävlingen raderad eller flyttad)
+                //    SÄGS — annars räknas starterna tyst bort.
+                missing = selected.Count(id => candidates.All(c => c.Id != id))
+            });
+        }
+
+        /// <summary>
+        /// Sparar vilka tävlingar som ingår och räknar om de oskickade avgifterna. <b>Bara kretsens
+        /// egna kandidater godtas</b> — listan kommer från klienten.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveRegionFeeCompetitions([FromBody] RegionFeeCompetitionsRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+            var region = await AuthorizeRegionAsync(request.RegionId);
+            if (region is null) return Json(new { success = false, message = "Åtkomst nekad" });
+
+            var clubIds = RegionClubs(region.Value.Code).Select(c => c.Id).ToHashSet();
+            var allowed = _regionCompetitions.GetCandidates(region.Value.Code, clubIds, request.Year).Select(c => c.Id).ToHashSet();
+            var ids = (request.CompetitionIds ?? new()).Distinct().ToList();
+            if (ids.Any(id => !allowed.Contains(id)))
+                return Json(new { success = false, message = "Minst en av tävlingarna hör inte till kretsen det året. Ingenting sparades." });
+
+            _regionCompetitions.SaveSelection(request.RegionId, request.Year, ids, await GetCurrentMemberIdAsync());
+            var (counts, _) = RegionStarts(request.RegionId, request.Year, region.Value.Code, useCache: false);
+            var refreshed = _feeService.RefreshUnsentRegionCharges(request.RegionId, request.Year, counts);
+            return Json(new
+            {
+                success = true,
+                message = $"{ids.Count} tävlingar ingår. "
+                        + (refreshed > 0 ? $"{refreshed} avgifter som inte skickats än räknades om. " : "")
+                        + "Avgifter som redan skickats ändras inte."
+            });
+        }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteRegionCharge([FromBody] RegionChargeLineRequest request)
-            => await EditRegionCharge(request?.ChargeId ?? 0, () =>
+            => await EditRegionCharge(request?.ChargeId ?? 0, _ =>
                 _feeService.DeleteRegionCharge(request!.ChargeId));
 
-        private async Task<IActionResult> EditRegionCharge(int chargeId, Func<string?> edit)
+        private async Task<IActionResult> EditRegionCharge(int chargeId, Func<MembershipFeeCharge, string?> edit)
         {
             var charge = chargeId == 0 ? null : _feeService.GetCharge(chargeId);
             if (charge is null || !charge.IsRegionFee)
@@ -641,7 +745,7 @@ namespace HpskSite.Controllers
             if (!await CanManageChargeAsync(charge))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
-            var error = edit();
+            var error = edit(charge);
             return Json(error is null ? new { success = true, message = (string?)null } : new { success = false, message = (string?)error });
         }
 
@@ -671,6 +775,14 @@ namespace HpskSite.Controllers
             //    "reminder" = de som gått ut men inte betalats (knappen "Påminn").
             //    Utan något av dem mejlas alla obetalda.
             var only = request.ChargeIds is { Count: > 0 } ? request.ChargeIds.ToHashSet() : null;
+
+            // ⚠️ Oskickade avgifter räknas om PRECIS FÖRE utskicket, med dagens resultat. Det som går
+            //    ut är det klubben ska betala, och räkningen kan ha ändrats sedan listan öppnades.
+            if (_feeService.GetRegionRate(request.RegionId, request.Year).UsesCompetitions)
+            {
+                var (fresh, _) = RegionStarts(request.RegionId, request.Year, region.Value.Code, useCache: false);
+                _feeService.RefreshUnsentRegionCharges(request.RegionId, request.Year, fresh);
+            }
             var feeEmails = _feeService.GetPayerEmails(MembershipFeeIssuer.Region, request.RegionId);
             var bg = IssuerBankgiro(request.RegionId);
             var hasSwish = IssuerHasSwish(request.RegionId);
@@ -820,6 +932,31 @@ namespace HpskSite.Controllers
                 .ToList();
 
         /// <summary>
+        /// pistol.nu:s räkning av starter per klubb i kretsens valda tävlingar för året, och de valda
+        /// tävlingarna (för namnen). Tomt när inga tävlingar är valda.
+        /// </summary>
+        private (Dictionary<int, RegionClubStarts> Counts, List<RegionFeeCandidate> Selection) RegionStarts(
+            int regionId, int year, string regionCode, bool useCache = true)
+        {
+            var ids = _regionCompetitions.GetSelection(regionId, year);
+            if (ids.Count == 0) return (new Dictionary<int, RegionClubStarts>(), new List<RegionFeeCandidate>());
+            var clubIds = RegionClubs(regionCode).Select(c => c.Id).ToHashSet();
+            var chosen = ids.ToHashSet();
+            var selection = _regionCompetitions.GetCandidates(regionCode, clubIds, year).Where(c => chosen.Contains(c.Id)).ToList();
+            return (_regionCompetitions.Count(ids, clubIds, useCache), selection);
+        }
+
+        /// <summary>Räkningen för klubben en kretsavgift gäller.</summary>
+        private RegionClubStarts? StartsForCharge(MembershipFeeCharge charge)
+        {
+            var node = charge.RegionId is int rid ? Services.ContentService.GetById(rid) : null;
+            var code = node?.GetValue<string>("regionCode") ?? "";
+            if (node is null || code.Length == 0) return null;
+            var (counts, _) = RegionStarts(node.Id, charge.Year, code);
+            return counts.GetValueOrDefault(charge.PayerClubId ?? 0);
+        }
+
+        /// <summary>
         /// Registrets förslag på medlemsantal: klubbens medlemskap utom de som utträtt eller avlidit —
         /// samma regel som klubbens egen avgiftskörning, så de två inte räknar olika på samma register.
         /// </summary>
@@ -904,6 +1041,18 @@ namespace HpskSite.Controllers
         public int Year { get; set; }
         public decimal BaseAmount { get; set; }
         public decimal PerMember { get; set; }
+        public decimal PerStart { get; set; }
+        public decimal PerCompetition { get; set; }
+        /// <summary>Radernas namn på räkningen, t.ex. "Startavgifter" och "Lagavgift".</summary>
+        public string? StartLabel { get; set; }
+        public string? CompetitionLabel { get; set; }
+    }
+
+    public class RegionFeeCompetitionsRequest
+    {
+        public int RegionId { get; set; }
+        public int Year { get; set; }
+        public List<int>? CompetitionIds { get; set; }
     }
 
     public class RegionEnsureRequest
@@ -942,5 +1091,9 @@ namespace HpskSite.Controllers
 
         /// <summary>Eget belopp på en oskickad avgift. Null = tillbaka till taxan.</summary>
         public decimal? ManualAmount { get; set; }
+
+        /// <summary>Antal starter/tävlingar skrivna för hand. Null = följ pistol.nu:s räkning.</summary>
+        public int? StartCount { get; set; }
+        public int? CompetitionCount { get; set; }
     }
 }

@@ -462,6 +462,46 @@ namespace HpskSite.Services
                 .ToList();
         }
 
+        /// <summary>
+        /// Kretsens tävlingar i BÅDA värdformerna: de kretsen själv arrangerar (<c>clubId</c> tomt,
+        /// regionkoden på tävlingen) och de en klubb i kretsen arrangerar. Underlaget för kretsavgiftens
+        /// val av tävlingar — en omgång i Hallandsserien kan ha vilken av formerna som helst. Går genom
+        /// den cachade trädskanningen, aldrig en ny.
+        /// </summary>
+        public List<IContent> GetCompetitionsInRegion(string regionCode, ISet<int> regionClubIds)
+        {
+            var wanted = NormalizeRegionCode(regionCode);
+            // ⚠️ En serieomgång utan egen värd ÄRVER seriens (Hallandsserien 2025: omgångarna har varken
+            //    clubId eller regionalFederation, serien har regionalFederation = Halland). Utan arvet
+            //    saknades hela serien i kretsens val.
+            var parents = new Dictionary<int, (int ClubId, string Region)>();
+            (int ClubId, string Region) HostOf(IContent c)
+            {
+                var clubId = c.GetValue<int>("clubId");
+                var region = NormalizeRegionCode(c.GetValue<string>("regionalFederation"));
+                if (clubId > 0 || region.Length > 0 || c.ParentId <= 0) return (clubId, region);
+                if (!parents.TryGetValue(c.ParentId, out var host))
+                {
+                    var parent = _contentService.GetById(c.ParentId);
+                    host = parent?.ContentType.Alias == "competitionSeries"
+                        ? (parent.GetValue<int>("clubId"), NormalizeRegionCode(parent.GetValue<string>("regionalFederation")))
+                        : (0, "");
+                    parents[c.ParentId] = host;
+                }
+                return host;
+            }
+
+            return GetContentScan().Competitions
+                .Where(c =>
+                {
+                    var (clubId, region) = HostOf(c);
+                    return clubId > 0
+                        ? regionClubIds.Contains(clubId)
+                        : wanted.Length > 0 && region == wanted;
+                })
+                .ToList();
+        }
+
         public static string NormalizeRegionCode(string? raw)
         {
             var value = (raw ?? "").Trim();

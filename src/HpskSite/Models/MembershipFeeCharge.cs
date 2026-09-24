@@ -69,6 +69,16 @@ namespace HpskSite.Models
         public int? MemberCount { get; set; }
 
         /// <summary>
+        /// Antalet starter kretsen skrivit FÖR HAND. <b>Null = följ pistol.nu:s räkning</b> över de
+        /// valda tävlingarna. Behövs för att en ny räkning inte ska skriva över en rättelse — delar av
+        /// kretsens serier finns inte på pistol.nu. Det tal som faktiskt debiteras står på raden.
+        /// </summary>
+        public int? StartCount { get; set; }
+
+        /// <summary>Antalet tävlingar kretsen skrivit för hand. Null = följ pistol.nu:s räkning.</summary>
+        public int? CompetitionCount { get; set; }
+
+        /// <summary>
         /// När betalningsuppmaningen FÖRST gick ut (mejl, eller betallänken kopierad). Null = inte skickad.
         ///
         /// <para><b>⚠️ En kretsavgift finns INNAN den skickas</b> (Stefan 2026-09-23): kretsen ska kunna

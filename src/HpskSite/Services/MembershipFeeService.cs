@@ -459,29 +459,44 @@ namespace HpskSite.Services
         //    av samma brygga. Det enda som är eget är TAXAN och FÖRSLAGET, för en krets tar betalt
         //    per klubb, inte per medlemstyp.
 
-        /// <summary>Kretsens taxa för ett år: grundavgift per klubb och pris per medlem.</summary>
-        public (decimal Base, decimal PerMember) GetRegionRate(int regionId, int year)
+        /// <summary>
+        /// Kretsens taxa för ett år: grundavgift per klubb, pris per medlem, per start och per tävling.
+        /// Start- och tävlingsradernas NAMN är kretsens egna och ligger i kategorins Label.
+        /// </summary>
+        public RegionFeeRate GetRegionRate(int regionId, int year)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var cats = scope.Database.Fetch<MembershipFeeCategory>(
                 "SELECT * FROM MembershipFeeCategory WHERE IssuerType = @0 AND RegionId = @1 AND Year = @2",
                 MembershipFeeIssuer.Region, regionId, year);
 
-            return (cats.FirstOrDefault(c => c.MembershipType == RegionFeeCalculator.BaseCategory)?.Amount ?? 0m,
-                    cats.FirstOrDefault(c => c.MembershipType == RegionFeeCalculator.PerMemberCategory)?.Amount ?? 0m);
+            MembershipFeeCategory? Cat(string key) => cats.FirstOrDefault(c => c.MembershipType == key);
+            var start = Cat(RegionFeeCalculator.PerStartCategory);
+            var comp = Cat(RegionFeeCalculator.PerCompetitionCategory);
+            return new RegionFeeRate(
+                Cat(RegionFeeCalculator.BaseCategory)?.Amount ?? 0m,
+                Cat(RegionFeeCalculator.PerMemberCategory)?.Amount ?? 0m,
+                start?.Amount ?? 0m,
+                comp?.Amount ?? 0m,
+                string.IsNullOrWhiteSpace(start?.Label) ? RegionFeeRate.DefaultStartLabel : start!.Label!,
+                string.IsNullOrWhiteSpace(comp?.Label) ? RegionFeeRate.DefaultCompetitionLabel : comp!.Label!);
         }
 
         /// <summary>
-        /// Sparar kretsens taxa. <b>Ändrar inga befintliga krav</b> — ett utskickat krav är vad
-        /// klubben har fått, och ett nytt pris gäller de krav som skapas efter det.
+        /// Sparar kretsens taxa. <b>Ändrar inga skickade krav</b> — ett utskickat krav är vad
+        /// klubben har fått. Oskickade krav räknas om med <paramref name="counts"/> (pistol.nu:s
+        /// räkning per klubb), så att ett nytt pris per start får sitt antal.
         /// </summary>
-        public void SaveRegionRate(int regionId, int year, decimal baseAmount, decimal perMember)
+        public void SaveRegionRate(int regionId, int year, RegionFeeRate rate,
+            IReadOnlyDictionary<int, RegionClubStarts>? counts = null)
         {
+            var baseAmount = rate.BaseAmount;
+            var perMember = rate.PerMember;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
             {
             var db = scope.Database;
 
-            void Upsert(string key, string label, decimal amount)
+            void Upsert(string key, string label, decimal amount, bool updateLabel = false)
             {
                 var cat = db.FirstOrDefault<MembershipFeeCategory>(
                     "SELECT * FROM MembershipFeeCategory WHERE IssuerType = @0 AND RegionId = @1 AND Year = @2 AND MembershipType = @3",
@@ -504,27 +519,67 @@ namespace HpskSite.Services
                 else
                 {
                     cat.Amount = amount;
+                    if (updateLabel) cat.Label = label;
                     db.Update(cat);
                 }
             }
 
             Upsert(RegionFeeCalculator.BaseCategory, "Grundavgift per klubb", Math.Max(0m, baseAmount));
             Upsert(RegionFeeCalculator.PerMemberCategory, "Per medlem", Math.Max(0m, perMember));
+            // ⚠️ Kategorins Label är RADENS NAMN på räkningen, inte en intern etikett.
+            Upsert(RegionFeeCalculator.PerStartCategory, CleanLabel(rate.StartLabel, RegionFeeRate.DefaultStartLabel),
+                Math.Max(0m, rate.PerStart), updateLabel: true);
+            Upsert(RegionFeeCalculator.PerCompetitionCategory, CleanLabel(rate.CompetitionLabel, RegionFeeRate.DefaultCompetitionLabel),
+                Math.Max(0m, rate.PerCompetition), updateLabel: true);
             }
 
-            // ⚠️ OSKICKADE avgifter följer taxan — ingen klubb har fått dem än. Ett eget belopp och
-            //    tilläggen står kvar. Skickade avgifter rörs aldrig.
+            RefreshUnsentRegionCharges(regionId, year, counts);
+        }
+
+        private static string CleanLabel(string? label, string fallback)
+        {
+            var s = (label ?? "").Trim();
+            if (s.Length == 0) return fallback;
+            return s.Length > 60 ? s[..60] : s;
+        }
+
+        /// <summary>
+        /// Räknar om de OSKICKADE avgifterna ur dagens taxa och <paramref name="counts"/>. Ett eget
+        /// belopp, tilläggen och antal som kretsen skrivit för hand står kvar. Skickade och betalda
+        /// avgifter rörs aldrig — det klubben fått är det den fått.
+        ///
+        /// <para>Körs när taxan sparas, när kretsen byter vilka tävlingar som ingår, och precis
+        /// före ett utskick — så att det som skickas bygger på de resultat som finns just då.</para>
+        /// </summary>
+        public int RefreshUnsentRegionCharges(int regionId, int year, IReadOnlyDictionary<int, RegionClubStarts>? counts)
+        {
+            var rate = GetRegionRate(regionId, year);
+            var changed = 0;
             foreach (var charge in GetChargesForRegionYear(regionId, year)
                          .Where(c => !c.IsRequestSent && c.PaymentStatus != "Paid"
                                      && c.Lines.All(l => l.Kind != MembershipFeeLineKind.Manual)))
             {
+                var computed = counts?.GetValueOrDefault(charge.PayerClubId ?? 0);
                 EditRegionChargeLines(charge.Id, (c, lines) =>
                 {
-                    RebuildBaseLines(lines, c.Year, Math.Max(0m, baseAmount), Math.Max(0m, perMember), c.MemberCount ?? 0, null);
+                    RebuildBaseLines(lines, c, rate, c.MemberCount ?? 0, computed, null);
                     return null;
                 });
+                changed++;
             }
+            return changed;
         }
+
+        // ⚠️ Antalet som DEBITERAS: kretsens rättade tal om det finns, annars pistol.nu:s räkning,
+        //    annars det som redan står på raden (ingen räkning tillgänglig just nu). Samma ordning
+        //    överallt, så att två vägar inte kan komma fram till olika räkningar för samma klubb.
+        private static int EffectiveStarts(MembershipFeeCharge charge, List<MembershipFeeChargeLine> lines, RegionClubStarts? computed)
+            => charge.StartCount ?? computed?.Starts
+               ?? (int)(lines.FirstOrDefault(l => l.Kind == MembershipFeeLineKind.PerStart)?.Quantity ?? 0);
+
+        private static int EffectiveCompetitions(MembershipFeeCharge charge, List<MembershipFeeChargeLine> lines, RegionClubStarts? computed)
+            => charge.CompetitionCount ?? computed?.Competitions
+               ?? (int)(lines.FirstOrDefault(l => l.Kind == MembershipFeeLineKind.PerCompetition)?.Quantity ?? 0);
 
         /// <summary>
         /// Klubbens avgift för året — skapas (OSKICKAD) om den inte finns. Används när kretsen rör en
@@ -534,7 +589,8 @@ namespace HpskSite.Services
         /// lagavgift på en klubb utan medlemmar. Den skickas aldrig (utskicket hoppar över 0 kr) och
         /// räknas aldrig som fordran (den är inte skickad).</para>
         /// </summary>
-        public (int? ChargeId, string? Error) EnsureRegionCharge(int regionId, int year, int clubId, int memberCount, int byMemberId)
+        public (int? ChargeId, string? Error) EnsureRegionCharge(int regionId, int year, int clubId, int memberCount,
+            RegionClubStarts? starts, int byMemberId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
@@ -544,9 +600,9 @@ namespace HpskSite.Services
                 MembershipFeeIssuer.Region, regionId, year, clubId);
             if (existing is not null) return (existing, null);
 
-            var (baseAmount, perMember) = GetRegionRate(regionId, year);
+            var rate = GetRegionRate(regionId, year);
             var count = Math.Max(0, memberCount);
-            var lines = RegionFeeCalculator.Lines(year, baseAmount, perMember, count, null);
+            var lines = RegionFeeCalculator.Lines(year, rate, count, starts?.Starts ?? 0, starts?.Competitions ?? 0, null);
 
             var charge = new MembershipFeeCharge
             {
@@ -578,14 +634,14 @@ namespace HpskSite.Services
         /// står kvar. <b>En skickad avgift ändras inte så</b> — klubben har fått ett belopp, och ett
         /// tyst nytt belopp på samma räkning är inget klubben kan förklara.
         /// </summary>
-        public string? SetRegionChargeManualAmount(int chargeId, decimal? amount)
+        public string? SetRegionChargeManualAmount(int chargeId, decimal? amount, RegionClubStarts? computed = null)
             => EditRegionChargeLines(chargeId, (charge, lines) =>
             {
                 if (charge.IsRequestSent)
                     return "Avgiften är redan skickad till klubben. Lägg till en rad i stället, eller ta bort avgiften och skicka en ny.";
-                var (baseAmount, perMember) = GetRegionRate(charge.RegionId ?? 0, charge.Year);
+                var rate = GetRegionRate(charge.RegionId ?? 0, charge.Year);
                 var manual = amount is null ? (decimal?)null : Math.Max(0m, amount.Value);
-                RebuildBaseLines(lines, charge.Year, baseAmount, perMember, charge.MemberCount ?? 0, manual);
+                RebuildBaseLines(lines, charge, rate, charge.MemberCount ?? 0, computed, manual);
                 // ⚠️ "Ingen avgift i år" (0 kr) måste STÅ KVAR som ett val. Kalkylatorn ger ingen rad
                 //    för 0 kr, och utan en rad räknar nästa taxeändring tillbaka klubben till taxan.
                 if (manual == 0m)
@@ -612,12 +668,15 @@ namespace HpskSite.Services
         /// Byter ut grund-, per-medlem- och egen-belopp-raderna och behåller tilläggen.
         /// Tilläggen läggs sist, så räkningen alltid börjar med årsavgiften.
         /// </summary>
-        private static void RebuildBaseLines(List<MembershipFeeChargeLine> lines, int year,
-            decimal baseAmount, decimal perMember, int memberCount, decimal? manual)
+        private static void RebuildBaseLines(List<MembershipFeeChargeLine> lines, MembershipFeeCharge charge,
+            RegionFeeRate rate, int memberCount, RegionClubStarts? computed, decimal? manual)
         {
+            // ⚠️ Antalen läses INNAN raderna rensas — det befintliga antalet är sista reserven.
+            var starts = EffectiveStarts(charge, lines, computed);
+            var competitions = EffectiveCompetitions(charge, lines, computed);
             var extras = lines.Where(l => l.Kind == MembershipFeeLineKind.Extra).ToList();
             lines.Clear();
-            lines.AddRange(RegionFeeCalculator.Lines(year, baseAmount, perMember, memberCount, manual));
+            lines.AddRange(RegionFeeCalculator.Lines(charge.Year, rate, memberCount, starts, competitions, manual));
             lines.AddRange(extras);
         }
 
@@ -648,7 +707,7 @@ namespace HpskSite.Services
         public RegionFeeGenerateResult GenerateRegionCharges(
             int regionId, int year, IEnumerable<RegionFeeClubInput> clubs, int byMemberId)
         {
-            var (baseAmount, perMember) = GetRegionRate(regionId, year);
+            var rate = GetRegionRate(regionId, year);
             var result = new RegionFeeGenerateResult();
 
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
@@ -664,7 +723,7 @@ namespace HpskSite.Services
                 if (existing.Contains(club.ClubId)) { result.SkippedExisting++; continue; }
 
                 var count = Math.Max(0, club.MemberCount);
-                var lines = RegionFeeCalculator.Lines(year, baseAmount, perMember, count, club.ManualAmount);
+                var lines = RegionFeeCalculator.Lines(year, rate, count, club.Starts, club.Competitions, club.ManualAmount);
                 if (lines.Count == 0) { result.SkippedZero++; continue; }
 
                 var charge = new MembershipFeeCharge
@@ -740,22 +799,56 @@ namespace HpskSite.Services
         /// belopp släpps (att ändra antalet betyder "räkna på medlemmarna"). <b>Skickad:</b> bara
         /// per-medlem-raden, med det pris avgiften skickades med.
         /// </summary>
-        public string? SetRegionChargeMemberCount(int chargeId, int memberCount)
+        public string? SetRegionChargeMemberCount(int chargeId, int memberCount, RegionClubStarts? computed = null)
             => EditRegionChargeLines(chargeId, (charge, lines) =>
             {
                 if (!charge.IsRequestSent)
                 {
-                    var (b, p) = GetRegionRate(charge.RegionId ?? 0, charge.Year);
+                    var rate = GetRegionRate(charge.RegionId ?? 0, charge.Year);
                     charge.MemberCount = Math.Max(0, memberCount);
-                    RebuildBaseLines(lines, charge.Year, b, p, charge.MemberCount.Value, null);
+                    RebuildBaseLines(lines, charge, rate, charge.MemberCount.Value, computed, null);
                     return null;
                 }
-                var (_, perMember) = GetRegionRate(charge.RegionId ?? 0, charge.Year);
+                var perMember = GetRegionRate(charge.RegionId ?? 0, charge.Year).PerMember;
                 var error = RegionFeeCalculator.SetMemberCount(lines, charge.Year, perMember, memberCount);
                 if (error is not null) return error;
                 if (lines.Count == 0)
                     return "Kravet skulle bli noll kronor. Ta bort kravet i stället.";
                 charge.MemberCount = memberCount;
+                return null;
+            });
+
+        /// <summary>
+        /// Rättar antalet starter och tävlingar för en klubb. <b>Null = följ pistol.nu:s räkning</b>
+        /// (<paramref name="computed"/>); ett tal = kretsens eget, som står kvar när räkningen görs om.
+        /// Behövs eftersom delar av kretsens serier inte finns på pistol.nu (Stefan 2026-09-24).
+        /// <b>Oskickad:</b> räknas ur dagens taxa. <b>Skickad:</b> bara de två raderna, med det pris
+        /// avgiften skickades med.
+        /// </summary>
+        public string? SetRegionChargeCompetitionCounts(int chargeId, int? startCount, int? competitionCount,
+            RegionClubStarts? computed)
+            => EditRegionChargeLines(chargeId, (charge, lines) =>
+            {
+                if (startCount < 0 || competitionCount < 0) return "Antalet kan inte vara negativt.";
+                charge.StartCount = startCount;
+                charge.CompetitionCount = competitionCount;
+                var rate = GetRegionRate(charge.RegionId ?? 0, charge.Year);
+
+                if (!charge.IsRequestSent)
+                {
+                    if (lines.Any(l => l.Kind == MembershipFeeLineKind.Manual))
+                        return "Beloppet för klubben är skrivet för hand och räknas inte på starter. Ändra beloppet först.";
+                    RebuildBaseLines(lines, charge, rate, charge.MemberCount ?? 0, computed, null);
+                    return null;
+                }
+
+                var starts = startCount ?? computed?.Starts
+                             ?? (int)(lines.FirstOrDefault(l => l.Kind == MembershipFeeLineKind.PerStart)?.Quantity ?? 0);
+                var comps = competitionCount ?? computed?.Competitions
+                            ?? (int)(lines.FirstOrDefault(l => l.Kind == MembershipFeeLineKind.PerCompetition)?.Quantity ?? 0);
+                var error = RegionFeeCalculator.SetCompetitionCounts(lines, charge.Year, rate, starts, comps);
+                if (error is not null) return error;
+                if (lines.Count == 0) return "Kravet skulle bli noll kronor. Ta bort kravet i stället.";
                 return null;
             });
 
@@ -841,6 +934,10 @@ namespace HpskSite.Services
 
         /// <summary>Satt = kretsen har bestämt beloppet för klubben; formeln används inte.</summary>
         public decimal? ManualAmount { get; set; }
+
+        /// <summary>pistol.nu:s räkning i de valda tävlingarna. Sätts av SERVERN, aldrig ur klientens lista.</summary>
+        public int Starts { get; set; }
+        public int Competitions { get; set; }
     }
 
     /// <summary>Vad medlemmen får välja på betalsidan. Se <see cref="MembershipFeeService.GetTypeChoice"/>.</summary>

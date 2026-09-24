@@ -9832,3 +9832,59 @@ Helt härledd, ingen lagring. Plus en `Ekonomi`-hink (`/ekonomi%`, inloggningskr
 **Svit:** `hpsk-verify/ekonomi-statistik-verify.mjs` **29/29** (läser bara) — mäter varje siffra mot
 oberoende SQL, med kontrollprov att sandlådepåståendet skiljer en dbo-läsande tjänst från en riktig.
 `ekonomi-statistik-shot.mjs` tar en skärmdump av sektionen. Adds C# → full ombyggnad. Ingen SQL.
+
+## Kretsavgiften: starter och tävlingar i kretsens serier (2026-09-24)
+
+Hallands kretsfaktura (2512 till Varbergs PK) har tre rader: *Årsavgift kretsen, Medlemmar 130 à 10 kr*,
+*Lagavgift kretsen, Tävlingar 11 à 20 kr* och *Startavgifter, Starter 140 à 20 kr* — de två sista över
+Hallandsserien i precision och fält, räknade för hand klubb för klubb. Nu väljer kretsen tävlingarna och
+pistol.nu räknar.
+
+**Stefans besked 2026-09-24:** A och C i samma omgång är **två starter**; tävlingarna är
+Hallandsserien precision + fält; delar kan saknas på pistol.nu, så **antalet måste gå att justera**;
+klubbarna betalar kretsen (skyttarna sponsras av klubben eller betalar klubben) — ingen dubbeldebitering.
+
+- **Taxan** har två nya delar i `MembershipFeeCategory`: `krets-per-start` och `krets-per-tavling`.
+  **Kategorins `Label` är RADENS NAMN på räkningen** (förval *Startavgifter* / *Lagavgift*) — klubbens
+  kassör känner igen sin räkning på dem. `GetRegionRate` returnerar nu `RegionFeeRate` (record).
+- **Valet av tävlingar** per (krets, avgiftsår) i nya tabellen `RegionFeeCompetition`. Kandidaterna är
+  kretsens tävlingar det året i BÅDA värdformerna (`InvoiceAdminService.GetCompetitionsInRegion`), utan
+  klubbinterna. ⚠️⚠️ **En serieomgång utan egen värd ÄRVER seriens** — Hallandsserien 2025:s omgångar har
+  varken `clubId` eller `regionalFederation`; serien har `regionalFederation = Halland`. Utan arvet
+  saknades hela serien i valet.
+- **Räkningen: `RegionFeeCompetitionService.Count`.** En start = (tävling, skytt, **klass**) med
+  resultat — distinkta rader ur grenens resultattabell (`CompetitionResultTables.For`), klassen vikt med
+  `ShootingClasses.NormalizeKey` (annars blir `C_Vet_Y` och `C Vet Y` två starter). Springskytte:
+  (skytt, vapengrupp), DNS utesluten. Klubben = **anmälans klubb** (`GetRegistrationClubIds`), annars
+  huvudklubben. Bara kretsens klubbar räknas. En tävling räknas när klubben hade ≥ 1 start. Cachas 2 min.
+- **Radtyperna** `per-start` och `per-competition` (`MembershipFeeLineKind`), byggda av
+  `RegionFeeCalculator.Lines(year, rate, members, starts, competitions, manual)`; den gamla signaturen
+  finns kvar som genväg. Ordning: grund, per medlem, per tävling, per start, tilläggen sist.
+- **Kretsens rättelse** lagras på avgiften: `MembershipFeeCharge.StartCount` / `CompetitionCount`,
+  **null = följ pistol.nu:s räkning**. ⚠️ Antalet som debiteras löses på ETT sätt
+  (`EffectiveStarts/EffectiveCompetitions`): rättelsen → pistol.nu:s räkning → radens befintliga antal.
+  En ny räkning (annat tävlingsval, fler resultat) skriver därför aldrig över en rättelse.
+- **Oskickade avgifter räknas om** (`RefreshUnsentRegionCharges`) när taxan sparas, när valet ändras och
+  **precis före ett utskick** — det som går ut bygger på dagens resultat. Skickade rörs aldrig; en rättelse
+  på en skickad avgift behåller priset och radnamnet den skickades med (`SetCompetitionCounts`).
+- **Klientens tal godtas aldrig**: `GenerateRegionCharges` sätter starterna på servern, och
+  `SaveRegionFeeCompetitions` vägrar en tävling som inte är kretsens det året.
+- **Ytan:** taxedialogen (per start / per tävling + radnamn), *Åtgärder → Tävlingar som ingår…* (grupperat
+  per serie, en ruta väljer hela serien, *tar anmälningsavgift* märks), kolumnerna Starter/Tävlingar (bara
+  när kretsen tar betalt för dem; `rf-nocomp`), och radens *Ändra antal starter och tävlingar…* med
+  underlaget tävling för tävling. Statuscellen bär `rf-status` — läs den på klassen, inte på position.
+
+**Operatörssteg:** `Migrations/add-competition-counts-to-region-fee.sql` **FÖRE deployen** (NPoco skriver
+de nya kolumnerna vid varje uppdatering av en avgift — utan dem faller varje "Markera betald"). Körd i
+dev 2026-09-24, **EJ i prod**. Inlagd i `check-prod-migrations-2026-09-24.sql` och körordningen (B22).
+Fildeploy av `KnowledgeBase/docs/kretsavgift.md`. Adds C# → full ombyggnad.
+
+**Sviter:** `hpsk-verify/kretsavgift-starter-verify.mjs` **34/34** (Halland, avgiftsår 2025, fixtur i
+omgång 1 mätt som differens: A1 + C1 + C Vet Y i båda formerna = exakt 3). **A/B: utan `NormalizeKey`
+faller de två påståendena om regeln (4 i stället för 3).** `kretsavgift-verify` 167/167 efter tre
+inaktuella påståenden rättats (rälsordningen efter Fakturor, meningen "och" i stället för "+",
+statuskolumnen på klass). Enhetstester 1508 (8 nya i `RegionFeeCalculatorTests`, Hallands faktura som facit).
+
+⚠️ **Bygg-fälla som kostade en runda:** efter A/B-återställningen med `sed` behöll det inkrementella
+bygget den muterade koden — DLL:en var nyare än källan och sviten fortsatte falla. Bygg om med
+`--no-incremental` efter en A/B.
