@@ -111,14 +111,31 @@ namespace HpskSite.Services.Ledger
 
             // ⚠️ Anspråken tas på CreatedUtc — när avgiften uppstod. Se klassens sammanfattning:
             //    att filtrera på obetalda skulle lämna 1510 negativt för allt som hann betalas.
+            // ⚠️⚠️ TÄVLINGSAVGIFTER SOM FAKTURERATS EN KLUBB (P3/P4). Avgiften makuleras när den buntas
+            //    in i en faktura (CoveredByChargeId) — men anspråket uppstod när avgiften uppstod, och
+            //    det finns kvar. Den räknas alltså med så länge fakturan inte är makulerad (då ersätts
+            //    den av en ny begäran, som räknas för sig). Betalningen AV fakturan (competition-invoice)
+            //    är en reglering, inget nytt anspråk — den tas bort här, annars dubbleras fordran.
             var claims = ldb.Fetch<ClaimRow>(
-                @"SELECT SourceType, COUNT(*) AS Count_, SUM(Amount) AS Amount
-                    FROM dbo.LedgerPayment
-                   WHERE IssuerType = @0 AND IssuerId = @1
-                     AND VoidedUtc IS NULL
-                     AND CreatedUtc >= @2 AND CreatedUtc < @3
-                   GROUP BY SourceType",
-                issuerType, issuerId, from.Date, to.Date.AddDays(1));
+                @"SELECT p.SourceType, COUNT(*) AS Count_, SUM(p.Amount) AS Amount
+                    FROM dbo.LedgerPayment p
+                    LEFT JOIN dbo.LedgerCharge c ON c.Id = p.CoveredByChargeId
+                   WHERE p.IssuerType = @0 AND p.IssuerId = @1
+                     AND p.SourceType <> @4
+                     AND (p.VoidedUtc IS NULL OR (p.CoveredByChargeId IS NOT NULL AND c.VoidedUtc IS NULL))
+                     AND p.CreatedUtc >= @2 AND p.CreatedUtc < @3
+                   GROUP BY p.SourceType",
+                issuerType, issuerId, from.Date, to.Date.AddDays(1), LedgerSourceType.CompetitionInvoice);
+
+            // Kreditnotor minskar anspråket den dag de utfärdas. (En krediterad rad som fortfarande
+            // är skyldig får en ny begäran — den räknas ovan, så nettot blir rätt.)
+            var credited = ldb.Fetch<decimal?>(
+                @"SELECT SUM(Amount) FROM dbo.LedgerCharge
+                   WHERE IssuerType = @0 AND IssuerId = @1 AND Kind = 'credit' AND VoidedUtc IS NULL
+                     AND IssueDate >= @2 AND IssueDate < @3",
+                issuerType, issuerId, from.Date, to.Date.AddDays(1)).FirstOrDefault() ?? 0m;
+            if (credited != 0m)
+                claims.Add(new ClaimRow { SourceType = LedgerSourceType.CompetitionRegistration, Count_ = 0, Amount = credited });
 
             // ⚠️⚠️ MEDLEMS- OCH KRETSAVGIFTERNA LIGGER INTE I LedgerPayment. De bor i
             //    MembershipFeeCharge, och exporten läste bara betalningstabellen — så den klubb som
