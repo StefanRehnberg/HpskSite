@@ -899,6 +899,155 @@
             </div>
         </div>
 
+        <!-- Section M: Ekonomi. Laddas separat (GetEkonomiStats) så att en långsam eller trasig
+             ekonomifråga aldrig håller tillbaka resten av sidan. -->
+        <h5 class="mt-4 mb-2"><i class="bi bi-cash-coin me-2"></i>Ekonomi</h5>
+        <p class="text-muted small mb-3">
+            Varje förening med ekonomiinställningar har en skarp liggare, och avgifter som betalas via
+            pistol.nu bokförs automatiskt. Därför räknas här <strong>egna</strong> verifikationer
+            (manuella, utgifter, bankavstämning, SIE-import, avskrivningar, ingående balanser) skilt från de
+            automatiska — det är de egna som visar att föreningen faktiskt arbetar i ekonomidelen.
+            Demoklubben Ankeborg räknas inte.
+        </p>
+        <div id="ekError" class="alert alert-warning d-none small"></div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-success">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Använder skarpt
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Föreningar där någon själv gjort något i den skarpa liggaren: bokfört, bekräftat en betalning, registrerat en utgift, importerat en bankfil, ställt ut en faktura, lagt en budget, ett projekt eller en tillgång, eller fastställt ett bokslut."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statEkUsing">—</h2>
+                        <small class="text-muted" id="statEkUsingSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-warning">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Har provat sandlådan
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Föreningar med minst en sandlåda, även övergivna. Fler sandlådor än föreningar betyder att någon börjat om."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statEkSandbox">—</h2>
+                        <small class="text-muted" id="statEkSandboxSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-primary">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Aktiva personer 30 d
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Olika personer som de senaste 30 dagarna gjort en egen verifikation, bekräftat en betalning eller registrerat en utgift i en skarp liggare."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statEkPeople">—</h2>
+                        <small class="text-muted" id="statEkPeopleSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100 border-info">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Egna verifikationer 30 d</h6>
+                        <h2 class="card-title mb-1" id="statEkOwn30">—</h2>
+                        <small class="text-muted" id="statEkOwn30Sub"></small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-lg-5">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            Hur långt har föreningarna kommit
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Antal föreningar per steg. Stegen är inte strikt i följd — en förening kan bokföra skarpt utan att ha provat sandlådan."></i>
+                        </h6>
+                        <div id="ekFunnel" class="small"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-7">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            Vilka delar används
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Antal föreningar som använt respektive del, skarpt och i sandlåda. Siffran inom parentes är antalet poster."></i>
+                        </h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0">
+                                <thead><tr><th>Del</th><th class="text-end">Skarpt</th><th class="text-end">Sandlåda</th></tr></thead>
+                                <tbody id="ekModulesBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-lg-8">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Verifikationer per vecka (26 veckor)</h6>
+                        <div style="height:260px"><canvas id="chartEkWeekly"></canvas></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Sandlådan</h6>
+                        <ul class="list-unstyled mb-3 small" id="ekSandboxList"></ul>
+                        <h6 class="card-title">Klubbform</h6>
+                        <ul class="list-unstyled mb-3 small" id="ekShapeList"></ul>
+                        <h6 class="card-title">
+                            Friktion
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Höga tal här pekar på något som är krångligt: utkast som ingen bokfört på en vecka, utgifter som väntat på attest i över 14 dagar, bankrader som inte hanterats."></i>
+                        </h6>
+                        <ul class="list-unstyled mb-0 small" id="ekFrictionList"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="card-title mb-0">
+                                Föreningar i ekonomidelen
+                                <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                                   title="Föreningar med någon aktivitet i ekonomidelen, sorterade på flest egna skarpa verifikationer. Delar i kursiv stil har bara provats i sandlådan."></i>
+                            </h6>
+                            <button class="btn btn-sm btn-link text-decoration-none p-0 d-none" id="ekOwnersToggle" onclick="toggleEkOwners()">Visa alla</button>
+                        </div>
+                        <div class="table-responsive mt-2" style="max-height:420px;overflow-y:auto">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead><tr>
+                                    <th>Förening</th><th>Typ</th><th>Form</th>
+                                    <th class="text-end">Sandlådor</th>
+                                    <th class="text-end">Egna skarpt</th>
+                                    <th class="text-end">Autom.</th>
+                                    <th class="text-end">Betalningar</th>
+                                    <th>Delar</th>
+                                    <th class="text-end">Senast</th>
+                                </tr></thead>
+                                <tbody id="ekOwnersBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -1046,6 +1195,7 @@
                 content.style.display = '';
                 renderStatistics(resp.data);
                 loadVisitorStats(force);
+                loadEkonomiStats(force);
             })
             .catch(err => {
                 loading.style.display = 'none';
@@ -1845,10 +1995,171 @@
             });
     }
 
+    // ── Section M: Ekonomi ──────────────────────────────────────────────────────
+    // Egen endpoint: ekonomifrågorna går mot ett dussin liggartabeller och får aldrig hålla
+    // tillbaka resten av sidan. Ett fel visas i sektionen, inte som sidans felruta.
+    const EK_OWNERS_COLLAPSED = 10;
+    let ekOwnersExpanded = false;
+    let ekOwners = [];
+
+    function loadEkonomiStats(force) {
+        const err = document.getElementById('ekError');
+        if (!err) return;
+        fetch('/umbraco/surface/AdminStatistics/GetEkonomiStats?force=' + (force ? 'true' : 'false'))
+            .then(r => r.json())
+            .then(resp => {
+                if (!resp.success) {
+                    err.textContent = 'Ekonomistatistiken kunde inte läsas: ' + (resp.message || 'okänt fel');
+                    err.classList.remove('d-none');
+                    return;
+                }
+                err.classList.add('d-none');
+                renderEkonomi(resp.data);
+            })
+            .catch(e => {
+                err.textContent = 'Ekonomistatistiken kunde inte läsas: ' + (e.message || 'nätverksfel');
+                err.classList.remove('d-none');
+            });
+    }
+
+    function ekSet(id, text) { const el = document.getElementById(id); if (el) el.textContent = text; }
+
+    function renderEkonomi(d) {
+        const s = d.summary;
+        ekSet('statEkUsing', s.usingLive);
+        ekSet('statEkUsingSub', s.usingLiveClubs + ' klubbar · ' + s.usingLiveRegions + ' kretsar · ' + s.ownLive + ' bokför själva');
+        ekSet('statEkSandbox', s.triedSandbox);
+        ekSet('statEkSandboxSub', s.sandboxesTotal + ' sandlådor · ' + s.sandboxesActive + ' aktiva');
+        ekSet('statEkPeople', s.activePeople30Live);
+        ekSet('statEkPeopleSub', s.activePeople30Sandbox > 0 ? ('+ ' + s.activePeople30Sandbox + ' i sandlådan') : 'i skarpa liggare');
+        ekSet('statEkOwn30', s.ownEntries30Live);
+        ekSet('statEkOwn30Sub', s.ownEntries30Sandbox + ' i sandlådan · ' + s.paymentsConfirmed30Live + ' betalningar bekräftade');
+
+        // Trappan: staplarnas längd mäts mot det första steget, så "hur många av dem som har en
+        // liggare har kommit hit" går att läsa direkt.
+        const funnel = d.funnel || [];
+        const base = Math.max(1, funnel.length ? funnel[0].count : 1);
+        document.getElementById('ekFunnel').innerHTML = funnel.map(function (f) {
+            const pct = Math.round(100 * f.count / base);
+            return '<div class="mb-2" title="' + escapeHtml(f.hint) + '">' +
+                '<div class="d-flex justify-content-between"><span>' + escapeHtml(f.label) + '</span><span class="fw-semibold">' + f.count + '</span></div>' +
+                '<div class="progress" style="height:6px" role="progressbar" aria-valuenow="' + f.count + '" aria-valuemin="0" aria-valuemax="' + base + '">' +
+                '<div class="progress-bar" style="width:' + Math.min(100, pct) + '%"></div></div></div>';
+        }).join('');
+
+        document.getElementById('ekModulesBody').innerHTML = (d.modules || []).map(function (m) {
+            const cell = function (n, v) {
+                return n > 0 ? (n + ' <small class="text-muted">(' + v + ')</small>') : '<span class="text-muted">0</span>';
+            };
+            return '<tr><td>' + escapeHtml(m.label) + '</td>' +
+                '<td class="text-end">' + cell(m.liveAssociations, m.liveVolume) + '</td>' +
+                '<td class="text-end">' + cell(m.sandboxAssociations, m.sandboxVolume) + '</td></tr>';
+        }).join('');
+
+        const sb = d.sandbox;
+        const li = function (label, value) {
+            return '<li class="d-flex justify-content-between border-bottom py-1"><span>' + label + '</span><span class="fw-semibold">' + value + '</span></li>';
+        };
+        document.getElementById('ekSandboxList').innerHTML =
+            li('Föreningar med sandlåda', sb.associations) +
+            li('Sandlådor aktiva / övergivna', sb.active + ' / ' + sb.abandoned) +
+            li('Har börjat om', sb.restartedAssociations) +
+            li('Har bokfört något i sandlådan', sb.withOwnEntries) +
+            li('Har importerat SIE i sandlådan', sb.withSieImport) +
+            li('Gick vidare till skarp bokföring', sb.convertedToLive) +
+            li('Median dagar sandlåda → skarpt', sb.medianDaysToLive == null ? '–' : sb.medianDaysToLive);
+
+        document.getElementById('ekShapeList').innerHTML = (d.shapes || []).map(function (x) {
+            return li(escapeHtml(x.label), x.associations + (x.associations ? ' <small class="text-muted">(' + x.usingLive + ' aktiva)</small>' : ''));
+        }).join('');
+
+        const fr = d.friction;
+        const bankPct = fr.bankRows > 0 ? Math.round(100 * fr.bankRowsHandled / fr.bankRows) + ' %' : '–';
+        const corrPct = fr.ownEntries > 0 ? (Math.round(1000 * fr.corrections / fr.ownEntries) / 10) + ' %' : '–';
+        document.getElementById('ekFrictionList').innerHTML =
+            li('Utkast orörda > 7 dagar', fr.staleDraftsLive + (fr.staleDrafts > fr.staleDraftsLive ? ' <small class="text-muted">(+' + (fr.staleDrafts - fr.staleDraftsLive) + ' sandlåda)</small>' : '')) +
+            li('Utgifter som väntat på attest > 14 d', fr.expensesWaiting) +
+            li('Bankrader hanterade', bankPct) +
+            li('Rättelser av egna verifikationer', corrPct) +
+            li('Revisorer inbjudna / har loggat in', fr.auditorsInvited + ' / ' + fr.auditorsAccepted);
+
+        renderEkWeekly(d.weekly || []);
+
+        ekOwners = d.byOwner || [];
+        ekOwnersExpanded = false;
+        renderEkOwners();
+    }
+
+    function renderEkWeekly(weekly) {
+        const colors = getColors();
+        const canvas = document.getElementById('chartEkWeekly');
+        if (!canvas) return;
+        destroyChart('chartEkWeekly');
+        chartInstances['chartEkWeekly'] = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: weekly.map(function (x, i) { return (i % 4 === 0 || i === weekly.length - 1) ? formatShortDate(x.weekStart) : ''; }),
+                datasets: [
+                    { label: 'Egna, skarpt', data: weekly.map(x => x.own), backgroundColor: colors.success + 'cc', borderColor: colors.success, borderWidth: 1 },
+                    { label: 'Automatiska, skarpt', data: weekly.map(x => x.auto), backgroundColor: colors.primary + '66', borderColor: colors.primary, borderWidth: 1 },
+                    { label: 'Sandlåda', data: weekly.map(x => x.sandbox), backgroundColor: colors.warning + 'aa', borderColor: colors.warning, borderWidth: 1 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: colors.text } },
+                    tooltip: { callbacks: { title: function (items) { return 'Veckan från ' + weekly[items[0].dataIndex].weekStart; } } }
+                },
+                scales: {
+                    x: { stacked: true, ticks: { color: colors.text, autoSkip: false, maxRotation: 0 }, grid: { color: colors.grid } },
+                    y: { stacked: true, beginAtZero: true, ticks: { color: colors.text, precision: 0 }, grid: { color: colors.grid } }
+                }
+            }
+        });
+    }
+
+    function renderEkOwners() {
+        const body = document.getElementById('ekOwnersBody');
+        const toggle = document.getElementById('ekOwnersToggle');
+        if (!body) return;
+        if (!ekOwners.length) {
+            body.innerHTML = '<tr><td colspan="9" class="text-center text-muted">Ingen förening har använt ekonomidelen ännu</td></tr>';
+            if (toggle) toggle.classList.add('d-none');
+            return;
+        }
+        if (toggle) {
+            toggle.classList.toggle('d-none', ekOwners.length <= EK_OWNERS_COLLAPSED);
+            toggle.textContent = ekOwnersExpanded ? 'Visa färre' : ('Visa alla (' + ekOwners.length + ')');
+        }
+        const rows = ekOwnersExpanded ? ekOwners : ekOwners.slice(0, EK_OWNERS_COLLAPSED);
+        body.innerHTML = rows.map(function (o) {
+            const parts = (o.modules || []).map(function (m) { return '<span class="badge bg-secondary-subtle text-secondary-emphasis me-1">' + escapeHtml(m) + '</span>'; })
+                .concat((o.sandboxModules || []).map(function (m) { return '<span class="badge bg-warning-subtle text-warning-emphasis fst-italic me-1" title="Bara i sandlådan">' + escapeHtml(m) + '</span>'; }));
+            return '<tr>' +
+                '<td>' + escapeHtml(o.name) + '</td>' +
+                '<td><span class="badge ' + (o.type === 'Krets' ? 'bg-primary' : 'bg-secondary') + '">' + o.type + '</span></td>' +
+                '<td class="text-nowrap"><small>' + escapeHtml(o.shape) + '</small></td>' +
+                '<td class="text-end">' + (o.sandboxes > 0 ? (o.sandboxesActive + ' / ' + o.sandboxes) : '<span class="text-muted">–</span>') + '</td>' +
+                '<td class="text-end fw-semibold">' + o.ownEntries + (o.ownEntries30 > 0 ? ' <small class="text-success">(+' + o.ownEntries30 + ')</small>' : '') + '</td>' +
+                '<td class="text-end">' + o.autoEntries + '</td>' +
+                '<td class="text-end">' + o.paymentsConfirmed + '</td>' +
+                '<td>' + (parts.join('') || '<span class="text-muted">–</span>') + '</td>' +
+                '<td class="text-end text-nowrap"><small class="text-muted">' + (o.lastActivity || '') + '</small></td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    window.toggleEkOwners = function () {
+        ekOwnersExpanded = !ekOwnersExpanded;
+        renderEkOwners();
+    };
+
     // Known feature buckets — kept in sync with the CASE in AdminStatisticsController.GetVisitorStats.
     // We render every one (filling 0 for any the server didn't return) so "this feature gets no
     // traffic" is shown explicitly rather than silently dropping out.
-    const FEATURE_ORDER = ['Utbildning', 'Styrelse', 'Fältkonfig', 'Siktbild', 'Skjutbanor', 'Skyttetrappan', 'Träningsmatch', 'Tävlingar', 'Märken', 'Live-resultat', 'Resultatinmatning', 'Mitt schema'];
+    const FEATURE_ORDER = ['Utbildning', 'Styrelse', 'Fältkonfig', 'Siktbild', 'Skjutbanor', 'Skyttetrappan', 'Träningsmatch', 'Tävlingar', 'Märken', 'Live-resultat', 'Resultatinmatning', 'Mitt schema', 'Ekonomi'];
 
     function renderFeatureUsage(featureUsage) {
         const colors = getColors();
