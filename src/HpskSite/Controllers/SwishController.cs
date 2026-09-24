@@ -77,6 +77,25 @@ namespace HpskSite.Controllers
         // 2026-08-05: ungated test + debug endpoints with no caller anywhere.
 
         /// <summary>
+        /// ⚠️⚠️ VÄXELN PER TÄVLING (P3/P4). En tävling i den nya modellen har inga fakturor — varje
+        /// endpoint här läser eller skapar fakturor och skulle svara med en QR mot ingenting (eller,
+        /// värre, ett felaktigt belopp). Den nya vägen är CompetitionFee-kontrollern; svaret säger det,
+        /// så en gammal klient som når hit får ett besked i stället för en tyst felbetalning.
+        /// </summary>
+        private IActionResult? LedgerModelAnswer(int competitionId)
+        {
+            var models = HttpContext?.RequestServices?.GetService(typeof(HpskSite.Services.CompetitionFees.CompetitionPaymentModelService))
+                as HpskSite.Services.CompetitionFees.CompetitionPaymentModelService;
+            if (models == null || !models.IsLedger(competitionId)) return null;
+            return Json(new
+            {
+                success = false,
+                paymentModel = "ledger",
+                message = "Tävlingen använder det nya betalsättet. Öppna tävlingen för att se vad som ska betalas."
+            });
+        }
+
+        /// <summary>
         /// Generate Swish QR code for competition payment
         /// </summary>
         /// <param name="competitionId">Competition ID</param>
@@ -84,6 +103,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GeneratePaymentQR(int competitionId, string targetMemberId = null)
         {
+            if (LedgerModelAnswer(competitionId) is { } ledger) return ledger;
             try
             {
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
@@ -376,6 +396,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetUnpaidInvoices(int competitionId)
         {
+            if (LedgerModelAnswer(competitionId) is { } ledger) return ledger;
             try
             {
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
@@ -598,6 +619,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GenerateTeamPaymentQR(int competitionId, int teamId)
         {
+            if (LedgerModelAnswer(competitionId) is { } ledger) return ledger;
             try
             {
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
@@ -1026,6 +1048,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SendQRCodeEmail(int competitionId, string targetMemberId = null)
         {
+            if (LedgerModelAnswer(competitionId) is { } ledger) return ledger;
             try
             {
                 _logger.LogInformation("SendQRCodeEmail called for CompetitionId: {CompetitionId}", competitionId);
@@ -1323,6 +1346,7 @@ namespace HpskSite.Controllers
         [IgnoreAntiforgeryToken]
         public async Task<IActionResult> SendTeamQRCodeEmail(int competitionId, int teamId, int targetMemberId = 0)
         {
+            if (LedgerModelAnswer(competitionId) is { } ledger) return ledger;
             try
             {
                 var currentMember = await _memberManager.GetCurrentMemberAsync();

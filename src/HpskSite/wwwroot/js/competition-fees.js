@@ -282,10 +282,12 @@ window.HpskFees = (function () {
 
         // Alla avgifter
         const filterAll = opts.filter || 'all';
+        const unpaidCount = d.items.filter(i => i.itemType === 'competition-registration' && i.status.key === 'unpaid').length;
         h += '<div class="card mb-3"><div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">'
             + '<span class="fw-semibold">Avgifter per anmälan och lag</span>'
             + '<div class="d-flex gap-2 flex-wrap">'
             + '<select class="form-select form-select-sm w-auto hf-filter"><option value="all">Alla</option><option value="todo"' + (filterAll === 'todo' ? ' selected' : '') + '>Bara det som väntar</option></select>'
+            + (unpaidCount > 0 ? '<button type="button" class="btn btn-outline-warning btn-sm hf-remind">Påminn obetalda (' + unpaidCount + ')</button>' : '')
             + '<button type="button" class="btn btn-outline-secondary btn-sm hf-resync">Räkna om avgifterna</button>'
             + '<button type="button" class="btn btn-primary btn-sm hf-invoice-club">Fakturera en klubb</button></div></div>'
             + '<div class="table-responsive"><table class="table table-sm mb-0 align-middle"><thead><tr><th>Namn</th><th>Klubb</th><th>Läge</th><th class="text-end">Kvar</th><th></th></tr></thead><tbody>';
@@ -333,6 +335,13 @@ window.HpskFees = (function () {
             setTimeout(reload, 900);
         });
         root.querySelector('.hf-invoice-club').addEventListener('click', () => openInvoiceClub(competitionId, reload));
+        const remind = root.querySelector('.hf-remind');
+        if (remind) remind.addEventListener('click', async () => {
+            remind.disabled = true;
+            const r = await post('SendReminders', { competitionId });
+            msg(remind.closest('.card').querySelector('.hf-msg'), r.message, r.success);
+            remind.disabled = false;
+        });
         root.querySelectorAll('.hf-receive').forEach(b => b.addEventListener('click', () =>
             openReceivePayment(competitionId, b.dataset.type, +b.dataset.id, reload)));
         root.querySelectorAll('.hf-reverse').forEach(b => b.addEventListener('click', () =>
