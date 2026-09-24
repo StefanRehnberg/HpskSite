@@ -4870,7 +4870,9 @@ kassören) och via `IsClubAdminForClub` även varje krets- och sajtadministratö
 1. **Revisor** (inbjuden ELLER vald `Revisor`/`Revisorssuppleant` i `BoardRoles`) ⇒ **Read**, alltid.
    ⚠️⚠️ **Prövas FÖRST** — en revisor som också är klubbadmin eller kassör får aldrig bokföra i det
    hen granskar. A/B: flyttas revisorn efter skrivrätten faller oberoendepåståendet.
-2. **Aktiv kassör** (`BoardRoleDefinitions.RoleKassor`) ⇒ **Write**.
+2. **Sajtadministratör** (`IsCurrentUserAdminAsync`, INTE `IsClubAdminForClub` som viker in krets-
+   och klubbadmin) ⇒ **Write**, även där kassör finns — supportvägen (Stefans beslut 2026-09-24).
+2b. **Aktiv kassör** (`BoardRoleDefinitions.RoleKassor`) ⇒ **Write**.
 3. **Administratör och INGEN aktiv kassör** ⇒ **Write** — övergången, och sidan ber om att
    kassören läggs in (`#…_noTreasurer`). En hård omläggning hade låst ute nästan alla föreningar.
 4. **Styrelseledamot** ⇒ Read. 5. **Administratör när kassör finns** ⇒ Read.

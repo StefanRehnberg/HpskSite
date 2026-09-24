@@ -449,6 +449,7 @@
                 HpskSite.Services.Ledger.LedgerAccessBasis.AdminWithoutTreasurer => "Administratör",
                 HpskSite.Services.Ledger.LedgerAccessBasis.Admin => "Administratör",
                 HpskSite.Services.Ledger.LedgerAccessBasis.Auditor => "Revisor",
+                HpskSite.Services.Ledger.LedgerAccessBasis.SiteAdmin => "Sajtadministratör",
                 _ => Model.CanWrite ? "Kassör" : "Styrelsen"
             };
             var bokforare = string.IsNullOrWhiteSpace(Model.TreasurerName)
