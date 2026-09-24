@@ -278,6 +278,7 @@ namespace HpskSite.Services.Ledger
         {
             LedgerSourceType.CompetitionRegistration => LedgerAccountRoles.RevenueParticipationFee,
             LedgerSourceType.TeamFee => LedgerAccountRoles.RevenueParticipationFee,
+            LedgerSourceType.CompetitionInvoice => LedgerAccountRoles.RevenueParticipationFee,
             LedgerSourceType.MembershipFee => LedgerAccountRoles.RevenueMembershipFee,
             LedgerSourceType.RegionFee => LedgerAccountRoles.RevenueRegionFee,
             _ => LedgerAccountRoles.RevenueOther

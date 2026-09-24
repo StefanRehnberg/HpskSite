@@ -696,6 +696,11 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Kunde inte ta bort anmälan." });
                 }
 
+                // Den nya modellen: öppna avgiftsbegäranden makuleras. Pengar och fakturor rörs inte —
+                // de syns som "för mycket betalt" på raden tills arrangören ångrar eller krediterar.
+                if (competitionId > 0)
+                    _paymentService.SyncLedgerFeesAfterRemoval(competitionId, registrationId: request.RegistrationId);
+
                 // Take the shooter off the start list and drop their result rows. Without this the
                 // deleted shooter stays on the generated list with orphaned result rows behind them
                 // — half of the known class-change orphaning issue. Springskytte has done this since

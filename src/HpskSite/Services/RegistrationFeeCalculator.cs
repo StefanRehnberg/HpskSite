@@ -120,26 +120,53 @@ namespace HpskSite.Services
             decimal subCompFee,
             string? subCompFeeMode)
         {
-            var applyPerClass = !string.Equals(subCompFeeMode,
-                SubCompetitionFeeModePerRegistration, StringComparison.OrdinalIgnoreCase);
+            var config = new FeeConfig(baseFee, juniorFee, subCompFee, subCompFeeMode);
 
             decimal total = 0;
             if (selectedClasses != null)
             {
                 foreach (var cls in selectedClasses)
-                {
-                    var feeForClass = IsJuniorClass(cls) && juniorFee.HasValue ? juniorFee.Value : baseFee;
-                    if (isSubCompetition && subCompFee > 0 && applyPerClass)
-                        feeForClass += subCompFee;
-                    total += feeForClass;
-                }
+                    total += FeeForClass(config, cls, isSubCompetition);
             }
 
-            if (isSubCompetition && subCompFee > 0 && !applyPerClass)
-                total += subCompFee;
-
-            return total;
+            return total + PerRegistrationSurcharge(config, isSubCompetition);
         }
+
+        /// <summary>
+        /// Tävlingens avgiftsinställningar, lästa en gång. Finns för att avgiften ska kunna DELAS
+        /// per klass (klubben betalar juniorklassen, skytten seniorklassen) utan en andra kopia av
+        /// reglerna — delarna måste per konstruktion summera till <see cref="Calculate(IContent, IReadOnlyCollection{string}, bool)"/>.
+        /// </summary>
+        public readonly record struct FeeConfig(decimal BaseFee, decimal? JuniorFee, decimal SubCompFee, string? SubCompFeeMode)
+        {
+            public bool SubCompPerClass => !string.Equals(SubCompFeeMode,
+                SubCompetitionFeeModePerRegistration, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static FeeConfig ReadConfig(IContent competition) => new(
+            ReadFee(competition, RegistrationFeeAlias),
+            ReadFeeOrNull(competition, JuniorRegistrationFeeAlias),
+            ReadFee(competition, SubCompetitionFeeAlias),
+            competition.GetValue<string>(SubCompetitionFeeModeAlias));
+
+        public static FeeConfig ReadConfig(IPublishedContent competition) => new(
+            ReadFee(competition, RegistrationFeeAlias),
+            ReadFeeOrNull(competition, JuniorRegistrationFeeAlias),
+            ReadFee(competition, SubCompetitionFeeAlias),
+            competition.Value<string>(SubCompetitionFeeModeAlias));
+
+        /// <summary>En klass avgift: grund- eller junioravgift, plus deltävlingen när den tas per klass.</summary>
+        public static decimal FeeForClass(FeeConfig config, string cls, bool isSubCompetition)
+        {
+            var fee = IsJuniorClass(cls) && config.JuniorFee.HasValue ? config.JuniorFee.Value : config.BaseFee;
+            if (isSubCompetition && config.SubCompFee > 0 && config.SubCompPerClass)
+                fee += config.SubCompFee;
+            return fee;
+        }
+
+        /// <summary>Deltävlingsavgiften när den tas EN gång per anmälan — hör inte till någon klass.</summary>
+        public static decimal PerRegistrationSurcharge(FeeConfig config, bool isSubCompetition)
+            => isSubCompetition && config.SubCompFee > 0 && !config.SubCompPerClass ? config.SubCompFee : 0m;
 
         private static decimal ReadFee(IPublishedContent competition, string alias)
         {

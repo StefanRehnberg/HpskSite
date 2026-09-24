@@ -153,7 +153,12 @@ namespace HpskSite.Services.Ledger
         /// får två handlingar i samma serie olika utseende.
         /// </summary>
         private static string DefaultPrefix(string kind)
-            => kind == LedgerSeriesKind.Receipt ? "K" : "V";
+            => kind switch
+            {
+                LedgerSeriesKind.Receipt => "K",
+                LedgerSeriesKind.Invoice => "F",
+                _ => "V"
+            };
 
         private class SeriesAllocation
         {

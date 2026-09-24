@@ -60,6 +60,14 @@ namespace HpskSite.Models.Ledger
         /// kvitto pekar på sin verifikation. Vi bygger det dyrare alternativet.)
         /// </summary>
         public const string Receipt = "receipt";
+
+        /// <summary>
+        /// Fakturor (<see cref="LedgerCharge"/>) — luckfri serie per utställare och år, lagkrav.
+        /// <para>⚠️ Egen serie, aldrig kvittots eller verifikationens. Ett nummer tilldelas vid
+        /// UTFÄRDANDET: fakturan skapas och skickas i samma handling, så inget utkast kan lämna en
+        /// lucka.</para>
+        /// </summary>
+        public const string Invoice = "invoice";
     }
 
     /// <summary>
@@ -104,5 +112,12 @@ namespace HpskSite.Models.Ledger
         /// bokför enligt kontantmetoden. <c>SourceId</c> är utgiftens id.</para>
         /// </summary>
         public const string Expense = "expense";
+
+        /// <summary>
+        /// Betalningen av en faktura som arrangören ställt ut till en klubb över dess anmälningar.
+        /// <para>⚠️ <c>SourceId</c> är TÄVLINGENS id, precis som för anmälningsavgiften — samma
+        /// projekt, samma intäktsroll. Fakturan bär betalningsraden i <c>ChargeId</c>.</para>
+        /// </summary>
+        public const string CompetitionInvoice = "competition-invoice";
     }
 }

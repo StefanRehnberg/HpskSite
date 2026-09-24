@@ -64,9 +64,9 @@ namespace HpskSite.Services.Ledger
                     (IssuerType, IssuerId, SourceType, SourceId, PayerMemberId, PayerName, Amount,
                      Method, ClaimedUtc, ClaimedByMemberId, ConfirmedUtc, ConfirmedByMemberId,
                      ActualAmount, JournalEntryId, ReceiptId, VoidedUtc, VoidedByMemberId,
-                     VoidReason, CreatedUtc)
+                     VoidReason, CreatedUtc, SourceItemId, FeePart, PayerClubId, CoveredByChargeId, ChargeId)
                   OUTPUT INSERTED.Id
-                  VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18)",
+                  VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18,@19,@20,@21,@22,@23)",
                 payment.IssuerType, payment.IssuerId, payment.SourceType,
                 (object?)payment.SourceId ?? DBNull.Value, (object?)payment.PayerMemberId ?? DBNull.Value,
                 payment.PayerName, payment.Amount, payment.Method,
@@ -75,7 +75,11 @@ namespace HpskSite.Services.Ledger
                 (object?)payment.ActualAmount ?? DBNull.Value, (object?)payment.JournalEntryId ?? DBNull.Value,
                 (object?)payment.ReceiptId ?? DBNull.Value, (object?)payment.VoidedUtc ?? DBNull.Value,
                 (object?)payment.VoidedByMemberId ?? DBNull.Value, (object?)payment.VoidReason ?? DBNull.Value,
-                payment.CreatedUtc);
+                payment.CreatedUtc,
+                // Tävlingsavgifternas fält (P3/P4). Null för evenemang och allt annat.
+                (object?)payment.SourceItemId ?? DBNull.Value, (object?)payment.FeePart ?? DBNull.Value,
+                (object?)payment.PayerClubId ?? DBNull.Value, (object?)payment.CoveredByChargeId ?? DBNull.Value,
+                (object?)payment.ChargeId ?? DBNull.Value);
 
             return payment.Id;
         }
@@ -673,6 +677,7 @@ namespace HpskSite.Services.Ledger
         {
             LedgerSourceType.CompetitionRegistration => LedgerAccountRoles.RevenueParticipationFee,
             LedgerSourceType.TeamFee => LedgerAccountRoles.RevenueParticipationFee,
+            LedgerSourceType.CompetitionInvoice => LedgerAccountRoles.RevenueParticipationFee,
             LedgerSourceType.MembershipFee => LedgerAccountRoles.RevenueMembershipFee,
             LedgerSourceType.RegionFee => LedgerAccountRoles.RevenueRegionFee,
             // Ett evenemang kan vara vad som helst — träning, kurs, städdag. Övriga intäkter är det
@@ -689,6 +694,7 @@ namespace HpskSite.Services.Ledger
         {
             LedgerSourceType.CompetitionRegistration => "Anmälningsavgift",
             LedgerSourceType.TeamFee => "Lagavgift",
+            LedgerSourceType.CompetitionInvoice => "Anmälningsavgifter enligt faktura",
             LedgerSourceType.Event => "Evenemangsavgift",
             LedgerSourceType.MembershipFee => "Medlemsavgift",
             LedgerSourceType.RegionFee => "Kretsavgift",

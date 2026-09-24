@@ -74,7 +74,13 @@ namespace HpskSite.Services.Ledger
             //    samma schemasöm. Gruppen bär IssuerId och får alltså sandlådespärren; medlemsraden
             //    har inget IssuerId (som konteringsraden) och hålls i rätt schema av sina FK.
             typeof(LedgerProjectGroup),
-            typeof(LedgerProjectGroupMember)
+            typeof(LedgerProjectGroupMember),
+
+            // ⚠️ Tävlingsavgifternas fakturor (P3/P4). Migreringen
+            //    create-competition-fee-tables.sql lägger också fem kolumner på LedgerPayment —
+            //    utan den faller VARJE läsning av betalningar, även evenemangens.
+            typeof(LedgerCharge),
+            typeof(LedgerChargeLine)
         };
 
         /// <summary>
@@ -93,7 +99,10 @@ namespace HpskSite.Services.Ledger
             "TR_LedgerBudgetLine_AdoptedIsFinal",
             // ⚠️ Bilagan har samma krav: underlaget är räkenskapsinformation och bevaras i sju
             // år. Utan den här raden ser en prod som saknar migreringen fullständigt frisk ut.
-            "TR_LedgerAttachment_NoDelete"
+            "TR_LedgerAttachment_NoDelete",
+            // ⚠️ En utfärdad faktura är en handling — samma krav som kvittot.
+            "TR_LedgerCharge_Immutable",
+            "TR_LedgerChargeLine_NoUpdateDelete"
         };
 
         /// <summary>
@@ -111,7 +120,9 @@ namespace HpskSite.Services.Ledger
             "TR_sbx_LedgerReceipt_NoUpdateDelete",
             "TR_sbx_LedgerBudget_AdoptedIsFinal",
             "TR_sbx_LedgerBudgetLine_AdoptedIsFinal",
-            "TR_sbx_LedgerAttachment_NoDelete"
+            "TR_sbx_LedgerAttachment_NoDelete",
+            "TR_sbx_LedgerCharge_Immutable",
+            "TR_sbx_LedgerChargeLine_NoUpdateDelete"
         };
 
         // Båda skripten namnges: en saknad momskolumn kommer ur det andra, och ett meddelande som
@@ -120,7 +131,8 @@ namespace HpskSite.Services.Ledger
             "Migrations/create-ledger-tables.sql + add-vat-to-ledger.sql + create-ledger-draft-tables.sql "
             + "+ create-ledger-payment-tables.sql + add-project-dimension-to-ledger.sql "
             + "+ create-ledger-budget-tables.sql + create-ledger-expense-table.sql "
-            + "+ create-ledger-asset-table.sql + create-ledger-project-group-tables.sql";
+            + "+ create-ledger-asset-table.sql + create-ledger-project-group-tables.sql "
+            + "+ create-competition-fee-tables.sql";
 
         /// <summary>Skriptet som skapar sandlådans schema. Ett eget svar kräver ett eget skript.</summary>
         public const string SandboxMigrationScript =

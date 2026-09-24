@@ -147,6 +147,7 @@ namespace HpskSite.Services.Ledger
                 .Where(p => p.SourceId is > 0
                             && (p.SourceType == LedgerSourceType.CompetitionRegistration
                                 || p.SourceType == LedgerSourceType.TeamFee
+                                || p.SourceType == LedgerSourceType.CompetitionInvoice
                                 || p.SourceType == LedgerSourceType.Event))
                 .GroupBy(p => (p.SourceType, SourceId: p.SourceId!.Value))
                 .Select(g => new SourceCompleteness
@@ -228,6 +229,7 @@ namespace HpskSite.Services.Ledger
             {
                 LedgerSourceType.Event => $"Borttagen händelse (#{sourceId})",
                 LedgerSourceType.TeamFee => $"Borttagen tävling (#{sourceId})",
+                LedgerSourceType.CompetitionInvoice => $"Borttagen tävling (#{sourceId})",
                 LedgerSourceType.CompetitionRegistration => $"Borttagen tävling (#{sourceId})",
                 _ => $"{LabelForSourceType(sourceType)} (#{sourceId})"
             };
@@ -242,6 +244,7 @@ namespace HpskSite.Services.Ledger
         {
             LedgerSourceType.CompetitionRegistration => "Anmälningsavgifter",
             LedgerSourceType.TeamFee => "Lagavgifter",
+            LedgerSourceType.CompetitionInvoice => "Fakturerade anmälningsavgifter",
             LedgerSourceType.Event => "Evenemangsavgifter",
             LedgerSourceType.MembershipFee => "Medlemsavgifter",
             LedgerSourceType.RegionFee => "Kretsavgifter",

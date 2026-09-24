@@ -51,6 +51,7 @@ namespace HpskSite.Models.Ledger
             {
                 LedgerSourceType.CompetitionRegistration => (Competition, sourceId.Value),
                 LedgerSourceType.TeamFee => (Competition, sourceId.Value),
+                LedgerSourceType.CompetitionInvoice => (Competition, sourceId.Value),
                 LedgerSourceType.Event => (Event, sourceId.Value),
                 _ => null
             };
