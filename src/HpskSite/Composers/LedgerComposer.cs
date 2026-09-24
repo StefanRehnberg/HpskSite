@@ -52,6 +52,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<LedgerJournalService>();
             builder.Services.AddScoped<LedgerAuditorService>();
             builder.Services.AddScoped<LedgerWriteGrantService>();
+            builder.Services.AddScoped<LedgerVatReturnService>();
             builder.Services.AddScoped<LedgerAssetService>();
             builder.Services.AddScoped<LedgerExpenseService>();
 

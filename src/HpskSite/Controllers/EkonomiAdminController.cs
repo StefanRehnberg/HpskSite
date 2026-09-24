@@ -53,6 +53,7 @@ namespace HpskSite.Controllers
         private readonly LedgerAttachmentService _attachmentService;
         private readonly LedgerAuditorService _auditorService;
         private readonly LedgerWriteGrantService _writeGrants;
+        private readonly LedgerVatReturnService _vatReturns;
         private readonly LedgerAssetService _assetService;
         private readonly LedgerExpenseService _expenseService;
         private readonly BoardRoleService _boardRoles;
@@ -99,6 +100,7 @@ namespace HpskSite.Controllers
             LedgerAttachmentService attachmentService,
             LedgerAuditorService auditorService,
             LedgerWriteGrantService writeGrants,
+            LedgerVatReturnService vatReturns,
             LedgerAssetService assetService,
             LedgerExpenseService expenseService,
             BoardRoleService boardRoles,
@@ -126,6 +128,7 @@ namespace HpskSite.Controllers
             _attachmentService = attachmentService;
             _auditorService = auditorService;
             _writeGrants = writeGrants;
+            _vatReturns = vatReturns;
             _assetService = assetService;
             _expenseService = expenseService;
             _boardRoles = boardRoles;
@@ -1516,6 +1519,80 @@ namespace HpskSite.Controllers
                     };
                 }),
                 boardUrl = $"/styrelse?type={ownerType}&id={ownerId}"
+            });
+        }
+
+        // ══ MOMSDEKLARATIONENS UNDERLAG ═══════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Rutorna till momsdeklarationen för en period i räkenskapsåret.
+        ///
+        /// <para><b>⚠️ Perioden räknas från RÄKENSKAPSÅRETS start</b>, inte från 1 januari — ett
+        /// brutet år (juli–juni) har sitt första kvartal juli–september. <c>period</c>: "year",
+        /// "q1"–"q4" eller "m1"–"m12". Läses av alla som får läsa: styrelsen och revisorn ska kunna
+        /// se vad föreningen deklarerat.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetVatReturn(int issuerType, int issuerId, int? year = null, string? period = null)
+        {
+            var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var fy = ResolveFiscalYear(issuerType, issuerId, year);
+            if (fy is null) return Json(new { success = true, hasFiscalYear = false });
+
+            var p = (period ?? "year").Trim().ToLowerInvariant();
+            DateTime from = fy.StartDate.Date, to = fy.EndDate.Date;
+            string label = $"Räkenskapsåret {fy.Year}";
+
+            if (p.Length >= 2 && (p[0] == 'q' || p[0] == 'm') && int.TryParse(p[1..], out var n))
+            {
+                var months = p[0] == 'q' ? 3 : 1;
+                var max = p[0] == 'q' ? 4 : 12;
+                if (n < 1 || n > max) return Json(new { success = false, message = "Okänd period." });
+
+                from = fy.StartDate.Date.AddMonths((n - 1) * months);
+                to = from.AddMonths(months).AddDays(-1);
+                if (to > fy.EndDate.Date) to = fy.EndDate.Date;
+                label = p[0] == 'q' ? $"Kvartal {n} ({from:yyyy-MM-dd} – {to:yyyy-MM-dd})"
+                                    : $"{from:MMMM yyyy}";
+            }
+            else if (p != "year")
+            {
+                return Json(new { success = false, message = "Okänd period." });
+            }
+
+            var r = _vatReturns.Build(issuerType, issuerId, from, to);
+            var status = _setupService.GetStatus(issuerType, issuerId);
+
+            return Json(new
+            {
+                success = true,
+                hasFiscalYear = true,
+                isVatRegistered = status.IsVatRegistered,
+                vatNumber = status.VatNumber,
+                year = fy.Year,
+                period = p,
+                label,
+                from = from.ToString("yyyy-MM-dd"),
+                to = to.ToString("yyyy-MM-dd"),
+                rates = r.Rates.Select(x => new { rate = x.Rate, salesNet = x.SalesNet, outputVat = x.OutputVat }),
+                boxes = new
+                {
+                    b05 = r.Box05, b10 = r.Box10, b11 = r.Box11, b12 = r.Box12, b48 = r.Box48, b49 = r.Box49,
+                    // Som det skrivs i rutan: hela kronor, örena stryks.
+                    k05 = LedgerVatReturn.WholeKronor(r.Box05), k10 = LedgerVatReturn.WholeKronor(r.Box10),
+                    k11 = LedgerVatReturn.WholeKronor(r.Box11), k12 = LedgerVatReturn.WholeKronor(r.Box12),
+                    k48 = LedgerVatReturn.WholeKronor(r.Box48)
+                },
+                ledgerOutput = r.LedgerOutput,
+                ledgerInput = r.LedgerInput,
+                outputDifference = r.OutputDifference,
+                inputDifference = r.InputDifference,
+                reconciles = r.Reconciles,
+                entryCount = r.EntryCount,
+                outputAccount = r.OutputAccount,
+                inputAccount = r.InputAccount
             });
         }
 

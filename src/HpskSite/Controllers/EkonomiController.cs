@@ -132,6 +132,7 @@ namespace HpskSite.Controllers
                 CanWrite = access.CanWrite,
                 AccessBasis = access.Basis,
                 CanManageWriteGrants = access.CanManageWriteGrants,
+                IsVatRegistered = status.IsVatRegistered,
                 TreasurerName = access.TreasurerName,
                 IssuerName = name,
                 // Tillbakalänken: kassören ska inte behöva bläddra sig hem.
@@ -203,6 +204,9 @@ namespace HpskSite.Controllers
         /// LÄSARE (ordföranden), så kontrollerna på Behörigheter får aldrig gatas på CanWrite.
         /// </summary>
         public bool CanManageWriteGrants { get; set; }
+
+        /// <summary>Momsregistrerad — styr om fliken Moms (deklarationens underlag) finns.</summary>
+        public bool IsVatRegistered { get; set; }
 
         /// <summary>Kassörens namn när den inloggade läser. Tomt = ingen kassör registrerad.</summary>
         public string TreasurerName { get; set; } = "";
