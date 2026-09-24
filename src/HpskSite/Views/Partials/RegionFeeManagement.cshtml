@@ -28,6 +28,11 @@
     /* Ett belopp får aldrig brytas mitt i ("200 / kr"). */
     #rfRoot .rf-n { white-space: nowrap; }
     @@media (max-width: 575.98px) { #rfRoot tr.rf-main td { border-bottom: 0; padding-bottom: 0; } }
+    /* Starter och tävlingar syns bara när kretsen tar betalt för dem. */
+    #rfRoot.rf-nocomp .rf-cc { display: none !important; }
+    #rfModal .rf-series { border-top: 1px solid var(--bs-border-color); padding-top: .5rem; margin-top: .75rem; }
+    #rfModal .rf-series:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+    #rfModal .rf-complist { max-height: 55vh; overflow-y: auto; }
 </style>
 
 <div id="rfRoot">
@@ -55,6 +60,7 @@
                     <li><hr class="dropdown-divider"></li>
                     <li><h6 class="dropdown-header">Inställningar</h6></li>
                     <li><button class="dropdown-item" type="button" id="rfEditRate"><i class="bi bi-cash-coin me-2"></i><span>Avgiften</span></button></li>
+                    <li><button class="dropdown-item" type="button" id="rfEditComps"><i class="bi bi-trophy me-2"></i><span>Tävlingar som ingår…</span></button></li>
                 </ul>
             </div>
             }
@@ -80,6 +86,8 @@
                     <th>Klubb</th>
                     <th class="d-none d-md-table-cell">E-post</th>
                     <th class="text-end"><span class="d-none d-sm-inline">Medlemmar</span><span class="d-sm-none" title="Medlemmar">Medl.</span></th>
+                    <th class="text-end rf-cc d-none d-md-table-cell">Starter</th>
+                    <th class="text-end rf-cc d-none d-md-table-cell">Tävlingar</th>
                     <th class="text-end">Att betala</th>
                     <th class="d-none d-sm-table-cell">Status</th>
                     <th class="text-end d-none d-sm-table-cell"><span class="visually-hidden">Åtgärder</span></th>
@@ -93,7 +101,7 @@
 @* EN dialog för alla ändringar — avgiften, antal, belopp, en ny rad. Samma form som resten av sajtens
    dialoger: rubrik, fält, Avbryt och en blå sparknapp. *@
 <div class="modal fade" id="rfModal" tabindex="-1" aria-hidden="true" aria-labelledby="rfModalTitle">
-    <div class="modal-dialog">
+    <div class="modal-dialog" id="rfModalDialog">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="rfModalTitle"></h5>
@@ -172,16 +180,34 @@
 
     // Vad taxan ger för ett antal — speglar RegionFeeCalculator. Bara för att avgöra om ett inskrivet
     // belopp är "eget"; servern räknar det riktiga beloppet.
-    function byRate(count) {
-        var b = data.rate.baseAmount || 0, p = data.rate.perMember || 0;
-        return (b > 0 ? b : 0) + (p > 0 && count > 0 ? Math.round(p * count * 100) / 100 : 0);
+    function byRate(count, starts, comps) {
+        var r = data.rate, b = r.baseAmount || 0, p = r.perMember || 0, ps = r.perStart || 0, pc = r.perCompetition || 0;
+        return (b > 0 ? b : 0) + (p > 0 && count > 0 ? Math.round(p * count * 100) / 100 : 0)
+             + (ps > 0 && starts > 0 ? Math.round(ps * starts * 100) / 100 : 0)
+             + (pc > 0 && comps > 0 ? Math.round(pc * comps * 100) / 100 : 0);
     }
+    function usesComps(r) { return (r.perStart || 0) > 0 || (r.perCompetition || 0) > 0; }
+    // ⚠️ En mening, i klartext — samma som förut, plus starter och tävlingar när de finns. Tomt = ingen taxa.
     function rateSentence(r) {
-        var b = r.baseAmount || 0, p = r.perMember || 0;
-        if (b > 0 && p > 0) return 'Varje klubb betalar ' + kr(b) + ' + ' + kr(p) + ' per medlem.';
-        if (b > 0) return 'Varje klubb betalar ' + kr(b) + '.';
-        if (p > 0) return 'Varje klubb betalar ' + kr(p) + ' per medlem.';
-        return '';
+        var parts = [];
+        if ((r.baseAmount || 0) > 0) parts.push(kr(r.baseAmount));
+        if ((r.perMember || 0) > 0) parts.push(kr(r.perMember) + ' per medlem');
+        if ((r.perStart || 0) > 0) parts.push(kr(r.perStart) + ' per start');
+        if ((r.perCompetition || 0) > 0) parts.push(kr(r.perCompetition) + ' per tävling');
+        if (parts.length === 0) return '';
+        var last = parts.pop();
+        return 'Varje klubb betalar ' + (parts.length ? parts.join(', ') + ' och ' + last : last) + '.';
+    }
+    function compsSentence() {
+        if (!usesComps(data.rate)) return '';
+        var n = (data.competitions || []).length;
+        return n === 0
+            ? 'Inga tävlingar är valda än — välj dem under Åtgärder → Tävlingar som ingår.'
+            : 'Starter och tävlingar räknas i ' + n + (n === 1 ? ' vald tävling' : ' valda tävlingar') + ' ur pistol.nu.';
+    }
+    function qty(lines, kind) {
+        var l = lines.find(function (x) { return x.kind === kind; });
+        return l ? l.quantity : 0;
     }
 
     // Radens läge, en gång, så att render, knapparna och summeringen läser samma sak.
@@ -195,6 +221,10 @@
             claimed: !!c && !!c.paymentSentDate,
             amount: c ? c.amount : r.proposedAmount,
             count: c ? c.memberCount : r.proposedCount,
+            // Det som debiteras: raden om avgiften finns, annars pistol.nu:s förslag.
+            starts: c ? (c.startCount != null ? c.startCount : qty(lines, 'per-start')) : r.proposedStarts,
+            comps: c ? (c.competitionCount != null ? c.competitionCount : qty(lines, 'per-competition')) : r.proposedCompetitions,
+            countsOwn: !!c && (c.startCount != null || c.competitionCount != null),
             manual: lines.some(function (l) { return l.kind === 'manual'; }),
             extras: lines.filter(function (l) { return l.kind === 'extra'; })
         };
@@ -238,6 +268,7 @@
             }
             items.push('<li><h6 class="dropdown-header">Avgiften</h6></li>');
             items.push(item('count', id, 'Ändra antal medlemmar…'));
+            if (usesComps(data.rate)) items.push(item('comp-counts', id, 'Ändra antal starter och tävlingar…'));
             if (!s.sent) items.push(item('amount', id, 'Ändra beloppet…'));
             items.push(item('line', id, 'Lägg till en rad, t.ex. lagavgift…'));
             s.extras.forEach(function (l) {
@@ -268,6 +299,8 @@
         var hasRate = sentence !== '';
 
         $('rfRateLine').textContent = hasRate ? sentence : '';
+        $('rfRoot').classList.toggle('rf-nocomp', !usesComps(data.rate));
+        var cs = compsSentence();
         show($('rfNoRate'), !hasRate);
         $('rfNoRateText').textContent = 'Kretsen har inte bestämt avgiften för ' + data.year + ' än.';
         show($('rfListWrap'), hasRate);
@@ -285,25 +318,33 @@
             if (!s.paid && s.sent) toRemind++;
 
             var countLabel = s.count == null ? '—' : s.count;
+            var own = s.countsOwn ? '<div class="small text-muted">ändrat</div>' : '';
             html += '<tr class="rf-main"><td>' + esc(r.clubName)
                   + (s.extras.length ? '<div class="small text-muted">inkl. ' + s.extras.map(function (l) {
                         return esc(l.description.toLowerCase()) + ' ' + kr(l.amount); }).join(', ') + '</div>' : '')
+                  // Mindre skärmar: antalen under klubbens namn i stället för i egna kolumner.
+                  + (usesComps(data.rate) ? '<div class="small text-muted d-md-none">' + s.starts + ' starter · ' + s.comps + ' tävlingar</div>' : '')
                   + '</td>'
                   + '<td class="d-none d-md-table-cell">' + emailCell(r) + '</td>'
                   + '<td class="text-end rf-n">' + esc(countLabel) + '</td>'
+                  + '<td class="text-end rf-n rf-cc d-none d-md-table-cell">' + s.starts + own + '</td>'
+                  + '<td class="text-end rf-n rf-cc d-none d-md-table-cell">' + s.comps + '</td>'
                   + '<td class="text-end rf-n">' + kr(s.amount) + (s.manual ? '<div class="small text-muted">eget belopp</div>' : '') + '</td>'
-                  + '<td class="small d-none d-sm-table-cell">' + statusCell(r, s) + '</td>'
+                  + '<td class="small rf-status d-none d-sm-table-cell">' + statusCell(r, s) + '</td>'
                   + '<td class="text-end rf-n rf-actions d-none d-sm-table-cell">' + actionsCell(r, s) + '</td></tr>'
                   // På telefon ryms inte fem kolumner: status och knappar får en egen rad under klubben.
                   + '<tr class="rf-mrow d-sm-none"><td colspan="3"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2 small">'
                   + '<span>' + statusCell(r, s) + (r.hasEmail ? '' : ' ' + emailCell(r)) + '</span>' + actionsCell(r, s) + '</div></td></tr>';
         });
 
-        html += '<tr class="rf-total"><td>Totalt</td><td class="d-none d-md-table-cell"></td><td></td><td class="text-end rf-n">' + kr(total) + '</td><td class="d-none d-sm-table-cell"></td><td class="d-none d-sm-table-cell"></td></tr>';
+        html += '<tr class="rf-total"><td>Totalt</td><td class="d-none d-md-table-cell"></td><td></td>'
+              + '<td class="rf-cc d-none d-md-table-cell"></td><td class="rf-cc d-none d-md-table-cell"></td>'
+              + '<td class="text-end rf-n">' + kr(total) + '</td><td class="d-none d-sm-table-cell"></td><td class="d-none d-sm-table-cell"></td></tr>';
         $('rfRows').innerHTML = html;
 
-        $('rfSummary').textContent = hasRate
-            ? paidCount + ' av ' + billed + ' klubbar har betalat · ' + kr(paidSum) + ' av ' + kr(total) : '';
+        $('rfSummary').textContent = (hasRate
+            ? paidCount + ' av ' + billed + ' klubbar har betalat · ' + kr(paidSum) + ' av ' + kr(total) : '')
+            + (cs ? (hasRate ? ' · ' : '') + cs : '');
 
         // Sidans Åtgärder: skicka och påminn visas bara när det finns något att göra.
         if ($('rfSend')) {
@@ -340,7 +381,9 @@
              + (type === 'text' ? 'maxlength="200"' : 'min="0" step="1"') + ' class="form-control" autocomplete="off" value="' + esc(value == null ? '' : value) + '">'
              + (suffix ? '<span class="input-group-text">' + suffix + '</span>' : '') + '</div></div>';
     }
-    function openForm(title, bodyHtml, onSave) {
+    function openForm(title, bodyHtml, onSave, wide) {
+        // Tävlingslistan behöver bredd; övriga dialoger är vanliga.
+        $('rfModalDialog').className = 'modal-dialog' + (wide ? ' modal-lg modal-dialog-scrollable' : '');
         $('rfModalTitle').textContent = title;
         $('rfModalBody').innerHTML = bodyHtml;
         show($('rfModalError'), false);
@@ -365,20 +408,94 @@
         if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') { ev.preventDefault(); $('rfModalSave').click(); }
     });
 
+    function textField(id, label, value) {
+        return '<div class="mb-3"><label class="form-label" for="' + id + '">' + label + '</label>'
+             + '<input id="' + id + '" type="text" maxlength="60" class="form-control" autocomplete="off" value="' + esc(value || '') + '"></div>';
+    }
     function openRateForm() {
+        var r0 = data.rate;
         openForm('Avgiften för ' + data.year,
-            '<p class="text-muted small">Hur mycket ska klubbarna betala? Fyll i ett eller båda.</p>'
-            + field('rfBase', 'Fast belopp per klubb', data.rate.baseAmount || '', 'kr')
-            + field('rfPer', 'Per medlem', data.rate.perMember || '', 'kr')
+            '<p class="text-muted small">Hur mycket ska klubbarna betala? Fyll i det som gäller, resten lämnar du tomt.</p>'
+            + field('rfBase', 'Fast belopp per klubb', r0.baseAmount || '', 'kr')
+            + field('rfPer', 'Per medlem', r0.perMember || '', 'kr')
+            + '<h6 class="mt-4">Kretsens tävlingar</h6>'
+            + '<p class="text-muted small">pistol.nu räknar varje klubbs starter i de tävlingar kretsen väljer. '
+            + 'En skytt som skjuter två klasser har två starter. Antalet går att ändra för varje klubb.</p>'
+            + '<div class="row g-2"><div class="col-sm-5">' + field('rfPerStart', 'Per start', r0.perStart || '', 'kr') + '</div>'
+            + '<div class="col-sm-7">' + textField('rfStartLabel', 'Radens namn på räkningen', r0.startLabel) + '</div></div>'
+            + '<div class="row g-2"><div class="col-sm-5">' + field('rfPerComp', 'Per tävling klubben deltog i', r0.perCompetition || '', 'kr') + '</div>'
+            + '<div class="col-sm-7">' + textField('rfCompLabel', 'Radens namn på räkningen', r0.competitionLabel) + '</div></div>'
             + '<p class="text-muted small mb-0">Avgifter som redan skickats ändras inte.</p>',
             async function () {
-                var b = num('rfBase'), p = num('rfPer');
-                if (b <= 0 && p <= 0) return 'Fyll i ett belopp.';
-                var r = await post('SaveRegionRate', { regionId: REGION_ID, year: year(), baseAmount: b, perMember: p });
-                return r.success ? null : r.message;
+                var b = num('rfBase'), p = num('rfPer'), ps = num('rfPerStart'), pc = num('rfPerComp');
+                if (b <= 0 && p <= 0 && ps <= 0 && pc <= 0) return 'Fyll i ett belopp.';
+                var r = await post('SaveRegionRate', { regionId: REGION_ID, year: year(), baseAmount: b, perMember: p,
+                    perStart: ps, perCompetition: pc, startLabel: $('rfStartLabel').value, competitionLabel: $('rfCompLabel').value });
+                if (!r.success) return r.message;
+                // Nyss valt att ta betalt per start men inga tävlingar valda: nästa steg är valet.
+                if ((ps > 0 || pc > 0) && (data.competitions || []).length === 0)
+                    setTimeout(openCompsForm, 400);
+                return null;
             });
     }
     if ($('rfEditRate')) $('rfEditRate').addEventListener('click', openRateForm);
+
+    // ── Tävlingar som ingår ───────────────────────────────────────────────────────────────
+    // ⚠️ Listan byggs ur kretsens tävlingar det året (både kretsens egna och klubbarnas), grupperad per
+    //    serie. En hel serie väljs med en ruta — Hallandsserien är sju till tio omgångar.
+    async function openCompsForm() {
+        var d = await (await fetch(F + 'GetRegionFeeCompetitions?regionId=' + REGION_ID + '&year=' + year(), { cache: 'no-store' })).json();
+        if (!d.success) { msg(false, d.message || 'Tävlingarna gick inte att läsa.'); return; }
+        var groups = [], bySeries = {};
+        (d.competitions || []).forEach(function (c) {
+            var key = c.series || '';
+            if (!bySeries[key]) { bySeries[key] = []; groups.push(key); }
+            bySeries[key].push(c);
+        });
+        var html = '<p class="text-muted small">Välj de tävlingar under ' + d.year + ' som kretsens avgift ska räknas på. '
+                 + 'Saknas en tävling på pistol.nu ändrar du antalet för klubben i stället.</p>';
+        if (d.missing > 0) html += '<div class="alert alert-warning small">' + d.missing + ' tidigare vald' + (d.missing === 1 ? '' : 'a')
+                 + ' tävling' + (d.missing === 1 ? ' finns' : 'ar finns') + ' inte längre och räknas inte. Spara för att ta bort den ur valet.</div>';
+        if (groups.length === 0) html += '<p class="mb-0">Kretsen har inga tävlingar på pistol.nu under ' + d.year + '.</p>';
+        html += '<div class="rf-complist">';
+        groups.forEach(function (g, gi) {
+            var list = bySeries[g];
+            html += '<div class="rf-series"><div class="form-check"><input class="form-check-input" type="checkbox" id="rfSer' + gi
+                  + '" data-rf-series="' + gi + '"' + (list.every(function (c) { return c.selected; }) ? ' checked' : '') + '>'
+                  + '<label class="form-check-label fw-semibold" for="rfSer' + gi + '">' + esc(g || 'Tävlingar utanför en serie')
+                  + ' <span class="text-muted fw-normal small">(' + list.length + ')</span></label></div>';
+            list.forEach(function (c) {
+                html += '<div class="form-check ms-4"><input class="form-check-input" type="checkbox" id="rfC' + c.id + '" value="' + c.id
+                      + '" data-rf-comp="' + gi + '"' + (c.selected ? ' checked' : '') + '>'
+                      + '<label class="form-check-label" for="rfC' + c.id + '">' + esc(c.name)
+                      + ' <span class="text-muted small">' + day(c.date) + ' · ' + esc(c.type) + ' · ' + esc(c.host) + '</span>'
+                      + (c.takesFee ? ' <span class="badge bg-warning-subtle text-warning-emphasis border" title="Skyttarna betalar redan en anmälningsavgift på pistol.nu. Kontrollera att starten inte tas betalt för två gånger.">tar anmälningsavgift</span>' : '')
+                      + '</label></div>';
+            });
+            html += '</div>';
+        });
+        html += '</div>';
+        openForm('Tävlingar som ingår — ' + d.year, html, async function () {
+            var ids = Array.prototype.map.call($('rfModalBody').querySelectorAll('input[data-rf-comp]:checked'),
+                function (i) { return parseInt(i.value, 10); });
+            var r = await post('SaveRegionFeeCompetitions', { regionId: REGION_ID, year: year(), competitionIds: ids });
+            if (r.success) msg(true, r.message);
+            return r.success ? null : r.message;
+        }, true);
+    }
+    // Seriens ruta styr sina tävlingar, och speglar dem.
+    $('rfModalBody').addEventListener('change', function (ev) {
+        var t = ev.target;
+        if (t.hasAttribute('data-rf-series')) {
+            $('rfModalBody').querySelectorAll('input[data-rf-comp="' + t.getAttribute('data-rf-series') + '"]')
+                .forEach(function (i) { i.checked = t.checked; });
+        } else if (t.hasAttribute('data-rf-comp')) {
+            var g = t.getAttribute('data-rf-comp'), all = $('rfModalBody').querySelectorAll('input[data-rf-comp="' + g + '"]');
+            var ser = $('rfModalBody').querySelector('input[data-rf-series="' + g + '"]');
+            if (ser) ser.checked = Array.prototype.every.call(all, function (i) { return i.checked; });
+        }
+    });
+    if ($('rfEditComps')) $('rfEditComps').addEventListener('click', openCompsForm);
     if ($('rfNoRateBtn')) $('rfNoRateBtn').addEventListener('click', openRateForm);
 
     // ── Klick i listan ───────────────────────────────────────────────────────────────────
@@ -399,8 +516,41 @@
                 });
             return;
         }
+        if (act === 'comp-counts') {
+            // Underlaget per tävling, så att kretsen ser VAR talet kommer ifrån innan det rättas.
+            var names = {};
+            (data.competitions || []).forEach(function (c) { names[c.id] = c; });
+            var basis = (row.startsByCompetition || []).slice().sort(function (x, y) {
+                var a = (names[x.competitionId] || {}).date || '', b = (names[y.competitionId] || {}).date || '';
+                return a < b ? -1 : a > b ? 1 : 0;
+            }).map(function (b) {
+                var c = names[b.competitionId];
+                return '<li>' + esc(c ? c.name : 'Tävling ' + b.competitionId) + (c ? ' <span class="text-muted">' + day(c.date) + '</span>' : '')
+                     + ': ' + b.starts + (b.starts === 1 ? ' start' : ' starter') + '</li>';
+            }).join('');
+            var cur = s.c || {};
+            openForm('Starter och tävlingar — ' + row.clubName,
+                '<p class="small mb-1">pistol.nu räknar <strong>' + row.proposedStarts + ' starter</strong> i <strong>'
+                + row.proposedCompetitions + ' av ' + (data.competitions || []).length + ' tävlingar</strong>.</p>'
+                + (basis ? '<ul class="small text-muted mb-3">' + basis + '</ul>' : '<p class="small text-muted">Klubben har inga starter i de valda tävlingarna.</p>')
+                + field('rfFormStarts', 'Antal starter att debitera', cur.startCount != null ? cur.startCount : '')
+                + field('rfFormComps', 'Antal tävlingar att debitera', cur.competitionCount != null ? cur.competitionCount : '')
+                + '<p class="text-muted small mb-0">Lämna ett fält tomt för att följa pistol.nu:s räkning. '
+                + 'Ett tal du skriver står kvar även om tävlingarna eller resultaten ändras.</p>',
+                async function () {
+                    function val(id) { var v = $(id).value.trim(); return v === '' ? null : Math.max(0, Math.round(parseFloat(v))); }
+                    var sc = val('rfFormStarts'), cc = val('rfFormComps');
+                    if ((sc !== null && isNaN(sc)) || (cc !== null && isNaN(cc))) return 'Skriv ett heltal, eller lämna fältet tomt.';
+                    var cid = await chargeIdFor(clubId); if (!cid) return 'Avgiften kunde inte skapas.';
+                    var x = await post('SetRegionChargeCompetitionCounts', { chargeId: cid, startCount: sc, competitionCount: cc });
+                    return x.success ? null : x.message;
+                });
+            $('rfFormStarts').placeholder = row.proposedStarts + ' enligt pistol.nu';
+            $('rfFormComps').placeholder = row.proposedCompetitions + ' enligt pistol.nu';
+            return;
+        }
         if (act === 'amount') {
-            var formula = byRate(s.count == null ? row.proposedCount : s.count);
+            var formula = byRate(s.count == null ? row.proposedCount : s.count, s.starts, s.comps);
             openForm('Belopp — ' + row.clubName,
                 field('rfFormAmount', 'Att betala', s.amount, 'kr')
                 + '<p class="text-muted small mb-0">Taxan ger ' + kr(formula) + '. Skriv det beloppet för att följa taxan igen.</p>',

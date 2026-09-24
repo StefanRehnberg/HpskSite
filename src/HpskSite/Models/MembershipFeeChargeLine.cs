@@ -58,5 +58,11 @@ namespace HpskSite.Models
 
         /// <summary>Ett tillägg, t.ex. en lagavgift.</summary>
         public const string Extra = "extra";
+
+        /// <summary>Pris × antal starter i kretsens valda tävlingar.</summary>
+        public const string PerStart = "per-start";
+
+        /// <summary>Pris × antal av de valda tävlingarna där klubben hade minst en start.</summary>
+        public const string PerCompetition = "per-competition";
     }
 }
