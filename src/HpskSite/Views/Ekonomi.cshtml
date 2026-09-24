@@ -450,6 +450,8 @@
                 HpskSite.Services.Ledger.LedgerAccessBasis.Admin => "Administratör",
                 HpskSite.Services.Ledger.LedgerAccessBasis.Auditor => "Revisor",
                 HpskSite.Services.Ledger.LedgerAccessBasis.SiteAdmin => "Sajtadministratör",
+                // ⚠️ INTE "Kassör" — hen är inte kassör, hen har fått kassörens rätt för en tid.
+                HpskSite.Services.Ledger.LedgerAccessBasis.Delegate => "Arbetar med ekonomin",
                 _ => Model.CanWrite ? "Kassör" : "Styrelsen"
             };
             var bokforare = string.IsNullOrWhiteSpace(Model.TreasurerName)
@@ -523,6 +525,9 @@
             <a href="#" class="ek-nav" data-view="installningar" id="@(uid)_toggleSetup">Inställningar</a>
             <a href="#" class="ek-nav" data-view="revisorer">Revisorer</a>
         }
+        @* ⚠️ För ALLA som läser: styrelsen och revisorn ska kunna se vilka som arbetar med
+           ekonomin, och ordföranden (en läsare) ska kunna ge rätten. *@
+        <a href="#" class="ek-nav" data-view="behorigheter">Behörigheter</a>
 
         @* ⚠️ Växlaren ligger SIST och lågmält. Att byta liggare är sällsynt och allvarligt;
            den ska gå att hitta, inte att råka klicka på. *@
@@ -1442,6 +1447,93 @@
                         En inbjudan gäller i 13 månader.
                     </p>
                 </div>
+            </section>
+
+            @*
+                ⚠️⚠️ VILKA FÅR ARBETA MED EKONOMIN? (Stefan 2026-09-24). Skrivrätten följer
+                kassörsuppdraget, men kassören kan vara borta eller ha ont om tid — mitt i året eller
+                precis när årsredovisningen ska fram. Kassören, ordföranden och en administratör
+                får därför ge någon annan SAMMA rätt som kassören, för en tid.
+
+                ⚠️ "Viktigt att det framgår hur det fungerar när rätten ges": förklaringen står
+                ÖVERST, och en rad under formuläret säger exakt vad som händer innan man trycker —
+                vem som får vad, till när, och vilka som får mejl. Mejlen upprepar det.
+
+                ⚠️ Fliken visas för ALLA som läser, och kontrollerna gatas på CanManageWriteGrants —
+                ALDRIG på CanWrite: ordföranden läser men får ge rätten.
+            *@
+            <section data-pane="behorigheter" hidden>
+                <div class="head">
+                    <div><h1>Vilka arbetar med ekonomin?</h1>
+                        <div class="sub">Kassören bokför. Behövs det hjälp kan någon annan få samma rätt, för en tid.</div></div>
+                </div>
+
+                <div class="ek-alert ek-bad d-none" id="@(uid)_wgError"></div>
+                <div class="ek-alert ek-ok d-none" id="@(uid)_wgOk"></div>
+
+                <div class="ek-card wide">
+                    <div class="ek-cardh"><h2>Så fungerar det</h2></div>
+                    <ul style="margin:0 0 0 1.1rem;padding:0;line-height:1.7">
+                        <li><strong>Kassören</strong> arbetar med ekonomin genom sitt uppdrag i föreningens uppgifter<span id="@(uid)_wgTreasurer"></span>.</li>
+                        <li>Är kassören borta eller behöver hjälp — med bokföringen under året, eller med bokslutet
+                            och årsredovisningen — kan <strong>kassören, ordföranden eller en administratör</strong> ge
+                            någon annan samma rätt, <strong>för en bestämd tid</strong>.</li>
+                        <li>Den som får rätten kan göra <strong>allt kassören kan</strong>: bokföra, stämma av mot banken och göra bokslutet.
+                            Hen kan däremot <strong>inte ge rätten vidare</strong> till någon annan.</li>
+                        <li><strong>Den som får rätten får ett mejl</strong> som förklarar vad hen kan göra och till när.
+                            <strong>Kassören får ett mejl</strong> när någon annan än kassören själv har gett rätten.</li>
+                        <li>Allt som bokförs visar vem som bokförde det. Rätten kan avslutas när som helst, och den
+                            upphör av sig själv efter slutdatumet.</li>
+                        <li>En <strong>revisor</strong> kan aldrig få rätten — revisorn granskar bokföringen.</li>
+                    </ul>
+                </div>
+
+                <div class="ek-card wide" style="margin-top:1rem">
+                    <div class="ek-cardh">
+                        <h2>Har rätten just nu</h2>
+                        <span class="meta" id="@(uid)_wgMeta"></span>
+                    </div>
+                    <table class="t">
+                        <thead><tr>
+                            <th>Namn</th>
+                            <th style="width:9rem">Gäller t.o.m.</th>
+                            <th>Given av</th>
+                            <th style="width:10rem"></th>
+                        </tr></thead>
+                        <tbody id="@(uid)_wgBody"></tbody>
+                    </table>
+                </div>
+
+                @if (Model.CanManageWriteGrants)
+                {
+                    <div class="ek-card wide" style="margin-top:1rem" id="@(uid)_wgFormCard">
+                        <div class="ek-cardh"><h2>Ge någon rätten</h2></div>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label" for="@(uid)_wgSearch">Vem?</label>
+                                <input type="text" class="form-control" id="@(uid)_wgSearch" autocomplete="off"
+                                       placeholder="Skriv namn eller e-post (minst två tecken)">
+                                <div class="list-group mt-1" id="@(uid)_wgResults"></div>
+                                <div class="form-text" id="@(uid)_wgPicked"></div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" for="@(uid)_wgEnds">Till och med</label>
+                                <input type="text" class="form-control ek-date" id="@(uid)_wgEnds" placeholder="åååå-mm-dd">
+                                <div class="form-text">Förvalt: räkenskapsårets slut + 3 månader, så att bokslutet hinns med.</div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" for="@(uid)_wgReason">Varför? (frivilligt)</label>
+                                <input type="text" class="form-control" id="@(uid)_wgReason" maxlength="400"
+                                       placeholder="Kassören föräldraledig">
+                            </div>
+                        </div>
+                        @* ⚠️ Vad som HÄNDER, innan man trycker. Uppdateras medan formuläret fylls i. *@
+                        <div class="why" id="@(uid)_wgSummary" style="margin-top:12px"></div>
+                        <div style="margin-top:12px">
+                            <button type="button" class="btn btn-primary" id="@(uid)_wgGrant" disabled>Ge rätten</button>
+                        </div>
+                    </div>
+                }
             </section>
 
             <section data-pane="bokfor" hidden>
@@ -2866,6 +2958,7 @@
         if (name === 'verifikationer' && !verLoaded) { verLoaded = true; loadJournal(true); }
 
         if (name === 'revisorer' && !revLoaded) { revLoaded = true; loadAuditors(); }
+        if (name === 'behorigheter' && !wgLoaded) { wgLoaded = true; loadGrants(); }
 
         // ⚠️ Samma skäl som ovan: registret räknar årets plan och läser årets bokförda
         //    avskrivningar ur liggaren. Varje skrivning hämtar om det själv.
@@ -4132,6 +4225,135 @@
             el('aError').textContent = e.message; show(el('aError'), true);
         });
     });
+
+    // ══ VILKA ARBETAR MED EKONOMIN? ══════════════════════════════════════════════════════
+    // ⚠️ ÄGAREN, aldrig utställaren (samma regel som revisorerna nedan): rätten gäller
+    //    föreningen och dess sandlådor. `ownerType`/`ownerId` sätts i revisorsavsnittet; det
+    //    här körs först när fliken öppnas, så de är satta då.
+    // ⚠️ Kontrollerna finns bara för den som får hantera listan — `el('wgGrant')` är vakten,
+    //    aldrig canWrite (ordföranden läser men får ge).
+    var wgLoaded = false, wgPicked = null, wgDefaultEnds = '';
+
+    function wgSummary() {
+        var s = el('wgSummary');
+        if (!s) return;
+        var ends = el('wgEnds').value;
+        if (!wgPicked) { s.textContent = 'Välj först vem som ska få rätten.'; el('wgGrant').disabled = true; return; }
+        if (!ends) { s.textContent = 'Ange till och med vilket datum rätten ska gälla.'; el('wgGrant').disabled = true; return; }
+        s.innerHTML = '<strong>Så här blir det:</strong> ' + esc(wgPicked.name) + ' får samma rätt som kassören — bokföra, '
+            + 'stämma av och göra bokslutet — till och med <strong>' + esc(ends) + '</strong>. '
+            + esc(wgPicked.name) + ' får ett mejl som förklarar det, och kassören får besked om det inte är '
+            + 'kassören själv som ger rätten. Den kan avslutas när som helst.';
+        el('wgGrant').disabled = false;
+    }
+
+    async function loadGrants() {
+        show(el('wgError'), false);
+        var d = await fetch('/umbraco/surface/EkonomiAdmin/GetWriteGrants?ownerType=' + ownerType
+                            + '&ownerId=' + ownerId, { cache: 'no-store' }).then(function (r) { return r.json(); });
+        if (!d.success) { el('wgError').textContent = d.message || 'Listan gick inte att läsa.'; show(el('wgError'), true); return; }
+
+        wgDefaultEnds = d.defaultEndsDate || '';
+        el('wgTreasurer').textContent = d.treasurer ? ' (i dag ' + d.treasurer + ')' : ' — ingen kassör är registrerad just nu';
+
+        var rows = d.grants || [];
+        var active = rows.filter(function (g) { return g.isActive; });
+        el('wgMeta').textContent = active.length === 0 ? 'Ingen utöver kassören' : active.length + ' utöver kassören';
+
+        var manage = !!el('wgGrant');
+        el('wgBody').innerHTML = rows.length === 0
+            ? '<tr><td colspan="4" class="muted">Bara kassören arbetar med ekonomin just nu.</td></tr>'
+            : rows.map(function (g) {
+                var state = g.isActive ? '' : '<div>' + badge('off', g.revoked ? 'Avslutad' : 'Utgången') + '</div>';
+                return '<tr' + (g.isActive ? '' : ' class="muted"') + '><td><strong>' + esc(g.memberName) + '</strong>' + state
+                     + (g.reason ? '<div class="muted">' + esc(g.reason) + '</div>' : '') + '</td>'
+                     + '<td>' + esc(g.endsDate) + '</td>'
+                     + '<td>' + esc(g.grantedByName) + ' <span class="muted">(' + esc(String(g.grantedByRole).toLowerCase()) + ', '
+                     + esc(shortDate(g.grantedUtc)) + ')</span></td>'
+                     + '<td class="n">' + (manage && g.isActive
+                        ? rowMenu([{ act: 'revoke', id: g.id, text: 'Avsluta rätten…', danger: true }]) : '') + '</td></tr>';
+            }).join('');
+
+        onRowAction(el('wgBody'), {
+            revoke: function (id) {
+                var g = rows.find(function (x) { return String(x.id) === String(id); });
+                if (!g) return;
+                ask({
+                    title: 'Avsluta rätten för ' + g.memberName,
+                    text: g.memberName + ' kan då inte längre arbeta med ekonomin. Det hen redan bokfört står kvar.',
+                    ok: 'Avsluta rätten'
+                }).then(function (answer) {
+                    if (answer === null) return;
+                    postJson('/umbraco/surface/EkonomiAdmin/RevokeWrite', { ownerType: ownerType, ownerId: ownerId, grantId: g.id })
+                        .then(function (j) {
+                            if (!j.success) { el('wgError').textContent = j.message; show(el('wgError'), true); return; }
+                            el('wgOk').textContent = j.message; show(el('wgOk'), true);
+                            loadGrants();
+                        });
+                });
+            }
+        });
+
+        if (manage && !el('wgEnds').value && wgDefaultEnds) setDateField('wgEnds', wgDefaultEnds);
+        wgSummary();
+    }
+
+    if (el('wgGrant')) {
+        var wgTimer = null;
+        el('wgSearch').addEventListener('input', function () {
+            var q = this.value.trim();
+            wgPicked = null; el('wgPicked').textContent = ''; wgSummary();
+            clearTimeout(wgTimer);
+            if (q.length < 2) { el('wgResults').innerHTML = ''; return; }
+            wgTimer = setTimeout(function () {
+                fetch('/umbraco/surface/EkonomiAdmin/SearchWriteGrantMembers?ownerType=' + ownerType + '&ownerId=' + ownerId
+                      + '&q=' + encodeURIComponent(q), { cache: 'no-store' })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        var ms = (d && d.members) || [];
+                        el('wgResults').innerHTML = ms.length === 0
+                            ? '<div class="list-group-item muted">Ingen medlem i föreningen matchar.</div>'
+                            : ms.map(function (m) {
+                                return '<button type="button" class="list-group-item list-group-item-action" data-wg-member="' + m.id + '">'
+                                     + esc(m.name) + ' <span class="muted">' + esc(m.email || '') + '</span></button>';
+                            }).join('');
+                        el('wgResults').querySelectorAll('[data-wg-member]').forEach(function (b) {
+                            b.addEventListener('click', function () {
+                                var m = ms.find(function (x) { return String(x.id) === b.dataset.wgMember; });
+                                wgPicked = { id: m.id, name: m.name };
+                                el('wgSearch').value = m.name;
+                                el('wgResults').innerHTML = '';
+                                el('wgPicked').textContent = 'Vald: ' + m.name + (m.email ? ' (' + m.email + ')' : '');
+                                wgSummary();
+                            });
+                        });
+                    });
+            }, 250);
+        });
+
+        el('wgEnds').addEventListener('change', wgSummary);
+        el('wgEnds').addEventListener('input', wgSummary);
+
+        el('wgGrant').addEventListener('click', function () {
+            var btn = this;
+            if (!wgPicked) return;
+            btn.disabled = true;
+            show(el('wgError'), false); show(el('wgOk'), false);
+            postJson('/umbraco/surface/EkonomiAdmin/GrantWrite', {
+                ownerType: ownerType, ownerId: ownerId, memberId: wgPicked.id,
+                endsDate: el('wgEnds').value, reason: el('wgReason').value
+            }).then(function (j) {
+                btn.disabled = false;
+                if (!j.success) { el('wgError').textContent = j.message; show(el('wgError'), true); return; }
+                el('wgOk').textContent = j.message; show(el('wgOk'), true);
+                wgPicked = null; el('wgSearch').value = ''; el('wgPicked').textContent = ''; el('wgReason').value = '';
+                loadGrants();
+            }).catch(function (e) {
+                btn.disabled = false;
+                el('wgError').textContent = e.message; show(el('wgError'), true);
+            });
+        });
+    }
 
     // ══ REVISORERNA ══════════════════════════════════════════════════════════════════════
     var revLoaded = false;

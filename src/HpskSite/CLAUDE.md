@@ -4875,7 +4875,29 @@ kassören) och via `IsClubAdminForClub` även varje krets- och sajtadministratö
 2b. **Aktiv kassör** (`BoardRoleDefinitions.RoleKassor`) ⇒ **Write**.
 3. **Administratör och INGEN aktiv kassör** ⇒ **Write** — övergången, och sidan ber om att
    kassören läggs in (`#…_noTreasurer`). En hård omläggning hade låst ute nästan alla föreningar.
+2c. **Har fått rätten att arbeta med ekonomin** (`LedgerWriteGrant`, gällande) ⇒ **Write**, basis
+   `Delegate`, rälsen "Arbetar med ekonomin". Se nedan.
 4. **Styrelseledamot** ⇒ Read. 5. **Administratör när kassör finns** ⇒ Read.
+
+### "Vilka arbetar med ekonomin?" — rätten som kan ges (2026-09-24)
+
+Stefan: *"inte att det måste vara kassören som ger rätten men att hen ska kunna det"* — kassören kan
+vara borta eller ha ont om tid, mitt i året eller precis när årsredovisningen ska fram.
+- **SAMMA rätt som kassören**, inte en "bara bokföra"-nivå — behovet kan vara bokslutet.
+- **Får ge:** kassören, **ordföranden**, administratören, sajtadmin (`CanManageWriteGrants`, räknat
+  ur ROLLERNA). **Aldrig** revisorn, och **aldrig den som själv bara fått rätten** — inga kedjor.
+  ⚠️ Ordföranden är LÄSARE: kontrollerna gatas på `CanManageWriteGrants`, aldrig `CanWrite`, och
+  fliken **Behörigheter** syns för alla som läser.
+- **Tidsbegränsad**, förval räkenskapsårets slut + 3 mån (utan år: i dag + 12 mån), max 24 mån.
+  Avslutas, raderas aldrig. En gällande rätt per person — förlängs inte tyst.
+- **Servern prövar** revisor → redan kassör → medlem i klubben (i den ordningen; sökningen är
+  inte grinden).
+- **Det framgår hur det fungerar:** "Så fungerar det" överst, en "Så här blir det"-rad före klicket,
+  mejl till personen (vad, till när, av vem — `SendWriteGrantedAsync`) och **till kassören när någon
+  annan gav rätten** (`SendWriteGrantNoticeToTreasurerAsync`). Reply-To = den som gav rätten.
+- `dbo.LedgerWriteGrant` — bara dbo, samma form som revisorns uppdrag. **Migrering:
+  `Migrations/create-ledger-write-grant.sql` FÖRE deploy.**
+- Svit: `ekonomi-behorighet-verify.mjs` avsnitt 4 — ordföranden ger rätten GENOM YTAN.
 
 `LedgerAccessBasis` bär VARFÖR, och rälsen säger det ("Administratör", "Revisor", "Det är kassören,
 Namn, som bokför"). **Den valda revisorn** läser utan inbjudan (`LedgerAuditorService.HasAccess` =
