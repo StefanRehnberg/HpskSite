@@ -3029,6 +3029,8 @@ namespace HpskSite.Controllers
                         entryLines = a.EntryLines,
                         isBalance = a.IsBalance,
                         isIncome = a.IsIncome,
+                        defaultVatRate = a.DefaultVatRate,
+                        canCarryVat = LedgerVat.AccountCanCarryVat(a.Number),
                         // ⚠️ Rollerna i KLARTEXT, aldrig som nycklar. "revenue-membership-fee"
                         // säger ingenting till en kassör som inte kan bokföring.
                         roles = a.Roles.Select(LedgerAccountRoles.Label).ToList()
@@ -3044,8 +3046,12 @@ namespace HpskSite.Controllers
                         label = LedgerAccountRoles.Label(r),
                         hint = LedgerAccountRoles.Hint(r),
                         optional = LedgerAccountRoles.IsOptional(r),
-                        accountNumber = rows.FirstOrDefault(a => a.Roles.Contains(r))?.Number ?? 0
-                    })
+                        accountNumber = rows.FirstOrDefault(a => a.Roles.Contains(r))?.Number ?? 0,
+                        // ⚠️ Momsrollerna MAPPAS alltid (se LedgerAccountRoles) men VISAS bara för
+                        //    en momsregistrerad förening — för alla andra är de brus.
+                        isVat = r == LedgerAccountRoles.VatOutgoing || r == LedgerAccountRoles.VatIncoming
+                    }),
+                    isVatRegistered = _setupService.GetStatus(issuerType, issuerId).IsVatRegistered
                 });
             }
             catch (Exception ex)
@@ -3101,6 +3107,82 @@ namespace HpskSite.Controllers
                 : new { success = false, message = result.Error! });
         }
 
+        /// <summary>Sätter kontots momssats. Null eller 0 = momsfritt.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetAccountVatRate([FromBody] SetAccountVatRateRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att ändra." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var result = _chartService.SetVatRate(
+                request.IssuerType, request.IssuerId, request.Number, request.Rate);
+
+            return Json(result.Success
+                ? new { success = true, message = request.Rate is > 0m
+                    ? $"Konto {request.Number} bokförs nu med {request.Rate:0.##} % moms."
+                    : $"Konto {request.Number} bokförs nu utan moms." }
+                : new { success = false, message = result.Error! });
+        }
+
+        /// <summary>
+        /// Momsregistreringen — på med momsregistreringsnummer, eller av. Svarar med den nya
+        /// statusen så att ytan ritar om sig ur samma svar som vid inläsning.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveVatSettings([FromBody] SaveVatSettingsRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+
+            var (ok, name) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (saved, error) = _setupService.SetVat(
+                request.IssuerType, request.IssuerId, request.Registered, request.VatNumber);
+
+            if (!saved) return Json(new { success = false, message = error });
+
+            return Json(new
+            {
+                success = true,
+                message = request.Registered
+                    ? "Föreningen är momsregistrerad. Sätt momssatsen på de konton som har moms."
+                    : "Föreningen är inte momsregistrerad. Ingen moms bokförs, och kvittona säger det.",
+                status = ReadStatus(request.IssuerType, request.IssuerId, name)
+            });
+        }
+
+        /// <summary>
+        /// "Så bokförs det" för Bokför — räknat av bokföringen själv, momsraden inräknad.
+        /// <para>⚠️ Skriver ingenting. Samma behörighet som bokföringen: det är ett formulärs underlag.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PreviewManual([FromBody] ManualEntryRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att visa." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            try
+            {
+                var (lines, error) = _manualPosting.Preview(request);
+                return Json(error is null
+                    ? new { success = true, lines }
+                    : new { success = false, lines, message = error } as object);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Förhandsvisningen fallerade för {Typ}/{Id}.",
+                    request.IssuerType, request.IssuerId);
+                return Json(new { success = false, message = "Konteringen gick inte att visa just nu." });
+            }
+        }
+
         /// <summary>Pekar om en kontoroll till ett annat konto.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -3138,6 +3220,24 @@ namespace HpskSite.Controllers
         public int IssuerId { get; set; }
         public int Number { get; set; }
         public bool Active { get; set; }
+    }
+
+    public class SetAccountVatRateRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public int Number { get; set; }
+        /// <summary>Null eller 0 = momsfritt.</summary>
+        public decimal? Rate { get; set; }
+    }
+
+    public class SaveVatSettingsRequest
+    {
+        public int IssuerType { get; set; }
+        public int IssuerId { get; set; }
+        public bool Registered { get; set; }
+        /// <summary>Momsregistreringsnummer eller organisationsnummer. Krävs när <see cref="Registered"/>.</summary>
+        public string? VatNumber { get; set; }
     }
 
     public class SetAccountRoleRequest

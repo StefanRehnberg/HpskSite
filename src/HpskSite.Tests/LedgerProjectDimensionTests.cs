@@ -58,8 +58,10 @@ namespace HpskSite.Tests
             [KretsmasterskapProjectId] = new LedgerProject { Id = KretsmasterskapProjectId, Name = "KrM 2025" }
         };
 
+        // ⚠️ Momsregistrerad: kioskkontots 25 % ska ge en momsrad i de här testen. Grinden för en
+        //    oregistrerad förening prövas i LedgerVatTests.
         private static List<LedgerJournalEntryLine> Build(LedgerPostingRequest request, out string? error)
-            => LedgerPostingService.BuildLines(request, Accounts(), Roles(), Projects(), out error);
+            => LedgerPostingService.BuildLines(request, Accounts(), Roles(), Projects(), vatRegistered: true, out error);
 
         // ── Verifikationens projekt smittar av sig på raderna ───────────────────────────────
 

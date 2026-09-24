@@ -254,6 +254,89 @@ namespace HpskSite.Services.Ledger
         }
 
         /// <summary>
+        /// Momsregistreringen: på med ett momsregistreringsnummer, eller av.
+        ///
+        /// <para><b>⚠️⚠️ FANNS INTE FÖRRÄN 2026-09-24.</b> Flaggan skrevs som 0 vid uppsättningen
+        /// och gick sedan inte att ändra från någon yta, så en momsregistrerad förening fick
+        /// <i>"Föreningen är inte momsregistrerad"</i> på varje kvitto — ett falskt påstående på en
+        /// utfärdad handling (Michael Henriksson, Åmåls PK).</para>
+        ///
+        /// <para><b>⚠️ AV VÄGRAS när moms är bokförd i ett år som inte är fastställt.</b> Saldot på
+        /// momskontona ska redovisas till Skatteverket; slogs registreringen av skulle momsraderna
+        /// och momsytorna försvinna ur sikte medan skulden står kvar. Ett fastställt år är avslutat,
+        /// så där är det fritt.</para>
+        ///
+        /// <para>⚠️ Numret sparas kvar när registreringen slås av. Det står inte på något kvitto då
+        /// (kvittot läser flaggan), och slås den på igen behöver kassören inte skriva det på nytt.</para>
+        /// </summary>
+        public (bool Ok, string? Error) SetVat(int issuerType, int issuerId, bool registered, string? vatNumber)
+        {
+            string? normalized = null;
+
+            if (registered)
+            {
+                var (n, err) = LedgerVat.NormalizeVatNumber(vatNumber);
+                if (err is not null) return (false, err);
+                normalized = n;
+            }
+
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                var ldb = new LedgerDb(db, issuerId);
+
+                var exists = ldb.ExecuteScalar<int>(
+                    "SELECT COUNT(1) FROM dbo.LedgerIssuerSettings WHERE IssuerType = @0 AND IssuerId = @1",
+                    issuerType, issuerId) > 0;
+
+                if (!exists) return (false, "Sätt upp ekonomin först.");
+
+                if (!registered)
+                {
+                    var vatAccounts = ldb.Fetch<int>(
+                        @"SELECT AccountNumber FROM dbo.LedgerAccountRole
+                           WHERE IssuerType = @0 AND IssuerId = @1 AND RoleKey IN (@2, @3)",
+                        issuerType, issuerId, LedgerAccountRoles.VatOutgoing, LedgerAccountRoles.VatIncoming);
+
+                    // ⚠️ Både momsbeloppet på källraden OCH rader på momskontona — en SIE-import
+                    //    bär momsen som egna rader utan belopp på källraden.
+                    var booked = ldb.ExecuteScalar<int>(
+                        $@"SELECT COUNT(1)
+                             FROM dbo.LedgerJournalEntryLine l
+                             JOIN dbo.LedgerJournalEntry e ON e.Id = l.JournalEntryId
+                             JOIN dbo.LedgerFiscalYear y ON y.Id = e.FiscalYearId
+                            WHERE e.IssuerType = @0 AND e.IssuerId = @1
+                              AND y.Status <> @2
+                              AND ((l.VatAmount IS NOT NULL AND l.VatAmount <> 0)
+                                   {(vatAccounts.Count > 0 ? $"OR l.AccountNumber IN ({string.Join(",", vatAccounts)})" : "")})",
+                        issuerType, issuerId, LedgerFiscalYearStatus.Established);
+
+                    if (booked > 0)
+                        return (false, "Det finns bokförd moms i ett räkenskapsår som inte är avslutat. "
+                                     + "Momsen ska redovisas innan registreringen slås av — slå av den "
+                                     + "när året är fastställt.");
+                }
+
+                ldb.Execute(
+                    registered
+                        ? "UPDATE dbo.LedgerIssuerSettings SET IsVatRegistered = 1, VatNumber = @2 WHERE IssuerType = @0 AND IssuerId = @1"
+                        : "UPDATE dbo.LedgerIssuerSettings SET IsVatRegistered = 0 WHERE IssuerType = @0 AND IssuerId = @1",
+                    issuerType, issuerId, (object?)normalized ?? DBNull.Value);
+
+                _logger.LogInformation(
+                    "Verifikationsliggaren: utställare {Typ}/{Id} momsregistrering {Lage}.",
+                    issuerType, issuerId, registered ? "PÅ" : "AV");
+
+                return (true, null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Momsregistreringen kunde inte sparas för {Typ}/{Id}.", issuerType, issuerId);
+                return (false, "Momsinställningen kunde inte sparas. Försök igen.");
+            }
+        }
+
+        /// <summary>
         /// Byter föreningsform. <b>Egen metod med flit</b> — <see cref="EnsureIssuer"/> skriver
         /// formen bara när inställningsraden skapas, eftersom den aldrig får skriva över något
         /// föreningen valt. Utan den här metoden hade en förening som en gång hamnat i fel form
