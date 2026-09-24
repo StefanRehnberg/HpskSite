@@ -9631,3 +9631,104 @@ See [Documentation/README.md](Documentation/README.md) for complete documentatio
 **Build Status:** ✅ Compiles (0 errors)
 **Deployment Status:** ✅ Production deployment successful
 **Last Updated:** Added production deployment guide and resolved ModelsBuilder issues
+
+## Tävlingsavgifterna i liggaren — fakturamodellens ombyggnad (P3/P4, 2026-09-24)
+
+Kvar-listans post 4. Design: `notes/fakturamodellen-design-2026-09-24.md` (v2, godkänd av Stefan —
+**v1 underkändes**, den skrevs utan att dagens fakturering var läst). Stefans uppdrag: *"Allt under
+Admin / Fakturor för klubbar och Kretsar ska in under Ekonomin."*
+
+### ⚠️⚠️ AVGIFT FÖRST, FAKTURA BARA NÄR ARRANGÖREN BUNTAR
+
+| Lager | Vad | Var |
+|---|---|---|
+| Avgiften | En **begärd** betalning per anmälan (och per lag). Inte pengar, inte intäkt. | `LedgerPayment` med `SourceItemId`, `FeePart`, `PayerClubId` |
+| Fakturan | Arrangören buntar EN klubbs öppna avgifter. Avgiftsraderna makuleras och pekar hit. | `LedgerCharge` + `LedgerChargeLine` |
+| Betalningen | Arrangörens bekräftelse → kvitto + verifikation (kontantmetoden). | `LedgerPaymentService.Confirm` |
+
+Dubbelräkning kan inte uppstå: en avgift är aldrig en intäkt, och en buntad avgift är makulerad
+(`CoveredByChargeId`) — varje befintlig läsare (översikt, avprickning, fullständighet) ser den som
+ersatt utan att känna till fakturorna. **`SourceId` förblir TÄVLINGENS id** (projektnyckeln).
+
+### Växeln per tävling — `CompetitionPaymentModelService` är ENDA läsvägen
+
+- `CompetitionPaymentModel` (SQL, **oföränderlig** via trigger). Beslutas vid **första anmälan**
+  (inne i `CompetitionFeeService.SyncRegistration/SyncTeam`, som varje anmälningsväg passerar).
+- Saknas rad: finns gamla fakturor → `legacy` skrivs (självläkning); annars är tävlingen ny.
+- **`PaymentService` skapar aldrig en gammal faktura för en ny tävling** — spärren sitter i varje
+  skapande primitiv, och `EnsureRegistrationInvoiceAsync`/`ReconcileRegistrationInvoiceAsync`/
+  `CreateTeamInvoiceAsync` räknar om i liggaren i stället. Därför följer disken, efteranmälan och
+  klassbyte med utan ändring hos anroparen. De gamla Swish-endpointsen svarar `paymentModel: ledger`.
+
+### "Klubben betalar" — en mängd anmälningstyper per tävling
+
+Arrangören väljer i `CompetitionFeeSettings` vilka typer (individ, junior, lag, stafett) klubben får
+betala för. Skyttens val (`CompetitionFeeChoice`) är en **hint**; avgiften delas **per klass**
+(`CompetitionFeePlanner.SplitRegistration`) i skyttens del (`self`) och klubbens (`club`).
+Deltävlingsavgiften per anmälan hamnar på skyttens del (Stefans beslut). Delarna summerar per
+konstruktion till `RegistrationFeeCalculator` — samma två funktioner (`FeeForClass`,
+`PerRegistrationSurcharge`).
+
+### Synken — `CompetitionFeePlanner.Plan` (ren funktion, 31 enhetstester)
+
+Öppna, opåstådda rader är det ENDA den makulerar. En öppen rad med rätt belopp behålls (annars blir
+skyttens QR ogiltig). Täckning = mottaget + påstått + fakturerat (så länge fakturan gäller);
+överskott räknas mot andra delar, resten rapporteras som `Overpaid` och görs ingenting åt.
+
+### Fakturan — `LedgerChargeService`
+
+- Utfärdas och skickas i ETT steg. Numret ur egen luckfri serie (`LedgerSeriesKind.Invoice`, prefix
+  `F`), referensen bredvid (`{tävling}-F{nr}`). Oföränderlig i databasen (`TR_LedgerCharge_Immutable`
+  — bara utskick och makulering får skrivas).
+- Grupperas på **anmälans klubb** (`PayerClubId`, snapshot) — med medlemmens primärklubb som
+  återfall för anmälningar utan klubb (disken lagrade länge `clubId = 0`).
+- Kreditnota = negativ `LedgerCharge` mot exakt en; släpper raderna → synken ger en ny begäran om
+  anmälan finns kvar. Makulering bara av obetald och okrediterad faktura.
+- Dokumentet `/klubbfaktura/{id}?t=` fungerar **utan inloggning** (DataProtection-token, en faktura).
+  Klubbens kassör loggar aldrig in — mejlet är räkningen. Ingen betalstatus på arket.
+
+### Ytorna — EN modul, `wwwroot/js/competition-fees.js`
+
+- **Anmälningar-fliken** (ny modell): betalstatus ur liggaren i `GetCompetitionRegistrations`/
+  `GetCompetitionTeams` (gamla strängar + `Invoiced`), radåtgärderna → modulen, menyn har
+  "Fakturera en klubb" (ingen samlingsfaktura, påminnelse eller bokföringsunderlag), avgiftspanelen.
+- **Ekonomi → Fakturor** (ny rälspost efter Avgifter): tävlingar med avgifter, samma panel, fakturor
+  till klubbar, fakturor från andra föreningar, och **den gamla modellens lista orörd** under
+  "Fakturor enligt det gamla sättet".
+- **Admin → Fakturor borttagen** i klubbens och kretsens adminpanel.
+- Skyttens betalsteg (anmälan, tävlingssidan, Min sida, Springskytte-, lag-, stafettmodalerna):
+  inget "Betala senare".
+- **Utgifter**: fakturor från andra föreningar bland räkningarna — "registrerad" = referensen står i
+  utgiftens beskrivning (samma regel som kretsavgiften, ingen ny kolumn).
+- **Arrangörsrätten** = tävlingens finansrätt **ELLER skrivrätt i liggaren** — kassören är ofta
+  inte klubbadmin.
+
+### Läsbryggan — `LedgerLegacyInvoiceBridge`
+
+Betalda gamla fakturor efter föreningens första räkenskapsår bokförs från Avgifter (`legacy-invoice`,
+spärr = liggaren själv). Barn till samlingsfakturor och kreditfakturor bokförs aldrig (den gamla
+kaskaden skrev "Paid" på barnen). **Bokföringen är inte provad mot en levande liggare** — det hade
+skrivit över hundra verifikationer i dev.
+
+### Bokslut och fordringsexport
+
+Kundfordringssteget räknar utfärdade obetalda fakturor. Exporten räknar en fakturerad avgift som
+anspråk så länge fakturan gäller, drar av kreditnotor, och räknar inte fakturans betalning som nytt
+anspråk.
+
+### ⚠️ Fällor
+
+- **`sqlcmd` utan `-b` exitar 0 när en trigger kastar** — mät värdet efteråt, inte felkoden.
+- Fakturanoderna i den gamla modellen heter `<klubb> - <datum>`, inte "Faktura…" — räkna på
+  innehållstypen `registrationInvoice`. Sviten räknade först på namnet och kunde inte falla.
+- **Dev-appen låser sig ~5 minuter efter start**: en bakgrundstjänst lämnar en transaktion öppen
+  med X-lås på `RankingSnapshot` och S-lås på `umbracoLock` → varje medlemssparning (inloggningen)
+  hänger. Förbefintligt, inte utrett. Starta om appen före en svit.
+
+**Operatörssteg:** `Migrations/create-competition-fee-tables.sql` **FÖRE deployen** (märker gamla
+tävlingar som legacy — kör den i deployfönstret). Körd i dev, TranCount 0. **EJ i prod.** Efter den:
+`/health/ledger` = `tables=26 triggers=9 sandbox=26 sandboxtriggers=8`.
+
+**Sviter:** `hpsk-verify/tavlingsavgift-verify.mjs` **67/67** (A/B: med spärren i PaymentService
+avstängd faller "inga gamla fakturor skapades"), `tavlingsavgift-ui-verify.mjs <tävling>` **21/21**
+med skärmdumpar. Enhetstester 1484.
