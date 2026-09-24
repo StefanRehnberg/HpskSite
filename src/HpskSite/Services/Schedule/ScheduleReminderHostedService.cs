@@ -3,6 +3,8 @@ using HpskSite.Services.Messaging;
 using HpskSite.Services.Notifications;
 using Umbraco.Cms.Infrastructure.Scoping;
 
+using HpskSite.Services.Hosting;
+
 namespace HpskSite.Services.Schedule
 {
     /// <summary>
@@ -22,7 +24,7 @@ namespace HpskSite.Services.Schedule
     /// Items with no absolute StartsAt (an undated skjutlag on a multi-day list) can't be reminded about
     /// and are skipped — there is no moment to count back from.
     /// </summary>
-    public class ScheduleReminderHostedService : BackgroundService
+    public class ScheduleReminderHostedService : IsolatedBackgroundService
     {
         /// <summary>How long before an item the reminder fires.</summary>
         private const int LeadMinutes = 30;
@@ -42,7 +44,7 @@ namespace HpskSite.Services.Schedule
             _logger = logger;
         }
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override async Task ExecuteIsolatedAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("ScheduleReminderHostedService started (lead {Lead} min, every {Interval} min).",
                 LeadMinutes, Interval.TotalMinutes);

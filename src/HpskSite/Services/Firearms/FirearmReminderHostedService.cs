@@ -2,6 +2,8 @@ using HpskSite.Services.Notifications;
 using Microsoft.Extensions.DependencyInjection;
 using Umbraco.Cms.Infrastructure.Scoping;
 
+using HpskSite.Services.Hosting;
+
 namespace HpskSite.Services.Firearms
 {
     /// <summary>
@@ -22,7 +24,7 @@ namespace HpskSite.Services.Firearms
     /// är opt-in en förutsättning för att arbetet ska vara värt att göra; här ska påminnelsen synas i
     /// appen även för den som inte har push, så svepet får inte hoppa över hens vapen.</para>
     /// </summary>
-    public class FirearmReminderHostedService : BackgroundService
+    public class FirearmReminderHostedService : IsolatedBackgroundService
     {
         /// <summary>Dagar kvar vid respektive steg. 0 = förfallen.</summary>
         private static readonly int[] Stages = { 90, 30, 0 };
@@ -46,7 +48,7 @@ namespace HpskSite.Services.Firearms
             _logger = logger;
         }
 
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override async Task ExecuteIsolatedAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation(
                 "FirearmReminderHostedService started (steps {Stages}, every {Hours} h).",

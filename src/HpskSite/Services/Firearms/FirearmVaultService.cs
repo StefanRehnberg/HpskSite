@@ -186,34 +186,33 @@ namespace HpskSite.Services.Firearms
         /// Antal valv, och hur många som ligger på en version vi inte har nyckeln till. Läses av
         /// startkontrollen. <b>Svarar <c>null</c> när tabellen inte finns</b> — en omigrerad miljö är
         /// inte ett larm, den har ingen krypterad data.
+        ///
+        /// <para><b>⚠️ KASTAR när frågan inte går att ställa</b> — den svarar aldrig null för ett
+        /// fel. En tidigare version (<c>TryGetInventory</c>) svalde undantaget och svarade null,
+        /// så en delad anslutning vid uppstart loggades som "FirearmKeyVault finns inte … ingen
+        /// krypterad data kan finnas". Det är precis det lugnande beskedet kontrollen finns för att
+        /// aldrig ge i onödan. Startkontrollen fångar undantaget och säger att den inte kunde
+        /// genomföras.</para>
         /// </summary>
-        public FirearmVaultInventory? TryGetInventory()
+        public FirearmVaultInventory? GetInventory()
         {
-            try
-            {
-                using var uow = _scopeProvider.CreateScope(autoComplete: true);
-                var db = uow.Database;
+            using var uow = _scopeProvider.CreateScope(autoComplete: true);
+            var db = uow.Database;
 
-                if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID('dbo.FirearmKeyVault','U') IS NULL THEN 0 ELSE 1 END") == 0)
-                    return null;
-
-                var versions = db.Fetch<VersionCount>(
-                    "SELECT KeyVersion, COUNT(*) AS [Count] FROM FirearmKeyVault GROUP BY KeyVersion");
-
-                var known = _keyRing.AvailableVersions.ToHashSet();
-                return new FirearmVaultInventory
-                {
-                    TotalVaults = versions.Sum(v => v.Count),
-                    UnreadableVaults = versions.Where(v => !known.Contains(v.KeyVersion)).Sum(v => v.Count),
-                    MissingVersions = versions.Where(v => !known.Contains(v.KeyVersion))
-                                              .Select(v => v.KeyVersion).OrderBy(v => v).ToList(),
-                };
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Kunde inte inventera FirearmKeyVault.");
+            if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID('dbo.FirearmKeyVault','U') IS NULL THEN 0 ELSE 1 END") == 0)
                 return null;
-            }
+
+            var versions = db.Fetch<VersionCount>(
+                "SELECT KeyVersion, COUNT(*) AS [Count] FROM FirearmKeyVault GROUP BY KeyVersion");
+
+            var known = _keyRing.AvailableVersions.ToHashSet();
+            return new FirearmVaultInventory
+            {
+                TotalVaults = versions.Sum(v => v.Count),
+                UnreadableVaults = versions.Where(v => !known.Contains(v.KeyVersion)).Sum(v => v.Count),
+                MissingVersions = versions.Where(v => !known.Contains(v.KeyVersion))
+                                          .Select(v => v.KeyVersion).OrderBy(v => v).ToList(),
+            };
         }
 
         // ── Internt ──────────────────────────────────────────────────────────────────────────────

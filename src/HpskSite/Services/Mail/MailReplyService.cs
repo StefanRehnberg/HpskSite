@@ -168,19 +168,16 @@ namespace HpskSite.Services.Mail
         /// </summary>
         public bool TableExists()
         {
-            try
-            {
-                using var uow = _scopeProvider.CreateScope(autoComplete: true);
-                return uow.Database.ExecuteScalar<int>(
-                    "SELECT CASE WHEN OBJECT_ID('dbo.MailReply','U') IS NULL THEN 0 ELSE 1 END") == 1;
-            }
-            catch (Exception ex)
-            {
-                // ⚠️ Kan vi inte fråga vet vi inte, och "vet inte" får inte rapporteras som "finns".
-                // Startkontrollen skiljer på de två.
-                _logger.LogDebug(ex, "MailReply: kunde inte kontrollera om tabellen finns.");
-                return false;
-            }
+            // ⚠️ INGEN catch här, med flit. Kan vi inte fråga vet vi inte, och "vet inte" får varken
+            // rapporteras som "finns" eller som "saknas". En tidigare version svalde felet och
+            // svarade false, så en delad anslutning vid uppstart (se IsolatedBackgroundService)
+            // loggades som det falska larmet "SVARSLAGRET ÄR TRASIGT" på Fatal-nivå — och
+            // disponeringsfelet som visade den verkliga orsaken försvann på Debug-nivå.
+            // Anroparen (startkontrollen) fångar undantaget och loggar att kontrollen inte kunde
+            // genomföras.
+            using var uow = _scopeProvider.CreateScope(autoComplete: true);
+            return uow.Database.ExecuteScalar<int>(
+                "SELECT CASE WHEN OBJECT_ID('dbo.MailReply','U') IS NULL THEN 0 ELSE 1 END") == 1;
         }
 
         /// <summary>Alla svar på ett ärende, äldst först.</summary>

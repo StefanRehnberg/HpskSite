@@ -9514,6 +9514,38 @@ _contentService.Unpublish(content);
 _contentService.Delete(content);
 ```
 
+## ⚠️⚠️ Bakgrundstjänster ärver `IsolatedBackgroundService` — ALDRIG `BackgroundService` (2026-09-24)
+
+**Ska du bygga en ny bakgrundstjänst?** Ärv `HpskSite.Services.Hosting.IsolatedBackgroundService`
+och skriv arbetet i `ExecuteIsolatedAsync`. Registrera den som vanligt med `AddHostedService<T>()`.
+`ExecuteAsync` är **förseglad** i basklassen, och `BackgroundServiceIsolationTests` faller för varje
+hostad tjänst i sajten som inte ärver den.
+
+**Varför.** Värden startar alla bakgrundstjänster från samma uppstartskontext, och Umbracos ambienta
+scope är en `AsyncLocal` som flyter med execution context. En vanlig `BackgroundService` delar därför
+ambient scope-stack med alla andra. Mätt i dev 2026-09-24: fyra startkontroller med samma fördröjning
+(1 min) kapplöpte, två av dem (`MailReplySchemaGuard` och `FirearmKeyGuard`) öppnade scope samtidigt
+och delade anslutning (*"The connection's current state is connecting"*), disponeringen kastade
+*"not the Ambient Scope"*, och **en rotscope med öppen transaktion blev kvar**. Rankingen (2 min) och
+bildstädningen (5 min) skrev sedan in i den: 70 X-lås på `RankingSnapshot`, S-lås på `umbracoLock`,
+och varje inloggning hängde för att `MemberService.Save` aldrig fick sitt skrivlås. Kapplöpningen var
+slumpvis — den syntes i dev-loggarna nästan varje dag — och därför "hjälpte" en omstart ibland.
+
+Basklassen kör arbetet i `Task.Run` under `ExecutionContext.SuppressFlow()`, så varje tjänst börjar
+i en tom kontext med egen scope-stack. **Isoleringen gäller MELLAN tjänster, inte inuti en:** startar
+en tjänst själv parallellt arbete gäller samma regel som överallt annars —
+`using (ExecutionContext.SuppressFlow()) { _ = Task.Run(...); }`.
+
+**Följdfixen:** `MailReplyService.TableExists` och `FirearmVaultService.GetInventory` (hette
+`TryGetInventory`) svalde tidigare undantaget och svarade "saknas", så kapplöpningen loggades som
+de FALSKA larmen *"SVARSLAGRET ÄR TRASIGT"* (Fatal) och *"FirearmKeyVault finns inte"*. De kastar nu,
+och startkontrollerna loggar att kontrollen inte kunde genomföras. **En kontroll får aldrig översätta
+"kunde inte fråga" till ett svar.**
+
+Test: `BackgroundServiceIsolationTests` (5). A/B: basklassen utan `SuppressFlow` → mekanismprovet
+rött; en tjänst som ärver `BackgroundService` → arkitekturregeln röd och namnger tjänsten; en tjänst
+som åsidosätter `ExecuteAsync` → kompileringsfel.
+
 ## Migrations (DISABLED)
 The `/Migrations` folder contains disabled database schemas for direct competition result storage. The system now uses Umbraco Document Types and Content Service instead. Migrations can be safely ignored unless reverting to database-backed storage.
 
@@ -9525,6 +9557,7 @@ The `/Migrations` folder contains disabled database schemas for direct competiti
 5. ✅ Always use dependency injection for Umbraco services
 6. ✅ Remember `SaveAndPublish()` for content to be visible on frontend
 7. ✅ Always use ClubService for club lookups
+8. ❌ Don't derive a background service from `BackgroundService` — use `IsolatedBackgroundService` (see the section above)
 
 ## Deployment
 
