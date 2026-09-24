@@ -78,10 +78,11 @@ namespace HpskSite.Services
         public bool IsLedgerModel(int competitionId) => _paymentModels.IsLedger(competitionId);
 
         /// <summary>
-        /// Räknar om en anmälans eller ett lags avgift i liggaren efter en borttagning — öppna
-        /// begäranden makuleras, pengar och fakturor rörs inte. Gör ingenting i den gamla modellen.
+        /// Räknar om en anmälans eller ett lags avgift i liggaren — efter en ändring eller en
+        /// borttagning. Öppna begäranden ersätts eller makuleras; pengar och fakturor rörs inte.
+        /// Gör ingenting i den gamla modellen.
         /// </summary>
-        public void SyncLedgerFeesAfterRemoval(int competitionId, int? registrationId = null, int? teamId = null, int byMemberId = 0)
+        public void SyncLedgerFees(int competitionId, int? registrationId = null, int? teamId = null, int byMemberId = 0)
         {
             if (!_paymentModels.IsLedger(competitionId)) return;
             try

@@ -653,6 +653,51 @@ namespace HpskSite.Controllers
             return Json(new { success = result.Success, message = result.Success ? result.Message : result.Error, outcome = result.Outcome });
         }
 
+        /// <summary>
+        /// POST SendReminders — mejlar betalningsuppgifterna till varje skytt med en obetald avgift.
+        /// <para>Ersätter den gamla påminnelsen (som läste fakturor). Bara skyttens egna öppna rader —
+        /// en påstådd betalning påminns inte (någon säger att den är betald), och klubbens del går
+        /// till klubben som en faktura, inte till skytten.</para>
+        /// <para>⚠️ Svaret säger hur många som faktiskt gick iväg. I dev finns ingen SMTP, och ett
+        /// "skickat" som bara betyder att vi försökte är den lögn EmailService redan rättats för.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SendReminders([FromBody] FeeRequest request)
+        {
+            var competitionId = request?.CompetitionId ?? 0;
+            if (!await IsOrganiserAsync(competitionId)) return Json(new { success = false, message = Denied });
+
+            var rows = _fees.LoadFeeRows(competitionId)
+                .Where(r => r.SourceType == LedgerSourceType.CompetitionRegistration
+                            && r.VoidedUtc == null && r.ConfirmedUtc == null && r.ClaimedUtc == null
+                            && r.FeePart != CompetitionFeePart.Club && r.PayerMemberId > 0)
+                .ToList();
+            if (rows.Count == 0) return Json(new { success = true, sent = 0, failed = 0, message = "Ingen har en obetald avgift att påminnas om." });
+
+            var payee = _payees.ResolvePayee(competitionId);
+            var competition = _contentService.GetById(competitionId);
+            var name = competition?.GetValue<string>("competitionName") ?? competition?.Name ?? "";
+            var organiserEmail = competition?.GetValue<string>("contactEmail");
+            var swish = SwishQrCodeGenerator.IsValidSwishNumber(payee.SwishNumber) ? payee.SwishNumber : null;
+            var members = _memberService.GetAllMembers(rows.Select(r => r.PayerMemberId!.Value).Distinct().ToArray())
+                .ToDictionary(m => m.Id);
+
+            int sent = 0, failed = 0, noEmail = 0;
+            foreach (var r in rows)
+            {
+                if (!members.TryGetValue(r.PayerMemberId!.Value, out var m) || string.IsNullOrWhiteSpace(m.Email)) { noEmail++; continue; }
+                if (await _email.SendCompetitionFeeCodeAsync(m.Email, m.Name ?? "", name, payee.Name, swish, payee.BgNumber,
+                        r.Amount, CompetitionFeeService.ReferenceFor(r), organiserEmail)) sent++;
+                else failed++;
+            }
+
+            var parts = new List<string> { $"{sent} påminnelser skickade" };
+            if (failed > 0) parts.Add($"{failed} kunde inte skickas");
+            if (noEmail > 0) parts.Add($"{noEmail} saknar e-postadress");
+            return Json(new { success = failed == 0 && sent > 0, sent, failed, noEmail, message = string.Join(", ", parts) + "." });
+        }
+
         /// <summary>POST Resync — räkna om alla avgifter på tävlingen (efter en avgiftsändring).</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]

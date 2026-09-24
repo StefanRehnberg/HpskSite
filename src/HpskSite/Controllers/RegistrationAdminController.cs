@@ -453,7 +453,15 @@ namespace HpskSite.Controllers
                 int? topUpInvoiceId = null;
                 bool classesChanged = !ClassListEquivalent(existingClasses, newClasses);
                 bool subCompetitionChanged = previousIsSubCompetition != request.IsSubCompetition;
-                if ((classesChanged || subCompetitionChanged) && competition != null)
+                // ⚠️ Den nya modellen (P3/P4): ingen tilläggsfaktura — avgiften räknas om i liggaren
+                //    (en obetald begäran ersätts, en betald får en ny rad för mellanskillnaden).
+                if ((classesChanged || subCompetitionChanged) && competition != null
+                    && _paymentService.IsLedgerModel(competitionId))
+                {
+                    _paymentService.SyncLedgerFees(competitionId, registrationId: request.RegistrationId);
+                    feeChangeNote = "Avgiften räknades om.";
+                }
+                else if ((classesChanged || subCompetitionChanged) && competition != null)
                 {
                     var classCodes = newClasses.Select(c => c.Class).ToList();
                     var newFee = HpskSite.Services.RegistrationFeeCalculator.Calculate(
@@ -699,7 +707,7 @@ namespace HpskSite.Controllers
                 // Den nya modellen: öppna avgiftsbegäranden makuleras. Pengar och fakturor rörs inte —
                 // de syns som "för mycket betalt" på raden tills arrangören ångrar eller krediterar.
                 if (competitionId > 0)
-                    _paymentService.SyncLedgerFeesAfterRemoval(competitionId, registrationId: request.RegistrationId);
+                    _paymentService.SyncLedgerFees(competitionId, registrationId: request.RegistrationId);
 
                 // Take the shooter off the start list and drop their result rows. Without this the
                 // deleted shooter stays on the generated list with orphaned result rows behind them
