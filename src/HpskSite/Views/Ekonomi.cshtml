@@ -392,8 +392,9 @@
                                 }
                             </div>
                         </li>
-                        <li><strong>Gör det du brukar göra under ett år.</strong> Lägg in ingående balanser, bokför
-                            några kvitton och utlägg, läs in ett kontoutdrag, gör en budget och prova bokslutet.</li>
+                        <li><strong>Lägg in ett år du redan har facit för.</strong> Ge sandlådan räkenskapsåret 2025
+                            och läs in 2025 från vårt gamla program som en SIE-fil, eller skriv in det. Jämför sedan
+                            resultat- och balansräkningen med årsredovisningen.</li>
                         <li><strong>Säg till när något är fel, konstigt eller svårt att förstå.</strong> Skriv vad du
                             gjorde och vad du väntade dig — en skärmbild hjälper.
                             <div class="mt-2">
@@ -401,20 +402,23 @@
                             </div>
                         </li>
                     </ol>
-                    <p class="small mb-0">Avgifter, fakturor och @feeWord.ToLowerInvariant() finns bara i den riktiga
-                       bokföringen och går inte att prova i sandlådan.</p>
+                    <p class="small mb-0">Avgifter och fakturor går inte att prova i sandlådan, men de testas av sig
+                       själva: anmälningsavgifter för tävlingar och evenemang bokförs automatiskt i den riktiga
+                       bokföringen när betalningen markeras som mottagen. Det gäller tävlingar som får sin första
+                       anmälan efter 24 september 2026.</p>
                 }
                 else if (Model.IsSandbox)
                 {
-                    <p>Allt du gör här är övning och kan kastas. Prova gärna det du brukar göra under ett år:
-                       ingående balanser, kvitton och utlägg, ett kontoutdrag, en budget och bokslutet.</p>
+                    <p>Allt du gör här är övning och kan kastas. Bäst är ett år du redan har facit för: ge
+                       sandlådan räkenskapsåret 2025, läs in 2025 från vårt gamla program som en SIE-fil eller
+                       skriv in det, och jämför resultat- och balansräkningen med årsredovisningen.</p>
                     <p>Hittar du något som är fel, konstigt eller svårt att förstå, skriv vad du gjorde och vad
                        du väntade dig — en skärmbild hjälper.</p>
                     <p class="mb-2">
                         <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#bugReportModal">Rapportera fel</button>
                     </p>
-                    <p class="small mb-0">Avgifter, fakturor och @feeWord.ToLowerInvariant() finns bara i den riktiga
-                       bokföringen. Dit kommer du tillbaka under <strong>Du arbetar i</strong> längst ned i menyn.
+                    <p class="small mb-0">Avgifter och fakturor finns bara i den riktiga bokföringen, där anmälningsavgifter
+                       för tävlingar och evenemang bokförs automatiskt när betalningen markeras som mottagen. Dit kommer du tillbaka under <strong>Du arbetar i</strong> längst ned i menyn.
                        Vill du börja om skapar du en ny sandlåda där.</p>
                 }
                 else
