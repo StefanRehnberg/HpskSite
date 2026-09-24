@@ -171,13 +171,16 @@ namespace HpskSite.Services.Ledger
             {
                 using var db = _databaseFactory.CreateDatabase();
 
-                return db.ExecuteScalar<int>(
-                    @"SELECT COUNT(1) FROM dbo.LedgerAuditorGrant
-                       WHERE OwnerType = @0 AND OwnerId = @1 AND MemberId = @2
-                         AND AcceptedUtc IS NOT NULL
-                         AND RevokedUtc IS NULL
-                         AND ExpiresUtc > @3",
-                    ownerType, ownerId, memberId, DateTime.UtcNow) > 0;
+                if (db.ExecuteScalar<int>(
+                        @"SELECT COUNT(1) FROM dbo.LedgerAuditorGrant
+                           WHERE OwnerType = @0 AND OwnerId = @1 AND MemberId = @2
+                             AND AcceptedUtc IS NOT NULL
+                             AND RevokedUtc IS NULL
+                             AND ExpiresUtc > @3",
+                        ownerType, ownerId, memberId, DateTime.UtcNow) > 0)
+                    return true;
+
+                return HasElectedRole(db, ownerType, ownerId, memberId);
             }
             catch (Exception ex)
             {
@@ -187,7 +190,84 @@ namespace HpskSite.Services.Ledger
             }
         }
 
-        /// <summary>Föreningarna en medlem är revisor för. Driver revisionssidans val av förening.</summary>
+        /// <summary>
+        /// Är medlemmen VALD revisor eller revisorssuppleant i föreningens uppgifter?
+        ///
+        /// <para><b>⚠️⚠️ SEDAN 2026-09-24 RÄCKER DET.</b> Inbjudningslänken byggde på antagandet att
+        /// <i>"klubbrevisorn har oftast inget konto hos oss"</i>. Michael Henriksson (Åmåls PK):
+        /// revisorerna läggs in i föreningens uppgifter och är till 99 % medlemmar. Den valda
+        /// revisorn får därför läsrätt direkt; länken finns kvar för den externa.</para>
+        ///
+        /// <para><b>⚠️ Rollen är IsBoardMember = 0</b> och frågas utan den flaggan — revisorn får
+        /// aldrig räknas in i beslutsförheten i den styrelse hen granskar. Aktiv = IsActive, samma
+        /// regel som styrelsens läsrätt: ett utgånget mandat revoquerar inte.</para>
+        /// </summary>
+        private static bool HasElectedRole(IUmbracoDatabase db, int ownerType, int ownerId, int memberId)
+            => db.ExecuteScalar<int>(
+                @"SELECT COUNT(1) FROM BoardRoles
+                   WHERE OwnerType = @0 AND OwnerId = @1 AND MemberId = @2
+                     AND IsActive = 1 AND RoleKey IN (@3)",
+                ownerType, ownerId, memberId, HpskSite.Models.BoardRoleDefinitions.AuditorRoleKeys) > 0;
+
+        /// <summary>
+        /// Var medlemmen är revisor: inbjudningar och valda uppdrag. Driver revisionssidans val av
+        /// förening. <c>ExpiresUtc</c> null = valt uppdrag (löper till nästa årsmöte, inte på tid).
+        /// </summary>
+        public List<(int OwnerType, int OwnerId, DateTime? ExpiresUtc)> AssignmentsForMember(int memberId)
+        {
+            var result = GrantsForMember(memberId)
+                .Select(g => (g.OwnerType, g.OwnerId, (DateTime?)g.ExpiresUtc))
+                .ToList();
+
+            if (memberId <= 0) return result;
+
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+
+                var elected = db.Fetch<ElectedRow>(
+                    @"SELECT DISTINCT OwnerType, OwnerId FROM BoardRoles
+                       WHERE MemberId = @0 AND IsActive = 1 AND RoleKey IN (@1)",
+                    memberId, HpskSite.Models.BoardRoleDefinitions.AuditorRoleKeys);
+
+                foreach (var e in elected)
+                    if (!result.Any(r => r.OwnerType == e.OwnerType && r.OwnerId == e.OwnerId))
+                        result.Add((e.OwnerType, e.OwnerId, null));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte läsa valda revisorsuppdrag för medlem {Id}.", memberId);
+            }
+
+            return result.OrderBy(r => r.OwnerType).ThenBy(r => r.OwnerId).ToList();
+        }
+
+        /// <summary>De valda revisorerna i föreningens uppgifter — för listan under Ekonomi → Revisorer.</summary>
+        public List<(int MemberId, string RoleKey)> ElectedForOwner(int ownerType, int ownerId)
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+
+                return db.Fetch<ElectedMember>(
+                        @"SELECT MemberId, RoleKey FROM BoardRoles
+                           WHERE OwnerType = @0 AND OwnerId = @1 AND IsActive = 1 AND RoleKey IN (@2)
+                           ORDER BY SortOrder",
+                        ownerType, ownerId, HpskSite.Models.BoardRoleDefinitions.AuditorRoleKeys)
+                    .Select(r => (r.MemberId, r.RoleKey))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte läsa valda revisorer för {Typ}/{Id}.", ownerType, ownerId);
+                return new();
+            }
+        }
+
+        private class ElectedRow { public int OwnerType { get; set; } public int OwnerId { get; set; } }
+        private class ElectedMember { public int MemberId { get; set; } public string RoleKey { get; set; } = ""; }
+
+        /// <summary>Inbjudna uppdrag en medlem har (bara inbjudningar). Se <see cref="AssignmentsForMember"/>.</summary>
         public List<LedgerAuditorGrant> GrantsForMember(int memberId)
         {
             if (memberId <= 0) return new List<LedgerAuditorGrant>();

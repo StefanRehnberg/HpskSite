@@ -130,6 +130,8 @@ namespace HpskSite.Controllers
                     ? _sandbox.ListForOwner(type, id)
                     : new List<HpskSite.Models.Ledger.LedgerIssuer> { live },
                 CanWrite = access.CanWrite,
+                AccessBasis = access.Basis,
+                TreasurerName = access.TreasurerName,
                 IssuerName = name,
                 // Tillbakalänken: kassören ska inte behöva bläddra sig hem.
                 BackUrl = node.Url(),
@@ -188,6 +190,15 @@ namespace HpskSite.Controllers
         /// som ett fel; därför står det skrivet vem som bokför.</para>
         /// </summary>
         public bool CanWrite { get; set; } = true;
+
+        /// <summary>
+        /// VARFÖR den inloggade får det hen får — styr rälsens roll och förklaringen. Se
+        /// <see cref="HpskSite.Services.Ledger.LedgerAccessBasis"/>.
+        /// </summary>
+        public HpskSite.Services.Ledger.LedgerAccessBasis AccessBasis { get; set; }
+
+        /// <summary>Kassörens namn när den inloggade läser. Tomt = ingen kassör registrerad.</summary>
+        public string TreasurerName { get; set; } = "";
 
         public string BackUrl { get; set; } = "/";
 

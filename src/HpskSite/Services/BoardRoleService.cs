@@ -220,6 +220,45 @@ namespace HpskSite.Services
                 ownerType, ownerId, memberId) > 0;
         }
 
+        /// <summary>
+        /// True if the member holds any of the given roles, ACTIVE, for this owner. IsBoardMember is
+        /// deliberately NOT part of the question — the auditor roles have it false.
+        /// </summary>
+        public bool HasActiveRole(int ownerType, int ownerId, int memberId, params string[] roleKeys)
+        {
+            if (memberId <= 0 || roleKeys.Length == 0) return false;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>(
+                "SELECT COUNT(1) FROM BoardRoles WHERE OwnerType = @0 AND OwnerId = @1 AND MemberId = @2 AND IsActive = 1 AND RoleKey IN (@3)",
+                ownerType, ownerId, memberId, roleKeys) > 0;
+        }
+
+        /// <summary>Active holders of a role for this owner, with names — "who is the treasurer?".</summary>
+        public List<BoardRole> GetActiveRoleHolders(int ownerType, int ownerId, params string[] roleKeys)
+        {
+            if (roleKeys.Length == 0) return new List<BoardRole>();
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var roles = scope.Database.Fetch<BoardRole>(
+                "SELECT * FROM BoardRoles WHERE OwnerType = @0 AND OwnerId = @1 AND IsActive = 1 AND RoleKey IN (@2) ORDER BY SortOrder",
+                ownerType, ownerId, roleKeys);
+            ResolveMemberNames(roles);
+            return roles;
+        }
+
+        /// <summary>
+        /// True if the member is an ELECTED auditor (Revisor/Revisorssuppleant) anywhere. Drives the
+        /// "Revision" menu link — without it an elected auditor has read access to the ledger but
+        /// no way to find /revision (invited auditors arrive through their link).
+        /// </summary>
+        public bool IsElectedAuditorAnywhere(int memberId)
+        {
+            if (memberId <= 0) return false;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>(
+                "SELECT COUNT(1) FROM BoardRoles WHERE MemberId = @0 AND IsActive = 1 AND RoleKey IN (@1)",
+                memberId, BoardRoleDefinitions.AuditorRoleKeys) > 0;
+        }
+
         /// <summary>True if the member sits on any active board (club or region). Cheap menu-gate check.</summary>
         public bool IsOnAnyBoard(int memberId)
         {

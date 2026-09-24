@@ -437,15 +437,48 @@
     <nav class="rail">
         <div class="brand">Pistol.nu</div>
         <div class="club">@Model.IssuerName</div>
-        <div class="role">@(Model.CanWrite ? "Kassör" : "Styrelsen") · @Model.CurrentYear</div>
+        @{
+            // ⚠️⚠️ SKRIVRÄTTEN FÖLJER KASSÖRSUPPDRAGET (2026-09-24) — se LedgerAccessService.
+            //    Rollen och förklaringen säger VARFÖR, eftersom "Kassör" på en administratör som
+            //    bokför i väntan på en registrerad kassör vore fel, och "Styrelsen" på en
+            //    administratör som läser likaså.
+            var basis = Model.AccessBasis;
+            var roleLabel = basis switch
+            {
+                HpskSite.Services.Ledger.LedgerAccessBasis.Treasurer => "Kassör",
+                HpskSite.Services.Ledger.LedgerAccessBasis.AdminWithoutTreasurer => "Administratör",
+                HpskSite.Services.Ledger.LedgerAccessBasis.Admin => "Administratör",
+                HpskSite.Services.Ledger.LedgerAccessBasis.Auditor => "Revisor",
+                _ => Model.CanWrite ? "Kassör" : "Styrelsen"
+            };
+            var bokforare = string.IsNullOrWhiteSpace(Model.TreasurerName)
+                ? "kassören" : "kassören, " + Model.TreasurerName + ",";
+        }
+        <div class="role">@roleLabel · @Model.CurrentYear</div>
 
         @* ⚠️⚠️ FRÅNVARON MÅSTE FÖRKLARAS. En yta där knapparna bara saknas läses som trasig —
            läsaren undrar om hen gjort fel, inte om hen har fel roll. *@
         @if (!Model.CanWrite)
         {
             <div class="ek-readonly-note">
-                Du läser föreningens ekonomi som styrelseledamot.
-                <strong>Det är kassören som bokför.</strong>
+                @(basis switch
+                {
+                    HpskSite.Services.Ledger.LedgerAccessBasis.Admin => "Du läser föreningens ekonomi som administratör.",
+                    HpskSite.Services.Ledger.LedgerAccessBasis.Auditor => "Du läser föreningens ekonomi som revisor.",
+                    _ => "Du läser föreningens ekonomi som styrelseledamot."
+                })
+                <strong>Det är @bokforare som bokför.</strong>
+            </div>
+        }
+        else if (basis == HpskSite.Services.Ledger.LedgerAccessBasis.AdminWithoutTreasurer)
+        {
+            @* ⚠️⚠️ ÖVERGÅNGEN. Utan registrerad kassör bokför administratören som förut — men det
+               ska SÄGAS, med vägen till rättelsen, annars står föreningen kvar i läget för alltid. *@
+            <div class="ek-readonly-note" id="@(uid)_noTreasurer">
+                Föreningen har ingen kassör registrerad, så du kan bokföra som administratör.
+                <strong>Lägg in kassören</strong> under
+                <a href="/styrelse?type=@Model.IssuerType&amp;id=@Model.OwnerId">Styrelsearbete</a>
+                — då är det kassören som bokför, och du kan läsa.
             </div>
         }
 
@@ -1402,8 +1435,10 @@
                         <tbody id="@(uid)_revBody"></tbody>
                     </table>
                     <p class="why" style="margin-bottom:0">
-                        Revisorn behöver inget konto sedan tidigare. Hen får en länk och skapar sin
-                        inloggning själv — och blir aldrig medlem i föreningen. Uppdraget gäller i 13 månader.
+                        <strong>Valda revisorer</strong> som finns i föreningens uppgifter kan läsa direkt —
+                        ingen inbjudan behövs. <strong>Är revisorn inte medlem</strong> bjuder du in hen här:
+                        hen får en länk, skapar sin inloggning själv och blir aldrig medlem i föreningen.
+                        En inbjudan gäller i 13 månader.
                     </p>
                 </div>
             </section>
@@ -4123,10 +4158,26 @@
         }
 
         var rows = d.auditors || [];
+        var elected = d.elected || [];
 
-        el('revBody').innerHTML = rows.length === 0
-            ? '<tr><td colspan="5" class="muted">Ingen revisor är inbjuden än.</td></tr>'
-            : rows.map(function (a) {
+        // ⚠️⚠️ De VALDA revisorerna först — de läser genom sitt uppdrag i föreningens uppgifter,
+        //    utan inbjudan. Läget säger varifrån åtkomsten kommer, och åtgärden pekar dit där
+        //    rollen bor: att "avsluta" den här vore att låtsas att den här listan äger den.
+        var electedRows = elected.map(function (a) {
+            return '<tr data-elected="' + a.memberId + '"><td>' + esc(a.name)
+                 + '<div class="muted">' + esc(a.email) + '</div></td>'
+                 + '<td>' + badge('ok', 'Vald ' + esc(a.role).toLowerCase())
+                 + '<div class="muted">Läser genom uppdraget i föreningens uppgifter</div></td>'
+                 + '<td class="muted">Till nästa årsmöte</td>'
+                 + '<td class="muted">—</td>'
+                 + '<td class="n"><a href="' + esc(d.boardUrl || '#') + '">Ändras i Styrelsearbete</a></td></tr>';
+        }).join('');
+
+        el('revBody').innerHTML = rows.length === 0 && elected.length === 0
+            ? '<tr><td colspan="5" class="muted">Ingen revisor är vald eller inbjuden än. Lägg in '
+              + 'revisorerna i föreningens uppgifter under Styrelsearbete — då kan de läsa direkt. '
+              + 'En revisor som inte är medlem bjuder du in här.</td></tr>'
+            : electedRows + rows.map(function (a) {
                 return '<tr><td>' + esc(a.name)
                      + '<div class="muted">' + esc(a.email) + '</div></td>'
                      + '<td>' + badge(a.isActive ? 'ok' : (/Inbjuden/.test(a.status || '') ? 'wait' : 'off'), a.status)

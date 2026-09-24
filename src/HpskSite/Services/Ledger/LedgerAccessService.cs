@@ -68,13 +68,13 @@ namespace HpskSite.Services.Ledger
             if (node is null) return LedgerAccessResult.None;
 
             string name;
-            bool canWrite;
+            bool isAdmin;
 
             if (ownerType == DocumentOwnerType.Club)
             {
-                // ⚠️ IsClubAdminForClub viker in klubbens KRETSADMINISTRATÖRER — det är
-                // befintligt och avsiktligt, se metodens egen dokumentation.
-                canWrite = await _auth.IsClubAdminForClub(ownerId);
+                // ⚠️ IsClubAdminForClub viker in klubbens KRETSADMINISTRATÖRER och sajtens
+                // administratörer — befintligt och avsiktligt, se metodens egen dokumentation.
+                isAdmin = await _auth.IsClubAdminForClub(ownerId);
                 name = node.Value<string>("clubName") ?? node.Name ?? "";
             }
             else if (ownerType == DocumentOwnerType.Region)
@@ -84,7 +84,7 @@ namespace HpskSite.Services.Ledger
                 var regionCode = node.Value<string>("regionCode") ?? "";
                 if (string.IsNullOrWhiteSpace(regionCode)) return LedgerAccessResult.None;
 
-                canWrite = await _auth.IsRegionalAdminForRegion(regionCode);
+                isAdmin = await _auth.IsRegionalAdminForRegion(regionCode);
                 name = node.Name ?? "";
             }
             else
@@ -93,7 +93,36 @@ namespace HpskSite.Services.Ledger
                 return LedgerAccessResult.None;
             }
 
-            if (canWrite) return new LedgerAccessResult(LedgerAccess.Write, name);
+            var memberId = await CurrentMemberIdAsync();
+
+            // ── Revisorn skriver ALDRIG ─────────────────────────────────────────────────────
+            // ⚠️⚠️ FÖRST, före skrivrätten. En revisor som råkar vara klubbadmin (eller kassör i
+            //    registret av misstag) hade annars kunnat bokföra i det hen ska granska — ett
+            //    oberoendebrott. Revisorn läser, via revisionsgrenen, och det är allt.
+            //    Frågan täcker både inbjudan och det VALDA uppdraget i föreningens uppgifter.
+            if (memberId > 0 && _auditors.HasAccess(ownerType, ownerId, memberId))
+                return new LedgerAccessResult(LedgerAccess.Read, name, isAuditor: true,
+                                              basis: LedgerAccessBasis.Auditor);
+
+            // ── Kassören skriver ───────────────────────────────────────────────────────────
+            // ⚠️⚠️ SKRIVRÄTTEN FÖLJER KASSÖRSUPPDRAGET (2026-09-24, Michael Henriksson: "Kassören
+            //    borde vara den enda som kan komma in och göra allt i bokföringen"). Förut skrev
+            //    klubbadmin — en teknisk roll på sajten, oftast en annan person än kassören —
+            //    och via IsClubAdminForClub även varje kretsadministratör i kretsen.
+            //
+            // ⚠️⚠️ ÖVERGÅNGEN: finns INGEN aktiv kassör i föreningens uppgifter skriver
+            //    administratören som förut, och ytan säger åt hen att lägga in kassören. En hård
+            //    omläggning hade låst ute varje förening som inte fört in sin kassör — alltså
+            //    nästan alla, den dag det deployas.
+            var treasurers = _boardRoles.GetActiveRoleHolders(ownerType, ownerId, BoardRoleDefinitions.RoleKassor);
+
+            if (memberId > 0 && treasurers.Any(t => t.MemberId == memberId))
+                return new LedgerAccessResult(LedgerAccess.Write, name, basis: LedgerAccessBasis.Treasurer);
+
+            var treasurerName = string.Join(", ", treasurers.Select(t => t.MemberName).Where(n => !string.IsNullOrWhiteSpace(n)));
+
+            if (isAdmin && treasurers.Count == 0)
+                return new LedgerAccessResult(LedgerAccess.Write, name, basis: LedgerAccessBasis.AdminWithoutTreasurer);
 
             // ── Styrelsen läser ──────────────────────────────────────────────────────────
             // ⚠️ IsBoardMemberOf kräver IsActive = 1 OCH IsBoardMember = 1. Revisorn och
@@ -104,21 +133,21 @@ namespace HpskSite.Services.Ledger
             // ⚠️ Ett utgånget mandat revoquerar inte: en styrelse sitter kvar till nästa årsmöte,
             // och en lucka där hade lämnat föreningen utan läsare i just det fönstret. Samma
             // resonemang som vapenregistrets behörighet.
-            var memberId = await CurrentMemberIdAsync();
             if (memberId > 0 && _boardRoles.IsBoardMemberOf(ownerType, ownerId, memberId))
-                return new LedgerAccessResult(LedgerAccess.Read, name);
+                return new LedgerAccessResult(LedgerAccess.Read, name, basis: LedgerAccessBasis.Board,
+                                              treasurerName: treasurerName);
 
-            // ── Revisorn läser också ──────────────────────────────────────────────────────
-            // ⚠️⚠️ EN EGEN GREN, ALDRIG EN VIDGNING AV IsBoardMemberOf. Den frågan kräver
-            // IsBoardMember = 1, och den flaggan styr också vilka som seedas som närvarande på
-            // styrelsemöten och RÄKNAS I BESLUTSFÖRHETEN. En revisor som blir beslutsför i den
-            // styrelse hen granskar är ett allvarligare fel än det man löste.
-            //
-            // ⚠️ Uppdraget är scopat till EN förening och har en utgångstid — se
-            // LedgerAuditorGrant.IsActive. Ett fel i uppslaget betyder NEKAD, aldrig öppet.
-            if (memberId > 0 && _auditors.HasAccess(ownerType, ownerId, memberId))
-                return new LedgerAccessResult(LedgerAccess.Read, name, isAuditor: true);
+            // ── Administratören läser när det finns en kassör ──────────────────────────────
+            // ⚠️ Läser, inte nekas: klubbadmin sköter föreningens sidor och ska kunna se att
+            //    ekonomin är uppsatt och hjälpa kassören — men bokföringen är kassörens.
+            //    Samma för krets- och sajtadministratörer (IsClubAdminForClub viker in dem).
+            if (isAdmin)
+                return new LedgerAccessResult(LedgerAccess.Read, name, basis: LedgerAccessBasis.Admin,
+                                              treasurerName: treasurerName);
 
+            // (Revisorn prövades först — se ovan. Den grenen är ALDRIG en vidgning av
+            //  IsBoardMemberOf: den flaggan styr också vilka som räknas i BESLUTSFÖRHETEN, och en
+            //  revisor som blir beslutsför i den styrelse hen granskar är ett allvarligare fel.)
             return new LedgerAccessResult(LedgerAccess.None, name);
         }
 
@@ -141,14 +170,42 @@ namespace HpskSite.Services.Ledger
         Write = 2
     }
 
+    /// <summary>
+    /// VARFÖR den inloggade får det hen får. Ytan behöver det för att förklara frånvaron av
+    /// knappar — "du läser som styrelseledamot" och "du läser som administratör, kassören bokför"
+    /// är olika meningar — och för att be administratören lägga in en kassör.
+    /// </summary>
+    public enum LedgerAccessBasis
+    {
+        None = 0,
+        /// <summary>Aktiv kassör i föreningens uppgifter — skriver.</summary>
+        Treasurer,
+        /// <summary>Administratör i en förening UTAN registrerad kassör — skriver, tills vidare.</summary>
+        AdminWithoutTreasurer,
+        /// <summary>Aktiv styrelseledamot — läser.</summary>
+        Board,
+        /// <summary>Administratör när föreningen har en kassör — läser.</summary>
+        Admin,
+        /// <summary>Revisor (vald eller inbjuden) — läser, skriver aldrig.</summary>
+        Auditor
+    }
+
     public readonly struct LedgerAccessResult
     {
-        public LedgerAccessResult(LedgerAccess access, string ownerName, bool isAuditor = false)
+        public LedgerAccessResult(LedgerAccess access, string ownerName, bool isAuditor = false,
+                                  LedgerAccessBasis basis = LedgerAccessBasis.None, string? treasurerName = null)
         {
             Access = access;
             OwnerName = ownerName;
             IsAuditor = isAuditor;
+            Basis = basis;
+            TreasurerName = treasurerName ?? "";
         }
+
+        public LedgerAccessBasis Basis { get; }
+
+        /// <summary>Kassören(s) namn, när den inloggade läser — "Det är Anna Svensson som bokför."</summary>
+        public string TreasurerName { get; }
 
         /// <summary>
         /// Sant när läsrätten kommer från ett REVISORSUPPDRAG och inte från styrelsen.
