@@ -604,7 +604,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 btn.disabled = false;
                 stafettLoadExistingTeams();
                 // Payment options ride above the (now empty) form - see stafettShowPaymentOptions.
-                if (stafettHasSwish && data.teamId) {
+                // Den nya modellen visar betalsteget även utan Swish (bankgiro, eller "faktureras klubben").
+                if ((stafettHasSwish || window.HpskFees) && data.teamId) {
                     stafettShowPaymentOptions(data.teamId, savedName);
                 }
             } else {
@@ -852,7 +853,20 @@ document.addEventListener('DOMContentLoaded', function() {
     // ==================== Payment Options ====================
     // Rendered ABOVE the create form, never over it: the form is already cleared and must stay usable
     // so a club can register its next relay team without closing the modal.
+    // ⚠️ Den nya modellen (P3/P4): stafettlagets avgift ur liggaren. Gamla vägen gäller gamla tävlingar.
     function stafettShowPaymentOptions(teamId, teamName) {
+        const panel = document.getElementById('stafettPaymentPanel');
+        if (!panel) return;
+        if (!window.HpskFees) { stafettShowPaymentOptionsLegacy(teamId, teamName); return; }
+        HpskFees.get('GetTeamFee', { competitionId: stafettCompetitionId, teamId }).then(d => {
+            if (!d.success || d.model !== 'ledger') { if (stafettHasSwish) stafettShowPaymentOptionsLegacy(teamId, teamName); return; }
+            panel.innerHTML = '<div class="alert alert-info mb-3"><h5 class="mb-2"><i class="bi bi-check-circle-fill text-success me-1"></i>' + HpskFees.esc(teamName || 'Stafettlaget') + ' har skapats</h5><div id="stafettLedgerPay"></div></div>';
+            HpskFees.renderTeamPay(document.getElementById('stafettLedgerPay'), stafettCompetitionId, teamId);
+            panel.scrollIntoView({ block: 'nearest' });
+        });
+    }
+
+    function stafettShowPaymentOptionsLegacy(teamId, teamName) {
         const panel = document.getElementById('stafettPaymentPanel');
         if (!panel) return;
         const safeName = String(teamName || 'Stafettlaget').replace(/[&<>"']/g, c =>

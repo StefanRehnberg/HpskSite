@@ -214,7 +214,6 @@
                 <optgroup label="Kretsen">
                     <option value="/styrelse?type=1&id=@regionContentId">Styrelsearbete ↗</option>
                     <option value="/ekonomi?type=1&id=@regionContentId">Ekonomi ↗</option>
-                    <option value="#regionInvoicesTab">Fakturor</option>
                     <option value="#regionSettingsTab">Inställningar</option>
                     <option value="#regionDocumentsTab" selected>Dokument</option>
                     <option value="#regionStatsTab">Statistik</option>
@@ -259,17 +258,13 @@
                     <i class="bi bi-clipboard-check me-2"></i>Styrelsearbete
                     <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar styrelsesidan"></i>
                 </a>
-                @* ⚠️ Knappens id är kvar som "regionInvoices-tab" med flit — AdminInvoicesList
-                   laddar lat på just den knappens shown.bs.tab via TabButtonId. *@
                 @* ⚠️ EGEN SIDA. Kassörsytan har sex egna railposter enligt
                    `Ekonomi Exempel/Ekonomi_Wireframes.pdf` och får inte plats som en flik. *@
                 <a class="nav-link d-flex align-items-center" href="/ekonomi?type=1&id=@regionContentId" target="_blank" rel="noopener">
                     <i class="bi bi-cash-coin me-2"></i>Ekonomi
                     <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar kassörens arbetsyta"></i>
                 </a>
-                <button class="nav-link" id="regionInvoices-tab" data-bs-toggle="tab" data-bs-target="#regionInvoicesTab" type="button" role="tab" aria-controls="regionInvoicesTab" aria-selected="false">
-                    <i class="bi bi-receipt me-2"></i>Fakturor
-                </button>
+                @* ⚠️ Fakturor-fliken är BORTTAGEN (2026-09-24) — den bor i Ekonomi → Fakturor. *@
                 <button class="nav-link" id="regionSettings-tab" data-bs-toggle="tab" data-bs-target="#regionSettingsTab" type="button" role="tab" aria-controls="regionSettingsTab" aria-selected="false">
                     <i class="bi bi-gear me-2"></i>Inställningar
                 </button>
@@ -325,22 +320,6 @@
             </div>
         </div>
 
-        @* Invoices Sub-Tab — each krets sees its OWN invoices (region locked, no krets picker).
-           Covers both the krets's own competitions and its clubs' competitions; see
-           InvoiceAdminService.ResolveCompetitionRegion. Loads lazily on first tab click.
-           ⚠️ BEHÖLLS när Ekonomi blev en egen sida: Pending-fakturorna är arrangörens
-           avprickningslista, och arrangören är inte alltid kassören. *@
-        <div class="tab-pane fade" id="regionInvoicesTab">
-            @{
-                var regionInvoicesVD = new ViewDataDictionary(ViewData)
-                {
-                    ["LockedRegionCode"] = ViewBag.regionCode as string ?? "",
-                    ["LockedRegionName"] = regionName,
-                    ["TabButtonId"] = "regionInvoices-tab"
-                };
-            }
-            @await Html.PartialAsync("AdminInvoicesList", regionInvoicesVD)
-        </div>
 
         <!-- Competitions Sub-Tab -->
         <div class="tab-pane fade" id="regionAdminCompetitionsTab">

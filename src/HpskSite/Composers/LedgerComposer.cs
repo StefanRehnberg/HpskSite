@@ -58,6 +58,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.CompetitionFees.CompetitionPaymentModelService>();
             builder.Services.AddScoped<HpskSite.Services.CompetitionFees.CompetitionFeeService>();
             builder.Services.AddScoped<HpskSite.Services.CompetitionFees.LedgerChargeService>();
+            builder.Services.AddScoped<HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge>();
             builder.Services.AddHostedService<LedgerSchemaGuardHostedService>();
         }
     }

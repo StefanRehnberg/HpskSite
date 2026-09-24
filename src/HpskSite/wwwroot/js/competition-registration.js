@@ -2294,6 +2294,32 @@ function transformModalToSuccessState(result, competitionId, isAdminRegistration
     // Get the target member ID (for admin registrations)
     const targetMemberId = selectedTargetMemberId || '';
 
+    // ⚠️⚠️ DEN NYA MODELLEN (P3/P4): avgiften är en begärd betalning i liggaren och betalsteget
+    // är en del av anmälan — inget "Betala senare". Undantaget är klasser arrangören tillåtit
+    // klubben att betala för; där väljer skytten "Klubben betalar" i betalsteget.
+    if (result.paymentModel === 'ledger' && window.HpskFees) {
+        const owes = Number(result.amountDue) > 0 || (result.ledgerFees && (result.ledgerFees.canChooseClubPays || result.ledgerFees.clubPart > 0));
+        modalBody.innerHTML = `
+            <div class="py-2">
+                <div class="text-center mb-3">
+                    <div class="text-success mb-2"><i class="bi bi-check-circle" style="font-size: 3rem;"></i></div>
+                    <h4 class="mb-1">Anmälan är registrerad</h4>
+                    <p class="text-muted mb-0">${result.message || ''}</p>
+                </div>
+                ${owes ? '<h5 class="mb-2"><i class="bi bi-wallet2"></i> Betala anmälningsavgiften</h5><div id="regFeePayStep"></div>'
+                       : '<div class="alert alert-success">Ingenting att betala.</div>'}
+                ${!isAdminRegistration ? '<div id="regNotisPrompt" style="display:none"></div>' : ''}
+            </div>`;
+        if (owes) HpskFees.renderPayStep(document.getElementById('regFeePayStep'), { competitionId, memberId: targetMemberId || undefined });
+        if (!isAdminRegistration && window.HpskWebPush) {
+            window.HpskWebPush.mountRegPrompt(document.getElementById('regNotisPrompt'), true);
+        }
+        if (modalFooter) {
+            modalFooter.innerHTML = '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><i class="bi bi-x-circle"></i> Stäng</button>';
+        }
+        return;
+    }
+
     // Extract data from result
     const message = result.message || 'Anmälan genomförd!';
     const isUpdate = result.isUpdate || false;

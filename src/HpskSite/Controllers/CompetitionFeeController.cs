@@ -50,6 +50,8 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly EmailService _email;
         private readonly IDataProtector _documentProtector;
+        private readonly LedgerAccessService _ledgerAccess;
+        private readonly LedgerIssuerResolver _issuers;
         private readonly ILogger<CompetitionFeeController> _logger;
 
         public CompetitionFeeController(
@@ -71,9 +73,13 @@ namespace HpskSite.Controllers
             ClubService clubService,
             EmailService email,
             IDataProtectionProvider dataProtection,
+            LedgerAccessService ledgerAccess,
+            LedgerIssuerResolver issuers,
             ILogger<CompetitionFeeController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _ledgerAccess = ledgerAccess;
+            _issuers = issuers;
             _memberManager = memberManager;
             _memberService = memberService;
             _contentService = contentService;
@@ -97,7 +103,20 @@ namespace HpskSite.Controllers
             return m == null || !int.TryParse(m.Id, out var id) ? 0 : id;
         }
 
-        private Task<bool> IsOrganiserAsync(int competitionId) => _auth.CanManageCompetitionFinanceAsync(competitionId);
+        /// <summary>
+        /// Arrangörens rätt över tävlingens pengar: tävlingens egen finansrätt, ELLER skrivrätt i
+        /// den förenings liggare som tar emot pengarna.
+        /// <para>⚠️⚠️ Den andra halvan är KASSÖREN. Kassören är ofta inte klubbadmin (10 av 12
+        /// styrelseledamöter var det inte, se <c>styrelsen-laser-kassoren-skriver</c>) — utan den
+        /// hade Ekonomi → Fakturor visat listan men nekat varje bekräftelse.</para>
+        /// </summary>
+        private async Task<bool> IsOrganiserAsync(int competitionId)
+        {
+            if (await _auth.CanManageCompetitionFinanceAsync(competitionId)) return true;
+            var issuer = _issuers.ResolveForCompetition(competitionId);
+            if (issuer == null) return false;
+            return (await _ledgerAccess.ResolveAsync(issuer.Value.Type, issuer.Value.Id)).CanWrite;
+        }
 
         /// <summary>
         /// Får den inloggade agera BETALARE på raden? Skytten själv, eller en klubbadmin för anmälans
@@ -478,6 +497,7 @@ namespace HpskSite.Controllers
             recipientId = v.Charge.RecipientId,
             recipientName = v.Charge.RecipientName,
             recipientEmail = v.Charge.RecipientEmail,
+            issuerName = v.Charge.IssuerName,
             competitionId = v.Charge.SourceId,
             competitionName = v.Charge.SourceName,
             issueDate = v.Charge.IssueDate.ToString("yyyy-MM-dd"),
@@ -832,6 +852,62 @@ namespace HpskSite.Controllers
             return Json(ok
                 ? new { success = true, message = "Tack! Arrangören stämmer av betalningen och skickar kvitto." }
                 : new { success = false, message = "Fakturan är redan betald, anmäld eller makulerad." });
+        }
+
+        /// <summary>
+        /// GET GetIssuerFees — Ekonomi → Fakturor: föreningens tävlingar med avgifter i den nya
+        /// modellen, alla fakturor den ställt ut, och (för en klubb) fakturor den fått.
+        /// <para>Läsrätt räcker (styrelsen och revisorn ser vad tävlingarna gav); varje handling i
+        /// listan prövas för sig mot arrangörsrätten.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetIssuerFees(int ownerType, int ownerId)
+        {
+            var access = await _ledgerAccess.ResolveAsync(ownerType, ownerId);
+            if (!access.CanRead) return Json(new { success = false, message = Denied });
+
+            // LEDGER-SEAM-OK: tävlingsavgifter ligger alltid i den skarpa liggaren (utställare = nodens id).
+            List<LedgerPayment> rows;
+            using (var db = DatabaseFactory.CreateDatabase())
+                rows = db.Fetch<LedgerPayment>(
+                    @"SELECT * FROM dbo.LedgerPayment
+                       WHERE IssuerType = @0 AND IssuerId = @1 AND SourceType IN (@2, @3, @4) AND SourceId IS NOT NULL",
+                    ownerType, ownerId, LedgerSourceType.CompetitionRegistration, LedgerSourceType.TeamFee,
+                    LedgerSourceType.CompetitionInvoice);
+
+            var invoices = _charges.ListForIssuer(ownerType, ownerId);
+            var compIds = rows.Select(r => r.SourceId!.Value).Concat(invoices.Select(v => v.Charge.SourceId)).Distinct().ToList();
+
+            var competitions = compIds.Select(id =>
+            {
+                var mine = rows.Where(r => r.SourceId == id).ToList();
+                var fees = mine.Where(r => r.SourceType != LedgerSourceType.CompetitionInvoice).ToList();
+                var node = _contentService.GetById(id);
+                return new
+                {
+                    competitionId = id,
+                    name = node?.GetValue<string>("competitionName") ?? node?.Name ?? $"Borttagen tävling (#{id})",
+                    date = node?.GetValue<DateTime?>("competitionDate")?.ToString("yyyy-MM-dd"),
+                    received = mine.Where(r => r.IsMoney).Sum(r => r.SettledAmount),
+                    claimed = mine.Where(r => r.IsClaimedOnly).Sum(r => r.Amount),
+                    open = fees.Where(r => r.VoidedUtc == null && r.ConfirmedUtc == null && r.ClaimedUtc == null).Sum(r => r.Amount),
+                    invoicedOpen = invoices.Where(v => v.Charge.SourceId == id && !v.Charge.IsVoided).Sum(v => v.Balance.Outstanding)
+                };
+            })
+            .OrderByDescending(c => c.claimed > 0).ThenByDescending(c => c.date).ToList();
+
+            var incoming = ownerType == DocumentOwnerType.Club
+                ? _charges.ListForRecipient(DocumentOwnerType.Club, ownerId).Where(v => !v.Charge.IsVoided).ToList()
+                : new List<LedgerChargeService.ChargeView>();
+
+            return Json(new
+            {
+                success = true,
+                canWrite = access.CanWrite,
+                competitions,
+                invoices = invoices.Select(InvoiceJson),
+                incoming = incoming.Select(InvoiceJson)
+            });
         }
 
         /// <summary>GET GetIncomingInvoices — fakturor TILL en klubb från arrangörer i pistol.nu.</summary>

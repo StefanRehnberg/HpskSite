@@ -715,7 +715,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 btn.disabled = false;
                 loadExistingTeams();
                 // Payment options ride above the (now empty) form — see showTeamPaymentOptions.
-                if (teamHasSwish && data.teamId) {
+                // Den nya modellen visar betalsteget även utan Swish (bankgiro, eller "faktureras klubben").
+                if ((teamHasSwish || window.HpskFees) && data.teamId) {
                     showTeamPaymentOptions(data.teamId, savedName);
                 }
             } else {
@@ -983,7 +984,21 @@ document.addEventListener('DOMContentLoaded', function() {
     // ==================== Team Payment Options ====================
     // Rendered ABOVE the create form, never over it: the form is already cleared and must stay
     // usable so a club can register its next team without closing the modal.
+    // ⚠️ Den nya modellen (P3/P4): lagets avgift ur liggaren — betala direkt, eller "faktureras
+    // klubben" när arrangören tillåtit lag. Den gamla vägen nedan gäller bara gamla tävlingar.
     function showTeamPaymentOptions(teamId, teamName) {
+        const panel = document.getElementById('teamPaymentPanel');
+        if (!panel) return;
+        if (!window.HpskFees) { showTeamPaymentOptionsLegacy(teamId, teamName); return; }
+        HpskFees.get('GetTeamFee', { competitionId, teamId }).then(d => {
+            if (!d.success || d.model !== 'ledger') { if (teamHasSwish) showTeamPaymentOptionsLegacy(teamId, teamName); return; }
+            panel.innerHTML = `<div class="alert alert-info mb-3"><h5 class="mb-2"><i class="bi bi-check-circle-fill text-success me-1"></i>${escapeHtmlLocal(teamName || 'Laget')} har skapats</h5><div id="teamLedgerPay"></div></div>`;
+            HpskFees.renderTeamPay(document.getElementById('teamLedgerPay'), competitionId, teamId);
+            panel.scrollIntoView({ block: 'nearest' });
+        });
+    }
+
+    function showTeamPaymentOptionsLegacy(teamId, teamName) {
         const panel = document.getElementById('teamPaymentPanel');
         if (!panel) return;
         panel.innerHTML = `

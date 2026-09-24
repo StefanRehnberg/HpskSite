@@ -149,7 +149,12 @@ namespace HpskSite.Services.Ledger
                                 || p.SourceType == LedgerSourceType.TeamFee
                                 || p.SourceType == LedgerSourceType.CompetitionInvoice
                                 || p.SourceType == LedgerSourceType.Event))
-                .GroupBy(p => (p.SourceType, SourceId: p.SourceId!.Value))
+                // ⚠️ En tävling är EN rad, oavsett om pengarna kom som anmälningsavgift, lagavgift eller
+                //    som betalning av en faktura till en klubb (P3/P4). Grupperades de på källtypen stod
+                //    samma tävling två gånger — och två rader med samma namn går inte att arbeta med.
+                .GroupBy(p => (SourceType: p.SourceType is LedgerSourceType.TeamFee or LedgerSourceType.CompetitionInvoice
+                                   ? LedgerSourceType.CompetitionRegistration : p.SourceType,
+                               SourceId: p.SourceId!.Value))
                 .Select(g => new SourceCompleteness
                 {
                     SourceType = g.Key.SourceType,

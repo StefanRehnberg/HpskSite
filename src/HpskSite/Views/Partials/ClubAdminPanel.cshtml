@@ -97,7 +97,6 @@
                 <optgroup label="Klubben">
                     <option value="/styrelse?type=0&id=@clubId">Styrelsearbete ↗</option>
                     <option value="/ekonomi?type=0&id=@clubId">Ekonomi ↗</option>
-                    <option value="#invoicesTab">Fakturor</option>
                     <option value="#clubFirearmsTab">Klubbvapen</option>
                     <option value="#settingsTab">Inställningar</option>
                     <option value="#documentsTab">Dokument</option>
@@ -202,12 +201,10 @@
                     <i class="bi bi-cash-coin me-2"></i>Ekonomi
                     <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar kassörens arbetsyta"></i>
                 </a>
-                @* ⚠️ Knappens id är "invoices-tab" — fakturalistan laddas lat på just den
-                   knappens shown.bs.tab (ClubAdminInvoicesList och raden längre ned i den här
-                   filen). Byt inte id. *@
-                <button class="nav-link" id="invoices-tab" data-bs-toggle="tab" data-bs-target="#invoicesTab" type="button" role="tab" aria-controls="invoicesTab" aria-selected="false">
-                    <i class="bi bi-receipt me-2"></i>Fakturor
-                </button>
+                @* ⚠️ Fakturor-fliken är BORTTAGEN (2026-09-24, Stefan: "Allt under Admin / Fakturor för
+                   klubbar och Kretsar ska in under Ekonomin"). Den bor nu i Ekonomi → Fakturor, med
+                   den gamla modellens lista orörd under "Fakturor enligt det gamla sättet".
+                   Arrangörens avprickning finns dessutom på tävlingens Anmälningar-flik. *@
                 @* Klubbens EGNA vapen och lånevapenhanteringen. Föreningsintyget ligger under
                    Medlemmar — det är en medlems ansökan, inte klubbens inventarie. *@
                 <button class="nav-link" id="clubFirearms-tab" data-bs-toggle="tab" data-bs-target="#clubFirearmsTab" type="button" role="tab" aria-controls="clubFirearmsTab" aria-selected="false">
@@ -466,12 +463,6 @@
 
         </div>
 
-        @* Fakturor — den gamla modellen, orörd. ⚠️ TOGS INTE BORT när Ekonomi blev en egen sida:
-           Pending-fakturorna ÄR arrangörens avprickningslista, och arrangören är inte alltid
-           kassören. Den avvecklas först när betalningsflödet har en ersättare. *@
-        <div class="tab-pane fade" id="invoicesTab">
-            @await Html.PartialAsync("ClubAdminInvoicesList")
-        </div>
 
         <!-- Documents Tab -->
         <div class="tab-pane fade" id="documentsTab">
@@ -3331,13 +3322,6 @@ document.getElementById('competitions-tab').addEventListener('shown.bs.tab', fun
 
 document.getElementById('members-tab').addEventListener('shown.bs.tab', function () {
     loadClubMembers();
-});
-
-document.getElementById('invoices-tab').addEventListener('shown.bs.tab', function () {
-    if (!clubInvoicesListLoaded) {
-        loadClubInvoices();
-        clubInvoicesListLoaded = true;
-    }
 });
 
 document.getElementById('traininggroups-tab').addEventListener('shown.bs.tab', function () {

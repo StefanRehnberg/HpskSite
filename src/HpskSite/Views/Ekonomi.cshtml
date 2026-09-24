@@ -385,6 +385,11 @@
            skrivrätt. Skrivkontrollerna inuti är det. *@
         <a href="#" class="ek-nav" data-view="projekt">Projekt</a>
         <a href="#" class="ek-nav" data-view="avgifter">Avgifter</a>
+        @* ⚠️ Fakturorna bodde i klubbens och kretsens ADMINPANEL (Admin → Fakturor) fram till
+           2026-09-24 (Stefan: "Allt under Admin / Fakturor för klubbar och Kretsar ska in under
+           Ekonomin"). Tävlingsavgifterna i den nya modellen, fakturorna till klubbar, inkommande
+           fakturor och den gamla modellens lista — på ETT ställe. Läsbart för styrelsen. *@
+        <a href="#" class="ek-nav" data-view="fakturor">Fakturor</a>
         @* ⚠️ Årsavgiften bodde förut i klubbens/kretsens ADMINPANEL (flyttad 2026-09-23). Det är
            kassörens arbete, och här har den rätt behörighet: kassören skriver, styrelsen läser. *@
         <a href="#" class="ek-nav" data-view="arsavgift">@feeWord</a>
@@ -581,6 +586,59 @@
                         <div class="ek-alert ek-bad d-none" id="@(uid)_queueError"></div>
                     </div>
 
+                    @* ⚠️ Läsbryggan (P3/P4): betalda fakturor i det GAMLA fakturasättet, betalda efter att
+                       föreningen började bokföra här. Utan kortet hade pengarna stått utanför bokföringen
+                       tyst — tävlingar i den gamla modellen lever kvar hela sin livstid. *@
+                    @if (!Model.IsSandbox)
+                    {
+                        <div class="ek-card wide d-none" id="@(uid)_legacyPost">
+                            <div class="ek-cardh"><h2>Betalda fakturor enligt det gamla sättet</h2><span class="meta" id="@(uid)_legacyPostMeta"></span></div>
+                            <p class="muted" style="margin-top:0">Tävlingar som fick sina första anmälningar före bytet har kvar de gamla fakturorna. De som betalats sedan ni började bokföra här ska bli verifikationer.</p>
+                            <table class="t"><thead><tr><th>Betald</th><th>Faktura</th><th>Betalare</th><th class="n">Belopp</th></tr></thead><tbody id="@(uid)_legacyPostBody"></tbody></table>
+                            @if (Model.CanWrite)
+                            {
+                                <button type="button" class="btn btn-sm btn-primary mt-2" id="@(uid)_legacyPostBtn">Bokför dem</button>
+                            }
+                            <div class="small mt-2" id="@(uid)_legacyPostMsg"></div>
+                        </div>
+                        <script>
+                        (function () {
+                            var uid = '@uid', issuerType = @Model.IssuerType, issuerId = @Model.IssuerId;
+                            var $ = function (s) { return document.getElementById(uid + '_' + s); };
+                            var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); };
+                            var kr = function (v) { return (Number(v) || 0).toLocaleString('sv-SE') + ' kr'; };
+                            function load() {
+                                fetch('/umbraco/surface/EkonomiAdmin/GetLegacyInvoicesToPost?issuerType=' + issuerType + '&issuerId=' + issuerId, { credentials: 'same-origin' })
+                                    .then(function (r) { return r.json(); })
+                                    .then(function (d) {
+                                        var card = $('legacyPost');
+                                        if (!d.success || !d.invoices || !d.invoices.length) { card.classList.add('d-none'); return; }
+                                        card.classList.remove('d-none');
+                                        $('legacyPostMeta').textContent = d.invoices.length + ' st · ' + kr(d.total);
+                                        $('legacyPostBody').innerHTML = d.invoices.map(function (i) {
+                                            return '<tr class="gap"><td>' + esc(i.paidDate) + '</td><td>' + esc(i.number) + ' <span class="muted">' + esc(i.competition) + '</span></td><td>' + esc(i.payer) + '</td><td class="n">' + kr(i.amount) + '</td></tr>';
+                                        }).join('');
+                                    });
+                            }
+                            window.hpskEkonomiLoadLegacyPost = load;
+                            var btn = $('legacyPostBtn');
+                            if (btn) btn.addEventListener('click', function () {
+                                btn.disabled = true;
+                                fetch('/umbraco/surface/Club/GetFormToken', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (t) {
+                                    return fetch('/umbraco/surface/EkonomiAdmin/PostLegacyInvoices', {
+                                        method: 'POST', credentials: 'same-origin',
+                                        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': t.token },
+                                        body: JSON.stringify({ issuerType: issuerType, issuerId: issuerId })
+                                    });
+                                }).then(function (r) { return r.json(); }).then(function (d) {
+                                    var m = $('legacyPostMsg'); m.className = 'small mt-2 ' + (d.success ? 'text-success' : 'text-danger'); m.textContent = d.message;
+                                    btn.disabled = false; load();
+                                });
+                            });
+                        })();
+                        </script>
+                    }
+
                     @* ⚠️⚠️ MEDLEMSAVGIFTEN ÄR KLUBBENS STÖRSTA INTÄKTSPOST och nådde inte
                        bokföringen förrän 2026-09-22 — avgiftsmodulen har egen tabell och egen
                        betalvägg. Kortet finns för att den luckan ska vara SYNLIG, inte tyst. *@
@@ -715,6 +773,140 @@
                         </div>
                     </div>
                 </div>
+            </section>
+
+            @* ── Fakturor och tävlingsavgifter (P3/P4) ──────────────────────────────────────────
+               ⚠️ Samma modul (competition-fees.js) och samma endpoints som tävlingens Anmälningar-flik:
+                  en bekräftelse här syns där, och tvärtom (Stefans beslut 2026-09-24).
+               ⚠️ Tävlingsavgifter finns bara i den RIKTIGA bokföringen, som evenemangens. *@
+            <section data-pane="fakturor" hidden>
+                <div class="head">
+                    <div>
+                        <h1>Fakturor och tävlingsavgifter</h1>
+                        <div class="sub">Vad tävlingarna ska ge, vad som är anmält betalt och vilka klubbar som har fått en faktura.</div>
+                    </div>
+                </div>
+                @if (Model.IsSandbox)
+                {
+                    <div class="ek-card">
+                        <div class="ek-alert ek-warn">
+                            Tävlingsavgifter och fakturor finns bara i den riktiga bokföringen, inte i sandlådan.
+                            <a href="/ekonomi?type=@Model.IssuerType&id=@Model.OwnerId&vy=fakturor">Gå till den riktiga bokföringen</a>.
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="ek-card" id="@(uid)_feeComps">
+                        <div class="ek-cardh"><h2>Tävlingar med avgifter</h2><span class="meta">Det som väntar på en avstämning ligger överst</span></div>
+                        <div id="@(uid)_feeCompList" class="muted">Hämtar…</div>
+                        <div id="@(uid)_feeCompPanel" class="mt-3"></div>
+                    </div>
+                    @* Ingen ek-card här: listan ritar sitt eget kort (samma som på Anmälningar-fliken). *@
+                    <div id="@(uid)_feeInvoices" style="margin-bottom:1rem"></div>
+                    @if (Model.IssuerType == 0)
+                    {
+                        <div class="ek-card" id="@(uid)_feeIncoming"></div>
+                    }
+                    @* ⚠️ Den gamla modellen, flyttad hit ORÖRD. Den räknas aldrig om och tas bort när
+                       sista tävlingen i den är avslutad. Laddas först när den öppnas — listan är tung. *@
+                    <details class="ek-card" id="@(uid)_legacyInvoices">
+                        <summary class="fw-semibold" id="ekLegacyInvoicesToggle">Fakturor enligt det gamla sättet</summary>
+                        <p class="muted mt-2">Tävlingar som fick sina första anmälningar före bytet. Där gäller fakturorna som förut — samlingsfaktura, kreditfaktura och markera betald.</p>
+                        @if (Model.IssuerType == 1)
+                        {
+                            var regionNode = Umbraco.Content(Model.OwnerId);
+                            var legacyVD = new Microsoft.AspNetCore.Mvc.ViewFeatures.ViewDataDictionary(ViewData)
+                            {
+                                ["LockedRegionCode"] = regionNode?.Value<string>("regionCode") ?? "",
+                                ["LockedRegionName"] = regionNode?.Name ?? "",
+                                ["TabButtonId"] = "ekLegacyInvoicesToggle"
+                            };
+                            @await Html.PartialAsync("AdminInvoicesList", legacyVD)
+                        }
+                        else
+                        {
+                            <script>const clubId = @Model.OwnerId;</script>
+                            @await Html.PartialAsync("ClubAdminInvoicesList")
+                        }
+                    </details>
+                    <script src="/js/competition-fees.js?v=@DateTime.Now.Ticks"></script>
+                    <script>
+                    (function () {
+                        var uid = '@uid', ownerType = @Model.IssuerType, ownerId = @Model.OwnerId;
+                        var $ = function (s) { return document.getElementById(uid + '_' + s); };
+
+                        function load() {
+                            HpskFees.get('GetIssuerFees', { ownerType: ownerType, ownerId: ownerId }).then(function (d) {
+                                if (!d.success) { $('feeCompList').textContent = d.message || 'Kunde inte hämta.'; return; }
+                                var kr = HpskFees.kr, esc = HpskFees.esc;
+                                if (!d.competitions.length) {
+                                    $('feeCompList').innerHTML = '<div class="muted">Inga tävlingar med avgifter i den nya modellen ännu.</div>';
+                                } else {
+                                    $('feeCompList').innerHTML = '<table class="t"><thead><tr><th>Tävling</th><th class="n">Mottaget</th><th class="n">Anmält betalt</th><th class="n">Obetalt</th><th class="n">Fakturerat, obetalt</th><th></th></tr></thead><tbody>'
+                                        + d.competitions.map(function (c) {
+                                            var gap = c.claimed > 0 || c.open > 0 || c.invoicedOpen > 0;
+                                            var cell = function (v) { return v > 0 ? kr(v) : 'Inget'; };
+                                            return '<tr' + (gap ? ' class="gap"' : '') + ' data-comp="' + c.competitionId + '"><td>' + esc(c.name) + (c.date ? ' <span class="muted">' + esc(c.date) + '</span>' : '') + '</td>'
+                                                + '<td class="n">' + cell(c.received) + '</td><td class="n">' + cell(c.claimed) + '</td><td class="n">' + cell(c.open) + '</td><td class="n">' + cell(c.invoicedOpen) + '</td>'
+                                                + '<td class="n"><button type="button" class="btn btn-sm btn-outline-primary" data-open-comp="' + c.competitionId + '">Öppna</button></td></tr>';
+                                        }).join('') + '</tbody></table>';
+                                    $('feeCompList').querySelectorAll('[data-open-comp]').forEach(function (b) {
+                                        b.addEventListener('click', function () {
+                                            var panel = $('feeCompPanel');
+                                            HpskFees.renderOrganiserPanel(panel, +b.dataset.openComp, { onChange: load });
+                                            panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                        });
+                                    });
+                                }
+                                var inv = $('feeInvoices');
+                                inv.innerHTML = HpskFees.renderInvoiceList(d.invoices, 'Fakturor till klubbar');
+                                inv._data = { invoices: d.invoices };
+                                HpskFees.wireInvoiceList(inv, load);
+                                var inc = $('feeIncoming');
+                                if (inc) {
+                                    inc.innerHTML = '<div class="ek-cardh"><h2>Fakturor från andra föreningar</h2><span class="meta">Det klubben ska betala</span></div>'
+                                        + (d.incoming.length ? '<table class="t"><thead><tr><th>Faktura</th><th>Från</th><th>Förfaller</th><th class="n">Kvar</th><th></th></tr></thead><tbody>'
+                                            + d.incoming.map(function (v) {
+                                                var state = v.settled ? 'Betald' : v.claimed > 0 ? 'Betalning anmäld' : '';
+                                                return '<tr' + (!v.settled && v.claimed <= 0 ? ' class="gap"' : '') + '><td><a href="' + esc(v.documentUrl) + '" target="_blank">' + esc(v.number) + '</a> <span class="muted">' + esc(v.competitionName) + '</span></td>'
+                                                    + '<td>' + esc(v.issuerName || '') + '</td><td>' + esc(v.dueDate || '') + '</td><td class="n">' + (v.outstanding > 0 ? kr(v.outstanding) : 'Inget') + '</td>'
+                                                    + '<td class="n">' + (state ? '<span class="muted">' + state + '</span>'
+                                                        : (d.canWrite ? '<button type="button" class="btn btn-sm btn-outline-primary" data-expense="' + v.id + '">Lägg in som utgift</button> ' : '')
+                                                          + '<button type="button" class="btn btn-sm btn-outline-success" data-claim-inv="' + v.id + '">Vi har betalat</button>') + '</td></tr>';
+                                            }).join('') + '</tbody></table>' : '<div class="muted">Inga fakturor från andra föreningar.</div>')
+                                        + '<div class="hf-msg"></div>';
+                                    inc.querySelectorAll('[data-claim-inv]').forEach(function (b) {
+                                        b.addEventListener('click', function () {
+                                            b.disabled = true;
+                                            HpskFees.post('ClaimInvoicePaid', { chargeId: +b.dataset.claimInv }).then(function (r) {
+                                                var m = inc.querySelector('.hf-msg'); m.className = 'hf-msg small mt-2 ' + (r.success ? 'text-success' : 'text-danger'); m.textContent = r.message;
+                                                if (r.success) setTimeout(load, 900); else b.disabled = false;
+                                            });
+                                        });
+                                    });
+                                    inc.querySelectorAll('[data-expense]').forEach(function (b) {
+                                        b.addEventListener('click', function () {
+                                            if (window.hpskEkonomiExpenseFromCharge) window.hpskEkonomiExpenseFromCharge(+b.dataset.expense, load);
+                                        });
+                                    });
+                                }
+                            });
+                        }
+                        window.hpskEkonomiLoadInvoices = load;
+
+                        // Den gamla listan laddas först när den öppnas.
+                        var legacy = $('legacyInvoices'), legacyLoaded = false;
+                        legacy.addEventListener('toggle', function () {
+                            if (!legacy.open || legacyLoaded) return;
+                            legacyLoaded = true;
+                            if (typeof loadClubInvoices === 'function') loadClubInvoices();
+                            // AdminInvoicesList lyssnar på shown.bs.tab på sin "flikknapp" — samma händelse här.
+                            document.getElementById('ekLegacyInvoicesToggle').dispatchEvent(new Event('shown.bs.tab'));
+                        });
+                    })();
+                    </script>
+                }
             </section>
 
             @* ── Årsavgiften: kretsavgift (krets → klubb) eller medlemsavgifter (klubb → medlem) ──
@@ -1547,7 +1739,8 @@
                 @* ⚠️ Kretsavgiften fanns bara på kretsens sida — klubbens kassör fick skriva in
                    samma räkning för hand. Nu står den här, där den ska betalas. *@
                 <div class="ek-card wide d-none" id="@(uid)_utIncoming" style="margin-bottom:1rem">
-                    <div class="ek-cardh"><h2>Räkningar från kretsen</h2></div>
+                    @* Kretsavgiften och fakturor från andra arrangörer i pistol.nu (P3/P4) — samma lista. *@
+                    <div class="ek-cardh"><h2>Räkningar från kretsen och andra föreningar</h2></div>
                     <table class="t">
                         <tbody id="@(uid)_utIncomingBody"></tbody>
                     </table>
@@ -2404,7 +2597,16 @@
         //    sjalv. Varje skrivning hamtar om den sjalv.
         if (name === 'bokslut' && !closeLoaded) { closeLoaded = true; loadClosing(); }
 
-        if (name === 'avgifter' && !recvLoaded) { recvLoaded = true; loadReceivables(); }
+        if (name === 'avgifter' && !recvLoaded) {
+            recvLoaded = true; loadReceivables();
+            if (window.hpskEkonomiLoadLegacyPost) window.hpskEkonomiLoadLegacyPost();
+        }
+
+        // Fakturor och tävlingsavgifter: vyns eget skript exporterar laddaren. EN gång per
+        // sidladdning — varje handling i vyn läser om själv.
+        if (name === 'fakturor' && !invoicesLoaded && window.hpskEkonomiLoadInvoices) {
+            invoicesLoaded = true; window.hpskEkonomiLoadInvoices();
+        }
 
         // ⚠️ Samma skäl som ovan: listan läser hela årets verifikationer för luckkontrollen.
         if (name === 'verifikationer' && !verLoaded) { verLoaded = true; loadJournal(true); }
@@ -2430,6 +2632,9 @@
         }
     }
     var annualFeeLoaded = false;
+    var invoicesLoaded = false;
+    // Fakturor-vyns "Lägg in som utgift" leder hit: räkningarna registreras under Utgifter.
+    window.hpskEkonomiExpenseFromCharge = function () { showView('utgifter'); };
     root.querySelectorAll('[data-view]').forEach(function (a) {
         a.addEventListener('click', function (ev) { ev.preventDefault(); showView(a.dataset.view); });
     });
@@ -2930,7 +3135,7 @@
 
         expenseRows = d.expenses || [];
         renderExpenses(d);
-        renderIncomingFees(d.incomingRegionFees || []);
+        renderIncomingFees(d.incomingRegionFees || [], d.incomingInvoices || []);
 
         if (canWrite) {
             fillSelect(el('uAccount'), d.accounts || []);
@@ -3166,10 +3371,11 @@
     //    så första gången formuläret öppnades som utlägg var mottagarlistan TOM och förfallodagen
     //    synlig — och Spara nekades med "välj vem som ska ha pengarna" utan att något gick att välja.
     var incomingFees = [];
-    function renderIncomingFees(list) {
+    function renderIncomingFees(list, invoices) {
         incomingFees = list;
-        show(el('utIncoming'), list.length > 0);
-        if (list.length === 0) return;
+        invoices = invoices || [];
+        show(el('utIncoming'), list.length > 0 || invoices.length > 0);
+        if (list.length === 0 && invoices.length === 0) return;
 
         var statusLabel = { registered: 'Väntar på attest', approved: 'Attesterad', paid: 'Betald' };
         el('utIncomingBody').innerHTML = list.map(function (f, i) {
@@ -3184,7 +3390,36 @@
                  + '<td class="n" style="width:8rem">' + kr(f.amount) + '</td>'
                  + '<td style="width:17rem">' + state + '</td>'
                  + '<td class="n" style="width:13rem">' + btn + '</td></tr>';
+        }).join('')
+        // Fakturor från andra föreningar (anmälningsavgifter). "Registrerad" = referensen står i en
+        // utgifts beskrivning — samma regel som kretsavgiften.
+        + invoices.map(function (f, i) {
+            var state = f.expenseId
+                ? badge(f.expenseStatus === 'paid' ? 'ok' : 'info', 'Registrerad · ' + (statusLabel[f.expenseStatus] || f.expenseStatus))
+                : (f.settled ? badge('ok', 'Arrangören har kvitterat') + ' ' : '') + badge('wait', 'Inte registrerad');
+            var btn = (!f.expenseId && canWrite)
+                ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-incoming-inv="' + i + '">Registrera som räkning</button>'
+                : '';
+            return '<tr><td>' + esc(f.issuerName) + ' <span class="muted">· Faktura '
+                 + (f.documentUrl ? '<a href="' + esc(f.documentUrl) + '" target="_blank">' + esc(f.number) + '</a>' : esc(f.number))
+                 + ' · ' + esc(f.competitionName) + ' · ' + esc(f.reference) + '</span></td>'
+                 + '<td class="n" style="width:8rem">' + kr(f.amount) + '</td>'
+                 + '<td style="width:17rem">' + state + '</td>'
+                 + '<td class="n" style="width:13rem">' + btn + '</td></tr>';
         }).join('');
+
+        el('utIncomingBody').querySelectorAll('button[data-incoming-inv]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                var f = invoices[parseInt(b.dataset.incomingInv, 10)];
+                openExpenseForm('faktura');
+                // ⚠️ Referensen MÅSTE stå i beskrivningen — det är den som gör raden "registrerad".
+                el('uDesc').value = 'Faktura ' + f.number + ', ' + f.competitionName + ' (' + f.reference + ')';
+                el('uAmount').value = f.outstanding > 0 ? f.outstanding : f.amount;
+                el('uPayeeName').value = f.issuerName;
+                if (f.issueDate) setDateField('uDate', f.issueDate);
+                if (f.dueDate) setDateField('uDue', f.dueDate);
+            });
+        });
 
         el('utIncomingBody').querySelectorAll('button[data-incoming]').forEach(function (b) {
             b.addEventListener('click', function () {

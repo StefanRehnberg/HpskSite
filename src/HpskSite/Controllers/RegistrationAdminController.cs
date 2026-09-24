@@ -2208,6 +2208,21 @@ namespace HpskSite.Controllers
                 decimal.TryParse(competition.GetValue<string>("teamRegistrationFee") ?? "0", out var teamFee);
                 decimal.TryParse(competition.GetValue<string>("stafettRegistrationFee") ?? "0", out var stafettFee);
 
+                // Den nya modellen (P3/P4): lagets läge ur liggaren, som anmälningarnas.
+                var ledgerTeams = new Dictionary<int, HpskSite.Services.CompetitionFees.FeeItemStatus>();
+                var paymentModel = "legacy";
+                var feeModels = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.CompetitionPaymentModelService))
+                    as HpskSite.Services.CompetitionFees.CompetitionPaymentModelService;
+                var feeService = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.CompetitionFeeService))
+                    as HpskSite.Services.CompetitionFees.CompetitionFeeService;
+                if (feeModels != null && feeService != null && feeModels.IsLedger(competitionId))
+                {
+                    paymentModel = "ledger";
+                    foreach (var item in feeService.BuildOverview(competitionId).Items
+                                 .Where(i => i.ItemType == HpskSite.Models.Ledger.LedgerSourceType.TeamFee))
+                        ledgerTeams[item.ItemId] = item.Status;
+                }
+
                 var result = teams.Select(t =>
                 {
                     var invoiceKey = $"team-{t.Team.Id}";
@@ -2227,6 +2242,23 @@ namespace HpskSite.Controllers
                     var feeBase = fee > 0 ? fee : invoiceAmount;
                     var paidBilled = teamPaidBilled.GetValueOrDefault(invoiceKey);
                     var outstanding = Math.Max(0m, feeBase - paidBilled);
+                    string? feeStatusKey = null, feeStatusLabel = null;
+                    if (paymentModel == "ledger" && ledgerTeams.TryGetValue(t.Team.Id, out var fs))
+                    {
+                        feeStatusKey = fs.Key;
+                        feeStatusLabel = HpskSite.Services.CompetitionFees.FeeStatusKeys.Label(fs.Key);
+                        status = fs.Key switch
+                        {
+                            HpskSite.Services.CompetitionFees.FeeStatusKeys.Paid => "Paid",
+                            HpskSite.Services.CompetitionFees.FeeStatusKeys.Overpaid => "Paid",
+                            HpskSite.Services.CompetitionFees.FeeStatusKeys.Invoiced => "Invoiced",
+                            HpskSite.Services.CompetitionFees.FeeStatusKeys.NoFee => "No Fee",
+                            _ => "Pending"
+                        };
+                        paidBilled = fs.Paid + fs.InvoicePaid;
+                        outstanding = Math.Max(0m, fs.Fee - paidBilled);
+                        inv = null;
+                    }
 
                     return new
                     {
@@ -2248,11 +2280,13 @@ namespace HpskSite.Controllers
                         // like the individual rows' fields and meaning the same thing, so the
                         // client can total both kinds with one rule.
                         paidAmount = paidBilled,
-                        outstandingAmount = outstanding
+                        outstandingAmount = outstanding,
+                        feeStatusKey,
+                        feeStatusLabel
                     };
                 }).ToList();
 
-                return Json(new { success = true, teams = result });
+                return Json(new { success = true, teams = result, paymentModel });
             }
             catch (Exception ex)
             {
