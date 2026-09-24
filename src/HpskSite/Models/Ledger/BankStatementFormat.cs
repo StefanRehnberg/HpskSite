@@ -50,6 +50,17 @@ namespace HpskSite.Models.Ledger
             if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
                 return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
 
+            // ⚠️⚠️ UTF-16 — "exportera till Excel" i en del internetbanker. Utan den här grenen
+            //    blev filen text med ett nolltecken mellan varje bokstav: ingen rubrik kändes igen,
+            //    och mappningen visade bara "— saknas —" (felrapport 2026-09-24, Dalslands
+            //    Sparbank). Med BOM avgör den; utan BOM avslöjar nollbytena på varannan plats det.
+            if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+                return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+            if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+                return Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+            if (LooksLikeUtf16(bytes, out var bigEndian))
+                return (bigEndian ? Encoding.BigEndianUnicode : Encoding.Unicode).GetString(bytes);
+
             try
             {
                 return new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(bytes);
@@ -60,6 +71,29 @@ namespace HpskSite.Models.Ledger
                 // typografiska citattecken och tankstreck. Latin-1 hade gett kontrolltecken.
                 return Encoding.Latin1.GetString(bytes);
             }
+        }
+
+        /// <summary>
+        /// UTF-16 utan BOM: i en text som mest är ASCII är varannan byte noll. Mäts på de första
+        /// byten — en vanlig CSV-fil har inga nollbyte alls.
+        /// </summary>
+        private static bool LooksLikeUtf16(byte[] bytes, out bool bigEndian)
+        {
+            bigEndian = false;
+            var n = Math.Min(bytes.Length, 400) & ~1;
+            if (n < 4) return false;
+
+            int evenZeros = 0, oddZeros = 0;
+            for (int i = 0; i < n; i += 2)
+            {
+                if (bytes[i] == 0) evenZeros++;
+                if (bytes[i + 1] == 0) oddZeros++;
+            }
+
+            var pairs = n / 2;
+            if (oddZeros > pairs * 0.4 && evenZeros < pairs * 0.1) return true;               // LE
+            if (evenZeros > pairs * 0.4 && oddZeros < pairs * 0.1) { bigEndian = true; return true; }
+            return false;
         }
 
         /// <summary>

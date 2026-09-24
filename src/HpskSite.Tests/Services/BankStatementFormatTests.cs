@@ -267,6 +267,53 @@ namespace HpskSite.Tests.Services
             sample.Should().HaveCount(3);
         }
 
+        /// <summary>
+        /// ⚠️⚠️ Andra felrapporten 2026-09-24 (Dalslands Sparbank, Swedbanks plattform): rättningen
+        /// ovan var ute och filen lästes ändå inte. En "exportera till Excel"-fil är UTF-16 — utan
+        /// avkodningen blir varannan byte ett nolltecken och ingen rubrik känns igen.
+        /// </summary>
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void Swedbanks_fil_i_UTF16_forhandslases(bool withBom)
+        {
+            var body = Encoding.Unicode.GetBytes(Swedbank);
+            var bytes = withBom ? Encoding.Unicode.GetPreamble().Concat(body).ToArray() : body;
+
+            var svc = new HpskSite.Services.Ledger.LedgerBankImportService(null!, null!);
+            var (map, sample, header) = svc.Preview(bytes);
+
+            header.Should().HaveCount(12);
+            header[5].Should().Be("Bokföringsdag");
+            map.Date.Should().Be(5);
+            map.Amount.Should().Be(10);
+            svc.Parse(bytes, map).Rows.Select(r => r.Amount).Should().Equal(270.00m, -120.50m, 1250.00m);
+        }
+
+        /// <summary>
+        /// ⚠️ Rubriker vi inte känner igen får INTE ge en tom mappning. Går filen att dela upp ska
+        /// operatören få "Kolumn 1…N" och kunna peka ut kolumnerna själv — det är vad ytan lovar.
+        /// </summary>
+        [Fact]
+        public void Okanda_rubriker_ger_valbara_kolumner_och_gar_att_mappa_for_hand()
+        {
+            var csv = "Dag;Vad;Summa\n2026-09-01;Swish;270,00\n2026-09-02;Kort;-120,50\n";
+            var bytes = Encoding.UTF8.GetBytes(csv);
+
+            var svc = new HpskSite.Services.Ledger.LedgerBankImportService(null!, null!);
+            var (map, sample, header) = svc.Preview(bytes);
+
+            header.Should().Equal("Kolumn 1", "Kolumn 2", "Kolumn 3");
+            map.Date.Should().Be(-1, "rubrikerna känns inte igen — operatören väljer");
+            sample.Should().NotBeEmpty();
+
+            // Operatören pekar ut kolumnerna. Rubrikraden "Dag;Vad;Summa" hoppas över MED ett skäl.
+            map.Date = 0; map.Text = 1; map.Amount = 2;
+            var parsed = svc.Parse(bytes, map);
+            parsed.Rows.Select(r => r.Amount).Should().Equal(270.00m, -120.50m);
+            parsed.Skipped.Should().ContainSingle(s => s.StartsWith("Rad 1"));
+        }
+
         [Fact]
         public void Swedbanks_fil_lases_in_med_ratt_belopp()
         {

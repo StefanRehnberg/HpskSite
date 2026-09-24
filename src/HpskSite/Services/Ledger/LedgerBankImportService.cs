@@ -71,6 +71,21 @@ namespace HpskSite.Services.Ledger
             var header = headerRow >= 0 ? rows[headerRow] : Array.Empty<string>();
             var guess = BankStatementFormat.GuessColumns(header);
 
+            // ⚠️⚠️ KÄNNS RUBRIKERNA INTE IGEN MÅSTE KOLUMNERNA ÄNDÅ GÅ ATT VÄLJA. Förut blev
+            //    rubrikraden tom, och ytan sa "peka ut dem själv" över rutor med bara "— saknas —"
+            //    (felrapport 2026-09-24). Går filen att dela upp får operatören "Kolumn 1…N" och
+            //    exempelraderna, och kan mappa själv. HeaderRow = -1: ingen rad hoppas över, och en
+            //    informationsrad överst redovisas som överhoppad i stället för att tyst försvinna.
+            if (headerRow < 0)
+            {
+                var width = rows.Count == 0 ? 0 : rows
+                    .GroupBy(r => r.Length).OrderByDescending(g => g.Count()).ThenByDescending(g => g.Key)
+                    .First().Key;
+
+                if (width >= 2)
+                    header = Enumerable.Range(1, width).Select(i => $"Kolumn {i}").ToArray();
+            }
+
             var mapping = new Mapping
             {
                 Date = guess.Date,
@@ -79,11 +94,11 @@ namespace HpskSite.Services.Ledger
                 AmountOut = guess.AmountOut,
                 Balance = guess.Balance,
                 Delimiter = delimiter,
-                HeaderRow = Math.Max(headerRow, 0)
+                HeaderRow = headerRow
             };
 
             // Ett par rader under rubriken räcker för att operatören ska känna igen sin fil.
-            var sample = rows.Skip(Math.Max(headerRow, 0) + 1).Take(5).ToList();
+            var sample = rows.Skip(headerRow + 1).Take(5).ToList();
             return (mapping, sample, header);
         }
 
