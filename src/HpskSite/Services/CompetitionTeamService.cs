@@ -366,6 +366,9 @@ namespace HpskSite.Services
             if (deleted <= 0)
                 return (false, "Laget kunde inte tas bort.");
 
+            // Den nya modellen: lagets öppna avgift makuleras (laget finns inte längre).
+            _paymentService.SyncLedgerFeesAfterRemoval(team.CompetitionId, teamId: teamId, byMemberId: actorMemberId ?? 0);
+
             // Remove the Umbraco registration doc
             try
             {

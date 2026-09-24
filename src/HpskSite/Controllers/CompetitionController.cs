@@ -180,7 +180,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> RegisterForCompetition(int competitionId,
             string selectedClasses = "", string startPreference = "Inget", int? targetMemberId = null,
             string startPreferencesJson = "", bool isSubCompetition = false,
-            string teamAssignmentsJson = "", int? representingClubId = null)
+            string teamAssignmentsJson = "", int? representingClubId = null, bool? clubPays = null)
         {
             try
             {
@@ -793,11 +793,53 @@ namespace HpskSite.Controllers
                     // decide whether to offer a Swish top-up (>0) or just confirm (0 — e.g. a swap, a
                     // removal, or an already-fully-paid registration). Read-only; best-effort.
                     decimal amountDue = newFee;
+
+                    // ⚠️⚠️ DEN NYA MODELLEN (P3/P4): avgiften är begärda betalningar i liggaren, och de
+                    // måste finnas NU — betalsteget visar dem i samma andetag som anmälan bekräftas.
+                    // Synken är idempotent; bakgrundsjobbet ovan kör den en gång till utan skada.
+                    string paymentModel = "legacy";
+                    object? ledgerFees = null;
                     try
                     {
-                        var paymentSvc = HttpContext?.RequestServices?.GetService(typeof(PaymentService)) as PaymentService;
-                        if (paymentSvc != null)
-                            amountDue = paymentSvc.GetInvoiceTotalsForRegistration(competitionId, registrationId).Outstanding;
+                        var models = HttpContext?.RequestServices?.GetService(typeof(HpskSite.Services.CompetitionFees.CompetitionPaymentModelService))
+                            as HpskSite.Services.CompetitionFees.CompetitionPaymentModelService;
+                        var fees = HttpContext?.RequestServices?.GetService(typeof(HpskSite.Services.CompetitionFees.CompetitionFeeService))
+                            as HpskSite.Services.CompetitionFees.CompetitionFeeService;
+                        if (models != null && fees != null && models.IsLedger(competitionId))
+                        {
+                            paymentModel = "ledger";
+                            var settings = fees.GetSettings(competitionId);
+                            // "Klubben betalar" är en hint och gäller bara typer arrangören tillåtit —
+                            // en skytt kan inte binda sin klubb genom att kryssa i en ruta.
+                            if (clubPays.HasValue)
+                            {
+                                var allowed = HpskSite.Services.CompetitionFees.CompetitionFeePlanner
+                                    .AnyClubPayable(selectedClassesList, settings.ClubPayable);
+                                fees.SetClubPaysChoice(competitionId, registrationId, clubPays.Value && allowed, currentMemberData.Id);
+                            }
+                            fees.SyncRegistration(competitionId, registrationId, currentMemberData.Id);
+
+                            var open = fees.LoadFeeRows(competitionId)
+                                .Where(r => r.SourceType == HpskSite.Models.Ledger.LedgerSourceType.CompetitionRegistration
+                                            && r.SourceItemId == registrationId
+                                            && r.VoidedUtc == null && r.ConfirmedUtc == null)
+                                .ToList();
+                            var toPay = open.Where(r => r.FeePart != HpskSite.Models.CompetitionFees.CompetitionFeePart.Club && r.ClaimedUtc == null).ToList();
+                            amountDue = toPay.Sum(r => r.Amount);
+                            ledgerFees = new
+                            {
+                                toPay = toPay.Select(r => new { id = r.Id, amount = r.Amount, reference = HpskSite.Services.CompetitionFees.CompetitionFeeService.ReferenceFor(r) }),
+                                clubPart = open.Where(r => r.FeePart == HpskSite.Models.CompetitionFees.CompetitionFeePart.Club).Sum(r => r.Amount),
+                                canChooseClubPays = HpskSite.Services.CompetitionFees.CompetitionFeePlanner.AnyClubPayable(selectedClassesList, settings.ClubPayable),
+                                clubPays = fees.GetClubPaysChoice(registrationId)
+                            };
+                        }
+                        else
+                        {
+                            var paymentSvc = HttpContext?.RequestServices?.GetService(typeof(PaymentService)) as PaymentService;
+                            if (paymentSvc != null)
+                                amountDue = paymentSvc.GetInvoiceTotalsForRegistration(competitionId, registrationId).Outstanding;
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -816,7 +858,9 @@ namespace HpskSite.Controllers
                             oldFee = oldFee,
                             newFee = newFee,
                             amountDue = amountDue,
-                            teamAssignments = dpConfig != null ? teamAssignments : null
+                            teamAssignments = dpConfig != null ? teamAssignments : null,
+                            paymentModel,
+                            ledgerFees
                         });
                     }
                     TempData["Success"] = successMessage;

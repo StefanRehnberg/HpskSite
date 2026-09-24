@@ -52,6 +52,12 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<LedgerAuditorService>();
             builder.Services.AddScoped<LedgerAssetService>();
             builder.Services.AddScoped<LedgerExpenseService>();
+
+            // Tävlingsavgifterna i liggaren (P3/P4) — ersätter den gamla fakturamodellen per tävling.
+            // Växeln läses ALLTID via CompetitionPaymentModelService; ingen yta gissar ur fakturorna.
+            builder.Services.AddScoped<HpskSite.Services.CompetitionFees.CompetitionPaymentModelService>();
+            builder.Services.AddScoped<HpskSite.Services.CompetitionFees.CompetitionFeeService>();
+            builder.Services.AddScoped<HpskSite.Services.CompetitionFees.LedgerChargeService>();
             builder.Services.AddHostedService<LedgerSchemaGuardHostedService>();
         }
     }

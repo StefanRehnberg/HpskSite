@@ -69,6 +69,37 @@ namespace HpskSite.Models.Ledger
 
         public DateTime CreatedUtc { get; set; }
 
+        // ── Tävlingsavgifterna (P3/P4, 2026-09-24) ───────────────────────────────────────────
+        //
+        // ⚠️⚠️ SourceId FÖRBLIR TÄVLINGENS ID. Anmälan eller laget bär SourceItemId — tre saker
+        //    vilar på att SourceId är tävlingen (projektet, översiktens panel 3, avprickningen).
+
+        /// <summary>
+        /// Anmälans id (<see cref="LedgerSourceType.CompetitionRegistration"/>) eller lagets id
+        /// (<see cref="LedgerSourceType.TeamFee"/>). Null för allt annat.
+        /// </summary>
+        public int? SourceItemId { get; set; }
+
+        /// <summary>Ur <see cref="HpskSite.Models.CompetitionFees.CompetitionFeePart"/>: vilken del av anmälans avgift raden gäller.</summary>
+        public string? FeePart { get; set; }
+
+        /// <summary>
+        /// Anmälans klubb, <b>snapshot</b> — nyckeln när arrangören fakturerar en klubb i efterhand.
+        /// <para>⚠️ Anmälans klubb, aldrig medlemmens <c>primaryClubId</c>: en skytt kan tävla för en
+        /// annan av sina klubbar, och då ska avgiften inte hamna på fel klubbs räkning.</para>
+        /// </summary>
+        public int? PayerClubId { get; set; }
+
+        /// <summary>
+        /// Satt på en <b>begärd</b> avgift som arrangören buntat in i en faktura. Raden makuleras i
+        /// samma handling — så varje befintlig läsare ser den som ersatt utan att känna till
+        /// fakturorna. Det är fakturan som nu ska betalas.
+        /// </summary>
+        public int? CoveredByChargeId { get; set; }
+
+        /// <summary>Satt på <b>betalningen av en faktura</b> (<see cref="LedgerSourceType.CompetitionInvoice"/>).</summary>
+        public int? ChargeId { get; set; }
+
         /// <summary>Mottagen av arrangören och inte makulerad. Det enda som räknas som pengar.</summary>
         [Ignore]
         public bool IsMoney => ConfirmedUtc is not null && VoidedUtc is null;

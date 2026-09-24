@@ -26,6 +26,14 @@ namespace HpskSite.Services
         private readonly ClubService _clubService;
         private readonly Umbraco.Cms.Core.Cache.AppCaches _appCaches;
 
+        // ⚠️⚠️ VÄXELN PER TÄVLING (P3/P4, 2026-09-24). En tävling i den nya modellen får ALDRIG en
+        //    faktura härifrån — dess avgifter bor i liggaren (CompetitionFeeService). Spärren sitter
+        //    i varje skapande primitiv, så ingen anropare kan glömma den; de två Ensure/Reconcile-
+        //    ingångarna räknar dessutom om avgiften i liggaren i stället, så varje befintlig väg
+        //    (anmälan, efteranmälan, disken, klassbyte) följer med utan en ändring hos anroparen.
+        private readonly HpskSite.Services.CompetitionFees.CompetitionPaymentModelService _paymentModels;
+        private readonly HpskSite.Services.CompetitionFees.CompetitionFeeService _competitionFees;
+
         public PaymentService(ILogger<PaymentService> logger,
             IContentService contentService,
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -35,9 +43,13 @@ namespace HpskSite.Services
             EmailService emailService,
             ReplyContactResolver replyContacts,
             ClubService clubService,
-            Umbraco.Cms.Core.Cache.AppCaches appCaches)
+            Umbraco.Cms.Core.Cache.AppCaches appCaches,
+            HpskSite.Services.CompetitionFees.CompetitionPaymentModelService paymentModels,
+            HpskSite.Services.CompetitionFees.CompetitionFeeService competitionFees)
         {
             _appCaches = appCaches;
+            _paymentModels = paymentModels;
+            _competitionFees = competitionFees;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _contentService = contentService ?? throw new ArgumentNullException(nameof(contentService));
             _umbracoContextAccessor = umbracoContextAccessor ?? throw new ArgumentNullException(nameof(umbracoContextAccessor));
@@ -47,6 +59,40 @@ namespace HpskSite.Services
             _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
             _replyContacts = replyContacts;
             _clubService = clubService ?? throw new ArgumentNullException(nameof(clubService));
+        }
+
+        /// <summary>
+        /// Spärren i varje skapande primitiv: en tävling i den nya modellen får aldrig en gammal
+        /// faktura. Loggas som varning — en anropare som når hit har missat växeln, och det ska synas.
+        /// </summary>
+        private bool RefuseForLedgerModel(int competitionId, string caller)
+        {
+            if (!_paymentModels.IsLedger(competitionId)) return false;
+            _logger.LogWarning(
+                "{Caller} anropades för tävling {CompetitionId}, som har avgifterna i liggaren. Ingen faktura skapades.",
+                caller, competitionId);
+            return true;
+        }
+
+        /// <summary>Tävlingen använder den nya modellen — avgifter i liggaren, inga fakturor.</summary>
+        public bool IsLedgerModel(int competitionId) => _paymentModels.IsLedger(competitionId);
+
+        /// <summary>
+        /// Räknar om en anmälans eller ett lags avgift i liggaren efter en borttagning — öppna
+        /// begäranden makuleras, pengar och fakturor rörs inte. Gör ingenting i den gamla modellen.
+        /// </summary>
+        public void SyncLedgerFeesAfterRemoval(int competitionId, int? registrationId = null, int? teamId = null, int byMemberId = 0)
+        {
+            if (!_paymentModels.IsLedger(competitionId)) return;
+            try
+            {
+                if (registrationId is > 0) _competitionFees.SyncRegistration(competitionId, registrationId.Value, byMemberId);
+                if (teamId is > 0) _competitionFees.SyncTeam(competitionId, teamId.Value, byMemberId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Avgiften kunde inte räknas om efter borttagning (tävling {CompetitionId}).", competitionId);
+            }
         }
 
         // Helper method to safely set invoice properties
@@ -397,6 +443,9 @@ namespace HpskSite.Services
             decimal totalAmount,
             string paymentMethod = "Swish")
         {
+            if (RefuseForLedgerModel(competitionId, nameof(CreateInvoiceAsync)))
+                return Task.FromResult<IContent?>(null);
+
             if (registrationId <= 0)
             {
                 _logger.LogWarning("CreateInvoiceAsync called with invalid registrationId: {RegistrationId}", registrationId);
@@ -626,6 +675,9 @@ namespace HpskSite.Services
             int? actorMemberId = null,
             string? actorMemberName = null)
         {
+            if (RefuseForLedgerModel(competitionId, nameof(CreateStandaloneInvoiceAsync)))
+                return Task.FromResult<IContent?>(null);
+
             try
             {
                 _umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext);
@@ -845,6 +897,12 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<IContent?> EnsureRegistrationInvoiceAsync(int competitionId, int registrationId)
         {
+            if (_paymentModels.IsLedger(competitionId))
+            {
+                _competitionFees.SyncRegistration(competitionId, registrationId, 0);
+                return null;
+            }
+
             try
             {
                 var registration = _contentService.GetById(registrationId);
@@ -943,6 +1001,12 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<bool> ReconcileRegistrationInvoiceAsync(int competitionId, int registrationId)
         {
+            if (_paymentModels.IsLedger(competitionId))
+            {
+                var sync = _competitionFees.SyncRegistration(competitionId, registrationId, 0);
+                return sync.Error == null;
+            }
+
             try
             {
                 var registration = _contentService.GetById(registrationId);
@@ -1673,6 +1737,13 @@ namespace HpskSite.Services
             int registrationId = 0,
             string paymentMethod = "Swish")
         {
+            if (_paymentModels.IsLedger(competitionId))
+            {
+                // Lagets avgift bor i liggaren — räkna om den där i stället för att skapa en faktura.
+                _competitionFees.SyncTeam(competitionId, teamId, 0);
+                return Task.FromResult<IContent?>(null);
+            }
+
             try
             {
                 _logger.LogInformation("Creating team invoice - CompetitionId: {CompetitionId}, TeamId: {TeamId}, TeamName: {TeamName}, Amount: {Amount}",

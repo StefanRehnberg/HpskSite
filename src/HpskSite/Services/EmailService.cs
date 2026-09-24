@@ -15,7 +15,7 @@ namespace HpskSite.Services
     /// <summary>
     /// Service for sending email notifications
     /// </summary>
-    public class EmailService
+    public partial class EmailService
     {
         private readonly IConfiguration _configuration;
         private readonly ILogger<EmailService> _logger;

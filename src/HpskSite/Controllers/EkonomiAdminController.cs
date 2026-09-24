@@ -531,7 +531,8 @@ namespace HpskSite.Controllers
                 "Posten är en avskrivning från Tillgångar och rättas inte för hand.",
             LedgerSourceType.OpeningBalance =>
                 "Posten är föreningens ingående balanser. Ändra dem under Inställningar → Ingående balanser.",
-            LedgerSourceType.CompetitionRegistration or LedgerSourceType.TeamFee or LedgerSourceType.Event =>
+            LedgerSourceType.CompetitionRegistration or LedgerSourceType.TeamFee
+                or LedgerSourceType.CompetitionInvoice or LedgerSourceType.Event =>
                 "Posten kommer från en anmälningsbetalning. Ångra betalningen där den togs emot.",
             _ => "Posten kommer inte från Bokför och rättas där den skapades."
         };
