@@ -21,6 +21,7 @@
     var memberRegionPages = new List<(string Name, string RegionUrl)>();
     var hasAdminAccess = false; // True if site admin OR regional admin
     var isOnBoard = false;      // True if the member sits on any club/region board (shows the Styrelse link)
+    var isElectedAuditor = false; // Elected Revisor/Revisorssuppleant anywhere (shows the Revision link)
 
     if (isLoggedIn && currentMember != null)
     {
@@ -110,6 +111,9 @@
         {
             isOnBoard = BoardRoleService.IsOnAnyBoard(memberData.Id)
                         || BoardRoleService.IsOnAnyValberedning(memberData.Id);
+            // ⚠️ En VALD revisor läser ekonomin genom sitt uppdrag (2026-09-24) men är ingen
+            //    styrelseledamot — utan länken fanns ingen väg till /revision.
+            isElectedAuditor = BoardRoleService.IsElectedAuditorAnywhere(memberData.Id);
         }
     }
 }
@@ -683,6 +687,10 @@
                                     @if (isOnBoard || hasAdminAccess)
                                     {
                                         <li><a class="dropdown-item" href="/styrelse"><i class="bi bi-clipboard-check"></i> Styrelse</a></li>
+                                    }
+                                    @if (isElectedAuditor)
+                                    {
+                                        <li><a class="dropdown-item" href="/revision"><i class="bi bi-search"></i> Revision</a></li>
                                     }
                                     @* Klubbarna och kretsarna låg här tidigare. De är FLYTTADE till en egen
                                        toppmeny ("Min klubb", se navigeringen ovan) — en medlem rapporterade

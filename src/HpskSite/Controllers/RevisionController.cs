@@ -206,11 +206,14 @@ namespace HpskSite.Controllers
             if (me <= 0)
                 return new RevisionModel { NeedsLogin = true };
 
-            var grants = _auditors.GrantsForMember(me);
+            // ⚠️ Inbjudningar OCH valda uppdrag (2026-09-24). En revisor som är vald i föreningens
+            //    uppgifter har ingen inbjudan — utan den här unionen hade hen fått "inget uppdrag"
+            //    här, fast ekonomidelen släpper in hen.
+            var assignments = _auditors.AssignmentsForMember(me);
 
             var model = new RevisionModel
             {
-                Assignments = grants.Select(g => new RevisionAssignment
+                Assignments = assignments.Select(g => new RevisionAssignment
                 {
                     OwnerType = g.OwnerType,
                     OwnerId = g.OwnerId,
@@ -535,7 +538,12 @@ namespace HpskSite.Controllers
         public int OwnerType { get; set; }
         public int OwnerId { get; set; }
         public string OwnerName { get; set; } = "";
-        public DateTime ExpiresUtc { get; set; }
+
+        /// <summary>
+        /// Inbjudans utgång. <b>Null = valt uppdrag</b> i föreningens uppgifter — det löper till
+        /// nästa årsmöte, inte på tid, och får inte visas med ett påhittat datum.
+        /// </summary>
+        public DateTime? ExpiresUtc { get; set; }
 
         /// <summary>Året revisorn valt, eller null för det senaste.</summary>
         public int? FiscalYearId { get; set; }

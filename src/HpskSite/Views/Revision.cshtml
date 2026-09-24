@@ -107,7 +107,14 @@
             <h1 style="font-size:26px;font-weight:800;margin-bottom:4px">@s.OwnerName</h1>
             <p class="muted">
                 Räkenskaperna, verifikationerna och underlagen — samlat.
-                Uppdraget gäller till @s.ExpiresUtc.ToLocalTime().ToString("d MMMM yyyy", sv).
+                @if (s.ExpiresUtc is DateTime until)
+                {
+                    <text>Uppdraget gäller till @until.ToLocalTime().ToString("d MMMM yyyy", sv).</text>
+                }
+                else
+                {
+                    <text>Du är vald revisor i föreningens uppgifter — uppdraget gäller till nästa årsmöte.</text>
+                }
             </p>
 
             @if (Model.Problem is not null)

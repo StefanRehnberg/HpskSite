@@ -4860,6 +4860,40 @@ Verifikationer/Tillgångar/Revisorer plus en kvittolänk i panel 4, som sedan ve
 byggdes visar **verifikationsnummer** för en bokförande förening. Regression efteråt: bokslut 25/25,
 ekonomisidan 59/59, enhetstesten 1363/1363.
 
+## Behörigheterna — kassören skriver, den valda revisorn läser (2026-09-24)
+
+Efter Michael Henriksson: *"Kassören borde vara den enda som kan komma in och göra allt i
+bokföringen."* Förut skrev **klubbadmin** (`ClubAdmin_{id}` — oftast en annan person än
+kassören) och via `IsClubAdminForClub` även varje krets- och sajtadministratör.
+
+**`LedgerAccessService.ResolveAsync`, i den här ordningen:**
+1. **Revisor** (inbjuden ELLER vald `Revisor`/`Revisorssuppleant` i `BoardRoles`) ⇒ **Read**, alltid.
+   ⚠️⚠️ **Prövas FÖRST** — en revisor som också är klubbadmin eller kassör får aldrig bokföra i det
+   hen granskar. A/B: flyttas revisorn efter skrivrätten faller oberoendepåståendet.
+2. **Aktiv kassör** (`BoardRoleDefinitions.RoleKassor`) ⇒ **Write**.
+3. **Administratör och INGEN aktiv kassör** ⇒ **Write** — övergången, och sidan ber om att
+   kassören läggs in (`#…_noTreasurer`). En hård omläggning hade låst ute nästan alla föreningar.
+4. **Styrelseledamot** ⇒ Read. 5. **Administratör när kassör finns** ⇒ Read.
+
+`LedgerAccessBasis` bär VARFÖR, och rälsen säger det ("Administratör", "Revisor", "Det är kassören,
+Namn, som bokför"). **Den valda revisorn** läser utan inbjudan (`LedgerAuditorService.HasAccess` =
+inbjudan ∪ roll — samma svar för ekonomin, `/revision` och protokollgrinden), `/revision` listar
+valda uppdrag (utan påhittat utgångsdatum), menyn får länken **Revision**, och Ekonomi → Revisorer
+listar de valda med "Ändras i Styrelsearbete".
+
+**⚠️⚠️ DEV-FIXTUREN:** 2604 och krets 3788 har RIKTIGA kassörer. `builder.claude` (5513) är därför
+lagd som **extra kassör** där (`CustomTitle = 'Testkonto: sviternas kassor (dev)'`, `IsBoardMember
+= 0`) — annars tappar varje svit som skriver som builder skrivrätten. **Tas den bort blir
+sviterna röda på korrekt kod.**
+
+**⚠️ Utanför:** `InvoiceAdminController` (tävlingarnas fakturor, disken) grindar fortfarande på
+klubbadmin — det är arrangörens arbete på tävlingsdagen, inte bokföringen.
+
+**Före deploy:** `Migrations/check-prod-treasurer-access-2026-09-24.sql` — vilka föreningar har
+kassör, och vem har bokfört där utan att vara kassör (de tappar skrivrätten).
+Svit: `hpsk-verify/ekonomi-behorighet-verify.mjs` 31/31; A/B (gamla regeln + revisorn efter
+skrivrätten) ⇒ 8 faller.
+
 ## Momsen — registreringen, satsen per konto, och grinden (2026-09-24)
 
 Efter Michael Henriksson (Åmåls PK). `LedgerIssuerSettings.IsVatRegistered` fanns men **gick inte

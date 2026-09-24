@@ -1494,7 +1494,25 @@ namespace HpskSite.Controllers
                     acceptedUtc = r.AcceptedUtc,
                     lastSeenUtc = r.LastSeenUtc,
                     revokeReason = r.RevokeReason
-                })
+                }),
+                // ⚠️⚠️ DE VALDA REVISORERNA (2026-09-24). Läsrätten följer rollen i föreningens
+                //    uppgifter — ingen inbjudan behövs. De listas här så att kassören ser VEM som
+                //    kan läsa och VARFÖR; att avsluta åtkomsten görs där rollen bor, inte här.
+                elected = _auditorService.ElectedForOwner(ownerType, ownerId).Select(e =>
+                {
+                    var m = _memberService.GetById(e.MemberId);
+                    var first = m?.GetValue<string>("firstName") ?? "";
+                    var last = m?.GetValue<string>("lastName") ?? "";
+                    var full = $"{first} {last}".Trim();
+                    return new
+                    {
+                        memberId = e.MemberId,
+                        name = string.IsNullOrEmpty(full) ? (m?.Name ?? "") : full,
+                        email = m?.Email ?? "",
+                        role = BoardRoleDefinitions.GetLabel(e.RoleKey)
+                    };
+                }),
+                boardUrl = $"/styrelse?type={ownerType}&id={ownerId}"
             });
         }
 

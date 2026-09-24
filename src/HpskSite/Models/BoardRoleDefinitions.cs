@@ -32,6 +32,20 @@ namespace HpskSite.Models
         /// </summary>
         public const string RoleOrdforande = "Ordforande";
 
+        /// <summary>
+        /// The treasurer's role key. Named because the ledger's write access follows it
+        /// (LedgerAccessService, 2026-09-24): a misspelled literal there would silently give NO ONE
+        /// the treasurer's rights and fall back to the club admin for every association.
+        /// </summary>
+        public const string RoleKassor = "Kassor";
+
+        /// <summary>
+        /// Elected auditors — READ access to the ledger via the auditor branch, never write, never
+        /// board membership (IsBoardMember = false: they must not count toward quorum on the board
+        /// they audit). The suppleant is included: elected, and must be able to step in unprepared.
+        /// </summary>
+        public static readonly string[] AuditorRoleKeys = { "Revisor", "Revisorssuppleant" };
+
         public static string GetLabel(string roleKey)
         {
             var match = AllRoles.FirstOrDefault(r => r.Key == roleKey);
