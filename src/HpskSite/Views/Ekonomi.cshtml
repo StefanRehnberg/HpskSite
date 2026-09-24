@@ -5394,7 +5394,11 @@
         }
     });
 
-    el('prPickList').addEventListener('change', function (ev) {
+    // ⚠️ VAKTAD. Väljardialogen renderas bara för skrivare, och en addEventListener på null
+    //    dödar hela sidans skript i läsläge. (Det som faktiskt fällde läsläget 2026-09-24 var
+    //    obRows nedan; den här vakten lades till samtidigt, efter en genomgång av alla bindningar
+    //    mot id:n som saknas för en läsare.)
+    if (el('prPickList')) el('prPickList').addEventListener('change', function (ev) {
         var cb = ev.target.closest('input[data-pick-project]');
         if (!cb || !pickingGroupId) return;
         cb.disabled = true;
@@ -6354,7 +6358,11 @@
         openModal('obModal');
     }
 
-    if (el('obOpen')) {
+    // ⚠️⚠️ canWrite OCH knappen. Knappen står i markupen för alla (den döljs i läsläge), men
+    //    dialogen med obRows/obSave renderas bara för skrivare — med bara `el('obOpen')` som vakt
+    //    kastade addEventListener på null och dödade HELA sidans skript för varje
+    //    styrelseledamot, från a096774 (2026-09-23) tills ekonomi-styrelse-lasratt fångade det.
+    if (canWrite && el('obOpen')) {
         el('obOpen').addEventListener('click', openOpeningBalances);
         el('obRows').addEventListener('input', obRecalc);
         el('obSave').addEventListener('click', function () {
