@@ -109,6 +109,38 @@ namespace HpskSite.Services.Ledger
         /// bokföringsprogram låter sina pistol.nu-verifikationer börja med en egen bokstav, så att
         /// de två serierna kan samexistera.</para>
         /// </summary>
+        /// <summary>
+        /// Importens serie: EN per ursprunglig serie och år (<c>import-A</c>, prefix <c>IA</c>), med
+        /// numret ur filen. Numret delas inte ut här — det är originalets.
+        /// <para>⚠️ Dubbletten stoppas av det unika indexet på (serie, nummer); importtjänsten
+        /// prövar det i förväg för att kunna säga vilket nummer som redan finns.</para>
+        /// </summary>
+        public (int SeriesId, int Number, string Prefix) ImportSeries(
+            IDatabase db, int issuerType, int issuerId, int year, string sourceSeries, int number)
+        {
+            var kind = ImportKind(sourceSeries);
+            var prefix = ImportPrefix(sourceSeries);
+            EnsureSeries(db, issuerType, issuerId, year, kind, prefix);
+            var seriesId = db.ExecuteScalar<int>(
+                LedgerSchema.Sql(issuerId, @"SELECT Id FROM dbo.LedgerNumberSeries
+                   WHERE IssuerType = @0 AND IssuerId = @1 AND Year = @2 AND Kind = @3"),
+                issuerType, issuerId, year, kind);
+            return (seriesId, number, prefix);
+        }
+
+        /// <summary>Seriens slag för en importerad serie. Kolumnen är 16 tecken.</summary>
+        public static string ImportKind(string sourceSeries) => "import-" + Clean(sourceSeries, 9);
+
+        /// <summary>Prefixet: "I" + serien, fyra tecken som mest (kolumnens bredd).</summary>
+        public static string ImportPrefix(string sourceSeries) => "I" + Clean(sourceSeries, 3);
+
+        private static string Clean(string s, int max)
+        {
+            var c = new string((s ?? "").Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+            if (c.Length == 0) c = "X";
+            return c.Length > max ? c[..max] : c;
+        }
+
         public static string Format(string prefix, int number)
             => string.IsNullOrWhiteSpace(prefix) ? number.ToString() : $"{prefix}-{number}";
 
@@ -119,6 +151,9 @@ namespace HpskSite.Services.Ledger
         /// fortsätta med den rad vinnaren skapade — inte fela.</para>
         /// </summary>
         private void EnsureSeries(IDatabase db, int issuerType, int issuerId, int year, string kind)
+            => EnsureSeries(db, issuerType, issuerId, year, kind, DefaultPrefix(kind));
+
+        private void EnsureSeries(IDatabase db, int issuerType, int issuerId, int year, string kind, string prefix)
         {
             var exists = db.ExecuteScalar<int>(
                 LedgerSchema.Sql(issuerId, @"SELECT COUNT(1) FROM dbo.LedgerNumberSeries
@@ -132,7 +167,7 @@ namespace HpskSite.Services.Ledger
                 db.Execute(
                     LedgerSchema.Sql(issuerId, @"INSERT INTO dbo.LedgerNumberSeries (IssuerType, IssuerId, Year, Kind, Prefix, NextNumber)
                       VALUES (@0, @1, @2, @3, @4, 1)"),
-                    issuerType, issuerId, year, kind, DefaultPrefix(kind));
+                    issuerType, issuerId, year, kind, prefix);
             }
             catch (Exception)
             {

@@ -43,6 +43,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<LedgerClosingService>();
             builder.Services.AddScoped<LedgerSieExportService>();
             builder.Services.AddScoped<LedgerReceivableExportService>();
+            builder.Services.AddScoped<LedgerSieImportService>();
 
             // Verifikationslistan, huvudboken och underlagen — revisionens ryggrad.
             // ⚠️ Lagringen är statslös och singleton; tjänsterna tar en databas per request.

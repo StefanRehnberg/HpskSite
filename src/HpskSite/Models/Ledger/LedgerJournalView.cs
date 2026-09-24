@@ -57,7 +57,10 @@ namespace HpskSite.Models.Ledger
         /// <summary>Förväntat antal om numreringen är luckfri.</summary>
         public int Expected => Last >= First ? Last - First + 1 : 0;
 
-        public bool HasGap => Count != Expected;
+        /// <summary>Nummer som saknas men är FÖRKLARADE (<c>LedgerNumberGap</c>, t.ex. ur en SIE-import).</summary>
+        public int Documented { get; set; }
+
+        public bool HasGap => Count + Documented != Expected;
     }
 
     /// <summary>En rad i verifikationslistan.</summary>

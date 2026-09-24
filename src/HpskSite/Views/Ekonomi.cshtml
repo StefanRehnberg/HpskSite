@@ -1084,6 +1084,40 @@
                     </div>
 
                     @*
+                        ⚠️⚠️ SIE-IMPORTEN (P10.2). Utan den kan en förening bara flytta hit vid ett årsskifte.
+                        Stefans beslut 2026-09-24: kontoplan + ingående balanser + årets verifikationer;
+                        originalnumren i en egen serie; saknade konton STOPPAR och kassören frågas;
+                        förhandsgranska, och prova i en sandlåda först.
+                    *@
+                    @if (Model.CanWrite)
+                    {
+                    <div class="ek-card wide d-none" id="@(uid)_sieCard">
+                        <div class="ek-cardh">
+                            <h2>Flytta hit bokföringen från ett annat program</h2>
+                            <span class="meta">SIE-fil</span>
+                        </div>
+                        <p class="muted" style="margin-top:0">
+                            Exportera en SIE-fil (typ 4) för det här räkenskapsåret ur ert tidigare program. Ingående balanser och
+                            årets verifikationer hittills tas in — verifikationerna med sina gamla nummer, i en egen serie.
+                            Ingenting sparas förrän ni tryckt Importera.
+                        </p>
+                        @if (!Model.IsSandbox)
+                        {
+                            <div class="ek-alert ek-warn" style="margin-bottom:10px">
+                                Prova gärna i en sandlåda först. En import går inte att ta tillbaka — fel rättas med rättelser.
+                            </div>
+                        }
+                        <div class="amount-row">
+                            <input type="file" class="form-control" accept=".se,.si,.sie,.txt" id="@(uid)_sieFile" style="max-width:24rem">
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="@(uid)_siePreview">Förhandsgranska</button>
+                        </div>
+                        <div id="@(uid)_sieResult" style="margin-top:12px"></div>
+                        <div class="ek-alert ek-ok d-none" id="@(uid)_sieOk" style="margin-top:12px"></div>
+                        <div class="ek-alert ek-bad d-none" id="@(uid)_sieError" style="margin-top:12px"></div>
+                    </div>
+                    }
+
+                    @*
                         ⚠️⚠️ HETTE "KONTOROLLER" OCH VISADE "12 mappade".
                         Stefan under provning: "Jag förstår inte vad 'Kontoroller' är för nåt och
                         vad de 12 mappade är, men jag förstår inte bokföring…" — och det är exakt
@@ -4631,6 +4665,8 @@
         if (canWrite) loadChart();
 
         show(el('obCard'), status.shape === 'full');
+        // SIE-importen hör till den förening som bokför här — de andra har kvar sitt program.
+        if (el('sieCard')) show(el('sieCard'), status.shape === 'full');
         if (status.shape === 'full') loadOpeningBalances();
         else { todo.noOpening = false; renderTodo(); }
 
@@ -5427,6 +5463,92 @@
      *    den bar multipart-granslinjen - anges den for hand hittar servern ingen fil och svarar
      *    "Ingen fil vald" om en fil som ligger i begaran.
      */
+    // ── SIE-importen ──────────────────────────────────────────────────────────────────────
+    // ⚠️ Filen skickas om vid varje steg (förhandsgranska, lägg upp konton, importera). Servern
+    //    kör förhandsgranskningen igen före importen — klientens bild av filen räknas aldrig.
+    function sieForm(extra) {
+        var fd = new FormData();
+        fd.append('issuerType', issuerType);
+        fd.append('issuerId', issuerId);
+        fd.append('file', el('sieFile').files[0]);
+        Object.keys(extra || {}).forEach(function (k) { fd.append(k, extra[k]); });
+        return fd;
+    }
+    function sieTell(ok, text) {
+        show(el('sieOk'), false); show(el('sieError'), false);
+        var box = el(ok ? 'sieOk' : 'sieError');
+        box.textContent = text; show(box, !!text);
+    }
+    function sieList(title, items, cls) {
+        if (!items || !items.length) return '';
+        return '<div class="ek-alert ' + cls + '" style="margin-bottom:8px"><strong>' + esc(title) + '</strong><ul style="margin:4px 0 0 18px;padding:0">'
+            + items.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul></div>';
+    }
+    function renderSiePreview(p) {
+        var h = '<table class="t" style="margin-bottom:10px"><tbody>'
+            + '<tr><td>Fil</td><td>' + esc([p.company, p.orgNumber, p.program].filter(Boolean).join(' · ')) + ' <span class="muted">(' + esc(p.encoding) + ')</span></td></tr>'
+            + '<tr><td>Räkenskapsår</td><td>' + esc(p.year || '—') + (p.isFirstYear ? ' <span class="muted">— föreningens första år hos oss</span>' : '') + '</td></tr>'
+            + '<tr><td>Ingående balanser</td><td>' + (p.importsOpeningBalances ? esc(p.openingBalanceLines) + ' konton, ' + kr(p.openingBalanceTotal) + ' i debet' : 'Tas inte in') + '</td></tr>'
+            + '<tr><td>Verifikationer</td><td>' + esc(p.vouchersToImport) + ' att importera (' + kr(p.voucherTotal) + ')'
+            + (p.alreadyImported ? ' · ' + esc(p.alreadyImported) + ' redan importerade hoppas över' : '') + '</td></tr>'
+            + (p.series || []).map(function (s) {
+                return '<tr><td>Serie ' + esc(s.source) + '</td><td>blir ' + esc(s.prefix) + ' · nr ' + esc(s.first) + '–' + esc(s.last) + ' (' + esc(s.count) + ' st)'
+                    + (s.gaps.length ? ' · <span style="color:var(--ek-attn)">luckor: ' + esc(s.gaps.join(', ')) + '</span>' : '') + '</td></tr>';
+            }).join('')
+            + '</tbody></table>';
+        h += sieList('Det här hindrar importen', p.errors, 'ek-bad');
+        h += sieList('Motsäger det som redan importerats', p.conflicts, 'ek-bad');
+        if (p.missingAccounts && p.missingAccounts.length) {
+            h += '<div class="ek-alert ek-warn" style="margin-bottom:8px"><strong>' + p.missingAccounts.length + ' konton finns inte i er kontoplan</strong>'
+                + '<ul style="margin:4px 0 0 18px;padding:0">' + p.missingAccounts.map(function (a) { return '<li>' + esc(a.number) + ' ' + esc(a.name) + '</li>'; }).join('') + '</ul>'
+                + '<div style="margin-top:8px"><button type="button" class="btn btn-sm btn-outline-primary" id="' + uid + '_sieAddAccounts">Lägg upp dem med filens namn</button>'
+                + ' <span class="muted">— eller lägg upp dem själva under Kontoplan och förhandsgranska igen.</span></div></div>';
+        }
+        h += sieList('Att tänka på', p.warnings, 'ek-warn');
+        if (p.renamedAccounts && p.renamedAccounts.length)
+            h += sieList('Konton som heter olika — vårt namn behålls', p.renamedAccounts.map(function (a) { return a.number + ': ' + a.ours + ' (i filen: ' + a.file + ')'; }), 'ek-info');
+        h += sieList('Läses inte in', p.notes, 'ek-info');
+        var hasGaps = (p.series || []).some(function (s) { return s.gaps.length; });
+        if (hasGaps)
+            h += '<label class="form-label" style="margin-top:6px">Varför saknas numren? Förklaringen sparas med luckorna.</label>'
+                + '<textarea class="form-control" rows="2" id="' + uid + '_sieGap">Numren saknades redan i föreningens tidigare program' + (p.program ? ' (' + esc(p.program) + ')' : '') + ' och följde med vid importen.</textarea>';
+        h += '<div style="margin-top:10px"><button type="button" class="btn btn-primary" id="' + uid + '_sieImport"' + (p.canImport ? '' : ' disabled') + '>Importera</button>'
+            + (p.canImport ? ''
+                : (!(p.errors || []).length && !(p.missingAccounts || []).length && !(p.conflicts || []).length)
+                    ? ' <span class="muted">Allt i filen är redan inläst — det finns inget nytt att importera.</span>'
+                    : ' <span class="muted">Åtgärda det som står ovan och förhandsgranska igen.</span>') + '</div>';
+        el('sieResult').innerHTML = h;
+
+        var add = document.getElementById(uid + '_sieAddAccounts');
+        if (add) add.addEventListener('click', function () {
+            add.disabled = true;
+            postForm('/umbraco/surface/EkonomiAdmin/AddSieAccounts', sieForm()).then(function (d) {
+                sieTell(d.success, d.message);
+                if (d.preview) renderSiePreview(d.preview);
+                if (d.success) loadChart();
+            }).catch(function (e) { sieTell(false, e.message); add.disabled = false; });
+        });
+        var imp = document.getElementById(uid + '_sieImport');
+        if (imp) imp.addEventListener('click', function () {
+            imp.disabled = true;
+            var gap = document.getElementById(uid + '_sieGap');
+            postForm('/umbraco/surface/EkonomiAdmin/ImportSie', sieForm({ gapExplanation: gap ? gap.value : '' })).then(function (d) {
+                sieTell(d.success, d.message);
+                if (d.success) { el('sieResult').innerHTML = ''; loadOpeningBalances(); }
+                else imp.disabled = false;
+            }).catch(function (e) { sieTell(false, e.message); imp.disabled = false; });
+        });
+    }
+    if (el('siePreview')) el('siePreview').addEventListener('click', function () {
+        if (!el('sieFile').files.length) { sieTell(false, 'Välj en SIE-fil först.'); return; }
+        sieTell(true, '');
+        el('sieResult').innerHTML = '<div class="muted">Läser filen…</div>';
+        postForm('/umbraco/surface/EkonomiAdmin/PreviewSieImport', sieForm()).then(function (d) {
+            if (!d.success) { el('sieResult').innerHTML = ''; sieTell(false, d.message); return; }
+            renderSiePreview(d.preview);
+        }).catch(function (e) { el('sieResult').innerHTML = ''; sieTell(false, e.message); });
+    });
+
     function postForm(url, formData) {
         return new Promise(function (resolve, reject) {
             withToken(function (t) {

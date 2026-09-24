@@ -163,13 +163,27 @@ namespace HpskSite.Services.Ledger
                     GROUP BY s.Prefix",
                 args);
 
+            // Förklarade luckor (LedgerNumberGap) — från det tidigare programmet vid en SIE-import.
+            // ⚠️ En förklarad lucka är fortfarande en lucka, men den är REDOGJORD för (BFNAR 2013:2),
+            //    och att larma om den för evigt hade gjort varningen meningslös för varje förening
+            //    som flyttat hit.
+            var documented = ldb.Fetch<SeriesSpanRow>(
+                $@"SELECT s.Prefix, 0 AS First_, 0 AS Last_, SUM(g.ToNumber - g.FromNumber + 1) AS Count_
+                     FROM dbo.LedgerNumberGap g
+                     JOIN dbo.LedgerNumberSeries s ON s.Id = g.SeriesId
+                    WHERE s.IssuerType = @0 AND s.IssuerId = @1
+                      {(fiscalYearId is > 0 or < 0 ? " AND s.Year = (SELECT Year FROM dbo.LedgerFiscalYear WHERE Id = @2)" : "")}
+                    GROUP BY s.Prefix",
+                args).ToDictionary(r => r.Prefix, r => r.Count_);
+
             foreach (var s in spans)
                 page.Series.Add(new LedgerSeriesSpan
                 {
                     Prefix = s.Prefix,
                     First = s.First_,
                     Last = s.Last_,
-                    Count = s.Count_
+                    Count = s.Count_,
+                    Documented = documented.GetValueOrDefault(s.Prefix)
                 });
         }
 

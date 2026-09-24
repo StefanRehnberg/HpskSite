@@ -386,7 +386,8 @@ namespace HpskSite.Controllers
                 correctedByNumber = detail.CorrectedByNumber,
                 correctsNumber = detail.CorrectsNumber,
                 // Bara en handbokförd post rättas härifrån — se CorrectEntry.
-                canCorrect = detail.Head.SourceType == LedgerSourceType.Manual
+                canCorrect = (detail.Head.SourceType == LedgerSourceType.Manual
+                              || detail.Head.SourceType == LedgerSourceType.SieImport)
                              && detail.CorrectedByEntryId is null && detail.Head.CorrectsEntryId is null
             });
         }
@@ -426,7 +427,9 @@ namespace HpskSite.Controllers
             if (detail.Head.CorrectsEntryId is not null)
                 return Json(new { success = false, message = "Det här är själv en rättelse. Bokför den rätta posten under Bokför i stället." });
 
-            if (detail.Head.SourceType != LedgerSourceType.Manual)
+            // En importerad verifikation har ingen källa hos oss som kan säga emot — den rättas som en
+            // handbokförd post.
+            if (detail.Head.SourceType != LedgerSourceType.Manual && detail.Head.SourceType != LedgerSourceType.SieImport)
                 return Json(new { success = false, message = SourceCorrectionHint(detail.Head.SourceType) });
 
             var (actorId, _) = await GetCurrentActorAsync();
@@ -1868,6 +1871,128 @@ namespace HpskSite.Controllers
                     rowCount = i.RowCount,
                     importedUtc = i.ImportedUtc
                 })
+            });
+        }
+
+        // ══ SIE-IMPORTEN (P10.2) ════════════════════════════════════════════════════════════
+
+        private const long MaxSieFileBytes = 20 * 1024 * 1024;
+
+        private LedgerSieImportService SieImport =>
+            (LedgerSieImportService)HttpContext.RequestServices.GetService(typeof(LedgerSieImportService))!;
+
+        private static async Task<byte[]?> ReadSie(IFormFile? file)
+        {
+            if (file == null || file.Length == 0 || file.Length > MaxSieFileBytes) return null;
+            using var ms = new MemoryStream();
+            await file.CopyToAsync(ms);
+            return ms.ToArray();
+        }
+
+        private static object PreviewJson(SieImportPreview p) => new
+        {
+            canImport = p.CanImport,
+            program = p.File?.Program,
+            company = p.File?.CompanyName,
+            orgNumber = p.File?.OrgNumber,
+            encoding = p.File?.EncodingName,
+            year = p.Year,
+            isFirstYear = p.IsFirstYear,
+            errors = p.Errors,
+            warnings = p.Warnings,
+            notes = p.Notes,
+            missingAccounts = p.MissingAccounts.Select(a => new { number = a.Number, name = a.Name }),
+            renamedAccounts = p.RenamedAccounts.Select(a => new { number = a.Number, ours = a.OurName, file = a.FileName }),
+            conflicts = p.Conflicts,
+            openingBalanceLines = p.OpeningBalanceLines,
+            importsOpeningBalances = p.ImportsOpeningBalances,
+            openingBalanceTotal = p.OpeningBalanceTotal,
+            vouchersToImport = p.VouchersToImport,
+            voucherTotal = p.VoucherTotal,
+            alreadyImported = p.AlreadyImported,
+            series = p.Series.Select(s => new
+            {
+                source = s.SourceSeries, prefix = s.Prefix, first = s.First, last = s.Last, count = s.Count,
+                gaps = s.Gaps.Select(g => g.From == g.To ? $"{g.From}" : $"{g.From}–{g.To}")
+            })
+        };
+
+        /// <summary>
+        /// Läser en SIE-fil och säger vad som skulle hända. <b>Skriver ingenting.</b>
+        /// <para>Skrivrätt krävs ändå: förhandsgranskningen betjänar ett importformulär.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PreviewSieImport(int issuerType, int issuerId, IFormFile? file)
+        {
+            var (ok, _) = await AuthorizeWriteAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+            var bytes = await ReadSie(file);
+            if (bytes == null) return Json(new { success = false, message = "Välj en SIE-fil (högst 20 MB)." });
+            return Json(new { success = true, preview = PreviewJson(SieImport.Preview(issuerType, issuerId, bytes)) });
+        }
+
+        /// <summary>
+        /// Lägger upp de konton filen använder som saknas i föreningens kontoplan, med filens namn.
+        /// <para>⚠️⚠️ Stefans beslut 2026-09-24: saknade konton STOPPAR importen och kassören FRÅGAS.
+        /// Det här är svaret på frågan — en uttrycklig handling, aldrig något importen gör själv.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddSieAccounts(int issuerType, int issuerId, IFormFile? file)
+        {
+            var (ok, name) = await AuthorizeWriteAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+            var bytes = await ReadSie(file);
+            if (bytes == null) return Json(new { success = false, message = "Välj en SIE-fil (högst 20 MB)." });
+
+            var chart = (LedgerChartService)HttpContext.RequestServices.GetService(typeof(LedgerChartService))!;
+            var p = SieImport.Preview(issuerType, issuerId, bytes);
+            var added = new List<int>();
+            var failed = new List<string>();
+            foreach (var a in p.MissingAccounts)
+            {
+                var r = chart.Add(issuerType, issuerId, a.Number, string.IsNullOrWhiteSpace(a.Name) ? $"Konto {a.Number}" : a.Name);
+                if (r.Success) added.Add(a.Number); else failed.Add($"{a.Number}: {r.Error}");
+            }
+            _logger.LogInformation("Ekonomi: {Forening} lade upp {Antal} konton ur en SIE-fil.", name, added.Count);
+            return Json(new
+            {
+                success = failed.Count == 0,
+                added,
+                message = failed.Count == 0 ? $"{added.Count} konton är upplagda." : string.Join(" ", failed),
+                preview = PreviewJson(SieImport.Preview(issuerType, issuerId, bytes))
+            });
+        }
+
+        /// <summary>
+        /// Importerar filen: ingående balanser (första året) och årets verifikationer i egna serier.
+        /// Förhandsgranskningen körs igen på servern — klientens bild räknas inte.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ImportSie(int issuerType, int issuerId, IFormFile? file, string? gapExplanation)
+        {
+            var (ok, name) = await AuthorizeWriteAsync(issuerType, issuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+            var bytes = await ReadSie(file);
+            if (bytes == null) return Json(new { success = false, message = "Välj en SIE-fil (högst 20 MB)." });
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var r = SieImport.Import(issuerType, issuerId, bytes, gapExplanation, actorId.Value);
+            _logger.LogInformation("Ekonomi: {Forening} SIE-import — {Antal} verifikationer, IB {Ib}, ok {Ok}.",
+                name, r.VouchersImported, r.OpeningBalancesImported, r.Success);
+            return Json(new
+            {
+                success = r.Success,
+                vouchersImported = r.VouchersImported,
+                openingBalancesImported = r.OpeningBalancesImported,
+                gapsRecorded = r.GapsRecorded,
+                message = r.Success
+                    ? $"Importerat: {(r.OpeningBalancesImported ? "ingående balanser och " : "")}{r.VouchersImported} verifikationer."
+                      + (r.GapsRecorded > 0 ? $" {r.GapsRecorded} luckor i serierna är förklarade." : "")
+                    : r.Error
             });
         }
 
