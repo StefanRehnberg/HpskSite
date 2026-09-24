@@ -52,6 +52,7 @@ namespace HpskSite.Controllers
         private readonly LedgerJournalService _journalService;
         private readonly LedgerAttachmentService _attachmentService;
         private readonly LedgerAuditorService _auditorService;
+        private readonly LedgerWriteGrantService _writeGrants;
         private readonly LedgerAssetService _assetService;
         private readonly LedgerExpenseService _expenseService;
         private readonly BoardRoleService _boardRoles;
@@ -97,6 +98,7 @@ namespace HpskSite.Controllers
             LedgerJournalService journalService,
             LedgerAttachmentService attachmentService,
             LedgerAuditorService auditorService,
+            LedgerWriteGrantService writeGrants,
             LedgerAssetService assetService,
             LedgerExpenseService expenseService,
             BoardRoleService boardRoles,
@@ -123,6 +125,7 @@ namespace HpskSite.Controllers
             _journalService = journalService;
             _attachmentService = attachmentService;
             _auditorService = auditorService;
+            _writeGrants = writeGrants;
             _assetService = assetService;
             _expenseService = expenseService;
             _boardRoles = boardRoles;
@@ -1514,6 +1517,202 @@ namespace HpskSite.Controllers
                 }),
                 boardUrl = $"/styrelse?type={ownerType}&id={ownerId}"
             });
+        }
+
+        // ══ VILKA FÅR ARBETA MED EKONOMIN? ════════════════════════════════════════════════════
+        //
+        // ⚠️⚠️ Stefan 2026-09-24: kassören ska KUNNA ge rätten, men inte vara den enda — kassören
+        //    kan vara borta eller ha ont om tid, mitt i året eller precis när årsredovisningen ska
+        //    fram. Kassören, ordföranden, en administratör och sajtadmin får ge den
+        //    (LedgerAccessResult.CanManageWriteGrants). ÄGAREN, aldrig utställaren — rätten gäller
+        //    föreningen och dess sandlådor.
+
+        /// <summary>Listan, vem som får ändra den, och förvalt slutdatum.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetWriteGrants(int ownerType, int ownerId)
+        {
+            var access = await ResolveAccessAsync(ownerType, ownerId);
+            if (!access.CanRead) return Json(new { success = false, message = DeniedMessage });
+
+            var fy = ResolveFiscalYear(ownerType, ownerId, null);
+            var defaultEnds = (fy?.EndDate ?? DateTime.Today.AddMonths(9)).Date.AddMonths(3);
+            if (defaultEnds < DateTime.Today) defaultEnds = DateTime.Today.AddMonths(3);
+
+            return Json(new
+            {
+                success = true,
+                canManage = access.CanManageWriteGrants,
+                defaultEndsDate = defaultEnds.ToString("yyyy-MM-dd"),
+                treasurer = access.TreasurerName,
+                grants = _writeGrants.ListForOwner(ownerType, ownerId).Select(g => new
+                {
+                    id = g.Id,
+                    memberName = g.MemberName,
+                    grantedByName = g.GrantedByName,
+                    grantedByRole = g.GrantedByRole,
+                    grantedUtc = g.GrantedUtc,
+                    endsDate = g.EndsDate.ToString("yyyy-MM-dd"),
+                    reason = g.Reason,
+                    isActive = g.IsActive,
+                    revoked = g.RevokedUtc != null
+                })
+            });
+        }
+
+        /// <summary>
+        /// Medlemmar att ge rätten till. Klubb: klubbens medlemmar; krets: alla (samma regel som
+        /// Styrelsearbetets medlemssökning — kretsens kassörer kommer ur klubbarna).
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> SearchWriteGrantMembers(int ownerType, int ownerId, string? q)
+        {
+            var access = await ResolveAccessAsync(ownerType, ownerId);
+            if (!access.CanManageWriteGrants) return Json(new { success = false, message = DeniedMessage });
+            if (string.IsNullOrWhiteSpace(q) || q.Trim().Length < 2)
+                return Json(new { success = true, members = Array.Empty<object>() });
+
+            var query = q.Trim();
+            var members = _memberService.GetAll(0, int.MaxValue, out _)
+                .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved);
+
+            if (ownerType == DocumentOwnerType.Club)
+            {
+                var clubIdStr = ownerId.ToString();
+                members = members.Where(m =>
+                    m.GetValue("primaryClubId")?.ToString() == clubIdStr ||
+                    (m.GetValue("memberClubIds")?.ToString()?.Split(',').Select(s => s.Trim()).Contains(clubIdStr) ?? false));
+            }
+
+            var result = members
+                .Where(m => m.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+                            || (m.Email?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
+                .OrderBy(m => m.Name)
+                .Take(15)
+                .Select(m => new { id = m.Id, name = m.Name, email = m.Email });
+
+            return Json(new { success = true, members = result });
+        }
+
+        /// <summary>
+        /// Ger en medlem rätten att arbeta med ekonomin — och SÄGER det: till personen (vad rätten
+        /// omfattar, till när, vem som gav den) och till kassören när det var någon annan.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> GrantWrite([FromBody] GrantWriteRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att spara." });
+
+            var access = await ResolveAccessAsync(request.OwnerType, request.OwnerId);
+            if (!access.CanManageWriteGrants) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, actorName) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var ends = ParseDate(request.EndsDate);
+            if (ends is null) return Json(new { success = false, message = "Ange till och med vilket datum rätten gäller." });
+
+            var member = _memberService.GetById(request.MemberId);
+            if (member is null) return Json(new { success = false, message = "Medlemmen finns inte." });
+
+            // ⚠️⚠️ ALDRIG EN REVISOR. Grinden prövar revisorn före listan och skulle ändå bara ge
+            //    läsrätt — men en rad som påstår något grinden inte gör är en lögn i listan.
+            if (_auditorService.HasAccess(request.OwnerType, request.OwnerId, member.Id))
+                return Json(new { success = false, message = $"{member.Name} är revisor i föreningen och kan inte få rätt att bokföra — revisorn granskar bokföringen." });
+
+            if (_boardRoles.HasActiveRole(request.OwnerType, request.OwnerId, member.Id, BoardRoleDefinitions.RoleKassor))
+                return Json(new { success = false, message = $"{member.Name} är redan kassör och har rätten genom uppdraget." });
+
+            // ⚠️ SAMMA regel som sökningen — i SERVERN. Utan den räckte ett gissat medlems-id i
+            //    anropet för att ge en utomstående kassörens rätt i klubben. (Kretsen: alla, som
+            //    Styrelsearbete — kretsens folk kommer ur klubbarna.)
+            if (request.OwnerType == DocumentOwnerType.Club)
+            {
+                var clubIdStr = request.OwnerId.ToString();
+                var inClub = member.GetValue("primaryClubId")?.ToString() == clubIdStr
+                             || (member.GetValue("memberClubIds")?.ToString()?.Split(',').Select(s => s.Trim()).Contains(clubIdStr) ?? false);
+                if (!inClub)
+                    return Json(new { success = false, message = $"{member.Name} är inte medlem i föreningen." });
+            }
+
+            var byRole = access.Basis switch
+            {
+                LedgerAccessBasis.Treasurer => "Kassör",
+                LedgerAccessBasis.SiteAdmin => "Sajtadministratör",
+                _ when _boardRoles.HasActiveRole(request.OwnerType, request.OwnerId, actorId.Value, BoardRoleDefinitions.RoleOrdforande) => "Ordförande",
+                _ => "Administratör"
+            };
+
+            var (ok, error, id) = _writeGrants.Grant(
+                request.OwnerType, request.OwnerId, member.Id, member.Name ?? "",
+                ends.Value, request.Reason, actorId.Value, actorName ?? "", byRole);
+
+            if (!ok) return Json(new { success = false, message = error });
+
+            // ── Mejlen ────────────────────────────────────────────────────────────────────
+            // ⚠️ Svarsadressen är den som GAV rätten. Saknas den: sajtens, uttryckligen.
+            var actorEmail = await CurrentActorEmailAsync();
+            var replyTo = string.IsNullOrWhiteSpace(actorEmail)
+                ? MailReplyTo.SiteAdmin
+                : MailReplyTo.To(actorEmail, actorName ?? access.OwnerName);
+
+            var url = $"{Request.Scheme}://{Request.Host}/ekonomi?type={request.OwnerType}&id={request.OwnerId}";
+            var notified = new List<string>();
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(member.Email)
+                    && await _emailService.SendWriteGrantedAsync(member.Email, member.Name ?? "", access.OwnerName,
+                        actorName ?? "", byRole, ends.Value, request.Reason, url, replyTo))
+                    notified.Add(member.Name ?? member.Email);
+
+                // ⚠️⚠️ KASSÖREN FÅR VETA NÄR NÅGON ANNAN GER RÄTTEN — ingen ska tyst kunna gå förbi hen.
+                if (access.Basis != LedgerAccessBasis.Treasurer)
+                {
+                    foreach (var t in _boardRoles.GetActiveRoleHolders(request.OwnerType, request.OwnerId, BoardRoleDefinitions.RoleKassor))
+                    {
+                        var tm = _memberService.GetById(t.MemberId);
+                        if (tm?.Email is null || tm.Id == actorId) continue;
+                        if (await _emailService.SendWriteGrantNoticeToTreasurerAsync(tm.Email, t.MemberName ?? tm.Name ?? "",
+                                access.OwnerName, member.Name ?? "", actorName ?? "", byRole, ends.Value,
+                                request.Reason, url, replyTo))
+                            notified.Add($"kassören {t.MemberName}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Mejlen om ekonomirätt {Id} gick inte att skicka.", id);
+            }
+
+            return Json(new
+            {
+                success = true,
+                message = $"{member.Name} kan nu arbeta med ekonomin till och med {ends.Value:d MMMM yyyy}."
+                        + (notified.Count > 0
+                            ? $" Besked har mejlats till {string.Join(" och ", notified)}."
+                            : " Inget mejl kunde skickas — berätta det för hen själv."),
+            });
+        }
+
+        /// <summary>Avslutar en rätt. Samma krets som får ge den.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RevokeWrite([FromBody] RevokeWriteRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Inget att ändra." });
+
+            var access = await ResolveAccessAsync(request.OwnerType, request.OwnerId);
+            if (!access.CanManageWriteGrants) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var (ok, error, grant) = _writeGrants.Revoke(request.OwnerType, request.OwnerId, request.GrantId, actorId.Value);
+
+            return Json(ok
+                ? new { success = true, message = $"{grant?.MemberName} kan inte längre arbeta med ekonomin. Det hen redan bokfört står kvar." }
+                : new { success = false, message = error });
         }
 
         /// <summary>
@@ -3238,6 +3437,22 @@ namespace HpskSite.Controllers
         public int IssuerId { get; set; }
         public int Number { get; set; }
         public bool Active { get; set; }
+    }
+
+    public class GrantWriteRequest
+    {
+        public int OwnerType { get; set; }
+        public int OwnerId { get; set; }
+        public int MemberId { get; set; }
+        public string? EndsDate { get; set; }
+        public string? Reason { get; set; }
+    }
+
+    public class RevokeWriteRequest
+    {
+        public int OwnerType { get; set; }
+        public int OwnerId { get; set; }
+        public int GrantId { get; set; }
     }
 
     public class SetAccountVatRateRequest

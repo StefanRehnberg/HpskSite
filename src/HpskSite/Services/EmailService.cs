@@ -371,6 +371,101 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Till den som fått rätten att arbeta med föreningens ekonomi.
+        ///
+        /// <para><b>⚠️ Mejlet FÖRKLARAR rätten</b> (Stefan 2026-09-24: "Viktigt att det framgår hur det
+        /// fungerar när rätten ges"): vad hen kan göra, till när, vem som gav den, att kassören ser
+        /// det och att allt hen bokför visar hens namn. En rätt man inte vet omfattningen av
+        /// används antingen inte alls eller för mycket.</para>
+        ///
+        /// <para>⚠️ Svarsadressen är den som GAV rätten — frågorna går till hen, inte till oss.</para>
+        /// </summary>
+        public async Task<bool> SendWriteGrantedAsync(
+            string toEmail, string toName, string ownerName, string grantedByName, string grantedByRole,
+            DateTime endsDate, string? reason, string ekonomiUrl, MailReplyTo replyTo)
+        {
+            var subject = $"Du kan nu arbeta med ekonomin för {ownerName}";
+            var why = string.IsNullOrWhiteSpace(reason) ? "" :
+                $"<p><strong>Anledning:</strong> {System.Net.WebUtility.HtmlEncode(reason)}</p>";
+
+            var body = $@"
+<html>
+<body>
+    <h2>Hej {System.Net.WebUtility.HtmlEncode(toName)},</h2>
+    <p><strong>{System.Net.WebUtility.HtmlEncode(grantedByName)}</strong> ({System.Net.WebUtility.HtmlEncode(grantedByRole.ToLowerInvariant())})
+       har gett dig rätt att arbeta med <strong>{System.Net.WebUtility.HtmlEncode(ownerName)}s</strong> ekonomi på pistol.nu
+       — till och med <strong>{endsDate:d MMMM yyyy}</strong>.</p>
+    {why}
+    <p><strong>Det här betyder att du kan göra samma sak som kassören:</strong></p>
+    <ul>
+        <li>bokföra kvitton, utgifter och betalningar,</li>
+        <li>stämma av mot banken,</li>
+        <li>göra bokslutet och ta fram resultat- och balansräkningen.</li>
+    </ul>
+    <p><strong>Bra att veta:</strong></p>
+    <ul>
+        <li>Allt du bokför visar ditt namn. En bokförd post kan inte ändras eller tas bort — ett fel rättas med en ny post.</li>
+        <li>Kassören ser att du har fått rätten, och kassören eller den som gav den kan avsluta den när som helst.</li>
+        <li>Du kan inte själv ge någon annan rätten.</li>
+        <li>Rätten upphör av sig själv efter {endsDate:d MMMM yyyy}.</li>
+    </ul>
+    <p style=""margin:26px 0"">
+        <a href=""{ekonomiUrl}""
+           style=""background:#0b63ce;color:#fff;padding:12px 22px;border-radius:6px;
+                  text-decoration:none;font-weight:600;display:inline-block"">
+            Öppna ekonomin
+        </a>
+    </p>
+    <p>Frågor? Svara på det här mejlet — det går till {System.Net.WebUtility.HtmlEncode(grantedByName)}.</p>
+    <p>Med vänliga hälsningar,<br/>{System.Net.WebUtility.HtmlEncode(ownerName)} via Pistol.nu</p>
+</body>
+</html>";
+
+            return await SendEmailAsync(toEmail, subject, body, replyTo);
+        }
+
+        /// <summary>
+        /// Till KASSÖREN när någon ANNAN gett en person rätten att arbeta med ekonomin.
+        ///
+        /// <para><b>⚠️ Varför:</b> ordföranden och administratören får ge rätten när kassören inte
+        /// är nåbar — men då ska kassören få veta det. Ingen ska tyst kunna gå förbi hen.</para>
+        /// </summary>
+        public async Task<bool> SendWriteGrantNoticeToTreasurerAsync(
+            string toEmail, string toName, string ownerName, string grantedToName,
+            string grantedByName, string grantedByRole, DateTime endsDate, string? reason,
+            string ekonomiUrl, MailReplyTo replyTo)
+        {
+            var subject = $"{grantedToName} har fått rätt att arbeta med ekonomin i {ownerName}";
+            var why = string.IsNullOrWhiteSpace(reason) ? "" :
+                $"<p><strong>Anledning:</strong> {System.Net.WebUtility.HtmlEncode(reason)}</p>";
+
+            var body = $@"
+<html>
+<body>
+    <h2>Hej {System.Net.WebUtility.HtmlEncode(toName)},</h2>
+    <p>Du får det här eftersom du är kassör i {System.Net.WebUtility.HtmlEncode(ownerName)}.</p>
+    <p><strong>{System.Net.WebUtility.HtmlEncode(grantedByName)}</strong> ({System.Net.WebUtility.HtmlEncode(grantedByRole.ToLowerInvariant())})
+       har gett <strong>{System.Net.WebUtility.HtmlEncode(grantedToName)}</strong> rätt att arbeta med föreningens ekonomi
+       till och med <strong>{endsDate:d MMMM yyyy}</strong> — samma rätt som du har, till exempel att bokföra och göra bokslutet.</p>
+    {why}
+    <p>Allt hen bokför visar hens namn. Stämmer det här inte kan du avsluta rätten under
+       <strong>Ekonomi → Inställningar → Vilka får arbeta med ekonomin?</strong></p>
+    <p style=""margin:26px 0"">
+        <a href=""{ekonomiUrl}""
+           style=""background:#0b63ce;color:#fff;padding:12px 22px;border-radius:6px;
+                  text-decoration:none;font-weight:600;display:inline-block"">
+            Öppna inställningarna
+        </a>
+    </p>
+    <p>Frågor? Svara på det här mejlet — det går till {System.Net.WebUtility.HtmlEncode(grantedByName)}.</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            return await SendEmailAsync(toEmail, subject, body, replyTo);
+        }
+
+        /// <summary>
         /// Send welcome email for quick-created members (created by admin at competition).
         /// Includes temporary password.
         /// </summary>

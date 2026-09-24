@@ -36,11 +36,13 @@ namespace HpskSite.Services.Ledger
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
+        private readonly LedgerWriteGrantService _writeGrants;
 
         public LedgerAccessService(
             AdminAuthorizationService auth,
             BoardRoleService boardRoles,
             LedgerAuditorService auditors,
+            LedgerWriteGrantService writeGrants,
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberManager memberManager,
             IMemberService memberService)
@@ -48,6 +50,7 @@ namespace HpskSite.Services.Ledger
             _auth = auth;
             _boardRoles = boardRoles;
             _auditors = auditors;
+            _writeGrants = writeGrants;
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -96,67 +99,70 @@ namespace HpskSite.Services.Ledger
             var memberId = await CurrentMemberIdAsync();
 
             // ── Revisorn skriver ALDRIG ─────────────────────────────────────────────────────
-            // ⚠️⚠️ FÖRST, före skrivrätten. En revisor som råkar vara klubbadmin (eller kassör i
-            //    registret av misstag) hade annars kunnat bokföra i det hen ska granska — ett
-            //    oberoendebrott. Revisorn läser, via revisionsgrenen, och det är allt.
-            //    Frågan täcker både inbjudan och det VALDA uppdraget i föreningens uppgifter.
+            // ⚠️⚠️ FÖRST, före skrivrätten. En revisor som råkar vara klubbadmin, kassör i
+            //    registret av misstag, eller står på listan "arbetar med ekonomin" hade annars
+            //    kunnat bokföra i det hen ska granska — ett oberoendebrott. Revisorn läser, via
+            //    revisionsgrenen, och det är allt. Täcker både inbjudan och det VALDA uppdraget.
+            //    Revisorn får inte heller ge någon annan rätten.
             if (memberId > 0 && _auditors.HasAccess(ownerType, ownerId, memberId))
                 return new LedgerAccessResult(LedgerAccess.Read, name, isAuditor: true,
                                               basis: LedgerAccessBasis.Auditor);
 
-            // ── Sajtens administratör skriver ──────────────────────────────────────────────
-            // ⚠️ Stefans beslut 2026-09-24: sajtadmin ska kunna bokföra även där föreningen har
-            //    en kassör — det är supportvägen när en förening ber om hjälp. Efter revisorn (en
-            //    revisor bokför aldrig) men före kassörsregeln, som annars gör sajtadmin till läsare.
-            //    ⚠️ BARA sajtadmin, inte krets- eller klubbadmin: IsClubAdminForClub viker in dem
-            //    alla, därför en egen fråga här.
-            if (await _auth.IsCurrentUserAdminAsync())
-                return new LedgerAccessResult(LedgerAccess.Write, name, basis: LedgerAccessBasis.SiteAdmin);
+            var isSiteAdmin = await _auth.IsCurrentUserAdminAsync();
 
-            // ── Kassören skriver ───────────────────────────────────────────────────────────
-            // ⚠️⚠️ SKRIVRÄTTEN FÖLJER KASSÖRSUPPDRAGET (2026-09-24, Michael Henriksson: "Kassören
-            //    borde vara den enda som kan komma in och göra allt i bokföringen"). Förut skrev
-            //    klubbadmin — en teknisk roll på sajten, oftast en annan person än kassören —
-            //    och via IsClubAdminForClub även varje kretsadministratör i kretsen.
-            //
-            // ⚠️⚠️ ÖVERGÅNGEN: finns INGEN aktiv kassör i föreningens uppgifter skriver
-            //    administratören som förut, och ytan säger åt hen att lägga in kassören. En hård
-            //    omläggning hade låst ute varje förening som inte fört in sin kassör — alltså
-            //    nästan alla, den dag det deployas.
             var treasurers = _boardRoles.GetActiveRoleHolders(ownerType, ownerId, BoardRoleDefinitions.RoleKassor);
-
-            if (memberId > 0 && treasurers.Any(t => t.MemberId == memberId))
-                return new LedgerAccessResult(LedgerAccess.Write, name, basis: LedgerAccessBasis.Treasurer);
-
+            var isTreasurer = memberId > 0 && treasurers.Any(t => t.MemberId == memberId);
             var treasurerName = string.Join(", ", treasurers.Select(t => t.MemberName).Where(n => !string.IsNullOrWhiteSpace(n)));
 
+            // ⚠️⚠️ VEM FÅR GE ANDRA RÄTTEN ATT ARBETA MED EKONOMIN (Stefan 2026-09-24): kassören,
+            //    ORDFÖRANDEN och administratören — "inte att det måste vara kassören som ger rätten
+            //    men att hen ska kunna det". Skälet är att kassören kan vara borta eller ha ont om
+            //    tid, mitt i året eller precis när årsredovisningen ska fram. Den som själv bara
+            //    har fått rätten via listan får INTE ge den vidare — inga kedjor.
+            var isChair = memberId > 0 && _boardRoles.HasActiveRole(ownerType, ownerId, memberId, BoardRoleDefinitions.RoleOrdforande);
+            var canManage = isSiteAdmin || isTreasurer || isChair || isAdmin;
+
+            LedgerAccessResult Result(LedgerAccess a, LedgerAccessBasis b) =>
+                new(a, name, basis: b, treasurerName: treasurerName, canManageWriteGrants: canManage);
+
+            // ── Sajtens administratör skriver ──────────────────────────────────────────────
+            // ⚠️ Stefans beslut 2026-09-24: supportvägen när en förening ber om hjälp. Efter
+            //    revisorn, före kassörsregeln. ⚠️ BARA sajtadmin — IsClubAdminForClub viker in
+            //    krets- och klubbadmin, därför en egen fråga.
+            if (isSiteAdmin) return Result(LedgerAccess.Write, LedgerAccessBasis.SiteAdmin);
+
+            // ── Kassören skriver ───────────────────────────────────────────────────────────
+            // ⚠️⚠️ SKRIVRÄTTEN FÖLJER KASSÖRSUPPDRAGET (2026-09-24, Michael Henriksson). Förut skrev
+            //    klubbadmin — oftast en annan person än kassören — och via IsClubAdminForClub även
+            //    varje kretsadministratör i kretsen.
+            if (isTreasurer) return Result(LedgerAccess.Write, LedgerAccessBasis.Treasurer);
+
+            // ── Den som fått rätten att arbeta med ekonomin ──────────────────────────────────
+            // ⚠️ SAMMA rätt som kassören — bokföring OCH bokslut. Behovet kan lika gärna vara
+            //    årsredovisningen som vardagens kvitton, så en "bara bokföra"-nivå hade inte löst
+            //    det Stefan beskrev. Tidsbegränsad och synlig; se LedgerWriteGrantService.
+            if (memberId > 0 && _writeGrants.HasActive(ownerType, ownerId, memberId))
+                // canManage kommer ur ROLLERNA, aldrig ur listan: en ordförande på listan får
+                // fortfarande hantera den, en "vanlig" person på listan får det inte.
+                return Result(LedgerAccess.Write, LedgerAccessBasis.Delegate);
+
+            // ⚠️⚠️ ÖVERGÅNGEN: finns INGEN aktiv kassör skriver administratören som förut, och ytan
+            //    säger åt hen att lägga in kassören. En hård omläggning hade låst ute nästan alla.
             if (isAdmin && treasurers.Count == 0)
-                return new LedgerAccessResult(LedgerAccess.Write, name, basis: LedgerAccessBasis.AdminWithoutTreasurer);
+                return Result(LedgerAccess.Write, LedgerAccessBasis.AdminWithoutTreasurer);
 
             // ── Styrelsen läser ──────────────────────────────────────────────────────────
-            // ⚠️ IsBoardMemberOf kräver IsActive = 1 OCH IsBoardMember = 1. Revisorn och
-            // valberedningen är alltså UTE här — de har IsBoardMember = 0.
-            // ⚠️ REVISORN LÖSTES 2026-09-23, i den EGNA grenen nedan (LedgerAuditorService), inte
-            // genom att vidga den här. Valberedningen har fortfarande ingen åtkomst till
-            // ekonomin, och ska inte ha det: de bereder val, de granskar inte räkenskaper.
-            // ⚠️ Ett utgånget mandat revoquerar inte: en styrelse sitter kvar till nästa årsmöte,
-            // och en lucka där hade lämnat föreningen utan läsare i just det fönstret. Samma
-            // resonemang som vapenregistrets behörighet.
+            // ⚠️ IsBoardMemberOf kräver IsActive = 1 OCH IsBoardMember = 1 — revisorn och
+            //    valberedningen är UTE (IsBoardMember = 0). Ett utgånget mandat revoquerar inte:
+            //    en styrelse sitter kvar till nästa årsmöte.
             if (memberId > 0 && _boardRoles.IsBoardMemberOf(ownerType, ownerId, memberId))
-                return new LedgerAccessResult(LedgerAccess.Read, name, basis: LedgerAccessBasis.Board,
-                                              treasurerName: treasurerName);
+                return Result(LedgerAccess.Read, LedgerAccessBasis.Board);
 
             // ── Administratören läser när det finns en kassör ──────────────────────────────
-            // ⚠️ Läser, inte nekas: klubbadmin sköter föreningens sidor och ska kunna se att
-            //    ekonomin är uppsatt och hjälpa kassören — men bokföringen är kassörens.
-            //    Samma för krets- och sajtadministratörer (IsClubAdminForClub viker in dem).
-            if (isAdmin)
-                return new LedgerAccessResult(LedgerAccess.Read, name, basis: LedgerAccessBasis.Admin,
-                                              treasurerName: treasurerName);
+            if (isAdmin) return Result(LedgerAccess.Read, LedgerAccessBasis.Admin);
 
-            // (Revisorn prövades först — se ovan. Den grenen är ALDRIG en vidgning av
-            //  IsBoardMemberOf: den flaggan styr också vilka som räknas i BESLUTSFÖRHETEN, och en
-            //  revisor som blir beslutsför i den styrelse hen granskar är ett allvarligare fel.)
+            // (Revisorn prövades först. Den grenen är ALDRIG en vidgning av IsBoardMemberOf: den
+            //  flaggan styr också BESLUTSFÖRHETEN.)
             return new LedgerAccessResult(LedgerAccess.None, name);
         }
 
@@ -198,20 +204,34 @@ namespace HpskSite.Services.Ledger
         /// <summary>Revisor (vald eller inbjuden) — läser, skriver aldrig.</summary>
         Auditor,
         /// <summary>Sajtens administratör — skriver alltid (support), utom som revisor.</summary>
-        SiteAdmin
+        SiteAdmin,
+        /// <summary>
+        /// Har fått rätten att arbeta med ekonomin (av kassören, ordföranden eller en
+        /// administratör) — samma rätt som kassören, tidsbegränsad.
+        /// </summary>
+        Delegate
     }
 
     public readonly struct LedgerAccessResult
     {
         public LedgerAccessResult(LedgerAccess access, string ownerName, bool isAuditor = false,
-                                  LedgerAccessBasis basis = LedgerAccessBasis.None, string? treasurerName = null)
+                                  LedgerAccessBasis basis = LedgerAccessBasis.None, string? treasurerName = null,
+                                  bool canManageWriteGrants = false)
         {
             Access = access;
             OwnerName = ownerName;
             IsAuditor = isAuditor;
             Basis = basis;
             TreasurerName = treasurerName ?? "";
+            CanManageWriteGrants = canManageWriteGrants;
         }
+
+        /// <summary>
+        /// Får den inloggade ge andra rätten att arbeta med ekonomin? Kassören, ordföranden,
+        /// administratören och sajtadmin — <b>aldrig</b> revisorn, och aldrig den som själv bara
+        /// fått rätten via listan. ⚠️ Kan vara sann för en LÄSARE: ordföranden läser men får ge.
+        /// </summary>
+        public bool CanManageWriteGrants { get; }
 
         public LedgerAccessBasis Basis { get; }
 

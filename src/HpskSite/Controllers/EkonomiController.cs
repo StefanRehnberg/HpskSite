@@ -131,6 +131,7 @@ namespace HpskSite.Controllers
                     : new List<HpskSite.Models.Ledger.LedgerIssuer> { live },
                 CanWrite = access.CanWrite,
                 AccessBasis = access.Basis,
+                CanManageWriteGrants = access.CanManageWriteGrants,
                 TreasurerName = access.TreasurerName,
                 IssuerName = name,
                 // Tillbakalänken: kassören ska inte behöva bläddra sig hem.
@@ -196,6 +197,12 @@ namespace HpskSite.Controllers
         /// <see cref="HpskSite.Services.Ledger.LedgerAccessBasis"/>.
         /// </summary>
         public HpskSite.Services.Ledger.LedgerAccessBasis AccessBasis { get; set; }
+
+        /// <summary>
+        /// Får den inloggade ge andra rätten att arbeta med ekonomin? ⚠️ Kan vara sann för en
+        /// LÄSARE (ordföranden), så kontrollerna på Behörigheter får aldrig gatas på CanWrite.
+        /// </summary>
+        public bool CanManageWriteGrants { get; set; }
 
         /// <summary>Kassörens namn när den inloggade läser. Tomt = ingen kassör registrerad.</summary>
         public string TreasurerName { get; set; } = "";
