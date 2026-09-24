@@ -92,8 +92,9 @@ namespace HpskSite.Services.Ledger
             var accounts = LoadAccounts(db, request.IssuerType, request.IssuerId);
             var roles = LoadRoleMap(db, request.IssuerType, request.IssuerId);
             var projects = LoadProjects(db, request.IssuerType, request.IssuerId);
+            var vatRegistered = LoadVatRegistered(db, request.IssuerType, request.IssuerId);
 
-            var built = BuildLines(request, accounts, roles, projects, out var buildError);
+            var built = BuildLines(request, accounts, roles, projects, vatRegistered, out var buildError);
             if (buildError is not null) return LedgerPostingResult.Failed(buildError);
 
             var imbalance = LedgerAmounts.Imbalance(built);
@@ -335,6 +336,7 @@ namespace HpskSite.Services.Ledger
             IReadOnlyDictionary<int, LedgerAccount> accounts,
             IReadOnlyDictionary<string, int> roles,
             IReadOnlyDictionary<int, LedgerProject> projects,
+            bool vatRegistered,
             out string? error)
         {
             error = null;
@@ -393,7 +395,12 @@ namespace HpskSite.Services.Ledger
                 }
 
                 var gross = line.Debit > 0 ? line.Debit : line.Credit;
-                var rate = line.VatRate ?? account.DefaultVatRate ?? 0m;
+                // ⚠️⚠️ MOMS BARA FÖR EN MOMSREGISTRERAD FÖRENING — här, i den enda vägen in i
+                //    liggaren, och inte hos varje anropare. Fram till 2026-09-24 räknades momsen ur
+                //    kontots sats oavsett registrering, så en sats satt av misstag (eller en förening
+                //    som avregistrerats) hade gett momsrader hos en förening som inte får ta ut moms.
+                //    Samma regel gäller en uttrycklig sats på raden.
+                var rate = vatRegistered ? line.VatRate ?? account.DefaultVatRate ?? 0m : 0m;
                 var (net, vat) = LedgerAmounts.SplitGross(gross, rate);
 
                 var posted = new LedgerJournalEntryLine
@@ -580,6 +587,38 @@ namespace HpskSite.Services.Ledger
                      AND StartDate <= @2 AND EndDate >= @2
                    ORDER BY Year"),
                 request.IssuerType, request.IssuerId, request.AccountingDate.Date);
+
+        /// <summary>
+        /// Är föreningen momsregistrerad? Saknas inställningsraden är svaret nej — samma förval
+        /// som uppsättningen skriver.
+        /// </summary>
+        private static bool LoadVatRegistered(IDatabase db, int issuerType, int issuerId)
+            => db.ExecuteScalar<int>(
+                LedgerSchema.Sql(issuerId,
+                    @"SELECT COUNT(1) FROM dbo.LedgerIssuerSettings
+                       WHERE IssuerType = @0 AND IssuerId = @1 AND IsVatRegistered = 1"),
+                issuerType, issuerId) > 0;
+
+        /// <summary>
+        /// Konteringen som <see cref="Post"/> SKULLE skriva — utan att skriva något.
+        ///
+        /// <para><b>⚠️ Samma <see cref="BuildLines"/> som bokföringen.</b> Bokför-ytans "Så bokförs
+        /// det" läser härifrån när momsen är med: två uträkningar av samma momsrad (en i
+        /// JavaScript, en här) kan glida isär på ett öre eller ett konto, och då godkänner
+        /// kassören en rad medan en annan bokförs.</para>
+        /// </summary>
+        public (List<LedgerJournalEntryLine> Lines, string? Error) Preview(LedgerPostingRequest request)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+
+            var accounts = LoadAccounts(db, request.IssuerType, request.IssuerId);
+            var roles = LoadRoleMap(db, request.IssuerType, request.IssuerId);
+            var projects = LoadProjects(db, request.IssuerType, request.IssuerId);
+            var vatRegistered = LoadVatRegistered(db, request.IssuerType, request.IssuerId);
+
+            var lines = BuildLines(request, accounts, roles, projects, vatRegistered, out var error);
+            return (lines, error);
+        }
 
         private static Dictionary<int, LedgerAccount> LoadAccounts(IDatabase db, int issuerType, int issuerId)
             => db.Fetch<LedgerAccount>(

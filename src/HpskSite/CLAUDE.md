@@ -4860,6 +4860,41 @@ Verifikationer/Tillgångar/Revisorer plus en kvittolänk i panel 4, som sedan ve
 byggdes visar **verifikationsnummer** för en bokförande förening. Regression efteråt: bokslut 25/25,
 ekonomisidan 59/59, enhetstesten 1363/1363.
 
+## Momsen — registreringen, satsen per konto, och grinden (2026-09-24)
+
+Efter Michael Henriksson (Åmåls PK). `LedgerIssuerSettings.IsVatRegistered` fanns men **gick inte
+att sätta från någon yta** — raden skapades med 0, så en momsregistrerad förening fick
+*"Föreningen är inte momsregistrerad"* på varje kvitto. Samtidigt räknade bokföringen moms ur
+kontots `DefaultVatRate` **utan att fråga om registreringen**.
+
+**⚠️⚠️ REGISTRERINGEN ÄR EN GRIND I BOKFÖRINGEN** — `LedgerPostingService.BuildLines` tar
+`vatRegistered` och sätter satsen till 0 för en oregistrerad förening, oavsett kontots sats eller
+en uttrycklig sats på raden. Här och inte hos anroparna: det är den enda vägen in i liggaren.
+A/B: utan grinden och utan uttrycklig riktning faller 3 av 31 i `LedgerVatTests` (2 grinden, 1
+riktningen).
+
+**⚠️⚠️ MOMSEN FÖLJER KONTOT, INTE VERIFIKATIONEN** (`LedgerVat`). Nästan alla registrerade
+föreningar momsar bara en del (kiosken, sponsringen — inte startavgifterna). Satsen sätts i
+kontoplanen (25/12/6, bara klass 3–7); Bokför förväljer kontots sats och kassören ändrar bara när
+en post avviker (`ManualEntryRequest.VatRate`: null = kontots, 0 = ingen).
+- **Riktningen följer KNAPPEN**, inte kontoklassen: `VatIsOutgoing = WeReceived`. En återbetalning
+  på ett intäktskonto är pengar UT och ska ha ingående moms — kontoklassens gissning gav utgående.
+- **Förhandsvisningen räknas av servern** (`PreviewManual` → `LedgerPostingService.Preview`, samma
+  `BuildLines`) när föreningen är registrerad. Sats, riktning, registrering och öresavrundning är
+  fyra saker att hålla lika på två ställen. Utan moms kvarstår JS-speglingen.
+- **Av vägras** när moms är bokförd (momsbelopp på raden ELLER rader på momsrollernas konton — en
+  SIE-import bär momsen som egna rader) i ett år som inte är fastställt.
+- **Momsnumret:** organisationsnumret godtas och byggs om till `SE…01`.
+- **Nej ⇒ momsraderna i "Vad hamnar var?" och kontoplanens momskolumn DÖLJS — avmappas ALDRIG.**
+
+⚠️ **`renderChart` har en egen `var show`** som skuggar hjälparen `show()`. Mitt anrop kastade
+"show is not a function", och varken kontoplanen eller rollraderna ritades. Påståendet "momsraderna
+döljs" var då grönt på en TOM tabell — sviten kräver nu att tabellen är ritad först, och läser bara
+radernas etiketter (varje rullgardin listar hela kontoplanen, 2610 inräknat).
+
+Svit: `hpsk-verify/ekonomi-moms-verify.mjs` 46/46 — oregistrerad FÖRST (kontot har redan 12 %, ingen
+momsrad får bokföras), sedan registrerad. **Ingen migrering** — kolumnerna fanns.
+
 ## Projektdimensionen — tävlingar och evenemang blir projekt (2026-09-23)
 
 Kvar-listans post 1. `LedgerProject` och `ProjectId` på konteringsraden fanns sedan 2026-09-18, men

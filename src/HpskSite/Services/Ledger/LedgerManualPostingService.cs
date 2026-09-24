@@ -53,8 +53,14 @@ namespace HpskSite.Services.Ledger
                     Number = a.Number,
                     Name = a.Name,
                     // Kontoklass 1 och 2 är balanskonton — pengarnas väg, inte vad de var.
-                    IsBalance = a.Number < 3000
+                    IsBalance = a.Number < 3000,
+                    DefaultVatRate = a.DefaultVatRate
                 }));
+
+            ctx.IsVatRegistered = ldb.ExecuteScalar<int>(
+                @"SELECT COUNT(1) FROM dbo.LedgerIssuerSettings
+                   WHERE IssuerType = @0 AND IssuerId = @1 AND IsVatRegistered = 1",
+                issuerType, issuerId) > 0;
 
             // Betalkontot föreslås ur rollmappningen, aldrig ur ett hårdkodat nummer.
             var roles = ldb.Fetch<LedgerAccountRole>(
@@ -189,6 +195,51 @@ namespace HpskSite.Services.Ledger
         }
 
         /// <summary>
+        /// "Så bokförs det", räknat av BOKFÖRINGEN — samma rader som <see cref="Post"/> skriver,
+        /// momsraden inräknad.
+        ///
+        /// <para><b>⚠️ Varför inte i JavaScript som förut:</b> utan moms är konteringen två rader
+        /// och går att spegla. Med moms avgör kontots sats, föreningens registrering, riktningen
+        /// och avrundningen till ören — fyra saker att hålla lika på två ställen. Ett öres
+        /// skillnad betyder att kassören godkände en rad och en annan bokfördes.</para>
+        /// </summary>
+        public (List<PreviewLine> Lines, string? Error) Preview(ManualEntryRequest r)
+        {
+            // ⚠️ Bara det konteringen hänger på. Text och datum fylls i medan förhandsvisningen
+            //    redan ska synas — att kräva dem här hade gjort rutan tom tills formuläret var klart.
+            if (r.Amount <= 0 || r.AccountNumber <= 0 || r.PaymentAccountNumber <= 0
+                || r.AccountNumber == r.PaymentAccountNumber)
+                return (new(), null);
+
+            if (!LedgerVat.IsAllowedRate(r.VatRate))
+                return (new(), "Momssatsen ska vara 25, 12 eller 6 procent — eller ingen moms.");
+
+            r.Description ??= "";
+
+            var (lines, error) = _posting.Preview(new LedgerPostingRequest
+            {
+                IssuerType = r.IssuerType,
+                IssuerId = r.IssuerId,
+                AccountingDate = (r.Date ?? DateTime.Today).Date,
+                Description = r.Description.Trim(),
+                SourceType = LedgerSourceType.Manual,
+                Lines = BuildLines(r)
+            });
+
+            if (error is not null) return (new(), error);
+
+            // Momsraden är den som INTE kom ur begäran: varken kontoraden eller betalkontot.
+            return (lines.Select(l => new PreviewLine
+            {
+                AccountNumber = l.AccountNumber,
+                AccountName = l.AccountName,
+                Debit = l.Debit,
+                Credit = l.Credit,
+                IsVat = l.AccountNumber != r.AccountNumber && l.AccountNumber != r.PaymentAccountNumber
+            }).ToList(), null);
+        }
+
+        /// <summary>
         /// Kontrollerna, som en ren funktion. <b>Ligger utanför databasen med flit</b> så reglerna
         /// går att pröva utan hela stacken.
         /// </summary>
@@ -216,6 +267,9 @@ namespace HpskSite.Services.Ledger
             if (r.AccountNumber == r.PaymentAccountNumber)
                 return "Posten skulle bokföras mot samma konto på båda sidor. Välj olika konton.";
 
+            if (!LedgerVat.IsAllowedRate(r.VatRate))
+                return "Momssatsen ska vara 25, 12 eller 6 procent — eller ingen moms.";
+
             return null;
         }
 
@@ -228,17 +282,27 @@ namespace HpskSite.Services.Ledger
         {
             var amount = r.Amount;
 
+            // ⚠️ Momsen hör till KONTORADEN, aldrig till betalkontot. Satsen är kassörens val om
+            //    hen ändrat den (null = kontots egen), och riktningen följer knappen: "Vi fick in"
+            //    är en försäljning (utgående moms), "Vi betalade" ett inköp (ingående). Utan den
+            //    uttryckliga riktningen gissar bokföringen på kontoklassen — och en återbetalning
+            //    på ett intäktskonto hade fått utgående moms fast pengarna gick ut.
+            //    Om moms alls bokförs avgör bokföringen: bara för en momsregistrerad förening.
+            var text = r.Description.Trim();
+
             // Vi betalade: kostnaden i debet, pengarna ut ur betalkontot (kredit).
             // Vi fick in:  pengarna in på betalkontot (debet), intäkten i kredit.
             return r.WeReceived
                 ? new List<LedgerPostingLine>
                 {
                     new() { AccountNumber = r.PaymentAccountNumber, Debit = amount, VatRate = 0 },
-                    new() { AccountNumber = r.AccountNumber, Credit = amount, Text = r.Description.Trim() }
+                    new() { AccountNumber = r.AccountNumber, Credit = amount, Text = text,
+                            VatRate = r.VatRate, VatIsOutgoing = true }
                 }
                 : new List<LedgerPostingLine>
                 {
-                    new() { AccountNumber = r.AccountNumber, Debit = amount, Text = r.Description.Trim() },
+                    new() { AccountNumber = r.AccountNumber, Debit = amount, Text = text,
+                            VatRate = r.VatRate, VatIsOutgoing = false },
                     new() { AccountNumber = r.PaymentAccountNumber, Credit = amount, VatRate = 0 }
                 };
         }
@@ -272,6 +336,12 @@ namespace HpskSite.Services.Ledger
         public int PaymentAccountNumber { get; set; }
 
         public int? ProjectId { get; set; }
+
+        /// <summary>
+        /// Momssatsen för just den här posten. <b>Null = kontots egen sats</b>; 0 = ingen moms.
+        /// Bokförs bara för en momsregistrerad förening.
+        /// </summary>
+        public decimal? VatRate { get; set; }
     }
 
     public class ManualPostingResult
@@ -298,6 +368,22 @@ namespace HpskSite.Services.Ledger
 
         /// <summary>Föreningens öppna projekt. Fältet är aldrig obligatoriskt.</summary>
         public List<ProjectOption> Projects { get; } = new();
+
+        /// <summary>
+        /// Momsregistrerad? Styr om ytan visar momsvalet och frågar servern om konteringen.
+        /// <para>⚠️ Bara ytans fråga — bokföringen avgör själv, oavsett vad ytan skickar.</para>
+        /// </summary>
+        public bool IsVatRegistered { get; set; }
+    }
+
+    /// <summary>En rad i förhandsvisningen "Så bokförs det".</summary>
+    public class PreviewLine
+    {
+        public int AccountNumber { get; set; }
+        public string AccountName { get; set; } = "";
+        public decimal Debit { get; set; }
+        public decimal Credit { get; set; }
+        public bool IsVat { get; set; }
     }
 
     public class ProjectOption
@@ -313,6 +399,9 @@ namespace HpskSite.Services.Ledger
 
         /// <summary>Kontoklass 1–2: pengarnas väg, inte vad de var.</summary>
         public bool IsBalance { get; set; }
+
+        /// <summary>Kontots momssats. Null = momsfritt.</summary>
+        public decimal? DefaultVatRate { get; set; }
     }
 
     public class RecentEntry

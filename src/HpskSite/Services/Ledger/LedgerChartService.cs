@@ -79,6 +79,7 @@ namespace HpskSite.Services.Ledger
                 IsActive = a.IsActive,
                 FromTemplate = a.FromTemplate,
                 EntryLines = used.FirstOrDefault(u => u.Number == a.Number)?.Rows ?? 0,
+                DefaultVatRate = a.DefaultVatRate,
                 // Rollerna som pekar hit. Ett konto de hänger på går inte att stänga.
                 Roles = roles.Where(r => r.AccountNumber == a.Number)
                              .Select(r => r.RoleKey)
@@ -288,6 +289,49 @@ namespace HpskSite.Services.Ledger
             }
         }
 
+        /// <summary>
+        /// Sätter kontots momssats. Null eller 0 = momsfritt.
+        ///
+        /// <para><b>⚠️ Ändrar bara framtiden.</b> Varje bokförd rad bär sin egen sats och sitt eget
+        /// momsbelopp (<see cref="LedgerJournalEntryLine.VatRate"/>), så en ny sats skriver aldrig
+        /// om en redan bokförd verifikation.</para>
+        ///
+        /// <para>⚠️ Satsen sparas även för en förening som inte är momsregistrerad — men den
+        /// bokförs inte förrän föreningen är det. Det är grinden i bokföringen, inte här.</para>
+        /// </summary>
+        public LedgerChartResult SetVatRate(int issuerType, int issuerId, int number, decimal? rate)
+        {
+            if (!LedgerVat.IsAllowedRate(rate))
+                return LedgerChartResult.Failed("Välj 25, 12 eller 6 procent — eller ingen moms.");
+
+            if (rate is > 0m && !LedgerVat.AccountCanCarryVat(number))
+                return LedgerChartResult.Failed(
+                    "Bara intäkts- och kostnadskonton (3000–7999) kan ha moms.");
+
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                var ldb = new LedgerDb(db, issuerId);
+
+                var rows = ldb.Execute(
+                    @"UPDATE dbo.LedgerAccount SET DefaultVatRate = @3
+                       WHERE IssuerType = @0 AND IssuerId = @1 AND Number = @2",
+                    issuerType, issuerId, number,
+                    rate is > 0m ? (object)rate.Value : DBNull.Value);
+
+                return rows > 0
+                    ? new LedgerChartResult { Number = number }
+                    : LedgerChartResult.Failed($"Konto {number} finns inte.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte sätta momssatsen på konto {Nummer} för {Typ}/{Id}.",
+                    number, issuerType, issuerId);
+
+                return LedgerChartResult.Failed("Momssatsen kunde inte sparas. Försök igen.");
+            }
+        }
+
         private class AccountUse
         {
             public int Number { get; set; }
@@ -312,6 +356,9 @@ namespace HpskSite.Services.Ledger
 
         /// <summary>Kontoroller som pekar hit. Är listan icke-tom går kontot inte att stänga.</summary>
         public List<string> Roles { get; set; } = new();
+
+        /// <summary>Momssatsen i procent. Null = momsfritt.</summary>
+        public decimal? DefaultVatRate { get; set; }
 
         /// <summary>1 och 2 är balanskonton — tillgångar och skulder.</summary>
         public bool IsBalance => Number < 3000;

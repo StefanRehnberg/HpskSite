@@ -1225,6 +1225,59 @@
                     }
 
                     @*
+                        ⚠️⚠️ MOMSEN (2026-09-24, Michael Henriksson, Åmåls PK). Flaggan fanns i
+                        datamodellen men gick inte att sätta från någon yta, så en momsregistrerad
+                        förening fick "inte momsregistrerad" på varje kvitto.
+
+                        ⚠️ Nej = momsraderna i "Vad hamnar var?" och momskolumnen i kontoplanen
+                        DÖLJS — men kontona står kvar mappade, så att den dag föreningen börjar
+                        momsa fungerar bokföringen direkt.
+
+                        ⚠️ Ja = satsen sätts per KONTO, inte per verifikation: föreningen momsar
+                        nästan alltid bara en del av verksamheten (kiosken, inte startavgifterna).
+                    *@
+                    <div class="ek-card wide" id="@(uid)_vatCard">
+                        <div class="ek-cardh">
+                            <h2>Moms</h2>
+                            <span class="meta" id="@(uid)_vatMeta"></span>
+                        </div>
+                        @if (Model.CanWrite)
+                        {
+                            <div class="fieldlabel" style="margin-top:0">Är föreningen momsregistrerad?</div>
+                            <label class="choice">
+                                <input type="radio" name="@(uid)_vat" id="@(uid)_vatNo" value="no">
+                                <span><strong>Nej</strong>
+                                    <span class="muted" style="display:block">Det vanliga för en
+                                    skytteförening. Ingen moms bokförs, och kvittona säger att
+                                    föreningen inte är momsregistrerad.</span></span>
+                            </label>
+                            <label class="choice">
+                                <input type="radio" name="@(uid)_vat" id="@(uid)_vatYes" value="yes">
+                                <span><strong>Ja, för hela eller en del av verksamheten</strong>
+                                    <span class="muted" style="display:block">Till exempel kiosken
+                                    eller sponsringen. Du sätter momssatsen på de konton det gäller
+                                    i kontoplanen nedan — momsen räknas sedan fram av sig själv när
+                                    du bokför på dem.</span></span>
+                            </label>
+                            <div class="d-none" id="@(uid)_vatNumberWrap" style="margin:10px 0 0 28px">
+                                <label class="form-label" for="@(uid)_vatNumber">Momsregistreringsnummer</label>
+                                <input type="text" class="form-control" id="@(uid)_vatNumber" maxlength="20"
+                                       style="max-width:18rem" placeholder="SE802412345601" autocomplete="off">
+                                <div class="form-text">Står på kvittona. Du kan också skriva bara organisationsnumret.</div>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:14px;margin-top:14px">
+                                <button type="button" class="btn btn-sm btn-primary" id="@(uid)_vatSave">Spara</button>
+                            </div>
+                            <div class="ek-alert ek-bad d-none" id="@(uid)_vatError" style="margin-top:12px"></div>
+                            <div class="ek-alert ek-ok d-none" id="@(uid)_vatOk" style="margin-top:12px"></div>
+                        }
+                        else
+                        {
+                            <div id="@(uid)_vatReadOnly" class="muted"></div>
+                        }
+                    </div>
+
+                    @*
                         ⚠️⚠️ HETTE "KONTOROLLER" OCH VISADE "12 mappade".
                         Stefan under provning: "Jag förstår inte vad 'Kontoroller' är för nåt och
                         vad de 12 mappade är, men jag förstår inte bokföring…" — och det är exakt
@@ -1295,6 +1348,8 @@
                                 <tr><th style="width:5rem">Konto</th>
                                     <th style="width:16rem">Namn</th>
                                     <th>Används till</th>
+                                    @* Bara för en momsregistrerad förening — se momskortet. *@
+                                    <th class="d-none" style="width:8rem" id="@(uid)_chartVatHead">Moms</th>
                                     <th class="n" style="width:6rem">Bokförda poster</th>
                                     <th style="width:9rem"></th></tr>
                             </thead>
@@ -1388,6 +1443,15 @@
 
                         <label class="fieldlabel" for="@(uid)_bAccount">Vilket konto hör det till?</label>
                         <select id="@(uid)_bAccount" class="form-select wide-in"></select>
+
+                        @* ⚠️ Bara för en momsregistrerad förening. Förvalet är KONTOTS sats —
+                           kassören ändrar bara när en post avviker (en kioskvara med annan sats).
+                           Beloppet ovan är alltid det som betalades, alltså inklusive moms. *@
+                        <div class="d-none" id="@(uid)_bVatWrap">
+                            <label class="fieldlabel" for="@(uid)_bVat">Moms</label>
+                            <select id="@(uid)_bVat" class="form-select wide-in"></select>
+                            <div class="why">Beloppet är det som betalades, med momsen i. Momsen räknas ut och bokförs på en egen rad.</div>
+                        </div>
 
                         <label class="fieldlabel" for="@(uid)_bPayAccount">Hur rörde sig pengarna?</label>
                         <select id="@(uid)_bPayAccount" class="form-select wide-in"></select>
@@ -4841,6 +4905,8 @@
             }).join('');
         el('accountSummary').textContent = status.accountCount + ' konton';
 
+        renderVat(status);
+
         // ⚠️ "Alla 12 mappade" sa ingenting till den som inte kan bokföring. Nu står antalet
         //    bara som en lugn bricka, och tabellen under säger vad kopplingarna ÄR.
         var missing = status.missingRoles || [];
@@ -4895,6 +4961,61 @@
         loadOverview();
     }
 
+    // ══ Moms ══════════════════════════════════════════════════════════════════════════════
+    // ⚠️ Registreringen är en GRIND i bokföringen (LedgerPostingService), inte bara ett val på
+    //    ytan: är föreningen inte registrerad bokförs ingen moms, vad kontot än säger.
+    function renderVat(status) {
+        var on = status.isVatRegistered === true;
+        el('vatMeta').textContent = on ? 'Momsregistrerad · ' + (status.vatNumber || '') : 'Inte momsregistrerad';
+
+        if (!canWrite) {
+            if (el('vatReadOnly')) el('vatReadOnly').textContent = on
+                ? 'Föreningen är momsregistrerad (' + (status.vatNumber || '') + '). Momsen följer kontona.'
+                : 'Föreningen är inte momsregistrerad. Ingen moms bokförs.';
+            return;
+        }
+
+        el('vatYes').checked = on;
+        el('vatNo').checked = !on;
+        if (status.vatNumber) el('vatNumber').value = status.vatNumber;
+        show(el('vatNumberWrap'), on);
+    }
+
+    if (canWrite) {
+        ['vatYes', 'vatNo'].forEach(function (id) {
+            el(id).addEventListener('change', function () {
+                show(el('vatNumberWrap'), el('vatYes').checked);
+                show(el('vatError'), false);
+                show(el('vatOk'), false);
+                if (el('vatYes').checked) el('vatNumber').focus();
+            });
+        });
+
+        el('vatSave').addEventListener('click', function () {
+            var btn = this;
+            show(el('vatError'), false);
+            show(el('vatOk'), false);
+            btn.disabled = true;
+
+            postJson('/umbraco/surface/EkonomiAdmin/SaveVatSettings', {
+                issuerType: issuerType, issuerId: issuerId,
+                registered: el('vatYes').checked,
+                vatNumber: el('vatNumber').value
+            }).then(function (d) {
+                btn.disabled = false;
+                if (!d.success) { el('vatError').textContent = d.message; show(el('vatError'), true); return; }
+                // Hela ytan ritas om ur den nya statusen: kontoplanens momskolumn, rollraderna
+                // och Bokför-formulärets momsval hänger alla på registreringen.
+                render(d.status, true);
+                el('vatOk').textContent = d.message;
+                show(el('vatOk'), true);
+            }).catch(function (e) {
+                btn.disabled = false;
+                el('vatError').textContent = e.message; show(el('vatError'), true);
+            });
+        });
+    }
+
     // ══ Bokför ═══════════════════════════════════════════════════════════════════════════
     var bokforCtx = null;
     var weReceived = false;
@@ -4926,6 +5047,9 @@
         // Förvalet sätts EFTER att listan fyllts, annars finns inget att välja bland.
         pickAccountForDirection();
 
+        show(el('bVatWrap'), c.isVatRegistered === true);
+        fillVatChoice();
+
         // ⚠️ Valet står KVAR efter en bokföring. En kassör som bokför fem kvitton till samma
         //    tävling ska inte behöva välja om projektet fem gånger — och valet syns i fältet.
         var projSel = el('bProject');
@@ -4949,10 +5073,91 @@
         renderPreview();
     }
 
-    // ⚠️⚠️ SPEGLAR LedgerManualPostingService.BuildLines. Två beskrivningar av samma kontering
-    //    kan glida isär, och då godkänner kassören en rad och en annan bokförs. Ändras den ena
-    //    MÅSTE den andra ändras — sviten LedgerManualPostingTests pinnar serverns sida.
+    // Momsvalet: "kontots sats" först, sedan satserna. Etiketten säger vad kontots sats ÄR —
+    // "Kontots sats" utan siffra är en fråga kassören inte kan svara på.
+    function fillVatChoice() {
+        var sel = el('bVat');
+        if (!sel || !bokforCtx || !bokforCtx.isVatRegistered) return;
+        var keep = sel.value;
+        var accNum = parseInt(el('bAccount').value, 10);
+        var acc = (bokforCtx.accounts || []).find(function (a) { return a.number === accNum; });
+        var rate = acc && acc.defaultVatRate ? Number(acc.defaultVatRate) : 0;
+
+        sel.innerHTML = '<option value="">' + (rate ? 'Kontots sats — ' + rate + ' %' : 'Kontots sats — ingen moms') + '</option>'
+            + [25, 12, 6].map(function (v) { return '<option value="' + v + '">' + v + ' %</option>'; }).join('')
+            + '<option value="0">Ingen moms på den här posten</option>';
+
+        // ⚠️ Ett avvikande val står bara kvar så länge kassören inte bytt konto — ett nytt konto
+        //    betyder en ny post, och då gäller dess egen sats.
+        sel.value = keep && sel.dataset.acc === String(accNum) ? keep : '';
+        sel.dataset.acc = String(accNum);
+    }
+
+    function vatChoice() {
+        var sel = el('bVat');
+        if (!sel || !bokforCtx || !bokforCtx.isVatRegistered || sel.value === '') return null;
+        return parseFloat(sel.value);
+    }
+
+    function manualRequest() {
+        return {
+            issuerType: issuerType, issuerId: issuerId,
+            amount: parseFloat(el('bAmount').value || '0') || 0,
+            weReceived: weReceived,
+            date: el('bDate').value || null,
+            description: el('bText').value,
+            accountNumber: parseInt(el('bAccount').value, 10) || 0,
+            paymentAccountNumber: parseInt(el('bPayAccount').value, 10) || 0,
+            projectId: parseInt(el('bProject').value, 10) || null,
+            vatRate: vatChoice()
+        };
+    }
+
+    // ⚠️⚠️ MED MOMS RÄKNAR SERVERN. Satsen, riktningen, registreringen och öresavrundningen är
+    //    fyra saker att hålla lika på två ställen — så en momsregistrerad förening får
+    //    konteringen ur bokföringens egen BuildLines (PreviewManual). Svar som kommer i fel
+    //    ordning kastas: bara det senaste anropet får rita.
+    var previewSeq = 0, previewTimer = null;
+    function renderServerPreview() {
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(function () {
+            var seq = ++previewSeq;
+            postJson('/umbraco/surface/EkonomiAdmin/PreviewManual', manualRequest()).then(function (d) {
+                if (seq !== previewSeq) return;
+                var lines = d.lines || [];
+                if (!d.success || lines.length === 0) {
+                    el('bPreview').innerHTML = '<tr><td colspan="4" class="muted">'
+                        + esc(d.message || 'Fyll i belopp och konto så visas konteringen här.') + '</td></tr>';
+                    return;
+                }
+                el('bPreview').innerHTML = lines.map(function (l) {
+                    return '<tr' + (l.isVat ? ' data-vat-line="1"' : '') + '><td>' + l.accountNumber + '</td>'
+                         + '<td>' + esc(l.accountName) + '</td>'
+                         + '<td class="n">' + (l.debit ? kr(l.debit) : '—') + '</td>'
+                         + '<td class="n">' + (l.credit ? kr(l.credit) : '—') + '</td></tr>';
+                }).join('');
+            }).catch(function () { });
+        }, 200);
+    }
+
+    // ⚠️⚠️ SPEGLAR LedgerManualPostingService.BuildLines — men BARA utan moms. Två beskrivningar
+    //    av samma kontering kan glida isär, och då godkänner kassören en rad och en annan
+    //    bokförs. Ändras den ena MÅSTE den andra ändras — sviten LedgerManualPostingTests pinnar
+    //    serverns sida. Med moms räknar servern (ovan).
     function renderPreview() {
+        if (bokforCtx && bokforCtx.isVatRegistered) {
+            fillVatChoice();
+            var ready = (parseFloat(el('bAmount').value || '0') || 0) > 0
+                && parseInt(el('bAccount').value, 10) && parseInt(el('bPayAccount').value, 10);
+            if (!ready) {
+                el('bPreview').innerHTML = '<tr><td colspan="4" class="muted">'
+                    + 'Fyll i belopp och konto så visas konteringen här.</td></tr>';
+                return;
+            }
+            renderServerPreview();
+            return;
+        }
+
         var amount = parseFloat(el('bAmount').value || '0') || 0;
         var accNum = parseInt(el('bAccount').value, 10);
         var payNum = parseInt(el('bPayAccount').value, 10);
@@ -5009,7 +5214,7 @@
 
     el('bPaid').addEventListener('click', function () { setDirection(false); });
     el('bGot').addEventListener('click', function () { setDirection(true); });
-    ['bAmount', 'bAccount', 'bPayAccount'].forEach(function (f) {
+    ['bAmount', 'bAccount', 'bPayAccount', 'bVat'].forEach(function (f) {
         el(f).addEventListener('input', renderPreview);
         el(f).addEventListener('change', renderPreview);
     });
@@ -5088,17 +5293,10 @@
         err.classList.add('d-none'); okBox.classList.add('d-none');
         btn.disabled = true;
 
-        postJson('/umbraco/surface/EkonomiAdmin/PostManual', {
-            issuerType: issuerType, issuerId: issuerId,
-            amount: parseFloat(el('bAmount').value || '0') || 0,
-            weReceived: weReceived,
-            date: el('bDate').value || null,
-            description: el('bText').value,
-            accountNumber: parseInt(el('bAccount').value, 10) || 0,
-            paymentAccountNumber: parseInt(el('bPayAccount').value, 10) || 0,
-            // ⚠️ 0 = "(inget projekt)" → null. Ett sandlådeprojekt har NEGATIVT id och är giltigt.
-            projectId: parseInt(el('bProject').value, 10) || null
-        })
+        // ⚠️ SAMMA begäran som förhandsvisningen (manualRequest) — det kassören såg under
+        //    "Så bokförs det" är det som bokförs, momssatsen inräknad.
+        //    projectId: 0 = "(inget projekt)" → null; ett sandlådeprojekt har NEGATIVT id och är giltigt.
+        postJson('/umbraco/surface/EkonomiAdmin/PostManual', manualRequest())
             .then(function (d) {
                 btn.disabled = false;
                 if (!d.success) {
@@ -6154,7 +6352,18 @@
     //
     // ⚠️⚠️ Kontoplanen gick inte att ändra från någon yta alls fram till 2026-09-22. För den som
     //    matar in förra årets bokföring är det blockerande: en förening har konton vi inte sått.
-    var chartAccounts = [], chartRoles = [], chartExpanded = false;
+    var chartAccounts = [], chartRoles = [], chartExpanded = false, chartVatRegistered = false;
+
+    // Momsvalet på en kontorad. Bara intäkter och kostnader kan ha moms (LedgerVat).
+    function vatCell(a) {
+        if (!chartVatRegistered) return '';
+        if (!a.canCarryVat) return '<td class="muted">—</td>';
+        var cur = a.defaultVatRate ? Number(a.defaultVatRate) : 0;
+        var opt = function (v, t) { return '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + t + '</option>'; };
+        return '<td><select class="form-select form-select-sm" data-vat-acc="' + a.number + '">'
+             + opt(0, 'Ingen') + opt(25, '25 %') + opt(12, '12 %') + opt(6, '6 %')
+             + '</select></td>';
+    }
 
     // ⚠️⚠️ KNAPPEN HETER VAD DEN GÖR. Den hette "Stäng", och det sa ingenting om vad som
     //    händer — Stefan 2026-09-22: "Vad menas med / vad gör, länken / knappen Stäng". Ett konto
@@ -6173,6 +6382,7 @@
              + '<td' + (a.isActive ? '' : ' class="chart-off"') + '>' + a.number + '</td>'
              + '<td>' + name + '</td>'
              + '<td class="muted">' + esc(uses) + '</td>'
+             + vatCell(a)
              + '<td class="n">' + (a.entryLines || 0) + '</td>'
              + '<td class="n"><button type="button" class="btn btn-sm btn-outline-secondary"'
              + ' data-toggle-acc="' + a.number + '" title="'
@@ -6195,6 +6405,20 @@
 
         var more = el('chartMore').querySelector('button');
         if (more) more.addEventListener('click', function () { chartExpanded = true; renderChart(); });
+
+        // ⚠️ INTE show() här — funktionens egen `var show` (raderna som visas) skuggar
+        //    hjälparen, och anropet kastade "show is not a function" så att varken kontoplanen
+        //    eller rollraderna ritades. Fångat av ekonomi-moms-verify.
+        el('chartVatHead').classList.toggle('d-none', !chartVatRegistered);
+        el('chartRows').querySelectorAll('select[data-vat-acc]').forEach(function (sel) {
+            sel.addEventListener('change', function () {
+                var rate = parseFloat(sel.value) || 0;
+                postJson('/umbraco/surface/EkonomiAdmin/SetAccountVatRate', {
+                    issuerType: issuerType, issuerId: issuerId,
+                    number: parseInt(sel.dataset.vatAcc, 10), rate: rate > 0 ? rate : null
+                }).then(chartDone).catch(chartFailed);
+            });
+        });
 
         // ⚠️ Namnet sparas när fältet lämnas, inte vid varje tangenttryck — annars blir varje
         //    bokstav ett anrop, och ett halvskrivet namn hinner sparas.
@@ -6220,7 +6444,12 @@
         //    lagt till 3015 ska kunna peka medlemsavgiften dit.
         var options = chartAccounts.filter(function (a) { return a.isActive; });
 
-        el('roleRows').innerHTML = chartRoles.map(function (r) {
+        // ⚠️⚠️ Momsraderna DÖLJS för en förening som inte är momsregistrerad — de avmappas
+        //    ALDRIG. Kontona står kvar kopplade, så att den dag föreningen börjar momsa fungerar
+        //    bokföringen direkt i stället för att fela mitt på en tävlingsdag.
+        var visible = chartRoles.filter(function (r) { return chartVatRegistered || !r.isVat; });
+
+        el('roleRows').innerHTML = visible.map(function (r) {
             // ⚠️⚠️ EN VALFRI ROLL MÅSTE KUNNA STÅ TOM. Utan det tomma alternativet väljs första
             //    kontot i listan automatiskt, och raden PÅSTÅR en koppling som inte finns —
             //    på en inställning vars hela poäng är att den är frivillig. Det tomma valet är
@@ -6397,6 +6626,7 @@
                 if (!d.success) throw new Error(d.message || 'Kontoplanen gick inte att läsa.');
                 chartAccounts = d.accounts || [];
                 chartRoles = d.roles || [];
+                chartVatRegistered = d.isVatRegistered === true;
                 renderChart();
                 renderRoles();
             })
