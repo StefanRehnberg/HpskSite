@@ -99,12 +99,12 @@ namespace HpskSite.Tests
         }
 
         /// <summary>
-        /// ⚠️ Riktningen följer knappen, inte kontoklassen. En återbetalning på ett intäktskonto
-        /// ("Vi betalade" på 3040) är pengar UT — med kontoklassens gissning hade den fått
-        /// utgående moms.
+        /// ⚠️⚠️ En återbetalning på ett intäktskonto ("Vi betalade" på 3040 — en kioskvara som
+        /// lämnas tillbaka) MINSKAR den utgående momsen: debet 2610. Första versionen lät knappen
+        /// styra och gav ingående moms — rätt netto, fel rutor i momsdeklarationen.
         /// </summary>
         [Fact]
-        public void Aterbetalning_pa_intaktskonto_ger_ingaende_moms_efter_knappen()
+        public void Aterbetalning_pa_intaktskonto_minskar_utgaende_moms()
         {
             var lines = Build(new ManualEntryRequest
             {
@@ -112,8 +112,8 @@ namespace HpskSite.Tests
                 Description = "Återbetald kioskvara", AccountNumber = 3040, PaymentAccountNumber = 1930
             }, vatRegistered: true);
 
-            lines.Should().Contain(l => l.AccountNumber == 2640 && l.Debit == 12m);
-            lines.Should().NotContain(l => l.AccountNumber == 2610);
+            lines.Should().Contain(l => l.AccountNumber == 2610 && l.Debit == 12m);
+            lines.Should().NotContain(l => l.AccountNumber == 2640);
         }
 
         [Fact]

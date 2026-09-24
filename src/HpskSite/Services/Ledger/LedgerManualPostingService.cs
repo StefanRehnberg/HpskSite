@@ -283,11 +283,16 @@ namespace HpskSite.Services.Ledger
             var amount = r.Amount;
 
             // ⚠️ Momsen hör till KONTORADEN, aldrig till betalkontot. Satsen är kassörens val om
-            //    hen ändrat den (null = kontots egen), och riktningen följer knappen: "Vi fick in"
-            //    är en försäljning (utgående moms), "Vi betalade" ett inköp (ingående). Utan den
-            //    uttryckliga riktningen gissar bokföringen på kontoklassen — och en återbetalning
-            //    på ett intäktskonto hade fått utgående moms fast pengarna gick ut.
-            //    Om moms alls bokförs avgör bokföringen: bara för en momsregistrerad förening.
+            //    hen ändrat den (null = kontots egen). Om moms alls bokförs avgör bokföringen: bara
+            //    för en momsregistrerad förening.
+            //
+            // ⚠️⚠️ RIKTNINGEN FÖLJER KONTOKLASSEN, INTE KNAPPEN (rättat samma dag, 2026-09-24).
+            //    Första versionen satte VatIsOutgoing = WeReceived. Då blev en återbetalning på ett
+            //    intäktskonto ("Vi betalade" på 3040 — en kioskvara som lämnas tillbaka) INGÅENDE
+            //    moms. Det är fel: en returnerad försäljning MINSKAR den utgående momsen (debet
+            //    2610). Nettot att betala blev detsamma, men momsdeklarationens rutor fel — ruta 48
+            //    upp i stället för ruta 05/11 ned. Bokföringens egen regel (klass 3 = utgående,
+            //    annars ingående) är den rätta, så inget uttryckligt val här.
             var text = r.Description.Trim();
 
             // Vi betalade: kostnaden i debet, pengarna ut ur betalkontot (kredit).
@@ -296,13 +301,11 @@ namespace HpskSite.Services.Ledger
                 ? new List<LedgerPostingLine>
                 {
                     new() { AccountNumber = r.PaymentAccountNumber, Debit = amount, VatRate = 0 },
-                    new() { AccountNumber = r.AccountNumber, Credit = amount, Text = text,
-                            VatRate = r.VatRate, VatIsOutgoing = true }
+                    new() { AccountNumber = r.AccountNumber, Credit = amount, Text = text, VatRate = r.VatRate }
                 }
                 : new List<LedgerPostingLine>
                 {
-                    new() { AccountNumber = r.AccountNumber, Debit = amount, Text = text,
-                            VatRate = r.VatRate, VatIsOutgoing = false },
+                    new() { AccountNumber = r.AccountNumber, Debit = amount, Text = text, VatRate = r.VatRate },
                     new() { AccountNumber = r.PaymentAccountNumber, Credit = amount, VatRate = 0 }
                 };
         }
