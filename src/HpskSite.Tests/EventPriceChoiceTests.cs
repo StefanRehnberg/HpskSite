@@ -111,7 +111,8 @@ namespace HpskSite.Tests
 
             var fel = ClubEventParticipationService.PriceChoiceError(ctx, null);
             fel.Should().NotBeNull("en trasig prislista far aldrig ge en gratis anmalan");
-            fel!.ToLowerInvariant().Should().Contain("ingen anmalan gjordes");
+            // Meddelandet skrivs med å/ä/ö sedan 2026-09-25 (Joakim, Tomelilla PK).
+            fel!.ToLowerInvariant().Should().Contain("ingen anmälan gjordes");
         }
 
         // ── Noll kronor är ett pris ─────────────────────────────────────────────────────────
