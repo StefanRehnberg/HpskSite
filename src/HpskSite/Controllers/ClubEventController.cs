@@ -1913,7 +1913,7 @@ namespace HpskSite.Controllers
                     if (current.Unreadable)
                     {
                         needsHuman.Add(new { id = node.Id, name = node.Name, raw = "(eventPrices)",
-                            reason = "Prisraderna gar inte att lasa - kontrollera innehallet for hand." });
+                            reason = "Prisraderna går inte att läsa — kontrollera innehållet för hand." });
                         continue;
                     }
 

@@ -478,14 +478,14 @@ namespace HpskSite.Services
         public static string? PriceChoiceError(ClubEventContext ctx, string? priceId)
         {
             if (ctx.Prices.Unreadable)
-                return "Evenemangets priser gar inte att lasa. Kontakta arrangoren - ingen anmalan gjordes.";
+                return "Evenemangets priser går inte att läsa. Kontakta arrangören — ingen anmälan gjordes.";
             if (ctx.Prices.Rows.Count <= 1) return null;
             if (ResolvePriceChoice(ctx, priceId) != null) return null;
 
             var val = string.Join(", ", ctx.Prices.Rows.Select(r => r.Label));
             return string.IsNullOrWhiteSpace(priceId)
-                ? $"Valj vilket pris som galler for dig: {val}."
-                : "Priset du valde finns inte langre pa evenemanget. Ladda om sidan och valj igen.";
+                ? $"Välj vilket pris som gäller för dig: {val}."
+                : "Priset du valde finns inte längre på evenemanget. Ladda om sidan och välj igen.";
         }
 
         public async Task<(bool Ok, string? Message, bool IsReserve)> SignUpAsync(
