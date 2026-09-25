@@ -138,15 +138,62 @@
 
     const $ = id => document.getElementById(id);
     function token() { return document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''; }
+    // ⚠️⚠️ Ett anrop som inte gick fram får ALDRIG vara tyst. post()/get() gjorde tidigare
+    // `.then(r => r.json())`, så ett felsvar (400 när säkerhetstoken inte längre stämmer, 500,
+    // en inloggningssida i stället för JSON) blev ett avvisat löfte som ingen fångade: ingen ruta,
+    // inget fel, och knappen såg ut att ha fungerat. Så "skickades" en kallelse 2026-09-25 som
+    // aldrig nådde servern. Nu visas felet i klartext (svReportRequestFailure) OCH löftet avvisas,
+    // så att laddarnas egna .catch() fortsätter visa sin felruta i stället för en tom lista.
+    // Servern som svarar {success:false} är ett annat fall — det hanterar varje anropare själv.
+    function svRequest(url, opts) {
+        return fetch(url, opts).then(
+            r => r.text().then(text => {
+                let data = null;
+                try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+                if (r.ok && data !== null) return data;
+                throw svRequestError(r.status, data);
+            }),
+            () => { throw svRequestError(0, null); }
+        );
+    }
+    function svRequestError(status, data) {
+        let msg, reload = false;
+        if (status === 0) msg = 'Ingen kontakt med servern. Kontrollera uppkopplingen och försök igen.';
+        else if (status === 400) { msg = 'Sidan har varit öppen för länge eller så har du loggat in/ut sedan den laddades. Ladda om sidan och försök igen.'; reload = true; }
+        else if (status === 401 || status === 403) { msg = 'Du verkar inte vara inloggad längre. Ladda om sidan och logga in igen.'; reload = true; }
+        else if (status >= 500) msg = 'Servern kunde inte utföra åtgärden (fel ' + status + '). Försök igen om en stund.';
+        else if (status >= 200 && status < 300) { msg = 'Svaret från servern gick inte att läsa — du kan ha blivit utloggad. Ladda om sidan och försök igen.'; reload = true; }
+        else msg = 'Åtgärden gick inte att utföra (fel ' + status + ').';
+        if (data && data.message) msg = data.message;
+        svReportRequestFailure(msg, reload);
+        const err = new Error(msg); err.status = status; err.shown = true;
+        return err;
+    }
+    // Inline-ruta, inte alert(): en blockerande dialog har tidigare rapporterats som att sidan frös.
+    function svReportRequestFailure(msg, reload) {
+        let box = document.getElementById('svRequestError');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'svRequestError';
+            box.setAttribute('role', 'alert');
+            box.className = 'alert alert-danger shadow d-flex align-items-start gap-2';
+            box.style.cssText = 'position:fixed;top:1rem;left:50%;transform:translateX(-50%);z-index:2000;max-width:min(640px,calc(100% - 32px));';
+            document.body.appendChild(box);
+        }
+        box.innerHTML = '<i class="bi bi-exclamation-triangle-fill mt-1"></i>' +
+            '<div class="flex-grow-1"><strong>Det gick inte.</strong> ' + esc(msg) +
+            (reload ? '<div class="mt-2"><button type="button" class="btn btn-sm btn-danger" onclick="location.reload()">Ladda om sidan</button></div>' : '') +
+            '</div><button type="button" class="btn-close" aria-label="Stäng" onclick="this.parentNode.remove()"></button>';
+    }
     function post(ctrl, action, params) {
-        return fetch('/umbraco/surface/' + ctrl + '/' + action, {
+        return svRequest('/umbraco/surface/' + ctrl + '/' + action, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() },
             body: new URLSearchParams(params).toString()
-        }).then(r => r.json());
+        });
     }
     function get(ctrl, action, qs) {
-        return fetch('/umbraco/surface/' + ctrl + '/' + action + '?' + new URLSearchParams(qs).toString()).then(r => r.json());
+        return svRequest('/umbraco/surface/' + ctrl + '/' + action + '?' + new URLSearchParams(qs).toString());
     }
     function esc(s) {
         if (s === null || s === undefined) return '';
