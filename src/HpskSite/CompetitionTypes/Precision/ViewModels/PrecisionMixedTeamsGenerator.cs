@@ -16,7 +16,9 @@ namespace HpskSite.CompetitionTypes.Precision.ViewModels
             _maxPerTeam = maxPerTeam;
             _startTime = startTime;
             _intervalMinutes = intervalMinutes;
-            _memberSortOrder = memberSortOrder = "FirstName";
+            // ⚠️ Stod `= memberSortOrder = "FirstName"` — parametern skrevs över, så sorteringsvalet
+            //    ignorerades alltid. Förvalet är fortfarande förnamn när inget anges.
+            _memberSortOrder = string.IsNullOrWhiteSpace(memberSortOrder) ? "FirstName" : memberSortOrder;
         }
 
         public List<StartListTeam> GenerateStartLists()
@@ -27,6 +29,15 @@ namespace HpskSite.CompetitionTypes.Precision.ViewModels
             regs.AddRange(this.GetRegsOrderedByRegs(_registrations));
             var teamNumber = 1;
 
+            // ⚠️⚠️ STARTTIDEN FLYTTAS FRAM ETT INTERVALL PER SKJUTLAG. Stod förut
+            //    StartTime = _startTime och EndTime = _startTime + 0 för VARJE lag, så alla skjutlag
+            //    fick samma tid och intervallet användes aldrig (Michael Henriksson, Åmåls PK
+            //    2026-09-24: "intervall 2h men bägge skjutlagen får samma starttid"). Samma regel som
+            //    de andra formaten i StartListGenerator: start, slut = start + intervall, nästa start
+            //    = slut. ⚠️ Särskilt viktigt här: med blandade vapengrupper står samma skytt i FLERA
+            //    lag, och samma tid betyder att hen ska skjuta två gånger samtidigt.
+            var currentStart = _startTime;
+
             while (regs.Count > 0)
             {
                 regs = this.GetRegsOrderedByRegs(regs);
@@ -34,11 +45,12 @@ namespace HpskSite.CompetitionTypes.Precision.ViewModels
 
                 if (shooters?.Count > 0)
                 {
+                    var end = currentStart.Add(TimeSpan.FromMinutes(_intervalMinutes));
                     var team = new StartListTeam
                     {
                         TeamNumber = teamNumber,
-                        StartTime = FormatTime(_startTime),
-                        EndTime = FormatTime(_startTime.Add(new TimeSpan())),
+                        StartTime = FormatTime(currentStart),
+                        EndTime = FormatTime(end),
                         ShooterCount = shooters.Count,
                         WeaponClasses = shooters.Select(r => r.WeaponClass).Distinct().OrderBy(c => c).ToList(),
                         Shooters = shooters
@@ -46,6 +58,7 @@ namespace HpskSite.CompetitionTypes.Precision.ViewModels
 
                     teams.Add(team);
                     teamNumber++;
+                    currentStart = end;
                 }
             }
 
