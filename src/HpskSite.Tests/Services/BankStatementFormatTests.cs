@@ -303,15 +303,78 @@ namespace HpskSite.Tests.Services
             var svc = new HpskSite.Services.Ledger.LedgerBankImportService(null!, null!);
             var (map, sample, header) = svc.Preview(bytes);
 
-            header.Should().Equal("Kolumn 1", "Kolumn 2", "Kolumn 3");
-            map.Date.Should().Be(-1, "rubrikerna känns inte igen — operatören väljer");
+            // ⚠️ Sedan 2026-09-25: rubrikraden är raden närmast före första datumraden, så kassören
+            //    får BANKENS namn att välja bland (inte "Kolumn 1…N"), och datumet läses ur datat.
+            header.Should().Equal("Dag", "Vad", "Summa");
+            map.HeaderRow.Should().Be(0);
+            map.Date.Should().Be(0, "datumkolumnen syns i datat");
+            map.Amount.Should().Be(-1, "\"Summa\" känns inte igen — ett belopp gissas aldrig ur datat");
             sample.Should().NotBeEmpty();
 
-            // Operatören pekar ut kolumnerna. Rubrikraden "Dag;Vad;Summa" hoppas över MED ett skäl.
-            map.Date = 0; map.Text = 1; map.Amount = 2;
+            // Operatören pekar ut beloppet. Rubrikraden hoppas över utan att räknas som överhoppad.
+            map.Text = 1; map.Amount = 2;
             var parsed = svc.Parse(bytes, map);
             parsed.Rows.Select(r => r.Amount).Should().Equal(270.00m, -120.50m);
-            parsed.Skipped.Should().ContainSingle(s => s.StartsWith("Rad 1"));
+            parsed.Skipped.Should().BeEmpty();
+        }
+
+        /// <summary>
+        /// ⚠️⚠️ MICHAELS RIKTIGA FORMAT (Dalslands Sparbank, bild 2026-09-25): FÖRKORTADE rubriker —
+        /// "Bokfdag", "Transdag", "Valutadag" — och kolumnen "Text" efter "Referens". Utan dem
+        /// hittades inget datum, knappen "Läs in" doldes och han såg en ifylld mappning utan någon
+        /// väg att spara. Mitt Swedbank-exempel ovan hade de LÅNGA rubrikerna och kunde inte falla.
+        /// </summary>
+        private const string Dalsland =
+              "* Transaktionsrapport Period 2025-01-01 – 2025-12-31 Skapad 2026-09-24 16:41 CEST\n"
+            + "Radnr,Clnr,Kontonr,Produkt,Valuta,Bokfdag,Transdag,Valutadag,Referens,Text,Belopp,Saldo\n"
+            + "1,XXXXXXX,XXXXXXXX,\"Föreningskonto\",SEK,2025-12-30,2025-12-30,2025-12-30,\"Polismyndigheten\",\"Bg-bet. via internet\",-360.00,122860.80\n"
+            + "2,XXXXXXX,XXXXXXXX,\"Föreningskonto\",SEK,2025-12-22,2025-12-22,2025-12-22,\"Swish\",\"Kalle Karlsson\",270.00,123220.80\n";
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void Michaels_fil_med_forkortade_rubriker_lases(bool windows1252)
+        {
+            var bytes = windows1252 ? System.Text.Encoding.Latin1.GetBytes(Dalsland) : Encoding.UTF8.GetBytes(Dalsland);
+            var svc = new HpskSite.Services.Ledger.LedgerBankImportService(null!, null!);
+            var (map, _, header) = svc.Preview(bytes);
+
+            map.HeaderRow.Should().Be(1, "informationsraden är ingen rubrik");
+            header[5].Should().Be("Bokfdag");
+            map.Date.Should().Be(5, "Bokfdag är bokföringsdagen");
+            map.Text.Should().Be(9, "\"Text\" går före \"Referens\"");
+            map.Amount.Should().Be(10);
+            map.Balance.Should().Be(11);
+
+            var parsed = svc.Parse(bytes, map);
+            parsed.Skipped.Should().BeEmpty();
+            parsed.Rows.Select(r => r.Amount).Should().Equal(-360.00m, 270.00m);
+            parsed.Rows[0].BookedDate.Should().Be(new DateTime(2025, 12, 30));
+            parsed.Rows[0].Text.Should().Be("Bg-bet. via internet");
+        }
+
+        /// <summary>"Bokfört saldo" börjar också på "bokf" — det får aldrig bli datumkolumnen.</summary>
+        [Fact]
+        public void Bokfort_saldo_blir_aldrig_datum()
+        {
+            var g = BankStatementFormat.GuessColumns(new[] { "Bokfört saldo", "Bokfdag", "Belopp" });
+            g.Date.Should().Be(1);
+            g.Balance.Should().Be(0);
+        }
+
+        /// <summary>
+        /// Känns ingen rubrik igen som datum läses datumkolumnen ur DATAT — den kolumn där varje
+        /// exempelrad är ett otvetydigt datum.
+        /// </summary>
+        [Fact]
+        public void Datumkolumnen_hittas_i_datat_nar_rubriken_ar_okand()
+        {
+            var csv = "Nr;Dag;Belopp\n1;2026-09-01;270,00\n2;2026-09-02;-120,50\n";
+            var svc = new HpskSite.Services.Ledger.LedgerBankImportService(null!, null!);
+            var (map, _, _) = svc.Preview(Encoding.UTF8.GetBytes(csv));
+
+            map.Date.Should().Be(1);
+            map.Amount.Should().Be(2);
         }
 
         [Fact]

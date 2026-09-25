@@ -68,6 +68,19 @@ namespace HpskSite.Services.Ledger
                 .ToList();
 
             var headerRow = BankStatementFormat.FindHeaderRow(rows);
+
+            // ⚠️ Kände vi inte igen rubrikerna är rubrikraden ändå oftast raden NÄRMAST FÖRE den
+            //    första raden med ett datum — om den har lika många kolumner. Då får kassören
+            //    bankens egna namn att välja bland i stället för "Kolumn 1…N", och raden hoppas över
+            //    i stället för att läsas som en transaktion.
+            if (headerRow < 0)
+            {
+                var firstData = rows.FindIndex(r => r.Length >= 2 && r.Any(c => BankStatementFormat.TryDate(c, out _)));
+                if (firstData > 0 && rows[firstData - 1].Length == rows[firstData].Length
+                    && !rows[firstData - 1].Any(c => BankStatementFormat.TryDate(c, out _)))
+                    headerRow = firstData - 1;
+            }
+
             var header = headerRow >= 0 ? rows[headerRow] : Array.Empty<string>();
             var guess = BankStatementFormat.GuessColumns(header);
 
@@ -99,6 +112,18 @@ namespace HpskSite.Services.Ledger
 
             // Ett par rader under rubriken räcker för att operatören ska känna igen sin fil.
             var sample = rows.Skip(headerRow + 1).Take(5).ToList();
+
+            // ⚠️ DATUMET UR DATAT när rubrikerna inte räckte: den första kolumn där VARJE
+            //    exempelrad är ett otvetydigt datum. Det är säkert just för datum — TryDate vägrar
+            //    03/04/2026 — medan ett belopp aldrig gissas ur datat (radnummer ser ut som belopp).
+            if (mapping.Date < 0 && sample.Count > 0)
+            {
+                var width = sample.Max(r => r.Length);
+                for (int c = 0; c < width; c++)
+                    if (sample.All(r => c < r.Length && BankStatementFormat.TryDate(r[c], out _)))
+                    { mapping.Date = c; break; }
+            }
+
             return (mapping, sample, header);
         }
 

@@ -290,13 +290,23 @@ namespace HpskSite.Models.Ledger
                 var h = (header[i] ?? "").Trim().ToLowerInvariant();
                 if (h.Length == 0) continue;
 
-                if (g.Date < 0 && (h.Contains("bokför") || h.Contains("bokfor")
-                    || h.Contains("transaktionsdat") || h == "datum" || h.Contains("date")))
+                // ⚠️⚠️ FÖRKORTADE RUBRIKER. Swedbanks plattform (Dalslands Sparbank m.fl.) skriver
+                //    "Bokfdag", "Transdag", "Valutadag" — varken "bokför" eller "transaktionsdat".
+                //    Utan dem hittades inget datum, knappen "Läs in" doldes, och kassören såg en
+                //    ifylld mappning utan någon väg att spara (Michael Henriksson 2026-09-25).
+                //    ⚠️ Men "Bokfört saldo" börjar också på "bokf" — ett datum får aldrig vara en
+                //    saldo- eller beloppskolumn.
+                var looksLikeDate = h.Contains("datum") || h.Contains("date")
+                    || h.StartsWith("bokf") || h.Contains("transaktionsdag") || h.Contains("transdag");
+                var isMoneyWord = h.Contains("saldo") || h.Contains("belopp") || h.Contains("balance") || h.Contains("amount");
+
+                if (g.Date < 0 && looksLikeDate && !isMoneyWord)
                     g.Date = i;
 
-                else if (g.Text < 0 && (h.Contains("text") || h.Contains("beskriv")
-                    || h.Contains("meddeland") || h.Contains("referens")
-                    || h.Contains("motpart") || h.Contains("description")))
+                // ⚠️ "Text" före "Referens": referensen är ofta bara "Swish" eller ett OCR-nummer,
+                //    texten är motparten. Referensen tas bara om det inte finns något bättre (nedan).
+                else if (g.Text < 0 && (h == "text" || h.Contains("beskriv") || h.Contains("transaktionstext")
+                    || h.Contains("meddeland") || h.Contains("motpart") || h.Contains("description")))
                     g.Text = i;
 
                 else if (g.AmountOut < 0 && (h.Contains("uttag") || h.Contains("utbetal")))
@@ -309,6 +319,14 @@ namespace HpskSite.Models.Ledger
                 else if (g.Balance < 0 && (h.Contains("saldo") || h.Contains("balance")))
                     g.Balance = i;
             }
+
+            // Referensen som text, bara när ingen bättre textkolumn fanns.
+            if (g.Text < 0)
+                for (int i = 0; i < header.Length; i++)
+                {
+                    var h = (header[i] ?? "").Trim().ToLowerInvariant();
+                    if (h.Contains("text") || h.Contains("referens")) { g.Text = i; break; }
+                }
 
             return g;
         }

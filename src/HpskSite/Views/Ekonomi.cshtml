@@ -1849,7 +1849,8 @@
 
                         <div style="margin-top:1rem">
                             <button type="button" class="btn btn-primary d-none"
-                                    id="@(uid)_bankImport">Läs in</button>
+                                    id="@(uid)_bankImport">Läs in kontoutdraget</button>
+                            <span class="muted" style="margin-left:10px" id="@(uid)_bankImportWhy"></span>
                         </div>
                     </div>
                 }
@@ -4900,7 +4901,16 @@
         // ⚠️ Utan datum OCH ett belopp gar filen inte att lasa alls. En knapp som gar att trycka
         //    men alltid misslyckas ar samre an en som sager varfor den ar av.
         var usable = !!m && m.date >= 0 && (m.amount >= 0 || m.amountOut >= 0);
-        show(el('bankImport'), usable);
+        // ⚠️⚠️ KNAPPEN SYNS ALLTID när filen är läst — avstängd, med skälet, tills den går att
+        //    använda. Den doldes förut, och Michael Henriksson (2026-09-25) såg en ifylld mappning
+        //    utan någon knapp: "Dock saknar jag spara". En saknad knapp läses som att funktionen
+        //    inte finns; en avstängd knapp med ett skäl säger vad som återstår.
+        show(el('bankImport'), !!m);
+        el('bankImport').disabled = !usable;
+        el('bankImport').textContent = 'Läs in kontoutdraget';
+        el('bankImportWhy').textContent = !m || usable ? ''
+            : (m.date < 0 ? 'Välj vilken kolumn som är datum' : 'Välj vilken kolumn som är beloppet')
+              + ' ovan, så går det att läsa in.';
     }
 
     async function bankPreview(file) {
@@ -4971,6 +4981,7 @@
             show(el('bankOk'), true);
             show(el('bankMapBox'), false);
             show(el('bankImport'), false);
+            el('bankImportWhy').textContent = '';
             el('bankFile').value = '';
             bankMap = null;
 
