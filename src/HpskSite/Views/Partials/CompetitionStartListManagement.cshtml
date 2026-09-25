@@ -1697,10 +1697,10 @@ function createTeamCard(team, index, isOfficial) {
                                         <i class="bi bi-three-dots-vertical"></i>
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end">
-                                        <li><a class="dropdown-item" href="#" onclick="moveShooterPosition(${shooter.memberId}, 'up'); return false;">
+                                        <li><a class="dropdown-item" href="#" onclick="moveShooterPosition(${shooter.memberId}, 'up', ${team.teamNumber}); return false;">
                                             <i class="bi bi-arrow-up me-2"></i>Flytta upp
                                         </a></li>
-                                        <li><a class="dropdown-item" href="#" onclick="moveShooterPosition(${shooter.memberId}, 'down'); return false;">
+                                        <li><a class="dropdown-item" href="#" onclick="moveShooterPosition(${shooter.memberId}, 'down', ${team.teamNumber}); return false;">
                                             <i class="bi bi-arrow-down me-2"></i>Flytta ner
                                         </a></li>
                                         <li><hr class="dropdown-divider"></li>
@@ -1815,6 +1815,8 @@ function getSelectedShooters() {
 // Move shooters modal
 let moveShootersModal = null;
 let currentMoveShooterIds = [];
+// ⚠️ Starterna som ska flyttas: medlem OCH skjutlag, se moveShooterPosition.
+let currentMoveShooterRefs = [];
 
 function openMoveShootersModal() {
     const selected = getSelectedShooters();
@@ -1824,6 +1826,7 @@ function openMoveShootersModal() {
     }
 
     currentMoveShooterIds = selected.map(s => s.memberId);
+    currentMoveShooterRefs = selected.map(s => ({ memberId: s.memberId, teamNumber: s.currentTeam || 0 }));
     document.getElementById('moveShooterCount').textContent = selected.length;
 
     // Populate team select (exclude teams that all selected shooters are already in)
@@ -1846,6 +1849,7 @@ function openMoveShootersModal() {
 // Move a single shooter (from dropdown menu)
 function openMoveShooterModal(memberId, name, currentTeam) {
     currentMoveShooterIds = [memberId];
+    currentMoveShooterRefs = [{ memberId: memberId, teamNumber: currentTeam || 0 }];
     document.getElementById('moveShooterCount').textContent = `1 (${name})`;
 
     // Populate team select excluding current team
@@ -1887,8 +1891,8 @@ function confirmMoveShooters() {
         : '/umbraco/surface/PrecisionStartList/MoveShooterToTeam';
 
     const body = currentMoveShooterIds.length > 1
-        ? { startListId: window.currentStartListId, memberIds: currentMoveShooterIds, targetTeamNumber: targetTeam }
-        : { startListId: window.currentStartListId, memberId: currentMoveShooterIds[0], targetTeamNumber: targetTeam };
+        ? { startListId: window.currentStartListId, memberIds: currentMoveShooterIds, shooters: currentMoveShooterRefs, targetTeamNumber: targetTeam }
+        : { startListId: window.currentStartListId, memberId: currentMoveShooterIds[0], sourceTeamNumber: (currentMoveShooterRefs[0] && currentMoveShooterRefs[0].teamNumber) || 0, targetTeamNumber: targetTeam };
 
     fetch(endpoint, {
         method: 'POST',
@@ -2046,7 +2050,10 @@ function openAddShooterToTeamModal(teamNumber) {
 // Move shooter up or down by one position within their current team. Calls
 // PrecisionStartListController.MoveShooterPosition which swaps with the adjacent shooter
 // and renumbers the team's positions. Works for both qualifying and finals lists.
-function moveShooterPosition(memberId, direction) {
+// ⚠️ teamNumber: en medlem kan stå i FLERA skjutlag (en start per vapengrupp, "Mixade vapengrupper
+//    per skjutlag"). Utan skjutlaget flyttade servern skytten i det FÖRSTA laget där hen fanns —
+//    Michael Henriksson 2026-09-24: "Skyttan kan inte flyttas längre" på fel lag.
+function moveShooterPosition(memberId, direction, teamNumber) {
     const startListId = window.currentStartListId;
     if (!startListId || !memberId) return;
 
@@ -2058,7 +2065,7 @@ function moveShooterPosition(memberId, direction) {
     fetch('/umbraco/surface/PrecisionStartList/MoveShooterPosition', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
-        body: JSON.stringify({ startListId: startListId, memberId: memberId, direction: direction })
+        body: JSON.stringify({ startListId: startListId, memberId: memberId, direction: direction, sourceTeamNumber: teamNumber || 0 })
     })
     .then(r => r.json())
     .then(data => {

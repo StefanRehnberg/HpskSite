@@ -1653,22 +1653,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
                 }
 
-                // Find the shooter in any team
-                StartListShooter? shooter = null;
-                StartListTeam? sourceTeam = null;
-                foreach (var team in configuration.Teams)
+                // Find the shooter IN THE GIVEN TEAM — see FindShooter.
+                var (shooter, sourceTeam, findError) = FindShooter(configuration, request.MemberId, request.SourceTeamNumber);
+                if (findError != null || shooter == null || sourceTeam == null)
                 {
-                    shooter = team.Shooters?.FirstOrDefault(s => s.MemberId == request.MemberId);
-                    if (shooter != null)
-                    {
-                        sourceTeam = team;
-                        break;
-                    }
-                }
-
-                if (shooter == null || sourceTeam == null)
-                {
-                    return Json(new { success = false, message = "Skyttan kunde inte hittas i startlistan." });
+                    return Json(new { success = false, message = findError ?? "Skyttan kunde inte hittas i startlistan." });
                 }
 
                 // Find target team
@@ -1744,6 +1733,39 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         }
 
         /// <summary>
+        /// Hittar EN start — medlemmen i ett bestämt skjutlag.
+        ///
+        /// <para><b>⚠️⚠️ En medlem kan stå i flera skjutlag</b> (en start per vapengrupp). Att ta det
+        /// första laget med medlemmen flyttade fel start (Michael Henriksson 2026-09-24). Med
+        /// <paramref name="sourceTeamNumber"/> letas bara i det laget; utan det accepteras bara det
+        /// otvetydiga fallet — står medlemmen i flera lag vägras begäran och det SÄGS, samma regel
+        /// som <see cref="RemoveShooterFromStartList"/>.</para>
+        /// </summary>
+        internal static (StartListShooter? Shooter, StartListTeam? Team, string? Error) FindShooter(
+            StartListConfiguration configuration, int memberId, int sourceTeamNumber)
+        {
+            if (sourceTeamNumber > 0)
+            {
+                var team = configuration.Teams.FirstOrDefault(t => t.TeamNumber == sourceTeamNumber);
+                var shooter = team?.Shooters?.FirstOrDefault(s => s.MemberId == memberId);
+                return shooter is null
+                    ? (null, null, $"Skyttan finns inte i skjutlag {sourceTeamNumber}.")
+                    : (shooter, team, null);
+            }
+
+            var hits = configuration.Teams
+                .Where(t => t.Shooters?.Any(s => s.MemberId == memberId) == true)
+                .ToList();
+
+            if (hits.Count == 0) return (null, null, "Skyttan kunde inte hittas i startlistan.");
+            if (hits.Count > 1)
+                return (null, null, $"Skyttan står i {hits.Count} skjutlag ({string.Join(", ", hits.Select(t => t.TeamNumber))}) — "
+                                  + "ange vilket skjutlag som avses. Ladda om sidan och försök igen.");
+
+            return (hits[0].Shooters!.First(s => s.MemberId == memberId), hits[0], null);
+        }
+
+        /// <summary>
         /// Move a shooter up or down by one position within their current team.
         /// Direction is "up" or "down". No-op if already at the boundary.
         /// </summary>
@@ -1769,23 +1791,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (configuration?.Teams == null)
                     return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
 
-                // Locate the shooter and their team.
-                StartListTeam? team = null;
-                int currentIndex = -1;
-                foreach (var t in configuration.Teams)
-                {
-                    if (t.Shooters == null) continue;
-                    var idx = t.Shooters.FindIndex(s => s.MemberId == request.MemberId);
-                    if (idx >= 0)
-                    {
-                        team = t;
-                        currentIndex = idx;
-                        break;
-                    }
-                }
-
-                if (team == null || team.Shooters == null || currentIndex < 0)
-                    return Json(new { success = false, message = "Skyttan kunde inte hittas i startlistan." });
+                // Locate the shooter IN THE GIVEN TEAM — see FindShooter.
+                var (found, team, findError) = FindShooter(configuration, request.MemberId, request.SourceTeamNumber);
+                if (findError != null || found == null || team?.Shooters == null)
+                    return Json(new { success = false, message = findError ?? "Skyttan kunde inte hittas i startlistan." });
+                var currentIndex = team.Shooters.IndexOf(found);
 
                 var newIndex = direction == "up" ? currentIndex - 1 : currentIndex + 1;
                 if (newIndex < 0 || newIndex >= team.Shooters.Count)
@@ -1862,20 +1872,18 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 int movedCount = 0;
                 var affectedTeams = new HashSet<int>();
 
-                foreach (var memberId in request.MemberIds)
+                // ⚠️ Starterna (medlem + skjutlag) om klienten skickat dem; annars bara medlems-id:n,
+                //    och då vägras en medlem som står i flera skjutlag (FindShooter) i stället för att
+                //    flytta en godtycklig start.
+                var refs = request.Shooters?.Count > 0
+                    ? request.Shooters
+                    : request.MemberIds.Select(id => new ShooterRef { MemberId = id, TeamNumber = 0 }).ToList();
+                var skipped = new List<string>();
+
+                foreach (var r in refs)
                 {
-                    // Find shooter
-                    StartListShooter? shooter = null;
-                    StartListTeam? sourceTeam = null;
-                    foreach (var team in configuration.Teams)
-                    {
-                        shooter = team.Shooters?.FirstOrDefault(s => s.MemberId == memberId);
-                        if (shooter != null)
-                        {
-                            sourceTeam = team;
-                            break;
-                        }
-                    }
+                    var (shooter, sourceTeam, findError) = FindShooter(configuration, r.MemberId, r.TeamNumber);
+                    if (findError != null) { skipped.Add(findError); continue; }
 
                     if (shooter == null || sourceTeam == null || sourceTeam.TeamNumber == targetTeam.TeamNumber)
                     {
@@ -1924,7 +1932,9 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 {
                     // Publish to make changes visible on frontend
                     _contentService.Publish(startList, new[] { "*" }, -1);
-                    return Json(new { success = true, message = $"{movedCount} skytt(ar) har flyttats till Lag {request.TargetTeamNumber}." });
+                    // ⚠️ Det som INTE flyttades SÄGS — en tyst överhoppad start ser ut som en flytt.
+                    return Json(new { success = true, message = $"{movedCount} skytt(ar) har flyttats till Lag {request.TargetTeamNumber}."
+                        + (skipped.Count > 0 ? " Inte flyttade: " + string.Join(" ", skipped.Distinct()) : "") });
                 }
                 return Json(new { success = false, message = "Kunde inte spara startlistan." });
             }
@@ -3928,11 +3938,17 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         public string? Date { get; set; }
     }
 
+    // ⚠️⚠️ SourceTeamNumber: EN MEDLEM KAN STÅ I FLERA SKJUTLAG (en start per vapengrupp — "A&R"-
+    //    tävlingar, milsnabb). Utan skjutlaget letade servern upp det FÖRSTA laget med medlemmen och
+    //    flyttade där: Michael Henriksson (Åmåls PK, 2026-09-24) flyttade en skytt i skjutlag 2 och
+    //    fick skytten i skjutlag 1 flyttad — eller "Skyttan kan inte flyttas längre" när hen stod
+    //    först i skjutlag 1. 0 = inte angivet; då vägras en tvetydig begäran (se FindShooter).
     public class MoveShooterRequest
     {
         public int StartListId { get; set; }
         public int MemberId { get; set; }
         public int TargetTeamNumber { get; set; }
+        public int SourceTeamNumber { get; set; }
     }
 
     public class MoveShooterPositionRequest
@@ -3940,13 +3956,22 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         public int StartListId { get; set; }
         public int MemberId { get; set; }
         public string Direction { get; set; } = "";   // "up" | "down"
+        public int SourceTeamNumber { get; set; }
     }
 
     public class BulkMoveShootersRequest
     {
         public int StartListId { get; set; }
         public List<int> MemberIds { get; set; } = new List<int>();
+        /// <summary>Vilka starter som ska flyttas — medlem OCH skjutlag. Vinner över <see cref="MemberIds"/>.</summary>
+        public List<ShooterRef> Shooters { get; set; } = new List<ShooterRef>();
         public int TargetTeamNumber { get; set; }
+    }
+
+    public class ShooterRef
+    {
+        public int MemberId { get; set; }
+        public int TeamNumber { get; set; }
     }
 
     public class UpdateShooterWeaponClassRequest
