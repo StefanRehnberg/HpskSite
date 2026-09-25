@@ -10,11 +10,13 @@ namespace HpskSite.Models.Ledger
     /// handling som går till årsmötet. Den här klassen är svaret; frågorna behåller sin SQL men
     /// måste ge <b>samma</b> tal, och det är mätt i <c>LedgerAccountClassTests</c>.</para>
     ///
-    /// <para><b>⚠️ Klass 8 räknas som INTÄKT-riktad</b>, precis som klass 3. Den bär både
-    /// ränteintäkter (8310) och räntekostnader (8410); med den här riktningen blir en intäkt
-    /// positiv och en kostnad negativ, vilket är hur en resultaträkning läses. Det är också vad
-    /// budgeten redan gör — ändras det här måste budgeten ändras i samma andetag, annars visar
-    /// Rapport och Bokslut olika resultat för samma år.</para>
+    /// <para><b>⚠️⚠️ KLASS 8 ÄR DELAD, enligt BAS: 8000–8399 är finansiella INTÄKTER (8310
+    /// Ränteintäkter), 8400–8999 är KOSTNADER (8410 Räntekostnader, bokslutsdispositioner, skatt).</b>
+    /// Fram till 2026-09-25 räknades hela klass 8 som intäkt, och räntekostnaden hamnade under
+    /// intäkterna i budgeten, som en negativ intäkt i resultaträkningen och som "I" i SIE-filen
+    /// (Michael Henriksson, Åmåls PK). ⚠️ Samma gräns finns som SQL i
+    /// <c>LedgerBudgetService</c> och <c>LedgerProjectService</c> — ändras den här måste de ändras i
+    /// samma andetag, annars visar Rapport och Bokslut olika resultat för samma år.</para>
     /// </summary>
     public static class LedgerAccountClass
     {
@@ -34,12 +36,15 @@ namespace HpskSite.Models.Ledger
         /// <summary>Hör kontot till resultaträkningen (klass 3–8)?</summary>
         public static bool IsResult(int accountNumber) => Of(accountNumber) is >= 3 and <= 8;
 
+        /// <summary>Sista kontot i klass 8 som är en finansiell INTÄKT. 8400 och uppåt är kostnader.</summary>
+        public const int LastFinancialIncomeAccount = 8399;
+
         /// <summary>
-        /// Är kontot intäkt-riktat? Klass 3 och 8.
-        /// <para>⚠️ Se klassens sammanfattning om varför 8 ligger här.</para>
+        /// Är kontot intäkt-riktat? Klass 3, och 8000–8399 i klass 8.
+        /// <para>⚠️ Se klassens sammanfattning om varför klass 8 är delad.</para>
         /// </summary>
         public static bool IsRevenueDirected(int accountNumber)
-            => Of(accountNumber) is 3 or 8;
+            => Of(accountNumber) == 3 || (accountNumber >= 8000 && accountNumber <= LastFinancialIncomeAccount);
 
         /// <summary>
         /// Beloppet i kontots EGEN riktning, alltid positivt när det går åt "rätt" håll.

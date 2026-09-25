@@ -48,6 +48,12 @@ namespace HpskSite.Models.Ledger
         public const string Imported = "imported";
         public const string AttachmentAdded = "attachment-added";
 
+        /// <summary>
+        /// Kassören intygade att föreningen INTE hade några ingående balanser (allt noll) —
+        /// ObjectType "FiscalYear", ObjectId = året. Se <c>LedgerOpeningBalanceService.Save</c>.
+        /// </summary>
+        public const string OpeningBalancesNone = "opening-balances-none";
+
         /// <summary>Databasen vägrade en ändring eller radering. Se klassens varning.</summary>
         public const string Rejected = "rejected";
     }

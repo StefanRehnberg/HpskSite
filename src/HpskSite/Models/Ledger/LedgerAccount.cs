@@ -276,6 +276,10 @@ namespace HpskSite.Models.Ledger
                 "Frivilligt. Medlemsavgifter kan ta ett halvår att få in — på ett eget konto syns "
                 + "det som normal eftersläpning i stället för som en obetald avgift.",
             Rounding           => "Behövs för att en verifikation alltid ska gå ihop på öret.",
+            // ⚠️ Swish är ett betalsätt, inte ett konto (Michael Henriksson 2026-09-25) — se
+            //    LedgerChartTemplate. Raden säger det, så att ingen lägger upp ett konto i onödan.
+            Swish              => "Swish kommer in på föreningskontot hos de flesta — välj då samma konto som "
+                                  + "bankkontot. Ett eget konto behövs bara om Swish är kopplat till ett eget bankkonto.",
             VatOutgoing        => "Används bara om föreningen är momsregistrerad.",
             VatIncoming        => "Används bara om föreningen är momsregistrerad.",
             _                  => ""

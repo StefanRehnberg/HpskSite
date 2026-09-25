@@ -78,17 +78,16 @@ namespace HpskSite.Models.Ledger
         /// Kontots SIE-typ ur numret: <c>T</c>illgång, <c>S</c>kuld, <c>I</c>ntäkt,
         /// <c>K</c>ostnad.
         ///
-        /// <para><b>⚠️ Klass 2 är S och klass 8 är I</b> — samma indelning som resten av
-        /// liggaren (<see cref="LedgerAccountClass"/>). Vore de olika skulle SIE-filen och
-        /// bokslutet beskriva samma konto på två sätt.</para>
+        /// <para><b>⚠️ Klass 2 är S; klass 8 är DELAD</b> — 8000–8399 I, 8400–8999 K, samma
+        /// indelning som resten av liggaren (<see cref="LedgerAccountClass"/>). Fram till 2026-09-25
+        /// blev hela klass 8 "I", så 8410 Räntekostnader exporterades som en intäkt. Vore SIE-filen
+        /// och bokslutet olika skulle de beskriva samma konto på två sätt.</para>
         /// </summary>
         public static string AccountType(int accountNumber) => LedgerAccountClass.Of(accountNumber) switch
         {
             1 => "T",
             2 => "S",
-            3 => "I",
-            8 => "I",
-            _ => "K"
+            _ => LedgerAccountClass.IsRevenueDirected(accountNumber) ? "I" : "K"
         };
     }
 }

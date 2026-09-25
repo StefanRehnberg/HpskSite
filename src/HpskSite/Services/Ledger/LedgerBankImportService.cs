@@ -624,27 +624,74 @@ namespace HpskSite.Services.Ledger
             }
         }
 
-        /// <summary>Tar bort ett utdrag. Raderna följer med via kaskaden.</summary>
+        /// <summary>
+        /// En omatchad bankrad med sitt utdrags bankkonto — underlaget för "Bokför…" på raden.
+        /// Null om raden inte finns, inte tillhör utställaren eller redan är ihopparad.
+        /// </summary>
+        public (LedgerBankRow Row, int AccountNumber)? UnmatchedRow(int issuerId, int rowId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
+
+            var row = ldb.Fetch<LedgerBankRow>(
+                "SELECT * FROM dbo.LedgerBankRow WHERE Id = @0 AND IssuerId = @1 AND MatchedLineId IS NULL",
+                rowId, issuerId).FirstOrDefault();
+            if (row is null) return null;
+
+            var acc = ldb.ExecuteScalar<int>(
+                "SELECT AccountNumber FROM dbo.LedgerBankImport WHERE Id = @0 AND IssuerId = @1", row.ImportId, issuerId);
+            return acc > 0 ? (row, acc) : null;
+        }
+
+        /// <summary>Raden på ett visst konto i en verifikation — bankbenet i en just bokförd post.</summary>
+        public int? LineOnAccount(int issuerId, int entryId, int accountNumber)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
+            return ldb.Fetch<int>(
+                "SELECT Id FROM dbo.LedgerJournalEntryLine WHERE JournalEntryId = @0 AND AccountNumber = @1",
+                entryId, accountNumber).FirstOrDefault() is var id && id != 0 ? id : null;   // ⚠️ negativt i sandlådan
+        }
+
+        /// <summary>
+        /// Tar bort ett utdrag. Raderna följer med via kaskaden.
+        /// <para><b>⚠️ Utdraget måste tillhöra UTSTÄLLAREN.</b> Förut var villkoret bara
+        /// <c>Id = @0</c> — en kassör i en förening kunde då ta bort en annan förenings utdrag genom
+        /// att gissa ett id (skrivgrinden prövar bara det utställar-id anroparen skickar).</para>
+        /// </summary>
         public bool Delete(int issuerId, int importId)
         {
             using var db = _databaseFactory.CreateDatabase();
             var ldb = new LedgerDb(db, issuerId);
 
-            return ldb.Execute("DELETE FROM dbo.LedgerBankImport WHERE Id = @0", importId) > 0;
+            return ldb.Execute("DELETE FROM dbo.LedgerBankImport WHERE Id = @0 AND IssuerId = @1", importId, issuerId) > 0;
         }
 
-        /// <summary>Operatörens egen matchning. <c>lineId = null</c> tar bort den.</summary>
+        /// <summary>
+        /// Operatörens egen matchning. <c>lineId = null</c> tar bort den.
+        ///
+        /// <para><b>⚠️ Både bankraden och bokföringsraden måste tillhöra UTSTÄLLAREN.</b> Förut
+        /// räckte ett gissat rad-id för att para ihop — eller lösa upp — en annan förenings rader.</para>
+        /// </summary>
         public bool SetMatch(int issuerId, int rowId, int? lineId, int byMemberId)
         {
             using var db = _databaseFactory.CreateDatabase();
             var ldb = new LedgerDb(db, issuerId);
 
-            if (lineId is null or <= 0)
+            // ⚠️⚠️ BARA 0 (eller null) BETYDER "LÖS UPP". Sandlådans id:n räknas NEDÅT — `<= 0` gjorde
+            //    varje manuell ihopparning i en sandlåda till en upplösning (mätt 2026-09-25).
+            if (lineId is null or 0)
                 return ldb.Execute(
                     @"UPDATE dbo.LedgerBankRow
                          SET MatchedLineId = NULL, MatchKind = NULL,
                              MatchedByMemberId = NULL, MatchedUtc = NULL
-                       WHERE Id = @0", rowId) > 0;
+                       WHERE Id = @0 AND IssuerId = @1", rowId, issuerId) > 0;
+
+            var lineIsOurs = ldb.ExecuteScalar<int>(
+                @"SELECT COUNT(1) FROM dbo.LedgerJournalEntryLine l
+                    JOIN dbo.LedgerJournalEntry e ON e.Id = l.JournalEntryId
+                   WHERE l.Id = @0 AND e.IssuerId = @1", lineId, issuerId) > 0;
+            if (!lineIsOurs) return false;
 
             // ⚠️ Det unika indexet är spärren mot att samma bokföringsrad kvittas två gånger.
             //    Fångas felet här blir beskedet begripligt i stället för ett SQL-undantag.
@@ -653,8 +700,8 @@ namespace HpskSite.Services.Ledger
                 return ldb.Execute(
                     @"UPDATE dbo.LedgerBankRow
                          SET MatchedLineId = @1, MatchKind = @2, MatchedByMemberId = @3, MatchedUtc = @4
-                       WHERE Id = @0", rowId, lineId, LedgerBankMatchKind.Manual,
-                    byMemberId, DateTime.UtcNow) > 0;
+                       WHERE Id = @0 AND IssuerId = @5", rowId, lineId, LedgerBankMatchKind.Manual,
+                    byMemberId, DateTime.UtcNow, issuerId) > 0;
             }
             catch (Exception ex)
             {

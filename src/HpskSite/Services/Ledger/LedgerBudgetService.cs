@@ -327,14 +327,15 @@ namespace HpskSite.Services.Ledger
                     : ldb.Fetch<LedgerBudgetLine>(
                         "SELECT * FROM dbo.LedgerBudgetLine WHERE BudgetId = @0", budget.Id);
 
-                // Utfallet per konto. ⚠️ Samma klassindelning som LedgerProjectService.Summarise:
-                // klass 3 och 8 är intäkt (Credit − Debit), 4–7 kostnad (Debit − Credit).
+                // Utfallet per konto. ⚠️ Samma klassindelning som LedgerAccountClass och
+                // LedgerProjectService.Summarise: klass 3 och 8000–8399 är intäkt (Credit − Debit),
+                // 4–7 och 8400–8999 kostnad (Debit − Credit) — se LedgerAccountClass om klass 8.
                 // Balanskonton (1 och 2) hör inte hemma i en resultatbudget.
                 var actuals = ldb.Fetch<AccountActual>(
                     @"SELECT l.AccountNumber,
                              MAX(l.AccountName) AS AccountName,
                              SUM(CASE WHEN l.AccountNumber BETWEEN 3000 AND 3999
-                                        OR l.AccountNumber BETWEEN 8000 AND 8999
+                                        OR l.AccountNumber BETWEEN 8000 AND 8399
                                       THEN l.Credit - l.Debit
                                       ELSE l.Debit - l.Credit END) AS Amount
                         FROM dbo.LedgerJournalEntryLine l
@@ -413,10 +414,11 @@ namespace HpskSite.Services.Ledger
             report.ResultDiff = report.ActualResult - report.BudgetResult;
         }
 
-        /// <summary>Klass 3 och 8 är intäkt. Samma gräns som överallt annars i liggaren.</summary>
-        internal static bool IsIncome(int accountNumber)
-            => (accountNumber >= 3000 && accountNumber <= 3999)
-            || (accountNumber >= 8000 && accountNumber <= 8999);
+        /// <summary>
+        /// Intäkt: klass 3 och 8000–8399. ⚠️ Frågar <see cref="LedgerAccountClass"/> — en egen
+        /// kopia av gränsen var precis det som lade räntekostnaden under intäkterna.
+        /// </summary>
+        internal static bool IsIncome(int accountNumber) => LedgerAccountClass.IsRevenueDirected(accountNumber);
 
         /// <summary>
         /// Färgen på en rad.

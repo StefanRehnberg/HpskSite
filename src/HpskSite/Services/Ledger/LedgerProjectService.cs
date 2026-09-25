@@ -336,10 +336,14 @@ namespace HpskSite.Services.Ledger
                                p.IsClosed,
                                p.SourceType,
                                p.SourceId,
+                               -- ⚠️ Klass 8 är delad (se LedgerAccountClass): 8000–8399 intäkt,
+                               --    8400–8999 kostnad. Kostnaderna tog förut bara 4000–7999, så en
+                               --    räntekostnad föll helt utanför projektets resultat.
                                ISNULL(SUM(CASE WHEN x.AccountNumber BETWEEN 3000 AND 3999
-                                                 OR x.AccountNumber BETWEEN 8000 AND 8999
+                                                 OR x.AccountNumber BETWEEN 8000 AND 8399
                                                THEN x.Credit - x.Debit ELSE 0 END), 0) AS Income,
                                ISNULL(SUM(CASE WHEN x.AccountNumber BETWEEN 4000 AND 7999
+                                                 OR x.AccountNumber BETWEEN 8400 AND 8999
                                                THEN x.Debit - x.Credit ELSE 0 END), 0) AS Costs,
                                COUNT(DISTINCT x.JournalEntryId) AS EntryCount
                           FROM dbo.LedgerProject p

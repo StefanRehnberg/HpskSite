@@ -52,10 +52,14 @@ namespace HpskSite.Models.Ledger
             new(1910, "Kontantkassa"),
             new(1920, "Plusgiro"),
             new(1930, "Föreningskonto"),
-            // Eget konto för Swish i stället för att blanda in det i 1930: en förening som stämmer
-            // av vill kunna se Swish-flödet för sig. Mönstret är samma underkontotanke som en
-            // ban- eller ungdomsfond använder.
-            new(1931, "Swish"),
+            // ⚠️⚠️ INGET EGET SWISH-KONTO (ändrat 2026-09-25). Mallen hade 1931 "Swish", men Swish
+            //    är ett betalsätt, inte ett konto: pengarna landar på föreningskontot. Michael
+            //    Henriksson (Åmåls PK): "Swish är ju jättebra men är ju inget eget konto." Med 1931
+            //    växte ett saldo som aldrig nollades, och bankavstämningen av 1930 visade varje
+            //    Swish-betalning som "hänt på kontot men inte bokfört". Swish-rollen pekar nu på
+            //    1930; en förening med ett EGET konto för Swish lägger upp det själv.
+            // 1940 i stället — de flesta föreningar har ett sparkonto (Michaels förslag).
+            new(1940, "Sparkonto"),
 
             // 2 — Eget kapital och skulder
             new(2060, "Eget kapital"),
@@ -129,7 +133,8 @@ namespace HpskSite.Models.Ledger
                 [LedgerAccountRoles.RevenueRegionFee]        = 3010,
                 [LedgerAccountRoles.RevenueOther]            = 3890,
                 [LedgerAccountRoles.BankAccount]             = 1930,
-                [LedgerAccountRoles.Swish]                   = 1931,
+                // Swish landar på föreningskontot — se kontolistan ovan.
+                [LedgerAccountRoles.Swish]                   = 1930,
                 [LedgerAccountRoles.CashBox]                 = 1910,
                 [LedgerAccountRoles.AccountsReceivable]      = 1510,
                 [LedgerAccountRoles.AccountsPayable]         = 2440,
