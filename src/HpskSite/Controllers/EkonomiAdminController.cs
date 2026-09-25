@@ -518,6 +518,7 @@ namespace HpskSite.Controllers
                     success = true,
                     entryId = result.EntryId,
                     removed = result.Removed,
+                    declaredNone = result.DeclaredNone,
                     state = _openingBalances.Get(request.IssuerType, request.IssuerId)
                 });
             }
@@ -2457,6 +2458,79 @@ namespace HpskSite.Controllers
             });
         }
 
+        /// <summary>
+        /// Bokför en bankrad som saknar verifikation — och parar ihop dem i samma steg.
+        ///
+        /// <para><b>⚠️⚠️ VARFÖR (Michael Henriksson 2026-09-25):</b> "välj bokföringsrad" listar bara
+        /// rader som REDAN är bokförda. Den som läser in ett kontoutdrag i en tom bokföring — precis
+        /// det man gör första gången — fick en rullgardin utan val och ingen väg framåt. Det kassören
+        /// vill göra med en sådan rad är att bokföra den.</para>
+        ///
+        /// <para><b>⚠️ Belopp, datum, riktning och bankkonto kommer ur BANKRADEN</b>, aldrig ur anropet —
+        /// kassören väljer bara vad posten VAR (konto och text). Då kan den bokförda posten inte
+        /// avvika från det banken säger, och ihopparningen är sann per konstruktion.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PostBankRow([FromBody] PostBankRowRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Ogiltig begäran." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var found = _bankService.UnmatchedRow(request.IssuerId, request.RowId);
+            if (found is null)
+                return Json(new { success = false, message = "Bankraden finns inte, eller är redan ihopparad med en bokföring." });
+
+            var (row, bankAccount) = found.Value;
+
+            var result = _manualPosting.Post(new ManualEntryRequest
+            {
+                IssuerType = request.IssuerType,
+                IssuerId = request.IssuerId,
+                Amount = Math.Abs(row.Amount),
+                WeReceived = row.Amount > 0,
+                Date = row.BookedDate.Date,
+                Description = string.IsNullOrWhiteSpace(request.Description) ? row.Text : request.Description.Trim(),
+                AccountNumber = request.AccountNumber,
+                PaymentAccountNumber = bankAccount,
+                ProjectId = request.ProjectId is int p && p != 0 ? p : null,
+                VatRate = request.VatRate
+            }, actorId.Value);
+
+            if (!result.Success) return Json(new { success = false, message = result.Error });
+
+            // Bankbenet i den nya verifikationen är raden vi parar ihop med.
+            var lineId = _bankService.LineOnAccount(request.IssuerId, result.EntryId, bankAccount);
+            var matched = lineId is int lid && _bankService.SetMatch(request.IssuerId, row.Id, lid, actorId.Value);
+
+            return Json(new
+            {
+                success = true,
+                number = result.Number,
+                matched,
+                message = matched
+                    ? $"Bokfört som {result.Number} och ihopparat med bankraden."
+                    : $"Bokfört som {result.Number}, men ihopparningen gick inte — para ihop raden för hand."
+            });
+        }
+
+        public class PostBankRowRequest
+        {
+            public int IssuerType { get; set; }
+            public int IssuerId { get; set; }
+            public int RowId { get; set; }
+            /// <summary>Vad posten VAR — kostnads- eller intäktskontot.</summary>
+            public int AccountNumber { get; set; }
+            public string? Description { get; set; }
+            public int? ProjectId { get; set; }
+            public decimal? VatRate { get; set; }
+        }
+
         /// <summary>Tar bort ett utdrag. Raderna följer med.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -3334,7 +3408,14 @@ namespace HpskSite.Controllers
                     //    Fredriks uppdelade fordringskonton omöjliga att sätta och funktionen
                     //    finns bara i koden. `optional` är vad som skiljer "inte ifylld ännu"
                     //    från "en lucka i uppsättningen"; kravlistan räknar fortfarande `All`.
-                    roles = LedgerAccountRoles.Known.Select(r => new
+                    // ⚠️ "När en klubb betalar kretsavgiften" är KRETSENS intäkt. För en klubb är
+                    //    kretsavgiften en KOSTNAD, som bokförs som en utgift — att visa raden för en
+                    //    klubb, mappad till 3010 Medlemsavgifter, lockade kassören att tro att den
+                    //    styrde klubbens egen betalning (Michael Henriksson 2026-09-25). Rollen står
+                    //    kvar mappad; den visas bara inte där den inte används.
+                    roles = LedgerAccountRoles.Known
+                        .Where(r => !(issuerType == DocumentOwnerType.Club && r == LedgerAccountRoles.RevenueRegionFee))
+                        .Select(r => new
                     {
                         key = r,
                         label = LedgerAccountRoles.Label(r),

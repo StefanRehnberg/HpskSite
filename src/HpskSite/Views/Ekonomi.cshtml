@@ -1297,11 +1297,18 @@
                             </label>
                             <label class="choice">
                                 <input type="radio" name="@(uid)_vat" id="@(uid)_vatYes" value="yes">
-                                <span><strong>Ja, för hela eller en del av verksamheten</strong>
-                                    <span class="muted" style="display:block">Till exempel kiosken
-                                    eller sponsringen. Du sätter momssatsen på de konton det gäller
-                                    i kontoplanen nedan — momsen räknas sedan fram av sig själv när
-                                    du bokför på dem.</span></span>
+                                @* ⚠️ Michael Henriksson 2026-09-25: "sen är man moms eller inte. Man
+                                   väljer inte vilka delar man momsar." Rätt — registreringen gäller
+                                   föreningen. Det som skiljer är vilka INTÄKTER som är momspliktiga,
+                                   och det avgör lagen, inte föreningen: idrottsverksamheten är
+                                   oftast momsfri även för en registrerad förening. Därför satsen
+                                   per konto — men texten får inte låta som ett eget val. *@
+                                <span><strong>Ja</strong>
+                                    <span class="muted" style="display:block">Sätt momssatsen på de
+                                    konton som är momspliktiga i kontoplanen nedan — till exempel
+                                    kiosk eller reklam. Intäkter som är momsfria enligt lagen, som
+                                    oftast idrottsverksamheten, får ingen sats. Momsen räknas sedan
+                                    fram av sig själv när du bokför.</span></span>
                             </label>
                             <div class="d-none" id="@(uid)_vatNumberWrap" style="margin:10px 0 0 28px">
                                 <label class="form-label" for="@(uid)_vatNumber">Momsregistreringsnummer</label>
@@ -2725,6 +2732,36 @@
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="@(uid)_aCancel">Avbryt</button>
                         <button type="button" class="btn btn-primary" id="@(uid)_aSave">Spara</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* ── Avstämning: bokför en bankrad ──
+           ⚠️ Beloppet, datumet och bankkontot VISAS men går inte att ändra — de är bankens. *@
+        <div class="modal fade" id="@(uid)_bpModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_bpTitle">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="@(uid)_bpTitle">Bokför bankraden</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3" id="@(uid)_bpFacts"></div>
+                        <div class="mb-3">
+                            <label class="form-label" for="@(uid)_bpAccount">Vilket konto hör det till?</label>
+                            <select class="form-select" id="@(uid)_bpAccount"></select>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label" for="@(uid)_bpText">Vad var det?</label>
+                            <input type="text" class="form-control" id="@(uid)_bpText" maxlength="200">
+                        </div>
+                        <div class="form-text">Posten bokförs med bankens belopp och datum, och paras ihop med raden direkt.</div>
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_bpError"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="@(uid)_bpSave">Bokför och para ihop</button>
                     </div>
                 </div>
             </div>
@@ -4853,7 +4890,7 @@
     //
     // ⚠️⚠️ F6 STYR FORMEN: det avvikande overst, det matchade hopfallt. Vardet ligger inte i att
     //    visa allt lika tydligt utan i att gora det som INTE stammer hittbart.
-    var bankMap = null, bankImports = [], recCurrent = 0, bankLoaded = false;
+    var bankMap = null, bankImports = [], recCurrent = 0, bankLoaded = false, recAccount = 0;
 
     function bankFields() {
         // ⚠️ Rubrikerna kommer ur FILEN, aldrig ur en lista i koden - bankerna doper kolumnerna
@@ -5037,6 +5074,7 @@
 
     function renderReconciliation(r) {
         show(el('recWrap'), true);
+        recAccount = r.accountNumber;
 
         // ⚠️⚠️ "Allt stammer" kraver BADA halvorna: noll omatchade OCH noll differens. Var for
         //    sig racker ingen - alla rader kan vara hopparade medan saldot anda skiljer sig, och
@@ -5076,20 +5114,35 @@
                  + '<td>' + esc(b.text) + '</td>'
                  + '<td class="n">' + kr(b.amount) + '</td>'
                  + '<td class="n">' + (canWrite
-                     ? // En kapad etikett laeses som en trasig kontroll. Bredden racker for hela texten.
-                     '<select class="form-select form-select-sm" style="min-width:15rem"'
-                       + ' data-match-row="' + b.id + '">'
-                       + '<option value="0">— välj bokföringsrad —</option>'
-                       + r.ledgerOnly.map(function (l) {
-                             return '<option value="' + l.lineId + '">' + esc(l.entryNumber)
-                                  + ' · ' + kr(l.movement) + '</option>';
-                         }).join('') + '</select>'
+                     // ⚠️⚠️ "Bokför…" FINNS ALLTID, rullgardinen bara när det finns något att välja.
+                     //    Den listar rader som REDAN är bokförda; i en tom bokföring — första gången
+                     //    man läser in ett utdrag — var den tom och raden hade ingen väg framåt
+                     //    (Michael Henriksson 2026-09-25). Det man vill göra då är att bokföra raden.
+                     ? '<div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">'
+                       + (r.ledgerOnly.length === 0 ? '' :
+                         // En kapad etikett laeses som en trasig kontroll. Bredden racker for hela texten.
+                         '<select class="form-select form-select-sm" style="min-width:13rem"'
+                         + ' data-match-row="' + b.id + '" title="Para ihop med en rad som redan är bokförd">'
+                         + '<option value="0">— para ihop med bokförd rad —</option>'
+                         + r.ledgerOnly.map(function (l) {
+                               return '<option value="' + l.lineId + '">' + esc(l.entryNumber)
+                                    + ' · ' + kr(l.movement) + '</option>';
+                           }).join('') + '</select>')
+                       + '<button type="button" class="btn btn-sm btn-outline-primary" data-post-row="' + b.id + '"'
+                       + ' title="Bokför raden och para ihop den direkt">Bokför…</button></div>'
                      : '') + '</td></tr>';
         }).join('');
 
         el('recBankOnly').querySelectorAll('select[data-match-row]').forEach(function (sl) {
             sl.addEventListener('change', function () {
                 setBankMatch(parseInt(sl.dataset.matchRow, 10), parseInt(sl.value, 10));
+            });
+        });
+
+        el('recBankOnly').querySelectorAll('button[data-post-row]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var b = r.bankOnly.find(function (x) { return String(x.id) === btn.dataset.postRow; });
+                if (b) openBankPost(b);
             });
         });
 
@@ -5128,6 +5181,58 @@
             });
         });
     }
+
+    // ── Bokför en bankrad ─────────────────────────────────────────────────────────────────
+    // ⚠️ Belopp, datum, riktning och bankkonto kommer ur BANKRADEN (servern läser dem själv,
+    //    PostBankRow) — dialogen visar dem bara. Kassören väljer vad posten VAR.
+    var bpAccounts = null, bpRow = null;
+
+    function openBankPost(b) {
+        bpRow = b;
+        el('bpFacts').innerHTML = esc(shortDate(b.bookedDate)) + ' · <strong>' + kr(b.amount) + '</strong> · '
+            + esc(b.text) + '<div class="muted">' + (b.amount > 0 ? 'Pengar in' : 'Pengar ut')
+            + ' på konto ' + recAccount + ' — så som banken visar det.</div>';
+        el('bpText').value = b.text || '';
+        show(el('bpError'), false);
+
+        var fill = function () {
+            // Intäkter för pengar in, kostnader för pengar ut — samma förval som Bokför.
+            var wantRevenue = b.amount > 0;
+            var list = bpAccounts.filter(function (a) { return !a.isBalance; });
+            el('bpAccount').innerHTML = list.map(function (a) {
+                return '<option value="' + a.number + '">' + a.number + ' · ' + esc(a.name) + '</option>';
+            }).join('');
+            var hit = list.find(function (a) { return (a.number >= 3000 && a.number < 4000) === wantRevenue; });
+            if (hit) el('bpAccount').value = String(hit.number);
+        };
+
+        if (bpAccounts) { fill(); openModal('bpModal'); return; }
+        fetch('/umbraco/surface/EkonomiAdmin/GetPostingContext?issuerType=' + issuerType + '&issuerId=' + issuerId,
+              { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+            if (!d.success) { el('bankError').textContent = d.message; show(el('bankError'), true); return; }
+            bpAccounts = d.context.accounts || [];
+            fill(); openModal('bpModal');
+        });
+    }
+
+    if (el('bpSave')) el('bpSave').addEventListener('click', function () {
+        var btn = this;
+        if (!bpRow) return;
+        btn.disabled = true;
+        postJson('/umbraco/surface/EkonomiAdmin/PostBankRow', {
+            issuerType: issuerType, issuerId: issuerId, rowId: bpRow.id,
+            accountNumber: parseInt(el('bpAccount').value, 10) || 0,
+            description: el('bpText').value
+        }).then(function (j) {
+            btn.disabled = false;
+            if (!j.success) { el('bpError').textContent = j.message; show(el('bpError'), true); return; }
+            closeModal('bpModal');
+            el('bankOk').textContent = j.message; show(el('bankOk'), true);
+            loadReconciliation(recCurrent);
+        }).catch(function (e) {
+            btn.disabled = false; el('bpError').textContent = e.message; show(el('bpError'), true);
+        });
+    });
 
     async function setBankMatch(rowId, lineId) {
         try {
@@ -6938,6 +7043,13 @@
             el('obBody').innerHTML = 'Per ' + esc(date) + ': tillgångar ' + kr(assets)
                 + ', eget kapital ' + kr(s.existingEquity) + '.';
             btn.textContent = 'Ändra ingående balanser…';
+        } else if (s.declaredNone) {
+            // ⚠️ "Noll" är ett besked (Michael Henriksson 2026-09-25) — en ny förening utan pengar
+            //    eller tillgångar ska inte stå med "Inte inlagda" för evigt.
+            el('obMeta').innerHTML = badge('ok', 'Inlagda — inga');
+            el('obBody').innerHTML = 'Föreningen hade inga ingående balanser den ' + esc(date)
+                + ' — balansräkningen börjar på noll.';
+            btn.textContent = 'Lägg in ingående balanser ändå…';
         } else {
             el('obMeta').innerHTML = badge('wait', 'Inte inlagda');
             el('obBody').innerHTML = 'Vad hade föreningen den ' + esc(date) + ', när bokföringen började här? '
@@ -6950,7 +7062,7 @@
         if (!s.yearIsOpen && !s.existingEntryId)
             el('obBody').innerHTML += ' <span class="muted">Året ' + s.year + ' är fastställt, så de kan inte längre läggas in.</span>';
 
-        todo.noOpening = !s.existingEntryId && s.yearIsOpen;
+        todo.noOpening = !s.existingEntryId && !s.declaredNone && s.yearIsOpen;
         renderTodo();
     }
 
@@ -6986,6 +7098,7 @@
 
         el('obIntro').textContent = 'Skriv saldona som de stod den ' + shortDate(s.date)
             + ' — kontoutdraget och kassaboken säger det. Tomma rader betyder noll. '
+            + 'Hade föreningen ingenting (en ny förening) sparar du med alla rader tomma. '
             + (s.existingEntryId ? 'De tidigare uppgifterna rättas och ersätts; ingenting skrivs över.' : '');
         el('obRows').innerHTML =
               obRowsHtml(s.accounts.filter(function (a) { return a.isAsset; }), 'Det föreningen äger', prefill)
@@ -7018,7 +7131,9 @@
                     closeModal('obModal');
                     obState = j.state;
                     renderOpeningBalances();
-                    el('obOk').textContent = j.removed ? 'De ingående balanserna är borttagna.'
+                    el('obOk').textContent = j.declaredNone
+                        ? 'Sparat: föreningen hade inga ingående balanser. Balansräkningen börjar på noll.'
+                        : j.removed ? 'De ingående balanserna är borttagna.'
                         : 'De ingående balanserna är bokförda.';
                     show(el('obOk'), true);
                 })

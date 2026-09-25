@@ -364,7 +364,7 @@ namespace HpskSite.Services.Ledger
         public bool IsBalance => Number < 3000;
 
         /// <summary>Klass 3 och 8. Samma gräns som överallt annars i liggaren.</summary>
-        public bool IsIncome => (Number >= 3000 && Number <= 3999) || (Number >= 8000 && Number <= 8999);
+        public bool IsIncome => LedgerAccountClass.IsRevenueDirected(Number);
     }
 
     public class LedgerChartResult

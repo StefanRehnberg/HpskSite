@@ -82,6 +82,15 @@ namespace HpskSite.Services.Ledger
                 }));
 
             var live = LiveEntry(ldb, issuerType, issuerId);
+
+            // ⚠️ "Noll" gäller bara när det inte finns någon levande verifikation — lägger
+            //    föreningen in balanser efteråt är det de som gäller.
+            if (live is null)
+                state.DeclaredNone = ldb.ExecuteScalar<int>(
+                    @"SELECT COUNT(1) FROM dbo.LedgerAuditEvent
+                       WHERE Action = @0 AND ObjectType = 'FiscalYear' AND ObjectId = @1",
+                    LedgerAuditAction.OpeningBalancesNone, first.Id) > 0;
+
             if (live is not null)
             {
                 state.ExistingEntryId = live.Id;
@@ -141,8 +150,16 @@ namespace HpskSite.Services.Ledger
             }
 
             var postingLines = BuildLines(lines, state.EquityAccountNumber);
+
+            // ⚠️⚠️ NOLL ÄR ETT SVAR. En ny förening har inga ingående balanser, och "spara med
+            //    nollor" gjorde ingenting — statusen stod kvar på "Inte inlagda" (Michael Henriksson
+            //    2026-09-25). En verifikation utan rader finns inte, så beskedet lagras i LOGGEN:
+            //    vem som intygade att allt var noll, och när. Statusen härleds ur det.
             if (postingLines.Count == 0 && replaceId is null)
-                return OpeningBalanceResult.Fail("Fyll i minst ett belopp.");
+            {
+                RecordNone(issuerId, state.FiscalYearId, byMemberId);
+                return new OpeningBalanceResult { Success = true, DeclaredNone = true };
+            }
 
             // ⚠️ Rättelsen FÖRST: går den inte igenom får ingen andra uppsättning skrivas, för då
             //    räknas föreningens förmögenhet två gånger och balansräkningen ser ändå rimlig ut.
@@ -154,7 +171,11 @@ namespace HpskSite.Services.Ledger
             }
 
             if (postingLines.Count == 0)
-                return new OpeningBalanceResult { Success = true, Removed = true };
+            {
+                // De tidigare balanserna är rättade bort och ersätts med "noll" — samma besked.
+                RecordNone(issuerId, state.FiscalYearId, byMemberId);
+                return new OpeningBalanceResult { Success = true, Removed = true, DeclaredNone = true };
+            }
 
             var result = _posting.Post(new LedgerPostingRequest
             {
@@ -172,6 +193,17 @@ namespace HpskSite.Services.Ledger
                 return OpeningBalanceResult.Fail(result.Error ?? "De ingående balanserna kunde inte bokföras.");
 
             return new OpeningBalanceResult { Success = true, EntryId = result.EntryId };
+        }
+
+        /// <summary>Loggar att föreningen inte hade några ingående balanser för året.</summary>
+        private void RecordNone(int issuerId, int fiscalYearId, int byMemberId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
+            ldb.Execute(
+                @"INSERT INTO dbo.LedgerAuditEvent (OccurredUtc, MemberId, Action, ObjectType, ObjectId, Detail)
+                  VALUES (@0, @1, @2, 'FiscalYear', @3, '{""opening"":""none""}')",
+                DateTime.UtcNow, byMemberId, LedgerAuditAction.OpeningBalancesNone, fiscalYearId);
         }
 
         /// <summary>
@@ -306,6 +338,9 @@ namespace HpskSite.Services.Ledger
         public int? ExistingNumber { get; set; }
         public decimal ExistingEquity { get; set; }
         public List<OpeningBalanceLine> ExistingLines { get; } = new();
+
+        /// <summary>Kassören har intygat att föreningen inte hade några ingående balanser (noll).</summary>
+        public bool DeclaredNone { get; set; }
     }
 
     public class OpeningBalanceResult
@@ -314,6 +349,9 @@ namespace HpskSite.Services.Ledger
         public string? Error { get; set; }
         public int EntryId { get; set; }
         public bool Removed { get; set; }
+
+        /// <summary>Allt var noll — sparat som "inga ingående balanser".</summary>
+        public bool DeclaredNone { get; set; }
 
         public static OpeningBalanceResult Fail(string e) => new() { Success = false, Error = e };
     }
