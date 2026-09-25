@@ -244,15 +244,15 @@
             const p = d.event.prices || [];
             if (d.event.pricesUnreadable) {
                 return '<div class="alert alert-danger py-2 px-3 mb-2 small">'
-                     + '<i class="bi bi-exclamation-triangle me-1"></i>Evenemangets priser gar inte att lasa. '
-                     + 'Kontakta arrangoren.</div>';
+                     + '<i class="bi bi-exclamation-triangle me-1"></i>Evenemangets priser går inte att läsa. '
+                     + 'Kontakta arrangören.</div>';
             }
             if (!p.length) return '';
             if (p.length === 1) {
                 return '<div class="mb-2 small"><span class="text-muted">Avgift:</span> '
                      + `<strong>${p[0].amount === 0 ? 'Gratis' : kr(p[0].amount)}</strong></div>`;
             }
-            let h = '<div class="mb-2"><div class="form-label small text-muted mb-1">Vilket pris galler for dig?</div>';
+            let h = '<div class="mb-2"><div class="form-label small text-muted mb-1">Vilket pris gäller för dig?</div>';
             p.forEach((row, i) => {
                 const id = 'ces-price-' + i;
                 h += '<div class="form-check">'
@@ -274,7 +274,7 @@
                      + `<strong>${p[0].amount === 0 ? 'Gratis' : kr(p[0].amount)}</strong></div>`;
             }
             let h = '<select class="form-select form-select-sm mb-2" id="ces-guest-price">'
-                  + '<option value="">Valj pris for gasten...</option>';
+                  + '<option value="">Välj pris för gästen…</option>';
             p.forEach(row => {
                 h += `<option value="${esc(row.id)}">${esc(row.label)} — `
                   +  `${row.amount === 0 ? 'Gratis' : kr(row.amount)}</option>`;
@@ -307,7 +307,7 @@
                             ? ''
                             : `<span class="small">${g.feeAmount === 0 ? 'Gratis' : kr(g.feeAmount)}</span>`)
                       +  `<button type="button" class="btn btn-sm btn-link text-danger p-0 ces-guest-drop" `
-                      +  `data-id="${g.id}" title="Avanmal ${esc(g.name)}">Ta bort</button>`
+                      +  `data-id="${g.id}" title="Avanmäl ${esc(g.name)}">Ta bort</button>`
                       +  '</div></div>';
                 });
 
@@ -316,11 +316,11 @@
                 // inte ar det - och det ar pengar.
                 if (party.missingPrice) {
                     h += '<div class="border-top pt-1 mt-1 small text-warning-emphasis">'
-                      +  '<i class="bi bi-exclamation-triangle me-1"></i>Nagon i sallskapet saknar pris. '
-                      +  'Kontakta arrangoren.</div>';
+                      +  '<i class="bi bi-exclamation-triangle me-1"></i>Någon i sällskapet saknar pris. '
+                      +  'Kontakta arrangören.</div>';
                 } else {
                     h += '<div class="border-top pt-1 mt-1 d-flex justify-content-between fw-semibold small">'
-                      +  `<span>Totalt for ${party.people} personer</span>`
+                      +  `<span>Totalt för ${party.people} personer</span>`
                       +  `<span>${party.total === 0 ? 'Gratis' : kr(party.total)}</span></div>`;
                 }
                 h += '</div>';
@@ -329,21 +329,21 @@
             if (!d.signupOpen) return h;
 
             if (party.guests.length >= party.maxGuests) {
-                return h + `<div class="small text-muted mb-2">Du har natt taket pa ${party.maxGuests} gaster. `
-                         + 'Kontakta arrangoren om ni ar fler.</div>';
+                return h + `<div class="small text-muted mb-2">Du har nått taket på ${party.maxGuests} gäster. `
+                         + 'Kontakta arrangören om ni är fler.</div>';
             }
 
             h += '<div class="mb-2">'
               +  '<button type="button" class="btn btn-sm btn-outline-secondary w-100" id="ces-guest-open">'
-              +  '<i class="bi bi-person-plus me-1"></i>Anmal en till</button>'
+              +  '<i class="bi bi-person-plus me-1"></i>Anmäl en till</button>'
               +  '<div class="d-none mt-2" id="ces-guest-form">'
               +  '<label for="ces-guest-name" class="form-label small text-muted mb-1">'
-              +  'Namn pa den du tar med</label>'
+              +  'Namn på den du tar med</label>'
               +  `<input type="text" class="form-control form-control-sm mb-2" id="ces-guest-name" maxlength="80" `
-              +  'placeholder="For- och efternamn">'
+              +  'placeholder="För- och efternamn">'
               +  guestPriceField(d)
-              +  '<button type="button" class="btn btn-sm btn-primary w-100" id="ces-guest-add">Anmal</button>'
-              +  '<div class="form-text">Familj och gaster behover inget konto — du star for anmalan.</div>'
+              +  '<button type="button" class="btn btn-sm btn-primary w-100" id="ces-guest-add">Anmäl</button>'
+              +  '<div class="form-text">Familj och gäster behöver inget konto — du står för anmälan.</div>'
               +  '</div></div>';
             return h;
         }
@@ -645,7 +645,7 @@
             document.querySelectorAll('.ces-guest-drop').forEach(btn => {
                 btn.addEventListener('click', () => {
                     // Namnet står i frågan: "ta bort gästen?" på en lista med tre är ingen fråga.
-                    const namn = btn.getAttribute('title')?.replace(/^Avanmal\s+/, '') || 'gästen';
+                    const namn = btn.getAttribute('title')?.replace(/^Avanmäl\s+/, '') || 'gästen';
                     if (!confirm(`Vill du avanmäla ${namn}?`)) return;
                     act(btn, 'CancelGuest', { eventId, participantId: parseInt(btn.dataset.id, 10) });
                 });
