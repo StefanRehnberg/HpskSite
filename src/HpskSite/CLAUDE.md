@@ -1979,6 +1979,53 @@ startlist-coverage 27/27, dnsdnf-ui 13/13, row-action-menus 60/60, action-menus-
 
 Adds C# → full rebuild. No SQL, no doctype property.
 
+### ⚠️⚠️ En klass per vapengrupp — regeln bor på SERVERN (2026-09-25)
+
+Stefans regel: *"det ska inte vara möjligt att ha samma klass i två skjutlag, och inte två olika
+C-klasser om inte tävlingen tillåter det"*. **`Models/ClassRegistrationRule.Conflict(classes,
+allowDualC)`** är enda platsen den bor:
+- samma klass aldrig två gånger (id och visningsnamn viks ihop — `C_Vet_Y` = `C Vet Y`);
+- en klass per vapengrupp (A, A Opt, AM, AP, AG, B, R, M är var sin grupp);
+- C och L: en klass, eller — med tävlingens `allowDualCClassRegistration` — högst två ur OLIKA
+  kategorier (öppen/dam/veteran/junior; Vet Y och Vet Ä är SAMMA kategori);
+- okända klasser (Springskyttes `C-H 50`) räknas bara mot sig själva.
+
+**⚠️ Fram till nu fanns regeln BARA i anmälningsformulärets JS.** Servern tog emot vad som helst
+och den gamla `FindWeaponClassConflicts` hade **noll anropare** (borttagen). Nu frågar sex vägar:
+`RegisterForCompetition`, `AddLateRegistration`, `UpdateCompetitionRegistration`,
+`AddShooterToStartList`, `UpdateShooterWeaponClass` (avslaget pekar på *Flytta till skjutlag*) och
+`ChangeShooterClass`. Diskens bockrutor (`getClassMutexBucket`) delar C/L på kategori bara när
+inställningen är på — förut delades de villkorslöst, så C2 + C Vet Y gick alltid.
+
+**⚠️⚠️ INSTÄLLNINGEN GICK ALDRIG ATT SLÅ PÅ.** Formulären heter `allowDualCClass`, doctypen bär bara
+`allowDualCClassRegistration` (som anmälan läser), och `SetValue` på en saknad egenskap är en tyst
+no-op. Katalogfältet bär nu `alias:` → **`CompetitionFieldCatalog.PropertyAliasFor(name)`** /
+`CompetitionField.Alias`, som `MapFieldNameToAlias` och `CreateCompetition` skriver genom. Ett
+fält vars formulärnamn skiljer sig från egenskapen ska ha ett alias — lägg aldrig till en till
+sådan skillnad utan det.
+
+Befintliga anmälningar som bryter regeln stoppas först när de redigeras.
+
+### Mixade vapengrupper per skjutlag: egen tid per skjutlag, flytt i rätt skjutlag (2026-09-25)
+
+Michael Henriksson (tävling 5574): båda skjutlagen fick 09:00–09:00, och en flytt verkade på fel
+skjutlag ("Skyttan kan inte flyttas längre").
+- `PrecisionMixedTeamsGenerator` satte `StartTime = starttiden` och `EndTime = starttiden + 0` för
+  varje lag. Nu flyttas starten fram ett intervall per skjutlag, samma regel som övriga format.
+  Sorteringsvalet skrevs dessutom över med `"FirstName"` i konstruktorn.
+- ⚠️⚠️ **I det formatet står samma medlem i FLERA skjutlag** (en start per vapengrupp), och
+  `MoveShooterPosition` / `MoveShooterToTeam` / `BulkMoveShooters` tog "första laget där medlemmen
+  fanns". Klienten skickar nu radens skjutlag (`sourceTeamNumber`, respektive
+  `shooters: [{memberId, teamNumber}]`), och **`FindShooter`** vägrar en tvetydig begäran utan
+  skjutlag i stället för att gissa. `UpdateShooterWeaponClass` skickade redan skjutlaget.
+- ⚠️ Redigerarens modal ligger i Startlistor-fliken — en svit måste klicka `#startlists-tab` först,
+  annars finns raderna i DOM:en men är osynliga.
+
+Svit: `hpsk-verify/mixed-teams-move-verify.mjs` 34/34 (bygger en skytt i två skjutlag på 2576,
+prövar flytt, vägrad tvetydig flytt, vägrat klassbyte, vägrad samma-vapengrupp, och att
+dubbel-C-inställningen sparas via riktiga sparvägen; återställer allt). Test:
+`PrecisionMixedStartListTests` 7, `ClassRegistrationRuleTests` 14.
+
 ### Publicerad startlista kan stänga självanmälan — och "Lägg till efteranmäld" är borta (2026-08-31)
 
 **Problemet Stefan beskrev:** en skytt dyker upp oanmäld strax före start. Anmäler hen sig själv på
@@ -4972,6 +5019,49 @@ radernas etiketter (varje rullgardin listar hela kontoplanen, 2610 inräknat).
 
 Svit: `hpsk-verify/ekonomi-moms-verify.mjs` 46/46 — oregistrerad FÖRST (kontot har redan 12 %, ingen
 momsrad får bokföras), sedan registrerad. **Ingen migrering** — kolumnerna fanns.
+
+## Bankavstämningen — riktning, borttagning och massbokföring (2026-09-25)
+
+Efter Michael Henriksson (Åmåls PK). `Services/Ledger/LedgerBankImportService` +
+`Models/Ledger/BankStatementFormat`, ytan är Avstämning i `Views/Ekonomi.cshtml`.
+
+**⚠️⚠️ FILENS ORDNING ÄR INTE TIDSORDNINGEN.** Swedbank och flera andra exporterar nyast först.
+`Store` tog in- och utgående saldo ur filens första och sista rad — kommentaren påstod att det
+hanterade sorteringen, koden gjorde det inte — så en sådan fil gav *"Bankens saldo 150 kr mot
+bokföringens 122 861 kr"* på ett konto som stämde på kronan.
+- **`BankStatementFormat.Chronological`** avgör riktningen ur **saldokedjan** (`saldo = föregående
+  + belopp`, räknat åt båda håll) och först när den inte säger något ur datumen. Kedjan är det enda
+  som avgör en fil där alla rader har samma datum. `Balances` ger in-/utgående ur den kronologiskt
+  första/sista raden.
+- `Store` numrerar om `LineNumber` kronologiskt, så listorna läses äldst först.
+- **Läsvägen räknar om saldot ur raderna** (`Reconciliation`), i stället för att lita på importens
+  lagrade `ClosingBalance`. Utdrag inlästa före rättelsen blir därför rätt utan migrering och utan
+  ny inläsning.
+
+**"Ta bort kontoutdraget"** (fel konto, fel fil). `DeleteBankImport` fanns men ingen yta nådde den.
+- **Två steg när rader är ihopparade:** första anropet svarar `needsConfirm` + antal och skriver
+  ingenting; `Confirm = true` tar bort. En verifikation skapad via "Bokför…" är BOKFÖRING, inte en
+  del av filen, och tas **inte** bort — rutan säger att den ska rättas under Bokför om kontot var
+  fel. Bekräftelsen är en ruta på sidan, aldrig `confirm()` (ekonomisidan har inga dialogrutor).
+- ⚠️⚠️ **`sbx.LedgerBankRow` saknar främmande nyckel mot importen** (dbo har `ON DELETE CASCADE`).
+  I en sandlåda blev raderna kvar som föräldralösa. `Delete` tar nu bort raderna uttryckligen i
+  samma transaktion — **lita aldrig på kaskaden i sbx**; andra sbx-tabeller kan ha samma lucka.
+
+**Massbokföring** (en tävlingsdags 50–60 kiosk-Swishar): kryssruta per rad, filter, "markera alla
+synliga", en åtgärdsrad OVANFÖR tabellen (sticky nedtill fungerar inte i sidans layout), och
+`bpModal` i tvåläge som listar raderna och låter en plockas bort.
+- ⚠️⚠️ **EN VERIFIKATION PER RAD, med flit** — Michaels val: antalet bankrader ska kunna jämföras
+  med antalet verifikationer, så revisorn ser om en rad aldrig bokförts. En samlingsverifikation per
+  dag övervägdes och valdes bort. Bygg inte om det utan att fråga.
+- `PostBankRows` och `PostBankRow` går genom **samma `PostOneBankRow`** — belopp, datum, riktning
+  och bankkonto läses ur BANKRADEN, aldrig ur begäran.
+- En rad som inte går att bokföra **stoppar inte de andra** och namnges som fel (`failed`), aldrig
+  gömd i ett grönt kvitto. Allt-eller-inget vore fel: de redan bokförda är riktiga verifikationer.
+- Tom text = varje rad behåller bankens egen text.
+
+Svit: `hpsk-verify/ekonomi-bank-saldo-och-borttag-verify.mjs` 39/39 (egen sandlåda; bygger även en
+"gammal" inläsning i SQL och kräver att den ändå visar rätt saldo). `ekonomi-avstamning-verify`
+städar nu med `confirm: true`. Ingen SQL, C# → full ombyggnad.
 
 ## Projektdimensionen — tävlingar och evenemang blir projekt (2026-09-23)
 
