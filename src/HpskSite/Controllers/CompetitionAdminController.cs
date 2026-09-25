@@ -874,7 +874,7 @@ namespace HpskSite.Controllers
                     allowSelfReporting = competition.GetValue<bool>("allowSelfReporting"),
                     showLiveResults = competition.GetValue<bool>("showLiveResults"),
                     isActive = competition.GetValue<bool>("isActive"),
-                    allowDualCClass = competition.GetValue<bool>("allowDualCClass"),
+                    allowDualCClass = competition.GetValue<bool>(HpskSite.Models.ClassRegistrationRule.PropertyAlias),
                     addToMenu = competition.GetValue<bool>("addToMenu"),
                     isAwardingStandardMedals = competition.GetValue<bool>("isAwardingStandardMedals"),
                     isClubOnly = competition.GetValue<bool>("isClubOnly"),
@@ -1218,7 +1218,9 @@ namespace HpskSite.Controllers
 
                         if (value != null)
                         {
-                            newCompetition.SetValue(field.Key, value);
+                            // ⚠️ Fältnamnet är inte alltid egenskapen — se PropertyAliasFor.
+                            newCompetition.SetValue(
+                                HpskSite.CompetitionTypes.Common.CompetitionFieldCatalog.PropertyAliasFor(field.Key), value);
                         }
                     }
                     catch (Exception ex)
@@ -1541,7 +1543,9 @@ namespace HpskSite.Controllers
 
                         if (value != null)
                         {
-                            newCompetition.SetValue(field.Key, value);
+                            // ⚠️ Fältnamnet är inte alltid egenskapen — se PropertyAliasFor.
+                            newCompetition.SetValue(
+                                HpskSite.CompetitionTypes.Common.CompetitionFieldCatalog.PropertyAliasFor(field.Key), value);
                         }
                     }
                     catch (Exception ex)
