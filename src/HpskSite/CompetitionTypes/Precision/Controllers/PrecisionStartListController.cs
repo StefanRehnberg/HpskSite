@@ -1123,6 +1123,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     {
                         return Json(new { success = false, message = $"Skyttan finns redan i startlistan i klass {sameClass.WeaponClass}." });
                     }
+
+                    var ruleError = ClassRuleConflict(startList,
+                        placements.Select(s => s.WeaponClass).Append(request.WeaponClass));
+                    if (ruleError != null)
+                        return Json(new { success = false, message = ruleError });
                 }
 
                 // Get member info
@@ -1741,6 +1746,18 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         /// otvetydiga fallet — står medlemmen i flera lag vägras begäran och det SÄGS, samma regel
         /// som <see cref="RemoveShooterFromStartList"/>.</para>
         /// </summary>
+        /// <summary>
+        /// <see cref="ClassRegistrationRule"/> för en skytts klasser på en startlista, med
+        /// tävlingens inställning för dubbel C-klass. Null = går ihop.
+        /// </summary>
+        private string? ClassRuleConflict(IContent startList, IEnumerable<string?> classes)
+        {
+            var competitionId = startList.GetValue<int>("competitionId");
+            var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+            var allowDualC = competition?.GetValue<bool>(ClassRegistrationRule.PropertyAlias) ?? false;
+            return ClassRegistrationRule.Conflict(classes, allowDualC);
+        }
+
         internal static (StartListShooter? Shooter, StartListTeam? Team, string? Error) FindShooter(
             StartListConfiguration configuration, int memberId, int sourceTeamNumber)
         {
@@ -2008,6 +2025,21 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var oldWeaponClass = !string.IsNullOrWhiteSpace(request.OldWeaponClass)
                     ? request.OldWeaponClass
                     : shooter.WeaponClass;
+
+                // ⚠️ Skyttens ÖVRIGA starter på listan plus den nya klassen måste gå ihop. Utan det
+                //    kunde samma skytt få samma klass i två skjutlag — Michael Henriksson (Åmåls PK)
+                //    bytte klasserna mellan skjutlag 1 och 2 för att komma runt en trasig flytt, och
+                //    första bytet skapade samma start två gånger. Att byta plats görs med Flytta.
+                var otherClasses = configuration.Teams
+                    .SelectMany(t => t.Shooters ?? new List<StartListShooter>())
+                    .Where(s => s.MemberId == request.MemberId && !ReferenceEquals(s, shooter))
+                    .Select(s => s.WeaponClass);
+                var classRuleError = ClassRuleConflict(startList, otherClasses.Append(request.NewWeaponClass));
+                if (classRuleError != null)
+                {
+                    return Json(new { success = false, message = classRuleError
+                        + " Vill du byta skjutlag för skytten, använd Flytta till skjutlag i stället." });
+                }
 
                 // Update weapon class in start list
                 shooter.WeaponClass = request.NewWeaponClass;

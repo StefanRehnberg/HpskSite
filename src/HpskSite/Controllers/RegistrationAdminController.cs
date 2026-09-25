@@ -327,6 +327,13 @@ namespace HpskSite.Controllers
                 if (newClasses.Count == 0)
                     return Json(new { success = false, message = "Anmälan måste ha minst en klass." });
 
+                // Samma regel som anmälan — se ClassRegistrationRule.
+                var classRuleError = HpskSite.Models.ClassRegistrationRule.Conflict(
+                    newClasses.Select(c => c.Class),
+                    competition?.GetValue<bool>(HpskSite.Models.ClassRegistrationRule.PropertyAlias) ?? false);
+                if (classRuleError != null)
+                    return Json(new { success = false, message = classRuleError });
+
                 // Capacity check: same rule as walk-in, but exclude this registration's existing
                 // contribution so re-saving without changing slots doesn't trip the guard.
                 var dpConfigEdit = competition != null
@@ -873,6 +880,14 @@ namespace HpskSite.Controllers
                 {
                     return Json(new { success = false, message = "Anmälan måste ha minst en giltig klass." });
                 }
+
+                // Samma regel som anmälan — se ClassRegistrationRule. Bockrutorna i disken lät förut
+                // C2 och C Vet Y stå ihop oavsett tävlingens inställning.
+                var lateClassRuleError = HpskSite.Models.ClassRegistrationRule.Conflict(
+                    classEntries.Select(e => e.Class),
+                    competition.GetValue<bool>(HpskSite.Models.ClassRegistrationRule.PropertyAlias));
+                if (lateClassRuleError != null)
+                    return Json(new { success = false, message = lateClassRuleError });
 
                 // Capacity validation: refuse over-booking direktplacering slots. Compute
                 // existing usage across all *other* registrations, then verify each picked

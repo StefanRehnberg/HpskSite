@@ -75,7 +75,7 @@
         }
     }
     
-    var allowDualCClass = competition?.Value<bool>("allowDualCClass");
+    var allowDualCClass = competition?.Value<bool>(HpskSite.Models.ClassRegistrationRule.PropertyAlias);
 
     // Get competitionManagers as JSON array of IDs
     var competitionManagerIds = new List<int>();

@@ -113,7 +113,7 @@ namespace HpskSite.CompetitionTypes.Common
             new("numberOfFinalSeries", "Varav finalserier", FieldControl.Number, "Konfiguration", 3,
                 notFor: new[] { Springskytte }),
             new("allowDualCClass", "Tillåt dubbel C-klassregistrering", FieldControl.Checkbox, "Konfiguration", 4,
-                notFor: new[] { Springskytte }),
+                notFor: new[] { Springskytte }, alias: HpskSite.Models.ClassRegistrationRule.PropertyAlias),
             new("showLiveResults", "Visa live-resultat", FieldControl.Checkbox, "Konfiguration", 5),
             new("isAwardingStandardMedals", "Standardmedaljsgrundande", FieldControl.Checkbox, "Konfiguration", 6,
                 help: "Standardmedaljer får inte delas ut vid klubbtävlingar (BR-PS.1.3)."),
@@ -187,6 +187,15 @@ namespace HpskSite.CompetitionTypes.Common
         public static CompetitionField? Find(string name)
             => All.FirstOrDefault(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
 
+        /// <summary>
+        /// Egenskapen ett formulärfält SKRIVS till. ⚠️ Fältnamnet och egenskapen kan skilja sig:
+        /// formulären heter <c>allowDualCClass</c> men doctypen bär bara
+        /// <c>allowDualCClassRegistration</c>, och anmälan läser den senare. Sparningen skrev på
+        /// fältnamnet och `SetValue` på en saknad egenskap är en TYST no-op — så inställningen gick
+        /// aldrig att slå på från formulären (2026-09-25). Okänt namn returneras oförändrat.
+        /// </summary>
+        public static string PropertyAliasFor(string name) => Find(name)?.Alias ?? name;
+
         /// <summary>Varje fältnamn katalogen känner till — oavsett gren.</summary>
         public static IReadOnlyCollection<string> AllFieldNames
             => All.Select(f => f.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -210,14 +219,22 @@ namespace HpskSite.CompetitionTypes.Common
         public CompetitionField(string name, string label, FieldControl control, string tab, int order,
                                 bool required = false, string? help = null, string? note = null,
                                 string? slot = null, string[]? onlyFor = null, string[]? notFor = null,
-                                string? inteIGuiden = null)
+                                string? inteIGuiden = null, string? alias = null)
         {
+            _alias = alias;
             Name = name; Label = label; Control = control; Tab = tab; Order = order;
             Required = required; Help = help; Note = note; Slot = slot;
             OnlyFor = onlyFor; NotFor = notFor; InteIGuiden = inteIGuiden;
         }
 
         public string Name { get; }
+
+        private readonly string? _alias;
+        /// <summary>
+        /// Doctype-egenskapen fältet lagras i. Nästan alltid samma som <see cref="Name"/> — se
+        /// <see cref="CompetitionFieldCatalog.PropertyAliasFor"/> för undantaget och varför.
+        /// </summary>
+        public string Alias => _alias ?? Name;
         public string Label { get; }
         public FieldControl Control { get; }
         public string Tab { get; }

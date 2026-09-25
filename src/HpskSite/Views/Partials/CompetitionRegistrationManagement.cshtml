@@ -5714,6 +5714,13 @@ function getClassMutexBucket(classId) {
     else if (/^A_p_/i.test(id)) weapon = 'A_P';
     else if (/^A_g_/i.test(id)) weapon = 'A_G';
 
+    // ⚠️ En klass per vapengrupp. Bara C och L kan bära två — och bara när tävlingen tillåter
+    //    dubbel C-klass, och då ur OLIKA kategorier. Förut delades varje vapengrupp på kategori
+    //    villkorslöst, så disken lät C2 och C Vet Y stå ihop oavsett inställning. Servern
+    //    (ClassRegistrationRule) är domaren; det här är bara bockrutornas förval.
+    const allowDualC = !!(window.CompetitionConfig && window.CompetitionConfig.allowDualCClassRegistration);
+    if ((weapon !== 'C' && weapon !== 'L') || !allowDualC) return weapon;
+
     let subcat = 'open';
     if (/_Jun(\b|$|_)/i.test(id)) subcat = 'jun';
     else if (/_Vet_/i.test(id)) subcat = 'vet';

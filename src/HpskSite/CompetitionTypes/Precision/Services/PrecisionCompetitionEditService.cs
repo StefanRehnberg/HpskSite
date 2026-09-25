@@ -351,7 +351,8 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             if (string.IsNullOrWhiteSpace(fieldName)) return null;
             if (HanterasAnnorstades.Contains(fieldName)) return null;
 
-            if (CompetitionFieldCatalog.Find(fieldName) != null) return fieldName;
+            var catalogField = CompetitionFieldCatalog.Find(fieldName);
+            if (catalogField != null) return catalogField.Alias;
             if (ExtraSparbaraFalt.Contains(fieldName)) return fieldName;
 
             // ⚠️ SÄG IFRÅN. Ett okänt fält är antingen en klient som skickar skräp eller ett

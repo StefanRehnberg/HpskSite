@@ -367,6 +367,17 @@ namespace HpskSite.Controllers
                     .Where(c => !string.IsNullOrEmpty(c))
                     .ToList();
 
+                // ⚠️ Regeln fanns bara i klienten — servern tog emot vad som helst. En anmälan
+                //    ersätter hela klasslistan (även vid uppdatering), så listan här är hela svaret.
+                var classRuleError = ClassRegistrationRule.Conflict(selectedClassesList,
+                    competition.GetValue<bool>(ClassRegistrationRule.PropertyAlias));
+                if (classRuleError != null)
+                {
+                    if (IsAjaxRequest()) return Json(new { success = false, message = classRuleError });
+                    TempData["Error"] = classRuleError;
+                    return RedirectToCurrentUmbracoPage();
+                }
+
                 IContent registrationsHub;
                 var competitionChildren = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
                 var existingHub = competitionChildren.FirstOrDefault(c =>
@@ -2580,114 +2591,6 @@ namespace HpskSite.Controllers
                 _logger.LogError(ex, "Error finding existing registration for member {MemberId}, competition {CompetitionId}, class {ShootingClass}",
                     memberId, competitionId, shootingClass);
                 return null;
-            }
-        }
-
-        /// <summary>
-        /// Extracts the weapon class code (e.g., "A", "A_Opt", "B", "C", "R") from a shooting class ID
-        /// via the authoritative ShootingClasses registry. Returns null if the id is unknown
-        /// (we deliberately do NOT fall back to the first character — that would misclassify A_opt_X).
-        /// </summary>
-        private string GetWeaponClassFromShootingClass(string shootingClassId)
-        {
-            if (string.IsNullOrEmpty(shootingClassId)) return null;
-            var code = ShootingClasses.GetWeaponClassCode(shootingClassId);
-            return string.IsNullOrEmpty(code) ? null : code;
-        }
-
-        /// <summary>
-        /// Determines the C-class subcategory (Regular, Veteran, Ladies, Junior)
-        /// </summary>
-        private string GetCClassSubcategory(string shootingClassId)
-        {
-            if (string.IsNullOrEmpty(shootingClassId)) return null;
-
-            // Regular C-classes: C1, C2, C3
-            if (shootingClassId == "C1" || shootingClassId == "C2" || shootingClassId == "C3")
-                return "Regular";
-
-            // Veteran C-classes: C_Vet_Y, C_Vet_A
-            if (shootingClassId.Contains("Vet"))
-                return "Veteran";
-
-            // Ladies C-classes: C1_Dam, C2_Dam, C3_Dam
-            if (shootingClassId.Contains("Dam"))
-                return "Ladies";
-
-            // Junior C-class: C_Jun
-            if (shootingClassId.Contains("Jun"))
-                return "Junior";
-
-            return "Regular"; // Default to Regular if can't determine
-        }
-
-        /// <summary>
-        /// Finds weapon class conflicts within a list of shooting classes
-        /// Returns list of conflicting class pairs (for display purposes)
-        /// NEW: Updated for multi-class registration system
-        /// </summary>
-        private List<string> FindWeaponClassConflicts(List<string> shootingClasses, bool allowDualCClassRegistration)
-        {
-            var conflicts = new List<string>();
-
-            try
-            {
-                if (shootingClasses == null || shootingClasses.Count <= 1)
-                    return conflicts; // No conflicts possible with 0 or 1 class
-
-                // Check each class against all others
-                for (int i = 0; i < shootingClasses.Count; i++)
-                {
-                    for (int j = i + 1; j < shootingClasses.Count; j++)
-                    {
-                        string class1 = shootingClasses[i];
-                        string class2 = shootingClasses[j];
-
-                        string weapon1 = GetWeaponClassFromShootingClass(class1);
-                        string weapon2 = GetWeaponClassFromShootingClass(class2);
-
-                        if (weapon1 != weapon2) continue; // Different weapons, no conflict
-
-                        // Same weapon class detected - apply special rules
-
-                        // C-Class special rule: Allow dual registration from different subcategories
-                        if (weapon1 == "C" && allowDualCClassRegistration)
-                        {
-                            string subcat1 = GetCClassSubcategory(class1);
-                            string subcat2 = GetCClassSubcategory(class2);
-
-                            // If same subcategory, it's a conflict
-                            if (subcat1 == subcat2)
-                            {
-                                conflicts.Add($"{class1} and {class2} are both {weapon1}-class {subcat1}");
-                                continue;
-                            }
-
-                            // Different subcategories - check if there are more than 2 C-classes total
-                            var cClassCount = shootingClasses
-                                .Count(c => GetWeaponClassFromShootingClass(c) == "C");
-
-                            if (cClassCount > 2)
-                            {
-                                conflicts.Add($"More than 2 C-classes registered (limit is 2 from different subcategories)");
-                            }
-                            // else: Different subcategory and <= 2 C-classes = allowed, no conflict
-                        }
-                        else
-                        {
-                            // All other cases: same weapon class = conflict
-                            conflicts.Add($"{class1} and {class2} are both {weapon1}-class");
-                        }
-                    }
-                }
-
-                return conflicts;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error finding weapon class conflicts for classes: {Classes}",
-                    string.Join(", ", shootingClasses ?? new List<string>()));
-                return conflicts;
             }
         }
 

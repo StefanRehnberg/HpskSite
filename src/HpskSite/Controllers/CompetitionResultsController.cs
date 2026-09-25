@@ -4746,6 +4746,19 @@ namespace HpskSite.Controllers
                 int rowsUpdated = 0;
                 using (var db = _umbracoDatabaseFactory.CreateDatabase())
                 {
+                    // ⚠️ Skyttens ÖVRIGA klasser i tävlingen plus den nya måste gå ihop
+                    //    (ClassRegistrationRule). Annars kunde ett klassbyte ge samma skytt samma klass
+                    //    två gånger — och en MERGE på (medlem, klass, serie) slår då ihop två starter.
+                    var heldClasses = await db.FetchAsync<string>(
+                        $"SELECT DISTINCT ShootingClass FROM [{resultTable}] WHERE CompetitionId = @0 AND MemberId = @1",
+                        request.CompetitionId, request.MemberId);
+                    var oldKey = ShootingClasses.NormalizeKey(request.OldShootingClass);
+                    var classRuleError = ClassRegistrationRule.Conflict(
+                        heldClasses.Where(c => ShootingClasses.NormalizeKey(c) != oldKey).Append(newClass.Name),
+                        competition.GetValue<bool>(ClassRegistrationRule.PropertyAlias));
+                    if (classRuleError != null)
+                        return Json(new { success = false, message = classRuleError });
+
                     rowsUpdated = await db.ExecuteAsync(
                         $"UPDATE [{resultTable}] SET ShootingClass = @0, LastModified = @1 WHERE CompetitionId = @2 AND MemberId = @3 AND ShootingClass = @4",
                         newClass.Name, DateTime.Now, request.CompetitionId, request.MemberId, request.OldShootingClass);
