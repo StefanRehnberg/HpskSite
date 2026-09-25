@@ -201,22 +201,37 @@ namespace HpskSite.Services.Firearms
         /// <summary>
         /// Registrerar påminnelsen. <c>false</c> = redan skickad (eller en samtidig körning hann
         /// först), och då ska ingenting skickas.
+        ///
+        /// <para><b>⚠️ Den redan registrerade raden avgörs av <c>WHERE NOT EXISTS</c>, inte av att
+        /// det unika indexet kastar.</b> Första versionen lät indexet avvisa insättningen och fångade
+        /// undantaget — funktionellt rätt, men Umbracos <c>UmbracoDatabase</c> loggar varje
+        /// <c>SqlException</c> på <c>Error</c> INNAN vår catch nås. Varje svep (och varje omstart)
+        /// skrev därför ett "Cannot insert duplicate key"-fel per redan påmint vapen i prodloggen —
+        /// samma logg som prod bara sparar Warning+ i och som vi felsöker allt annat ur.
+        /// Indexet ligger kvar som spärr mot en äkta kapplöpning; den loggar då, men är sällsynt.
+        /// Samma form som <c>ScheduleReminderHostedService</c>.</para>
         /// </summary>
         private bool TryClaim(IScopeProvider scopeProvider, DueRow row, int stage)
         {
             try
             {
                 using var uow = scopeProvider.CreateScope(autoComplete: true);
-                uow.Database.Execute(
+                var n = uow.Database.Execute(
                     @"INSERT INTO FirearmReminder (FirearmId, MemberId, Stage, ExpiresOnAtSend, SentAt)
-                      VALUES (@0, @1, @2, @3, @4)",
+                      SELECT @0, @1, @2, @3, @4
+                      WHERE NOT EXISTS (
+                          SELECT 1 FROM FirearmReminder
+                           WHERE FirearmId = @0 AND Stage = @2 AND ExpiresOnAtSend = @3)",
                     row.FirearmId, row.MemberId, stage, row.LicenseExpiresOn.Date, DateTime.Now);
-                return true;
+                return n > 0;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Unikt index avvisade insättningen = redan registrerad. Fråga inte databasen igen;
-                // avslaget ÄR svaret, och det är leverantörsoberoende.
+                // Hit kommer vi bara vid en äkta kapplöpning mot indexet eller ett databasfel. Båda
+                // ger "skicka inte" — men ett databasfel är en missad påminnelse och ska synas.
+                _logger.LogWarning(ex,
+                    "Licenspåminnelse kunde inte registreras (vapen {FirearmId}, steg {Stage}) — skickas inte.",
+                    row.FirearmId, stage);
                 return false;
             }
         }
