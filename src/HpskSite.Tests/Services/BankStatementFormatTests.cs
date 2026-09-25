@@ -391,5 +391,53 @@ namespace HpskSite.Tests.Services
             parsed.Rows[0].BookedDate.Should().Be(new DateTime(2026, 9, 23));
             parsed.Rows[0].Balance.Should().Be(5270.00m);
         }
+
+        // ── Riktning och saldon ─────────────────────────────────────────────────────────────
+        // Michael Henriksson (Åmåls PK) 2026-09-25: filen är nyast först, första raden bär
+        // utgående saldo 122 860,80. Vi läste sista raden och fick 150 kr.
+
+        private static LedgerBankRow R(int d, decimal amount, decimal? balance) =>
+            new() { BookedDate = new DateTime(2025, 12, d), Amount = amount, Balance = balance };
+
+        [Fact]
+        public void Nyast_forst_ger_utgaende_saldo_ur_forsta_raden()
+        {
+            var rows = new List<LedgerBankRow> { R(30, -360m, 122860.80m), R(20, 500m, 123220.80m), R(1, 150m, 122720.80m) };
+            var (opening, closing) = BankStatementFormat.Balances(rows);
+            closing.Should().Be(122860.80m);
+            opening.Should().Be(122570.80m);
+        }
+
+        [Fact]
+        public void Aldst_forst_ger_utgaende_saldo_ur_sista_raden()
+        {
+            var rows = new List<LedgerBankRow> { R(1, 150m, 122720.80m), R(20, 500m, 123220.80m), R(30, -360m, 122860.80m) };
+            BankStatementFormat.Balances(rows).Closing.Should().Be(122860.80m);
+        }
+
+        [Fact]
+        public void Samma_datum_avgors_av_saldokedjan()
+        {
+            // Alla 22 jun — datumen säger ingenting, kedjan säger nyast först.
+            var rows = new List<LedgerBankRow> { R(22, 55m, 1210m), R(22, 90m, 1155m), R(22, 65m, 1065m) };
+            BankStatementFormat.Chronological(rows).Last().Balance.Should().Be(1210m);
+            BankStatementFormat.Balances(rows).Opening.Should().Be(1000m);
+        }
+
+        [Fact]
+        public void Utan_saldon_avgor_datumen()
+        {
+            var rows = new List<LedgerBankRow> { R(30, 1m, null), R(1, 2m, null) };
+            BankStatementFormat.Chronological(rows).First().BookedDate.Day.Should().Be(1);
+            BankStatementFormat.Balances(rows).Closing.Should().BeNull();
+        }
+
+        [Fact]
+        public void Enda_raden_ger_bada_saldona()
+        {
+            var (opening, closing) = BankStatementFormat.Balances(new List<LedgerBankRow> { R(5, 100m, 600m) });
+            opening.Should().Be(500m);
+            closing.Should().Be(600m);
+        }
     }
 }

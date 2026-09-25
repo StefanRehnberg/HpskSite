@@ -1816,6 +1816,15 @@
                 <div class="ek-alert ek-bad d-none" id="@(uid)_bankError"></div>
                 <div class="ek-alert ek-ok d-none" id="@(uid)_bankOk"></div>
 
+                @* Bekräftelsen för att ta bort ett utdrag. En ruta på sidan, aldrig confirm(). *@
+                <div class="ek-alert ek-warn d-none" id="@(uid)_recDelBox">
+                    <div id="@(uid)_recDelText"></div>
+                    <div class="mt-2 d-flex gap-2">
+                        <button type="button" class="btn btn-danger btn-sm" id="@(uid)_recDelYes">Ta bort kontoutdraget</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="@(uid)_recDelNo">Avbryt</button>
+                    </div>
+                </div>
+
                 @* Tomt lage. ⚠️ Sager vad vi INTE gor - det ar den vanligaste farhagan. *@
                 <div class="soonbox d-none" id="@(uid)_bankEmpty">
                     <h2>Inget kontoutdrag inläst ännu</h2>
@@ -1879,8 +1888,28 @@
                             Pengar har rört kontot utan att det finns en verifikation. Antingen ska
                             posten bokföras, eller så hör raden till ett annat konto.
                         </p>
+                        @* Massbokföring (Michael Henriksson 2026-09-25): en tävlingsdags kiosk-Swishar
+                           är 50–60 likadana rader. Filtret ringar in dem, kryssen väljer, och varje rad
+                           blir ändå EN egen verifikation. *@
+                        <div class="d-none mb-2" id="@(uid)_recFilterWrap" style="max-width:22rem">
+                            <input type="search" class="form-control form-control-sm" id="@(uid)_recFilter"
+                                   placeholder="Filtrera på text, datum eller belopp" autocomplete="off">
+                        </div>
+                        @* ⚠️ OVANFÖR tabellen, intill "markera alla": ett sticky-läge nedtill fungerar
+                           inte i ekonomisidans layout, och raden hamnade då efter 60 rader. *@
+                        <div class="d-none" id="@(uid)_recBulkBar"
+                             style="position:sticky;top:0;z-index:2;background:var(--bs-body-bg);border-bottom:1px solid var(--bs-border-color);padding:.6rem 0;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
+                            <strong id="@(uid)_recBulkCount"></strong>
+                            <span class="muted" id="@(uid)_recBulkSum"></span>
+                            <button type="button" class="btn btn-primary btn-sm" id="@(uid)_recBulkPost">Bokför markerade…</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="@(uid)_recBulkClear">Avmarkera</button>
+                        </div>
                         <table class="t">
-                            <thead><tr><th style="width:7rem">Datum</th><th>Text</th>
+                            <thead><tr>
+                                <th class="d-none" id="@(uid)_recSelTh" style="width:2rem">
+                                    <input type="checkbox" class="form-check-input" id="@(uid)_recSelAll"
+                                           title="Markera alla rader som syns" aria-label="Markera alla rader som syns"></th>
+                                <th style="width:7rem">Datum</th><th>Text</th>
                                 <th class="n" style="width:8rem">Belopp</th>
                                 <th style="width:12rem"></th></tr></thead>
                             <tbody id="@(uid)_recBankOnly"></tbody>
@@ -5049,12 +5078,18 @@
                 return '<option value="' + i.id + '">' + i.accountNumber + ' · '
                      + esc(shortDate(i.periodFrom)) + '–' + esc(shortDate(i.periodTo))
                      + ' (' + i.rowCount + ' rader)</option>';
-            }).join('') + '</select>';
+            }).join('') + '</select>'
+            // Fel konto eller fel fil ska gå att ångra (Michael Henriksson 2026-09-25).
+            + (canWrite ? ' <button type="button" class="btn btn-outline-secondary" id="' + uid
+                          + '_recDelete">Ta bort kontoutdraget</button>' : '');
 
+        show(el('recDelBox'), false);
+        delete el('recDelBox').dataset.step;
         var pick = el('recPick');
         if (pick) {
             pick.value = String(selectId || bankImports[0].id);
-            pick.addEventListener('change', function () { loadReconciliation(pick.value); });
+            pick.addEventListener('change', function () { show(el('recDelBox'), false); loadReconciliation(pick.value); });
+            if (el('recDelete')) el('recDelete').addEventListener('click', function () { delete el('recDelBox').dataset.step; recAskDelete(false); });
             await loadReconciliation(pick.value);
         } else {
             show(el('recWrap'), false);
@@ -5109,8 +5144,16 @@
         // ── Bankrader utan motpart ──────────────────────────────────────────────────────
         show(el('recBankOnlyCard'), r.bankOnly.length > 0);
         el('recBankOnlyMeta').textContent = r.bankOnly.length + ' rader';
+        recBankRows = r.bankOnly;
+        recSel = new Set();
+        show(el('recSelTh'), canWrite && r.bankOnly.length > 0);
+        show(el('recFilterWrap'), canWrite && r.bankOnly.length > 1);
         el('recBankOnly').innerHTML = r.bankOnly.map(function (b) {
-            return '<tr><td class="date">' + esc(shortDate(b.bookedDate)) + '</td>'
+            return '<tr data-bank-row="' + b.id + '"'
+                 + ' data-search="' + esc((shortDate(b.bookedDate) + ' ' + (b.text || '') + ' ' + b.amount).toLowerCase()) + '">'
+                 + (canWrite ? '<td><input type="checkbox" class="form-check-input" data-sel-row="' + b.id + '"'
+                               + ' aria-label="Markera raden"></td>' : '')
+                 + '<td class="date">' + esc(shortDate(b.bookedDate)) + '</td>'
                  + '<td>' + esc(b.text) + '</td>'
                  + '<td class="n">' + kr(b.amount) + '</td>'
                  + '<td class="n">' + (canWrite
@@ -5145,6 +5188,15 @@
                 if (b) openBankPost(b);
             });
         });
+
+        el('recBankOnly').querySelectorAll('input[data-sel-row]').forEach(function (cb) {
+            cb.addEventListener('change', function () {
+                if (cb.checked) recSel.add(cb.dataset.selRow); else recSel.delete(cb.dataset.selRow);
+                recSyncBulk();
+            });
+        });
+        if (el('recFilter')) { el('recFilter').value = ''; }
+        recSyncBulk();
 
         // ── Bokforingsrader utan motpart ────────────────────────────────────────────────
         show(el('recLedgerOnlyCard'), r.ledgerOnly.length > 0);
@@ -5182,22 +5234,128 @@
         });
     }
 
+    // ── Markera flera bankrader ──────────────────────────────────────────────────────────
+    // ⚠️ Urvalet nollställs vid varje omritning: raderna kan ha bokförts eller försvunnit, och
+    //    ett urval som pekar på rader som inte längre syns bokför något användaren inte ser.
+    var recBankRows = [], recSel = new Set();
+
+    function recSelectedRows() {
+        return recBankRows.filter(function (b) { return recSel.has(String(b.id)); });
+    }
+
+    function recVisibleBoxes() {
+        return Array.prototype.filter.call(el('recBankOnly').querySelectorAll('input[data-sel-row]'),
+            function (cb) { return !cb.closest('tr').classList.contains('d-none'); });
+    }
+
+    function recSyncBulk() {
+        var rows = recSelectedRows();
+        var sum = rows.reduce(function (s, b) { return s + b.amount; }, 0);
+        show(el('recBulkBar'), canWrite && rows.length > 0);
+        el('recBulkCount').textContent = rows.length + (rows.length === 1 ? ' rad markerad' : ' rader markerade');
+        el('recBulkSum').textContent = 'Summa ' + kr(sum);
+        var vis = recVisibleBoxes();
+        var all = el('recSelAll');
+        if (all) {
+            var on = vis.filter(function (cb) { return cb.checked; }).length;
+            all.checked = vis.length > 0 && on === vis.length;
+            all.indeterminate = on > 0 && on < vis.length;
+        }
+    }
+
+    if (canWrite && el('recSelAll')) {
+        el('recSelAll').addEventListener('change', function () {
+            var on = el('recSelAll').checked;
+            recVisibleBoxes().forEach(function (cb) {
+                cb.checked = on;
+                if (on) recSel.add(cb.dataset.selRow); else recSel.delete(cb.dataset.selRow);
+            });
+            recSyncBulk();
+        });
+        el('recFilter').addEventListener('input', function () {
+            var q = el('recFilter').value.trim().toLowerCase();
+            el('recBankOnly').querySelectorAll('tr[data-bank-row]').forEach(function (tr) {
+                tr.classList.toggle('d-none', q !== '' && tr.dataset.search.indexOf(q) < 0);
+            });
+            recSyncBulk();
+        });
+        el('recBulkClear').addEventListener('click', function () {
+            recSel = new Set();
+            el('recBankOnly').querySelectorAll('input[data-sel-row]').forEach(function (cb) { cb.checked = false; });
+            recSyncBulk();
+        });
+        el('recBulkPost').addEventListener('click', function () {
+            var rows = recSelectedRows();
+            if (rows.length) openBankPost(rows);
+        });
+    }
+
     // ── Bokför en bankrad ─────────────────────────────────────────────────────────────────
     // ⚠️ Belopp, datum, riktning och bankkonto kommer ur BANKRADEN (servern läser dem själv,
     //    PostBankRow) — dialogen visar dem bara. Kassören väljer vad posten VAR.
-    var bpAccounts = null, bpRow = null;
+    var bpAccounts = null, bpRow = null, bpRows = null;
+
+    // Flera rader: listan i dialogen går att rensa, och summan följer med.
+    function bpRenderBulk() {
+        var sum = bpRows.reduce(function (s, x) { return s + x.amount; }, 0);
+        var ins = bpRows.filter(function (x) { return x.amount > 0; }).length;
+        var outs = bpRows.length - ins;
+        el('bpFacts').innerHTML = '<strong>' + bpRows.length + ' rader · ' + kr(sum) + '</strong>'
+            + '<div class="muted">Varje rad blir en egen verifikation med bankens belopp och datum, '
+            + 'ihopparad med raden. Konto ' + recAccount + '.</div>'
+            + (ins > 0 && outs > 0
+                ? '<div class="ek-alert ek-warn mt-2 mb-0">' + ins + ' pengar in och ' + outs + ' pengar ut. '
+                  + 'Alla bokförs på samma konto — stämmer det?</div>' : '')
+            + '<div style="max-height:14rem;overflow:auto;margin-top:.5rem;border:1px solid var(--bs-border-color);border-radius:6px">'
+            + '<table class="t" style="margin:0"><tbody>'
+            + bpRows.map(function (x) {
+                  return '<tr><td class="date">' + esc(shortDate(x.bookedDate)) + '</td><td>' + esc(x.text) + '</td>'
+                       + '<td class="n">' + kr(x.amount) + '</td>'
+                       + '<td class="n"><button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-bp-drop="' + x.id
+                       + '" title="Ta bort ur urvalet">Ta bort</button></td></tr>';
+              }).join('')
+            + '</tbody></table></div>';
+        el('bpFacts').querySelectorAll('button[data-bp-drop]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                bpRows = bpRows.filter(function (x) { return String(x.id) !== btn.dataset.bpDrop; });
+                recSel.delete(btn.dataset.bpDrop);
+                var cb = el('recBankOnly').querySelector('input[data-sel-row="' + btn.dataset.bpDrop + '"]');
+                if (cb) cb.checked = false;
+                recSyncBulk();
+                if (bpRows.length === 0) { closeModal('bpModal'); return; }
+                bpRenderBulk();
+            });
+        });
+        el('bpSave').textContent = 'Bokför ' + bpRows.length + (bpRows.length === 1 ? ' rad' : ' rader');
+    }
 
     function openBankPost(b) {
-        bpRow = b;
-        el('bpFacts').innerHTML = esc(shortDate(b.bookedDate)) + ' · <strong>' + kr(b.amount) + '</strong> · '
-            + esc(b.text) + '<div class="muted">' + (b.amount > 0 ? 'Pengar in' : 'Pengar ut')
-            + ' på konto ' + recAccount + ' — så som banken visar det.</div>';
-        el('bpText').value = b.text || '';
+        var bulk = Array.isArray(b);
+        bpRows = bulk ? b.slice() : null;
+        bpRow = bulk ? null : b;
+        el('bpTitle').textContent = bulk ? 'Bokför markerade bankrader' : 'Bokför bankraden';
+        if (bulk) {
+            bpRenderBulk();
+            // Samma text på alla rader om kassören skriver en; annars behåller varje rad bankens.
+            var texts = bpRows.map(function (x) { return x.text || ''; });
+            el('bpText').value = texts.every(function (t) { return t === texts[0]; }) ? texts[0] : '';
+            el('bpText').placeholder = 'Tomt = varje rad behåller bankens text';
+        } else {
+            el('bpFacts').innerHTML = esc(shortDate(b.bookedDate)) + ' · <strong>' + kr(b.amount) + '</strong> · '
+                + esc(b.text) + '<div class="muted">' + (b.amount > 0 ? 'Pengar in' : 'Pengar ut')
+                + ' på konto ' + recAccount + ' — så som banken visar det.</div>';
+            el('bpText').value = b.text || '';
+            el('bpText').placeholder = '';
+            el('bpSave').textContent = 'Bokför och para ihop';
+        }
         show(el('bpError'), false);
 
         var fill = function () {
             // Intäkter för pengar in, kostnader för pengar ut — samma förval som Bokför.
-            var wantRevenue = b.amount > 0;
+            // Flera rader: efter majoriteten.
+            var wantRevenue = bulk
+                ? bpRows.filter(function (x) { return x.amount > 0; }).length * 2 >= bpRows.length
+                : b.amount > 0;
             var list = bpAccounts.filter(function (a) { return !a.isBalance; });
             el('bpAccount').innerHTML = list.map(function (a) {
                 return '<option value="' + a.number + '">' + a.number + ' · ' + esc(a.name) + '</option>';
@@ -5217,6 +5375,35 @@
 
     if (el('bpSave')) el('bpSave').addEventListener('click', function () {
         var btn = this;
+        if (bpRows) {
+            if (bpRows.length === 0) return;
+            btn.disabled = true;
+            postJson('/umbraco/surface/EkonomiAdmin/PostBankRows', {
+                issuerType: issuerType, issuerId: issuerId,
+                rowIds: bpRows.map(function (x) { return x.id; }),
+                accountNumber: parseInt(el('bpAccount').value, 10) || 0,
+                description: el('bpText').value
+            }).then(function (j) {
+                btn.disabled = false;
+                if (!j.success && !(j.failed && j.failed.length)) {
+                    el('bpError').textContent = j.message; show(el('bpError'), true); return;
+                }
+                closeModal('bpModal');
+                var detail = (j.failed || []).map(function (f) {
+                    var x = bpRows.find(function (y) { return y.id === f.rowId; });
+                    return (x ? shortDate(x.bookedDate) + ' ' + kr(x.amount) : 'Rad') + ': ' + f.message;
+                });
+                el('bankOk').textContent = j.message;
+                show(el('bankOk'), j.posted > 0);
+                // ⚠️ Rader som inte bokfördes namnges som FEL, inte gömda i ett grönt kvitto.
+                el('bankError').textContent = detail.length ? 'Inte bokförda: ' + detail.join(' · ') : '';
+                show(el('bankError'), detail.length > 0);
+                loadReconciliation(recCurrent);
+            }).catch(function (e) {
+                btn.disabled = false; el('bpError').textContent = e.message; show(el('bpError'), true);
+            });
+            return;
+        }
         if (!bpRow) return;
         btn.disabled = true;
         postJson('/umbraco/surface/EkonomiAdmin/PostBankRow', {
@@ -5233,6 +5420,62 @@
             btn.disabled = false; el('bpError').textContent = e.message; show(el('bpError'), true);
         });
     });
+
+    // ⚠️ Första anropet tar bort direkt när inga rader är ihopparade, och svarar annars med
+    //    antalet. Då säger rutan att verifikationerna finns KVAR — "Bokför…" skapade riktig
+    //    bokföring som inte hör till filen och som måste rättas för sig om kontot var fel.
+    function recImportLabel() {
+        var i = bankImports.filter(function (x) { return x.id === recCurrent; })[0];
+        return i ? i.accountNumber + ' · ' + shortDate(i.periodFrom) + '–' + shortDate(i.periodTo)
+                   + ' (' + i.rowCount + ' rader)' : 'kontoutdraget';
+    }
+
+    async function recAskDelete(confirmed) {
+        show(el('bankError'), false);
+        show(el('bankOk'), false);
+
+        if (!confirmed && !el('recDelBox').dataset.step) {
+            el('recDelText').innerHTML = 'Ta bort <b>' + esc(recImportLabel()) + '</b>? Raderna försvinner ur '
+                + 'avstämningen. Du kan läsa in filen igen, på rätt konto.';
+            el('recDelBox').dataset.step = 'ask';
+            show(el('recDelBox'), true);
+            return;
+        }
+
+        try {
+            var d = await postJson('/umbraco/surface/EkonomiAdmin/DeleteBankImport', {
+                issuerType: issuerType, issuerId: issuerId, importId: recCurrent,
+                confirm: el('recDelBox').dataset.step === 'matched'
+            });
+            if (d.needsConfirm) {
+                el('recDelText').innerHTML = '<b>' + d.matched + ' av raderna är redan ihopparade med bokföringen.</b> '
+                    + 'Verifikationerna tas <b>inte</b> bort med kontoutdraget. Har du bokfört rader härifrån '
+                    + 'på fel konto ska de verifikationerna rättas under Bokför. Ta bort kontoutdraget ändå?';
+                el('recDelBox').dataset.step = 'matched';
+                show(el('recDelBox'), true);
+                return;
+            }
+            if (!d.success) throw new Error(d.message || 'Kontoutdraget kunde inte tas bort.');
+
+            var label = recImportLabel();
+            delete el('recDelBox').dataset.step;
+            show(el('recDelBox'), false);
+            await loadBank();
+            el('bankOk').textContent = 'Kontoutdraget ' + label + ' är borttaget.';
+            show(el('bankOk'), true);
+        } catch (e) {
+            el('bankError').textContent = e.message;
+            show(el('bankError'), true);
+        }
+    }
+
+    if (canWrite && el('recDelYes')) {
+        el('recDelYes').addEventListener('click', function () { recAskDelete(true); });
+        el('recDelNo').addEventListener('click', function () {
+            delete el('recDelBox').dataset.step;
+            show(el('recDelBox'), false);
+        });
+    }
 
     async function setBankMatch(rowId, lineId) {
         try {

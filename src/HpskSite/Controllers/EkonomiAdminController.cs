@@ -2482,41 +2482,118 @@ namespace HpskSite.Controllers
             var (actorId, _) = await GetCurrentActorAsync();
             if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
 
-            var found = _bankService.UnmatchedRow(request.IssuerId, request.RowId);
+            var one = PostOneBankRow(request.IssuerType, request.IssuerId, request.RowId, request.AccountNumber,
+                request.Description, request.ProjectId, request.VatRate, actorId.Value);
+
+            if (!one.Ok) return Json(new { success = false, message = one.Error });
+
+            return Json(new
+            {
+                success = true,
+                number = one.Number,
+                matched = one.Matched,
+                message = one.Matched
+                    ? $"Bokfört som {one.Number} och ihopparat med bankraden."
+                    : $"Bokfört som {one.Number}, men ihopparningen gick inte — para ihop raden för hand."
+            });
+        }
+
+        /// <summary>
+        /// En bankrad → en verifikation, ihopparad med raden. ENDA vägen; både "Bokför…" och
+        /// massbokföringen går hit, så de två inte kan glida isär.
+        /// <para>Belopp, datum, riktning och bankkonto läses ur BANKRADEN, aldrig ur begäran.</para>
+        /// </summary>
+        private (bool Ok, string? Error, string? Number, bool Matched) PostOneBankRow(
+            int issuerType, int issuerId, int rowId, int accountNumber, string? description,
+            int? projectId, decimal? vatRate, int actorId)
+        {
+            var found = _bankService.UnmatchedRow(issuerId, rowId);
             if (found is null)
-                return Json(new { success = false, message = "Bankraden finns inte, eller är redan ihopparad med en bokföring." });
+                return (false, "Bankraden finns inte, eller är redan ihopparad med en bokföring.", null, false);
 
             var (row, bankAccount) = found.Value;
 
             var result = _manualPosting.Post(new ManualEntryRequest
             {
-                IssuerType = request.IssuerType,
-                IssuerId = request.IssuerId,
+                IssuerType = issuerType,
+                IssuerId = issuerId,
                 Amount = Math.Abs(row.Amount),
                 WeReceived = row.Amount > 0,
                 Date = row.BookedDate.Date,
-                Description = string.IsNullOrWhiteSpace(request.Description) ? row.Text : request.Description.Trim(),
-                AccountNumber = request.AccountNumber,
+                Description = string.IsNullOrWhiteSpace(description) ? row.Text : description.Trim(),
+                AccountNumber = accountNumber,
                 PaymentAccountNumber = bankAccount,
-                ProjectId = request.ProjectId is int p && p != 0 ? p : null,
-                VatRate = request.VatRate
-            }, actorId.Value);
+                ProjectId = projectId is int p && p != 0 ? p : null,
+                VatRate = vatRate
+            }, actorId);
 
-            if (!result.Success) return Json(new { success = false, message = result.Error });
+            if (!result.Success) return (false, result.Error, null, false);
 
             // Bankbenet i den nya verifikationen är raden vi parar ihop med.
-            var lineId = _bankService.LineOnAccount(request.IssuerId, result.EntryId, bankAccount);
-            var matched = lineId is int lid && _bankService.SetMatch(request.IssuerId, row.Id, lid, actorId.Value);
+            var lineId = _bankService.LineOnAccount(issuerId, result.EntryId, bankAccount);
+            var matched = lineId is int lid && _bankService.SetMatch(issuerId, row.Id, lid, actorId);
+            return (true, null, result.Number, matched);
+        }
 
-            return Json(new
+        /// <summary>
+        /// Bokför flera bankrader på samma konto — t.ex. en tävlingsdags kiosk-Swishar.
+        ///
+        /// <para><b>⚠️ EN VERIFIKATION PER RAD, med flit</b> (Michael Henriksson 2026-09-25): då kan
+        /// antalet bankrader jämföras med antalet verifikationer, och revisorn ser direkt om en
+        /// rad aldrig bokfördes. En samlingsverifikation per dag övervägdes och valdes bort.</para>
+        ///
+        /// <para>En rad som inte går att bokföra stoppar inte de andra — den rapporteras med sitt
+        /// skäl. Allt eller inget vore fel här: de redan bokförda är riktiga verifikationer.</para>
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PostBankRows([FromBody] PostBankRowsRequest request)
+        {
+            if (request is null || request.RowIds is null || request.RowIds.Count == 0)
+                return Json(new { success = false, message = "Inga rader valda." });
+            if (request.RowIds.Count > 1000)
+                return Json(new { success = false, message = "Högst 1 000 rader åt gången." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            var (actorId, _) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var numbers = new List<string>();
+            var failed = new List<object>();
+            int unmatched = 0;
+
+            foreach (var rowId in request.RowIds.Distinct())
             {
-                success = true,
-                number = result.Number,
-                matched,
-                message = matched
-                    ? $"Bokfört som {result.Number} och ihopparat med bankraden."
-                    : $"Bokfört som {result.Number}, men ihopparningen gick inte — para ihop raden för hand."
-            });
+                var one = PostOneBankRow(request.IssuerType, request.IssuerId, rowId, request.AccountNumber,
+                    request.Description, request.ProjectId, request.VatRate, actorId.Value);
+                if (!one.Ok) { failed.Add(new { rowId, message = one.Error }); continue; }
+                numbers.Add(one.Number ?? "");
+                if (!one.Matched) unmatched++;
+            }
+
+            var msg = numbers.Count == 0
+                ? "Ingen rad bokfördes."
+                : $"{numbers.Count} {(numbers.Count == 1 ? "verifikation" : "verifikationer")} bokförda"
+                  + (numbers.Count > 1 ? $" ({numbers.First()}–{numbers.Last()})" : $" ({numbers.First()})")
+                  + " och ihopparade med bankraderna."
+                  + (unmatched > 0 ? $" {unmatched} gick inte att para ihop — gör det för hand." : "")
+                  + (failed.Count > 0 ? $" {failed.Count} rader kunde inte bokföras, se nedan." : "");
+
+            return Json(new { success = numbers.Count > 0, posted = numbers.Count, numbers, unmatched, failed, message = msg });
+        }
+
+        public class PostBankRowsRequest
+        {
+            public int IssuerType { get; set; }
+            public int IssuerId { get; set; }
+            public List<int> RowIds { get; set; } = new();
+            public int AccountNumber { get; set; }
+            /// <summary>Tomt = varje rad behåller bankens egen text.</summary>
+            public string? Description { get; set; }
+            public int? ProjectId { get; set; }
+            public decimal? VatRate { get; set; }
         }
 
         public class PostBankRowRequest
@@ -2541,7 +2618,18 @@ namespace HpskSite.Controllers
             var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
             if (!ok) return Json(new { success = false, message = DeniedMessage });
 
-            return Json(new { success = _bankService.Delete(request.IssuerId, request.ImportId) });
+            // ⚠️ Två steg när rader redan är ihopparade (Michael Henriksson 2026-09-25: "råkat
+            //    importera på fel konto"). En verifikation skapad via "Bokför…" tas INTE bort med
+            //    utdraget — den är bokföring, inte en del av filen — så den som tar bort måste få
+            //    veta att den finns kvar. Första anropet skriver ingenting.
+            var matched = _bankService.MatchedCount(request.IssuerId, request.ImportId);
+            if (matched is null)
+                return Json(new { success = false, message = "Kontoutdraget hittades inte." });
+            if (matched > 0 && !request.Confirm)
+                return Json(new { success = false, needsConfirm = true, matched });
+
+            var deleted = _bankService.Delete(request.IssuerId, request.ImportId);
+            return Json(new { success = deleted, matched, message = deleted ? null : "Kontoutdraget kunde inte tas bort." });
         }
 
         public class BankMatchRequest
@@ -2551,6 +2639,8 @@ namespace HpskSite.Controllers
             public int ImportId { get; set; }
             public int RowId { get; set; }
             public int LineId { get; set; }
+            /// <summary>DeleteBankImport: ta bort även när rader är ihopparade.</summary>
+            public bool Confirm { get; set; }
         }
 
         /// <summary>
