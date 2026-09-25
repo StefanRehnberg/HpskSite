@@ -232,14 +232,15 @@ namespace HpskSite.Services.Ledger
             var from = parsed.Rows.Min(r => r.BookedDate);
             var to = parsed.Rows.Max(r => r.BookedDate);
 
-            // ⚠️ Saldona tas ur FÖRSTA och SISTA raden i filens egen ordning, inte ur datum:
-            //    ett utdrag kan vara sorterat nyast först, och då är "sista raden" det
-            //    ingående saldot. Ordningen i filen är den banken själv redovisade i.
-            var first = parsed.Rows.First();
-            var last = parsed.Rows.Last();
-
-            var opening = first.Balance.HasValue ? first.Balance - first.Amount : null;
-            var closing = last.Balance;
+            // ⚠️⚠️ Saldona tas ur den KRONOLOGISKT första och sista raden, inte ur filens.
+            //    Förut stod här att filens egen ordning var rätt — men koden tog ändå första
+            //    raden som ingående, så en fil med nyast först fick det ingående saldot som
+            //    utgående (Michael Henriksson, 2026-09-25). Se BankStatementFormat.Chronological.
+            //    Raderna numreras också om kronologiskt, så listorna läses uppifrån och ned i
+            //    tidsordning i stället för nerifrån.
+            var chrono = BankStatementFormat.Chronological(parsed.Rows);
+            for (int n = 0; n < chrono.Count; n++) chrono[n].LineNumber = n + 1;
+            var (opening, closing) = BankStatementFormat.Balances(chrono);
 
             var importId = ldb.ExecuteScalar<int>(
                 @"INSERT INTO dbo.LedgerBankImport
@@ -385,8 +386,14 @@ namespace HpskSite.Services.Ledger
                    WHERE IssuerType = @0 AND IssuerId = @1 AND Number = @2",
                 issuerType, issuerId, import.AccountNumber).FirstOrDefault() ?? "";
 
-            var rows = ldb.Fetch<LedgerBankRow>(
-                "SELECT * FROM dbo.LedgerBankRow WHERE ImportId = @0 ORDER BY LineNumber", importId);
+            // ⚠️ Kronologiskt även vid läsning: utdrag inlästa före 2026-09-25 lagrades i filens
+            //    ordning med saldot ur fel ände. Raderna bär sina egna saldon, så svaret räknas om
+            //    här i stället för att lita på importens lagrade ClosingBalance — ingen migrering
+            //    och ingen ny inläsning behövs.
+            var rows = BankStatementFormat.Chronological(ldb.Fetch<LedgerBankRow>(
+                "SELECT * FROM dbo.LedgerBankRow WHERE ImportId = @0 ORDER BY LineNumber", importId));
+            var (_, rowClosing) = BankStatementFormat.Balances(rows);
+            if (rowClosing.HasValue) view.BankClosingBalance = rowClosing;
 
             // ⚠️ Serieprefixet bor på SERIEN, inte på verifikationen, så det måste joinas in —
             //    ett nummer utan prefix går inte att slå upp i föreningens egen pärm.
@@ -659,12 +666,36 @@ namespace HpskSite.Services.Ledger
         /// <c>Id = @0</c> — en kassör i en förening kunde då ta bort en annan förenings utdrag genom
         /// att gissa ett id (skrivgrinden prövar bara det utställar-id anroparen skickar).</para>
         /// </summary>
+        /// <summary>
+        /// Hur många av utdragets rader som är ihopparade med bokföringen — automatiskt, för hand
+        /// eller via "Bokför…". Null när utdraget inte tillhör utställaren.
+        /// </summary>
+        public int? MatchedCount(int issuerId, int importId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
+            var exists = ldb.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM dbo.LedgerBankImport WHERE Id = @0 AND IssuerId = @1", importId, issuerId);
+            if (exists == 0) return null;
+            return ldb.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM dbo.LedgerBankRow WHERE ImportId = @0 AND IssuerId = @1 AND MatchedLineId IS NOT NULL",
+                importId, issuerId);
+        }
+
         public bool Delete(int issuerId, int importId)
         {
             using var db = _databaseFactory.CreateDatabase();
             var ldb = new LedgerDb(db, issuerId);
 
-            return ldb.Execute("DELETE FROM dbo.LedgerBankImport WHERE Id = @0 AND IssuerId = @1", importId, issuerId) > 0;
+            // ⚠️ Raderna tas bort UTTRYCKLIGEN, inte via kaskaden: dbo har ON DELETE CASCADE men
+            //    sandlådans sbx.LedgerBankRow saknar främmande nyckel helt (mätt 2026-09-25), så
+            //    där blev raderna kvar som föräldralösa. Svaret ska inte bero på schemat.
+            using var tx = ldb.GetTransaction();
+            var gone = ldb.Execute("DELETE FROM dbo.LedgerBankImport WHERE Id = @0 AND IssuerId = @1", importId, issuerId) > 0;
+            if (gone)
+                ldb.Execute("DELETE FROM dbo.LedgerBankRow WHERE ImportId = @0 AND IssuerId = @1", importId, issuerId);
+            tx.Complete();
+            return gone;
         }
 
         /// <summary>

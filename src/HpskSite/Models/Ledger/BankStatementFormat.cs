@@ -25,6 +25,57 @@ namespace HpskSite.Models.Ledger
     /// </summary>
     public static class BankStatementFormat
     {
+        /// <summary>
+        /// Raderna i KRONOLOGISK ordning, äldst först, oavsett hur banken sorterade filen.
+        ///
+        /// <para><b>⚠️⚠️ FILENS ORDNING ÄR INTE TIDSORDNINGEN.</b> Swedbank och flera andra
+        /// exporterar nyast först. Vi tog in- och utgående saldo ur filens första och sista rad,
+        /// så en sådan fil fick det INGÅENDE saldot som utgående — Michael Henriksson (Åmåls PK)
+        /// 2026-09-25: "Bankens saldo 150 kr mot bokföringens 122 861 kr", differens −122 711 kr
+        /// på ett konto som stämde på kronan.</para>
+        ///
+        /// <para>Riktningen avgörs i första hand av <b>saldokedjan</b> — i rätt ordning gäller
+        /// <c>saldo = föregående saldo + belopp</c> rad för rad, och det är det enda som avgör en
+        /// fil där alla rader har samma datum. Säger kedjan ingenting (inga saldon, eller lika
+        /// många träffar åt båda håll) avgör datumen. Säger inte de heller något behålls filens
+        /// ordning.</para>
+        /// </summary>
+        public static List<LedgerBankRow> Chronological(IReadOnlyList<LedgerBankRow> rows)
+        {
+            var list = rows.ToList();
+            if (list.Count < 2) return list;
+
+            int forward = 0, backward = 0;
+            for (int i = 1; i < list.Count; i++)
+            {
+                var a = list[i - 1];
+                var b = list[i];
+                if (a.Balance is not decimal ba || b.Balance is not decimal bb) continue;
+                if (bb == ba + b.Amount) forward++;
+                if (ba == bb + a.Amount) backward++;
+            }
+
+            bool reverse;
+            if (forward != backward) reverse = backward > forward;
+            else reverse = list[0].BookedDate > list[^1].BookedDate;
+
+            if (reverse) list.Reverse();
+            return list;
+        }
+
+        /// <summary>
+        /// Utdragets ingående och utgående saldo, ur den kronologiskt första respektive sista
+        /// raden (<see cref="Chronological"/>). Null där filen inte bär något saldo.
+        /// </summary>
+        public static (decimal? Opening, decimal? Closing) Balances(IReadOnlyList<LedgerBankRow> rows)
+        {
+            var c = Chronological(rows);
+            if (c.Count == 0) return (null, null);
+            var first = c[0];
+            var last = c[^1];
+            return (first.Balance.HasValue ? first.Balance - first.Amount : null, last.Balance);
+        }
+
         /// <summary>Avgränsare vi provar, i fallande sannolikhet för en svensk bank.</summary>
         /// <remarks>
         /// ⚠️ Semikolon FÖRST. Svenska exporter använder decimalkomma, och då kan fältavgränsaren
