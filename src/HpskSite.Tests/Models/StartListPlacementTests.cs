@@ -144,6 +144,39 @@ namespace HpskSite.Tests.Models
         }
 
         [Fact]
+        public void MellanSkjutlag_TillSkjutlagDarSkyttenRedanStar_Vagras()
+        {
+            // Samma medlem med två starter (A2 och B2) i olika skjutlag: B2-starten får inte
+            // flyttas till skjutlaget där A2-starten står — de skjuter samtidigt.
+            var a = Team(1, 1, 2);
+            var b = Team(2, 1);
+            var twin = new StartListShooter { Position = 3, MemberId = 777, Name = "Björn", WeaponClass = "B2" };
+            a.Shooters!.Add(twin);
+            b.Shooters!.Add(new StartListShooter { Position = 2, MemberId = 777, Name = "Björn", WeaponClass = "A2" });
+            var before = (Lanes(a), Lanes(b));
+
+            var r = MoveTo(a, twin, b, 5, null, 10, null);
+            r.Outcome.Should().Be(Outcome.Refused);
+            r.Message.Should().Contain("två banor");
+            a.Shooters.Should().Contain(twin);
+            b.Shooters!.Count(s => s.MemberId == 777).Should().Be(1);
+        }
+
+        [Fact]
+        public void Byt_MellanSkjutlag_NarGrannenRedanStarIKallskjutlaget_Vagras()
+        {
+            var a = Team(1, 1, 2);
+            var b = Team(2, 1);
+            // Skytten på bana 1 i skjutlag 2 har också en start i skjutlag 1.
+            a.Shooters!.Add(new StartListShooter { Position = 3, MemberId = 201, Name = "T2P1", WeaponClass = "C1" });
+            var mover = a.Shooters.Single(s => s.MemberId == 101);
+            var r = MoveTo(a, mover, b, 1, ModeSwap, 10, null);
+            r.Outcome.Should().Be(Outcome.Refused);
+            mover.Position.Should().Be(1);
+            a.Shooters.Should().Contain(mover);
+        }
+
+        [Fact]
         public void PlaceInFirstFree_HopparOverTrasigBana()
         {
             var t = Team(1, 1, 2);

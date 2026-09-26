@@ -1790,7 +1790,7 @@ function initStartListDragAndDrop(container) {
         const row = e.target.closest('.shooter-row[draggable="true"]');
         if (!row) return;
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', JSON.stringify({ memberId: +row.dataset.memberId, team: +row.dataset.team }));
+        e.dataTransfer.setData('text/plain', JSON.stringify({ memberId: +row.dataset.memberId, team: +row.dataset.team, weaponClass: row.dataset.weaponClass || '' }));
         row.classList.add('dragging');
     });
     container.addEventListener('dragend', e => {
@@ -1821,7 +1821,7 @@ function initStartListDragAndDrop(container) {
         if (!src || !lane || !targetTeam) return;
         if (src.team === targetTeam && t.dataset.memberId && +t.dataset.memberId === src.memberId) return;
         const shooter = findEditorShooter(src.memberId, src.team);
-        window._setLaneCtx = { memberId: src.memberId, sourceTeam: src.team, name: shooter?.name || '' };
+        window._setLaneCtx = { memberId: src.memberId, sourceTeam: src.team, weaponClass: src.weaponClass || '', name: shooter?.name || '' };
         requestSetLane(targetTeam, lane, null, { fromDrop: true });
     });
 }
@@ -1830,6 +1830,7 @@ function openSetLaneModalFor(el) {
     window._setLaneCtx = {
         memberId: +el.dataset.memberId,
         sourceTeam: +el.dataset.team,
+        weaponClass: el.dataset.weaponClass || '',
         name: el.dataset.shooterName || ''
     };
     showSetLaneModal(+el.dataset.team, +el.dataset.lane, null);
@@ -1911,6 +1912,7 @@ async function requestSetLane(targetTeam, lane, mode, opts) {
                 startListId: window.currentStartListId,
                 memberId: ctx.memberId,
                 sourceTeamNumber: ctx.sourceTeam,
+                weaponClass: ctx.weaponClass || null,
                 targetTeamNumber: targetTeam,
                 lane: lane,
                 mode: mode
@@ -2115,6 +2117,7 @@ function createTeamCard(team, index, isOfficial) {
             shootersHtml += `
                 <div class="shooter-row d-flex align-items-center p-2 border-bottom${laneInfo.broken.has(shooter.position) ? ' shooter-on-broken' : ''}"
                      data-member-id="${shooter.memberId}" data-team="${team.teamNumber}" data-lane="${shooter.position}"
+                     data-weapon-class="${hpskEsc(shooterWeaponClass)}"
                      ${dnd ? 'draggable="true"' : ''}>
                     ${dnd ? '<i class="bi bi-grip-vertical text-muted me-1 drag-handle" title="Dra för att flytta"></i>' : ''}
                     <input type="checkbox" class="form-check-input me-2 shooter-checkbox"
@@ -2136,7 +2139,7 @@ function createTeamCard(team, index, isOfficial) {
                                     <ul class="dropdown-menu dropdown-menu-end">
                                         <li><a class="dropdown-item" href="#" onclick="openSetLaneModalFor(this); return false;"
                                                data-member-id="${shooter.memberId}" data-shooter-name="${hpskEsc(shooter.name)}"
-                                               data-team="${team.teamNumber}" data-lane="${shooter.position}">
+                                               data-team="${team.teamNumber}" data-lane="${shooter.position}" data-weapon-class="${hpskEsc(shooterWeaponClass)}">
                                             <i class="bi bi-geo-alt me-2"></i>Välj skjutplats…
                                         </a></li>
                                         <li><a class="dropdown-item" href="#" onclick="moveShooterPosition(${shooter.memberId}, 'up', ${team.teamNumber}); return false;">
