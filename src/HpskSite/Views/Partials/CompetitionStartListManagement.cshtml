@@ -37,6 +37,18 @@
         border-bottom: none !important;
     }
 
+    /* Banor som egna rader: ledig och ur funktion. */
+    .lane-row { min-height: 30px; }
+    .lane-empty { background-color: transparent; }
+    .lane-broken { background-color: var(--bs-danger-bg-subtle); }
+    .shooter-on-broken { background-color: var(--bs-danger-bg-subtle); }
+    .lane-drop-hint { opacity: 0; font-size: .75rem; }
+    /* Dra-och-släpp (bara dator). */
+    .shooter-row[draggable="true"] { cursor: grab; }
+    .shooter-row.dragging { opacity: .45; }
+    .drop-target { outline: 2px dashed var(--bs-primary); outline-offset: -2px; background-color: var(--bs-primary-bg-subtle) !important; }
+    .drop-target .lane-drop-hint { opacity: 1; }
+
     .min-width-0 {
         min-width: 0;
     }
@@ -507,6 +519,13 @@
                 <div class="mb-3">
                     <label for="maxShootersPerTeam" class="form-label">Max antal skyttar per skjutlag:</label>
                     <input type="number" class="form-control" id="maxShootersPerTeam" value="30" min="1" max="50">
+                    <div class="form-text">Antalet banor. Banor som är ur funktion får ingen skytt.</div>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mt-1">
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="openBrokenLanesModal()">
+                            <i class="bi bi-cone-striped me-1"></i>Banor ur funktion…
+                        </button>
+                        <span class="small text-muted" id="generateBrokenLanesSummary"></span>
+                    </div>
                 </div>
                 <div class="mb-3">
                     <label for="firstStartTime" class="form-label">Första starttid:</label>
@@ -546,6 +565,9 @@
                     <div class="d-flex flex-wrap gap-2">
                         <button type="button" class="btn btn-primary btn-sm" onclick="openCreateTeamModal()">
                             <i class="bi bi-plus-circle me-1"></i><span class="d-none d-sm-inline">Skapa Skjutlag</span><span class="d-sm-none">Skjutlag</span>
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm" id="brokenLanesBtn" onclick="openBrokenLanesModal()">
+                            <i class="bi bi-cone-striped me-1"></i>Banor ur funktion<span id="brokenLanesBtnCount"></span>
                         </button>
                     </div>
                     <div class="d-flex flex-wrap align-items-center gap-2">
@@ -735,6 +757,81 @@
 <!-- ========================================
      CREATE TEAM MODAL (Phase 4)
      ======================================== -->
+@* Välj skjutplats — samma dialog för menyvalet och för dra-och-släpp. Är banan upptagen
+   frågar den Byt plats / Flytta ner; systemet gissar aldrig. Regeln bor i StartListPlacement. *@
+<div class="modal fade" id="setLaneModal" tabindex="-1" aria-labelledby="setLaneModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="setLaneModalLabel"><i class="bi bi-geo-alt me-2"></i>Välj skjutplats</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-3">Skytt: <strong id="setLaneShooterName"></strong></p>
+                <div class="row g-2 mb-2" id="setLaneInputs">
+                    <div class="col-7">
+                        <label for="setLaneTeam" class="form-label">Skjutlag</label>
+                        <select id="setLaneTeam" class="form-select"></select>
+                    </div>
+                    <div class="col-5">
+                        <label for="setLaneNumber" class="form-label">Bana</label>
+                        <input type="number" id="setLaneNumber" class="form-control" min="1" inputmode="numeric" autocomplete="off">
+                    </div>
+                </div>
+                <div class="form-text mb-2" id="setLaneHint"></div>
+                <div id="setLaneChoice" class="alert alert-warning d-none mb-0">
+                    <p class="mb-2" id="setLaneChoiceText"></p>
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-outline-dark" onclick="submitSetLane('swap')" id="setLaneSwapBtn">
+                            <i class="bi bi-arrow-left-right me-1"></i><span id="setLaneSwapLabel">Byt plats</span>
+                        </button>
+                        <button type="button" class="btn btn-outline-dark" onclick="submitSetLane('shift')" id="setLaneShiftBtn">
+                            <i class="bi bi-arrow-down me-1"></i><span id="setLaneShiftLabel">Flytta ner</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="setLaneError" class="alert alert-danger d-none mt-2 mb-0"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="setLaneSubmitBtn" onclick="submitSetLane(null)">Flytta</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Banor ur funktion — per TÄVLING, gäller alla skjutlag och alla startlistor. En lagad bana tas
+   bort ur listan och blir ledig igen. Att markera en bana flyttar INGEN skytt; de som står där
+   namnges så att funktionären kan flytta dem med "Välj skjutplats". *@
+<div class="modal fade" id="brokenLanesModal" tabindex="-1" aria-labelledby="brokenLanesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="brokenLanesModalLabel"><i class="bi bi-cone-striped me-2"></i>Banor ur funktion</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">
+                    En bana som är ur funktion får ingen skytt i något skjutlag — varken när startlistan
+                    skapas eller när du placerar skyttar själv. Gäller hela tävlingen. När banan är lagad
+                    tar du bort den här, så blir den ledig igen.
+                </p>
+                <label class="form-label">Trasiga banor</label>
+                <div id="brokenLanesChips" class="d-flex flex-wrap gap-2 mb-2"></div>
+                <div class="input-group">
+                    <input type="number" id="brokenLaneInput" class="form-control" min="1" placeholder="Banans nummer" inputmode="numeric" autocomplete="off">
+                    <button type="button" class="btn btn-outline-danger" onclick="addBrokenLane()"><i class="bi bi-plus-lg me-1"></i>Markera som trasig</button>
+                </div>
+                <div id="brokenLanesWarning" class="alert alert-warning d-none mt-3 mb-0"></div>
+                <div id="brokenLanesError" class="alert alert-danger d-none mt-3 mb-0"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="createTeamModal" tabindex="-1" aria-labelledby="createTeamModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -1519,6 +1616,17 @@ function loadStartListForEditing(startListId) {
         .then(async data => {
             if (data.success) {
                 currentStartListConfig = data.configuration;
+                // Banor: antal per skjutlag och tävlingens trasiga banor, för bana-för-bana-
+                // renderingen, "Välj skjutplats" och dra-och-släpp.
+                window.editorLaneInfo = {
+                    maxPerTeam: data.maxPerTeam || 0,
+                    broken: new Set(data.brokenLanes || []),
+                    competitionId: data.competitionId || $('.competition-startlist-management').data('competition-id')
+                };
+                updateBrokenLanesButton();
+                // Dra-och-släpp bara på dator (mus): med fingret krockar det med rullning, och där
+                // är "Välj skjutplats…" vägen.
+                window.editorDragAndDrop = !!(window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches);
                 // Statuses must be in hand BEFORE rendering — the shooter rows draw their
                 // Ej start / Bruten badge straight from window.participantStatusByKey.
                 await loadParticipantStatuses();
@@ -1659,6 +1767,292 @@ function displayTeamCards(teams, isOfficial) {
     container.querySelectorAll('.shooter-checkbox').forEach(cb => {
         cb.addEventListener('change', updateSelectionCount);
     });
+
+    if (window.editorDragAndDrop) initStartListDragAndDrop(container);
+}
+
+// ── Välj skjutplats / dra-och-släpp / trasiga banor ─────────────────────────────
+// Samma endpoint (SetShooterPosition) och samma fråga vid upptagen bana för dialogen och för
+// dra-och-släpp, så beteendet är detsamma oavsett hur funktionären flyttar.
+
+function findEditorShooter(memberId, teamNumber) {
+    const team = (currentStartListConfig?.teams || []).find(t => t.teamNumber === teamNumber);
+    return (team?.shooters || []).find(s => s.memberId === memberId) || null;
+}
+
+// Delegerade lyssnare på behållaren — kopplas EN gång. Raderna byts ut vid varje omritning,
+// så lyssnare direkt på raderna hade slutat fungera efter första flytten.
+function initStartListDragAndDrop(container) {
+    if (container.dataset.dndBound === '1') return;
+    container.dataset.dndBound = '1';
+
+    container.addEventListener('dragstart', e => {
+        const row = e.target.closest('.shooter-row[draggable="true"]');
+        if (!row) return;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', JSON.stringify({ memberId: +row.dataset.memberId, team: +row.dataset.team }));
+        row.classList.add('dragging');
+    });
+    container.addEventListener('dragend', e => {
+        e.target.closest?.('.shooter-row')?.classList.remove('dragging');
+        container.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+    });
+    const dropTargetOf = e => e.target.closest('.shooter-row, .lane-empty');
+    container.addEventListener('dragover', e => {
+        const t = dropTargetOf(e);
+        if (!t) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        container.querySelectorAll('.drop-target').forEach(el => { if (el !== t) el.classList.remove('drop-target'); });
+        t.classList.add('drop-target');
+    });
+    container.addEventListener('dragleave', e => {
+        const t = dropTargetOf(e);
+        if (t && !t.contains(e.relatedTarget)) t.classList.remove('drop-target');
+    });
+    container.addEventListener('drop', e => {
+        const t = dropTargetOf(e);
+        if (!t) return;
+        e.preventDefault();
+        t.classList.remove('drop-target');
+        let src;
+        try { src = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
+        const lane = +t.dataset.lane, targetTeam = +t.dataset.team;
+        if (!src || !lane || !targetTeam) return;
+        if (src.team === targetTeam && t.dataset.memberId && +t.dataset.memberId === src.memberId) return;
+        const shooter = findEditorShooter(src.memberId, src.team);
+        window._setLaneCtx = { memberId: src.memberId, sourceTeam: src.team, name: shooter?.name || '' };
+        requestSetLane(targetTeam, lane, null, { fromDrop: true });
+    });
+}
+
+function openSetLaneModalFor(el) {
+    window._setLaneCtx = {
+        memberId: +el.dataset.memberId,
+        sourceTeam: +el.dataset.team,
+        name: el.dataset.shooterName || ''
+    };
+    showSetLaneModal(+el.dataset.team, +el.dataset.lane, null);
+}
+
+function showSetLaneModal(teamNumber, lane, choice) {
+    const ctx = window._setLaneCtx || {};
+    document.getElementById('setLaneShooterName').textContent = ctx.name || '';
+    const sel = document.getElementById('setLaneTeam');
+    sel.innerHTML = (currentStartListConfig?.teams || []).map(t => {
+        const label = t.label || t.Label || '';
+        return `<option value="${t.teamNumber}">Skjutlag ${t.teamNumber}${label ? ' — ' + hpskEsc(label) : ''}</option>`;
+    }).join('');
+    sel.value = String(teamNumber || ctx.sourceTeam);
+    const input = document.getElementById('setLaneNumber');
+    input.value = lane || '';
+    const info = window.editorLaneInfo || { maxPerTeam: 0, broken: new Set() };
+    if (info.maxPerTeam) input.max = info.maxPerTeam; else input.removeAttribute('max');
+    const broken = [...info.broken].sort((a, b) => a - b);
+    document.getElementById('setLaneHint').textContent =
+        (info.maxPerTeam ? `Banor 1–${info.maxPerTeam}.` : '') +
+        (broken.length ? ` Ur funktion: ${broken.join(', ')}.` : '');
+    document.getElementById('setLaneError').classList.add('d-none');
+    setLaneChoiceState(choice);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('setLaneModal')).show();
+    if (!choice) setTimeout(() => input.focus(), 250);
+}
+
+// choice = null → vanligt läge; annars { occupantName, message } → fråga Byt / Flytta ner.
+function setLaneChoiceState(choice) {
+    const box = document.getElementById('setLaneChoice');
+    const submit = document.getElementById('setLaneSubmitBtn');
+    if (!choice) {
+        box.classList.add('d-none');
+        submit.classList.remove('d-none');
+        return;
+    }
+    const who = choice.occupantName || 'skytten';
+    document.getElementById('setLaneChoiceText').textContent = choice.message || '';
+    document.getElementById('setLaneSwapLabel').textContent = `Byt plats med ${who}`;
+    document.getElementById('setLaneShiftLabel').textContent = `Flytta ner ${who} och de efter (fram till första lediga bana)`;
+    box.classList.remove('d-none');
+    submit.classList.add('d-none');
+}
+
+function submitSetLane(mode) {
+    const team = +document.getElementById('setLaneTeam').value;
+    const lane = +document.getElementById('setLaneNumber').value;
+    if (!lane || lane < 1) {
+        const err = document.getElementById('setLaneError');
+        err.textContent = 'Ange banans nummer.';
+        err.classList.remove('d-none');
+        return;
+    }
+    requestSetLane(team, lane, mode, { fromModal: true });
+}
+
+// Ändra valen i dialogen → tillbaka till vanligt läge (frågan gällde en annan bana).
+document.addEventListener('input', e => {
+    if (e.target && (e.target.id === 'setLaneNumber' || e.target.id === 'setLaneTeam')) setLaneChoiceState(null);
+});
+document.addEventListener('change', e => {
+    if (e.target && e.target.id === 'setLaneTeam') setLaneChoiceState(null);
+});
+
+async function requestSetLane(targetTeam, lane, mode, opts) {
+    const ctx = window._setLaneCtx;
+    if (!ctx) return;
+    if (!confirmIfResultsExist('Flytta skytt')) return;
+    const token = getAntiForgeryToken();
+    if (!token) { showAlert('danger', 'Säkerhetstoken saknas. Försök ladda om sidan.'); return; }
+
+    let d;
+    try {
+        const r = await fetch('/umbraco/surface/PrecisionStartList/SetShooterPosition', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({
+                startListId: window.currentStartListId,
+                memberId: ctx.memberId,
+                sourceTeamNumber: ctx.sourceTeam,
+                targetTeamNumber: targetTeam,
+                lane: lane,
+                mode: mode
+            })
+        });
+        d = await r.json();
+    } catch (e) {
+        showAlert('danger', 'Ett oväntat fel uppstod när skytten skulle flyttas.');
+        return;
+    }
+
+    const modalEl = document.getElementById('setLaneModal');
+    if (d.needsChoice) {
+        // Upptagen bana: fråga — även efter dra-och-släpp, så inget flyttas på en gissning.
+        if (!modalEl.classList.contains('show')) showSetLaneModal(targetTeam, lane, d);
+        else setLaneChoiceState({ occupantName: d.occupantName, message: d.message });
+        return;
+    }
+    if (!d.success) {
+        if (modalEl.classList.contains('show')) {
+            const err = document.getElementById('setLaneError');
+            err.textContent = d.message || 'Skytten kunde inte flyttas.';
+            err.classList.remove('d-none');
+        } else {
+            showAlert('danger', d.message || 'Skytten kunde inte flyttas.');
+        }
+        return;
+    }
+    bootstrap.Modal.getInstance(modalEl)?.hide();
+    if (!d.unchanged) {
+        editorHasChanges = true;
+        showAlert('success', d.message || 'Skytten har flyttats.');
+        loadStartListForEditing(window.currentStartListId);
+    }
+}
+
+function updateBrokenLanesButton() {
+    const lanes = [...(window.editorLaneInfo?.broken || [])].sort((a, b) => a - b);
+    const el = document.getElementById('brokenLanesBtnCount');
+    if (el) el.textContent = lanes.length ? ` (${lanes.length})` : '';
+    const sum = document.getElementById('generateBrokenLanesSummary');
+    if (sum) sum.textContent = lanes.length ? `Ur funktion: bana ${lanes.join(', ')}` : 'Alla banor fungerar.';
+}
+
+// Trasiga banor kan sättas INNAN någon startlista finns (Michael: "innan tävling"), så
+// dialogen får inte förutsätta att redigeraren har laddat banorna.
+async function ensureLaneInfoLoaded() {
+    const competitionId = window.editorLaneInfo?.competitionId || $('.competition-startlist-management').data('competition-id');
+    if (window.editorLaneInfo && window.editorLaneInfo.competitionId) return;
+    let lanes = [];
+    try {
+        const r = await fetch(`/umbraco/surface/PrecisionStartList/GetBrokenLanes?competitionId=${competitionId}&_=${Date.now()}`, { cache: 'no-store' });
+        const d = await r.json();
+        if (d.success) lanes = d.lanes || [];
+    } catch (e) { /* visas som "alla banor fungerar"; sparningen säger till om något är fel */ }
+    window.editorLaneInfo = Object.assign(window.editorLaneInfo || { maxPerTeam: 0 }, {
+        broken: new Set(lanes),
+        competitionId: competitionId
+    });
+    updateBrokenLanesButton();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (document.getElementById('generateBrokenLanesSummary')) ensureLaneInfoLoaded();
+});
+
+async function openBrokenLanesModal() {
+    await ensureLaneInfoLoaded();
+    renderBrokenLaneChips();
+    document.getElementById('brokenLanesWarning').classList.add('d-none');
+    document.getElementById('brokenLanesError').classList.add('d-none');
+    document.getElementById('brokenLaneInput').value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('brokenLanesModal')).show();
+}
+
+function renderBrokenLaneChips() {
+    const lanes = [...(window.editorLaneInfo?.broken || [])].sort((a, b) => a - b);
+    const box = document.getElementById('brokenLanesChips');
+    box.innerHTML = lanes.length
+        ? lanes.map(l => `<span class="badge text-bg-danger d-inline-flex align-items-center gap-1 fs-6 fw-normal">
+                Bana ${l}
+                <button type="button" class="btn-close btn-close-white" style="font-size:.6rem" aria-label="Bana ${l} är lagad"
+                        title="Banan är lagad — gör den ledig igen" data-lane="${l}" onclick="removeBrokenLane(+this.dataset.lane)"></button>
+            </span>`).join('')
+        : '<span class="text-muted small">Alla banor fungerar.</span>';
+}
+
+function addBrokenLane() {
+    const n = +document.getElementById('brokenLaneInput').value;
+    const err = document.getElementById('brokenLanesError');
+    if (!n || n < 1) { err.textContent = 'Ange banans nummer.'; err.classList.remove('d-none'); return; }
+    const lanes = new Set(window.editorLaneInfo?.broken || []);
+    lanes.add(n);
+    saveBrokenLanes([...lanes]);
+}
+
+function removeBrokenLane(n) {
+    const lanes = new Set(window.editorLaneInfo?.broken || []);
+    lanes.delete(n);
+    saveBrokenLanes([...lanes]);
+}
+
+async function saveBrokenLanes(lanes) {
+    const token = getAntiForgeryToken();
+    const err = document.getElementById('brokenLanesError');
+    const warn = document.getElementById('brokenLanesWarning');
+    err.classList.add('d-none');
+    if (!token) { err.textContent = 'Säkerhetstoken saknas. Försök ladda om sidan.'; err.classList.remove('d-none'); return; }
+    let d;
+    try {
+        const r = await fetch('/umbraco/surface/PrecisionStartList/SetBrokenLanes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body: JSON.stringify({ competitionId: window.editorLaneInfo?.competitionId, lanes })
+        });
+        d = await r.json();
+    } catch (e) {
+        err.textContent = 'Ett oväntat fel uppstod när banorna skulle sparas.';
+        err.classList.remove('d-none');
+        return;
+    }
+    if (!d.success) {
+        err.textContent = d.message || 'Banorna kunde inte sparas.';
+        err.classList.remove('d-none');
+        return;
+    }
+    window.editorLaneInfo.broken = new Set(d.lanes || []);
+    document.getElementById('brokenLaneInput').value = '';
+    renderBrokenLaneChips();
+    updateBrokenLanesButton();
+
+    const on = d.onBrokenLanes || [];
+    if (on.length) {
+        warn.innerHTML = '<strong>Skyttar står på en bana som är ur funktion.</strong> De flyttas inte automatiskt — '
+            + 'flytta dem med <em>Välj skjutplats</em>:<ul class="mb-0 mt-1">'
+            + on.map(o => `<li>${hpskEsc(o.name)} — skjutlag ${o.teamNumber}, bana ${o.lane} (${hpskEsc(o.startList)})</li>`).join('')
+            + '</ul>';
+        warn.classList.remove('d-none');
+    } else {
+        warn.classList.add('d-none');
+    }
+    if (window.currentStartListId) loadStartListForEditing(window.currentStartListId);
 }
 
 // Create single team card
@@ -1666,10 +2060,44 @@ function createTeamCard(team, index, isOfficial) {
     const shooterCount = team.shooters ? team.shooters.length : 0;
     const canDeleteTeam = shooterCount === 0;
 
-    // Build shooters list HTML
+    // Skjutlaget ritas BANA FÖR BANA. En plats är en skjutplats: luckor efter en flyttad skytt
+    // och trasiga banor syns som egna rader, och de lediga raderna går att släppa en skytt på.
+    // Visas: alla banor fram till den sista upptagna, trasiga banor inom skjutlaget, och den
+    // första lediga banan efter den sista skytten — inte 30 tomma rader i ett halvtomt skjutlag.
+    const laneInfo = window.editorLaneInfo || { maxPerTeam: 0, broken: new Set() };
+    const sortedShooters = (team.shooters || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+    const shootersByLane = new Map();
+    sortedShooters.forEach(s => {
+        if (!shootersByLane.has(s.position)) shootersByLane.set(s.position, []);
+        shootersByLane.get(s.position).push(s);
+    });
+    const lastOccupied = sortedShooters.length ? sortedShooters[sortedShooters.length - 1].position : 0;
+    const laneCap = laneInfo.maxPerTeam || (lastOccupied + 1);
+    let firstFreeAfter = 0;
+    for (let p = lastOccupied + 1; p <= Math.max(laneCap, lastOccupied + 1); p++) {
+        if (!laneInfo.broken.has(p)) { firstFreeAfter = p; break; }
+    }
+    const brokenInTeam = [...laneInfo.broken].filter(l => l >= 1 && l <= laneCap);
+    const topLane = Math.max(lastOccupied, firstFreeAfter, ...brokenInTeam, 0);
+    const dnd = !!window.editorDragAndDrop;
+
     let shootersHtml = '';
-    if (team.shooters && team.shooters.length > 0) {
-        team.shooters.forEach(shooter => {
+    // Skyttar utan giltig plats (äldre data) ritas först, så att ingen försvinner ur redigeraren.
+    const laneOrder = [...new Set(sortedShooters.filter(s => !(s.position >= 1)).map(s => s.position))];
+    for (let lane = 1; lane <= topLane; lane++) laneOrder.push(lane);
+    for (const lane of laneOrder) {
+        const atLane = shootersByLane.get(lane);
+        if (!atLane) {
+            if (laneInfo.broken.has(lane)) {
+                shootersHtml += `<div class="lane-row lane-broken d-flex align-items-center px-2 py-1 border-bottom small text-danger" data-lane="${lane}" data-team="${team.teamNumber}">
+                    <i class="bi bi-cone-striped me-2"></i>${lane}. Bana ur funktion</div>`;
+            } else if (lane <= lastOccupied || lane === firstFreeAfter) {
+                shootersHtml += `<div class="lane-row lane-empty d-flex align-items-center px-2 py-1 border-bottom small text-muted" data-lane="${lane}" data-team="${team.teamNumber}">
+                    <span class="me-2">${lane}.</span><i>ledig</i>${dnd ? '<span class="ms-auto lane-drop-hint">släpp här</span>' : ''}</div>`;
+            }
+            continue;
+        }
+        atLane.forEach(shooter => {
             // Handle both camelCase (from API) and PascalCase (from raw JSON)
             const clubDisplay = shooter.club || shooter.Club || 'Okänd klubb';
             // The class Id, which is what SetParticipantStatus keys on — read defensively for the
@@ -1679,8 +2107,16 @@ function createTeamCard(team, index, isOfficial) {
             const statusBadge = pstatus
                 ? `<span class="badge bg-warning text-dark" title="Skytten producerar inga fler resultat">${pstatus.label}</span>`
                 : '';
+            // En skytt på en bana som markerats trasig flyttas aldrig automatiskt — funktionären
+            // ska se det och flytta skytten själv med "Välj skjutplats".
+            const onBrokenBadge = laneInfo.broken.has(shooter.position)
+                ? `<span class="badge bg-danger" title="Banan är ur funktion — flytta skytten med Välj skjutplats">Bana ur funktion</span>`
+                : '';
             shootersHtml += `
-                <div class="shooter-row d-flex align-items-center p-2 border-bottom" data-member-id="${shooter.memberId}" data-team="${team.teamNumber}">
+                <div class="shooter-row d-flex align-items-center p-2 border-bottom${laneInfo.broken.has(shooter.position) ? ' shooter-on-broken' : ''}"
+                     data-member-id="${shooter.memberId}" data-team="${team.teamNumber}" data-lane="${shooter.position}"
+                     ${dnd ? 'draggable="true"' : ''}>
+                    ${dnd ? '<i class="bi bi-grip-vertical text-muted me-1 drag-handle" title="Dra för att flytta"></i>' : ''}
                     <input type="checkbox" class="form-check-input me-2 shooter-checkbox"
                            data-member-id="${shooter.memberId}" data-team="${team.teamNumber}">
                     <div class="flex-grow-1 min-width-0">
@@ -1692,11 +2128,17 @@ function createTeamCard(team, index, isOfficial) {
                             <div class="d-flex align-items-center gap-1">
                                 <span class="badge bg-info">${hpskEsc(shooter.weaponClass)}</span>
                                 ${statusBadge}
+                                ${onBrokenBadge}
                                 <div class="dropdown">
                                     <button class="btn btn-sm btn-link text-secondary p-1" data-bs-toggle="dropdown" aria-expanded="false">
                                         <i class="bi bi-three-dots-vertical"></i>
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><a class="dropdown-item" href="#" onclick="openSetLaneModalFor(this); return false;"
+                                               data-member-id="${shooter.memberId}" data-shooter-name="${hpskEsc(shooter.name)}"
+                                               data-team="${team.teamNumber}" data-lane="${shooter.position}">
+                                            <i class="bi bi-geo-alt me-2"></i>Välj skjutplats…
+                                        </a></li>
                                         <li><a class="dropdown-item" href="#" onclick="moveShooterPosition(${shooter.memberId}, 'up', ${team.teamNumber}); return false;">
                                             <i class="bi bi-arrow-up me-2"></i>Flytta upp
                                         </a></li>
@@ -1739,7 +2181,8 @@ function createTeamCard(team, index, isOfficial) {
                 </div>
             `;
         });
-    } else {
+    }
+    if (sortedShooters.length === 0 && !shootersHtml) {
         shootersHtml = '<p class="text-muted p-3 mb-0 text-center"><i>Inga skyttar i detta lag</i></p>';
     }
 
@@ -2188,7 +2631,10 @@ function openAddShooterModal() {
     teamSelect.innerHTML = '<option value="">-- Välj skjutlag --</option>';
     if (currentStartListConfig && currentStartListConfig.teams) {
         const st = currentStartListConfig.settings || currentStartListConfig.Settings || {};
-        const maxPerTeam = st.maxShootersPerTeam || st.MaxShootersPerTeam || 0;
+        const lanesPerTeam = st.maxShootersPerTeam || st.MaxShootersPerTeam || 0;
+        // Trasiga banor tar platser ur kapaciteten — samma regel som servern (UsableLanes).
+        const brokenInRange = [...(window.editorLaneInfo?.broken || [])].filter(l => l >= 1 && l <= lanesPerTeam).length;
+        const maxPerTeam = lanesPerTeam > 0 ? Math.max(0, lanesPerTeam - brokenInRange) : 0;
         let anyRoom = false;
         currentStartListConfig.teams.forEach(team => {
             const lbl = team.label || team.Label || '';

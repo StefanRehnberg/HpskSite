@@ -42,6 +42,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         private readonly PrecisionFinalsQualificationService _finalsQualificationService;
         private readonly PrecisionQualifyingResultsService _qualifyingResultsService;
         private readonly PrecisionFinalsStartListBuilder _finalsBuilder;
+        private readonly BrokenLaneService _brokenLanes;
 
         public PrecisionStartListController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -64,7 +65,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             MemberClubService memberClubService,
             PrecisionFinalsQualificationService finalsQualificationService,
             PrecisionQualifyingResultsService qualifyingResultsService,
-            PrecisionFinalsStartListBuilder finalsBuilder)
+            PrecisionFinalsStartListBuilder finalsBuilder,
+            BrokenLaneService brokenLanes)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberManager = memberManager;
@@ -83,6 +85,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             _finalsQualificationService = finalsQualificationService;
             _qualifyingResultsService = qualifyingResultsService;
             _finalsBuilder = finalsBuilder;
+            _brokenLanes = brokenLanes;
         }
 
         [HttpGet]
@@ -803,12 +806,18 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     ? startList.GetValue<bool>("isOfficialFinalsStartList")
                     : startList.GetValue<bool>("isOfficialStartList");
 
+                // Trasiga banor och antal banor följer med, så redigeraren kan visa lediga och
+                // trasiga banor som egna rader och varna för en skytt som står på en trasig bana.
+                var editCompetitionId = startList.GetValue<int>("competitionId");
                 return Json(new
                 {
                     success = true,
                     startListId = startListId,
                     configuration = configuration,
-                    isOfficial = isOfficial
+                    isOfficial = isOfficial,
+                    competitionId = editCompetitionId,
+                    maxPerTeam = configuration != null ? MaxPerTeam(configuration) : new StartListSettings().MaxShootersPerTeam,
+                    brokenLanes = _brokenLanes.Get(editCompetitionId).OrderBy(l => l).ToList()
                 });
             }
             catch (Exception ex)
@@ -1166,18 +1175,21 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 // syntes först på plats. Taket är samma tal generatorn byggde listan med
                 // (Settings.MaxShootersPerTeam); saknas inställningarna faller vi tillbaka
                 // på modellens standardvärde i stället för att låta kontrollen tystna.
-                var maxPerTeam = configuration.Settings?.MaxShootersPerTeam ?? new StartListSettings().MaxShootersPerTeam;
-                if (maxPerTeam > 0 && (team.Shooters?.Count ?? 0) >= maxPerTeam)
+                var maxPerTeam = MaxPerTeam(configuration);
+                // Trasiga banor tar platser ur kapaciteten: tio banor med bana 7 trasig rymmer nio.
+                var broken = _brokenLanes.Get(startList.GetValue<int>("competitionId"));
+                var usable = StartListTeam.UsableLanes(maxPerTeam, broken);
+                if (maxPerTeam > 0 && (team.Shooters?.Count ?? 0) >= usable)
                 {
                     // Föreslå ETT lag med plats i stället för att bara neka — funktionären
                     // står vid disken och behöver nästa steg, inte ett nej.
                     var withRoom = configuration.Teams
-                        .Where(t => (t.Shooters?.Count ?? 0) < maxPerTeam)
+                        .Where(t => (t.Shooters?.Count ?? 0) < usable)
                         .OrderBy(t => t.TeamNumber)
                         .Select(t => new
                         {
                             t.TeamNumber,
-                            Free = maxPerTeam - (t.Shooters?.Count ?? 0)
+                            Free = usable - (t.Shooters?.Count ?? 0)
                         })
                         .ToList();
 
@@ -1189,9 +1201,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new
                     {
                         success = false,
-                        message = $"Skjutlag {team.TeamNumber} är fullt ({team.Shooters?.Count ?? 0} av {maxPerTeam} platser)." + suggestion,
+                        message = $"Skjutlag {team.TeamNumber} är fullt ({team.Shooters?.Count ?? 0} av {usable} platser"
+                                  + (usable < maxPerTeam ? $", {maxPerTeam - usable} bana/banor ur funktion" : "") + ")." + suggestion,
                         teamFull = true,
-                        maxPerTeam,
+                        maxPerTeam = usable,
                         teamsWithRoom = withRoom
                     });
                 }
@@ -1206,7 +1219,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 };
 
                 // Första lediga plats — en lucka efter en borttagen skytt, annars sist.
-                team.PlaceInFirstFreePosition(newShooter, maxPerTeam);
+                team.PlaceInFirstFreePosition(newShooter, maxPerTeam, broken);
 
                 // Update weapon classes
                 if (!team.WeaponClasses.Contains(request.WeaponClass))
@@ -1690,7 +1703,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     .ToList() ?? new List<string>();
 
                 // Add to target team — första lediga plats där.
-                targetTeam.PlaceInFirstFreePosition(shooter, MaxPerTeam(configuration));
+                targetTeam.PlaceInFirstFreePosition(shooter, MaxPerTeam(configuration), _brokenLanes.Get(startList.GetValue<int>("competitionId")));
 
                 // Update target team weapon classes
                 targetTeam.WeaponClasses = targetTeam.Shooters
@@ -1844,6 +1857,169 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         }
 
         /// <summary>
+        /// Samma behörighet som genereringen (<c>CanManageCompetition</c>). Null = får ändra.
+        /// </summary>
+        private async Task<string?> DenyUnlessCanManageAsync(int competitionId)
+        {
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember == null) return "Du måste vara inloggad.";
+            var memberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
+            if (memberData == null || !await _validator.CanManageCompetition(memberData.Id, competitionId))
+                return "Du har inte behörighet att ändra startlistan för denna tävling.";
+            return null;
+        }
+
+        /// <summary>
+        /// Tävlingens trasiga banor.
+        /// </summary>
+        [HttpGet]
+        public IActionResult GetBrokenLanes(int competitionId)
+        {
+            if (competitionId <= 0) return Json(new { success = false, message = "Ogiltigt tävlings-ID." });
+            return Json(new { success = true, lanes = _brokenLanes.Get(competitionId).OrderBy(l => l).ToList() });
+        }
+
+        /// <summary>
+        /// Ersätter tävlingens trasiga banor. En lagad bana tas bort ur listan och blir ledig igen.
+        ///
+        /// ⚠️ Flyttar INGEN skytt. En bana som markeras trasig mitt i tävlingen kan ha skyttar som
+        /// redan står där — att flytta dem automatiskt vore att ändra startlistan bakom
+        /// funktionärens rygg. Svaret namnger dem i stället, så att de kan flyttas med
+        /// "Välj skjutplats".
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetBrokenLanes([FromBody] SetBrokenLanesRequest request)
+        {
+            try
+            {
+                if (request == null || request.CompetitionId <= 0)
+                    return Json(new { success = false, message = "Ogiltigt tävlings-ID." });
+
+                var deny = await DenyUnlessCanManageAsync(request.CompetitionId);
+                if (deny != null) return Json(new { success = false, message = deny });
+
+                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                var (ok, error) = _brokenLanes.Set(request.CompetitionId, request.Lanes ?? new List<int>(), currentMember?.Name);
+                if (!ok) return Json(new { success = false, message = error });
+
+                var lanes = _brokenLanes.Get(request.CompetitionId);
+
+                // Skyttar som står på en trasig bana, i tävlingens alla startlistor.
+                var onBroken = new List<object>();
+                if (lanes.Count > 0)
+                {
+                    foreach (var node in _contentService.GetPagedChildren(request.CompetitionId, 0, 50, out _)
+                                 .Where(c => c.ContentType.Alias is "precisionStartList" or "finalsStartList"))
+                    {
+                        StartListConfiguration? cfg = null;
+                        try { cfg = JsonConvert.DeserializeObject<StartListConfiguration>(node.GetValue<string>("configurationData") ?? ""); }
+                        catch { /* annan konfigurationsform (t.ex. Springskytte) — inga skjutlag här */ }
+                        foreach (var t in cfg?.Teams ?? new List<StartListTeam>())
+                            foreach (var s in (t.Shooters ?? new List<StartListShooter>()).Where(s => lanes.Contains(s.Position)))
+                                onBroken.Add(new { startList = node.Name, teamNumber = t.TeamNumber, lane = s.Position, name = s.Name });
+                    }
+                }
+
+                return Json(new
+                {
+                    success = true,
+                    lanes = lanes.OrderBy(l => l).ToList(),
+                    onBrokenLanes = onBroken,
+                    message = lanes.Count == 0
+                        ? "Inga banor är markerade som trasiga."
+                        : $"Ur funktion: bana {string.Join(", ", lanes.OrderBy(l => l))}."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error setting broken lanes for competition {CompetitionId}", request?.CompetitionId);
+                return Json(new { success = false, message = "Ett oväntat fel uppstod." });
+            }
+        }
+
+        /// <summary>
+        /// Flytta en skytt till en bestämd bana, i samma eller ett annat skjutlag. Används av
+        /// dialogen "Välj skjutplats" och av dra-och-släpp i redigeraren. Är banan upptagen och
+        /// inget val skickats svarar den needsChoice — dialogen frågar då Byt plats / Flytta ner.
+        /// Regeln bor i <see cref="StartListPlacement"/>.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetShooterPosition([FromBody] SetShooterPositionRequest request)
+        {
+            try
+            {
+                if (request == null || request.StartListId <= 0 || request.MemberId <= 0 || request.Lane <= 0)
+                    return Json(new { success = false, message = "Ogiltiga parametrar." });
+
+                var startList = _contentService.GetById(request.StartListId);
+                if (startList == null)
+                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+
+                var competitionId = startList.GetValue<int>("competitionId");
+                var deny = await DenyUnlessCanManageAsync(competitionId);
+                if (deny != null) return Json(new { success = false, message = deny });
+
+                var configuration = JsonConvert.DeserializeObject<StartListConfiguration>(startList.GetValue<string>("configurationData") ?? "");
+                if (configuration?.Teams == null)
+                    return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
+
+                var (shooter, sourceTeam, findError) = FindShooter(configuration, request.MemberId, request.SourceTeamNumber);
+                if (findError != null || shooter == null || sourceTeam == null)
+                    return Json(new { success = false, message = findError ?? "Skyttan kunde inte hittas i startlistan." });
+
+                var targetTeam = request.TargetTeamNumber > 0
+                    ? configuration.Teams.FirstOrDefault(t => t.TeamNumber == request.TargetTeamNumber)
+                    : sourceTeam;
+                if (targetTeam == null)
+                    return Json(new { success = false, message = $"Skjutlag {request.TargetTeamNumber} finns inte." });
+
+                var result = StartListPlacement.MoveTo(
+                    sourceTeam, shooter, targetTeam, request.Lane, request.Mode,
+                    MaxPerTeam(configuration), _brokenLanes.Get(competitionId));
+
+                switch (result.Outcome)
+                {
+                    case StartListPlacement.Outcome.NeedsChoice:
+                        return Json(new
+                        {
+                            success = false,
+                            needsChoice = true,
+                            occupantName = result.Occupant?.Name,
+                            message = result.Message
+                        });
+                    case StartListPlacement.Outcome.Refused:
+                        return Json(new { success = false, message = result.Message });
+                    case StartListPlacement.Outcome.NoChange:
+                        return Json(new { success = true, unchanged = true, message = result.Message });
+                }
+
+                foreach (var t in new[] { sourceTeam, targetTeam }.Distinct())
+                {
+                    t.ShooterCount = t.Shooters?.Count ?? 0;
+                    t.WeaponClasses = t.Shooters?.Select(s => s.WeaponClass).Distinct().OrderBy(c => c).ToList() ?? new List<string>();
+                }
+
+                var competitionName = _contentService.GetById(competitionId)?.Name ?? "Okänd tävling";
+                startList.SetValue("configurationData", JsonConvert.SerializeObject(configuration));
+                startList.SetValue("startListContent", await _renderer.GenerateStartListHtml(configuration, competitionName));
+
+                var save = _contentService.Save(startList);
+                if (!save.Success)
+                    return Json(new { success = false, message = "Kunde inte spara startlistan." });
+                _contentService.Publish(startList, new[] { "*" }, -1);
+
+                return Json(new { success = true, message = result.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error setting position for member {MemberId} in start list {StartListId}", request?.MemberId, request?.StartListId);
+                return Json(new { success = false, message = "Ett oväntat fel uppstod." });
+            }
+        }
+
+        /// <summary>
         /// Move multiple shooters to a different team
         /// </summary>
         [HttpPost]
@@ -1907,7 +2083,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     sourceTeam.Shooters?.Remove(shooter);
                     affectedTeams.Add(sourceTeam.TeamNumber);
 
-                    targetTeam.PlaceInFirstFreePosition(shooter, MaxPerTeam(configuration));
+                    targetTeam.PlaceInFirstFreePosition(shooter, MaxPerTeam(configuration), _brokenLanes.Get(startList.GetValue<int>("competitionId")));
                     movedCount++;
                 }
 
@@ -2571,6 +2747,16 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             IContent competition, StartListConfiguration config, string generatedBy, int maxShootersPerTeam,
             string weaponGroup, string? finalsDate = null)
         {
+            // Trasiga banor gäller finalen också (samma banor, samma tävling). Finalgenereringen
+            // numrerar 1..n ändå, så skyttarna flyttas av de trasiga banorna här, på ETT ställe
+            // för alla tre finalvägarna.
+            // ⚠️ Bara skjutlag där någon faktiskt står på en trasig bana: "Fortsätt i samma
+            // ordning" kopierar kvalets banor med flit, och en omnumrering hade stängt dess luckor.
+            var brokenLanes = _brokenLanes.Get(competition.Id);
+            if (brokenLanes.Count > 0 && config.Teams != null)
+                foreach (var t in config.Teams.Where(t => t.Shooters?.Any(s => brokenLanes.Contains(s.Position)) == true))
+                    t.MoveOffBrokenLanes(brokenLanes);
+
             var existingFinalsStartList = FindFinalsNodeForGroup(competition.Id, weaponGroup, out var legacyNode);
 
             // ⚠️ En äldre lista utan gruppmärkning ADOPTERAS av den första gruppen som
@@ -3313,11 +3499,34 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Inga registreringar hittades för denna tävling." });
                 }
 
+                // Trasiga banor: generatorn får skjutlagets VERKLIGA kapacitet (banor minus de
+                // trasiga), och skyttarna flyttas sedan av de trasiga banorna i samma ordning. Så
+                // ger tio banor med bana 7 trasig nio skyttar på 1–6 och 8–10.
+                var brokenLanes = _brokenLanes.Get(request.CompetitionId);
+                var lanes = request.MaxShootersPerTeam;
+                if (brokenLanes.Count > 0 && lanes > 0)
+                {
+                    var usableLanes = StartListTeam.UsableLanes(lanes, brokenLanes);
+                    if (usableLanes < 1)
+                        return Json(new { success = false, message = $"Alla {lanes} banor är markerade som trasiga — det finns ingen plats att placera skyttar på." });
+                    request.MaxShootersPerTeam = usableLanes;
+                }
+
                 // Generate start list data using the generator service
                 var startListData = _generator.GenerateStartListData(registrations, request);
                 if (startListData == null || startListData.Teams == null || !startListData.Teams.Any())
                 {
                     return Json(new { success = false, message = "Kunde inte generera startlista. Kontrollera att registreringar finns." });
+                }
+
+                if (brokenLanes.Count > 0)
+                {
+                    foreach (var genTeam in startListData.Teams)
+                        genTeam.MoveOffBrokenLanes(brokenLanes);
+                    // Listan minns ANTALET BANOR, inte kapaciteten — placering och "Välj skjutplats"
+                    // räknar själva bort de trasiga, och en lagad bana ska ge tillbaka sin plats.
+                    if (startListData.Settings != null) startListData.Settings.MaxShootersPerTeam = lanes;
+                    request.MaxShootersPerTeam = lanes;
                 }
 
                 // Generate HTML content using the renderer service
@@ -3979,6 +4188,25 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         public int MemberId { get; set; }
         public string Direction { get; set; } = "";   // "up" | "down"
         public int SourceTeamNumber { get; set; }
+    }
+
+    public class SetShooterPositionRequest
+    {
+        public int StartListId { get; set; }
+        public int MemberId { get; set; }
+        /// <summary>Skjutlaget skytten står i (krävs när samma medlem står i flera skjutlag).</summary>
+        public int SourceTeamNumber { get; set; }
+        /// <summary>Skjutlaget skytten ska till; 0 = samma skjutlag.</summary>
+        public int TargetTeamNumber { get; set; }
+        public int Lane { get; set; }
+        /// <summary>null = fråga om banan är upptagen; "swap" = byt plats; "shift" = flytta ner.</summary>
+        public string? Mode { get; set; }
+    }
+
+    public class SetBrokenLanesRequest
+    {
+        public int CompetitionId { get; set; }
+        public List<int>? Lanes { get; set; }
     }
 
     public class BulkMoveShootersRequest
