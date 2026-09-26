@@ -2227,7 +2227,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 classEntry.Class = newWeaponClass;
 
                 // Serialize and save
-                var updatedJson = System.Text.Json.JsonSerializer.Serialize(shootingClasses);
+                var updatedJson = HpskSite.Models.CompetitionRegistrationDocument.SerializeShootingClasses(shootingClasses);
                 memberRegistration.SetValue("shootingClasses", updatedJson);
 
                 var saveResult = _contentService.Save(memberRegistration);

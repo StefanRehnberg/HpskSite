@@ -2042,31 +2042,10 @@ namespace HpskSite.Controllers
         /// </summary>
         private List<string> ParseShootingClasses(string shootingClassesJson)
         {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(shootingClassesJson) || shootingClassesJson == "[]")
-                {
-                    return new List<string>();
-                }
-
-                // Try to deserialize as array of objects with "class" property
-                var classObjects = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, string>>>(shootingClassesJson);
-                if (classObjects != null && classObjects.Count > 0)
-                {
-                    return classObjects
-                        .Where(c => c.ContainsKey("class"))
-                        .Select(c => c["class"])
-                        .ToList();
-                }
-
-                // Fallback: try as simple string array
-                var simpleArray = System.Text.Json.JsonSerializer.Deserialize<List<string>>(shootingClassesJson);
-                return simpleArray ?? new List<string>();
-            }
-            catch
-            {
-                return new List<string>();
-            }
+            // Den handskrivna läsningen här missade två former: "Class" med versal (klassbytet
+            // skrev så) och varje post med ett numeriskt teamNumber — Dictionary<string,string>
+            // kastar på ett tal, och catch gav då en tom klasslista. Gå via den delade läsaren.
+            return HpskSite.Models.CompetitionRegistrationDocument.ReadClassIds(shootingClassesJson);
         }
 
         /// <summary>
