@@ -1168,31 +1168,28 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                // Append a row per class. Position is recomputed below in one pass so adds
-                // and removes both leave a gap-free list.
+                // En rad per klass, på första lediga skjutplats — en lucka efter en skytt som
+                // flyttats eller tagits bort, annars sist.
+                //
+                // ⚠️ Här numrerades tidigare HELA skjutlaget om 1..n "defensivt". Det stängde varje
+                // lucka och flyttade alla skyttar efter den till en annan tavla, bara för att någon
+                // efteranmäldes vid disken. Position är en skjutplats; se
+                // StartListTeam.PlaceInFirstFreePosition.
                 foreach (var entry in classes)
                 {
                     if (string.IsNullOrEmpty(entry.Class)) continue;
-                    team.Shooters.Add(new StartListShooter
+                    team.PlaceInFirstFreePosition(new StartListShooter
                     {
-                        Position = team.Shooters.Count + 1,
                         Name = memberName,
                         Club = clubName,
                         WeaponClass = entry.Class,
                         MemberId = memberId
-                    });
+                    }, maxPer);
 
                     if (!team.WeaponClasses.Contains(entry.Class))
                         team.WeaponClasses.Add(entry.Class);
                 }
                 team.WeaponClasses = team.WeaponClasses.OrderBy(c => c).ToList();
-
-                // Renumber positions across the whole team (defensive — covers the case where
-                // the existing list had stale numbering).
-                for (int i = 0; i < team.Shooters.Count; i++)
-                {
-                    team.Shooters[i].Position = i + 1;
-                }
                 team.ShooterCount = team.Shooters.Count;
 
                 var competitionName = competition.Name ?? "";

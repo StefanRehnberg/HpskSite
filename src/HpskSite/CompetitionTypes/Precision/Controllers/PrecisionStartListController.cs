@@ -1199,17 +1199,14 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 // Create shooter
                 var newShooter = new StartListShooter
                 {
-                    Position = (team.Shooters?.Count ?? 0) + 1,
                     Name = $"{member.GetValue<string>("firstName")} {member.GetValue<string>("lastName")}",
                     Club = clubName,
                     WeaponClass = request.WeaponClass,
                     MemberId = request.MemberId
                 };
 
-                // Add shooter
-                if (team.Shooters == null) team.Shooters = new List<StartListShooter>();
-                team.Shooters.Add(newShooter);
-                team.ShooterCount = team.Shooters.Count;
+                // Första lediga plats — en lucka efter en borttagen skytt, annars sist.
+                team.PlaceInFirstFreePosition(newShooter, maxPerTeam);
 
                 // Update weapon classes
                 if (!team.WeaponClasses.Contains(request.WeaponClass))
@@ -1376,12 +1373,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         team.Shooters.Remove(shooter);
                         shooterFound = true;
 
-                        // Reposition remaining shooters
-                        for (int i = 0; i < team.Shooters.Count; i++)
-                        {
-                            team.Shooters[i].Position = i + 1;
-                        }
-
+                        // Platsen lämnas TOM — övriga skyttar står kvar på sina skjutplatser.
+                        // Se StartListTeam.PlaceInFirstFreePosition.
                         team.ShooterCount = team.Shooters.Count;
 
                         // Update weapon classes (only if no other shooter has this class)
@@ -1685,16 +1678,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Skyttan är redan i detta lag." });
                 }
 
-                // Remove from source team
+                // Remove from source team. Platsen lämnas TOM — övriga skyttar står kvar på
+                // sina skjutplatser (se StartListTeam.PlaceInFirstFreePosition).
                 sourceTeam.Shooters?.Remove(shooter);
                 sourceTeam.ShooterCount = sourceTeam.Shooters?.Count ?? 0;
-
-                // Reorder source team positions
-                int pos = 1;
-                foreach (var s in sourceTeam.Shooters ?? new List<StartListShooter>())
-                {
-                    s.Position = pos++;
-                }
 
                 // Update source team weapon classes
                 sourceTeam.WeaponClasses = sourceTeam.Shooters?
@@ -1702,14 +1689,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     .Distinct()
                     .ToList() ?? new List<string>();
 
-                // Add to target team
-                if (targetTeam.Shooters == null)
-                {
-                    targetTeam.Shooters = new List<StartListShooter>();
-                }
-                shooter.Position = targetTeam.Shooters.Count + 1;
-                targetTeam.Shooters.Add(shooter);
-                targetTeam.ShooterCount = targetTeam.Shooters.Count;
+                // Add to target team — första lediga plats där.
+                targetTeam.PlaceInFirstFreePosition(shooter, MaxPerTeam(configuration));
 
                 // Update target team weapon classes
                 targetTeam.WeaponClasses = targetTeam.Shooters
@@ -1790,6 +1771,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         }
 
         /// <summary>
+        /// Antal skjutplatser per skjutlag — samma tal generatorn byggde listan med, och samma
+        /// fallback som kapacitetskontrollen i AddShooterToStartList.
+        /// </summary>
+        private static int MaxPerTeam(StartListConfiguration configuration) =>
+            configuration.Settings?.MaxShootersPerTeam ?? new StartListSettings().MaxShootersPerTeam;
+
+        /// <summary>
         /// Move a shooter up or down by one position within their current team.
         /// Direction is "up" or "down". No-op if already at the boundary.
         /// </summary>
@@ -1819,18 +1807,18 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var (found, team, findError) = FindShooter(configuration, request.MemberId, request.SourceTeamNumber);
                 if (findError != null || found == null || team?.Shooters == null)
                     return Json(new { success = false, message = findError ?? "Skyttan kunde inte hittas i startlistan." });
-                var currentIndex = team.Shooters.IndexOf(found);
+                team.SortByPosition();
+                var currentIndex = team.Shooters!.IndexOf(found);
 
                 var newIndex = direction == "up" ? currentIndex - 1 : currentIndex + 1;
                 if (newIndex < 0 || newIndex >= team.Shooters.Count)
                     return Json(new { success = false, message = "Skyttan kan inte flyttas längre." });
 
-                // Swap the two shooters in the list, then renumber the whole team's positions.
-                var shooter = team.Shooters[currentIndex];
-                team.Shooters.RemoveAt(currentIndex);
-                team.Shooters.Insert(newIndex, shooter);
-                for (int i = 0; i < team.Shooters.Count; i++)
-                    team.Shooters[i].Position = i + 1;
+                // Byt SKJUTPLATS med grannen — numrera inte om skjutlaget. En omnumrering 1..n
+                // stängde varje lucka och flyttade skyttar som inte var inblandade.
+                var neighbour = team.Shooters[newIndex];
+                (found.Position, neighbour.Position) = (neighbour.Position, found.Position);
+                team.SortByPosition();
 
                 // Save and regenerate cached HTML — same pattern as MoveShooterToTeam.
                 var competitionId = startList.GetValue<int>("competitionId");
@@ -1914,25 +1902,20 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         continue; // Skip if not found or already in target team
                     }
 
-                    // Move shooter
+                    // Move shooter. Platsen i källskjutlaget lämnas TOM, och i målskjutlaget
+                    // hamnar skytten på första lediga plats (se StartListTeam.PlaceInFirstFreePosition).
                     sourceTeam.Shooters?.Remove(shooter);
                     affectedTeams.Add(sourceTeam.TeamNumber);
 
-                    shooter.Position = targetTeam.Shooters.Count + 1;
-                    targetTeam.Shooters.Add(shooter);
+                    targetTeam.PlaceInFirstFreePosition(shooter, MaxPerTeam(configuration));
                     movedCount++;
                 }
 
-                // Update affected teams
+                // Update affected teams — utan omnumrering.
                 foreach (var teamNum in affectedTeams)
                 {
                     var team = configuration.Teams.First(t => t.TeamNumber == teamNum);
                     team.ShooterCount = team.Shooters?.Count ?? 0;
-                    int pos = 1;
-                    foreach (var s in team.Shooters ?? new List<StartListShooter>())
-                    {
-                        s.Position = pos++;
-                    }
                     team.WeaponClasses = team.Shooters?.Select(s => s.WeaponClass).Distinct().ToList() ?? new List<string>();
                 }
 
