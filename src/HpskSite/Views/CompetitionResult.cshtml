@@ -201,6 +201,14 @@
             .results-table { font-size: 9px; }
             .results-table th, .results-table td { padding: 2px 4px; }
             .class-header { font-size: 12px; }
+            /* Markeringen av den inloggade och hens klubb är en skärmhjälp. En utskrift
+               eller PDF publiceras för andra (kretsens hemsida), så den ska vara neutral. */
+            .current-user, .same-club { background-color: transparent !important; }
+            /* Individuellt och Lagresultat är flikar på skärmen, men en utskrift ska bära
+               BÅDA — annars blev PDF:en bara den flik som råkade vara öppen. */
+            .tab-content > .tab-pane { display: block !important; opacity: 1 !important; }
+            #teamResults { break-before: page; }
+            .print-section-heading { font-size: 14px; font-weight: bold; margin: 0 0 8px; }
             .print-footer {
                 position: fixed;
                 bottom: 0;
@@ -285,6 +293,7 @@
             </ul>
             <div class="tab-content">
                 <div class="tab-pane fade show active" id="individualResults" role="tabpanel">
+                    <div class="print-only print-section-heading" style="display:none">Individuella resultat</div>
                     <div id="resultsContent">
                         <div class="text-center py-4">
                             <div class="spinner-border text-primary" role="status">
@@ -295,6 +304,7 @@
                     </div>
                 </div>
                 <div class="tab-pane fade" id="teamResults" role="tabpanel">
+                    <div class="print-only print-section-heading" style="display:none">Lagresultat</div>
                     <div id="teamResultsContent">
                         <div class="text-center py-4">
                             <div class="spinner-border text-primary" role="status">
@@ -1299,7 +1309,9 @@
 
                     group.shooters.forEach((shooter, idx) => {
                         const isCurrentUser = shooter.name === currentUserName;
-                        const rowClass = isCurrentUser ? 'table-info fw-bold' : '';
+                        // Samma klass som de andra renderarna, så att utskriftens neutralisering
+                        // (@@media print) gäller även här. 'table-info fw-bold' följde med i PDF:en.
+                        const rowClass = isCurrentUser ? 'current-user' : '';
                         html += `<tr class="${rowClass}">
                             <td class="text-center">${group.__isFlat ? shooter.__flatPos : idx + 1}</td>
                             <td>${shooter.name}</td>
@@ -1446,18 +1458,11 @@
             }
         }
 
-        // Load team results when tab is shown
+        // Lagresultaten laddas direkt vid sidladdning, inte först när fliken öppnas: en
+        // utskrift/PDF bär båda flikarna, och laddades lagen lat stod det "Laddar
+        // lagresultat..." i PDF:en för den som aldrig klickat på fliken.
         if (allowTeams) {
-            const teamTab = document.getElementById('teamTab');
-            if (teamTab) {
-                let teamResultsLoaded = false;
-                teamTab.addEventListener('shown.bs.tab', () => {
-                    if (!teamResultsLoaded) {
-                        loadTeamResults();
-                        teamResultsLoaded = true;
-                    }
-                });
-            }
+            loadTeamResults();
         }
 
         // Stop auto-refresh when page is hidden
