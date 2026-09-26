@@ -9709,6 +9709,23 @@ region-receivable 19/19. (*uppdaterade till menyn — samma dialog, ny väg in.)
 
 ## Common Patterns
 
+### ⚠️ Ett misslyckat anrop får aldrig vara tyst — `_RequestFailureNet` (2026-09-25)
+
+En kallelse "skickades" utan att nå servern: `/styrelse`s `post()` gjorde `.then(r => r.json())`,
+ett 400 blev ett ofångat avvisat löfte, och ingenting syntes. ~770 anrop på sajten har samma form.
+
+**`Views/Partials/_RequestFailureNet.cshtml`** ligger först i `<head>` i `Master.cshtml` och gör två saker:
+- `Response.prototype.json` kastar vid ett icke-JSON-svar ett fel som bär **status och adress**
+  (`err.hpskRequest`), med klartext ur `hpskRequestFailureMessage(status)`.
+- En `unhandledrejection`-lyssnare visar felrutan (`hpskReportRequestFailure(msg, reload)`) för ett
+  anrop **ingen tog hand om**. Anrop med egen `.catch()` påverkas inte; externa adresser visas inte.
+
+**Ny kod:** kontrollera `r.ok` och kasta med `hpskRequestFailureMessage` (se `readJson` i
+`StyrelseJustera.cshtml`) — ett felsvar får aldrig tolkas som "tom lista". **Skriv ingen egen felruta.**
+En fristående sida (`Layout = null`) måste inkludera partialen själv. En `.catch(() => {})` eller
+`.catch(console.error)` gör felet osynligt igen — ~80 sådana finns kvar och är ej genomgångna.
+Svit: `hpsk-verify/styrelse-request-errors-verify.mjs` (27; `ONLY_NET=1` hoppar över styrelsedelen).
+
 ### Model Usage
 **✅ CORRECT** - Use auto-generated models:
 ```csharp

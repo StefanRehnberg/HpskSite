@@ -19,6 +19,8 @@
         .signer:last-child { border-bottom: 0; }
         h1 { font-size: 1.6rem; font-weight: 700; }
     </style>
+    @* Fristående sida (Layout = null) — skyddsnätet kommer inte med Master, så det inkluderas här. *@
+    @await Html.PartialAsync("_RequestFailureNet")
 </head>
 <body>
     <div class="wrap">
@@ -31,12 +33,22 @@
         const $ = id => document.getElementById(id);
         function token() { return document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''; }
         function esc(s) { return (s ?? '').toString().replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c])); }
-        function get(action) { return fetch('/umbraco/surface/BoardMeeting/' + action + '?t=' + encodeURIComponent(TOKEN)).then(r => r.json()); }
+        // ⚠️ Ett felsvar (400 när sidan legat öppen, 500, inloggningssida) får inte bli tyst: det här är
+        // sidan där protokollet signeras på plats, och en tyst miss läses som "jag har justerat".
+        // Felet kastas med klartext ur _RequestFailureNet; approve() saknar egen catch, så nätet visar
+        // rutan, och load() visar samma text i sidan.
+        function readJson(r) {
+            if (r.ok) return r.json();
+            const info = window.hpskRequestFailureMessage(r.status);
+            const err = new Error(info.msg); err.hpskRequest = true; err.status = r.status; err.url = r.url; err.reload = info.reload;
+            throw err;
+        }
+        function get(action) { return fetch('/umbraco/surface/BoardMeeting/' + action + '?t=' + encodeURIComponent(TOKEN)).then(readJson); }
         function post(action) {
             return fetch('/umbraco/surface/BoardMeeting/' + action, {
                 method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() },
                 body: new URLSearchParams({ t: TOKEN }).toString()
-            }).then(r => r.json());
+            }).then(readJson);
         }
 
         function render(d) {
@@ -74,7 +86,12 @@
                 load();
             });
         };
-        function load() { get('GetJusteringByToken').then(render).catch(() => { $('content').innerHTML = '<div class="alert alert-danger">Tekniskt fel.</div>'; }); }
+        function load() {
+            get('GetJusteringByToken').then(render).catch(e => {
+                const msg = (e && e.hpskRequest) ? e.message : window.hpskRequestFailureMessage(0).msg;
+                $('content').innerHTML = `<div class="alert alert-danger">${esc(msg)}</div>`;
+            });
+        }
         load();
     </script>
     @Html.AntiForgeryToken()
