@@ -47,7 +47,14 @@
     const post = async (url, body) => (await fetch('/umbraco/surface/Springskytte/' + url, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() }, body: JSON.stringify(body)
     })).json();
-    const get = (url) => fetch('/umbraco/surface/Springskytte/' + url).then(r => r.json());
+    // ⚠️ Ett felsvar får inte tolkas som "inga resultat" — då döljs kortet tyst. Kastas i stället med
+    // klartext; ingen anropare har en egen catch, så _RequestFailureNet (Master) visar felrutan.
+    const get = (url) => fetch('/umbraco/surface/Springskytte/' + url).then(r => {
+        if (r.ok) return r.json();
+        const info = window.hpskRequestFailureMessage(r.status);
+        const err = new Error(info.msg); err.hpskRequest = true; err.status = r.status; err.url = r.url; err.reload = info.reload;
+        throw err;
+    });
     const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
 
     // Per-leg bibs on the result list too: "120-1 Anna". The bib belongs to the leg, and a name that

@@ -124,7 +124,14 @@
         });
         return r.json();
     };
-    const stfGet = (url) => fetch('/umbraco/surface/Springskytte/' + url).then(r => r.json());
+    // ⚠️ Ett felsvar får inte tolkas som "inga lag" — då döljs kortet tyst. Kastas i stället med
+    // klartext; ingen anropare har en egen catch, så _RequestFailureNet (Master) visar felrutan.
+    const stfGet = (url) => fetch('/umbraco/surface/Springskytte/' + url).then(r => {
+        if (r.ok) return r.json();
+        const info = window.hpskRequestFailureMessage(r.status);
+        const err = new Error(info.msg); err.hpskRequest = true; err.status = r.status; err.url = r.url; err.reload = info.reload;
+        throw err;
+    });
     const esc = (s) => (s == null ? '' : String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
 
     // Teams inline in the card. The Deltagare column shows the per-leg BIB ("120-1") with the runner's

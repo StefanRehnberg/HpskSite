@@ -1,0 +1,108 @@
+@*
+    ⚠️⚠️ SKYDDSNÄTET FÖR TYSTA ANROP (2026-09-25).
+
+    Omkring 770 anrop på sajten gör `fetch(...).then(r => r.json())` utan att först fråga om svaret
+    lyckades. Svarar servern med 400 (säkerhetstoken utgången), 500, en inloggningssida eller inte
+    alls, kastar r.json() — och finns ingen .catch() försvinner felet: ingen ruta, inget fel, och
+    knappen ser ut att ha fungerat. Så "skickades" en kallelse som aldrig nådde servern.
+
+    Två delar, båda globala och båda passiva tills något går fel:
+      1. Response.prototype.json kastar ett fel som bär svarets STATUS och adress, så att
+         meddelandet kan säga vad som hände (400 = ladda om sidan) i stället för "Unexpected token <".
+      2. En unhandledrejection-lyssnare visar felrutan för ett anrop INGEN tog hand om. Anrop med en
+         egen .catch() påverkas inte — de har själva valt vad som ska hända.
+
+    Bara anrop mot sajten själv visar rutan; ett externt API (karta, geokodning) som faller är inte
+    användarens sak att ladda om sidan för. Fel som redan visats (err.hpskShown) visas inte igen.
+
+    Inkluderas i <head> i Master.cshtml, och av fristående sidor (Layout = null) som gör anrop.
+    Guardad mot dubbel inkludering. `window.hpskReportRequestFailure(msg, reload)` är den ENDA
+    felrutan — skriv inte en egen per sida.
+*@
+<script>
+(function () {
+    if (window.hpskRequestFailureNetLoaded) return;
+    window.hpskRequestFailureNetLoaded = true;
+
+    function escText(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c];
+        });
+    }
+
+    function sameOrigin(url) {
+        if (!url) return true;
+        try { return new URL(url, location.href).origin === location.origin; } catch (e) { return true; }
+    }
+
+    // Klartext efter status. 0 = inget svar alls.
+    function messageFor(status) {
+        if (status === 0) return { msg: 'Ingen kontakt med servern. Kontrollera uppkopplingen och försök igen.', reload: false };
+        if (status === 400) return { msg: 'Sidan har varit öppen för länge eller så har du loggat in/ut sedan den laddades. Ladda om sidan och försök igen.', reload: true };
+        if (status === 401 || status === 403) return { msg: 'Du verkar inte vara inloggad längre. Ladda om sidan och logga in igen.', reload: true };
+        if (status === 404) return { msg: 'Funktionen hittades inte på servern (fel 404). Ladda om sidan och försök igen.', reload: true };
+        if (status >= 500) return { msg: 'Servern kunde inte utföra åtgärden (fel ' + status + '). Försök igen om en stund.', reload: false };
+        if (status >= 200 && status < 300) return { msg: 'Svaret från servern gick inte att läsa — du kan ha blivit utloggad. Ladda om sidan och försök igen.', reload: true };
+        return { msg: 'Åtgärden gick inte att utföra (fel ' + status + ').', reload: false };
+    }
+    window.hpskRequestFailureMessage = messageFor;
+
+    // Inline-ruta, inte alert(): en blockerande dialog har tidigare rapporterats som att sidan frös.
+    window.hpskReportRequestFailure = function (msg, reload) {
+        function show() {
+            var box = document.getElementById('hpskRequestError');
+            if (!box) {
+                box = document.createElement('div');
+                box.id = 'hpskRequestError';
+                box.setAttribute('role', 'alert');
+                box.className = 'alert alert-danger shadow d-flex align-items-start gap-2';
+                box.style.cssText = 'position:fixed;top:1rem;left:50%;transform:translateX(-50%);z-index:2000;max-width:min(640px,calc(100% - 32px));';
+                document.body.appendChild(box);
+            }
+            box.innerHTML = '<i class="bi bi-exclamation-triangle-fill mt-1"></i>' +
+                '<div class="flex-grow-1"><strong>Det gick inte.</strong> ' + escText(msg) +
+                (reload ? '<div class="mt-2"><button type="button" class="btn btn-sm btn-danger" onclick="location.reload()">Ladda om sidan</button></div>' : '') +
+                '</div><button type="button" class="btn-close" aria-label="Stäng" onclick="this.parentNode.remove()"></button>';
+        }
+        if (document.body) show(); else document.addEventListener('DOMContentLoaded', show);
+    };
+
+    // 1. r.json() på ett svar som inte är JSON: kasta ett fel som bär statusen.
+    if (window.Response && Response.prototype.json && !Response.prototype.json.hpskWrapped) {
+        var origJson = Response.prototype.json;
+        var wrapped = function () {
+            var resp = this;
+            return origJson.call(resp).catch(function (cause) {
+                var info = messageFor(resp.ok ? 200 : resp.status);
+                var err = new Error(info.msg);
+                err.hpskRequest = true;
+                err.status = resp.status;
+                err.url = resp.url;
+                err.reload = info.reload;
+                err.cause = cause;
+                throw err;
+            });
+        };
+        wrapped.hpskWrapped = true;
+        Response.prototype.json = wrapped;
+    }
+
+    // 2. Visa felet när ingen tog hand om det.
+    window.addEventListener('unhandledrejection', function (ev) {
+        var e = ev.reason;
+        if (!e || e.hpskShown) return;
+        if (e.hpskRequest) {
+            if (!sameOrigin(e.url)) return;
+            e.hpskShown = true;
+            window.hpskReportRequestFailure(e.message, !!e.reload);
+            return;
+        }
+        // fetch() själv kastar TypeError när det inte finns någon förbindelse alls.
+        if (e instanceof TypeError && /Failed to fetch|NetworkError|Load failed|network/i.test(e.message || '')) {
+            e.hpskShown = true;
+            var info = messageFor(0);
+            window.hpskReportRequestFailure(info.msg, info.reload);
+        }
+    });
+})();
+</script>

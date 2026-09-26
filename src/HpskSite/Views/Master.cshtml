@@ -150,6 +150,8 @@
     <link href="~/css/theme.css" rel="stylesheet" asp-append-version="true">
     <link href="~/css/chat-widget.css" rel="stylesheet" asp-append-version="true">
     <link href="~/css/tutorial.css" rel="stylesheet" asp-append-version="true">
+    @* Först av alla skript: skyddsnätet måste vara på plats innan någon sida hinner göra ett anrop. *@
+    @await Html.PartialAsync("_RequestFailureNet")
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
     @await Html.PartialAsync("_ShootingClassesBootstrap")
     <style>
