@@ -1691,6 +1691,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Skyttan är redan i detta lag." });
                 }
 
+                // En skytt kan inte stå på två banor i samma skjutlag (se StartListPlacement).
+                var alreadyInTarget = targetTeam.Shooters?.FirstOrDefault(s => s.MemberId == request.MemberId);
+                if (alreadyInTarget != null)
+                {
+                    return Json(new { success = false, message = $"{shooter.Name} står redan i skjutlag {targetTeam.TeamNumber} (bana {alreadyInTarget.Position}, {alreadyInTarget.WeaponClass}) — en skytt kan inte stå på två banor i samma skjutlag." });
+                }
+
                 // Remove from source team. Platsen lämnas TOM — övriga skyttar står kvar på
                 // sina skjutplatser (se StartListTeam.PlaceInFirstFreePosition).
                 sourceTeam.Shooters?.Remove(shooter);
@@ -1760,14 +1767,21 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         }
 
         internal static (StartListShooter? Shooter, StartListTeam? Team, string? Error) FindShooter(
-            StartListConfiguration configuration, int memberId, int sourceTeamNumber)
+            StartListConfiguration configuration, int memberId, int sourceTeamNumber, string? weaponClass = null)
         {
             if (sourceTeamNumber > 0)
             {
                 var team = configuration.Teams.FirstOrDefault(t => t.TeamNumber == sourceTeamNumber);
-                var shooter = team?.Shooters?.FirstOrDefault(s => s.MemberId == memberId);
+                // ⚠️ Klassen skiljer två starter för samma medlem i samma skjutlag (äldre data, eller
+                // diskens walk-in med flera klasser). Utan den togs "första raden" — och i en
+                // verifiering flyttades en skytts A2-start när B2-starten skulle flyttas.
+                var candidates = team?.Shooters?.Where(s => s.MemberId == memberId).ToList() ?? new List<StartListShooter>();
+                var shooter = string.IsNullOrWhiteSpace(weaponClass)
+                    ? candidates.FirstOrDefault()
+                    : candidates.FirstOrDefault(s => CoverageKeys.Canonical(s.WeaponClass) == CoverageKeys.Canonical(weaponClass))
+                      ?? (candidates.Count == 1 ? candidates[0] : null);
                 return shooter is null
-                    ? (null, null, $"Skyttan finns inte i skjutlag {sourceTeamNumber}.")
+                    ? (null, null, $"Skyttan finns inte i skjutlag {sourceTeamNumber}" + (string.IsNullOrWhiteSpace(weaponClass) ? "." : $" i klass {weaponClass}."))
                     : (shooter, team, null);
             }
 
@@ -1965,7 +1979,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (configuration?.Teams == null)
                     return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
 
-                var (shooter, sourceTeam, findError) = FindShooter(configuration, request.MemberId, request.SourceTeamNumber);
+                var (shooter, sourceTeam, findError) = FindShooter(configuration, request.MemberId, request.SourceTeamNumber, request.WeaponClass);
                 if (findError != null || shooter == null || sourceTeam == null)
                     return Json(new { success = false, message = findError ?? "Skyttan kunde inte hittas i startlistan." });
 
@@ -2076,6 +2090,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     if (shooter == null || sourceTeam == null || sourceTeam.TeamNumber == targetTeam.TeamNumber)
                     {
                         continue; // Skip if not found or already in target team
+                    }
+
+                    // En skytt kan inte stå på två banor i samma skjutlag (se StartListPlacement).
+                    if (targetTeam.Shooters.Any(s => s.MemberId == shooter.MemberId))
+                    {
+                        skipped.Add($"{shooter.Name} står redan i skjutlag {targetTeam.TeamNumber}.");
+                        continue;
                     }
 
                     // Move shooter. Platsen i källskjutlaget lämnas TOM, och i målskjutlaget
@@ -4196,6 +4217,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         public int MemberId { get; set; }
         /// <summary>Skjutlaget skytten står i (krävs när samma medlem står i flera skjutlag).</summary>
         public int SourceTeamNumber { get; set; }
+        /// <summary>Startens klass — skiljer två starter för samma medlem i samma skjutlag.</summary>
+        public string? WeaponClass { get; set; }
         /// <summary>Skjutlaget skytten ska till; 0 = samma skjutlag.</summary>
         public int TargetTeamNumber { get; set; }
         public int Lane { get; set; }

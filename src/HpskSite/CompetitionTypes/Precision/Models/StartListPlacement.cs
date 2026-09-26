@@ -44,6 +44,18 @@ namespace HpskSite.CompetitionTypes.Precision.Models
             var sameTeam = ReferenceEquals(sourceTeam, targetTeam);
             var oldLane = shooter.Position;
 
+            // ⚠️ En skytt kan inte stå på två banor i samma skjutlag — skjutlaget skjuter
+            // samtidigt. I formatet med blandade vapengrupper har samma medlem flera starter i
+            // olika skjutlag, och en flytt in i ett skjutlag där hen redan står hade gett två rader
+            // för samma person — och gjort varje senare flytt tvetydig.
+            if (!sameTeam)
+            {
+                var already = targetTeam.Shooters.FirstOrDefault(s => s.MemberId == shooter.MemberId);
+                if (already != null)
+                    return new(Outcome.Refused,
+                        $"{shooter.Name} står redan i skjutlag {targetTeam.TeamNumber} (bana {already.Position}, {already.WeaponClass}) — en skytt kan inte stå på två banor i samma skjutlag.");
+            }
+
             if (sameTeam && oldLane == lane)
                 return new(Outcome.NoChange, $"{shooter.Name} står redan på bana {lane}.");
 
@@ -69,6 +81,14 @@ namespace HpskSite.CompetitionTypes.Precision.Models
                 }
                 else
                 {
+                    // Samma spärr åt andra hållet: skytten på banan får inte hamna i ett skjutlag
+                    // där hen redan står.
+                    var occupantAlready = sourceTeam.Shooters.FirstOrDefault(s =>
+                        s.MemberId == occupant.MemberId && !ReferenceEquals(s, shooter));
+                    if (occupantAlready != null)
+                        return new(Outcome.Refused,
+                            $"{occupant.Name} står redan i skjutlag {sourceTeam.TeamNumber} (bana {occupantAlready.Position}) — välj Flytta ner i stället.");
+
                     // Skytten på banan tar den flyttandes gamla plats i det andra skjutlaget.
                     targetTeam.Shooters.Remove(occupant);
                     Relocate(sourceTeam, shooter, targetTeam, lane);
