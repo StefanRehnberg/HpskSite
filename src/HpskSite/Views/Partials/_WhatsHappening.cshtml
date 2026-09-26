@@ -39,8 +39,11 @@
     var ongoing = itemList.Where(i => i.IsOngoing).OrderBy(i => i.Start).ToList();
     var upcoming = itemList.Where(i => !i.IsOngoing).OrderBy(i => i.Start).ToList();
 
-    // tab key, horizon-in-days (0 = the live "Pågår nu" tab), label
-    var tabs = new[] { ("now", 0, "Pågår nu"), ("d7", 7, "7 dagar"), ("d14", 14, "14 dagar"), ("d30", 30, "30 dagar") };
+    // tab key, horizon-in-days, label.
+    // ⚠️ "Idag" visar ALLT med dagens datum: pågående träningsmatcher OCH dagens tävlingar och
+    // händelser. Fliken hette tidigare "Pågår nu" och visade bara träningsmatcherna, så den som
+    // valde den såg dagens tävlingar försvinna (rapporterat 2026-09-26).
+    var tabs = new[] { ("today", 0, "Idag"), ("d7", 7, "7 dagar"), ("d14", 14, "14 dagar"), ("d30", 30, "30 dagar") };
     const string defaultTab = "d7";
 
     var ongoingTotal = isLocked ? data.OngoingMatchCountByRegion.GetValueOrDefault(lockedCode!) : data.OngoingMatchTotal;
@@ -96,17 +99,13 @@
             {
                 <li class="nav-item">
                     <button type="button" class="nav-link @(key == defaultTab ? "active" : "")" data-tab="@key" data-days="@days">
-                        @if (key == "now")
-                        {
-                            <span class="wh-live"></span>
-                        }
                         @label<span class="badge rounded-pill text-bg-secondary ms-1" data-ct="@key">0</span>
                     </button>
                 </li>
             }
         </ul>
 
-        @* "Pågår nu" panel — ongoing träningsmatcher *@
+        @* Pågående träningsmatcher — visas överst under "Idag", ovanför dagens övriga händelser *@
         <div class="wh-panel" data-panel="now">
             <div class="wh-grid" data-grid="now">
                 @if (!isLoggedIn)
@@ -141,7 +140,7 @@
             <div class="text-center text-muted small py-3 wh-span" data-empty="now" style="display:none;"></div>
         </div>
 
-        @* Upcoming panel — shared by 7/14/30 dagar; JS shows rows where daysAhead ≤ selected horizon *@
+        @* Upcoming panel — shared by Idag/7/14/30 dagar; JS shows rows where daysAhead ≤ selected horizon *@
         <div class="wh-panel" data-panel="upcoming">
             <div class="wh-grid" data-grid="upcoming">
                 @foreach (var item in upcoming)
@@ -267,9 +266,11 @@
             if (show) visibleUpcoming++;
         });
 
-        // badges
+        // badges — "Idag" räknar pågående träningsmatcher + allt med dagens datum
         var nowN = ongoingCount(region);
-        setBadge('now', nowN);
+        var todayN = 0;
+        upRows.forEach(function (r) { if (regionOk(r, region) && parseInt(r.dataset.days || '0', 10) <= 0) todayN++; });
+        setBadge('today', nowN + todayN);
         [7, 14, 30].forEach(function (h) {
             var n = 0;
             upRows.forEach(function (r) { if (regionOk(r, region) && parseInt(r.dataset.days || '0', 10) <= h) n++; });
@@ -284,10 +285,11 @@
             if (strip) strip.style.display = nowN > 0 ? '' : 'none';
         }
 
-        // which panel is visible
-        var showNow = activeTab === 'now';
-        panel('now').classList.toggle('on', showNow);
-        panel('upcoming').classList.toggle('on', !showNow);
+        // Under "Idag" visas båda panelerna: pågående träningsmatcher överst, dagens händelser under.
+        // Matchpanelen göms när den är tom (för utloggade döljer remsan sig själv på noll).
+        var isToday = activeTab === 'today';
+        panel('now').classList.toggle('on', isToday && (anon || nowN > 0));
+        panel('upcoming').classList.toggle('on', !isToday || visibleUpcoming > 0 || nowN === 0);
 
         // columns: ≤3 → single column
         var upGrid = root.querySelector('[data-grid="upcoming"]');
@@ -297,17 +299,16 @@
 
         // empty states
         var emptyNow = root.querySelector('[data-empty="now"]');
-        if (emptyNow) {
-            if (showNow && nowN === 0) { emptyNow.textContent = 'Inga träningsmatcher pågår just nu.'; emptyNow.style.display = ''; }
-            else emptyNow.style.display = 'none';
-        }
+        if (emptyNow) emptyNow.style.display = 'none';
         var emptyUp = root.querySelector('[data-empty="upcoming"]');
         if (emptyUp) {
-            if (!showNow && visibleUpcoming === 0) {
+            // Under "Idag" är listan tom först när varken en match pågår eller något har dagens datum.
+            if (visibleUpcoming === 0 && !(isToday && nowN > 0)) {
                 var within30 = 0;
                 upRows.forEach(function (r) { if (regionOk(r, region) && parseInt(r.dataset.days || '0', 10) <= 30) within30++; });
+                var what = isToday ? 'Inget planerat idag.' : 'Inget planerat de närmaste ' + horizon + ' dagarna.';
                 if (within30 > 0) {
-                    emptyUp.innerHTML = 'Inget planerat de närmaste ' + horizon + ' dagarna. <strong>' + within30 + '</strong> händelser inom 30 dagar — vidga vyn ovan.';
+                    emptyUp.innerHTML = what + ' <strong>' + within30 + '</strong> händelser inom 30 dagar — vidga vyn ovan.';
                 } else {
                     emptyUp.textContent = 'Inget planerat de närmaste 30 dagarna.';
                 }
@@ -335,7 +336,9 @@
     root.querySelectorAll('.nav-link[data-tab]').forEach(function (btn) {
         btn.addEventListener('click', function () {
             activeTab = btn.dataset.tab;
-            horizon = parseInt(btn.dataset.days || '7', 10) || horizon;
+            // ⚠️ Inte `|| horizon`: "Idag" har horisont 0, och 0 är falsy — då behölls förra flikens horisont.
+            var h = parseInt(btn.dataset.days, 10);
+            horizon = isNaN(h) ? horizon : h;
             root.querySelectorAll('.nav-link[data-tab]').forEach(function (b) { b.classList.toggle('active', b === btn); });
             update();
         });
