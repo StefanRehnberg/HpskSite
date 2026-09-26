@@ -226,6 +226,58 @@ namespace HpskSite.Models
         }
 
         /// <summary>
+        /// Bara klass-id:na ur en lagrad klasslista, oavsett form: en array av strängar
+        /// (Springskyttes äldre form) eller av objekt med "class" i VILKET SKIFTLÄGE SOM HELST.
+        ///
+        /// ⚠️ Klasslistan finns i databasen både som camelCase ("class", från
+        /// <see cref="SerializeShootingClasses"/>) och som PascalCase ("Class") — klassbytet i
+        /// startlisteredigeraren och ChangeShooterClass serialiserade länge med System.Text.Json:s
+        /// standard. Läsare som gjorde GetProperty("class") kastade på den senare, felet svaldes,
+        /// och skytten försvann tyst ur laganmälan (tävling 5574, 2026-09-26). Läs aldrig
+        /// klasslistan för hand — gå hit eller till <see cref="DeserializeShootingClasses"/>.
+        /// </summary>
+        public static List<string> ReadClassIds(string? json)
+        {
+            var ids = new List<string>();
+            if (string.IsNullOrWhiteSpace(json)) return ids;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind != JsonValueKind.Array) return ids;
+
+                foreach (var cls in doc.RootElement.EnumerateArray())
+                {
+                    string? id = null;
+                    if (cls.ValueKind == JsonValueKind.String)
+                    {
+                        id = cls.GetString();
+                    }
+                    else if (cls.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var prop in cls.EnumerateObject())
+                        {
+                            if (string.Equals(prop.Name, "class", StringComparison.OrdinalIgnoreCase)
+                                && prop.Value.ValueKind == JsonValueKind.String)
+                            {
+                                id = prop.Value.GetString();
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(id)) ids.Add(id.Trim());
+                }
+            }
+            catch (JsonException)
+            {
+                // Oläsbar JSON: inga klasser.
+            }
+
+            return ids;
+        }
+
+        /// <summary>
         /// Get all class codes as a flat list
         /// </summary>
         public static List<string> GetClassCodes(List<ShootingClassEntry> classes)

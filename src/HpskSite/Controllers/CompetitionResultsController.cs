@@ -5006,7 +5006,7 @@ namespace HpskSite.Controllers
 
             classEntry.Class = newClass;
 
-            var updatedJson = System.Text.Json.JsonSerializer.Serialize(shootingClasses);
+            var updatedJson = HpskSite.Models.CompetitionRegistrationDocument.SerializeShootingClasses(shootingClasses);
             memberRegistration.SetValue("shootingClasses", updatedJson);
 
             var saveResult = _contentService.Save(memberRegistration);

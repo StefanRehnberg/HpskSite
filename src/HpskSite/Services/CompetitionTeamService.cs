@@ -1092,24 +1092,8 @@ namespace HpskSite.Services
 
                     var memberName = reg.GetValue<string>("memberName") ?? "";
                     var classesJson = reg.GetValue<string>("shootingClasses") ?? "[]";
-                    var classes = new List<string>();
-
-                    try
-                    {
-                        var parsed = JsonSerializer.Deserialize<JsonElement[]>(classesJson);
-                        if (parsed != null)
-                        {
-                            foreach (var cls in parsed)
-                            {
-                                var classId = cls.ValueKind == JsonValueKind.Object
-                                    ? cls.GetProperty("class").GetString() ?? ""
-                                    : cls.GetString() ?? "";
-                                if (!string.IsNullOrEmpty(classId))
-                                    classes.Add(classId);
-                            }
-                        }
-                    }
-                    catch { }
+                    // Skiftlägesokänslig läsning — se CompetitionRegistrationDocument.ReadClassIds.
+                    var classes = CompetitionRegistrationDocument.ReadClassIds(classesJson);
 
                     result.Add(new RegisteredMemberInfo
                     {
@@ -1722,74 +1706,35 @@ namespace HpskSite.Services
                     if (clubId <= 0)
                         clubId = _memberClubService.GetPrimaryClubId(_memberService.GetById(memberId));
 
-                    if (isSpringskytte)
+                    // ⚠️ Klasslistan finns i TVÅ stavningar i databasen: SerializeShootingClasses
+                    // skriver camelCase ("class"), men klassbytet i startlisteredigeraren och
+                    // ChangeShooterClass skrev System.Text.Json:s standard ("Class"). Den gamla
+                    // läsningen gjorde GetProperty("class") — skiftlägeskänsligt — och en
+                    // KeyNotFoundException svaldes av catch, så varje skytt vars klass bytts
+                    // försvann TYST ur laganmälan ("Skapa lag"). Rapporterat live från tävling
+                    // 5574, 2026-09-26: 2 av Åmåls 7 skyttar syntes. Läs skiftlägesokänsligt.
+                    //
+                    // Jämförelsen viker dessutom ihop klassens id och visningsnamn (C_Vet_Y /
+                    // C Vet Y), som klassbytet historiskt också blandat.
+                    foreach (var classId in CompetitionRegistrationDocument.ReadClassIds(classesJson))
                     {
-                        // Springskytte registration class format: "A-D 21", "C-H 35"
-                        // The shooting classes may be stored differently
-                        try
-                        {
-                            var classes = JsonSerializer.Deserialize<JsonElement[]>(classesJson);
-                            if (classes != null)
-                            {
-                                foreach (var cls in classes)
-                                {
-                                    var classId = cls.ValueKind == JsonValueKind.Object
-                                        ? cls.GetProperty("class").GetString() ?? ""
-                                        : cls.GetString() ?? "";
+                        var key = ShootingClasses.NormalizeKey(classId);
+                        var match = compatibleClasses.FirstOrDefault(c =>
+                            c == classId || ShootingClasses.NormalizeKey(c) == key);
+                        if (match == null) continue;
 
-                                    if (compatibleClasses.Contains(classId))
-                                    {
-                                        if (!result.Any(r => r.MemberId == memberId))
-                                        {
-                                            result.Add(new EligibleMember
-                                            {
-                                                MemberId = memberId,
-                                                Name = memberName,
-                                                ClubId = clubId,
-                                                ClubName = memberClub,
-                                                ShootingClass = classId
-                                            });
-                                        }
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-                    else
-                    {
-                        // Standard: classes stored as JSON array of objects [{class:"A1",startPreference:"Early"}, ...]
-                        try
+                        if (!result.Any(r => r.MemberId == memberId))
                         {
-                            var classes = JsonSerializer.Deserialize<JsonElement[]>(classesJson);
-                            if (classes != null)
+                            result.Add(new EligibleMember
                             {
-                                foreach (var cls in classes)
-                                {
-                                    var classId = cls.ValueKind == JsonValueKind.Object
-                                        ? cls.GetProperty("class").GetString() ?? ""
-                                        : cls.GetString() ?? "";
-
-                                    if (compatibleClasses.Contains(classId))
-                                    {
-                                        if (!result.Any(r => r.MemberId == memberId))
-                                        {
-                                            result.Add(new EligibleMember
-                                            {
-                                                MemberId = memberId,
-                                                Name = memberName,
-                                                ClubId = clubId,
-                                                ClubName = memberClub,
-                                                ShootingClass = classId
-                                            });
-                                        }
-                                        break;
-                                    }
-                                }
-                            }
+                                MemberId = memberId,
+                                Name = memberName,
+                                ClubId = clubId,
+                                ClubName = memberClub,
+                                ShootingClass = classId
+                            });
                         }
-                        catch { }
+                        break;
                     }
                 }
             }
