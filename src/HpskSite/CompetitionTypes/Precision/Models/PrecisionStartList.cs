@@ -158,6 +158,50 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         // Finals-only: display string for merged classes, e.g. "C + C Dam + C Jun".
         // Null/empty for regular qualifying teams.
         public string? ChampionshipClasses { get; set; }
+
+        /// <summary>
+        /// Lägger skytten på första lediga plats i skjutlaget — en lucka efter en skytt som
+        /// flyttats eller tagits bort, annars sist.
+        ///
+        /// ⚠️⚠️ <see cref="StartListShooter.Position"/> ÄR EN SKJUTPLATS, inte ett radnummer.
+        /// Redigeraren numrerade om hela skjutlaget 1..n efter varje borttagning och flytt, så att
+        /// ta bort skytten på plats 3 flyttade alla efter hen till en annan tavla — mitt i en
+        /// tävling, för någon annans skull (rapporterat från tävling 5574, 2026-09-26). Luckan
+        /// står nu kvar, precis som när en anmälan raderas (StartListCleanup). Numrera ALDRIG om
+        /// ett skjutlag här; en ny generering gör det, medvetet.
+        ///
+        /// "Antal + 1" går inte längre att använda som ny plats: med en lucka kan den platsen
+        /// redan vara upptagen.
+        /// </summary>
+        public void PlaceInFirstFreePosition(StartListShooter shooter, int maxPerTeam)
+        {
+            Shooters ??= new List<StartListShooter>();
+            var taken = Shooters.Select(s => s.Position).ToHashSet();
+
+            var position = 0;
+            var limit = maxPerTeam > 0 ? maxPerTeam : int.MaxValue;
+            for (var p = 1; p <= limit; p++)
+            {
+                if (!taken.Contains(p)) { position = p; break; }
+            }
+            // Fullt (eller överfullt) skjutlag: efter den högsta platsen, aldrig på en upptagen.
+            if (position == 0) position = (taken.Count == 0 ? 0 : taken.Max()) + 1;
+
+            shooter.Position = position;
+            Shooters.Add(shooter);
+            SortByPosition();
+        }
+
+        /// <summary>
+        /// Håller listan i platsordning. Renderarna och redigeraren går igenom listan i tur och
+        /// ordning, så en skytt som lagts i en lucka måste också ligga där i listan.
+        /// </summary>
+        public void SortByPosition()
+        {
+            if (Shooters == null) return;
+            Shooters = Shooters.OrderBy(s => s.Position).ToList();
+            ShooterCount = Shooters.Count;
+        }
     }
 
     public class StartListShooter
