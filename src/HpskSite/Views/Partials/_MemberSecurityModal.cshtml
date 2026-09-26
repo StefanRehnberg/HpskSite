@@ -126,12 +126,14 @@
                                     <div class="mb-2">
                                         <label for="adminNewPassword" class="form-label small">Nytt lösenord</label>
                                         <input type="password" class="form-control form-control-sm" id="adminNewPassword"
-                                               placeholder="Minst 6 tecken" minlength="6">
+                                               placeholder="Minst 6 tecken" minlength="6" autocomplete="new-password"
+                                               data-1p-ignore="true" data-lpignore="true" data-bwignore="true">
                                     </div>
                                     <div class="mb-2">
                                         <label for="adminConfirmPassword" class="form-label small">Bekräfta lösenord</label>
                                         <input type="password" class="form-control form-control-sm" id="adminConfirmPassword"
-                                               placeholder="Upprepa lösenord">
+                                               placeholder="Upprepa lösenord" autocomplete="new-password"
+                                               data-1p-ignore="true" data-lpignore="true" data-bwignore="true">
                                     </div>
                                     <button type="button" class="btn btn-primary btn-sm" onclick="setMemberPassword()">
                                         <i class="bi bi-check-lg me-1"></i>Sätt lösenord

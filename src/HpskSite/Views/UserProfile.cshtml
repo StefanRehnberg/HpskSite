@@ -446,7 +446,10 @@
                                         </div>
                                         <div class="col-md-3 col-sm-6">
                                             <label for="compSearchFilter" class="form-label">Sök</label>
-                                            <input type="text" id="compSearchFilter" class="form-control" placeholder="Sök tävlingar..." oninput="applyCompetitionFiltersDebounced()">
+                                            @* type="search" + autocomplete="off" + eget name: ett filterfält får aldrig
+                                               autofyllas — ett ifyllt värde filtrerar tyst bort hela listan. Se
+                                               användarnamnsfältet i lösenordsdialogen. *@
+                                            <input type="search" id="compSearchFilter" name="compSearch" autocomplete="off" class="form-control" placeholder="Sök tävlingar..." oninput="applyCompetitionFiltersDebounced()">
                                         </div>
                                     </div>
                                 </div>
@@ -1445,6 +1448,15 @@ function deletePracticeRow(id) {
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
+                @* ⚠️ Lösenordsfälten ligger utanför varje <form>, och då letar Chromes
+                   lösenordshanterare BAKÅT i sidan efter ett textfält att lägga användarnamnet i.
+                   Närmast var sökfältet på Tävlingar-fliken: det fylldes med e-postadressen, och
+                   vid första klicket (Chrome lämnar ut autofyllda värden först efter en användar-
+                   gest) filtrerades listan till "Inga tävlingsanmälningar" — rapporterat när
+                   medlemmen tryckte "Skriv ut kvitto" (2026-09-26). Ett eget användarnamnsfält här
+                   ger hanteraren rätt mål. *@
+                <input type="text" class="visually-hidden" name="username" autocomplete="username"
+                       value="@(currentMember?.Email ?? "")" tabindex="-1" aria-hidden="true">
                 <div class="mb-3">
                     <label for="cpCurrentPassword" class="form-label">Nuvarande lösenord</label>
                     <input type="password" class="form-control" id="cpCurrentPassword" autocomplete="current-password">
