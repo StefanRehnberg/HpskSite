@@ -175,6 +175,10 @@ namespace HpskSite.Composers
             // later series could still break.
             builder.Services.AddScoped<ParticipantStatusService>();
 
+            // Trasiga banor (skjutplatser ur funktion) per tävling — läses av startliste-
+            // genereringen, redigeraren och diskens walk-in så ingen placeras där.
+            builder.Services.AddScoped<BrokenLaneService>();
+
             // Fältskytte (Normal/Poäng/Magnumfält) Särskjutning — separate service since Fältskytte
             // uses a different result-entry shape (per-station hits/figures/poängmål)
             builder.Services.AddScoped<HpskSite.CompetitionTypes.Faltskytte.Services.FaltskytteShootOffService>();

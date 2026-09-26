@@ -173,7 +173,7 @@ namespace HpskSite.CompetitionTypes.Precision.Models
         /// "Antal + 1" går inte längre att använda som ny plats: med en lucka kan den platsen
         /// redan vara upptagen.
         /// </summary>
-        public void PlaceInFirstFreePosition(StartListShooter shooter, int maxPerTeam)
+        public void PlaceInFirstFreePosition(StartListShooter shooter, int maxPerTeam, ISet<int>? brokenLanes = null)
         {
             Shooters ??= new List<StartListShooter>();
             var taken = Shooters.Select(s => s.Position).ToHashSet();
@@ -182,13 +182,43 @@ namespace HpskSite.CompetitionTypes.Precision.Models
             var limit = maxPerTeam > 0 ? maxPerTeam : int.MaxValue;
             for (var p = 1; p <= limit; p++)
             {
-                if (!taken.Contains(p)) { position = p; break; }
+                if (!taken.Contains(p) && brokenLanes?.Contains(p) != true) { position = p; break; }
             }
-            // Fullt (eller överfullt) skjutlag: efter den högsta platsen, aldrig på en upptagen.
-            if (position == 0) position = (taken.Count == 0 ? 0 : taken.Max()) + 1;
+            // Fullt (eller överfullt) skjutlag: efter den högsta platsen, aldrig på en upptagen
+            // och aldrig på en trasig bana.
+            if (position == 0)
+            {
+                position = (taken.Count == 0 ? 0 : taken.Max()) + 1;
+                while (brokenLanes?.Contains(position) == true) position++;
+            }
 
             shooter.Position = position;
             Shooters.Add(shooter);
+            SortByPosition();
+        }
+
+        /// <summary>
+        /// Antal skjutplatser som går att använda: 1..max minus de trasiga banorna inom det
+        /// intervallet. Det är skjutlagets verkliga kapacitet.
+        /// </summary>
+        public static int UsableLanes(int maxPerTeam, ISet<int>? brokenLanes) =>
+            Math.Max(0, maxPerTeam - (brokenLanes?.Count(l => l >= 1 && l <= maxPerTeam) ?? 0));
+
+        /// <summary>
+        /// Efter en generering: skyttarna står på 1..n. Flytta dem till de banor som går att
+        /// använda, i samma ordning — den n:te skytten till den n:te hela banan. Görs bara på en
+        /// NYGENERERAD lista (där omnumrering ändå sker); en befintlig lista rörs aldrig av att en
+        /// bana markeras trasig, då visas en varning i stället.
+        /// </summary>
+        public void MoveOffBrokenLanes(ISet<int>? brokenLanes)
+        {
+            if (Shooters == null || Shooters.Count == 0 || brokenLanes == null || brokenLanes.Count == 0) return;
+            var lane = 0;
+            foreach (var s in Shooters.OrderBy(s => s.Position).ToList())
+            {
+                do { lane++; } while (brokenLanes.Contains(lane));
+                s.Position = lane;
+            }
             SortByPosition();
         }
 

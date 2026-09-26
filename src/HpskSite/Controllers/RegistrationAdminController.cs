@@ -40,6 +40,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.StartListCoverage.StartListCoverageService _coverageService;
         private readonly HpskSite.Services.StartListCleanup.StartListCleanupService _startListCleanupService;
         private readonly ILogger<RegistrationAdminController> _logger;
+        private readonly BrokenLaneService _brokenLanes;
 
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -64,9 +65,11 @@ namespace HpskSite.Controllers
             RegistrationClubPropagationService clubPropagationService,
             HpskSite.Services.StartListCoverage.StartListCoverageService coverageService,
             HpskSite.Services.StartListCleanup.StartListCleanupService startListCleanupService,
-            ILogger<RegistrationAdminController> logger)
+            ILogger<RegistrationAdminController> logger,
+            BrokenLaneService brokenLanes)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _brokenLanes = brokenLanes;
             _memberClubService = memberClubService;
             _clubPropagationService = clubPropagationService;
             _logger = logger;
@@ -1156,14 +1159,17 @@ namespace HpskSite.Controllers
                 team.Shooters ??= new List<StartListShooter>();
 
                 var maxPer = config.Settings?.MaxShootersPerTeam ?? 30;
-                if (team.Shooters.Count + classes.Count > maxPer)
+                // Trasiga banor tar platser ur kapaciteten och får aldrig få en skytt.
+                var brokenLanes = _brokenLanes.Get(request.CompetitionId);
+                var usablePer = StartListTeam.UsableLanes(maxPer, brokenLanes);
+                if (team.Shooters.Count + classes.Count > usablePer)
                 {
-                    var remaining = Math.Max(0, maxPer - team.Shooters.Count);
+                    var remaining = Math.Max(0, usablePer - team.Shooters.Count);
                     return Json(new
                     {
                         success = false,
                         message = remaining == 0
-                            ? $"Skjutlag {request.TeamNumber} är fullt ({maxPer} platser)."
+                            ? $"Skjutlag {request.TeamNumber} är fullt ({usablePer} platser)."
                             : $"Skjutlag {request.TeamNumber} har bara {remaining} ledig(a) plats(er) kvar — du försöker boka {classes.Count}."
                     });
                 }
@@ -1184,7 +1190,7 @@ namespace HpskSite.Controllers
                         Club = clubName,
                         WeaponClass = entry.Class,
                         MemberId = memberId
-                    }, maxPer);
+                    }, maxPer, brokenLanes);
 
                     if (!team.WeaponClasses.Contains(entry.Class))
                         team.WeaponClasses.Add(entry.Class);
