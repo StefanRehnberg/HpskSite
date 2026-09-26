@@ -2184,10 +2184,18 @@ function renderMemberMedalDetail(data) {
 function loadMemberGold(memberId, memberName) {
     const section = document.getElementById('memberGoldSection');
     if (!section) return;
+    // ⚠️ Ett misslyckat anrop får inte se ut som "ingen guldstatus": då saknas rutan helt, och med den
+    // knapparna för att godkänna en inskickad ansökan, utan att något säger att något fattas.
+    const failed = msg => {
+        section.innerHTML = `<div class="alert alert-warning small py-2 mb-0">
+            <i class="bi bi-exclamation-triangle me-1"></i>Guldmedaljstatus kunde inte hämtas${msg ? ': ' + escapeMedalHtml(msg) : '.'}
+            <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" data-gold-retry>Försök igen</button></div>`;
+        section.querySelector('[data-gold-retry]').addEventListener('click', () => loadMemberGold(memberId, memberName));
+    };
     fetch(`/umbraco/surface/StandardMedal/GetMemberGoldStatus?memberId=${memberId}`)
         .then(r => r.json())
-        .then(data => { if (data.success) renderMemberGold(data, memberName); })
-        .catch(() => {});
+        .then(data => { if (data && data.success) renderMemberGold(data, memberName); else failed(data && data.message); })
+        .catch(e => failed(e && e.hpskRequest ? e.message : ''));
 }
 
 function renderMemberGold(data, memberName) {
