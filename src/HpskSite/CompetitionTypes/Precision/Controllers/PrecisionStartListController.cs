@@ -851,7 +851,14 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 // Get configuration to find shooters already in start list
                 var configData = startList.GetValue<string>("configurationData");
-                var existingMemberIds = new HashSet<int>();
+
+                // A place on the start list is per (member, CLASS), not per member — the same
+                // shooter routinely stands in A and C, and in the mixed-weapon-group format in two
+                // different skjutlag. Excluding on the member alone hid every shooter who already
+                // had ONE start from being placed in their other class, so the dialog found nobody
+                // (reported live from competition 5574, 2026-09-26). Same key as
+                // AddShooterToStartList, so the list never offers what the add then refuses.
+                var existingStarts = new HashSet<string>();
 
                 if (!string.IsNullOrEmpty(configData))
                 {
@@ -864,20 +871,20 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                             {
                                 foreach (var shooter in team.Shooters)
                                 {
-                                    existingMemberIds.Add(shooter.MemberId);
+                                    existingStarts.Add(CoverageKeys.For(shooter.MemberId, shooter.WeaponClass));
                                 }
                             }
                         }
                     }
                 }
 
-                // Get all registrations for this competition
+                // Get all registrations for this competition (one row per registered class)
                 var registrations = await _repository.GetCompetitionRegistrations(competitionId);
 
-                // Filter: not already in start list AND matches search query
+                // Filter: this (member, class) not already in start list AND matches search query
                 var queryLower = query.ToLowerInvariant();
                 var availableShooters = registrations
-                    .Where(r => !existingMemberIds.Contains(r.MemberId))
+                    .Where(r => !existingStarts.Contains(CoverageKeys.For(r.MemberId, r.MemberClass)))
                     .Where(r => r.MemberName.ToLowerInvariant().Contains(queryLower))
                     .Select(r => new
                     {
