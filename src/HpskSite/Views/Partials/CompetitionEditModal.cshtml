@@ -396,6 +396,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
 
+                    @await Html.PartialAsync("_ClubPaysFeeSetting", "edit_")
+
                     </section>
                     <section class="hpsk-section" data-title="Konfiguration">
                     <div class="row">
@@ -1126,6 +1128,9 @@ window.populateEditModal = function(competition) {
         stafettGroup.classList.toggle('d-none', !isSpringskytte);
     }
 
+    // "Får klubben betala…" — egen SQL-inställning, läses separat (_ClubPaysFeeSetting).
+    if (window.hpskClubPays) hpskClubPays.load('edit_', parseInt(competition.id, 10) || 0);
+
     // Fältskytte section
     const isFaltskytte = (competition.competitionType === 'Faltskytte' || competition.competitionType === 'MagnumFalt');
     const faltSection = document.getElementById('editFaltskytteSection');
@@ -1484,6 +1489,15 @@ function saveCompetition() {
 
         if (data.success) {
             document.getElementById('editFormErrors').classList.add('d-none');
+
+            // "Får klubben betala…" sparas med ett eget anrop (SQL, inte en tävlingsegenskap).
+            // ⚠️ Ett misslyckande SÄGS — tävlingen är sparad, men valet är det inte.
+            const savedId = isNewCompetition ? (parseInt(data.data && data.data.id, 10) || 0) : competitionId;
+            if (window.hpskClubPays) {
+                hpskClubPays.save('edit_', savedId).then(r => {
+                    if (!r.success) showNotification(r.message, 'warning');
+                });
+            }
 
             // Check if series assignment changed — if so, move the competition
             const seriesDropdown = document.getElementById('edit_seriesId');

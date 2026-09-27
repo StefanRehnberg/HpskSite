@@ -403,7 +403,13 @@ namespace HpskSite.Controllers
                 var doc = await _intygDocuments.BuildDraftAsync(memberId, resolvedClubId, year ?? DateTime.Today.Year);
                 if (doc == null) return Json(new { success = false, message = "Medlemmen hittades inte." });
 
-                return Json(new { success = true, data = doc, clubId = resolvedClubId });
+                return Json(new
+                {
+                    success = true,
+                    data = doc,
+                    clubId = resolvedClubId,
+                    signatories = _intygDocuments.GetSignatoryOptions(resolvedClubId)
+                });
             }
             catch (Exception ex)
             {
@@ -457,8 +463,21 @@ namespace HpskSite.Controllers
                 if (!isSiteAdmin && !isClubAdmin)
                     return Json(new { success = false, message = "Du har inte behörighet att utfärda föreningsintyg för den här medlemmen." });
 
-                var doc = await _intygDocuments.BuildDraftAsync(req.MemberId, clubId, req.ActivityYear > 0 ? req.ActivityYear : DateTime.Today.Year);
+                var doc = await _intygDocuments.BuildDraftAsync(req.MemberId, clubId,
+                    req.ActivityYear > 0 ? req.ActivityYear : DateTime.Today.Year, req.SignatoryRoleId);
                 if (doc == null) return Json(new { success = false, message = "Kunde inte bygga intyget." });
+
+                // ⚠️ Den valda undertecknaren måste vara den som hamnade på dokumentet. Byggaren
+                // faller tillbaka på ordföranden när raden inte finns i klubbens styrelse (t.ex. om
+                // ledamoten avgick medan formuläret stod öppet) — det får aldrig ske tyst här.
+                if (req.SignatoryRoleId > 0 && doc.UnderskriftRollId != req.SignatoryRoleId)
+                    return Json(new
+                    {
+                        success = false,
+                        message = "Den valda undertecknaren är inte längre ordförande eller utsedd " +
+                                  "föreningsintygsansvarig i klubbens styrelse. Välj undertecknare " +
+                                  "på nytt och utfärda igen."
+                    });
 
                 req.ApplyTo(doc);
                 doc.IssuedAt = DateTime.Now;
@@ -785,6 +804,7 @@ namespace HpskSite.Controllers
                         kind = ForeningsintygRequestKind.Label(r.Kind),
                         r.Forbund,
                         r.VapengruppSkytteform,
+                        r.Diarienummer,
                         createdAt = r.CreatedAt.ToString("yyyy-MM-dd"),
 
                         // ⚠️ ANTALET KRÄVER INGEN AVKRYPTERING och hör därför INTE bakom Hämta.

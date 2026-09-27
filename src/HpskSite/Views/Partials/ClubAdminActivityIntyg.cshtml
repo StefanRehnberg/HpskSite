@@ -512,6 +512,18 @@
 
                     <h6 class="small fw-bold text-uppercase text-muted mt-4">Underskrift</h6>
                     <div class="row g-2">
+                        <div class="col-md-8">
+                            <label class="form-label small mb-0" for="fiSignatory">Undertecknas av</label>
+                            <select id="fiSignatory" class="form-select form-select-sm"></select>
+                            <div class="form-text" id="fiSignatoryHint"></div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0" for="fiDiarienummer">Diarienummer</label>
+                            <input id="fiDiarienummer" class="form-control form-control-sm" maxlength="50" autocomplete="off">
+                            <div class="form-text" id="fiDiarienummerHint">Licensansökans diarienummer hos Polisen, så att intyget kopplas till rätt ärende. Tomt = rutan lämnas tom.</div>
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-1">
                         <div class="col-md-4">
                             <label class="form-label small mb-0" for="fiOrt">Ort</label>
                             <input id="fiOrt" class="form-control form-control-sm">
@@ -740,7 +752,8 @@
         fiBehovAnnatText:  'BehovAnnatText',
         fiSkjutprovDatum:  'SkjutprovDatum',
         fiSkjutAnnatText:  'SkjutskicklighetAnnatText',
-        fiOrt:             'UnderskriftOrt'
+        fiOrt:             'UnderskriftOrt',
+        fiDiarienummer:    'Diarienummer'
     };
 
     // Serverns konstanter, en gång var. Att hårdkoda strängarna här vore ett andra exemplar som är
@@ -783,6 +796,11 @@
         syncAnnatForbund();
         setVal('fiPurpose', 'Vapenlicens');
         setVal('fiNotes', '');
+        // ⚠️ Undertecknaren fylls om av loadDraft för varje medlem. Töms här så att ett misslyckat
+        // utkast inte lämnar förra ärendets val kvar — det hade postats som ett aktivt val.
+        var sigSel = document.getElementById('fiSignatory');
+        if (sigSel) { sigSel.innerHTML = ''; sigSel.disabled = false; }
+        applyReqDiarienummer(null);
 
         // ⚠️⚠️ ÅTERSTÄLLS TILL PÅ, och den ligger MEDVETET UTANFÖR `ISSUE_CHECKS`.
         //
@@ -929,10 +947,60 @@
             if (!j.success) { resetIssueForm(null); return; }
             _draftClubId = j.clubId || 0;
             resetIssueForm(j.data);
+            renderSignatories(j.signatories || [], j.data ? j.data.underskriftRollId : 0);
         } catch (e) {
             resetIssueForm(null);
         }
     }
+
+    /// Väljaren "Undertecknas av" — ordföranden och klubbens utsedda föreningsintygsansvariga,
+    /// ordföranden förvald. De utsedda är samma personer som får mejl om nya förfrågningar.
+    ///
+    /// ⚠️ Valet är en PEKARE på en styrelserad. Servern läser namn, titel och kontakt ur registret
+    /// och vägrar ett id som inte är valbart, så väljaren kan inte användas för att skriva under i
+    /// någon annans namn.
+    var _signatoryAppointedCount = 0;
+    function renderSignatories(options, selectedRoleId) {
+        var sel = document.getElementById('fiSignatory');
+        var hint = document.getElementById('fiSignatoryHint');
+        if (!sel) return;
+        _signatoryAppointedCount = options.filter(function (o) { return o.isAppointed; }).length;
+        if (!options.length) {
+            sel.innerHTML = '<option value="0">Ingen undertecknare</option>';
+            sel.disabled = true;
+            if (hint) hint.innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>' +
+                'Klubben har varken ordförande eller utsedda föreningsintygsansvariga i styrelsen, så intyget ' +
+                'får ingen undertecknare. Lägg in ordföranden under Styrelsearbete → Styrelsen, eller utse ' +
+                'ansvariga under Åtgärder → Vem får läsa medlemmarnas vapeninnehav.</span>';
+            return;
+        }
+        sel.disabled = false;
+        sel.innerHTML = options.map(function (o) {
+            return '<option value="' + o.roleId + '"' + (o.roleId === selectedRoleId ? ' selected' : '') +
+                   ' data-missing="' + (o.missingContact ? '1' : '0') + '">' +
+                   hpskEsc(o.name) + ' — ' + hpskEsc(o.title) + (o.missingContact ? ' (kontaktuppgifter saknas)' : '') +
+                   '</option>';
+        }).join('');
+        syncSignatoryHint();
+    }
+
+    function syncSignatoryHint() {
+        var sel = document.getElementById('fiSignatory');
+        var hint = document.getElementById('fiSignatoryHint');
+        if (!sel || !hint || sel.disabled) return;
+        var opt = sel.options[sel.selectedIndex];
+        var base = 'Ordföranden och de som utsetts som föreningsintygsansvariga — samma personer som får mejl ' +
+            'om nya förfrågningar. Namn, titel och kontaktuppgifter hämtas ur styrelsen och ledamotens profil.';
+        if (_signatoryAppointedCount === 0)
+            base += ' Klubben har inte utsett några föreningsintygsansvariga, så bara ordföranden kan väljas.';
+        hint.innerHTML = opt && opt.getAttribute('data-missing') === '1'
+            ? base + ' <span class="text-warning-emphasis"><i class="bi bi-exclamation-triangle me-1"></i>' +
+              'Den valda ledamoten saknar e-post eller telefon i sin profil, så de raderna blir tomma på intyget.</span>'
+            : base;
+    }
+    document.addEventListener('change', function (ev) {
+        if (ev.target && ev.target.id === 'fiSignatory') syncSignatoryHint();
+    });
 
     document.addEventListener('click', function (ev) {
         if (ev.target && ev.target.closest && ev.target.closest('#fiFirearmFetchBtn')) {
@@ -954,6 +1022,7 @@
         Object.keys(ISSUE_TEXTS).forEach(function (id) { fd.append(ISSUE_TEXTS[id], getVal(id)); });
         var antal = getVal('fiAntalVapen');
         if (String(antal).trim() !== '') fd.append('AntalVapenSedanTidigare', antal);
+        fd.append('SignatoryRoleId', getVal('fiSignatory') || 0);
 
         // ⚠️ FÖRFRÅGAN SOM UTFÄRDANDET BESVARAR. Det här fältet är vad som binder de två halvorna
         // ihop: servern stänger förfrågan och länkar dokumentet i SAMMA handling. Utan det var
@@ -1539,6 +1608,7 @@
         if (!sel || !note) return;
 
         var q = _reqCounts[String(sel.value)];
+        applyReqDiarienummer(q);
         if (!q) { note.innerHTML = ''; note.classList.add('d-none'); return; }
 
         var dek = (typeof q.antalDeklarerat === 'number') ? q.antalDeklarerat : null;
@@ -1565,6 +1635,21 @@
         }
         note.innerHTML = html;
         note.classList.remove('d-none');
+    }
+
+    /// Förifyller diarienumret ur den valda förfrågan — medlemmen har det från sin licensansökan.
+    /// ⚠️ Bara när fältet är tomt: utfärdaren kan ha skrivit in eller rättat numret, och ett byte
+    /// av förfrågan får inte kasta det. Hjälptexten säger var numret kom ifrån.
+    var DIARIE_HINT = 'Licensansökans diarienummer hos Polisen, så att intyget kopplas till rätt ärende. Tomt = rutan lämnas tom.';
+    function applyReqDiarienummer(q) {
+        var hint = document.getElementById('fiDiarienummerHint');
+        var fromMember = q && q.diarienummer ? String(q.diarienummer) : '';
+        if (fromMember && !getVal('fiDiarienummer')) setVal('fiDiarienummer', fromMember);
+        if (!hint) return;
+        if (!q) { hint.textContent = DIARIE_HINT; return; }
+        hint.innerHTML = fromMember
+            ? 'Angivet av medlemmen i förfrågan: <strong>' + hpskEsc(fromMember) + '</strong>. ' + DIARIE_HINT
+            : 'Medlemmen angav inget diarienummer i förfrågan. ' + DIARIE_HINT;
     }
 
     async function fetchFirearmData() {

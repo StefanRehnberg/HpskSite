@@ -45,6 +45,17 @@ namespace HpskSite.Models
         public int RequestId { get; set; }
 
         /// <summary>
+        /// Vilken styrelseledamot som undertecknar (<c>BoardRoles.Id</c>). 0 = ordföranden.
+        ///
+        /// <para><b>⚠️ En PEKARE, inte ett registerfält.</b> Namn, titel, e-post och telefon läses
+        /// alltid ur styrelseregistret och medlemsprofilen på servern, så valet kan bara peka på
+        /// någon som faktiskt sitter i klubbens styrelse. Ett id som inte gör det vägras vid
+        /// utfärdandet i stället för att tyst ersättas med ordföranden — utfärdaren valde en
+        /// bestämd person, och ett intyg i någon annans namn än den valda är värre än inget.</para>
+        /// </summary>
+        public int SignatoryRoleId { get; set; }
+
+        /// <summary>
         /// Ska medlemmen få ett mejl om att intyget är utfärdat? Utfärdaren väljer per gång.
         ///
         /// <para><b>⚠️⚠️ STRÄNG OCH INTE `bool?` — OCH DET ÄR TREDJE GÅNGEN DEN FÄLLAN SLÅR TILL I
@@ -152,6 +163,12 @@ namespace HpskSite.Models
         public bool SkjutskicklighetAnnat { get; set; }
         public string? SkjutskicklighetAnnatText { get; set; }
 
+        /// <summary>
+        /// Licensansökans diarienummer hos Polisen. Ett INTYGSFÄLT: förifylls ur medlemmens
+        /// förfrågan, men det är utfärdarens värde som skrivs ut.
+        /// </summary>
+        public string? Diarienummer { get; set; }
+
         // ── Underskrift ──────────────────────────────────────────────
 
         /// <summary>Orten intyget skrivs under på. Förifylls med klubbens ort som förslag.</summary>
@@ -205,6 +222,7 @@ namespace HpskSite.Models
             doc.SilvermarkeDynamiska = SilvermarkeDynamiska;
             doc.SkjutskicklighetAnnat = SkjutskicklighetAnnat;
             doc.SkjutskicklighetAnnatText = Trim(SkjutskicklighetAnnatText);
+            doc.Diarienummer = Trim(Diarienummer);
 
             // Ort får skrivas över med tomt: styrelsen kan medvetet lämna den blank.
             doc.UnderskriftOrt = Trim(UnderskriftOrt);

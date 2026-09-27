@@ -96,6 +96,36 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Vilka andra konfigurationer som länkar till stationer i den här — läses av
+        /// redigeraren innan en station flyttas eller tas bort, eftersom länkarna pekar
+        /// på stationsNUMRET. Kräver redigeringsrätt: frågan ställs bara av den som
+        /// kan numrera om.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetLinkers(int id)
+        {
+            try
+            {
+                var viewerId = await _configService.GetCurrentMemberIdAsync();
+                if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
+
+                var config = await _configService.GetByIdAsync(id);
+                if (config == null) return Json(new { success = false, message = "Konfigurationen hittades inte." });
+
+                if (!await _configService.CanEditAsync(config, viewerId))
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+
+                var linkers = await _configService.GetLinkersAsync(id, viewerId);
+                return Json(new { success = true, linkers });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reading linkers for config {Id}", id);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Lightweight station-summary view used by the "Importera station från en annan konfiguration"
         /// picker. Returns the stations array (figures + målgrupps) but skips the full faltCfgData blob.
         /// </summary>

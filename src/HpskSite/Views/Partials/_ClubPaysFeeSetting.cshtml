@@ -1,0 +1,181 @@
+@*
+ * "Får klubben betala i stället för skytten?" — tävlingens inställning, i tävlingsdialogerna.
+ *
+ * Renderas av tävlingsguiden (wizard_), Redigera tävling (edit_) och Springskyttemodalen
+ * (springEdit_), med prefixet som modell. Flyttad hit 2026-09-26 från avgiftspanelen på
+ * Anmälningar (Stefans beslut): valet styr vad skytten får välja vid anmälan, så det ska vara
+ * bestämt när tävlingen skapas — inte ändras mitt i anmälningstiden från en flik om anmälningar.
+ *
+ * ⚠️⚠️ INSTÄLLNINGEN ÄR INTE EN TÄVLINGSEGENSKAP. Den ligger i SQL (CompetitionFeeSettings) och
+ * sparas med ett EGET anrop (CompetitionFee/SaveSettings) EFTER att tävlingen sparats — i guiden
+ * finns ju inget tävlings-id förrän CreateCompetition svarat. Därför har kryssrutorna INGA
+ * name-attribut: de får aldrig hamna i FormData och därmed i tävlingens fältpåse, där
+ * MapFieldNameToAlias hade släppt dem tyst.
+ *
+ * Rutan visas bara när tävlingen har en avgift, och bara typer med en avgift erbjuds — en ruta för
+ * "Stafett" på en tävling utan stafettavgift är en fråga utan betydelse. Den visas inte heller för
+ * en tävling i den gamla fakturamodellen, där valet saknar verkan.
+ *
+ * API (window.hpskClubPays): reset(prefix) · load(prefix, competitionId) · sync(prefix) ·
+ * save(prefix, competitionId) → Promise<{ skipped?, success, message }>.
+ *@
+@model string
+@{
+    // Model = fält-id-prefixet ("wizard_", "edit_", "springEdit_") — samma form som _FaltskytteCompetitionPicker.
+    var cpPrefix = Model ?? "";
+    var cpTypes = new[]
+    {
+        ("individ", "Individuell anmälan"),
+        ("junior", "Juniorer"),
+        ("lag", "Lag"),
+        ("stafett", "Stafett")
+    };
+}
+<div class="mb-3 d-none" id="@(cpPrefix)clubPaysBlock" data-model="ledger" data-loaded="0">
+    <label class="form-label mb-1">Får klubben betala i stället för skytten?</label>
+    <div class="form-text mt-0 mb-2">
+        För det du kryssar i kan skytten välja "Klubben betalar" vid anmälan. Kassören skickar sedan en
+        faktura till klubben. För det du inte kryssar i betalar skytten direkt vid anmälan.
+    </div>
+    <div class="d-flex flex-wrap gap-3">
+        @foreach (var (key, label) in cpTypes)
+        {
+            <div class="form-check" data-cp-row="@key">
+                @* ⚠️ Id:t byggs som ETT uttryck: "clubPays_@key" läser Razor som en e-postadress
+                   och skriver ut tecknen rakt av. *@
+                <input class="form-check-input" type="checkbox" id="@(cpPrefix + "clubPays_" + key)" data-cp-type="@key" autocomplete="off">
+                <label class="form-check-label" for="@(cpPrefix + "clubPays_" + key)">@label</label>
+            </div>
+        }
+    </div>
+    <div class="form-text" id="@(cpPrefix)clubPaysNote"></div>
+</div>
+
+<script>
+if (!window.hpskClubPays) {
+    window.hpskClubPays = (function () {
+        const TYPES = ['individ', 'junior', 'lag', 'stafett'];
+        const block = p => document.getElementById(p + 'clubPaysBlock');
+        const num = (p, name) => {
+            const el = document.getElementById(p + name);
+            if (!el || el.disabled) return 0;
+            const v = parseFloat(String(el.value || '').replace(',', '.'));
+            return isNaN(v) ? 0 : v;
+        };
+        const checked = (p, name) => !!document.getElementById(p + name)?.checked;
+
+        // Vilka anmälningstyper har en avgift just nu? Läser dialogens egna fält, så rutan följer
+        // med medan arrangören skriver. Junior utan egen avgift betalar den individuella (fältets
+        // hjälptext: "0 = samma som individuell").
+        function typesWithFee(p) {
+            const reg = num(p, 'registrationFee'), jun = num(p, 'juniorRegistrationFee');
+            const set = new Set();
+            if (reg > 0) set.add('individ');
+            if (jun > 0 || reg > 0) set.add('junior');
+            if (checked(p, 'allowTeams') && num(p, 'teamRegistrationFee') > 0) set.add('lag');
+            if (checked(p, 'allowStafett') && num(p, 'stafettRegistrationFee') > 0) set.add('stafett');
+            return set;
+        }
+
+        function bind(p) {
+            const b = block(p);
+            if (!b || b.dataset.bound === '1') return;
+            b.dataset.bound = '1';
+            ['registrationFee', 'juniorRegistrationFee', 'teamRegistrationFee', 'stafettRegistrationFee', 'allowTeams', 'allowStafett']
+                .forEach(n => {
+                    const el = document.getElementById(p + n);
+                    if (!el) return;
+                    el.addEventListener('input', () => sync(p));
+                    // change fyrar efter dialogens egen onchange, som nollar avgiften när laganmälan slås av.
+                    el.addEventListener('change', () => setTimeout(() => sync(p), 0));
+                });
+        }
+
+        function sync(p) {
+            const b = block(p);
+            if (!b) return;
+            bind(p);
+            const withFee = typesWithFee(p);
+            b.querySelectorAll('[data-cp-row]').forEach(row => row.classList.toggle('d-none', !withFee.has(row.dataset.cpRow)));
+            b.classList.toggle('d-none', b.dataset.model !== 'ledger' || withFee.size === 0);
+        }
+
+        function setChecks(p, types) {
+            const set = new Set(types || []);
+            TYPES.forEach(t => { const cb = document.getElementById(p + 'clubPays_' + t); if (cb) cb.checked = set.has(t); });
+        }
+
+        function note(p, text) { const n = document.getElementById(p + 'clubPaysNote'); if (n) n.textContent = text || ''; }
+
+        // Ny tävling: inget att läsa, den nya modellen gäller. Sparas efter CreateCompetition.
+        function reset(p) {
+            const b = block(p);
+            if (!b) return;
+            b.dataset.model = 'ledger';
+            b.dataset.loaded = '1';
+            b.dataset.hadTypes = '0';
+            setChecks(p, []);
+            note(p, '');
+            sync(p);
+        }
+
+        async function load(p, competitionId) {
+            const b = block(p);
+            if (!b) return;
+            if (!(competitionId > 0)) { reset(p); return; }
+            // ⚠️ Tills svaret kommit vet vi inte vad som gäller — rutan göms och sparas inte, så en
+            // snabb Spara aldrig skriver tomt över ett befintligt val.
+            b.dataset.loaded = '0';
+            b.dataset.hadTypes = '0';
+            b.dataset.model = 'unknown';
+            b.dataset.competitionId = String(competitionId);
+            setChecks(p, []);
+            note(p, '');
+            sync(p);
+            try {
+                const r = await fetch('/umbraco/surface/CompetitionFee/GetSettings?competitionId=' + competitionId, { credentials: 'same-origin' });
+                const d = await r.json();
+                if (b.dataset.competitionId !== String(competitionId)) return; // dialogen hann byta tävling
+                if (!d.success) { b.dataset.model = 'unavailable'; sync(p); return; }
+                b.dataset.model = d.model || 'ledger';
+                b.dataset.loaded = '1';
+                b.dataset.hadTypes = (d.clubPayableTypes || []).length ? '1' : '0';
+                setChecks(p, d.clubPayableTypes);
+            } catch (e) {
+                b.dataset.model = 'unavailable';
+            }
+            sync(p);
+        }
+
+        async function save(p, competitionId) {
+            const b = block(p);
+            if (!b || b.dataset.loaded !== '1' || b.dataset.model !== 'ledger' || !(competitionId > 0))
+                return { skipped: true, success: true };
+            // Bara typer som HAR en avgift. En kvarglömd bock på en typ vars avgift tagits bort ska
+            // inte ligga kvar och dyka upp igen den dag avgiften sätts.
+            const withFee = typesWithFee(p);
+            const types = TYPES.filter(t => withFee.has(t) && document.getElementById(p + 'clubPays_' + t)?.checked);
+            // Inget valt och inget sparat sedan tidigare = inget att skriva. Det håller också en
+            // Skjutledare (som får skapa tävlingar men saknar finansrätt) fri från en varning om
+            // något hen aldrig rört.
+            if (types.length === 0 && b.dataset.hadTypes !== '1') return { skipped: true, success: true };
+            try {
+                const tok = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+                const r = await fetch('/umbraco/surface/CompetitionFee/SaveSettings', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': tok },
+                    body: JSON.stringify({ competitionId: competitionId, types: types })
+                });
+                if (!r.ok) return { success: false, message: 'Valet om klubben får betala kunde inte sparas (' + r.status + ').' };
+                const d = await r.json();
+                return d.success ? d : { success: false, message: 'Valet om klubben får betala kunde inte sparas: ' + (d.message || '') };
+            } catch (e) {
+                return { success: false, message: 'Valet om klubben får betala kunde inte sparas.' };
+            }
+        }
+
+        return { reset, load, sync, save };
+    })();
+}
+</script>

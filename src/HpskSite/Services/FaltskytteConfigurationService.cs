@@ -220,6 +220,72 @@ namespace HpskSite.Services
             return visible;
         }
 
+        /// <summary>
+        /// Andra konfigurationer som har en station LÄNKAD till en station i den här
+        /// (<c>_linkedFromConfigId</c>). Länken pekar på källans stationsNUMMER, så en
+        /// omnumrering här gör att länken pekar på fel station — det här är underlaget
+        /// för varningen i redigeraren innan en station flyttas eller tas bort.
+        /// Namnet lämnas bara ut för konfigurationer betraktaren själv får se.
+        /// </summary>
+        public async Task<List<FaltskytteConfigurationLinker>> GetLinkersAsync(int configId, int? viewerMemberId)
+        {
+            var result = new List<FaltskytteConfigurationLinker>();
+            using var db = _databaseFactory.CreateDatabase();
+            // ⚠ '_' är ett jokertecken i LIKE — därav [_]. Förfiltret är bara en
+            // grovsållning; JSON-tolkningen nedan avgör.
+            var candidates = await db.FetchAsync<FaltskytteConfiguration>(
+                "WHERE Id <> @0 AND JsonBlob LIKE '%[_]linkedFromConfigId%'", configId);
+
+            foreach (var cfg in candidates)
+            {
+                var stations = new SortedSet<int>();
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(cfg.JsonBlob ?? "{}");
+                    CollectLinks(doc.RootElement, configId, stations);
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    continue;
+                }
+                if (stations.Count == 0) continue;
+
+                var canView = await CanViewAsync(cfg, viewerMemberId);
+                result.Add(new FaltskytteConfigurationLinker
+                {
+                    Name = canView ? cfg.Name : null,
+                    StationNumbers = stations.ToList()
+                });
+            }
+            return result;
+        }
+
+        private static void CollectLinks(System.Text.Json.JsonElement el, int configId, SortedSet<int> stations)
+        {
+            if (el.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                if (el.TryGetProperty("_linkedFromConfigId", out var idEl)
+                    && ReadInt(idEl) == configId
+                    && el.TryGetProperty("_linkedFromStationNumber", out var stEl)
+                    && ReadInt(stEl) is int st)
+                {
+                    stations.Add(st);
+                }
+                foreach (var p in el.EnumerateObject()) CollectLinks(p.Value, configId, stations);
+            }
+            else if (el.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var item in el.EnumerateArray()) CollectLinks(item, configId, stations);
+            }
+        }
+
+        private static int? ReadInt(System.Text.Json.JsonElement el) => el.ValueKind switch
+        {
+            System.Text.Json.JsonValueKind.Number when el.TryGetInt32(out var n) => n,
+            System.Text.Json.JsonValueKind.String when int.TryParse(el.GetString(), out var s) => s,
+            _ => null
+        };
+
         public async Task<List<FaltskytteConfigurationCollaborator>> GetCollaboratorsAsync(int configId)
         {
             using var db = _databaseFactory.CreateDatabase();

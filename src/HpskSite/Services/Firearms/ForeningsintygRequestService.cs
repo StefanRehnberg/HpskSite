@@ -101,6 +101,13 @@ namespace HpskSite.Services.Firearms
         /// </summary>
         public DateTime? AntalVapenBekraftatAt { get; set; }
 
+        /// <summary>
+        /// Licensansökans diarienummer hos Polisen, om medlemmen har det. Valfritt: medlemmen kan
+        /// fråga innan licensansökan är inskickad. Förifylls i utfärdandeformuläret, där klubben
+        /// kan rätta det — det som skrivs ut är utfärdarens värde, inte det här.
+        /// </summary>
+        public string? Diarienummer { get; set; }
+
         public DateTime CreatedAt { get; set; }
 
         // Visningsfält, inte kolumner.
@@ -156,7 +163,7 @@ namespace HpskSite.Services.Firearms
         public (int RequestId, string? Error) Create(
             int memberId, int clubId, string kind, int firearmId,
             string forbund, string? vapengrupp, string? message,
-            bool antalVapenBekraftat = false)
+            bool antalVapenBekraftat = false, string? diarienummer = null)
         {
             if (memberId <= 0 || clubId <= 0) return (0, "Ogiltig medlem eller klubb.");
             if (!ForeningsintygRequestKind.IsValid(kind)) return (0, "Ogiltig typ av förfrågan.");
@@ -222,6 +229,7 @@ namespace HpskSite.Services.Firearms
                 Status = ForeningsintygRequestStatus.Ny,
                 AntalVapenSedanTidigare = antal,
                 AntalVapenBekraftatAt = DateTime.Now,
+                Diarienummer = Trim(diarienummer, 50),
                 CreatedAt = DateTime.Now,
             };
             db.Insert(row);
