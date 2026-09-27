@@ -137,6 +137,11 @@ namespace HpskSite.CompetitionTypes.NationellHelmatch.Services
 
         private static string? ExtractClassification(string shootingClass)
         {
+            // The registry answers for every known class, Id form included ("C_Vet_Y" contains
+            // neither "VET Y" nor "VETY", so the string test below counted it as open class).
+            // The string test stays only for names the registry does not know (merged groups).
+            if (HpskSite.Models.ShootingClasses.TryGetSubCategoryLabel(shootingClass, out var registryLabel))
+                return registryLabel;
             if (string.IsNullOrEmpty(shootingClass))
                 return null;
             var upper = shootingClass.ToUpper().Trim();

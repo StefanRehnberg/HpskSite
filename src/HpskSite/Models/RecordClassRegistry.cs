@@ -42,9 +42,9 @@ namespace HpskSite.Models
         private static readonly string[] WithRevolverTeam =
             { "A", "A_Opt", "B", "C", "C_Dam", "C_Jun", "C_Vet", "R" };
 
-        // M1–M9 enligt vapenklasskatalogen i ShootingClasses (M8 Revolver 38-45, M9 Vapenklass A).
+        // M1–M9 direkt ur klassregistret (ShootingClasses) — aldrig en handskriven lista.
         private static readonly string[] MagnumClasses =
-            { "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9" };
+            ShootingClasses.ForWeapon(WeaponClass.M).Select(sc => sc.Id).ToArray();
 
         // ── Grenkatalogen ────────────────────────────────────────────────────────────
 

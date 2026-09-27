@@ -1,3 +1,4 @@
+@await Html.PartialAsync("_ShootingClassesBootstrap")
 @*
     Organizer → registered shooters composer ("Meddela deltagare").
     Sends a web-push + in-app-inbox notification to shooters registered in this competition,
@@ -110,7 +111,7 @@
                 (j.classes || []).forEach(function (c) {
                     var val = 'Klass:' + c.classId;
                     classCounts[val] = c.count;
-                    opts.push('<option value="' + esc(val) + '">Klass ' + esc(c.classId) + ' (' + c.count + ')</option>');
+                    opts.push('<option value="' + esc(val) + '">Klass ' + esc(window.getShootingClassName ? window.getShootingClassName(c.classId) : c.classId) + ' (' + c.count + ')</option>');
                 });
                 el.to.innerHTML = opts.join('');
                 updatePreview();

@@ -273,17 +273,16 @@
         lClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.L).ToList();
         mClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.M).ToList();
 
-        // Subdivide C classes into subcategories for proper validation
-        cRegularClasses = cClasses.Where(sc => sc.Id == "C1" || sc.Id == "C2" || sc.Id == "C3").ToList();
-        cVetClasses = cClasses.Where(sc => sc.Id == "C_Vet_Y" || sc.Id == "C_Vet_A").ToList();
-        cJuniorClasses = cClasses.Where(sc => sc.Id == "C_Jun").ToList();
-        cDamClasses = cClasses.Where(sc => sc.Id.EndsWith("_Dam") && sc.Id.StartsWith("C")).ToList();
+        // Subdivide C and L classes by the registry's category (never by parsing the id)
+        cRegularClasses = cClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Open).ToList();
+        cVetClasses = cClasses.Where(sc => sc.IsVeteran).ToList();
+        cJuniorClasses = cClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Junior).ToList();
+        cDamClasses = cClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Dam).ToList();
 
-        // Subdivide L classes into subcategories (same structure as C)
-        lRegularClasses = lClasses.Where(sc => sc.Id == "L1" || sc.Id == "L2" || sc.Id == "L3").ToList();
-        lVetClasses = lClasses.Where(sc => sc.Id == "L_Vet_Y" || sc.Id == "L_Vet_A").ToList();
-        lJuniorClasses = lClasses.Where(sc => sc.Id == "L_Jun").ToList();
-        lDamClasses = lClasses.Where(sc => sc.Id.EndsWith("_Dam") && sc.Id.StartsWith("L")).ToList();
+        lRegularClasses = lClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Open).ToList();
+        lVetClasses = lClasses.Where(sc => sc.IsVeteran).ToList();
+        lJuniorClasses = lClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Junior).ToList();
+        lDamClasses = lClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Dam).ToList();
     }
 }
 

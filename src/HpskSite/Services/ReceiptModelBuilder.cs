@@ -110,7 +110,7 @@ namespace HpskSite.Services
                 {
                     var json = reg.GetValue<string>("shootingClasses") ?? "";
                     var entries = CompetitionRegistrationDocument.DeserializeShootingClasses(json);
-                    classes = string.Join(", ", entries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)));
+                    classes = string.Join(", ", entries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)).Select(HpskSite.Models.ShootingClasses.DisplayName));
                 }
             }
 
@@ -135,7 +135,7 @@ namespace HpskSite.Services
                         if (!string.IsNullOrWhiteSpace(childJson))
                         {
                             var childEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(childJson);
-                            childClasses = string.Join(", ", childEntries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)));
+                            childClasses = string.Join(", ", childEntries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)).Select(HpskSite.Models.ShootingClasses.DisplayName));
                         }
                     }
 

@@ -8,6 +8,7 @@
    Included by this partial rather than by its host pages, so the helper travels with the code that
    needs it and cannot be forgotten when the partial is added to a new surface. *@
 @await Html.PartialAsync("_HtmlEscape")
+@await Html.PartialAsync("_ShootingClassesBootstrap")
 @* Publiceringstillstandet: EN form och ETT ordpar over Resultat, Startlistor och
    Finalstartlistor. *@
 @await Html.PartialAsync("_PublishState")
@@ -1029,7 +1030,7 @@ function loadWeaponClassOptions() {
                 permutations.forEach((perm, index) => {
                     const option = document.createElement('option');
                     option.value = perm.join(',');
-                    option.textContent = perm.join(', ');
+                    option.textContent = perm.map(window.getWeaponGroupLabel).join(', ');
                     if (index === 0) option.selected = true;
                     select.appendChild(option);
                 });
@@ -2129,7 +2130,7 @@ function createTeamCard(team, index, isOfficial) {
                                 <span class="text-muted d-none d-md-inline ms-2">${hpskEsc(clubDisplay)}</span>
                             </div>
                             <div class="d-flex align-items-center gap-1">
-                                <span class="badge bg-info">${hpskEsc(shooter.weaponClass)}</span>
+                                <span class="badge bg-info">${hpskEsc(window.getShootingClassName(shooter.weaponClass))}</span>
                                 ${statusBadge}
                                 ${onBrokenBadge}
                                 <div class="dropdown">
@@ -2552,7 +2553,7 @@ function removeShooterFromTeam(startListId, memberId, shooterName, shootingClass
     if (!confirmIfResultsExist('Ta bort skytt fr\u00e5n lag')) return;
     // Name the CLASS in the dialog. A place on the list is per (skytt, klass), so on a multi-class
     // shooter "ta bort NN från startlistan" does not say which of their starts is about to go.
-    const what = shootingClass ? `${shooterName} (${shootingClass})` : shooterName;
+    const what = shootingClass ? `${shooterName} (${window.getShootingClassName(shootingClass)})` : shooterName;
     if (!confirm(`Är du säker på att du vill ta bort ${what} från startlistan?\n\nOBS: Detta går inte att ångra.`)) {
         return;
     }
@@ -2738,7 +2739,7 @@ function searchShooters(query) {
                                         <br>
                                         <small class="text-muted">${shooter.club || 'Okänd klubb'}</small>
                                     </div>
-                                    <span class="badge bg-info">${shooter.shootingClass}</span>
+                                    <span class="badge bg-info">${hpskEsc(window.getShootingClassName(shooter.shootingClass))}</span>
                                 </div>
                             </a>
                         `;

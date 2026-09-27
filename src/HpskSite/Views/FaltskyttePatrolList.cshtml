@@ -38,6 +38,7 @@
         .pl-held { opacity: .75; border: 2px solid var(--bs-warning, #ffc107); }
         .pl-member { font-size: .9rem; }
     </style>
+    @await Html.PartialAsync("_ShootingClassesBootstrap")
 </head>
 <body>
     <div class="container-fluid py-3">
@@ -107,7 +108,7 @@
                 b += '<div class="alert alert-success d-flex align-items-center flex-wrap gap-2 py-3 mb-2">'
                     + '<span class="badge bg-success me-2">NÄST PÅ TUR</span>'
                     + '<span class="fs-2 fw-bold">Patrull ' + next.patrolNumber + '</span>'
-                    + '<span class="fs-5 ms-2 text-muted">Vapengrupp ' + esc(next.weaponGroup) + (next.label ? ' — ' + esc(next.label) : '') + '</span></div>';
+                    + '<span class="fs-5 ms-2 text-muted">Vapengrupp ' + esc(window.formatWeaponGroups(next.weaponGroup)) + (next.label ? ' — ' + esc(next.label) : '') + '</span></div>';
             } else {
                 var anyHeld = patrols.some(function (p) { return !p.departedAt && p.held; });
                 b += '<div class="alert alert-secondary fs-4 py-3 mb-2"><i class="bi bi-check2-all me-2"></i>'
@@ -131,12 +132,12 @@
                               : (isNext ? '<span class="badge bg-success">NÄST PÅ TUR</span>' : ''));
                 var members = (p.members || []).map(function (m) {
                     var isDns = m.status === 'DNS';
-                    return '<li class="list-group-item py-1 pl-member d-flex justify-content-between' + (isDns ? ' opacity-50' : '') + '"><span>' + esc(m.name) + ' <span class="text-muted">(' + esc(m.club) + ')</span>' + (isDns ? ' <span class="badge bg-secondary">DNS</span>' : '') + '</span><span class="badge bg-body-secondary text-body">' + esc(m.shootingClass) + '</span></li>';
+                    return '<li class="list-group-item py-1 pl-member d-flex justify-content-between' + (isDns ? ' opacity-50' : '') + '"><span>' + esc(m.name) + ' <span class="text-muted">(' + esc(m.club) + ')</span>' + (isDns ? ' <span class="badge bg-secondary">DNS</span>' : '') + '</span><span class="badge bg-body-secondary text-body">' + esc(window.getShootingClassName(m.shootingClass)) + '</span></li>';
                 }).join('');
                 return '<div class="col-12 col-sm-6 col-lg-4 col-xxl-3" data-patrol="' + p.patrolId + '">'
                     + '<div class="' + cardCls + '">'
                     + '<div class="card-header d-flex justify-content-between align-items-center py-2">'
-                    + '<span class="fw-bold">Patrull ' + p.patrolNumber + ', Vapengrupp ' + esc(p.weaponGroup) + (p.label ? ' — ' + esc(p.label) : '') + '</span>'
+                    + '<span class="fw-bold">Patrull ' + p.patrolNumber + ', Vapengrupp ' + esc(window.formatWeaponGroups(p.weaponGroup)) + (p.label ? ' — ' + esc(p.label) : '') + '</span>'
                     + startBadge
                     + '</div>'
                     + (status ? '<div class="card-body py-2">' + status + '</div>' : '')

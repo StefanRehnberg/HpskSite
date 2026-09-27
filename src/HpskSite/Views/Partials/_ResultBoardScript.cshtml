@@ -39,8 +39,16 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             var m=(n||'').match(/Vapengrupp\s+([AC])/i);
             return m?m[1].toUpperCase():((n||'').trim().charAt(0).toUpperCase()||'?');
         }
-        return(n||'').trim().charAt(0).toUpperCase()||'?';
+        // The class registry's weapon group ("A_Opt", "A_M" …) — the same codes configuredWCs
+        // comes with from the server. A merged group ("C2+Dam") answers for its first class; the
+        // first letter is only the fallback for names the registry does not know.
+        var t=(n||'').trim();
+        var code=window.getWeaponClassCode?(window.getWeaponClassCode(t)||window.getWeaponClassCode(t.split('+')[0])):'';
+        return code||t.charAt(0).toUpperCase()||'?';
     }
+    // Label of a weapon-group code for people: "A_Opt" → "A Opt".
+    function wcLabel(w){return window.getWeaponGroupLabel?window.getWeaponGroupLabel(w):w}
+    var WC_ORDER=['C','B','A','A_Opt','A_M','A_P','A_G','R','L','M'];
     function getSpringWC(g){return g.weaponClass||getWC(g.className||g.ClassName||'')}
 
     // Build the weapon-class checkbox filter from configured classes
@@ -52,7 +60,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             var s=new Set();allGroups.forEach(function(g){
                 s.add(isSpringskytte?getSpringWC(g):getWC(g.className||g.ClassName||''));
             });
-            var o=['C','B','A','R','L','M'];
+            var o=WC_ORDER;
             wcs=Array.from(s).sort(function(a,b){var ai=o.indexOf(a),bi=o.indexOf(b);return(ai<0?99:ai)-(bi<0?99:bi)});
         }
         if(!wcs.length)return; // no classes yet — wait for data
@@ -74,7 +82,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
                 if(this.checked)selectedWCs[this.value]=1;else delete selectedWCs[this.value];
                 persistFilter();cycleIdx=0;syncUrl();renderAll();restartCycle();
             });
-            lab.appendChild(cb);lab.appendChild(document.createTextNode(' '+w));
+            lab.appendChild(cb);lab.appendChild(document.createTextNode(' '+wcLabel(w)));
             box.appendChild(lab);
         });
     }
@@ -83,7 +91,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
     // Weapon classes present in the data AND selected, in dropdown order
     function orderedSelectedPresent(){
         var s={};allGroups.forEach(function(g){s[isSpringskytte?getSpringWC(g):getWC(g.className||g.ClassName||'')]=1});
-        var o=['C','B','A','R','L','M'];
+        var o=WC_ORDER;
         return Object.keys(s).filter(function(w){return selectedWCs&&selectedWCs[w]}).sort(function(a,b){var ai=o.indexOf(a),bi=o.indexOf(b);return(ai<0?99:ai)-(bi<0?99:bi)});
     }
     // Which weapon classes to render right now (one at a time when Växla is on)
@@ -98,7 +106,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
     function updateCycleLabel(){
         var el=document.getElementById('rbCycleNow');if(!el)return;
         if(layoutMode==='grid'){var tot=orderedSelectedPresent().length;el.textContent=(cycleMode&&tot>tileCount)?'▶ roterar':'';return}
-        if(cycleMode){var s=orderedSelectedPresent();el.textContent=s.length?('▶ Vapengrupp '+(s[cycleIdx]||s[0])):''}
+        if(cycleMode){var s=orderedSelectedPresent();el.textContent=s.length?('▶ Vapengrupp '+wcLabel(s[cycleIdx]||s[0])):''}
         else el.textContent='';
     }
 
@@ -273,7 +281,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
         var html='<div class="rb-grid cols-'+n+'">';
         for(var i=0;i<n;i++){
             var wg=show[i];
-            var head=(wg&&!isFaltskytte)?('<div class="rb-tile-head">Vapengrupp '+wg.wc+' ('+wg.count+' deltagare)</div>'):'';
+            var head=(wg&&!isFaltskytte)?('<div class="rb-tile-head">Vapengrupp '+wcLabel(wg.wc)+' ('+wg.count+' deltagare)</div>'):'';
             html+='<div class="rb-tile">'+head+'<div class="rb-tile-body" id="rbTile'+i+'"></div></div>';
         }
         html+='</div>';
@@ -370,7 +378,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
             var hasSS=shooters.some(function(s){var r=s.shootOffRounds||s.ShootOffRounds;return Array.isArray(r)&&r.length>0});
             var cols=4+n+2+(hasSS?1:0)+(isMedals?1:0);
             h+='<table class="rb-table" style="margin-bottom:1rem">';
-            h+='<thead><tr><td colspan="'+cols+'" style="background:#0f3460;color:#4ecca3;font-weight:700;padding:.5rem;text-align:left;border-bottom:2px solid #4ecca3">Vapengrupp '+wc+' <span style="opacity:.6;font-weight:400">('+shooters.length+' deltagare)</span></td></tr>';
+            h+='<thead><tr><td colspan="'+cols+'" style="background:#0f3460;color:#4ecca3;font-weight:700;padding:.5rem;text-align:left;border-bottom:2px solid #4ecca3">Vapengrupp '+wcLabel(wc)+' <span style="opacity:.6;font-weight:400">('+shooters.length+' deltagare)</span></td></tr>';
             h+='<tr><th>#</th><th>Namn</th><th>Klass</th><th>Förening</th>';
             for(var i=1;i<=n;i++)h+='<th class="rb-series-col">'+i+'</th>';
             h+='<th>'+(faltIsPoang?'Poäng':'Tot')+'</th><th>Pm</th>';
@@ -608,7 +616,7 @@ function rbBoardScript(compId, hasFinalsRound, qualSeriesCount, numFinalSeries, 
                     ?' <span style="color:'+(isClassLeader?'#4ecca3':'#8892b0')+';font-weight:'+(isClassLeader?'700':'400')+'">· '+r.classRank+'</span>'
                     :'';
                 klassCell='<td style="text-align:left;white-space:nowrap">'
-                    +esc((multiWc?r.wc+' ':'')+(r.cls||''))+rk+'</td>';
+                    +esc((multiWc?wcLabel(r.wc)+' ':'')+(r.cls||''))+rk+'</td>';
             }
             if(status){
                 h+='<tr'+pad+'><td>-</td><td>'+esc(so)+'</td><td style="text-align:left">'+esc(sh.name||'')+'</td><td style="text-align:left">'+esc(sh.clubShort||sh.club||'')+'</td>'+klassCell;

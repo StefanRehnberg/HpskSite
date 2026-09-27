@@ -392,7 +392,7 @@
                 @foreach (var p in memberPatrols)
                 {
                     var t = p.StartTime.HasValue ? p.StartTime.Value.ToString("HH:mm") : "";
-                    var lbl = (string.IsNullOrEmpty(p.WeaponGroup) ? "" : p.WeaponGroup + " · ")
+                    var lbl = (string.IsNullOrEmpty(p.WeaponGroup) ? "" : HpskSite.Models.ShootingClasses.WeaponGroupsText(p.WeaponGroup) + " · ")
                         + "Patrull " + p.PatrolNumber
                         + (string.IsNullOrEmpty(t) ? "" : " · " + t)
                         + (string.IsNullOrEmpty(p.Label) ? "" : " — " + p.Label);

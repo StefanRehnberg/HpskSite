@@ -189,7 +189,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const stafettHasSwish = @((ViewData["StafettHasSwish"] as bool? ?? false).ToString().ToLower());
 
     const stafettIsAdmin = stafettRegRole === 'admin';
-    const stafettIsRegionalAdmin = stafettRegRole === 'regionalAdmin';
+    // regRole ranks clubAdmin/skjutledare above regionalAdmin, so a krets admin who also holds a
+    // club role would otherwise be locked to one club. The separate flag keeps the krets picker.
+    const stafettIsRegionalAdmin = !stafettIsAdmin && (stafettRegRole === 'regionalAdmin' || @((ViewData["IsRegionalAdmin"] as bool? ?? false).ToString().ToLower()));
     const stafettIsMember = !stafettIsAdmin && !stafettIsRegionalAdmin;
 
     // Edit/Delete is allowed for site admins (all), regional admins (teams whose club is in
@@ -237,7 +239,17 @@ document.addEventListener('DOMContentLoaded', function() {
             stafettPopulateClubDropdown(stafettRegRegionCode);
             if (stafettCurrentMemberClubId > 0) stafettClubSelect.value = stafettCurrentMemberClubId.toString();
         } else {
-            stafettPopulateClubDropdown('');
+            // Site admin: start from the admin's own krets and förening, but leave both open —
+            // an admin often registers another club's team.
+            stafettRegionSelect.disabled = false;
+            stafettClubSelect.disabled = false;
+            if (stafettRegRegionCode && stafettRegionSelect.querySelector(`option[value="${stafettRegRegionCode}"]`)) {
+                stafettRegionSelect.value = stafettRegRegionCode;
+            }
+            stafettPopulateClubDropdown(stafettRegionSelect.value);
+            if (stafettCurrentMemberClubId > 0 && stafettClubSelect.querySelector(`option[value="${stafettCurrentMemberClubId}"]`)) {
+                stafettClubSelect.value = stafettCurrentMemberClubId.toString();
+            }
         }
     }
 

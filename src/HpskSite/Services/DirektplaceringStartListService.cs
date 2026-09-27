@@ -150,7 +150,7 @@ namespace HpskSite.Services
                 html.AppendLine("<tbody>");
                 foreach (var shooter in team.Shooters)
                 {
-                    html.AppendLine($"<tr><td>{shooter.Position}</td><td>{System.Net.WebUtility.HtmlEncode(shooter.Name)}</td><td>{System.Net.WebUtility.HtmlEncode(shooter.Club)}</td><td>{shooter.WeaponClass}</td></tr>");
+                    html.AppendLine($"<tr><td>{shooter.Position}</td><td>{System.Net.WebUtility.HtmlEncode(shooter.Name)}</td><td>{System.Net.WebUtility.HtmlEncode(shooter.Club)}</td><td>{System.Net.WebUtility.HtmlEncode(HpskSite.Models.ShootingClasses.DisplayName(shooter.WeaponClass))}</td></tr>");
                 }
                 html.AppendLine("</tbody></table><br>");
             }

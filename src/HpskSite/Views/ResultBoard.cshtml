@@ -24,42 +24,19 @@
     var showLiveResults = competition?.Value<bool>("showLiveResults") ?? false;
     var isExternal = competition?.Value<bool>("isExternal") ?? false;
 
-    // Reproduce Competition.cshtml's configuredWCs derivation from shootingClassIds
-    // (JSON array OR CSV; map each id to its weapon group; dedupe; order C,B,A,R,L,M).
+    // The competition's weapon groups, from the class registry (JSON array or legacy CSV via
+    // ShootingClassIdsValue.ReadIds), in the result-list order. Codes as the registry has them
+    // ("A_Opt", "A_M") — the board groups on the same codes and labels them for display.
     var configuredWCs = new string[0];
     if (competition != null)
     {
-        var raw = competition.Value("shootingClassIds");
-        var scIds = "";
-        if (raw is string[] arr) scIds = string.Join(",", arr);
-        else if (raw is IEnumerable<string> en) scIds = string.Join(",", en);
-        else if (raw is string s) scIds = s ?? "";
-        else if (raw != null)
-        {
-            try { var t = competition.Value<IEnumerable<string>>("shootingClassIds"); if (t != null) scIds = string.Join(",", t); }
-            catch { scIds = ""; }
-        }
-
-        var ids = new List<string>();
-        if (!string.IsNullOrEmpty(scIds))
-        {
-            if (scIds.StartsWith("[") && scIds.EndsWith("]"))
-            {
-                var inner = scIds.Substring(1, scIds.Length - 2);
-                ids.AddRange(inner.Split(',').Select(x => x.Trim().Trim('"')).Where(x => !string.IsNullOrEmpty(x)));
-            }
-            else
-            {
-                ids.AddRange(scIds.Split(',').Select(x => x.Trim()).Where(x => !string.IsNullOrEmpty(x)));
-            }
-        }
-        var order = new[] { "C", "B", "A", "R", "L", "M" };
-        configuredWCs = ids
-            .Select(id => HpskSite.Models.ShootingClasses.GetById(id))
+        configuredWCs = HpskSite.Models.ShootingClassIdsValue.ReadIds(competition.Value("shootingClassIds"))
+            .Select(id => HpskSite.Models.ShootingClasses.Resolve(id))
             .Where(sc => sc != null)
-            .Select(sc => sc!.Weapon.ToString())
+            .Select(sc => sc!.Weapon)
             .Distinct()
-            .OrderBy(wc => { var i = Array.IndexOf(order, wc); return i < 0 ? 99 : i; })
+            .OrderBy(w => { var i = Array.IndexOf(HpskSite.Models.ShootingClassOrder.ResultList, w); return i < 0 ? 99 : i; })
+            .Select(w => w.ToString())
             .ToArray();
     }
 
@@ -168,6 +145,7 @@ else
 {
     <style>html,body{margin:0;height:100%;background:#1a1a2e;color:#e0e0e0;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center;padding:1rem}</style>
 }
+    @await Html.PartialAsync("_ShootingClassesBootstrap")
 </head>
 <body>
 @if (boardAvailable)

@@ -32,14 +32,16 @@ namespace HpskSite.Models
         /// <summary>Kategori inom C/L. Veteran yngre och äldre är SAMMA kategori.</summary>
         public static string? Category(string? classIdOrName)
         {
-            var sc = Resolve(classIdOrName);
+            var sc = ShootingClasses.Resolve(classIdOrName);
             if (sc == null) return null;
             if (sc.Weapon != WeaponClass.C && sc.Weapon != WeaponClass.L) return null;
-            var id = sc.Id;
-            if (id.Contains("_Vet_", StringComparison.OrdinalIgnoreCase)) return "veteran";
-            if (id.EndsWith("_Dam", StringComparison.OrdinalIgnoreCase)) return "dam";
-            if (id.EndsWith("_Jun", StringComparison.OrdinalIgnoreCase)) return "junior";
-            return "öppen";
+            if (sc.IsVeteran) return "veteran";
+            return sc.Category switch
+            {
+                ClassCategory.Dam => "dam",
+                ClassCategory.Junior => "junior",
+                _ => "öppen"
+            };
         }
 
         /// <summary>
@@ -62,7 +64,7 @@ namespace HpskSite.Models
                 var names = group.Select(x => ShootingClasses.ToCanonicalName(x.Raw)).ToList();
                 if (names.Count < 2) continue;
                 var joined = string.Join(" och ", names);
-                var weapon = WeaponLabel(group.Key);
+                var weapon = ShootingClasses.WeaponGroupLabel(group.Key);
 
                 if (group.Key != WeaponClass.C && group.Key != WeaponClass.L)
                     return $"En skytt kan bara stå i en klass per vapengrupp ({joined} är båda {weapon}).";
@@ -82,21 +84,5 @@ namespace HpskSite.Models
 
             return null;
         }
-
-        private static ShootingClass? Resolve(string? idOrName)
-        {
-            if (string.IsNullOrWhiteSpace(idOrName)) return null;
-            var k = idOrName.Trim();
-            return ShootingClasses.GetById(k) ?? ShootingClasses.GetByName(k);
-        }
-
-        private static string WeaponLabel(WeaponClass w) => w switch
-        {
-            WeaponClass.A_Opt => "A Opt",
-            WeaponClass.A_M => "AM",
-            WeaponClass.A_P => "AP",
-            WeaponClass.A_G => "AG",
-            _ => w.ToString()
-        };
     }
 }

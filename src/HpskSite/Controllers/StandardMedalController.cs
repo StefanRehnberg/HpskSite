@@ -166,7 +166,7 @@ namespace HpskSite.Controllers
                     points = a.Points,
                     competitionName = a.CompetitionName,
                     competitionDate = a.CompetitionDate,
-                    shootingClass = a.ShootingClass,
+                    shootingClass = HpskSite.Models.ShootingClasses.DisplayName(a.ShootingClass),
                     source = a.Source,
                     hasProof = a.ProofType == Models.StandardMedals.ProofFile && !string.IsNullOrEmpty(a.ProofFileRef),
                     trainingScoreId = a.TrainingScoreId
@@ -331,7 +331,7 @@ namespace HpskSite.Controllers
                 competitionName = a.CompetitionName,
                 competitionDate = a.CompetitionDate,
                 location = a.Location,
-                shootingClass = a.ShootingClass,
+                shootingClass = HpskSite.Models.ShootingClasses.DisplayName(a.ShootingClass),
                 source = a.Source,
                 status = a.Status,
                 proofType = a.ProofType,

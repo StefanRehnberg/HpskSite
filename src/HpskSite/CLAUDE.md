@@ -2006,6 +2006,66 @@ sådan skillnad utan det.
 
 Befintliga anmälningar som bryter regeln stoppas först när de redigeras.
 
+### ⚠️⚠️ Skytteklasserna finns på ETT ställe — `ShootingClass.cs` (2026-09-27)
+
+Ett klass-id ("C_Vet_Y", "C2_Dam", "A_m_1") syntes gång på gång för användare, och klasser föll
+ur någon av ett tjugotal handskrivna listor. Id och namn är identiska för C1/C2/C3 och skiljer sig
+för varje klass med ändelse, så felet syns bara på dam-, veteran-, junior-, optik- och AM/AP/AG-klasserna.
+
+**Regeln: all klassinformation kommer ur registret.**
+- **Server:** `ShootingClasses` — `Resolve`, `DisplayName`, `GetCategory`, `GetLevel`, `For(weapon, categories)`,
+  `ForWeapon`, `WeaponGroupLabel`, `CategoryLabel`, `TryGetSubCategoryLabel`. Varje klass bär
+  `Category` (Open/Dam/VeteranYounger/VeteranOlder/Junior) och `Level` (1–3 eller null; ⚠️ M1–M9
+  har ingen nivå, de är olika vapen). **Tolka aldrig ett id** (`Contains("_Dam")`, `charAt(0)`, regex).
+- **Sortering:** `ShootingClassOrder.Key(klassEllerGrupp, vapengruppsordning)` — hanterar även
+  sammanslagna grupper ("C2+Dam") och mästerskapskategorier ("C Dam"). Ersatte fem tabeller som
+  saknade olika klasser (resultatlistan kände varken C Jun, L, M eller AM/AP/AG).
+- **Webbläsaren:** `_ShootingClassesBootstrap.cshtml` (i Master; partialer som använder det
+  inkluderar det själva, guardat) — `getShootingClassName`, `getShootingClass`,
+  `getShootingClassCategory`, `getShootingClassLevel`, `formatShootingClasses`, `getWeaponGroupLabel`,
+  `getWeaponGroups`, `weaponGroupOptionsHtml`. **Visa aldrig ett id — visa `getShootingClassName(x)`.**
+- **Listor i vyer** renderas ur registret: klassväljaren (`_ShootingClassPicker`, sektioner via
+  `ShootingClassPickerLayout`), Fältskyttets resultatinmatning, säsongssidan, egenbokningens
+  vapengruppslistor.
+- **Läsning av `shootingClassIds`:** `ShootingClassIdsValue.ReadIds(value)` — aldrig `Split(',')`,
+  som lämnar `["C1"` på ett JSON-värde (säsongssidan visade därför "Inga klasser").
+
+**`ShootingClassRegistryGuardTests` fallerar bygget** på ett citerat id med understreck, ett citerat
+namn som skiljer sig från id:t, tre klass-id:n på en rad, eller en handskriven `value="C1"`.
+Kommentarer ignoreras. Ett motiverat undantag: filen i `AllowedFiles`, eller `class-literal-ok: <skäl>`
+på raden (dev-seeders, rekordkategorikoder, SHB:s magnumgränser, lagklassnamn).
+
+**Fynd på vägen:** medaljtjänsternas `ExtractClassification` läste `"C_VET_Y"` som öppen klass
+(id-formen innehåller varken "VET Y" eller "VETY"); nivåspärren och disken tolkade id:n med regex;
+livetavlan grupperade A Opt/AM under "A" medan dess filter använde registrets koder; MagnumPrecision
+visade A Opt/AM/AP/AG-sektionerna i klassväljaren. Egenrapporterade standardmedaljer lagrar nu
+klassnamnet (som resultatrader).
+
+### Egenbokning: skjutlaget väljs direkt under klassen (2026-09-27)
+
+Skyttar tryckte Anmäl utan att se skjutlagsvalet, som låg i en egen sektion längst ner i modalen.
+De fick "Fel vid anmälan: Du måste välja skjutlag för varje vapengrupp" och uppfattade det som att
+sidan var trasig.
+- **Raden "Välj skjutlag för {klass}" renderas direkt under klassens radioknapp**
+  (`onDpClassSelectionChanged` i `competition-registration.js`). `#direktplaceringTeamSection` hålls
+  dold men finns kvar. Raderna ligger i `#classSelections`, så varje uppslag scopas dit.
+- **Radioknappar avmarkeras utan change-event** (klicka igen, byte av medlem, badges för befintlig
+  anmälan). Därför synkas raderna också från `updateSubmitButton` och `clearAllClassSelections`
+  via `refreshDpTeamRows`.
+- **`validateDpTeamSelections` körs före sändning.** Den markerar varje tom ruta `is-invalid` med
+  klassnamnet, rullar till och fokuserar den första, och visar `#dpSubmitError` vid knappen.
+  Anmäl-knappen stängs aldrig av.
+- **Dubbel C (`allowDualCClassRegistration`):** varje C-klass får sin egen rad. Ett skjutlag som
+  valts för den andra klassen stängs av och märks "[valt för C1]".
+- **Servern kontrollerade bara `teamAssignments.Count == 0`.** En anmälan med två klasser och ett
+  skjutlag gick därför igenom, och den andra klassen blev utan plats. Nu krävs skjutlag för VARJE
+  vald klass, och samma skjutlag för två klasser vägras. Båda felen namnger klasserna.
+
+Verifierat i webbläsaren på dev 9658: rad under klassen, röd markering, fokus och felrad, att
+markeringen släpper, två C-rader med "[valt för C1]", och att raden försvinner när klassen
+avmarkeras. Dubbel C prövades genom att kryssa C Vet Y direkt i sidan, eftersom fixturen inte har
+inställningen på. **Serverkontrollen är inte provad i körning.** Adds C# → full ombyggnad.
+
 ### Mixade vapengrupper per skjutlag: egen tid per skjutlag, flytt i rätt skjutlag (2026-09-25)
 
 Michael Henriksson (tävling 5574): båda skjutlagen fick 09:00–09:00, och en flytt verkade på fel

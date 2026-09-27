@@ -247,43 +247,14 @@
                 var competitionTypeName = competitionType?.Name ?? "Okänd typ";
 
                 // Multiple shooting classes support - handle string array from multiselect
-                var shootingClassIdsRaw = competition.Value("shootingClassIds");
-                var shootingClassIds = "";
-                if (shootingClassIdsRaw is string[] stringArray)
-                {
-                    shootingClassIds = string.Join(",", stringArray);
-                }
-                else if (shootingClassIdsRaw is string stringValue)
-                {
-                    shootingClassIds = stringValue ?? "";
-                }
-                // Define shooting classes (hardcoded Swedish weapon classes)
-                var shootingClasses = new List<dynamic>
-                {
-                    new { Id = "A1", Name = "A1", Description = "Vapenklass A för nybörjare" },
-                    new { Id = "A2", Name = "A2", Description = "Vapenklass A för Guldmärkesskyttar" },
-                    new { Id = "A3", Name = "A3", Description = "Vapenklass A för Riksmästare" },
-                    new { Id = "B1", Name = "B1", Description = "Vapenklass B för nybörjare" },
-                    new { Id = "B2", Name = "B2", Description = "Vapenklass B för Guldmärkesskyttar" },
-                    new { Id = "B3", Name = "B3", Description = "Vapenklass B för Riksmästare" },
-                    new { Id = "C1", Name = "C1", Description = "Vapenklass C öppen för nybörjare" },
-                    new { Id = "C2", Name = "C2", Description = "Vapenklass C öppen för Guldmärkesskyttar" },
-                    new { Id = "C3", Name = "C3", Description = "Vapenklass C öppen för Riksmästare" },
-                    new { Id = "C_Vet_Y", Name = "C Vet Y", Description = "Vapenklass C Veteran Yngre" },
-                    new { Id = "C_Vet_A", Name = "C Vet Ä", Description = "Vapenklass C Veteran Äldre" },
-                    new { Id = "C_Jun", Name = "C Jun", Description = "Vapenklass C Juniorer" },
-                    new { Id = "C1_Dam", Name = "C1 Dam", Description = "Vapenklass C Dam för nybörjare" },
-                    new { Id = "C2_Dam", Name = "C2 Dam", Description = "Vapenklass C Dam för Guldmärkesskyttar" },
-                    new { Id = "C3_Dam", Name = "C3 Dam", Description = "Vapenklass C Dam för Riksmästare" }
-                };
-
-                // Get all shooting classes for this competition
-                var competitionShootingClasses = new List<dynamic>();
-                if (!string.IsNullOrEmpty(shootingClassIds))
-                {
-                    var ids = shootingClassIds.Split(',').Select(id => id.Trim()).Where(id => !string.IsNullOrEmpty(id)).ToList();
-                    competitionShootingClasses = shootingClasses.Where(sc => ids.Contains(sc.Id)).ToList<dynamic>();
-                }
+                // The competition's classes, from the class registry (never a hardcoded list).
+                // ReadIds handles the stored JSON array as well as legacy CSV.
+                var classIdList = HpskSite.Models.ShootingClassIdsValue.ReadIds(competition.Value("shootingClassIds"));
+                var competitionShootingClasses = classIdList
+                    .Select(id => HpskSite.Models.ShootingClasses.Resolve(id))
+                    .Where(sc => sc != null)
+                    .Select(sc => sc!)
+                    .ToList();
 
                 var shootingClassName = competitionShootingClasses.Any()
                     ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))

@@ -96,16 +96,13 @@ namespace HpskSite.CompetitionTypes.Common
                    ?? ShootingClasses.GetByName(shootingClassIdOrName);
             if (cls == null) return shootingClassIdOrName.Trim();
 
-            var weapon = WeaponLabel(cls.Weapon);
+            var weapon = ShootingClasses.WeaponGroupLabel(cls.Weapon);
 
             // Bara vapengrupp C har underkategorier, och bara när omfattningen delar dem.
             // Att vidga det till L vore en ny regel, inte den befintliga — L Dam/Vet/Jun
             // poolas därför precis som medaljberäkningen gör i dag.
-            if (splitGroupC && cls.Weapon == WeaponClass.C)
-            {
-                var sub = CSubCategory(cls.Id);
-                if (sub != null) return $"C {sub}";
-            }
+            if (splitGroupC && cls.Weapon == WeaponClass.C && cls.Category != ClassCategory.Open)
+                return $"C {ShootingClasses.CategoryLabel(cls.Category)}";
 
             return weapon;
         }
@@ -168,31 +165,6 @@ namespace HpskSite.CompetitionTypes.Common
             }
             return lookup;
         }
-
-        /// <summary>"Dam" / "Vet Y" / "Vet Ä" / "Jun", eller null för öppen klass.</summary>
-        private static string? CSubCategory(string classId) => classId switch
-        {
-            "C1_Dam" or "C2_Dam" or "C3_Dam" => "Dam",
-            "C_Vet_Y" => "Vet Y",
-            "C_Vet_A" => "Vet Ä",
-            "C_Jun" => "Jun",
-            _ => null
-        };
-
-        private static string WeaponLabel(WeaponClass weapon) => weapon switch
-        {
-            WeaponClass.A => "A",
-            WeaponClass.A_Opt => "A Opt",
-            WeaponClass.A_M => "AM",
-            WeaponClass.A_P => "AP",
-            WeaponClass.A_G => "AG",
-            WeaponClass.B => "B",
-            WeaponClass.C => "C",
-            WeaponClass.R => "R",
-            WeaponClass.M => "M",
-            WeaponClass.L => "L",
-            _ => weapon.ToString()
-        };
 
         /// <summary>
         /// competitionScope lagras normalt som en ren sträng, men en FlexibleDropdown kan ha

@@ -69,27 +69,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             _logger = logger;
         }
 
-        /// <summary>Sort order for class names in result lists: C→B→A→R→M, then by level and variant.</summary>
-        public static int GetClassSortOrder(string className)
-        {
-            if (string.IsNullOrEmpty(className)) return 9999;
-            // Weapon group order
-            var weaponOrder = className[0] switch { 'C' => 100, 'L' => 200, 'B' => 300, 'A' => 400, 'R' => 500, 'M' => 600, _ => 800 };
-            // Sub-order within weapon group: class number, then variant
-            var sub = 0;
-            if (className.Contains("1")) sub = 10;
-            else if (className.Contains("2")) sub = 20;
-            else if (className.Contains("3")) sub = 30;
-            // Variant suffix
-            if (className.Contains("Dam")) sub += 1;
-            else if (className.Contains("Vet Y")) sub += 2;
-            else if (className.Contains("Vet Ä")) sub += 3;
-            else if (className.Contains("Vet")) sub += 2;
-            else if (className.Contains("Jun")) sub += 4;
-            // Merged classes (contain +) sort after their base
-            if (className.Contains("+")) sub += 5;
-            return weaponOrder + sub;
-        }
+        /// <summary>
+        /// Sort order for class names, merged groups ("C2+Dam") and championship categories ("C Dam")
+        /// in result lists: C, L, B, the A family, R, M — then level and category. From the class
+        /// registry (<see cref="ShootingClassOrder"/>), never a hand-written table.
+        /// </summary>
+        public static int GetClassSortOrder(string className) =>
+            ShootingClassOrder.Key(className, ShootingClassOrder.Faltskytte);
 
         public static FaltskytteCompetitionConfig ParseCompetitionConfig(IContent competition)
         {

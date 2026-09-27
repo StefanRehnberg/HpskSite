@@ -1,4 +1,5 @@
-﻿@*
+﻿@await Html.PartialAsync("_ShootingClassesBootstrap")
+@*
  * Fältskytte Patrol Management
  * Full CRUD for patrols and shooters, with publish mechanism.
  *@
@@ -391,7 +392,7 @@
 
             var html = '<div class="card mb-3">' +
                 '<div class="card-header py-2 d-flex justify-content-between align-items-center">' +
-                '<span><strong>Vapengrupp ' + wg + '</strong>' +
+                '<span><strong>Vapengrupp ' + hpskEsc(window.formatWeaponGroups(wg)) + '</strong>' +
                 '<span class="badge bg-primary ms-2">' + grpPatrols.length + ' patruller</span>' +
                 '<span class="badge bg-secondary ms-2">' + totalShooters + ' skyttar</span></span>' +
                 '<button class="btn btn-outline-danger btn-sm py-0" onclick="faltDeleteGroupPatrols(\'' + wg.replace(/'/g, "\\'") + '\')" title="Ta bort">' +
@@ -426,7 +427,7 @@
                         html += '<div class="d-flex align-items-center gap-2 py-1 falt-member-row' + (isDns ? ' opacity-50' : '') + '" data-pm-id="' + m.patrolMemberId + '">' +
                             '<input type="checkbox" class="form-check-input falt-member-check" data-pm-id="' + m.patrolMemberId + '" onchange="faltUpdateBulkBar()">' +
                             '<span class="flex-grow-1 small">' + hpskEsc(m.name) + ' <span class="text-muted">(' + hpskEsc(m.club) + ')</span>' +
-                            ' <span class="badge bg-body-secondary text-body">' + hpskEsc(m.shootingClass) + '</span>' +
+                            ' <span class="badge bg-body-secondary text-body">' + hpskEsc(window.getShootingClassName(m.shootingClass)) + '</span>' +
                             (isDns ? ' <span class="badge bg-secondary">DNS</span>' : '') + '</span>' +
                             '<button class="btn ' + (isDns ? 'btn-warning' : 'btn-outline-warning') + ' btn-sm py-0 px-1" onclick="faltSetDns(' + m.patrolMemberId + ',' + (!isDns) + ')" title="' + (isDns ? 'Ångra DNS' : 'Markera DNS – frigör platsen') + '">DNS</button>' +
                             '<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="faltRemoveShooter(' + m.patrolMemberId + ')" title="Ta bort"><i class="bi bi-x"></i></button>' +
@@ -655,7 +656,7 @@
                 var assigned = s.assignedToPatrol != null;
                 container.innerHTML += '<div class="d-flex align-items-center justify-content-between py-1 border-bottom' + (assigned ? ' bg-body-tertiary' : '') + '">' +
                     '<span class="small">' + hpskEsc(s.name) + ' <span class="text-muted">(' + hpskEsc(s.club) + ')</span>' +
-                    ' <span class="badge bg-body-secondary text-body">' + hpskEsc(s.shootingClass) + '</span>' +
+                    ' <span class="badge bg-body-secondary text-body">' + hpskEsc(window.getShootingClassName(s.shootingClass)) + '</span>' +
                     (assigned ? ' <span class="badge bg-info text-dark">Patrull ' + hpskEsc(s.assignedToPatrol) + '</span>' : '') +
                     '</span>' +
                     '<button class="btn btn-sm btn-outline-primary py-0" onclick="faltAddShooterByIndex(' + si + ')"' +
@@ -822,7 +823,7 @@
         // Name them, but cap the list — a 40-patrol dialog is as unreadable as no dialog.
         var shown = changes.slice(0, 12).map(function(c) {
             var extra = [];
-            if (c.weaponGroup) extra.push('vapengrupp ' + c.weaponGroup);
+            if (c.weaponGroup) extra.push('vapengrupp ' + window.formatWeaponGroups(c.weaponGroup));
             if (c.label) extra.push(c.label);
             if (c.resultCount > 0) extra.push(c.resultCount + ' resultat');
             return '  Patrull ' + c.oldNumber + ' → ' + c.newNumber
@@ -892,7 +893,7 @@
         Object.keys(byGroup).forEach(function(wg) {
             var grp = byGroup[wg];
             var total = grp.reduce(function(s,p){return s+p.members.length;},0);
-            w.document.write('<h2>Vapengrupp ' + wg + ' \u2014 ' + grp.length + ' patruller, ' + total + ' skyttar</h2>');
+            w.document.write('<h2>Vapengrupp ' + hpskEsc(window.formatWeaponGroups(wg)) + ' \u2014 ' + grp.length + ' patruller, ' + total + ' skyttar</h2>');
             grp.forEach(function(p) {
                 var t = p.startTime ? new Date(p.startTime).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'}) : '';
                 // Was a hand-rolled three-replace escape that missed both quote kinds.
@@ -902,7 +903,7 @@
                     + (t ? '<span class="patrol-time">' + t + '</span>' : '')
                     + '<span class="patrol-writein"></span></div>');
                 p.members.forEach(function(m) {
-                    w.document.write('<div class="member">' + hpskEsc(m.name) + ' <span class="member-class">(' + hpskEsc(m.club) + ') ' + hpskEsc(m.shootingClass) + '</span></div>');
+                    w.document.write('<div class="member">' + hpskEsc(m.name) + ' <span class="member-class">(' + hpskEsc(m.club) + ') ' + hpskEsc(window.getShootingClassName(m.shootingClass)) + '</span></div>');
                 });
                 w.document.write('</div>');
             });

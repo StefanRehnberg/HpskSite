@@ -241,17 +241,16 @@
     var lClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.L).ToList();
     var mClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.M).ToList();
 
-    // Subdivide C classes into subcategories for proper validation
-    var cRegularClasses = cClasses.Where(sc => sc.Id == "C1" || sc.Id == "C2" || sc.Id == "C3").ToList();
-    var cVetClasses = cClasses.Where(sc => sc.Id == "C_Vet_Y" || sc.Id == "C_Vet_A").ToList();
-    var cJuniorClasses = cClasses.Where(sc => sc.Id == "C_Jun").ToList();
-    var cDamClasses = cClasses.Where(sc => sc.Id.EndsWith("_Dam") && sc.Id.StartsWith("C")).ToList();
+    // Subdivide C and L classes by the registry's category (never by parsing the id)
+    var cRegularClasses = cClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Open).ToList();
+    var cVetClasses = cClasses.Where(sc => sc.IsVeteran).ToList();
+    var cJuniorClasses = cClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Junior).ToList();
+    var cDamClasses = cClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Dam).ToList();
 
-    // Subdivide L classes into subcategories (same structure as C)
-    var lRegularClasses = lClasses.Where(sc => sc.Id == "L1" || sc.Id == "L2" || sc.Id == "L3").ToList();
-    var lVetClasses = lClasses.Where(sc => sc.Id == "L_Vet_Y" || sc.Id == "L_Vet_A").ToList();
-    var lJuniorClasses = lClasses.Where(sc => sc.Id == "L_Jun").ToList();
-    var lDamClasses = lClasses.Where(sc => sc.Id.EndsWith("_Dam") && sc.Id.StartsWith("L")).ToList();
+    var lRegularClasses = lClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Open).ToList();
+    var lVetClasses = lClasses.Where(sc => sc.IsVeteran).ToList();
+    var lJuniorClasses = lClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Junior).ToList();
+    var lDamClasses = lClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Dam).ToList();
 
     var now = DateTime.Now;
     string status = "Okänd";
@@ -1792,6 +1791,7 @@
 			{ "RegRole", regRole },
 			{ "RegRegionCode", regRegionCode },
 			{ "ClubsWithRegionsJson", clubsWithRegionsJson },
+			{ "IsRegionalAdmin", isRegionalAdmin },
 			{ "TeamRegistrationFee", teamRegFee },
 			{ "TeamHasSwish", teamHasSwish },
 				{ "IsSpringskytte", isSpringskytte }
@@ -1813,6 +1813,7 @@
 			{ "RegRole", regRole },
 			{ "RegRegionCode", regRegionCode },
 			{ "ClubsWithRegionsJson", clubsWithRegionsJson },
+			{ "IsRegionalAdmin", isRegionalAdmin },
 			{ "StafettRegistrationFee", stafettRegFee },
 			{ "StafettHasSwish", stafettHasSwish },
 				{ "IsSpringskytte", isSpringskytte }

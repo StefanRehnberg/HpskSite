@@ -2165,7 +2165,7 @@ function renderMemberMedalDetail(data) {
         html += `<tr>
             <td>${compCell}</td>
             <td>${escapeMedalHtml(a.discipline)}</td>
-            <td>${escapeMedalHtml(a.shootingClass || '–')}</td>
+            <td>${escapeMedalHtml(a.shootingClass ? window.getShootingClassName(a.shootingClass) : '–')}</td>
             <td>${medalCell}</td>
             <td>${source}</td>
             <td>${proof}</td>

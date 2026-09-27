@@ -53,48 +53,16 @@
                             <label for="faltShootingClass" class="form-label">Skytteklass <span class="text-danger">*</span></label>
                             <select class="form-select" id="faltShootingClass" required>
                                 <option value="">Välj klass...</option>
-                                <optgroup label="C — Kal. 22">
-                                    <option value="C1">C1</option>
-                                    <option value="C2">C2</option>
-                                    <option value="C3">C3</option>
-                                    <option value="C_Vet_Y">C Vet Y</option>
-                                    <option value="C_Vet_A">C Vet Ä</option>
-                                    <option value="C_Jun">C Jun</option>
-                                    <option value="C1_Dam">C1 Dam</option>
-                                    <option value="C2_Dam">C2 Dam</option>
-                                    <option value="C3_Dam">C3 Dam</option>
-                                </optgroup>
-                                <optgroup label="A — Tjänstevapen">
-                                    <option value="A1">A1</option>
-                                    <option value="A2">A2</option>
-                                    <option value="A3">A3</option>
-                                </optgroup>
-                                <optgroup label="A Opt — Optisk">
-                                    <option value="A_opt_1">A Opt 1</option>
-                                    <option value="A_opt_2">A Opt 2</option>
-                                    <option value="A_opt_3">A Opt 3</option>
-                                </optgroup>
-                                <optgroup label="B — Kal. 32-45">
-                                    <option value="B1">B1</option>
-                                    <option value="B2">B2</option>
-                                    <option value="B3">B3</option>
-                                </optgroup>
-                                <optgroup label="R — Revolver">
-                                    <option value="R1">R1</option>
-                                    <option value="R2">R2</option>
-                                    <option value="R3">R3</option>
-                                </optgroup>
-                                <optgroup label="M — Magnum">
-                                    <option value="M1">M1</option>
-                                    <option value="M2">M2</option>
-                                    <option value="M3">M3</option>
-                                    <option value="M4">M4</option>
-                                    <option value="M5">M5</option>
-                                    <option value="M6">M6</option>
-                                    <option value="M7">M7</option>
-                                    <option value="M8">M8</option>
-                                    <option value="M9">M9</option>
-                                </optgroup>
+                                @* Klasserna kommer ur ShootingClasses — aldrig en handskriven lista. *@
+                                @foreach (var weapon in HpskSite.Models.ShootingClassPickerLayout.FaltskytteOrder)
+                                {
+                                    <optgroup label="@(HpskSite.Models.ShootingClasses.WeaponGroupLabel(weapon)) — @(HpskSite.Models.ShootingClassPickerLayout.WeaponDescription(weapon))">
+                                        @foreach (var sc in HpskSite.Models.ShootingClasses.ForWeapon(weapon))
+                                        {
+                                            <option value="@sc.Id">@sc.Name</option>
+                                        }
+                                    </optgroup>
+                                }
                             </select>
                         </div>
                         <div class="col-md-4">

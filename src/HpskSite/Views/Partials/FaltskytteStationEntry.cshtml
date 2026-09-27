@@ -1,4 +1,5 @@
-﻿@*
+﻿@await Html.PartialAsync("_ShootingClassesBootstrap")
+@*
  * Fältskytte Station Entry — Mobile-Optimized
  * Tap-button hit entry, one shooter at a time, large touch targets.
  *@
@@ -357,7 +358,7 @@
             html += '<div class="card mb-2 fse-patrol-row' + (allDone ? ' border-success' : '') + '" onclick="fseSelectPatrol(' + p.patrolNumber + ')">' +
                 '<div class="card-body py-3 d-flex align-items-center justify-content-between">' +
                 '<div><strong class="fs-5">Patrull ' + p.patrolNumber + lbl + '</strong>' +
-                '<span class="badge bg-info ms-2">' + (p.weaponGroup || '') + '</span>' +
+                '<span class="badge bg-info ms-2">' + hpskEsc(window.formatWeaponGroups(p.weaponGroup || '')) + '</span>' +
                 (timeStr ? '<span class="text-muted ms-2">' + timeStr + '</span>' : '') +
                 '<span class="text-muted ms-2 small">' + total + ' skyttar</span></div>' +
                 (allDone ? '<i class="bi bi-check-circle-fill text-success fs-4"></i>' : '<i class="bi bi-circle text-muted fs-4"></i>') +
@@ -438,7 +439,7 @@
             rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom' + (isDns ? ' opacity-75' : '') + '">' +
                 '<input type="checkbox" class="form-check-input fse-rc-check" data-member-id="' + m.memberId + '"' + (isDns ? '' : ' checked') + ' onchange="fseRcToggle(this)">' +
                 '<span class="flex-grow-1">' + hpskEsc(m.name) + ' <span class="text-muted small">(' + hpskEsc(m.club) + ')</span>' +
-                ' <span class="badge bg-body-secondary text-body">' + hpskEsc(m.shootingClass) + '</span>' + fseDnsBadge(m) + '</span>' +
+                ' <span class="badge bg-body-secondary text-body">' + hpskEsc(window.getShootingClassName(m.shootingClass)) + '</span>' + fseDnsBadge(m) + '</span>' +
                 (m.hasResult ? '<i class="bi bi-check-circle-fill text-success"></i>' : '') +
                 '</div>';
         });
@@ -541,7 +542,7 @@
             rcHtml += '<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom' + (fseIsDns(m) ? ' opacity-75' : '') + '">' +
                 '<input type="checkbox" class="form-check-input fse-rc-check" data-member-id="' + m.memberId + '"' + (isPresent ? ' checked' : '') + ' onchange="fseRcToggle(this)">' +
                 '<span class="flex-grow-1">' + hpskEsc(m.name) + ' <span class="text-muted small">(' + hpskEsc(m.club) + ')</span>' +
-                ' <span class="badge bg-body-secondary text-body">' + hpskEsc(m.shootingClass) + '</span>' + fseDnsBadge(m) + '</span>' +
+                ' <span class="badge bg-body-secondary text-body">' + hpskEsc(window.getShootingClassName(m.shootingClass)) + '</span>' + fseDnsBadge(m) + '</span>' +
                 (m.hasResult ? '<i class="bi bi-check-circle-fill text-success"></i>' : '') +
                 '</div>';
         });
@@ -639,7 +640,7 @@
         // Nav
         document.getElementById('fseShooterPosition').textContent = m.position || (currentShooterIdx + 1);
         document.getElementById('fseShooterName').textContent = m.name;
-        document.getElementById('fseShooterInfo').textContent = m.shootingClass + ' \u00b7 ' + m.club;
+        document.getElementById('fseShooterInfo').textContent = window.getShootingClassName(m.shootingClass) + ' \u00b7 ' + m.club;
         document.getElementById('fsePrevBtn').disabled = currentShooterIdx === 0;
         document.getElementById('fseNextBtn').disabled = currentShooterIdx >= members.length - 1;
         document.getElementById('fseShooterSavedBadge').style.display = m.hasResult && !state._dirty ? '' : 'none';

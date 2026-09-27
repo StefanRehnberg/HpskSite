@@ -480,9 +480,9 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
                 items.Add(new ScheduleItem
                 {
                     Kind = ScheduleItemKind.Skytte,
-                    Title = $"Klass {r.ShootingClass}" + (isDns ? " — anmäld som ej startande" : ""),
+                    Title = $"Klass {HpskSite.Models.ShootingClasses.DisplayName(r.ShootingClass)}" + (isDns ? " — anmäld som ej startande" : ""),
                     Where = where,
-                    Detail = string.IsNullOrWhiteSpace(r.WeaponGroup) ? null : $"Vapengrupp {r.WeaponGroup}",
+                    Detail = string.IsNullOrWhiteSpace(r.WeaponGroup) ? null : $"Vapengrupp {WeaponGroupText(r.WeaponGroup)}",
                     StartsAt = isDns ? null : r.StartTime,
                     TimeLabel = r.StartTime?.ToString("HH:mm", Sv) ?? "Tid ej satt",
                     DayKey = dayKey,
@@ -758,8 +758,12 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
 
         // ---------------------------------------------------------------- small helpers
 
+        // "A_Opt" → "A Opt": a weapon-group code is code, not a label.
+        private static string WeaponGroupText(string code) =>
+            HpskSite.Models.ShootingClasses.WeaponGroupsText(code);
+
         private static string DisplayClass(string weaponClass, string? championshipClass)
-            => !string.IsNullOrWhiteSpace(championshipClass) ? championshipClass! : weaponClass;
+            => !string.IsNullOrWhiteSpace(championshipClass) ? championshipClass! : HpskSite.Models.ShootingClasses.DisplayName(weaponClass);
 
         /// <summary>
         /// The role name the functionary sees in their own schedule. Resolved through the merged catalog,

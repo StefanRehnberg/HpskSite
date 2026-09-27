@@ -131,7 +131,7 @@ function renderScoreDetails(score) {
                         ${score.competitionShootingClass ? `
                             <div class="col-md-4">
                                 <small class="text-muted d-block">Klass</small>
-                                <strong class="h5">${score.competitionShootingClass}</strong>
+                                <strong class="h5">${window.getShootingClassName(score.competitionShootingClass)}</strong>
                             </div>
                         ` : ''}
                         ${score.competitionStdMedal ? `

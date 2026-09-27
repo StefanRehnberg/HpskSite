@@ -2,6 +2,7 @@
 @using static HpskSite.Models.Federations
 @using System.Text.Json
 @using System.Text.Encodings.Web
+@await Html.PartialAsync("_ShootingClassesBootstrap")
 @* Competition Team Registration Modal *@
 @* Included from Competition.cshtml when allowTeams is true *@
 
@@ -200,7 +201,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const teamHasSwish = @((ViewData["TeamHasSwish"] as bool? ?? false).ToString().ToLower());
 
     const isAdmin = regRole === 'admin';
-    const isRegionalAdmin = regRole === 'regionalAdmin';
+    // regRole ranks clubAdmin/skjutledare above regionalAdmin, so a krets admin who also holds a
+    // club role would otherwise be locked to one club. The separate flag keeps the krets picker.
+    const isRegionalAdmin = !isAdmin && (regRole === 'regionalAdmin' || @((ViewData["IsRegionalAdmin"] as bool? ?? false).ToString().ToLower()));
     const isMember = !isAdmin && !isRegionalAdmin;
 
     // A team is owned by one club. Edit/Delete is allowed for: site admins (all), regional
@@ -250,7 +253,18 @@ document.addEventListener('DOMContentLoaded', function() {
             populateClubDropdown(regRegionCode);
             if (currentMemberClubId > 0) clubSelect.value = currentMemberClubId.toString();
         } else {
-            populateClubDropdown('');
+            // Site admin: start from the admin's own krets and förening, but leave both open —
+            // an admin often registers another club's team. Falls back to "Alla kretsar" when
+            // the admin has no club (or its krets isn't in the list).
+            regionSelect.disabled = false;
+            clubSelect.disabled = false;
+            if (regRegionCode && regionSelect.querySelector(`option[value="${regRegionCode}"]`)) {
+                regionSelect.value = regRegionCode;
+            }
+            populateClubDropdown(regionSelect.value);
+            if (currentMemberClubId > 0 && clubSelect.querySelector(`option[value="${currentMemberClubId}"]`)) {
+                clubSelect.value = currentMemberClubId.toString();
+            }
         }
     }
 
@@ -392,7 +406,7 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 const tc = availableTeamClasses.find(t => t.teamClass === teamClass);
                 if (tc) {
-                    const fmtClasses = tc.compatibleClasses.map(c => window.formatAgeSpan ? window.formatAgeSpan(c) : c).join(', ');
+                    const fmtClasses = tc.compatibleClasses.map(teamClassLabel).join(', ');
                     info.textContent = `${tc.coreMembers} ordinarie + ${tc.maxSpares} reserv. Klasser: ${fmtClasses}`;
                 }
             }
@@ -402,6 +416,13 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     bindTeamClassSelect();
+
+    // Display label of a class: the class registry's name ("C_Vet_Y" → "C Vet Y"); Springskytte's
+    // age classes are not in the registry and go through formatAgeSpan as before.
+    function teamClassLabel(c) {
+        if (window.getShootingClass && window.getShootingClass(c)) return window.getShootingClassName(c);
+        return window.formatAgeSpan ? window.formatAgeSpan(c) : c;
+    }
 
     // ==================== Load registered members (shared) ====================
     async function loadRegisteredMembers(clubId, tbodyId, classSelectId) {
@@ -456,12 +477,13 @@ document.addEventListener('DOMContentLoaded', function() {
             row.appendChild(tdName);
 
             const tdClasses = document.createElement('td');
-            const fmt = window.formatAgeSpan || (x => x);
-            tdClasses.innerHTML = m.shootingClasses.map(c =>
-                (teamClass && compatibleClasses.includes(c))
-                    ? `<span class="badge bg-success me-1">${fmt(c)}</span>`
-                    : `<span class="badge bg-secondary me-1">${fmt(c)}</span>`
-            ).join('');
+            // The class ids are compared as ids; what the person READS is the registry's name.
+            m.shootingClasses.forEach(c => {
+                const badge = document.createElement('span');
+                badge.className = 'badge me-1 ' + ((teamClass && compatibleClasses.includes(c)) ? 'bg-success' : 'bg-secondary');
+                badge.textContent = teamClassLabel(c);
+                tdClasses.appendChild(badge);
+            });
             row.appendChild(tdClasses);
 
             const tdSpare = document.createElement('td');

@@ -53,7 +53,7 @@ namespace HpskSite.CompetitionTypes.Precision.Models
                 var already = targetTeam.Shooters.FirstOrDefault(s => s.MemberId == shooter.MemberId);
                 if (already != null)
                     return new(Outcome.Refused,
-                        $"{shooter.Name} står redan i skjutlag {targetTeam.TeamNumber} (bana {already.Position}, {already.WeaponClass}) — en skytt kan inte stå på två banor i samma skjutlag.");
+                        $"{shooter.Name} står redan i skjutlag {targetTeam.TeamNumber} (bana {already.Position}, {HpskSite.Models.ShootingClasses.DisplayName(already.WeaponClass)}) — en skytt kan inte stå på två banor i samma skjutlag.");
             }
 
             if (sameTeam && oldLane == lane)

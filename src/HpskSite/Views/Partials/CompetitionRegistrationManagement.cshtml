@@ -1,4 +1,5 @@
-﻿@*
+﻿@await Html.PartialAsync("_ShootingClassesBootstrap")
+@*
  * Competition-Specific Registration Management Partial View
  * Focused on managing registrations for a single competition
 *@
@@ -2338,7 +2339,7 @@ async function editTeam(teamId) {
                 ? ' <span class="badge bg-warning text-dark" title="Medlemmen har ingen individuell anmälan till tävlingen">ej anmäld</span>'
                 : '';
             const cls = c.shootingClasses
-                ? ` <span class="text-muted small">${escapeHtmlSafe(c.shootingClasses)}</span>` : '';
+                ? ` <span class="text-muted small">${escapeHtmlSafe(window.formatShootingClasses(Array.isArray(c.shootingClasses) ? c.shootingClasses : String(c.shootingClasses).split(',')))}</span>` : '';
             return `
             <div class="d-flex align-items-center py-1">
                 <div class="form-check flex-grow-1 mb-0">
@@ -2816,7 +2817,7 @@ function renderLateTeamMembers() {
         if (!lateTeamIsRelay) {
             const tdClass = document.createElement('td');
             tdClass.className = 'small text-muted';
-            tdClass.textContent = m.shootingClass || '';
+            tdClass.textContent = window.getShootingClassName(m.shootingClass || '');
             row.appendChild(tdClass);
 
             const tdSpare = document.createElement('td');
@@ -3372,6 +3373,8 @@ function updatePaymentSummary() {
             .sort((a, b) => startsByWeapon[b] - startsByWeapon[a] || a.localeCompare(b, 'sv'))
             .map(wc => `${wc} ${startsByWeapon[wc]}`);
         byWeaponEl.textContent = parts.join(' · ');
+    const sc = window.getShootingClass(classId);
+    if (sc) return sc.weaponLabel;
         // The cell clips at one line, so keep the whole list reachable on hover.
         byWeaponEl.title = parts.length ? 'Starter per vapengrupp: ' + parts.join(', ') : '';
     }
@@ -3390,10 +3393,10 @@ function updatePaymentSummary() {
     cards.style.display = '';
 }
 
-// Weapon class from a class id. First character for the standard ids (C1, A_Vet_Y, A_opt_1)
-// and for Springskytte's composite ids ("A-D 21" → A) alike — the same rule the live result
-// board uses. Returns '' for anything that doesn't start with a known weapon letter, so an
-// unexpected id is dropped from the breakdown rather than inventing a group.
+// Weapon group label of a class ("A Opt", "AM", "C"). Registry classes answer from the class
+// registry — A Opt and AM/AP/AG are their own weapon groups, not "A". Springskytte's composite
+// ids ("A-D 21") are not in the registry and keep their first letter. Returns '' for anything
+// else, so an unexpected id is dropped from the breakdown rather than inventing a group.
 function weaponClassOf(classId) {
     const c = (classId || '').trim().charAt(0).toUpperCase();
     return 'ABCRLM'.includes(c) ? c : '';
@@ -3449,21 +3452,17 @@ function populateCompetitionClubFilter() {
     }
 }
 
-// Canonical ordering for the 39 standard shooting classes. Anything not in this
-// list (e.g. Springskytte composite classes like "A-D 21") sorts after these,
-// alphabetically/numerically.
-const STANDARD_CLASS_ORDER = [
-    "A1", "A2", "A3",
-    "B1", "B2", "B3",
-    "C1", "C2", "C3", "C_Vet_Y", "C_Vet_A", "C_Jun", "C1_Dam", "C2_Dam", "C3_Dam",
-    "R1", "R2", "R3",
-    "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9",
-    "L1", "L2", "L3", "L_Vet_Y", "L_Vet_A", "L_Jun", "L1_Dam", "L2_Dam", "L3_Dam"
-];
+// Canonical ordering = the class registry's order (ShootingClasses.All). Id and Name both
+// resolve. Anything not in the registry (e.g. Springskytte composite classes like "A-D 21")
+// sorts after these, alphabetically/numerically.
+function classRegistryIndex(idOrName) {
+    const sc = window.getShootingClass(idOrName);
+    return sc ? (window.HpskShootingClasses || []).indexOf(sc) : -1;
+}
 
 function compareShootingClassIds(a, b) {
-    const ia = STANDARD_CLASS_ORDER.indexOf(a);
-    const ib = STANDARD_CLASS_ORDER.indexOf(b);
+    const ia = classRegistryIndex(a);
+    const ib = classRegistryIndex(b);
     if (ia !== -1 && ib !== -1) return ia - ib;
     if (ia !== -1) return -1;
     if (ib !== -1) return 1;
@@ -4106,7 +4105,7 @@ async function editCompetitionRegistration(registrationId) {
                     <input class="form-check-input edit-class-cb" type="checkbox"
                            id="${safeId}" value="${escapeAttr(id)}" checked>
                     <label class="form-check-label" for="${safeId}">
-                        ${escapeAttr(id)} <span class="badge bg-warning text-dark">befintlig</span>
+                        ${escapeAttr(window.getShootingClassName(id))} <span class="badge bg-warning text-dark">befintlig</span>
                     </label>
                 </div>`;
         }).join('');
@@ -4122,7 +4121,7 @@ async function editCompetitionRegistration(registrationId) {
                     <div class="form-check">
                         <input class="form-check-input edit-class-cb" type="checkbox"
                                id="${safeId}" value="${escapeAttr(id)}" checked>
-                        <label class="form-check-label" for="${safeId}">${escapeAttr(id)}</label>
+                        <label class="form-check-label" for="${safeId}">${escapeAttr(window.getShootingClassName(id))}</label>
                     </div>`;
             }).join('');
     }
@@ -4981,6 +4980,8 @@ async function setCheckedIn(registrationId, checkedIn) {
             },
             body: JSON.stringify({ registrationId, checkedIn })
         });
+// Display name of a class, from the class registry ("C_Vet_Y" → "C Vet Y", "A_m_1" → "AM1").
+// The home-made converter this replaced got A Opt, AM/AP/AG and L Vet Ä wrong.
         const data = await resp.json();
         if (!data.success) {
             throw new Error(data.message || 'Misslyckades att spara närvaro.');
@@ -5005,37 +5006,7 @@ function getPreferenceBadgeClass(preference) {
 }
 
 function normalizeShootingClass(raw) {
-    if (!raw) return '';
-    let s = String(raw).trim();
-    // Normalize separators and uppercase where needed
-    s = s.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
-
-    // Common compact forms → spaced
-    s = s.replace(/^C\s?Jun$/i, 'C Jun');
-    s = s.replace(/^C1\s?Dam$/i, 'C1 Dam');
-    s = s.replace(/^C2\s?Dam$/i, 'C2 Dam');
-    s = s.replace(/^C3\s?Dam$/i, 'C3 Dam');
-
-    // Veteran Younger/Older variants
-    // Map various CVY forms to 'C Vet Y'
-    if (/^C\s*V(e|ä)?t\s*Y$/i.test(s) || /^CVY$/i.test(s)) {
-        return 'C Vet Y';
-    }
-    // Map various CVÄ/CVAE forms to 'C Vet Ä'
-    if (/^C\s*V(e|ä)?t\s*(Ä|A)$/i.test(s) || /^CVÄ$/i.test(s) || /^CVA$/i.test(s)) {
-        // Force Swedish Ä
-        return 'C Vet Ä';
-    }
-
-    // Map CD3 or C D3 to C3 Dam
-    if (/^C\s*D3$/i.test(s) || /^CD3$/i.test(s)) {
-        return 'C3 Dam';
-    }
-
-    // Uppercase A/B/C categories like A1/A2/A3/B1... keep as-is
-    if (/^[ABC][0-9]$/i.test(s)) return s.toUpperCase();
-
-    return s;
+    return window.getShootingClassName(raw);
 }
 
 // Load data when the registrations tab is shown
@@ -5675,7 +5646,7 @@ async function refreshWalkInPatrolOptions() {
         if (data.success && Array.isArray(data.patrols)) {
             // Highest-numbered first matches "Nästa lediga" intuition (most recent, likely still open).
             data.patrols.slice().sort((a, b) => b.patrolNumber - a.patrolNumber).forEach(p => {
-                const wg = p.weaponGroup ? ` · ${p.weaponGroup}` : '';
+                const wg = p.weaponGroup ? ` · ${window.formatWeaponGroups(p.weaponGroup)}` : '';
                 const lbl = p.label ? ` — ${p.label}` : '';
                 const count = (p.members || []).length;
                 const opt = new Option(`Patrull ${p.patrolNumber}${lbl}${wg} (${count} skyttar)`, String(p.patrolId));
@@ -5704,15 +5675,11 @@ function getClassMutexBucket(classId) {
     // Springskytte composite — each combination is its own bucket so multi-class still works.
     if (id.includes('-')) return `springskytte:${id}`;
 
-    // A-family weapon groups: A, A_Opt, A_M, A_P, A_G are each their own bucket so a
-    // shooter can register in A1 + AM1 + AP1 + AG1 + A_opt_1 simultaneously. Without
-    // this, the simple first-char mapping would lump them all into "A" and the cashier
-    // mutex would auto-untick when a second A-family class is picked.
-    let weapon = id.charAt(0).toUpperCase();
-    if (/^A_opt/i.test(id)) weapon = 'A_Opt';
-    else if (/^A_m_/i.test(id)) weapon = 'A_M';
-    else if (/^A_p_/i.test(id)) weapon = 'A_P';
-    else if (/^A_g_/i.test(id)) weapon = 'A_G';
+    // Weapon group and category come from the class registry. A, A_Opt, A_M, A_P, A_G are
+    // each their own bucket, so a shooter can register in A1 + AM1 + AP1 + AG1 + A Opt 1.
+    const sc = window.getShootingClass(id);
+    if (!sc) return `unknown:${id}`;
+    const weapon = sc.weapon;
 
     // ⚠️ En klass per vapengrupp. Bara C och L kan bära två — och bara när tävlingen tillåter
     //    dubbel C-klass, och då ur OLIKA kategorier. Förut delades varje vapengrupp på kategori
@@ -5721,11 +5688,8 @@ function getClassMutexBucket(classId) {
     const allowDualC = !!(window.CompetitionConfig && window.CompetitionConfig.allowDualCClassRegistration);
     if ((weapon !== 'C' && weapon !== 'L') || !allowDualC) return weapon;
 
-    let subcat = 'open';
-    if (/_Jun(\b|$|_)/i.test(id)) subcat = 'jun';
-    else if (/_Vet_/i.test(id)) subcat = 'vet';
-    else if (/Dam/i.test(id)) subcat = 'dam';
-
+    // Veteran yngre and äldre are ONE category for this rule (pick one of them).
+    const subcat = { Junior: 'jun', VeteranYounger: 'vet', VeteranOlder: 'vet', Dam: 'dam' }[sc.category] || 'open';
     return `${weapon}:${subcat}`;
 }
 

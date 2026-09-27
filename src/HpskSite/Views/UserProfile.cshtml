@@ -181,7 +181,7 @@
                                         if (!j.success || !j.lines || !j.lines.length) return;
                                         var html = j.lines.map(function (l) {
                                             var parts = [];
-                                            parts.push('<strong>' + (disc[l.discipline] || l.discipline) + ' ' + l.weaponGroup + '</strong>');
+                                            parts.push('<strong>' + (disc[l.discipline] || l.discipline) + ' ' + window.formatWeaponGroups(l.weaponGroup) + '</strong>');
                                             parts.push('handicap ' + Number(l.handicapIndex).toFixed(2) + (l.isProvisional ? ' <span class="badge bg-warning text-dark">Provisoriskt</span>' : ''));
                                             if (l.clubRank) parts.push('#' + l.clubRank + (l.clubTotal ? '/' + l.clubTotal : '') + ' i ' + (l.clubName || 'klubben') + mv(l.clubMovement));
                                             if (l.nationalRank) parts.push('#' + l.nationalRank + ' i landet');
@@ -3436,7 +3436,7 @@ function openUnverifiedMedalsModal() {
                     <tr>
                         <td>${badge} <span class="ms-1">${escapeHtml(m.medalName)}</span> <small class="text-muted">(${m.points} p)</small></td>
                         <td class="d-none d-md-table-cell">${m.competitionName ? escapeHtml(m.competitionName) : '<span class="text-muted">–</span>'}</td>
-                        <td>${m.shootingClass ? `<span class="badge bg-secondary">${escapeHtml(m.shootingClass)}</span>` : ''}</td>
+                        <td>${m.shootingClass ? `<span class="badge bg-secondary">${escapeHtml(window.getShootingClassName(m.shootingClass))}</span>` : ''}</td>
                         <td class="d-none d-sm-table-cell">${m.competitionDate ? formatDateShort(m.competitionDate) : m.year}</td>
                         <td>${proof}<div class="small text-muted">${escapeHtml(srcNote || '')}</div></td>
                     </tr>`;
@@ -4878,7 +4878,7 @@ function renderFaltskytteDashboard(data) {
                         <div class="small">
                             ${(stats.activityByWeaponGroup || []).map((w, i, arr) => `
                                 <div class="d-flex justify-content-between ${i < arr.length - 1 ? 'border-bottom' : ''} py-1">
-                                    <span><strong>${w.weaponGroup}</strong></span>
+                                    <span><strong>${escapeHtml(window.formatWeaponGroups(w.weaponGroup))}</strong></span>
                                     <span class="text-muted">${w.count} tävl.</span>
                                 </div>
                             `).join('') || '<div class="text-muted text-center py-2">Inga tävlingar</div>'}
@@ -4894,7 +4894,7 @@ function renderFaltskytteDashboard(data) {
                         <h3 class="mb-2 text-center">${stats.hitPercentAvg.toFixed(1)} <small class="text-muted fs-6">% snitt</small></h3>
                         <div class="small">
                             ${(stats.hitPercentByWeaponGroup || []).map(w => `
-                                <div class="d-flex justify-content-between"><span>${w.weaponGroup}</span><span class="text-muted">${w.hitPercent.toFixed(1)} %</span></div>
+                                <div class="d-flex justify-content-between"><span>${escapeHtml(window.formatWeaponGroups(w.weaponGroup))}</span><span class="text-muted">${w.hitPercent.toFixed(1)} %</span></div>
                                 <div class="pct-bar mb-1"><div style="width:${Math.min(100, w.hitPercent)}%"></div></div>
                             `).join('') || '<div class="text-muted text-center py-2">—</div>'}
                         </div>
@@ -5313,7 +5313,7 @@ function renderCompetitionsCards() {
 
 function renderShootingClasses(classes) {
     if (!classes || classes.length === 0) return '<span class="text-muted">Ingen</span>';
-    return classes.map(cls => `<span class="badge bg-secondary me-1">${cls}</span>`).join('');
+    return classes.map(cls => `<span class="badge bg-secondary me-1">${escapeHtml(window.getShootingClassName(cls))}</span>`).join('');
 }
 
 function renderPaymentBadge(status, amount) {
