@@ -86,8 +86,10 @@ namespace HpskSite.Services
         {
             if (string.IsNullOrWhiteSpace(classIdOrName)) return false;
 
-            // Standard disciplines: "C_Jun", "L_Jun"
-            if (classIdOrName.Contains("_Jun", StringComparison.OrdinalIgnoreCase)) return true;
+            // Standard disciplines: ask the registry (C Jun, L Jun). A registry class that is not a
+            // junior class is never junior — no string parsing of ids.
+            var known = HpskSite.Models.ShootingClasses.Resolve(classIdOrName);
+            if (known != null) return known.Category == HpskSite.Models.ClassCategory.Junior;
 
             // Springskytte composite class: "A-D jun", "A-D 15", "C-H 18", etc.
             // Age/gender part is after the '-'; sub-21 brackets (15, 18, jun) all count as junior.

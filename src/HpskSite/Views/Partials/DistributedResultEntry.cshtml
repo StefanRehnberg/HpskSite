@@ -1,3 +1,4 @@
+@await Html.PartialAsync("_ShootingClassesBootstrap")
 @*
     Distributed Result Entry Modal
     Mobile-friendly modal for club admins/skjutledare to report results
@@ -424,7 +425,7 @@
             byClub[club].forEach(m => {
                 const opt = document.createElement('option');
                 opt.value = m.memberId + '|' + m.shootingClass;
-                opt.textContent = m.name + ' (' + m.shootingClass + ')';
+                opt.textContent = m.name + ' (' + window.getShootingClassName(m.shootingClass) + ')';
                 group.appendChild(opt);
             });
             select.appendChild(group);

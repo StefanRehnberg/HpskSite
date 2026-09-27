@@ -2711,9 +2711,9 @@ namespace HpskSite.Controllers
                             {
                                 foreach (var shooter in cg.Shooters)
                                 {
-                                    // Find the class ID from the name
-                                    var classId = ShootingClasses.GetByName(cg.ClassName)?.Id
-                                        ?? cg.ClassName.Replace(" ", "_");
+                                    // The class ID from the registry; an unknown name (a merged group) stays as it is —
+                                    // never manufacture an id by replacing spaces.
+                                    var classId = ShootingClasses.Resolve(cg.ClassName)?.Id ?? cg.ClassName;
                                     syntheticResults.Add(new PrecisionResultEntry
                                     {
                                         CompetitionId = competitionId,
@@ -4080,26 +4080,10 @@ namespace HpskSite.Controllers
             string GetGroupName(string shootingClass) =>
                 mergeGroupLookup.TryGetValue(shootingClass, out var group) ? group : shootingClass;
 
-            // Define class order (C classes first, then B, then A, then R)
-            var classOrder = new Dictionary<string, int>
-            {
-                { "C1", 1 }, { "C1 Dam", 2 }, { "C1 Jun", 3 },
-                { "C2", 4 }, { "C2 Dam", 5 }, { "C2 Jun", 6 },
-                { "C3", 7 }, { "C3 Dam", 8 }, { "C3 Jun", 9 },
-                { "C Vet Y", 10 }, { "C Vet Y Dam", 11 }, { "C Vet Y Jun", 12 },
-                { "C Vet Ä", 13 }, { "C Vet Ä Dam", 14 }, { "C Vet Ä Jun", 15 },
-                { "B1", 16 }, { "B1 Dam", 17 }, { "B1 Jun", 18 },
-                { "B2", 19 }, { "B2 Dam", 20 }, { "B2 Jun", 21 },
-                { "B3", 22 }, { "B3 Dam", 23 }, { "B3 Jun", 24 },
-                { "B Vet Y", 25 }, { "B Vet Y Dam", 26 }, { "B Vet Y Jun", 27 },
-                { "B Vet Ä", 28 }, { "B Vet Ä Dam", 29 }, { "B Vet Ä Jun", 30 },
-                { "A1", 31 }, { "A1 Dam", 32 }, { "A1 Jun", 33 },
-                { "A2", 34 }, { "A2 Dam", 35 }, { "A2 Jun", 36 },
-                { "A3", 37 }, { "A3 Dam", 38 }, { "A3 Jun", 39 },
-                { "A Opt 1", 40 }, { "A Opt 2", 41 }, { "A Opt 3", 42 },
-                { "A Opt", 43 }, // legacy / unspecific
-                { "R1", 44 }, { "R2", 45 }, { "R3", 46 }
-            };
+            // Class order: from the registry (C first, then B, A, the A family, R, L, M).
+            // The hand-written table this replaced knew neither C Jun, L, M nor AM/AP/AG.
+            int ClassOrderKey(string shootingClass) =>
+                ShootingClassOrder.Key(shootingClass, ShootingClassOrder.ResultList);
 
             // Determine competition type for type-specific logic
             var competitionTypeId = competition?.GetValue<string>("competitionType") ?? "Precision";
@@ -4136,7 +4120,7 @@ namespace HpskSite.Controllers
             // instead of falling through to the unknown-class bucket.
             var classGroups = shooterResults
                 .GroupBy(s => GetGroupName(s.ShootingClass))
-                .OrderBy(g => g.Min(s => classOrder.GetValueOrDefault(s.ShootingClass, 999)))
+                .OrderBy(g => g.Min(s => ClassOrderKey(s.ShootingClass)))
                 .ThenBy(g => g.Key) // stable secondary sort for any unknown classes
                 .Select(classGroup => new ClassGroup
                 {

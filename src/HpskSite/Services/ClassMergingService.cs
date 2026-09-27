@@ -590,12 +590,13 @@ namespace HpskSite.Services
         /// </summary>
         private static string FormatLevelName(string weaponGroup, int level)
         {
-            if (weaponGroup == "A_Opt") return $"A Opt {level}";
-            // A-family subgroups use the compact display name (AM1/AP1/AG1) — not the
-            // underscore-style ID. Mirrors how the registry lists them.
-            if (weaponGroup == "A_M") return $"AM{level}";
-            if (weaponGroup == "A_P") return $"AP{level}";
-            if (weaponGroup == "A_G") return $"AG{level}";
+            // The registry's own Name for the open class at that level ("A Opt 2", "AM1", "C3").
+            if (Enum.TryParse<WeaponClass>(weaponGroup, out var weapon))
+            {
+                var name = ShootingClasses.For(weapon, ClassCategory.Open)
+                    .FirstOrDefault(sc => sc.Level == level)?.Name;
+                if (name != null) return name;
+            }
             return $"{weaponGroup}{level}";
         }
 
@@ -603,6 +604,12 @@ namespace HpskSite.Services
         {
             // "C2 Dam" → 2, "A3" → 3, "C Vet Y" → null, "L1 Dam" → 1, "A Opt 2" → 2
             if (string.IsNullOrEmpty(className)) return null;
+
+            // A registry class answers from the registry. ⚠️ Except magnum: M1–M9 carry no level
+            // there (they are different weapons), but this service has always read their digit and
+            // its magnum handling (GetBlockReason tests magnum BEFORE class 1) relies on that.
+            var known = ShootingClasses.Resolve(className);
+            if (known != null && known.Weapon != WeaponClass.M) return known.Level;
 
             // Compact form: digit right after the weapon group letter ("A3", "R2", "C1 Dam")
             if (className.Length >= 2 && char.IsDigit(className[1]))
@@ -628,17 +635,25 @@ namespace HpskSite.Services
             // förslag, tvärtemot både SHB och vår egen spec.
             return GetCompetenceLevel(className) == 1
                 && !IsDamClass(className)
-                && !className.Contains("Vet")
-                && !className.Contains("Jun");
+                && !IsVetYClass(className) && !IsVetAClass(className)
+                && !IsJuniorClass(className);
         }
 
-        private static bool IsDamClass(string className) => className.Contains("Dam");
+        // Category tests ask the registry. The string test is only the fallback for names the
+        // registry does not know — combined group names such as "C2+Dam".
+        private static bool IsCategory(string className, ClassCategory category, string fallbackToken)
+        {
+            var known = ShootingClasses.Resolve(className);
+            return known != null ? known.Category == category : className.Contains(fallbackToken);
+        }
 
-        private static bool IsVetYClass(string className) => className.Contains("Vet Y");
+        private static bool IsDamClass(string className) => IsCategory(className, ClassCategory.Dam, "Dam");
 
-        private static bool IsVetAClass(string className) => className.Contains("Vet Ä");
+        private static bool IsVetYClass(string className) => IsCategory(className, ClassCategory.VeteranYounger, "Vet Y");
 
-        private static bool IsJuniorClass(string className) => className.Contains("Jun");
+        private static bool IsVetAClass(string className) => IsCategory(className, ClassCategory.VeteranOlder, "Vet Ä");
+
+        private static bool IsJuniorClass(string className) => IsCategory(className, ClassCategory.Junior, "Jun");
 
         private static string GetMedalImpact(int count, bool isJunior)
         {
@@ -674,28 +689,8 @@ namespace HpskSite.Services
                 suggestions.Remove(r);
         }
 
-        private static int GetClassSortOrder(string className)
-        {
-            var order = new Dictionary<string, int>
-            {
-                { "C1", 1 }, { "C1 Dam", 2 }, { "C1 Jun", 3 },
-                { "C2", 4 }, { "C2 Dam", 5 }, { "C2 Jun", 6 },
-                { "C3", 7 }, { "C3 Dam", 8 }, { "C3 Jun", 9 },
-                { "C Vet Y", 10 }, { "C Vet Ä", 11 }, { "C Jun", 12 },
-                { "B1", 16 }, { "B2", 19 }, { "B3", 22 },
-                { "A1", 31 }, { "A2", 34 }, { "A3", 37 },
-                { "A Opt 1", 38 }, { "A Opt 2", 39 }, { "A Opt 3", 40 },
-                { "R1", 41 }, { "R2", 42 }, { "R3", 43 },
-                { "L1", 50 }, { "L1 Dam", 51 }, { "L2", 52 }, { "L2 Dam", 53 },
-                { "L3", 54 }, { "L3 Dam", 55 },
-                { "L Vet Y", 56 }, { "L Vet Ä", 57 }, { "L Jun", 58 },
-                // A-family subgroups sort at the end so existing positions stay stable.
-                // Within the family they're grouped by subgroup then level.
-                { "AM1", 60 }, { "AM2", 61 }, { "AM3", 62 },
-                { "AP1", 63 }, { "AP2", 64 }, { "AP3", 65 },
-                { "AG1", 66 }, { "AG2", 67 }, { "AG3", 68 }
-            };
-            return order.GetValueOrDefault(className, 999);
-        }
+        // Same order as the result list — from the class registry, never a hand-written table.
+        private static int GetClassSortOrder(string className) =>
+            ShootingClassOrder.Key(className, ShootingClassOrder.ResultList);
     }
 }

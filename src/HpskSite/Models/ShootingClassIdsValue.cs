@@ -80,6 +80,26 @@ namespace HpskSite.Models
         /// oförändrad, vilket är hela skälet att kontrollen är "börjar med [" och inte en parse:
         /// ett dubbelkodat värde ska inte uppstå av att någon sparar en gång till.
         /// </summary>
+        /// <summary>
+        /// READ side: the stored value (JSON array, legacy CSV, string[] or anything the
+        /// property converter hands back) → the list of class ids. Empty list for nothing.
+        /// Use this instead of <c>Split(',')</c>, which leaves <c>["C1"</c> on a JSON value.
+        /// </summary>
+        public static List<string> ReadIds(object? value)
+        {
+            var json = Normalize(value);
+            if (json == null) return new List<string>();
+            try
+            {
+                return (System.Text.Json.JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>())
+                    .Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).ToList();
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return new List<string>();
+            }
+        }
+
         public static string? FromText(string? text)
         {
             if (string.IsNullOrWhiteSpace(text)) return null;

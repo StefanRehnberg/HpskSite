@@ -459,14 +459,41 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // Validate: Direktplacering requires team assignments for all classes
-                if (dpConfig != null && teamAssignments.Count == 0)
+                // Validate: Direktplacering requires a skjutlag for EVERY selected class — not just
+                // one. Checking only "any assignment" let a two-class registration through with the
+                // second class silently unplaced. Also refuse the same skjutlag for two classes
+                // (e.g. two C classes on a dual-C competition): a shooter cannot stand in one
+                // skjutlag twice. The client checks both first; this is the backstop.
+                if (dpConfig != null)
                 {
-                    var errorMsg = "Du måste välja skjutlag för varje vapengrupp.";
-                    if (IsAjaxRequest())
-                        return Json(new { success = false, message = errorMsg });
-                    TempData["Error"] = errorMsg;
-                    return RedirectToCurrentUmbracoPage();
+                    string ClassName(string id) => HpskSite.Models.ShootingClasses.GetById(id)?.Name ?? id;
+
+                    var missingTeam = selectedClassesList
+                        .Where(sc => !teamAssignments.TryGetValue(sc, out var t) || t <= 0)
+                        .Select(ClassName)
+                        .ToList();
+
+                    string? errorMsg = null;
+                    if (missingTeam.Count > 0)
+                    {
+                        errorMsg = $"Du måste välja skjutlag för {string.Join(" och ", missingTeam)}.";
+                    }
+                    else
+                    {
+                        var doubled = selectedClassesList
+                            .GroupBy(sc => teamAssignments[sc])
+                            .FirstOrDefault(g => g.Count() > 1);
+                        if (doubled != null)
+                            errorMsg = $"{string.Join(" och ", doubled.Select(ClassName))} kan inte skjutas i samma skjutlag. Välj olika skjutlag.";
+                    }
+
+                    if (errorMsg != null)
+                    {
+                        if (IsAjaxRequest())
+                            return Json(new { success = false, message = errorMsg });
+                        TempData["Error"] = errorMsg;
+                        return RedirectToCurrentUmbracoPage();
+                    }
                 }
 
                 // Build shooting classes array with per-class preferences and team assignments
@@ -760,7 +787,7 @@ namespace HpskSite.Controllers
 
                 if (createdRegistrations.Any())
                 {
-                    var classesText = string.Join(", ", createdRegistrations);
+                    var classesText = string.Join(", ", createdRegistrations.Select(HpskSite.Models.ShootingClasses.DisplayName));
                     if (targetMemberId.HasValue && targetMemberId.Value != currentMemberData.Id)
                     {
                         successMessages.Add($"{memberName} har anmälts till tävlingen i klasserna: {classesText}");
@@ -773,7 +800,7 @@ namespace HpskSite.Controllers
 
                 if (updatedRegistrations.Any())
                 {
-                    var classesText = string.Join(", ", updatedRegistrations);
+                    var classesText = string.Join(", ", updatedRegistrations.Select(HpskSite.Models.ShootingClasses.DisplayName));
                     if (targetMemberId.HasValue && targetMemberId.Value != currentMemberData.Id)
                     {
                         successMessages.Add($"Uppdaterade anmälan för {memberName} i klasserna: {classesText}");
@@ -901,12 +928,6 @@ namespace HpskSite.Controllers
             }
         }
 
-        private string GetShootingClassName(string classId)
-        {
-            // Convert class ID to class name - this would typically query the shooting classes
-            // For now, return the ID as the class name
-            return classId;
-        }
 
         private IContent GetOrCreateRegistrationsFolder(IContent competition)
         {
@@ -2828,7 +2849,7 @@ namespace HpskSite.Controllers
 
                 // Create new registration
                 var memberName = $"{targetMember.GetValue<string>("firstName")} {targetMember.GetValue<string>("lastName")}";
-                var registrationName = $"{memberName} - {newShootingClass} - {DateTime.Now:yyyy-MM-dd}";
+                var registrationName = $"{memberName} - {HpskSite.Models.ShootingClasses.DisplayName(newShootingClass)} - {DateTime.Now:yyyy-MM-dd}";
                 var newRegistration = _contentService.Create(registrationName, registrationsHub, "competitionRegistration");
 
                 // Set properties
@@ -2847,7 +2868,7 @@ namespace HpskSite.Controllers
                 return Json(new
                 {
                     success = true,
-                    message = $"Anmälan ersatt: {oldShootingClass} → {newShootingClass}",
+                    message = $"Anmälan ersatt: {HpskSite.Models.ShootingClasses.DisplayName(oldShootingClass)} → {HpskSite.Models.ShootingClasses.DisplayName(newShootingClass)}",
                     oldClass = oldShootingClass,
                     newClass = newShootingClass,
                     registrationId = newRegistration.Id

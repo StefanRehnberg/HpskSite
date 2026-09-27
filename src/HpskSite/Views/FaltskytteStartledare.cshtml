@@ -44,6 +44,7 @@
         .sl-dns-btn { min-width: 54px; }
         #slWake.active { background: var(--bs-success); color: #fff; border-color: var(--bs-success); }
     </style>
+    @await Html.PartialAsync("_ShootingClassesBootstrap")
 </head>
 <body>
     <div class="container-fluid py-2">
@@ -143,7 +144,7 @@
                 if (next) {
                     b += '<div class="alert alert-success d-flex align-items-center justify-content-between flex-wrap gap-2 py-3 mb-2">'
                         + '<div><span class="badge bg-success me-2">NÄST PÅ TUR</span><span class="fs-3 fw-bold">Patrull ' + next.patrolNumber + '</span>'
-                        + '<span class="fs-5 ms-2 text-muted">Vapengrupp ' + esc(next.weaponGroup) + '</span></div>'
+                        + '<span class="fs-5 ms-2 text-muted">Vapengrupp ' + esc(window.formatWeaponGroups(next.weaponGroup)) + '</span></div>'
                         + '<button class="btn btn-success btn-lg" onclick="sendOff(' + next.patrolId + ',true)"><i class="bi bi-send-fill me-1"></i>Skicka iväg patrull ' + next.patrolNumber + '</button></div>';
                 } else {
                     var anyHeld = patrols.some(function (p) { return !p.departedAt && p.held; });
@@ -178,7 +179,7 @@
                     var members = real.map(function (m) {
                         var isDns = m.status === 'DNS';
                         return '<li class="list-group-item py-1 d-flex justify-content-between align-items-center sl-member' + (isDns ? ' sl-dns' : '') + '">'
-                            + '<span>' + esc(m.name) + ' <span class="text-muted small">(' + esc(m.club) + ')</span> <span class="badge bg-body-secondary text-body">' + esc(m.shootingClass) + '</span>' + (isDns ? ' <span class="badge bg-secondary">DNS</span>' : '') + '</span>'
+                            + '<span>' + esc(m.name) + ' <span class="text-muted small">(' + esc(m.club) + ')</span> <span class="badge bg-body-secondary text-body">' + esc(window.getShootingClassName(m.shootingClass)) + '</span>' + (isDns ? ' <span class="badge bg-secondary">DNS</span>' : '') + '</span>'
                             + '<button class="btn ' + (isDns ? 'btn-warning' : 'btn-outline-warning') + ' btn-sm sl-dns-btn" onclick="setDns(' + m.patrolMemberId + ',' + (!isDns) + ')" title="' + (isDns ? 'Ångra DNS' : 'Markera DNS – frigör platsen') + '">DNS</button>'
                             + '</li>';
                     }).join('');
@@ -188,7 +189,7 @@
                     return '<div class="col-12 col-md-6 col-xl-4" data-patrol="' + p.patrolId + '">'
                         + '<div class="' + cardCls + '">'
                         + '<div class="card-header d-flex justify-content-between align-items-center py-2">'
-                        + '<span class="fw-bold">Patrull ' + p.patrolNumber + ' · ' + esc(p.weaponGroup) + (timeStr ? ' · ' + timeStr : '') + '</span>' + statusBadge + '</div>'
+                        + '<span class="fw-bold">Patrull ' + p.patrolNumber + ' · ' + esc(window.formatWeaponGroups(p.weaponGroup)) + (timeStr ? ' · ' + timeStr : '') + '</span>' + statusBadge + '</div>'
                         + '<div class="p-2 sl-act d-flex gap-1 flex-wrap">' + ctrl + '</div>'
                         + '<ul class="list-group list-group-flush flex-grow-1">' + members + '</ul>'
                         + '</div></div>';

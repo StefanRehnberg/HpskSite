@@ -52,26 +52,32 @@ namespace HpskSite.Models
         //
         // Klasslagen (Dam/Vet/Jun) lånar INTE: de är klasspecifika, och att låna in en
         // öppen-C-skytt i ett damlag är inte samma sak som det omvända.
-        private static readonly string[] CBorrowClasses =
-            { "C1_Dam", "C2_Dam", "C3_Dam", "C_Vet_Y", "C_Vet_A", "C_Jun" };
-        private static readonly string[] LBorrowClasses =
-            { "L1_Dam", "L2_Dam", "L3_Dam", "L_Vet_Y", "L_Vet_A", "L_Jun" };
+        //
+        // Klasslistorna härleds ur ShootingClasses (vapengrupp + kategori) — de skrivs aldrig ut
+        // för hand. En klass som läggs till i registret hamnar därmed i rätt lagklass av sig själv.
+        private static string[] Ids(WeaponClass weapon, params ClassCategory[] categories) =>
+            ShootingClasses.For(weapon, categories).Select(sc => sc.Id).ToArray();
+
+        private static readonly ClassCategory[] NonOpen =
+            { ClassCategory.Dam, ClassCategory.VeteranYounger, ClassCategory.VeteranOlder, ClassCategory.Junior };
+        private static readonly ClassCategory[] Veteran =
+            { ClassCategory.VeteranYounger, ClassCategory.VeteranOlder };
 
         private static readonly Dictionary<string, StandardTeamClassDef> StandardTeamClassMap = new()
         {
-            ["A"] = new(new[] { "A1", "A2", "A3" }),
-            ["A Opt"] = new(new[] { "A_opt_1", "A_opt_2", "A_opt_3" }),
-            ["B"] = new(new[] { "B1", "B2", "B3" }),
-            ["C Öppen"] = new(new[] { "C1", "C2", "C3" }, AlsoEligibleClasses: CBorrowClasses),
-            ["C Vet"] = new(new[] { "C_Vet_Y", "C_Vet_A" }),
-            ["C Jun"] = new(new[] { "C_Jun" }),
-            ["C Dam"] = new(new[] { "C1_Dam", "C2_Dam", "C3_Dam" }),
-            ["R"] = new(new[] { "R1", "R2", "R3" }),
-            ["M"] = new(new[] { "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9" }),
-            ["L Öppen"] = new(new[] { "L1", "L2", "L3" }, AlsoEligibleClasses: LBorrowClasses),
-            ["L Vet"] = new(new[] { "L_Vet_Y", "L_Vet_A" }),
-            ["L Jun"] = new(new[] { "L_Jun" }),
-            ["L Dam"] = new(new[] { "L1_Dam", "L2_Dam", "L3_Dam" }),
+            ["A"] = new(Ids(WeaponClass.A, ClassCategory.Open)),
+            ["A Opt"] = new(Ids(WeaponClass.A_Opt, ClassCategory.Open)),
+            ["B"] = new(Ids(WeaponClass.B, ClassCategory.Open)),
+            ["C Öppen"] = new(Ids(WeaponClass.C, ClassCategory.Open), AlsoEligibleClasses: Ids(WeaponClass.C, NonOpen)),
+            ["C Vet"] = new(Ids(WeaponClass.C, Veteran)),
+            ["C Jun"] = new(Ids(WeaponClass.C, ClassCategory.Junior)), // class-literal-ok: team-class name, not a shooting class
+            ["C Dam"] = new(Ids(WeaponClass.C, ClassCategory.Dam)),
+            ["R"] = new(Ids(WeaponClass.R, ClassCategory.Open)),
+            ["M"] = new(ShootingClasses.ForWeapon(WeaponClass.M).Select(sc => sc.Id).ToArray()),
+            ["L Öppen"] = new(Ids(WeaponClass.L, ClassCategory.Open), AlsoEligibleClasses: Ids(WeaponClass.L, NonOpen)),
+            ["L Vet"] = new(Ids(WeaponClass.L, Veteran)),
+            ["L Jun"] = new(Ids(WeaponClass.L, ClassCategory.Junior)), // class-literal-ok: team-class name, not a shooting class
+            ["L Dam"] = new(Ids(WeaponClass.L, ClassCategory.Dam)),
         };
 
         private record StandardTeamClassDef(string[] IndividualClasses, string[]? AlsoEligibleClasses = null)

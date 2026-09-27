@@ -1,4 +1,5 @@
 ﻿@using HpskSite.CompetitionTypes.Common
+@await Html.PartialAsync("_ShootingClassesBootstrap")
 @*
  * Competition Results Management Partial View
  * Handles results entry and management for a specific competition
@@ -2899,7 +2900,8 @@ function loadShooterResults() {
         id: selectedShooter.memberId,
         name: selectedShooter.name,
         club: selectedShooter.club,
-        class: selectedShooter.weaponClass,
+        // The start list stores the Id; a result row and the screen carry the Name (as finals does).
+        class: window.getShootingClassName(selectedShooter.weaponClass),
         memberId: selectedShooter.memberId,
         teamNumber: teamNumber,
         position: position
@@ -4944,7 +4946,7 @@ function populatePositionsDropdown() {
     team.shooters.forEach(shooter => {
         const option = document.createElement('option');
         option.value = shooter.position;
-        option.textContent = `Pos ${shooter.position}: ${shooter.name || 'Unknown'} (${shooter.weaponClass || 'N/A'})`;
+        option.textContent = `Pos ${shooter.position}: ${shooter.name || 'Unknown'} (${shooter.weaponClass ? window.getShootingClassName(shooter.weaponClass) : 'N/A'})`;
         positionSelect.appendChild(option);
     });
 }

@@ -14,17 +14,25 @@ namespace HpskSite.CompetitionTypes.Precision.Services
     {
         private readonly ILogger<PrecisionFinalsQualificationService> _logger;
 
-        // Championship class groupings as per rules
-        private static readonly Dictionary<string, List<string>> ChampionshipClassMappings = new()
+        // Championship class groupings as per rules — category label → its classes' display names,
+        // built from the class registry. Order: A, B, C, then C's sub-categories (the order
+        // GenerateTeamStructure combines them in).
+        private static readonly HpskSite.Models.ClassCategory[] CSubCategoryOrder =
         {
-            { "A", new List<string> { "A1", "A2", "A3" } },
-            { "B", new List<string> { "B1", "B2", "B3" } },
-            { "C", new List<string> { "C1", "C2", "C3" } },
-            { "C Dam", new List<string> { "C1 Dam", "C2 Dam", "C3 Dam" } },
-            { "C Jun", new List<string> { "C Jun" } },
-            { "C Vet Y", new List<string> { "C Vet Y" } },
-            { "C Vet Ä", new List<string> { "C Vet Ä" } }
+            HpskSite.Models.ClassCategory.Dam, HpskSite.Models.ClassCategory.Junior,
+            HpskSite.Models.ClassCategory.VeteranYounger, HpskSite.Models.ClassCategory.VeteranOlder
         };
+
+        private static List<string> Names(HpskSite.Models.WeaponClass weapon, HpskSite.Models.ClassCategory category) =>
+            HpskSite.Models.ShootingClasses.For(weapon, category).Select(sc => sc.Name).ToList();
+
+        private static readonly Dictionary<string, List<string>> ChampionshipClassMappings =
+            new[] { HpskSite.Models.WeaponClass.A, HpskSite.Models.WeaponClass.B, HpskSite.Models.WeaponClass.C }
+                .Select(w => (Key: HpskSite.Models.ShootingClasses.WeaponGroupLabel(w), Classes: Names(w, HpskSite.Models.ClassCategory.Open)))
+                .Concat(CSubCategoryOrder.Select(c => (
+                    Key: "C " + HpskSite.Models.ShootingClasses.CategoryLabel(c),
+                    Classes: Names(HpskSite.Models.WeaponClass.C, c))))
+                .ToDictionary(x => x.Key, x => x.Classes);
 
         public PrecisionFinalsQualificationService(ILogger<PrecisionFinalsQualificationService> logger)
         {
@@ -237,28 +245,9 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         /// Sort key for group names — uses the same ordering as the result list so the
         /// finals admin UI matches what the admin sees on the result list.
         /// </summary>
-        private static int ClassSortKey(string groupName)
-        {
-            // Match the prefix of the first source class. Combined names like "C2+Dam"
-            // sort with the C2 group; "A2+3" sorts with A2.
-            var lookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-            {
-                { "C1", 1 }, { "C1 Dam", 2 }, { "C1 Jun", 3 },
-                { "C2", 4 }, { "C2 Dam", 5 }, { "C2 Jun", 6 },
-                { "C3", 7 }, { "C3 Dam", 8 }, { "C3 Jun", 9 },
-                { "C Vet Y", 10 }, { "C Vet Ä", 11 }, { "C Jun", 12 },
-                { "B1", 16 }, { "B2", 19 }, { "B3", 22 },
-                { "A1", 31 }, { "A2", 34 }, { "A3", 37 },
-                { "A Opt 1", 38 }, { "A Opt 2", 39 }, { "A Opt 3", 40 },
-                { "R1", 41 }, { "R2", 42 }, { "R3", 43 }
-            };
-            // Match the longest known prefix in the lookup, so "C2+Dam" matches "C2".
-            var bestKey = lookup.Keys
-                .Where(k => groupName.StartsWith(k, StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(k => k.Length)
-                .FirstOrDefault();
-            return bestKey != null ? lookup[bestKey] : 999;
-        }
+        private static int ClassSortKey(string groupName) =>
+            // Combined names like "C2+Dam" sort with C2, "A2+3" with A2 — handled by the registry order.
+            HpskSite.Models.ShootingClassOrder.Key(groupName, HpskSite.Models.ShootingClassOrder.ResultList);
 
         /// <summary>
         /// The 7 championship classes used by the LEGACY "ProposedTeams" logic in
@@ -301,7 +290,8 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             }
 
             // C classes - combined with specific order: C, C Dam, C Jun, C Vet Y, C Vet Ä
-            var cClasses = new[] { "C", "C Dam", "C Jun", "C Vet Y", "C Vet Ä" }
+            var cClasses = new[] { "C" }
+                .Concat(CSubCategoryOrder.Select(c => "C " + HpskSite.Models.ShootingClasses.CategoryLabel(c)))
                 .Select(name => classQualifications.FirstOrDefault(c => c.ChampionshipClass == name))
                 .Where(c => c != null && c.Qualifiers > 0)
                 .ToList();

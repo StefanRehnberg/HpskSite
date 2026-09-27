@@ -1495,7 +1495,7 @@ namespace HpskSite.Services
                     {
                         var json = reg.GetValue<string>("shootingClasses") ?? "";
                         var entries = CompetitionRegistrationDocument.DeserializeShootingClasses(json);
-                        classes = string.Join(", ", entries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)));
+                        classes = string.Join(", ", entries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)).Select(HpskSite.Models.ShootingClasses.DisplayName));
                     }
                 }
 

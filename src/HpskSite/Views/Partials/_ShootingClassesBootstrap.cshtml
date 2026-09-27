@@ -12,11 +12,85 @@
     // Emits a site-wide JS mapping of shooting class ID → weapon class code so that
     // front-end code can replace .charAt(0) / .substring(0,1) with window.getWeaponClassCode(id).
     // Critical for A_opt_1 / A_opt_2 / A_opt_3 which would otherwise be misclassified as plain "A".
+    //
+    // ⚠️⚠️ THIS IS THE ONLY CLASS LIST THE BROWSER MAY USE. Never write an array of class ids or
+    // names in a view or script, never parse an id ("_Dam", "_Vet_", charAt(0)), and never show an
+    // Id — show window.getShootingClassName(x). ShootingClassRegistryGuardTests fails the build on
+    // a new hardcoded class literal. category: Open | Dam | VeteranYounger | VeteranOlder | Junior;
+    // level: 1–3 or null (veteran/junior, and magnum, whose number is a weapon, not a level).
     var classesJson = System.Text.Json.JsonSerializer.Serialize(
-        ShootingClasses.All.Select(sc => new { id = sc.Id, name = sc.Name, weapon = sc.Weapon.ToString() }));
+        ShootingClasses.All.Select(sc => new
+        {
+            id = sc.Id,
+            name = sc.Name,
+            description = sc.Description,
+            weapon = sc.Weapon.ToString(),
+            weaponLabel = ShootingClasses.WeaponGroupLabel(sc.Weapon),
+            category = sc.Category.ToString(),
+            level = sc.Level
+        }),
+        new System.Text.Json.JsonSerializerOptions
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        });
 }
 <script>
     window.HpskShootingClasses = @Html.Raw(classesJson);
+    // The registry entry for a class given as Id or Name, or null.
+    window.getShootingClass = function (shootingClassIdOrName) {
+        if (!shootingClassIdOrName) return null;
+        var lower = String(shootingClassIdOrName).trim().toLowerCase();
+        if (!lower) return null;
+        var list = window.HpskShootingClasses || [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].id.toLowerCase() === lower || list[i].name.toLowerCase() === lower) return list[i];
+        }
+        return null;
+    };
+    // 'Open' | 'Dam' | 'VeteranYounger' | 'VeteranOlder' | 'Junior', or '' when unknown.
+    window.getShootingClassCategory = function (shootingClassIdOrName) {
+        var sc = window.getShootingClass(shootingClassIdOrName);
+        return sc ? sc.category : '';
+    };
+    // 1–3, or null (veteran, junior, magnum, unknown).
+    window.getShootingClassLevel = function (shootingClassIdOrName) {
+        var sc = window.getShootingClass(shootingClassIdOrName);
+        return sc ? sc.level : null;
+    };
+    // Human label of a weapon-group code ("A_Opt" → "A Opt", "A_M" → "AM"). Unknown input unchanged.
+    window.getWeaponGroupLabel = function (weaponCode) {
+        if (!weaponCode) return '';
+        var key = String(weaponCode).trim();
+        var list = window.HpskShootingClasses || [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].weapon.toLowerCase() === key.toLowerCase()) return list[i].weaponLabel;
+        }
+        return key;
+    };
+    // A combined weapon-group code as stored on a mixed patrol ("A+A_Opt") → "A+A Opt".
+    window.formatWeaponGroups = function (codes) {
+        if (!codes) return '';
+        return String(codes).split('+').map(function (c) { return window.getWeaponGroupLabel(c.trim()); }).join('+');
+    };
+    // The weapon groups in registry order: [{ code: 'A_Opt', label: 'A Opt' }, …].
+    window.getWeaponGroups = function () {
+        var seen = {}, out = [];
+        (window.HpskShootingClasses || []).forEach(function (sc) {
+            if (!seen[sc.weapon]) { seen[sc.weapon] = 1; out.push({ code: sc.weapon, label: sc.weaponLabel }); }
+        });
+        return out;
+    };
+    // <option> markup for a weapon-group select — never write the list by hand.
+    window.weaponGroupOptionsHtml = function () {
+        return window.getWeaponGroups().map(function (w) {
+            return '<option value="' + w.code + '">' + w.label + '</option>';
+        }).join('');
+    };
+    // Display names for a list of classes, joined — for badges and summaries.
+    window.formatShootingClasses = function (classes, separator) {
+        return (classes || []).map(function (c) { return window.getShootingClassName(c); })
+            .filter(function (n) { return !!n; }).join(separator || ', ');
+    };
     window.getWeaponClassCode = function (shootingClassIdOrName) {
         if (!shootingClassIdOrName) return '';
         var key = String(shootingClassIdOrName).trim();

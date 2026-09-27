@@ -66,6 +66,8 @@ namespace HpskSite.Controllers
         /// TrainingScores row changes. Awards already consumed by a Guldmedalj application are
         /// left untouched (their points are locked into a submitted application).
         /// </summary>
+        private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
         private async Task SyncSelfReportedMedalAsync(int trainingScoreId, TrainingScoreEntry entry)
         {
             var existing = await _medalLedger.GetByTrainingScoreAsync(trainingScoreId);
@@ -106,7 +108,8 @@ namespace HpskSite.Controllers
                     CompetitionName = resolvedName,
                     CompetitionDate = entry.TrainingDate,
                     Location = entry.CompetitionLocation,
-                    ShootingClass = entry.CompetitionShootingClass,
+                    // Stored as the display NAME, like result rows — the form posts the Id.
+                    ShootingClass = NullIfEmpty(HpskSite.Models.ShootingClasses.DisplayName(entry.CompetitionShootingClass)),
                     ProofType = string.IsNullOrEmpty(entry.MedalProofFileRef)
                         ? StandardMedals.ProofAttestation
                         : StandardMedals.ProofFile,
@@ -129,13 +132,13 @@ namespace HpskSite.Controllers
             bool materialChange =
                 existing.MedalType != newMedal ||
                 existing.Year != newYear ||
-                !string.Equals(existing.ShootingClass ?? "", entry.CompetitionShootingClass ?? "", StringComparison.OrdinalIgnoreCase);
+                HpskSite.Models.ShootingClasses.NormalizeKey(existing.ShootingClass) != HpskSite.Models.ShootingClasses.NormalizeKey(entry.CompetitionShootingClass);
 
             existing.Year = newYear;
             existing.Discipline = string.IsNullOrWhiteSpace(entry.Discipline) ? StandardMedals.Precision : entry.Discipline;
             existing.MedalType = newMedal;
             existing.CompetitionDate = entry.TrainingDate;
-            existing.ShootingClass = entry.CompetitionShootingClass;
+            existing.ShootingClass = NullIfEmpty(HpskSite.Models.ShootingClasses.DisplayName(entry.CompetitionShootingClass));
             // The dedicated name/location fields aren't loaded into the edit form, but the
             // description (→ resolvedName fallback) is — so refresh the name whenever we can resolve
             // one, and only overwrite location when the caller actually supplied it.

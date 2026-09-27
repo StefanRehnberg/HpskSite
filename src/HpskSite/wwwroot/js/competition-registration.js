@@ -407,6 +407,7 @@ function updateSubmitButton() {
     const hasMemberSelected = selectedTargetMemberId !== null;
 
     submitBtn.disabled = !hasSelection || !hasMemberSelected;
+    refreshDpTeamRows();
 }
 
 // Alias for updateSubmitButton to be called from registration target code
@@ -501,57 +502,16 @@ function validateLClassSelection(newClassId) {
     return true;
 }
 
+// Competence level ('1'–'3') from the class registry, or null — veteran, junior and magnum
+// classes have none (M1–M9 are different weapons). Returned as a string, as the callers compare it.
 function getClassLevel(classId) {
-    if (!classId) return null;
-    // M-classes are exempt from level matching
-    if (classId.startsWith('M')) {
-        return null;
-    }
-
-    // A-family subgroup IDs (A_m_1, A_p_2, A_g_3, A_opt_1) — level is the trailing digit.
-    // These don't match the simple /([ABCRL])([123])/ regex because the digit isn't
-    // directly after the weapon-group letter, so we extract by ID first.
-    const familyMatch = classId.match(/^A_(?:m|p|g|opt)_([123])$/i);
-    if (familyMatch) return familyMatch[1];
-
-    // Standard IDs (A1, B2, C3, R1, L1) and composites (C1_Dam, L3_Dam).
-    const idMatch = classId.match(/^([ABCRL])([123])(?:_|$)/);
-    if (idMatch) return idMatch[2];
-
-    // Fallback: parse from display name (e.g. when the regex above can't see the digit).
-    const className = getClassDisplayName(classId);
-    const levelMatch = className.match(/([ABCRL])([123])/);
-    return levelMatch ? levelMatch[2] : null;
+    const level = window.getShootingClassLevel(classId);
+    return level == null ? null : String(level);
 }
 
+// Display name from the class registry ("C_Vet_Y" → "C Vet Y"). Never read it off the DOM.
 function getClassDisplayName(classId) {
-    // Get the display name from the label associated with this class
-    const labelSelectors = [
-        `label[for="class_A_${classId}"] strong`,
-        `label[for="class_AOpt_${classId}"] strong`,
-        `label[for="class_AM_${classId}"] strong`,
-        `label[for="class_AP_${classId}"] strong`,
-        `label[for="class_AG_${classId}"] strong`,
-        `label[for="class_B_${classId}"] strong`,
-        `label[for="class_R_${classId}"] strong`,
-        `label[for="class_CR_${classId}"] strong`,
-        `label[for="class_CV_${classId}"] strong`,
-        `label[for="class_CD_${classId}"] strong`,
-        `label[for="class_CJ_${classId}"] strong`,
-        `label[for="class_LR_${classId}"] strong`,
-        `label[for="class_LV_${classId}"] strong`,
-        `label[for="class_LD_${classId}"] strong`,
-        `label[for="class_LJ_${classId}"] strong`,
-        `label[for="class_M_${classId}"] strong`
-    ];
-
-    for (let selector of labelSelectors) {
-        const label = document.querySelector(selector);
-        if (label) {
-            return label.textContent;
-        }
-    }
-    return classId;
+    return window.getShootingClassName(classId);
 }
 
 function updateClassAvailability() {
@@ -668,6 +628,11 @@ async function submitRegistrationForm() {
 
         if (selectedClasses.length === 0) {
             alert('Du måste välja minst en skytteklass för att anmäla dig.');
+            return;
+        }
+
+        // Direktplacering: every selected class needs a skjutlag before we send anything
+        if (!validateDpTeamSelections()) {
             return;
         }
 
@@ -1226,153 +1191,27 @@ function initializeCClassValidation() {
                 return false;
             }
 
-            // Level matching validation: if you select a level (1-3) in ANY class, you must select the same level in ALL other classes
+            // Level matching validation: if you select a level (1-3) in ANY class, you must select
+            // the same level in ALL other classes. The level comes from the class registry —
+            // veteran, junior and magnum classes have none and are therefore exempt.
             let selectedLevel = null;
             let levelSource = '';
-
-            // Check A classes for level
-            if (selectedA) {
-                const match = selectedA.value.match(/^A([123])$/);
-                if (match) {
-                    selectedLevel = match[1];
-                    levelSource = `A${selectedLevel}`;
-                }
-            }
-
-            // Check A Opt classes for level (own weapon group, but level must still match across groups)
-            if (selectedAOpt) {
-                const match = selectedAOpt.value.match(/^A_opt_([123])$/);
-                if (match) {
-                    if (selectedLevel && selectedLevel !== match[1]) {
-                        e.preventDefault();
-                        alert(`Du har valt ${levelSource} och A Opt ${match[1]}. Du måste välja samma nivå (1-3) i alla klasser.`);
-                        return false;
-                    }
-                    if (!selectedLevel) {
-                        selectedLevel = match[1];
-                        levelSource = `A Opt ${selectedLevel}`;
-                    }
-                }
-            }
-
-            // Check AM/AP/AG classes for level — A-family subgroups, same competence ladder
-            // as plain A. Each is its own weapon group; level must match across groups.
-            const aFamilySubs = [
-                { selected: selectedAM, regex: /^A_m_([123])$/, name: 'AM' },
-                { selected: selectedAP, regex: /^A_p_([123])$/, name: 'AP' },
-                { selected: selectedAG, regex: /^A_g_([123])$/, name: 'AG' }
-            ];
-            for (const sub of aFamilySubs) {
-                if (!sub.selected) continue;
-                const match = sub.selected.value.match(sub.regex);
-                if (!match) continue;
-                if (selectedLevel && selectedLevel !== match[1]) {
+            for (const radio of [selectedA, selectedAOpt, selectedAM, selectedAP, selectedAG, selectedB,
+                                 selectedCRegular, selectedCDam, selectedR, selectedLRegular, selectedLDam]) {
+                if (!radio) continue;
+                const level = window.getShootingClassLevel(radio.value);
+                if (level == null) continue;
+                const name = window.getShootingClassName(radio.value);
+                if (selectedLevel != null && selectedLevel !== level) {
                     e.preventDefault();
-                    alert(`Du har valt ${levelSource} och ${sub.name}${match[1]}. Du måste välja samma nivå (1-3) i alla klasser.`);
+                    alert(`Du har valt ${levelSource} och ${name}. Du måste välja samma nivå (1-3) i alla klasser.`);
                     return false;
                 }
-                if (!selectedLevel) {
-                    selectedLevel = match[1];
-                    levelSource = `${sub.name}${selectedLevel}`;
+                if (selectedLevel == null) {
+                    selectedLevel = level;
+                    levelSource = name;
                 }
             }
-
-            // Check B classes for level
-            if (selectedB) {
-                const match = selectedB.value.match(/B([123])/);
-                if (match) {
-                    if (selectedLevel && selectedLevel !== match[1]) {
-                        e.preventDefault();
-                        alert(`Du har valt ${levelSource} och B${match[1]}. Du måste välja samma nivå (1-3) i alla klasser.`);
-                        return false;
-                    }
-                    if (!selectedLevel) {
-                        selectedLevel = match[1];
-                        levelSource = `B${selectedLevel}`;
-                    }
-                }
-            }
-
-            // Check C regular classes for level
-            if (selectedCRegular) {
-                const match = selectedCRegular.value.match(/C([123])/);
-                if (match) {
-                    if (selectedLevel && selectedLevel !== match[1]) {
-                        e.preventDefault();
-                        alert(`Du har valt ${levelSource} och C${match[1]}. Du måste välja samma nivå (1-3) i alla klasser.`);
-                        return false;
-                    }
-                    if (!selectedLevel) {
-                        selectedLevel = match[1];
-                        levelSource = `C${selectedLevel}`;
-                    }
-                }
-            }
-
-            // Check C Dam classes for level matching
-            if (selectedCDam) {
-                const match = selectedCDam.value.match(/C([123])_Dam/);
-                if (match) {
-                    if (selectedLevel && selectedLevel !== match[1]) {
-                        e.preventDefault();
-                        alert(`Du har valt ${levelSource}. Du måste välja C${selectedLevel} Dam för att matcha nivån.`);
-                        return false;
-                    }
-                    if (!selectedLevel) {
-                        selectedLevel = match[1];
-                        levelSource = `C${selectedLevel} Dam`;
-                    }
-                }
-            }
-
-            // Check R classes for level
-            if (selectedR) {
-                const match = selectedR.value.match(/R([123])/);
-                if (match) {
-                    if (selectedLevel && selectedLevel !== match[1]) {
-                        e.preventDefault();
-                        alert(`Du har valt ${levelSource} och R${match[1]}. Du måste välja samma nivå (1-3) i alla klasser.`);
-                        return false;
-                    }
-                    if (!selectedLevel) {
-                        selectedLevel = match[1];
-                        levelSource = `R${selectedLevel}`;
-                    }
-                }
-            }
-
-            // Check L regular classes for level
-            if (selectedLRegular) {
-                const match = selectedLRegular.value.match(/L([123])/);
-                if (match) {
-                    if (selectedLevel && selectedLevel !== match[1]) {
-                        e.preventDefault();
-                        alert(`Du har valt ${levelSource} och L${match[1]}. Du måste välja samma nivå (1-3) i alla klasser.`);
-                        return false;
-                    }
-                    if (!selectedLevel) {
-                        selectedLevel = match[1];
-                        levelSource = `L${selectedLevel}`;
-                    }
-                }
-            }
-
-            // Check L Dam classes for level matching
-            if (selectedLDam) {
-                const match = selectedLDam.value.match(/L([123])_Dam/);
-                if (match) {
-                    if (selectedLevel && selectedLevel !== match[1]) {
-                        e.preventDefault();
-                        alert(`Du har valt ${levelSource}. Du måste välja L${selectedLevel} Dam för att matcha nivån.`);
-                        return false;
-                    }
-                    if (!selectedLevel) {
-                        selectedLevel = match[1];
-                        levelSource = `L${selectedLevel} Dam`;
-                    }
-                }
-            }
-
             // Note: M classes are exempt from level matching validation
         });
     }
@@ -1642,6 +1481,16 @@ function clearAllClassSelections() {
     if (!container) return;
     container.querySelectorAll('input[type="radio"]:checked').forEach(function(r) { r.checked = false; });
     container.querySelectorAll('input[type="checkbox"]:checked').forEach(function(c) { c.checked = false; });
+    refreshDpTeamRows();
+}
+
+// Radios are unchecked programmatically in several places (deselect-on-click, member switch,
+// existing-registration badges) without a change event, so the inline skjutlag rows are
+// re-synced from updateSubmitButton / clearAllClassSelections as well.
+function refreshDpTeamRows() {
+    try {
+        if (typeof onDpClassSelectionChanged === 'function') onDpClassSelectionChanged();
+    } catch (e) { /* Direktplacering state not initialised yet */ }
 }
 
 async function handleMemberSelection() {
@@ -1877,7 +1726,7 @@ function addExistingRegistrationBadges() {
 
         // Get unique class IDs (in case of duplicates)
         const uniqueClasses = [...new Set(classEntries.map(entry => entry.classId))];
-        const classesText = uniqueClasses.join(', ');
+        const classesText = window.formatShootingClasses(uniqueClasses);
 
         // Find the appropriate heading
         const headings = document.querySelectorAll('#classSelections h6');
@@ -2091,7 +1940,7 @@ function showUpdateConfirmationDialog(classId, callback) {
     // Fallback to native confirm if modal not found
     if (!modalElement) {
         console.warn('updateRegistrationConfirmModal not found, using native confirm');
-        const confirmed = confirm(`Du är redan anmäld i ${classId}. Vill du uppdatera din anmälan?`);
+        const confirmed = confirm(`Du är redan anmäld i ${getClassDisplayName(classId)}. Vill du uppdatera din anmälan?`);
         callback(confirmed);
         return;
     }
@@ -2110,7 +1959,7 @@ function showUpdateConfirmationDialog(classId, callback) {
 
     if (!confirmBtn || !cancelBtn) {
         console.warn('Modal buttons not found, using native confirm');
-        const confirmed = confirm(`Du är redan anmäld i ${classId}. Vill du uppdatera din anmälan?`);
+        const confirmed = confirm(`Du är redan anmäld i ${getClassDisplayName(classId)}. Vill du uppdatera din anmälan?`);
         callback(confirmed);
         return;
     }
@@ -2136,6 +1985,9 @@ function showUpdateConfirmationDialog(classId, callback) {
 
 // Show confirmation dialog for replacing an existing registration with new class
 function showReplaceConfirmationDialog(existingClass, newClass, callback) {
+    // Everything below is shown to a person: names, never ids.
+    existingClass = getClassDisplayName(existingClass);
+    newClass = getClassDisplayName(newClass);
     const modalElement = document.getElementById('replaceRegistrationConfirmModal');
 
     // Fallback to native confirm if modal not found
@@ -2189,22 +2041,19 @@ function showReplaceConfirmationDialog(existingClass, newClass, callback) {
     modal.show();
 }
 
-// Get C-class subcategory
-function getCClassSubcategory(classId) {
-    if (classId === 'C1' || classId === 'C2' || classId === 'C3') return 'Regular';
-    if (classId.includes('Vet')) return 'Veteran';
-    if (classId.includes('Dam')) return 'Ladies';
-    if (classId.includes('Jun')) return 'Junior';
-    return 'Regular';
+// C/L subcategory from the class registry: 'Regular' | 'Veteran' | 'Ladies' | 'Junior'.
+// Veteran yngre and äldre are one subcategory here (registration rule).
+function getClassSubcategory(classId) {
+    switch (window.getShootingClassCategory(classId)) {
+        case 'VeteranYounger':
+        case 'VeteranOlder': return 'Veteran';
+        case 'Dam': return 'Ladies';
+        case 'Junior': return 'Junior';
+        default: return 'Regular';
+    }
 }
-
-function getLClassSubcategory(classId) {
-    if (classId === 'L1' || classId === 'L2' || classId === 'L3') return 'Regular';
-    if (classId.includes('Vet')) return 'Veteran';
-    if (classId.includes('Dam')) return 'Ladies';
-    if (classId.includes('Jun')) return 'Junior';
-    return 'Regular';
-}
+function getCClassSubcategory(classId) { return getClassSubcategory(classId); }
+function getLClassSubcategory(classId) { return getClassSubcategory(classId); }
 
 // Validate weapon class conflicts
 function validateWeaponClassConflicts(newClassId) {
@@ -2709,47 +2558,63 @@ function onDpClassSelectionChanged() {
         }
     });
 
+    // The skjutlag choice is rendered INLINE, directly under the class radio it belongs to.
+    // A separate section at the bottom of the modal was below the fold for most shooters, who
+    // then pressed Anmäl and got an error pointing at nothing. The old section markup stays
+    // hidden. With dual C-class registration each C class gets its own row, keyed per class.
     const section = document.getElementById('direktplaceringTeamSection');
-    const container = document.getElementById('teamSelectionContainer');
-
-    if (selectedClasses.length === 0) {
-        section.style.display = 'none';
-        container.innerHTML = '';
-        return;
-    }
-
-    section.style.display = 'block';
+    if (section) section.style.display = 'none';
+    const scope = document.getElementById('classSelections') || document;
 
     // Preserve existing team selections before rebuilding
     const previousSelections = {};
-    container.querySelectorAll('.dp-team-select').forEach(sel => {
+    scope.querySelectorAll('.dp-team-select').forEach(sel => {
         if (sel.value) previousSelections[sel.dataset.classId] = sel.value;
     });
 
     // Remove rows for classes that are no longer selected
-    container.querySelectorAll('.dp-team-row').forEach(row => {
+    scope.querySelectorAll('.dp-team-row').forEach(row => {
         if (!selectedClasses.includes(row.dataset.classId)) row.remove();
     });
+
+    if (selectedClasses.length === 0) {
+        hideDpSubmitError();
+        return;
+    }
 
     const config = window.CompetitionConfig.direktplaceringConfig;
 
     selectedClasses.forEach(classId => {
-        // Skip if row already exists for this class
-        if (container.querySelector(`.dp-team-row[data-class-id="${classId}"]`)) return;
+        const radio = scope.querySelector(`input[type="radio"][value="${CSS.escape(classId)}"]:checked`);
+        const anchor = radio ? radio.closest('.row') : null;
+
+        // Keep an existing row, but make sure it sits right under its class
+        const existingRow = scope.querySelector(`.dp-team-row[data-class-id="${CSS.escape(classId)}"]`);
+        if (existingRow) {
+            if (anchor && anchor.nextElementSibling !== existingRow) anchor.insertAdjacentElement('afterend', existingRow);
+            return;
+        }
 
         // Resolve weapon group via the registry so A_opt_X belongs to "A_Opt", not "A".
         const weaponGroup = window.getWeaponClassCode(classId);
+        const displayName = getClassDisplayName(classId) || classId;
+        const selectId = `dpTeamSelect_${classId.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+
         const row = document.createElement('div');
-        row.className = 'mb-2 dp-team-row';
+        row.className = 'dp-team-row ms-4 me-1 mt-1 mb-2 p-2 rounded border border-primary-subtle';
+        row.style.backgroundColor = 'var(--bs-primary-bg-subtle)';
         row.dataset.classId = classId;
 
         const rowLabel = document.createElement('label');
         rowLabel.className = 'form-label small mb-1 fw-semibold';
-        rowLabel.textContent = `Klass ${classId}:`;
+        rowLabel.htmlFor = selectId;
+        rowLabel.innerHTML = '<i class="bi bi-calendar-check me-1"></i>';
+        rowLabel.appendChild(document.createTextNode(`Välj skjutlag för ${displayName}`));
         row.appendChild(rowLabel);
 
         const select = document.createElement('select');
         select.className = 'form-select form-select-sm dp-team-select';
+        select.id = selectId;
         select.dataset.classId = classId;
 
         // Default option
@@ -2801,12 +2666,60 @@ function onDpClassSelectionChanged() {
             });
         }
 
-        select.addEventListener('change', syncDpTeamSelects);
+        select.addEventListener('change', () => {
+            clearDpTeamInvalid(select);
+            syncDpTeamSelects();
+        });
         row.appendChild(select);
-        container.appendChild(row);
+
+        const feedback = document.createElement('div');
+        feedback.className = 'invalid-feedback';
+        feedback.textContent = `Välj vilket skjutlag du vill skjuta i för ${displayName}.`;
+        row.appendChild(feedback);
+
+        if (anchor) anchor.insertAdjacentElement('afterend', row);
+        else scope.appendChild(row);
     });
 
     syncDpTeamSelects();
+}
+
+function clearDpTeamInvalid(select) {
+    if (select.value) select.classList.remove('is-invalid');
+    if (!document.querySelector('.dp-team-select.is-invalid')) hideDpSubmitError();
+}
+
+function hideDpSubmitError() {
+    const el = document.getElementById('dpSubmitError');
+    if (el) el.classList.add('d-none');
+}
+
+// Returns true when every selected class has a skjutlag. Otherwise marks each empty choice,
+// scrolls to and focuses the first one, and says so next to the Anmäl button — the button
+// itself stays enabled, because a disabled button cannot explain what is missing.
+function validateDpTeamSelections() {
+    if (!window.CompetitionConfig?.isDirektplacering) return true;
+    const selects = Array.from(document.querySelectorAll('#classSelections .dp-team-select'));
+    const missing = selects.filter(s => !s.value);
+    selects.forEach(s => s.classList.toggle('is-invalid', !s.value));
+    if (missing.length === 0) {
+        hideDpSubmitError();
+        return true;
+    }
+
+    const names = missing.map(s => getClassDisplayName(s.dataset.classId) || s.dataset.classId);
+    const errorEl = document.getElementById('dpSubmitError');
+    if (errorEl) {
+        errorEl.textContent = names.length === 1
+            ? `Du behöver välja skjutlag för ${names[0]} — se markeringen ovan.`
+            : `Du behöver välja skjutlag för ${names.join(' och ')} — se markeringarna ovan.`;
+        errorEl.classList.remove('d-none');
+    }
+
+    const first = missing[0];
+    first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => first.focus({ preventScroll: true }), 350);
+    return false;
 }
 
 function syncDpTeamSelects() {
@@ -2819,23 +2732,30 @@ function syncDpTeamSelects() {
 
     selects.forEach(sel => {
         const myClassId = sel.dataset.classId;
-        const teamsUsedByOthers = new Set();
+        // teamNumber → the other class that already uses it (a shooter cannot stand in the
+        // same skjutlag twice, e.g. with two C classes on a dual-C competition)
+        const teamsUsedByOthers = new Map();
         Object.entries(takenTeams).forEach(([classId, teamNum]) => {
-            if (classId !== myClassId) teamsUsedByOthers.add(teamNum);
+            if (classId !== myClassId) teamsUsedByOthers.set(teamNum, classId);
         });
 
         Array.from(sel.options).forEach(opt => {
             if (!opt.value) return; // skip default "-- Välj skjutlag --"
+            if (opt.dataset.baseText === undefined) opt.dataset.baseText = opt.textContent;
             const wasTakenDisabled = opt.dataset.takenDisabled === 'true';
-            const isTakenByOther = teamsUsedByOthers.has(opt.value);
+            const otherClass = teamsUsedByOthers.get(opt.value);
 
-            if (isTakenByOther && !opt.disabled) {
+            if (otherClass && !opt.disabled) {
                 opt.disabled = true;
                 opt.dataset.takenDisabled = 'true';
-            } else if (!isTakenByOther && wasTakenDisabled) {
+                opt.textContent = `${opt.dataset.baseText} [valt för ${getClassDisplayName(otherClass) || otherClass}]`;
+            } else if (!otherClass && wasTakenDisabled) {
                 // Only re-enable if we were the ones who disabled it
                 opt.disabled = false;
                 opt.dataset.takenDisabled = '';
+                opt.textContent = opt.dataset.baseText;
+            } else if (otherClass && wasTakenDisabled) {
+                opt.textContent = `${opt.dataset.baseText} [valt för ${getClassDisplayName(otherClass) || otherClass}]`;
             }
         });
     });

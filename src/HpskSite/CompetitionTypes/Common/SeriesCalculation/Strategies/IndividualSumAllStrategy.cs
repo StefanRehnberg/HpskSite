@@ -180,7 +180,6 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
             Dictionary<string, List<SeriesStandingRow>> standingsByClass,
             List<SeriesCompetitionInfo> competitions)
         {
-            var classOrder = GetClassOrder();
 
             return standingsByClass
                 .Select(kvp =>
@@ -192,7 +191,8 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                     var displayName = sc?.Name ?? kvp.Key;
                     return (DisplayName: displayName, Rows: kvp.Value);
                 })
-                .OrderBy(item => classOrder.GetValueOrDefault(item.DisplayName, 999))
+                // A → A family → B → C → R → M → L, highest skill level first — from the registry.
+                .OrderBy(item => ShootingClassOrder.Key(item.DisplayName, ShootingClassOrder.SeriesStandings, levelDescending: true))
                 .ThenBy(item => item.DisplayName, StringComparer.Ordinal)
                 .Select(item =>
                 {
@@ -225,53 +225,6 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.Strategies
                     };
                 })
                 .ToList();
-        }
-
-        private static Dictionary<string, int> GetClassOrder()
-        {
-            // Weapon groups ordered A → A Opt → B → C → R → M → L.
-            // Within each weapon group, highest skill level first (3 → 2 → 1).
-            return new Dictionary<string, int>
-            {
-                // A group
-                { "A3", 1 }, { "A3 Dam", 2 }, { "A3 Jun", 3 },
-                { "A2", 4 }, { "A2 Dam", 5 }, { "A2 Jun", 6 },
-                { "A1", 7 }, { "A1 Dam", 8 }, { "A1 Jun", 9 },
-
-                // A Opt group (own weapon class)
-                { "A Opt 3", 10 },
-                { "A Opt 2", 11 },
-                { "A Opt 1", 12 },
-
-                // B group
-                { "B3", 20 }, { "B3 Dam", 21 }, { "B3 Jun", 22 },
-                { "B2", 23 }, { "B2 Dam", 24 }, { "B2 Jun", 25 },
-                { "B1", 26 }, { "B1 Dam", 27 }, { "B1 Jun", 28 },
-                { "B Vet Y", 29 }, { "B Vet Y Dam", 30 }, { "B Vet Y Jun", 31 },
-                { "B Vet Ä", 32 }, { "B Vet Ä Dam", 33 }, { "B Vet Ä Jun", 34 },
-
-                // C group
-                { "C3", 40 }, { "C3 Dam", 41 }, { "C3 Jun", 42 },
-                { "C2", 43 }, { "C2 Dam", 44 }, { "C2 Jun", 45 },
-                { "C1", 46 }, { "C1 Dam", 47 }, { "C1 Jun", 48 },
-                { "C Vet Y", 49 }, { "C Vet Y Dam", 50 }, { "C Vet Y Jun", 51 },
-                { "C Vet Ä", 52 }, { "C Vet Ä Dam", 53 }, { "C Vet Ä Jun", 54 },
-                { "C Jun", 55 }, { "C Dam", 56 },
-
-                // R group
-                { "R3", 60 }, { "R2", 61 }, { "R1", 62 },
-
-                // M group
-                { "M1", 70 }, { "M2", 71 }, { "M3", 72 },
-                { "M4", 73 }, { "M5", 74 }, { "M6", 75 },
-                { "M7", 76 }, { "M8", 77 }, { "M9", 78 },
-
-                // L group
-                { "L3", 80 }, { "L3 Dam", 81 },
-                { "L2", 82 }, { "L2 Dam", 83 },
-                { "L1", 84 }, { "L1 Dam", 85 },
-                { "L Vet Y", 86 }, { "L Vet Ä", 87 }, { "L Jun", 88 }
-            };
         }
     }
 }

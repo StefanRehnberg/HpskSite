@@ -1814,7 +1814,7 @@ namespace HpskSite.Controllers
                         .Where(k => !existing.Any(c => string.Equals(c.Class?.Trim(), k, StringComparison.OrdinalIgnoreCase)))
                         .ToList();
                     if (unknown.Count > 0)
-                        return Json(new { success = false, message = $"Anmälan saknar klassen {string.Join(", ", unknown)}." });
+                        return Json(new { success = false, message = $"Anmälan saknar klassen {string.Join(", ", unknown.Select(HpskSite.Models.ShootingClasses.DisplayName))}." });
 
                     foreach (var entry in existing)
                     {
@@ -2829,8 +2829,8 @@ namespace HpskSite.Controllers
                     var shootingClassesJson = reg.GetValue<string>("shootingClasses") ?? "";
                     var classEntries = HpskSite.Models.CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
                     var classes = classEntries.Count > 0
-                        ? string.Join(" | ", classEntries.Select(c => c.Class))
-                        : (reg.GetValue<string>("shootingClass") ?? "");
+                        ? string.Join(" | ", classEntries.Select(c => HpskSite.Models.ShootingClasses.DisplayName(c.Class)))
+                        : HpskSite.Models.ShootingClasses.DisplayName(reg.GetValue<string>("shootingClass") ?? "");
                     var preferences = classEntries.Count > 0
                         ? string.Join(" | ", classEntries.Select(c => c.StartPreference ?? "Inget"))
                         : (reg.GetValue<string>("startPreference") ?? "Inget");

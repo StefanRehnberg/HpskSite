@@ -156,6 +156,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private static string? ExtractClassification(string shootingClass)
         {
             if (string.IsNullOrEmpty(shootingClass)) return null;
+            // Registry first (Id and Name alike); the string test is only for unknown names.
+            var known = ShootingClasses.Resolve(shootingClass);
+            if (known != null)
+            {
+                if (known.IsVeteran) return "Veteran";
+                return known.Category switch
+                {
+                    ClassCategory.Dam => "Dam",
+                    ClassCategory.Junior => "Junior",
+                    _ => null
+                };
+            }
             var lower = shootingClass.ToLower();
             if (lower.Contains("dam")) return "Dam";
             if (lower.Contains("jun")) return "Junior";

@@ -1,3 +1,4 @@
+@await Html.PartialAsync("_ShootingClassesBootstrap")
 @*
  * Placement coverage for every discipline EXCEPT Springskytte, which has its own panel because
  * it also covers stafett teams (see SpringskytteStartListManagement).
@@ -66,7 +67,7 @@ if (!window.hpskLoadStartListCoverage) {
         const wcBadges = (ind.byWeapon || []).map(w => {
             const ok = w.placed >= w.total;
             return `<span class="badge bg-${ok ? 'success' : (noListYet ? 'secondary' : 'danger')} me-1">`
-                 + `Vapengrupp ${hpskCovEsc(w.weaponClass)}: ${w.placed}/${w.total}</span>`;
+                 + `Vapengrupp ${hpskCovEsc(window.getWeaponGroupLabel(w.weaponClass))}: ${w.placed}/${w.total}</span>`;
         }).join('');
 
         const orphans = cov.onListWithoutRegistration || [];
@@ -76,9 +77,9 @@ if (!window.hpskLoadStartListCoverage) {
             const blocks = [];
             (ind.byWeapon || []).filter(w => (w.missing || []).length > 0).forEach(w => {
                 const rows = (w.missing || []).map(m =>
-                    `<li>${hpskCovEsc(m.name)} <span class="text-muted">— ${hpskCovEsc(m.club || '')} · ${hpskCovEsc(m.shootingClass || '')}</span></li>`
+                    `<li>${hpskCovEsc(m.name)} <span class="text-muted">— ${hpskCovEsc(m.club || '')} · ${hpskCovEsc(window.getShootingClassName(m.shootingClass || ''))}</span></li>`
                 ).join('');
-                blocks.push(`<div class="mb-2"><strong>Vapengrupp ${hpskCovEsc(w.weaponClass)} — ${w.missing.length} utan starttid</strong>`
+                blocks.push(`<div class="mb-2"><strong>Vapengrupp ${hpskCovEsc(window.getWeaponGroupLabel(w.weaponClass))} — ${w.missing.length} utan starttid</strong>`
                           + `<ul class="mb-0 small">${rows}</ul></div>`);
             });
             if (orphans.length) {
@@ -88,7 +89,7 @@ if (!window.hpskLoadStartListCoverage) {
                 const rows = orphans.map((m, oi) =>
                     `<li class="mb-1" id="hpskOrphan_${oi}">
                         ${hpskCovEsc(m.name)}
-                        <span class="text-muted">— ${hpskCovEsc(m.club || '')} · står som ${hpskCovEsc(m.shootingClass || '')}</span>
+                        <span class="text-muted">— ${hpskCovEsc(m.club || '')} · står som ${hpskCovEsc(window.getShootingClassName(m.shootingClass || ''))}</span>
                         <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 ms-2"
                                 onclick="hpskRemoveOrphanRow(${oi})">
                             <i class="bi bi-x-lg"></i> Ta bort från listan
@@ -137,7 +138,7 @@ if (!window.hpskLoadStartListCoverage) {
         const o = (window.__hpskOrphans || [])[idx];
         if (!panel || !o) return;
 
-        const msg = `${o.name} står på startlistan som ${o.shootingClass} men har ingen anmälan i den klassen.\n\n`
+        const msg = `${o.name} står på startlistan som ${window.getShootingClassName(o.shootingClass)} men har ingen anmälan i den klassen.\n\n`
             + 'Raden tas bort från startlistan, och eventuella resultat som matats in för just den '
             + 'klassen tas bort med den. Skyttens övriga klasser rörs inte.\n\nTa bort raden?';
         if (!confirm(msg)) return;

@@ -440,16 +440,9 @@
             return (i >= 0 && i < seriesScores.length) ? seriesScores[i] : null;
         }
 
-        // "A_Opt" -> "A Opt", "A_M" -> "AM" … mirrors the prefixes ClassMergingService uses for
-        // combined class names, so the two surfaces name the same weapon group the same way.
+        // "A_Opt" -> "A Opt", "A_M" -> "AM" … from the class registry (ShootingClasses.WeaponGroupLabel).
         function crWeaponGroupLabel(code) {
-            switch (code) {
-                case 'A_Opt': return 'A Opt';
-                case 'A_M': return 'AM';
-                case 'A_P': return 'AP';
-                case 'A_G': return 'AG';
-                default: return code;
-            }
+            return window.getWeaponGroupLabel(code);
         }
 
         // How many weapon groups actually hold more than one class group. 0 = flattening would change

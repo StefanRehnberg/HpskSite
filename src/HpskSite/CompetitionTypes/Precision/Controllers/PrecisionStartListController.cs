@@ -1137,7 +1137,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                     if (sameClass != null)
                     {
-                        return Json(new { success = false, message = $"Skyttan finns redan i startlistan i klass {sameClass.WeaponClass}." });
+                        return Json(new { success = false, message = $"Skyttan finns redan i startlistan i klass {ShootingClasses.DisplayName(sameClass.WeaponClass)}." });
                     }
 
                     var ruleError = ClassRuleConflict(startList,
@@ -1323,7 +1323,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     {
                         success = false,
                         message = $"Vapenklass saknas i begäran. Skyttan har {memberPlacements.Count} " +
-                                  $"placeringar på listan ({string.Join(", ", memberPlacements.Select(s => s.WeaponClass))}), " +
+                                  $"placeringar på listan ({string.Join(", ", memberPlacements.Select(s => ShootingClasses.DisplayName(s.WeaponClass)))}), " +
                                   "så klassen måste anges för att rätt start tas bort."
                     });
                 }
@@ -1374,7 +1374,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                             {
                                 var which = requestedClassKey == null
                                     ? "denna skytt"
-                                    : $"skytten i klass {shooter.WeaponClass}";
+                                    : $"skytten i klass {ShootingClasses.DisplayName(shooter.WeaponClass)}";
                                 return Json(new
                                 {
                                     success = false,
@@ -1695,7 +1695,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var alreadyInTarget = targetTeam.Shooters?.FirstOrDefault(s => s.MemberId == request.MemberId);
                 if (alreadyInTarget != null)
                 {
-                    return Json(new { success = false, message = $"{shooter.Name} står redan i skjutlag {targetTeam.TeamNumber} (bana {alreadyInTarget.Position}, {alreadyInTarget.WeaponClass}) — en skytt kan inte stå på två banor i samma skjutlag." });
+                    return Json(new { success = false, message = $"{shooter.Name} står redan i skjutlag {targetTeam.TeamNumber} (bana {alreadyInTarget.Position}, {ShootingClasses.DisplayName(alreadyInTarget.WeaponClass)}) — en skytt kan inte stå på två banor i samma skjutlag." });
                 }
 
                 // Remove from source team. Platsen lämnas TOM — övriga skyttar står kvar på
@@ -1781,7 +1781,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     : candidates.FirstOrDefault(s => CoverageKeys.Canonical(s.WeaponClass) == CoverageKeys.Canonical(weaponClass))
                       ?? (candidates.Count == 1 ? candidates[0] : null);
                 return shooter is null
-                    ? (null, null, $"Skyttan finns inte i skjutlag {sourceTeamNumber}" + (string.IsNullOrWhiteSpace(weaponClass) ? "." : $" i klass {weaponClass}."))
+                    ? (null, null, $"Skyttan finns inte i skjutlag {sourceTeamNumber}" + (string.IsNullOrWhiteSpace(weaponClass) ? "." : $" i klass {ShootingClasses.DisplayName(weaponClass)}."))
                     : (shooter, team, null);
             }
 
@@ -2254,7 +2254,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     // Also update the underlying registration so the change persists when regenerating start lists
                     var registrationUpdated = await UpdateRegistrationWeaponClass(competitionId, request.MemberId, oldWeaponClass, request.NewWeaponClass);
 
-                    var message = $"Vapenklass har ändrats till {request.NewWeaponClass}.";
+                    var message = $"Vapenklass har ändrats till {ShootingClasses.DisplayName(request.NewWeaponClass)}.";
                     if (registrationUpdated)
                     {
                         message += " Anmälan har också uppdaterats.";
@@ -2300,7 +2300,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                     if (resultRowsUpdated > 0)
                     {
-                        message += $" {resultRowsUpdated} resultatrad(er) flyttades till {request.NewWeaponClass}.";
+                        message += $" {resultRowsUpdated} resultatrad(er) flyttades till {ShootingClasses.DisplayName(request.NewWeaponClass)}.";
                     }
                     else if (resultMigrationFailed)
                     {
