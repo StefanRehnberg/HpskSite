@@ -2026,6 +2026,53 @@ prövar flytt, vägrad tvetydig flytt, vägrat klassbyte, vägrad samma-vapengru
 dubbel-C-inställningen sparas via riktiga sparvägen; återställer allt). Test:
 `PrecisionMixedStartListTests` 7, `ClassRegistrationRuleTests` 14.
 
+### ⚠️⚠️ En plats i ett skjutlag ÄR en skjutplats — banor ur funktion, välj skjutplats (2026-09-26)
+
+Önskemål från Michael Henriksson (tävling 5574). `StartListShooter.Position` är **banan** skytten
+skjuter på, inte ett radnummer.
+
+- **Numrera ALDRIG om ett skjutlag vid redigering.** Borttagning, flytt (en och flera), upp/ner och
+  diskens walk-in (`AssignWalkInToStartListTeam`) numrerade om 1..n, så att ta bort skytten på plats
+  3 flyttade alla efter hen till en annan tavla mitt i tävlingen. Luckan står nu kvar (som
+  `StartListCleanup` redan gjorde). Bara en ny generering numrerar om, med flit.
+- **`StartListTeam.PlaceInFirstFreePosition(shooter, max, broken)` är enda placeringsregeln:**
+  första lucka, annars sist, aldrig en trasig bana. "Antal + 1" är förbjudet — med luckor kan den
+  platsen vara upptagen. `UsableLanes(max, broken)` är skjutlagets verkliga kapacitet.
+- **`StartListPlacement.MoveTo`** (ren klass) = "Välj skjutplats" och dra-och-släpp: ledig bana →
+  flytta; upptagen → `NeedsChoice`, sedan **swap** eller **shift** (flytta ner bara fram till
+  närmaste lucka; inom skjutlaget mot den lämnade platsen). Endpoint `SetShooterPosition`.
+- ⚠️ **En skytt kan inte stå på två banor i samma skjutlag.** I formatet med blandade vapengrupper
+  har samma medlem flera starter i olika skjutlag; en flytt in där hen redan står vägras (även i
+  `MoveShooterToTeam`/`BulkMoveShooters` och vid byte). Playwright-sviten hittade att det annars
+  gav två rader för samma medlem och att nästa flytt tog fel start.
+- ⚠️ **En start pekas ut med medlem + skjutlag + KLASS** (`FindShooter(..., weaponClass)`);
+  redigeraren skickar klassen från raden.
+- **Banor ur funktion per TÄVLING:** tabellen `CompetitionBrokenLane` (`BrokenLaneService`;
+  migrering `create-competition-broken-lane-table.sql`, körd i dev, **EJ i prod**). Läsning
+  degraderar till tomt, skrivning vägrar och namnger migreringen. Generatorn får `UsableLanes` som
+  kapacitet och `MoveOffBrokenLanes` flyttar skyttarna efteråt; finalerna i
+  `PersistFinalsStartListAsync` (bara skjutlag där någon står på en trasig bana, så "Fortsätt i
+  samma ordning" behåller kvalets banor). **Att markera en bana flyttar ingen skytt** — svaret och
+  redigeraren namnger dem. Direktplacering (DP) följer inte trasiga banor.
+- Redigeraren ritar skjutlagen **bana för bana** (luckor och trasiga banor som egna rader).
+  Dra-och-släpp bara med `(hover: hover) and (pointer: fine)`; delegerade lyssnare kopplas en gång.
+- ⚠️ **Redigerarens äldre skrivande endpoints saknar behörighetskontroll** (lägg till, ta bort,
+  flytta, skapa skjutlag, ändra tider). De nya (`SetShooterPosition`, `SetBrokenLanes`) använder
+  `DenyUnlessCanManageAsync` = `_validator.CanManageCompetition`. Ej åtgärdat.
+
+Tester: `StartListPlacementTests` + `StartListTeamPlacementTests` (23). Svit
+`hpsk-verify/skjutplats-verify.mjs` 44/44 på dev 2576 (återställer allt och jämför slutläget).
+Genereringen med trasiga banor är inte provad i webbläsaren (numrerar om dev-datat).
+
+### ⚠️ Klasslistan på en anmälan finns i två skiftlägen (2026-09-26)
+
+`shootingClasses` lagras som `[{"class":…}]` (camelCase, `SerializeShootingClasses`) men klassbytet i
+startlisteredigeraren och `ChangeShooterClass` skrev länge `[{"Class":…}]` (System.Text.Json:s
+standard). Läsare med `GetProperty("class")` kastade, felet svaldes, och skytten försvann tyst ur
+laganmälan (tävling 5574: 4 av 6 Åmål-skyttar). **Läs alltid via
+`CompetitionRegistrationDocument.ReadClassIds` eller `DeserializeShootingClasses`**, skriv alltid via
+`SerializeShootingClasses`. 12 anmälningar i prod bär versalformen; de behöver inte skrivas om.
+
 ### Publicerad startlista kan stänga självanmälan — och "Lägg till efteranmäld" är borta (2026-08-31)
 
 **Problemet Stefan beskrev:** en skytt dyker upp oanmäld strax före start. Anmäler hen sig själv på
