@@ -1,0 +1,109 @@
+@*
+    /allt — zoombar karta över allt som ryms i pistol.nu.
+    Renderas av OmfattningController (routad, ingen Umbraco-nod). Publik, ingen inloggning:
+    sidan ska kunna visas för en kompis på skjutbanan via QR-koden.
+
+    Innehållet bor i wwwroot/js/omfattning-data.js, logiken i wwwroot/js/omfattning.js.
+    Fristående sida (Layout = null): kartan fyller hela skärmen, och sajtens navigering,
+    sidfot och chattknapp hade tagit höjden från den.
+*@
+@model HpskSite.Controllers.OmfattningViewModel
+@{
+    Layout = null;
+    var metaDescription = "Allt som ryms i pistol.nu: tävlingar, skjutbanor, klubben, medlemmar, vapen, ekonomi, styrelsen, utbildning och mer. Zooma in och se hur mycket som finns.";
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Allt som ryms i pistol.nu</title>
+    <meta name="description" content="@metaDescription">
+    <meta property="og:title" content="Allt som ryms i pistol.nu">
+    <meta property="og:description" content="@metaDescription">
+    <meta property="og:url" content="@Model.PageUrl">
+    <meta property="og:type" content="website">
+    <link rel="icon" type="image/png" href="~/images/HPSK_Logo.png">
+    <script>
+        // Samma temanyckel som Master.cshtml, så sidan följer det val medlemmen gjort på sajten.
+        try { document.documentElement.setAttribute('data-theme', localStorage.getItem('hpsk-theme') || 'light'); }
+        catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Instrument+Sans:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="~/css/omfattning.css" asp-append-version="true">
+</head>
+<body>
+<div class="page">
+    <header class="topbar">
+        <a class="brand" href="/">
+            <img src="~/images/HPSK_Logo.png" alt="" width="28" height="28">
+            <span>pistol.nu</span>
+        </a>
+        <div class="topbar-actions">
+            <button type="button" class="tb-btn" id="qrOpen" aria-haspopup="dialog">
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M1 1h5v5H1zm1 1v3h3V2zm8-1h5v5h-5zm1 1v3h3V2zM1 10h5v5H1zm1 1v3h3v-3zm2-8h1v1H4zm8 0h1v1h-1zM4 12h1v1H4zm4-11h1v2H8zm0 3h1v3H7V6h1zm2 4h2v1h-1v1h-1zm3 0h2v2h-1v-1h-1zm-3 3h1v2h-1zm2 0h1v1h2v1h-3zm2-1h1v1h-1zM8 9h1v2H8zm0 3h1v3H8z"/></svg>
+                <span><span class="tb-short">Visa </span>QR-kod</span>
+            </button>
+            @if (Model.IsLoggedIn)
+            {
+                <a class="tb-btn tb-primary" href="/">Till pistol.nu</a>
+            }
+            else
+            {
+                <a class="tb-btn tb-primary" href="@(Model.LoginUrl)?tab=register">Skapa konto<span class="tb-short"> – gratis</span></a>
+            }
+        </div>
+    </header>
+
+    <div class="app">
+        <div class="stage" id="stage">
+            <svg id="svg" role="img" aria-label="Zoombar karta över allt som finns i pistol.nu"></svg>
+            <div class="hdr">
+                <h1>Allt som ryms i pistol.nu</h1>
+                <p><b id="nLeaf">–</b> funktioner i <b id="nArea">–</b> områden. Tävlingar är ett av dem. Klicka på en cirkel, eller nyp och scrolla för att zooma djupare.</p>
+            </div>
+            <div class="crumbs" id="crumbs"></div>
+            <div class="tools">
+                <button id="zin" aria-label="Zooma in">+</button>
+                <button id="zout" aria-label="Zooma ut">−</button>
+                <button id="zhome" aria-label="Visa hela pistol.nu">⌂</button>
+            </div>
+        </div>
+        <aside class="panel">
+            <div class="search">
+                <label for="q" class="eyebrow" style="margin-bottom:8px">Hitta en funktion</label>
+                <input id="q" type="search" placeholder="t.ex. startlista, protokoll, valvet" autocomplete="off">
+                <div class="hits" id="hits" hidden></div>
+            </div>
+            <div class="info" id="info"></div>
+        </aside>
+    </div>
+</div>
+
+<div class="qr-overlay" id="qrOverlay" hidden>
+    <div class="qr-card" role="dialog" aria-modal="true" aria-labelledby="qrTitle">
+        <button type="button" class="qr-close" id="qrClose" aria-label="Stäng">×</button>
+        <h2 id="qrTitle">Visa för en kompis</h2>
+        <p>Låt kompisen rikta mobilkameran mot koden. Sidan öppnas direkt, utan inloggning.</p>
+        <div class="qr-code">
+            @if (Model.QrSvg != null)
+            {
+                @Html.Raw(Model.QrSvg)
+            }
+            else
+            {
+                <p>QR-koden kunde inte skapas. Använd adressen nedan.</p>
+            }
+        </div>
+        <div class="qr-url">@Model.DisplayUrl</div>
+        <button type="button" class="tb-btn" id="qrCopy" data-url="@Model.PageUrl">Kopiera länken</button>
+        <div class="qr-copied" id="qrCopied" aria-live="polite"></div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="~/js/omfattning-data.js" asp-append-version="true"></script>
+<script src="~/js/omfattning.js" asp-append-version="true"></script>
+</body>
+</html>
