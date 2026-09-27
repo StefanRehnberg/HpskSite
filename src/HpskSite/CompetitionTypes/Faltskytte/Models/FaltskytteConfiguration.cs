@@ -158,4 +158,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string MemberName { get; set; } = "";
         public string? ClubName { get; set; }
     }
+
+    /// <summary>
+    /// En annan konfiguration som länkar till stationer i den här. <see cref="Name"/>
+    /// är null när betraktaren inte får se den konfigurationen.
+    /// </summary>
+    public class FaltskytteConfigurationLinker
+    {
+        public string? Name { get; set; }
+        public List<int> StationNumbers { get; set; } = new();
+    }
 }

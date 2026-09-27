@@ -7538,6 +7538,42 @@ kräver båda, så kontakten hämtas per medlem via `IMemberService`. Rollnyckel
 `BoardRoleDefinitions.RoleOrdforande`; de två befintliga ordförandekontrollerna i `BoardMeetingService`
 pekar nu på den i stället för på en literal.
 
+### Undertecknaren: ordföranden eller en utsedd föreningsintygsansvarig (2026-09-27)
+
+Önskemål från Joakim Åman: ordföranden var hårdkodad som undertecknare. Blanketten säger
+"ordföranden eller den i styrelsen som utsetts", så utfärdaren väljer nu i **Undertecknas av**
+(`#fiSignatory`), ordföranden förvald.
+- **De valbara är ordföranden + klubbens utsedda föreningsintygsansvariga** (gruppen
+  `Foreningsintygsansvarig_{klubb}` på en `boardOnly`-rad) — inte hela styrelsen. Joakim: "De som får
+  skriva under är samma som jag lägger in att få mail om ny ansökan." En rad per person
+  (`ReadSigners`); samma lista bygger väljaren OCH dokumentet, så ett erbjudet val aldrig vägras.
+- **Valet är en PEKARE (`IssueForeningsintygRequest.SignatoryRoleId` = `BoardRoles.Id`), aldrig ett
+  namn.** Namn, titel och kontakt läses ur registret på servern — registerfälten kan fortfarande inte
+  postas. Raden och inte medlemmen, eftersom en person kan ha flera uppdrag och titeln följer raden.
+- **⚠️ Ett id utanför klubbens aktiva styrelse VÄGRAS vid utfärdande** (`UnderskriftRollId` jämförs
+  med valet) i stället för att byggaren tyst faller tillbaka på ordföranden — ett intyg i någon
+  annans namn än den valda är värre än inget. Förhandsvisningen får falla tillbaka.
+- `UnderskriftRollId` ligger i snapshotten. `GetIntygDraft` returnerar `signatories`; väljaren
+  töms i `resetIssueForm` så att ett val inte läcker mellan ärenden.
+
+### Diarienumret kommer från medlemmen (2026-09-27)
+
+Vi lämnade blankettens diarienummerruta alltid tom i tron att Polisen fyller i den. Fel: numret står
+på medlemmens licensansökan, och föreningen skriver det på intyget så att Polisen kan koppla intyget
+till rätt ärende (Joakim Åman). Nu: valfritt fält i medlemmens förfrågan
+(`ForeningsintygRequest.Diarienummer`), visas i inkorgen, förifylls i utfärdandeformuläret
+(`applyReqDiarienummer`, bara när fältet är tomt) där klubben kan rätta det, och skrivs ut på båda
+sidorna. `ForeningsintygDocument.Diarienummer` är ett INTYGSFÄLT — utfärdarens värde skrivs ut.
+
+**⚠️ Operatörssteg:** `Migrations/add-diarienummer-to-foreningsintyg-request.sql` **FÖRE deployen**
+(NPoco skriver kolumnen vid varje uppdatering av en förfrågan). Körd i dev 2026-09-27, **EJ i prod.**
+
+Verifierat 45/45 `hpsk-verify/foreningsintyg-undertecknare-verify.mjs`, 7/7
+`foreningsintyg-diarienummer-request-verify.mjs` (medlemmens riktiga endpoint, med tillfälliga
+personuppgifter som återställs) och 156/156 `foreningsintyg-verify`. ⚠️ Snapshotten escapar å/ä/ö
+som `ä` (System.Text.Json:s standardkodare) — en SQL-`LIKE` på ett svenskt namn måste escapas
+likadant.
+
 ### Styrelsebeslutet
 
 `BoardAgendaItemCatalog` fick nyckeln `foreningsintyg` (`ItemType = "text"`). Blanketten säger
@@ -10072,8 +10108,21 @@ skyttens QR ogiltig). Täckning = mottaget + påstått + fakturerat (så länge 
 ### Ytorna — EN modul, `wwwroot/js/competition-fees.js`
 
 - **Anmälningar-fliken** (ny modell): betalstatus ur liggaren i `GetCompetitionRegistrations`/
-  `GetCompetitionTeams` (gamla strängar + `Invoiced`), radåtgärderna → modulen, menyn har
-  "Fakturera en klubb" (ingen samlingsfaktura, påminnelse eller bokföringsunderlag), avgiftspanelen.
+  `GetCompetitionTeams` (gamla strängar + `Invoiced`), radåtgärderna → modulen (Markera som betald
+  m.fl.). **⚠️⚠️ INGEN avgiftspanel och ingen Betalningar-grupp i menyn (Stefans beslut
+  2026-09-26):** avstämning mot Swish/bank, "Fakturera en klubb" och påminnelser är KASSÖRENS och
+  bor bara i Ekonomi → Fakturor. Panelen var en kopia med en andra tabell över samma anmälningar,
+  och den visades även på tävlingar utan avgifter. Lägg inte tillbaka den.
+- **"Får klubben betala i stället för skytten?"** sätts i tävlingsguiden, Redigera tävling och
+  Springskyttemodalen via `Views/Partials/_ClubPaysFeeSetting.cshtml` (modell = fält-prefix).
+  ⚠️ Inställningen är SQL (`CompetitionFeeSettings`), inte en doctype-egenskap: kryssrutorna har
+  **inga `name`** (hamnar aldrig i fältpåsen) och sparas med ett EGET anrop
+  (`CompetitionFee/SaveSettings`) efter att tävlingen sparats — i guiden med `data.data.id` från
+  `CreateCompetition`. Läses med `CompetitionFee/GetSettings` (bär `model`; dold för `legacy`).
+  Rutan och varje typ visas bara när dialogens avgiftsfält har en avgift. Tomt val utan tidigare
+  sparat val skrivs inte (en Skjutledare får skapa tävlingar men saknar finansrätt). I Ekonomi-
+  panelen är valet bara läsbart. `GetIssuerFees` visar inte en tävling vars avgifter alla är
+  makulerade och som saknar pengar och fakturor.
 - **Ekonomi → Fakturor** (ny rälspost efter Avgifter): tävlingar med avgifter, samma panel, fakturor
   till klubbar, fakturor från andra föreningar, och **den gamla modellens lista orörd** under
   "Fakturor enligt det gamla sättet".
@@ -10112,8 +10161,13 @@ tävlingar som legacy — kör den i deployfönstret). Körd i dev, TranCount 0.
 `/health/ledger` = `tables=26 triggers=9 sandbox=26 sandboxtriggers=8`.
 
 **Sviter:** `hpsk-verify/tavlingsavgift-verify.mjs` **67/67** (A/B: med spärren i PaymentService
-avstängd faller "inga gamla fakturor skapades"), `tavlingsavgift-ui-verify.mjs <tävling>` **21/21**
-med skärmdumpar. Enhetstester 1484.
+avstängd faller "inga gamla fakturor skapades"), `tavlingsavgift-ui-verify.mjs <tävling>` **43/43**
+med skärmdumpar (2026-09-26: frånvaron på Anmälningar, rutan i Redigera tävling inkl. spara-rundtur
+och återställning, rutan i guiden, läsbart val + fakturadialog i Ekonomi). ⚠️ Grundsvitens fixtur
+måste ha `allowDualCClass: 'true'` (skytt 1 anmäls i C1 + C Jun) och fälten Redigera tävling kräver
+(plats, tävlingsledare, e-post, anmälningsdatum) — annars vägrar dialogen spara. Kör alltid grund-
+sviten först: UI-sviten anmäler en skytt och går inte att köra två gånger på samma tävling.
+Enhetstester 1484.
 
 ## SIE-importen — en förening flyttar hit mitt i året (P10.2, 2026-09-24)
 

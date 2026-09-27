@@ -241,6 +241,8 @@
                         </div>
                     </div>
 
+                    @await Html.PartialAsync("_ClubPaysFeeSetting", "springEdit_")
+
                     <hr>
 
                     </section>
@@ -635,6 +637,9 @@ window.populateSpringEditModal = function(comp) {
     springEditAllowTeamsChange();
     springEditAllowStafettChange();
 
+    // "Får klubben betala…" — egen SQL-inställning, läses separat (_ClubPaysFeeSetting).
+    if (window.hpskClubPays) hpskClubPays.load('springEdit_', parseInt(comp.id, 10) || 0);
+
     // Description via CKEditor
     if (springEditDescEditor) {
         springEditDescEditor.setData(comp.description || '');
@@ -975,6 +980,14 @@ function springEditSave() {
 
         if (data.success) {
             document.getElementById('springEditFormErrors').classList.add('d-none');
+
+            // "Får klubben betala…" sparas med ett eget anrop. ⚠️ Ett misslyckande SÄGS.
+            if (window.hpskClubPays) {
+                hpskClubPays.save('springEdit_', competitionId).then(r => {
+                    if (!r.success && typeof showNotification === 'function') showNotification(r.message, 'warning');
+                    else if (!r.success) alert(r.message);
+                });
+            }
 
             // Handle series move
             const seriesDropdown = document.getElementById('springEdit_seriesId');

@@ -349,6 +349,12 @@
                            placeholder="t.ex. Precision C">
                 </div>
 
+                <div class="mb-3">
+                    <label class="form-label small" for="fwReqDiarienummer">Diarienummer på din licensansökan <span class="text-muted">(om du har det)</span></label>
+                    <input type="text" class="form-control" id="fwReqDiarienummer" name="fwReqDiarienummer" autocomplete="off" maxlength="50">
+                    <div class="form-text">Numret Polisen gav din licensansökan. Klubben skriver det på intyget så att Polisen kan koppla intyget till rätt ärende. Har du inte skickat in ansökan än kan du lämna fältet tomt.</div>
+                </div>
+
                 <div>
                     <label class="form-label small" for="fwReqMessage">Meddelande till klubben</label>
                     <textarea class="form-control" id="fwReqMessage" name="fwReqMessage" autocomplete="off" rows="2" maxlength="1000"></textarea>
@@ -870,6 +876,7 @@
 
         document.getElementById('fwReqError').classList.add('d-none');
         document.getElementById('fwReqMessage').value = '';
+        document.getElementById('fwReqDiarienummer').value = '';
 
         var fsel = document.getElementById('fwReqFirearm');
         fsel.innerHTML = list.map(function (x) {
@@ -1137,6 +1144,7 @@
             forbund: document.getElementById('fwReqForbund').value,
             vapengrupp: document.getElementById('fwReqVapengrupp').value,
             message: document.getElementById('fwReqMessage').value,
+            diarienummer: document.getElementById('fwReqDiarienummer').value,
             // ⚠️ "1", inte true: parametern är en STRÄNG på servern just för att "1"/"0" inte
             // binder till bool i ASP.NET Core. Se `RequestIntyg`.
             antalVapenBekraftat: '1'

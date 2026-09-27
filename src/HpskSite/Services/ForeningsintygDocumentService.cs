@@ -56,7 +56,10 @@ namespace HpskSite.Services
         /// Ett utkast för (medlem, klubb). <paramref name="activityYear"/> är bara vilket år
         /// aktivitetsunderlaget visas för — det påverkar inga fält på blanketten.
         /// </summary>
-        public async Task<ForeningsintygDocument?> BuildDraftAsync(int memberId, int clubId, int activityYear)
+        /// <paramref name="signatoryRoleId"/> = styrelseraden som ska underteckna; 0 = föreslå
+        /// ordföranden. En rad som inte är en aktiv styrelseledamot i klubben ignoreras här —
+        /// anroparen jämför <c>UnderskriftRollId</c> med sitt val och vägrar vid utfärdande.
+        public async Task<ForeningsintygDocument?> BuildDraftAsync(int memberId, int clubId, int activityYear, int signatoryRoleId = 0)
         {
             var member = _memberService.GetById(memberId);
             if (member == null) return null;
@@ -72,7 +75,7 @@ namespace HpskSite.Services
             FillPersonal(doc, member);
             FillClub(doc, clubId);
             FillMembershipStart(doc, memberId, clubId);
-            FillSignatory(doc, clubId);
+            FillSignatory(doc, clubId, signatoryRoleId);
             await FillMarkenAsync(doc, memberId);
 
             doc.SaknadeRegisterfalt = MissingRegisterFields(member, doc);
@@ -160,29 +163,116 @@ namespace HpskSite.Services
         // ── Underskrift ──────────────────────────────────────────────
 
         /// <summary>
-        /// Ordföranden föreslås som undertecknare — blanketten säger att intyget skrivs under av
-        /// ordföranden eller den i styrelsen som utsetts, så det är ett förslag och inte ett beslut.
+        /// De som kan underteckna, ordföranden först: <b>ordföranden och klubbens utsedda
+        /// föreningsintygsansvariga</b>. Blanketten säger "ordföranden eller den i styrelsen som
+        /// utsetts", och de utsedda är just de styrelsen pekat ut — samma personer som får mejl om
+        /// nya förfrågningar och får läsa medlemmarnas vapenuppgifter (Joakim Åman 2026-09-27: "De
+        /// som får skriva under är samma som jag lägger in att få mail om ny ansökan").
         ///
-        /// ⚠️ <c>BoardRoleService</c> resolvar bara NAMNET; e-post och telefon finns inte där. Måste
-        /// hämtas per medlem via <c>IMemberService</c>, annars står blankettens kontaktrader tomma.
+        /// <para>Rollen kräver redan ett styrelseuppdrag i klubben, så listan är en delmängd av
+        /// styrelsen (<c>boardOnly</c>): revisor och valberedning kommer aldrig med.</para>
         /// </summary>
-        private void FillSignatory(ForeningsintygDocument doc, int clubId)
+        public List<ForeningsintygSignatoryOption> GetSignatoryOptions(int clubId)
         {
-            if (clubId <= 0) return;
+            var list = new List<ForeningsintygSignatoryOption>();
+            foreach (var r in ReadSigners(clubId))
+            {
+                var person = r.MemberId > 0 ? _memberService.GetById(r.MemberId) : null;
+                var name = person == null ? (r.MemberName ?? "") : PersonName(person);
+                list.Add(new ForeningsintygSignatoryOption
+                {
+                    RoleId = r.Id,
+                    Name = name,
+                    Title = r.DisplayTitle,
+                    IsChair = r.RoleKey == BoardRoleDefinitions.RoleOrdforande,
+                    IsAppointed = IsAppointed(r.MemberId, clubId),
+                    // Blankettens kontaktrader läses ur undertecknarens medlemsprofil. Saknas de
+                    // syns det i väljaren, innan någon skriver under.
+                    MissingContact = person == null
+                        || string.IsNullOrWhiteSpace(person.Email)
+                        || (string.IsNullOrWhiteSpace(Val(person, "phoneNumber")) && string.IsNullOrWhiteSpace(Val(person, "landlinePhone")))
+                });
+            }
+            return list;
+        }
 
-            BoardRole? signatory = null;
+        /// <summary>
+        /// Styrelseraderna för de som får underteckna — en rad per PERSON. Ordförandens rad först;
+        /// en utsedd person med flera uppdrag representeras av sitt första (registrets ordning),
+        /// eftersom titeln på blanketten följer raden.
+        ///
+        /// ⚠️ Samma lista används för väljaren OCH för att bygga dokumentet. Två listor hade kunnat
+        /// vara oense om vem som är valbar, och då vägras ett val väljaren själv erbjöd.
+        /// </summary>
+        private List<BoardRole> ReadSigners(int clubId)
+        {
+            if (clubId <= 0) return new();
             try
             {
                 var board = _boardRoles.GetBoardMembers(DocumentOwnerType.Club, clubId, boardOnly: true);
-                signatory = board.FirstOrDefault(r => r.RoleKey == BoardRoleDefinitions.RoleOrdforande)
-                            ?? board.FirstOrDefault();
+                var chair = board.Where(r => r.RoleKey == BoardRoleDefinitions.RoleOrdforande).ToList();
+                var chairMembers = chair.Select(r => r.MemberId).ToHashSet();
+                var appointed = board
+                    .Where(r => r.RoleKey != BoardRoleDefinitions.RoleOrdforande
+                                && !chairMembers.Contains(r.MemberId)
+                                && IsAppointed(r.MemberId, clubId))
+                    .GroupBy(r => r.MemberId)
+                    .Select(g => g.OrderBy(r => r.SortOrder).First());
+                return chair.Concat(appointed).ToList();
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Föreningsintyg: kunde inte läsa styrelsen för klubb {ClubId}", clubId);
+                return new();
             }
+        }
+
+        /// <summary>
+        /// Bär medlemmen rollen föreningsintygsansvarig för klubben? Samma grupp som
+        /// <see cref="HpskSite.Services.Firearms.FirearmAuthorizationService"/> läser; styrelsekravet
+        /// uppfylls redan av att raden kommer ur <c>boardOnly</c>-listan.
+        /// </summary>
+        private bool IsAppointed(int memberId, int clubId)
+        {
+            if (memberId <= 0) return false;
+            try
+            {
+                return _memberService.GetAllRoles(memberId)
+                    .Contains(HpskSite.Services.Firearms.FirearmAuthorizationService.GroupName(clubId));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Föreningsintyg: kunde inte läsa roller för medlem {MemberId}", memberId);
+                return false;
+            }
+        }
+
+        private static string PersonName(IMember person)
+        {
+            var name = $"{Val(person, "firstName")} {Val(person, "lastName")}".Trim();
+            return string.IsNullOrWhiteSpace(name) ? (person.Name ?? "") : name;
+        }
+
+        /// <summary>
+        /// Ordföranden föreslås som undertecknare, men utfärdaren kan välja en utsedd
+        /// föreningsintygsansvarig — blanketten säger "ordföranden eller den i styrelsen som utsetts".
+        ///
+        /// ⚠️ Valet är en PEKARE på en styrelserad, aldrig ett namn. Namn, titel och kontakt läses
+        /// alltid ur registret, så den som utfärdar kan inte skriva under i någon annans namn.
+        /// En rad som inte finns bland de valbara ignoreras här (dokumentet får förslaget);
+        /// utfärdandet vägrar i stället för att tyst byta undertecknare.
+        ///
+        /// ⚠️ <c>BoardRoleService</c> resolvar bara NAMNET; e-post och telefon finns inte där. Måste
+        /// hämtas per medlem via <c>IMemberService</c>, annars står blankettens kontaktrader tomma.
+        /// </summary>
+        private void FillSignatory(ForeningsintygDocument doc, int clubId, int signatoryRoleId)
+        {
+            var board = ReadSigners(clubId);
+            var signatory = (signatoryRoleId > 0 ? board.FirstOrDefault(r => r.Id == signatoryRoleId) : null)
+                            ?? board.FirstOrDefault();
             if (signatory == null) return;
 
+            doc.UnderskriftRollId = signatory.Id;
             doc.BefattningFunktion = signatory.DisplayTitle;
 
             var person = signatory.MemberId > 0 ? _memberService.GetById(signatory.MemberId) : null;
@@ -192,8 +282,7 @@ namespace HpskSite.Services
                 return;
             }
 
-            var name = $"{Val(person, "firstName")} {Val(person, "lastName")}".Trim();
-            doc.Namnfortydligande = string.IsNullOrWhiteSpace(name) ? (person.Name ?? "") : name;
+            doc.Namnfortydligande = PersonName(person);
             doc.UnderskriftEPost = person.Email ?? "";
             doc.UnderskriftTelefonMobil = Val(person, "phoneNumber");
             doc.UnderskriftTelefon = Val(person, "landlinePhone");

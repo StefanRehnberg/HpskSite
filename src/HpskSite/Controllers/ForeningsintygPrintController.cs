@@ -141,7 +141,8 @@ namespace HpskSite.Controllers
                 return View("~/Views/ForeningsintygPrint.cshtml", Denied());
 
             var doc = await _builder.BuildDraftAsync(
-                req.MemberId, req.ClubId, req.ActivityYear > 0 ? req.ActivityYear : DateTime.Today.Year);
+                req.MemberId, req.ClubId, req.ActivityYear > 0 ? req.ActivityYear : DateTime.Today.Year,
+                req.SignatoryRoleId);
             if (doc == null) return NotFound();
 
             req.ApplyTo(doc);

@@ -226,8 +226,9 @@ window.HpskFees = (function () {
     // ═════════════════════════════════ ARRANGÖREN ═════════════════════════════════════════
 
     /**
-     * Arrangörens avprickning: sammanfattning, val av vad klubben får betala för, det som väntar
-     * på en handling, alla avgifter och tävlingens fakturor.
+     * Kassörens avprickning (Ekonomi → Fakturor): sammanfattning, det som väntar på en handling,
+     * vad klubben får betala för (bara läsbart), alla avgifter och tävlingens fakturor.
+     * ⚠️ Visas INTE längre på Anmälningar-fliken (2026-09-26) — där räcker radernas Åtgärder.
      */
     async function renderOrganiserPanel(el, competitionId, opts) {
         opts = opts || {};
@@ -271,14 +272,16 @@ window.HpskFees = (function () {
         }
         h += '<div class="hf-msg px-3 pb-2"></div></div></div>';
 
-        // Val: vad får klubben betala för?
+        // Vad klubben får betala för — BARA LÄSBART här. ⚠️ Inställningen hör till tävlingen och
+        // sätts i tävlingsguiden och Redigera tävling (_ClubPaysFeeSetting.cshtml), innan första
+        // anmälan; den styr vad skytten får välja. Kassören behöver veta vad som gäller, inte ändra det.
         const types = d.settings.clubPayableTypes || [];
-        h += '<div class="card mb-3"><div class="card-header fw-semibold">Får klubben betala i stället för skytten?</div><div class="card-body">'
-            + '<div class="small text-body-secondary mb-2">För det du inte kryssar i betalar skytten direkt vid anmälan. För det du kryssar i kan skytten välja "Klubben betalar", och du skickar sedan en faktura till klubben.</div>'
-            + '<div class="d-flex flex-wrap gap-3">' + d.settings.allTypes.map(x =>
-                '<div class="form-check"><input class="form-check-input hf-type" type="checkbox" value="' + x.key + '" id="hft' + competitionId + x.key + '"' + (types.indexOf(x.key) >= 0 ? ' checked' : '') + '>'
-                + '<label class="form-check-label" for="hft' + competitionId + x.key + '">' + esc(x.label) + '</label></div>').join('') + '</div>'
-            + '<button type="button" class="btn btn-outline-primary btn-sm mt-2 hf-save-types">Spara</button><div class="hf-msg"></div></div></div>';
+        const typeLabel = k => { const x = (d.settings.allTypes || []).find(t => t.key === k); return x ? x.label : k; };
+        h += '<div class="small text-body-secondary mb-3 hf-clubpays-note">'
+            + (types.length
+                ? 'Klubben får betala för: <strong>' + types.map(k => esc(typeLabel(k))).join(', ') + '</strong>. Övriga avgifter betalar skytten direkt vid anmälan.'
+                : 'Alla betalar sina avgifter direkt vid anmälan — klubben får inte betala i skyttens ställe.')
+            + ' Ändras av arrangören under Redigera tävling.</div>';
 
         // Alla avgifter
         const filterAll = opts.filter || 'all';
@@ -322,11 +325,6 @@ window.HpskFees = (function () {
             msg(b.closest('.card').querySelector('.hf-msg'), r.message, r.success);
             if (r.success) setTimeout(reload, 900); else b.disabled = false;
         }));
-        root.querySelector('.hf-save-types').addEventListener('click', async (e) => {
-            const types2 = Array.from(root.querySelectorAll('.hf-type:checked')).map(x => x.value);
-            const r = await post('SaveSettings', { competitionId, types: types2 });
-            msg(e.target.closest('.card-body').querySelector('.hf-msg'), r.message, r.success);
-        });
         root.querySelector('.hf-filter').addEventListener('change', (e) => { opts.filter = e.target.value; reload(); });
         root.querySelector('.hf-resync').addEventListener('click', async (e) => {
             e.target.disabled = true;

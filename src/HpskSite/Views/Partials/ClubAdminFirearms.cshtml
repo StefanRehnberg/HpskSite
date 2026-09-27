@@ -1601,6 +1601,9 @@
         var msg = r.memberMessage
             ? '<div class="small text-muted fst-italic">”' + esc(r.memberMessage) + '”</div>'
             : '';
+        // Licensansökans diarienummer, om medlemmen angav det. Förifylls i blanketten.
+        if (r.diarienummer)
+            msg += '<div class="small text-muted">Diarienummer: ' + esc(r.diarienummer) + '</div>';
 
         // ⚠️ ETT ÄRENDE SOM VÄNTAR PÅ MEDLEMMEN MÅSTE SE ANNORLUNDA UT. `UnderBehandling` ligger i
         // `Open` med flit — förfrågan är fortfarande klubbens ärende, bara inte klubbens tur — men

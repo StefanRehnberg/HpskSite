@@ -387,7 +387,9 @@ namespace HpskSite.Controllers
             // ⚠️ STRÄNG, inte bool. "1"/"0" binder INTE till bool i ASP.NET Core — värdet faller
             // tyst tillbaka på default, och en obekräftad räkning hade då sluppit förbi spärren.
             // Fjärde gången den fällan slår till i den här kodbasen; se `IsTrueFlag`.
-            string? antalVapenBekraftat = null)
+            string? antalVapenBekraftat = null,
+            // Licensansökans diarienummer hos Polisen, om medlemmen har det. Valfritt.
+            string? diarienummer = null)
         {
             var memberId = await CurrentMemberIdAsync();
             if (memberId <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
@@ -443,7 +445,7 @@ namespace HpskSite.Controllers
                 || bekraftat.Equals("on", StringComparison.OrdinalIgnoreCase);
 
             var (requestId, error) = _requests.Create(
-                memberId, clubId, kind, firearmId, forbund ?? "", vapengrupp, message, antalOk);
+                memberId, clubId, kind, firearmId, forbund ?? "", vapengrupp, message, antalOk, diarienummer);
 
             if (error is not null) return Json(new { success = false, message = error });
 

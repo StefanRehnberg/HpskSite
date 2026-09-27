@@ -439,6 +439,8 @@
                             <small class="form-text text-muted">0 för ingen stafettavgift</small>
                         </div>
 
+                        @await Html.PartialAsync("_ClubPaysFeeSetting", "wizard_")
+
                         <hr class="my-3">
 
                         <div class="mb-3">
@@ -1001,6 +1003,7 @@ document.getElementById('competitionWizardModal').addEventListener('show.bs.moda
     }
     wizardCurrentStep = 0;
     resetWizard();
+    if (window.hpskClubPays) hpskClubPays.reset('wizard_');
     detectContext();
     loadClubsForWizard();
     loadRegionsForWizard();
@@ -1826,6 +1829,16 @@ function submitWizard() {
             // Reset button state BEFORE closing modal
             btnCreate.disabled = false;
             btnCreate.innerHTML = originalText;
+
+            // "Får klubben betala…" — kan först sparas nu, när tävlingen har ett id.
+            // ⚠️ Läses FÖRE att guiden stängs; nästa öppning nollställer rutan.
+            if (window.hpskClubPays) {
+                const newId = parseInt(data.data && data.data.id, 10) || 0;
+                hpskClubPays.save('wizard_', newId).then(r => {
+                    if (!r.success && typeof showNotification === 'function') showNotification(r.message, 'warning');
+                    else if (!r.success) alert(r.message);
+                });
+            }
 
             // Close wizard
             const modal = bootstrap.Modal.getInstance(document.getElementById('competitionWizardModal'));

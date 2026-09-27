@@ -780,10 +780,40 @@ function createDefaultFigure(num) {
     return { figureNumber: num, isPoangmal: false, behavior: "Fast", sizeGroup: 0 };
 }
 
-function faltCfgUpdateStations() {
-    faltCfgStationCount = parseInt(document.getElementById('faltCfg_stationCount').value) || 8;
-    faltCfgWeaponClasses.forEach(wc => ensureStations(wc));
-    renderActiveTab();
+// Ändrat antal stationer. Att sänka antalet tar bort stationerna med HÖGST nummer —
+// inte den station operatören tänkt bort. Har någon av dem inställningar sägs det
+// först, med en hänvisning till "Ta bort stationen" (rapport 2026-09-27: en
+// operatör lade den oönskade stationen sist och sänkte antalet, vilket bara
+// fungerar om den råkade ha högst nummer).
+async function faltCfgUpdateStations() {
+    var input = document.getElementById('faltCfg_stationCount');
+    var requested = parseInt(input.value, 10);
+    if (!requested || requested < 1) { input.value = faltCfgStationCount; return; }
+    var previous = faltCfgStationCount;
+    if (requested < previous) {
+        var removed = [];
+        for (var n = requested + 1; n <= previous; n++) removed.push(n);
+        var withContent = removed.filter(function (num) {
+            return faltCfgStationClassKeys().some(function (wc) {
+                return faltCfgStationHasContent(faltCfgData[wc].stations.find(function (s) { return s.station === num; }));
+            });
+        });
+        if (withContent.length > 0) {
+            var ok = confirm('Att sänka antalet till ' + requested + ' tar bort ' +
+                withContent.map(faltCfgStationLabel).join(', ') + ', som har inställningar.\n\n' +
+                'Vill du ta bort en annan station, avbryt och välj "Ta bort stationen" i den stationens Åtgärder-meny.\n\n' +
+                'Ta bort ' + (withContent.length === 1 ? 'stationen' : 'stationerna') + '?');
+            if (!ok) { input.value = previous; return; }
+        }
+        var mapping = {};
+        removed.forEach(function (num) { mapping[num] = null; });
+        if (!await faltCfgConfirmLinkImpact(mapping)) { input.value = previous; return; }
+        faltCfgApplyRenumber(mapping);
+    }
+    faltCfgStationCount = requested;
+    faltCfgStationClassKeys().forEach(function (wc) { ensureStations(wc); });
+    faltCfgWeaponClasses.forEach(function (wc) { if (faltCfgData[wc]) ensureStations(wc); });
+    await faltCfgCommitStructure();
 }
 
 function buildTabs() {
@@ -978,25 +1008,199 @@ function faltCfgCopyStation(stationNum, wc) {
     renderActiveTab();
 }
 
-// Reorder a station within the active weapon class. direction = -1 (up) / +1 (down).
-// Swaps array positions only — the station NUMBER (its stable identity) doesn't
-// change, so result entry / QR / patrol pages (which look up by number) are
-// unaffected. The order is per weapon class; linked classes stay in sync because
-// faltCfgMarkDirty → faltCfgSyncLinked copies the whole (reordered) config across.
-function faltCfgMoveStation(wc, stationNum, direction) {
-    var stations = faltCfgData[wc] && faltCfgData[wc].stations;
-    if (!stations) return;
-    var idx = stations.findIndex(function(s) { return s.station === stationNum; });
-    if (idx < 0) return;
-    var target = idx + direction;
-    if (target < 0 || target >= stations.length) return;
-    var neighbourNum = stations[target].station;
-    var tmp = stations[idx];
-    stations[idx] = stations[target];
-    stations[target] = tmp;
-    faltCfgMarkDirty(wc, stationNum);
-    faltCfgMarkDirty(wc, neighbourNum);
+// ─── Stationsordning: PLATSEN I LISTAN ÄR STATIONSNUMRET ──────────────
+// Tidigare bytte en flytt bara plats i listan medan numret låg kvar, eftersom
+// numret sågs som stationens fasta identitet. Men patruller, resultatinmatning
+// och QR-koder går på NUMRET, så en flytt ändrade ingenting på tävlingen — bara i
+// redigeraren. Operatören döpte om stationen till "Station 5" för att få ordningen
+// att stämma och fick "Station 7 – Station 5" på stationskortet (rapport från
+// Folkestorp 2026-09-27).
+//
+// Nu: varje strukturell ändring (flytt, borttagning, ändrat antal) numrerar om så
+// att listan alltid är 1..n i nummerordning, i ALLA vapenklasser samtidigt — en
+// station är en fysisk plats i skogen, samma för alla klasser.
+//
+// Det är säkert här: en tävling får en KOPIA av konfigurationen när den ansluts,
+// så redan anslutna tävlingar påverkas inte. Det som kan påverkas är andra
+// konfigurationer som LÄNKAR en station härifrån (länken pekar på numret) — därför
+// frågar faltCfgConfirmLinkImpact innan något ändras.
+
+function faltCfgStationClassKeys() {
+    return Object.keys(faltCfgData).filter(function (k) {
+        return !faltCfgIsMetaKey(k) && faltCfgData[k] && Array.isArray(faltCfgData[k].stations);
+    });
+}
+
+function faltCfgSortStationsByNumber() {
+    faltCfgStationClassKeys().forEach(function (wc) {
+        faltCfgData[wc].stations.sort(function (a, b) { return a.station - b.station; });
+    });
+}
+
+// True när någon klass har listan i annan ordning än numren — gamla konfigurationer
+// där flyttar gjordes innan platsen blev numret.
+function faltCfgOrderDiffersFromNumbers() {
+    return faltCfgStationClassKeys().some(function (wc) {
+        var sts = faltCfgData[wc].stations;
+        for (var i = 1; i < sts.length; i++) if (sts[i].station < sts[i - 1].station) return true;
+        return false;
+    });
+}
+
+// Station innehåller något operatören har gjort: namn, figurval, bilder, beskrivning.
+// Används för att varna innan en station försvinner.
+function faltCfgStationHasContent(st) {
+    if (!st) return false;
+    if (st.name) return true;
+    return (st.targetGroups || []).some(function (tg) {
+        if (tg.imageUrl || tg.description) return true;
+        return (tg.figures || []).some(function (f) { return !!(f.targetName || f.imageUrl || f.targetId); });
+    });
+}
+
+function faltCfgStationLabel(num) {
+    var canonical = faltCfgGetCanonicalClass();
+    var st = (faltCfgData[canonical] && faltCfgData[canonical].stations || []).find(function (s) { return s.station === num; });
+    return 'Station ' + num + (st && st.name ? ' (' + st.name + ')' : '');
+}
+
+// mapping: { gammaltNummer: nyttNummer | null }  (null = tas bort). Nummer som inte
+// finns i mappningen behålls. Flyttar även osparad-markeringar och öppet kort.
+function faltCfgApplyRenumber(mapping) {
+    function mapNum(n) { return Object.prototype.hasOwnProperty.call(mapping, n) ? mapping[n] : n; }
+    faltCfgStationClassKeys().forEach(function (wc) {
+        faltCfgData[wc].stations = faltCfgData[wc].stations
+            .filter(function (s) { return mapNum(s.station) !== null; })
+            .map(function (s) { s.station = mapNum(s.station); return s; });
+    });
+    faltCfgSortStationsByNumber();
+    var dirty = new Set();
+    faltCfgDirtyStations.forEach(function (key) {
+        var i = key.lastIndexOf('_');
+        var n = mapNum(parseInt(key.substring(i + 1), 10));
+        if (n !== null) dirty.add(key.substring(0, i) + '_' + n);
+    });
+    faltCfgDirtyStations = dirty;
+    if (faltCfgExpandedStation != null) faltCfgExpandedStation = mapNum(faltCfgExpandedStation);
+}
+
+// Andra konfigurationer kan ha länkat en station härifrån. Länken pekar på
+// stationsnumret, så om det numret ändras eller försvinner pekar den fel efteråt.
+// Frågar operatören; returnerar false om hen avbryter. Bara i fristående redigeraren.
+async function faltCfgConfirmLinkImpact(mapping) {
+    if (!faltCfgIsStandaloneEditor() || !window._faltCfgConfigurationId) return true;
+    var linkers;
+    try {
+        var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/GetLinkers?id=' + window._faltCfgConfigurationId);
+        var data = await resp.json();
+        if (!data.success) throw new Error(data.message || 'fel');
+        linkers = data.linkers || [];
+    } catch (err) {
+        console.error(err);
+        return confirm('Det gick inte att kontrollera om andra konfigurationer länkar till stationer här.\n\n' +
+            'Om någon gör det kan länken peka på fel station efter ändringen. Vill du fortsätta ändå?');
+    }
+    function changed(n) { return Object.prototype.hasOwnProperty.call(mapping, n) && mapping[n] !== n; }
+    var affected = linkers.filter(function (l) { return (l.stationNumbers || []).some(changed); });
+    if (affected.length === 0) return true;
+    var lines = affected.map(function (l) {
+        var who = l.name ? '"' + l.name + '"' : 'En konfiguration du inte har åtkomst till';
+        return '• ' + who + ' länkar station ' + l.stationNumbers.filter(changed).join(', ');
+    });
+    return confirm('Andra konfigurationer länkar till stationer som får nytt nummer eller tas bort:\n\n' +
+        lines.join('\n') + '\n\n' +
+        'Länkarna pekar på stationsnumret. Efter ändringen visar de "Källan har ändrats", och ' +
+        '"Ladda om" där skulle hämta fel station. Den som äger konfigurationen behöver avlänka ' +
+        'och länka om stationen.\n\nVill du fortsätta?');
+}
+
+// Strukturella ändringar sparas direkt — det finns ingen enskild station vars
+// "Spara stationen" de hör till. (Hela konfigurationen sparas alltid som en helhet.)
+async function faltCfgCommitStructure() {
+    var input = document.getElementById('faltCfg_stationCount');
+    if (input) input.value = faltCfgStationCount;
     renderActiveTab();
+    await faltCfgSaveAll();
+    renderActiveTab();
+}
+
+// direction = -1 (upp) / +1 (ned). Byter NUMMER med grannstationen i alla klasser.
+async function faltCfgMoveStation(wc, stationNum, direction) {
+    var target = stationNum + direction;
+    if (target < 1 || target > faltCfgStationCount) return;
+    var mapping = {};
+    mapping[stationNum] = target;
+    mapping[target] = stationNum;
+    if (!await faltCfgConfirmLinkImpact(mapping)) return;
+    faltCfgApplyRenumber(mapping);
+    await faltCfgCommitStructure();
+}
+
+async function faltCfgDeleteStation(stationNum) {
+    if (faltCfgStationCount <= 1) { alert('Konfigurationen måste ha minst en station.'); return; }
+    var label = faltCfgStationLabel(stationNum);
+    var hasContent = faltCfgStationClassKeys().some(function (wc) {
+        return faltCfgStationHasContent(faltCfgData[wc].stations.find(function (s) { return s.station === stationNum; }));
+    });
+    var msg = 'Ta bort ' + label + '?\n\n';
+    if (hasContent) msg += 'Stationen har inställningar (figurer, bilder eller namn) som försvinner, i alla vapenklasser.\n\n';
+    msg += stationNum < faltCfgStationCount
+        ? 'Stationerna efter får nya nummer: ' + (stationNum + 1) + '–' + faltCfgStationCount + ' blir ' + stationNum + '–' + (faltCfgStationCount - 1) + '.'
+        : 'Det är den sista stationen, så inga andra stationer får nya nummer.';
+    if (!confirm(msg)) return;
+    var mapping = {};
+    mapping[stationNum] = null;
+    for (var n = stationNum + 1; n <= faltCfgStationCount; n++) mapping[n] = n - 1;
+    if (!await faltCfgConfirmLinkImpact(mapping)) return;
+    faltCfgApplyRenumber(mapping);
+    faltCfgStationCount--;
+    await faltCfgCommitStructure();
+}
+
+// Gamla konfigurationer kan ha en ordning i listan som skiljer sig från numren.
+// Operatören väljer: numren följer ordningen, eller ordningen följer numren.
+async function faltCfgFixLegacyOrder(renumber) {
+    if (renumber) {
+        var canonical = faltCfgGetCanonicalClass();
+        var mapping = {};
+        (faltCfgData[canonical].stations || []).forEach(function (s, i) { mapping[s.station] = i + 1; });
+        if (!await faltCfgConfirmLinkImpact(mapping)) return;
+        faltCfgApplyRenumber(mapping);
+    } else {
+        faltCfgSortStationsByNumber();
+    }
+    await faltCfgCommitStructure();
+}
+
+function faltCfgOrderBannerHtml() {
+    if (!faltCfgOrderDiffersFromNumbers()) return '';
+    return '<div class="alert alert-warning small d-flex flex-wrap gap-2 align-items-center" id="faltCfgOrderBanner">' +
+        '<div class="flex-grow-1"><i class="bi bi-exclamation-triangle me-1"></i>' +
+        'Stationerna ligger i en annan ordning än sina nummer. Skyttarna går stationerna i <strong>nummerordning</strong>, ' +
+        'så ordningen i listan har ingen betydelse på tävlingen. Välj vad som gäller:</div>' +
+        '<button type="button" class="btn btn-sm btn-warning" onclick="faltCfgFixLegacyOrder(true)">Numrera om efter ordningen i listan</button>' +
+        '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="faltCfgFixLegacyOrder(false)">Behåll numren</button>' +
+        '</div>';
+}
+
+// Radens meny (Kopiera / Skriv ut / Ta bort). Ligger UTANFÖR kortets collapse-växlare:
+// Bootstrap 5.3 lyssnar på data-api-klick i CAPTURE-fasen på document, så
+// event.stopPropagation() på en knapp inuti växlaren hindrar INTE att kortet fälls ut.
+// Därför sitter växlaren bara på titeldelen av rubriken.
+function faltCfgStationMenuHtml(stationNum, wc, includeCopy) {
+    function item(onclick, icon, text, cls) {
+        return '<li><button type="button" class="dropdown-item' + (cls ? ' ' + cls : '') + '" onclick="' + onclick + '">' +
+            '<i class="bi ' + icon + ' me-2"></i>' + text + '</button></li>';
+    }
+    return '<span class="dropdown">' +
+        '<button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" ' +
+        'data-station-menu="' + stationNum + '">Åtgärder</button>' +
+        '<ul class="dropdown-menu dropdown-menu-end">' +
+        (includeCopy ? item("faltCfgCopyStation(" + stationNum + ",'" + wc + "')", 'bi-copy', 'Kopiera från annan vapenklass') : '') +
+        item("faltCfgPrintStation(" + stationNum + ",'" + wc + "')", 'bi-printer', 'Skriv ut stationskort') +
+        '<li><hr class="dropdown-divider"></li>' +
+        item('faltCfgDeleteStation(' + stationNum + ')', 'bi-trash', 'Ta bort stationen', 'text-danger') +
+        '</ul></span>';
 }
 
 function faltCfgEscapeHtml(s) {
@@ -1018,17 +1222,7 @@ function faltCfgSimpleSetName(stationNum, value) {
 }
 
 function faltCfgSimpleMoveStation(stationNum, direction) {
-    faltCfgWeaponClasses.forEach(function(wc) {
-        var stations = faltCfgData[wc] && faltCfgData[wc].stations;
-        if (!stations) return;
-        var idx = stations.findIndex(function(s){ return s.station === stationNum; });
-        var target = idx + direction;
-        if (idx < 0 || target < 0 || target >= stations.length) return;
-        var tmp = stations[idx]; stations[idx] = stations[target]; stations[target] = tmp;
-    });
-    // Mark dirty (badge only; the whole blob saves regardless of which is flagged).
-    faltCfgMarkDirty(faltCfgGetCanonicalClass(), stationNum);
-    renderActiveTab();
+    return faltCfgMoveStation(faltCfgGetCanonicalClass(), stationNum, direction);
 }
 
 // ─── Rendering ──────────────────────────────────────────────────────
@@ -1045,9 +1239,9 @@ function renderActiveTab() {
         const collapseId = `faltCfgStation_${wc}_${st.station}`;
         html += `
         <div class="card mb-2" data-station="${st.station}" data-wc="${wc}">
-            <div class="card-header py-2" role="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}">
-                <div class="d-flex justify-content-between align-items-center">
-                    <span>
+            <div class="card-header py-2">
+                <div class="d-flex justify-content-between align-items-center gap-2">
+                    <span class="flex-grow-1 py-1" role="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}" data-station-title="${st.station}">
                         <strong>Station ${st.station}</strong>${st.name ? ` <span class="text-body-secondary">– ${faltCfgEscapeHtml(st.name)}</span>` : ''}
                         <span id="faltCfgSaved_${wc}_${st.station}" class="badge bg-success ms-2" style="display:none">Sparad</span>
                         <span id="faltCfgDirty_${wc}_${st.station}" class="badge bg-warning text-dark ms-2" style="display:none">Osparad</span>
@@ -1061,12 +1255,7 @@ function renderActiveTab() {
                         <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); faltCfgSaveStation(${st.station}, '${wc}')">
                             <i class="bi bi-check-lg me-1"></i>Spara stationen
                         </button>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="event.stopPropagation(); faltCfgCopyStation(${st.station}, '${wc}')" title="Kopiera denna station från annan vapenklass">
-                            <i class="bi bi-copy"></i>
-                        </button>
-                        <button class="btn btn-outline-info btn-sm" onclick="event.stopPropagation(); faltCfgPrintStation(${st.station}, '${wc}')" title="Skriv ut stationskort">
-                            <i class="bi bi-printer"></i>
-                        </button>
+                        ${faltCfgStationMenuHtml(st.station, wc, true)}
                     </span>
                 </div>
             </div>
@@ -1151,7 +1340,7 @@ function renderActiveTab() {
         </div>`;
     });
 
-    container.innerHTML = html;
+    container.innerHTML = faltCfgOrderBannerHtml() + html;
 
     // Track which station the user expands manually
     container.querySelectorAll('.collapse').forEach(el => {
@@ -1827,9 +2016,9 @@ function faltCfgRenderSimpleMode() {
 
         html +=
             '<div class="card mb-2" data-station="' + st.station + '">' +
-              '<div class="card-header py-2" role="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '">' +
-                '<div class="d-flex justify-content-between align-items-center">' +
-                  '<span><strong>Station ' + st.station + '</strong>' + (st.name ? ' <span class="text-body-secondary">– ' + faltCfgEscapeHtml(st.name) + '</span>' : '') +
+              '<div class="card-header py-2">' +
+                '<div class="d-flex justify-content-between align-items-center gap-2">' +
+                  '<span class="flex-grow-1 py-1" role="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" data-station-title="' + st.station + '"><strong>Station ' + st.station + '</strong>' + (st.name ? ' <span class="text-body-secondary">– ' + faltCfgEscapeHtml(st.name) + '</span>' : '') +
                     '<span id="faltCfgSimpleSaved_' + st.station + '" class="badge bg-success ms-2" style="display:none">Sparad</span>' +
                     '<span id="faltCfgSimpleDirty_' + st.station + '" class="badge bg-warning text-dark ms-2"' + (anyDirty ? '' : ' style="display:none"') + '>Osparad</span>' +
                   '</span>' +
@@ -1843,9 +2032,7 @@ function faltCfgRenderSimpleMode() {
                     '<button class="btn btn-success btn-sm" onclick="event.stopPropagation(); faltCfgSimpleSaveStation(' + st.station + ')">' +
                       '<i class="bi bi-check-lg me-1"></i>Spara stationen' +
                     '</button>' +
-                    '<button class="btn btn-outline-info btn-sm" onclick="event.stopPropagation(); faltCfgPrintStation(' + st.station + ',\'' + canonical + '\')" title="Skriv ut stationskort">' +
-                      '<i class="bi bi-printer"></i>' +
-                    '</button>' +
+                    faltCfgStationMenuHtml(st.station, canonical, false) +
                   '</span>' +
                 '</div>' +
               '</div>' +
@@ -1879,7 +2066,7 @@ function faltCfgRenderSimpleMode() {
             '</div>';
     });
 
-    container.innerHTML = html;
+    container.innerHTML = faltCfgOrderBannerHtml() + html;
 
     // Track which station the user expands manually
     container.querySelectorAll('.collapse').forEach(function (el) {
@@ -2063,10 +2250,13 @@ async function faltCfgSaveAll() {
     var _fldEl = document.getElementById(faltCfgGetTargetFieldId()); if (_fldEl) _fldEl.value = json;
 
     if (faltCfgIsEditMode()) {
-        await faltCfgSaveToServer(json);
+        // Ett misslyckat sparande får inte rensa osparad-markeringarna — då ser
+        // redigeraren sparad ut medan servern har den gamla versionen.
+        if (!await faltCfgSaveToServer(json)) return false;
     }
 
     faltCfgDirtyStations.clear();
+    return true;
 }
 
 async function faltCfgSaveToServer(json) {

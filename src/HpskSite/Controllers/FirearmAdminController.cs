@@ -501,7 +501,7 @@ namespace HpskSite.Controllers
                     r.Id, r.MemberId, r.MemberName, r.FirearmId, r.FirearmAlias,
                     r.FirearmWeaponClass, r.FirearmVapentyp,
                     kind = r.Kind, kindLabel = r.KindLabel,
-                    r.Forbund, r.VapengruppSkytteform, r.MemberMessage,
+                    r.Forbund, r.VapengruppSkytteform, r.MemberMessage, r.Diarienummer,
                     status = r.Status, statusLabel = r.StatusLabel, r.IsOpen,
                     createdAt = r.CreatedAt.ToString("yyyy-MM-dd"),
                     r.HandlerNote,

@@ -223,8 +223,9 @@
 
     <div class="grid">
         <div class="fld w50"><span class="lbl">Datum</span><div class="val">@d.UnderskriftDatum</div></div>
-        @* Diarienummer fylls av Polismyndigheten — lämnas alltid tomt. *@
-        <div class="fld w50"><span class="lbl">Diarienummer</span><div class="val">&nbsp;</div></div>
+        @* Licensansökans diarienummer, så att Polisen kan koppla intyget till rätt ärende. Medlemmen
+           anger det i förfrågan; tomt = rutan lämnas tom att fylla i för hand. *@
+        <div class="fld w50"><span class="lbl">Diarienummer</span><div class="val">@(string.IsNullOrWhiteSpace(d.Diarienummer) ? " " : d.Diarienummer)</div></div>
     </div>
 
     <h2 class="sec">Personuppgifter</h2>
@@ -338,7 +339,7 @@
 
     <div class="grid">
         <div class="fld w50"><span class="lbl">Sökande</span><div class="val">@d.HelaNamnet</div></div>
-        <div class="fld w50"><span class="lbl">Diarienummer</span><div class="val">&nbsp;</div></div>
+        <div class="fld w50"><span class="lbl">Diarienummer</span><div class="val">@(string.IsNullOrWhiteSpace(d.Diarienummer) ? " " : d.Diarienummer)</div></div>
     </div>
 
     <h2 class="sec">Behov av enhandsvapen</h2>

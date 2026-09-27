@@ -1,0 +1,168 @@
+Return-Path: <>
+Delivered-To: admin@pistol.nu
+Received: from localhost (localhost [127.0.0.1])
+	by mail.simply.com (Simply.com) with ESMTP id 4hsKVs1dLMz2Vyxx
+	for <admin@pistol.nu>; Sat, 26 Sep 2026 09:50:29 +0200 (CEST)
+X-Spam-Flag: NO
+Received: from websmtp-out2.simply.com (websmtp-out2.simply.com [94.231.103.245])
+	(using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)
+	 key-exchange X25519 server-signature RSA-PSS (2048 bits) server-digest SHA256)
+	(Client did not present a certificate)
+	by mail.simply.com (Simply.com) with ESMTPS id 4hsKVr2JtMz3hhtP
+	for <admin@pistol.nu>; Sat, 26 Sep 2026 09:50:28 +0200 (CEST)
+Authentication-Results: mail.simply.com;
+	dkim=none;
+	dmarc=pass (policy=reject) header.from=simply.com;
+	spf=pass (mail.simply.com: domain of websmtp-out2.simply.com designates 94.231.103.245 as permitted sender) smtp.helo=websmtp-out2.simply.com
+Received: by websmtp.simply.com (Simply.com)
+	id 4hsKVr2962z3hkbT; Sat, 26 Sep 2026 09:50:28 +0200 (CEST)
+Date: Sat, 26 Sep 2026 09:50:28 +0200 (CEST)
+From: Simply.com mailsystem <postmaster@mail.simply.com>
+Subject: Undelivered Mail
+To: admin@pistol.nu
+Auto-Submitted: auto-replied
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status;
+	boundary="4hsKVr00FHz3hkbG.1790409028/websmtp.simply.com"
+Message-Id: <4hsKVr2962z3hkbT@websmtp.simply.com>
+
+This is a MIME-encapsulated message.
+
+--4hsKVr00FHz3hkbG.1790409028/websmtp.simply.com
+Content-Description: Notification
+Content-Type: text/plain; charset=us-ascii
+
+This is the mail system at Simply.com (websmtp.simply.com).
+
+Your message could not be delivered to one or more recipients.
+
+Please see the error message below for further details.
+
+If you choose to contact our support regarding this issue, please 
+include the report below in its entirety in your support ticket.
+
+The response was:
+
+<pistol.sater@gmail.com>: host gmail-smtp-in.l.google.com[173.194.69.27] said:
+    550-5.1.1 The email account that you tried to reach does not exist. Please
+    try 550-5.1.1 double-checking the recipient's email address for typos or
+    550-5.1.1 unnecessary spaces. For more information, go to 550 5.1.1
+    https://support.google.com/mail/?p=NoSuchUser
+    4fb4d7f45d1cf-6aae59480ddsi4539850a12.88 - gsmtp (in reply to RCPT TO
+    command)
+
+--4hsKVr00FHz3hkbG.1790409028/websmtp.simply.com
+Content-Description: Delivery report
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; websmtp.simply.com
+X-Simply-com-Queue-ID: 4hsKVr00FHz3hkbG
+X-Simply-com-Sender: rfc822; admin@pistol.nu
+Arrival-Date: Sat, 26 Sep 2026 09:50:27 +0200 (CEST)
+
+Final-Recipient: rfc822; pistol.sater@gmail.com
+Original-Recipient: rfc822;pistol.sater@gmail.com
+Action: failed
+Status: 5.1.1
+Remote-MTA: dns; gmail-smtp-in.l.google.com
+Diagnostic-Code: smtp; 550-5.1.1 The email account that you tried to reach does
+    not exist. Please try 550-5.1.1 double-checking the recipient's email
+    address for typos or 550-5.1.1 unnecessary spaces. For more information, go
+    to 550 5.1.1  https://support.google.com/mail/?p=NoSuchUser
+    4fb4d7f45d1cf-6aae59480ddsi4539850a12.88 - gsmtp
+
+--4hsKVr00FHz3hkbG.1790409028/websmtp.simply.com
+Content-Description: Undelivered Message
+Content-Type: message/rfc822
+
+Return-Path: <admin@pistol.nu>
+Received: from nt28 (unknown [93.191.156.11])
+	(using TLSv1.3 with cipher TLS_CHACHA20_POLY1305_SHA256 (256/256 bits)
+	 key-exchange X25519 server-signature RSA-PSS (2048 bits) server-digest SHA256)
+	(No client certificate requested)
+	by websmtp.simply.com (Simply.com) with ESMTPSA id 4hsKVr00FHz3hkbG
+	for <pistol.sater@gmail.com>; Sat, 26 Sep 2026 09:50:27 +0200 (CEST)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=pistol.nu; s=simplycom2;
+	t=1790409028; h=from:from:reply-to:reply-to:subject:subject:date:date:to:to:cc:
+	 mime-version:mime-version:content-type:content-type:
+	 content-transfer-encoding:content-transfer-encoding;
+	bh=TF/kSAGWUuqdl8948HMw+hB1loOAgbMteqqEL0c1cwU=;
+	b=cXqmrZgoc2LDPAB476Cq3PNsWnM2p2qMmBRBBYAzL+pqHWMtqeFl3J7zuyXt+l10HJGi3s
+	TfTlLHkSO1tWisQ9z3bDWLGQlxZGiXj6mRogfb+BaUBWmeHH73W0AqybXQoq5bY+5nMnlZ
+	khxu/ykmwVh87nJHCoyIVKnQa8sSBbAD+t29o80vxbelKTSE2r7sq5yerNkbsabeENJVsH
+	6G5URtxAQSx8Zdthk7X+wtrV5KcI9GCSoRiddj80fLnomZk/M28spM5J8M8DboHJIOmDC7
+	NtGth4OolRagEmPQl5xm8IA4jPW56cUh1RUQxdnHEWJWduk1GY6fR36P7FqdEg==
+MIME-Version: 1.0
+From: =?utf-8?Q?S=C3=A4ters_Pistolskyttef=C3=B6rening_via_Pistol=2Enu?=
+ <admin@pistol.nu>
+To: pistol.sater@gmail.com
+Reply-To: =?utf-8?Q?S=C3=A4ters_Pistolskyttef=C3=B6rening?=
+ <powi78@gmail.com>
+Date: 26 Sep 2026 09:50:28 +0200
+Subject: =?utf-8?B?QmV0YWxuaW5nc2Jla3LDpGZ0ZWxzZSDigJMgU2VyaWVmw6Rs?=
+ =?utf-8?B?dCAxMA==?=
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PGh0bWw+DQo8aGVhZD4NCiAgICA8c3R5bGU+DQogICAgICAgIGJvZHkgeyBmb250LWZh
+bWlseTogQXJpYWwsIHNhbnMtc2VyaWY7IGxpbmUtaGVpZ2h0OiAxLjU7IGNvbG9yOiAj
+MzMzOyB9DQogICAgICAgIC5jb250YWluZXIgeyBtYXgtd2lkdGg6IDU2MHB4OyBtYXJn
+aW46IDAgYXV0bzsgcGFkZGluZzogMTZweDsgfQ0KICAgICAgICAuaGVhZGVyIHsgYmFj
+a2dyb3VuZDojMTk4NzU0OyBjb2xvcjojZmZmOyBwYWRkaW5nOjE4cHg7IGJvcmRlci1y
+YWRpdXM6NXB4IDVweCAwIDA7IH0NCiAgICAgICAgLmhlYWRlciBoMiB7IG1hcmdpbjow
+OyBmb250LXNpemU6MjBweDsgfQ0KICAgICAgICAuY29udGVudCB7IGJhY2tncm91bmQ6
+I2Y4ZjlmYTsgYm9yZGVyOjFweCBzb2xpZCAjZGVlMmU2OyBwYWRkaW5nOjI0cHg7IGJv
+cmRlci1yYWRpdXM6MCAwIDVweCA1cHg7IH0NCiAgICAgICAgdGFibGUua3YgeyB3aWR0
+aDoxMDAlOyBib3JkZXItY29sbGFwc2U6Y29sbGFwc2U7IG1hcmdpbjoxNHB4IDA7IH0N
+CiAgICAgICAgdGFibGUua3YgdGQgeyBwYWRkaW5nOjZweCA4cHg7IGJvcmRlci1ib3R0
+b206MXB4IHNvbGlkICNlOWVjZWY7IHZlcnRpY2FsLWFsaWduOnRvcDsgfQ0KICAgICAg
+ICB0YWJsZS5rdiB0ZDpmaXJzdC1jaGlsZCB7IHdpZHRoOjQyJTsgY29sb3I6IzQ5NTA1
+NzsgfQ0KICAgICAgICAua3ZpdHRvLWJveCB7IGJhY2tncm91bmQ6I2ZmZjsgYm9yZGVy
+OjFweCBzb2xpZCAjZGVlMmU2OyBib3JkZXItcmFkaXVzOjZweDsgcGFkZGluZzoxNnB4
+OyBtYXJnaW4tdG9wOjE2cHg7IH0NCiAgICAgICAgLmJ0biB7IGRpc3BsYXk6aW5saW5l
+LWJsb2NrOyBiYWNrZ3JvdW5kOiMxOTg3NTQ7IGNvbG9yOiNmZmYgIWltcG9ydGFudDsg
+dGV4dC1kZWNvcmF0aW9uOm5vbmU7IHBhZGRpbmc6MTBweCAxOHB4OyBib3JkZXItcmFk
+aXVzOjZweDsgbWFyZ2luLXRvcDo2cHg7IH0NCiAgICAgICAgLmZvb3RlciB7IG1hcmdp
+bi10b3A6MThweDsgZm9udC1zaXplOjEycHg7IGNvbG9yOiM2Yzc1N2Q7IHRleHQtYWxp
+Z246Y2VudGVyOyB9DQogICAgPC9zdHlsZT4NCjwvaGVhZD4NCjxib2R5Pg0KICAgIDxk
+aXYgY2xhc3M9J2NvbnRhaW5lcic+DQogICAgICAgIDxkaXYgY2xhc3M9J2hlYWRlcic+
+PGgyPuKckyBCZXRhbG5pbmdzYmVrcsOkZnRlbHNlPC9oMj48L2Rpdj4NCiAgICAgICAg
+PGRpdiBjbGFzcz0nY29udGVudCc+DQogICAgICAgICAgICA8cD5IZWogQm9zc2UgSGFz
+c2VsYmVyZyE8L3A+DQogICAgICAgICAgICA8cD5WaSBiZWtyw6RmdGFyIGF0dCBkaW4g
+YmV0YWxuaW5nIHRpbGwgPHN0cm9uZz5TZXJpZWYmIzIyODtsdCAxMDwvc3Ryb25nPg0K
+ICAgICAgICAgICAgICAgaGFyIHJlZ2lzdHJlcmF0cy48L3A+DQogICAgICAgICAgICA8
+dGFibGUgY2xhc3M9J2t2Jz4NCiAgICAgICAgICAgICAgICA8dHI+PHRkPjxzdHJvbmc+
+U2t5dHQ6PC9zdHJvbmc+PC90ZD48dGQ+Qm9zc2UgSGFzc2VsYmVyZzwvdGQ+PC90cj4N
+CiAgICAgICAgICAgICAgICA8dHI+PHRkPjxzdHJvbmc+VMOkdmxpbmc6PC9zdHJvbmc+
+PC90ZD48dGQ+U2VyaWVmJiMyMjg7bHQgMTA8L3RkPjwvdHI+DQogICAgICAgICAgICAg
+ICAgPHRyPjx0ZD48c3Ryb25nPkFycmFuZ8O2cjo8L3N0cm9uZz48L3RkPjx0ZD5TJiMy
+Mjg7dGVycyBQaXN0b2xza3l0dGVmJiMyNDY7cmVuaW5nPC90ZD48L3RyPg0KICAgICAg
+ICAgICAgICAgIDx0cj48dGQ+PHN0cm9uZz5LbGFzc2VyOjwvc3Ryb25nPjwvdGQ+PHRk
+PlIyLCBDX1ZldF9BPC90ZD48L3RyPg0KICAgICAgICAgICAgICAgIDx0cj48dGQ+PHN0
+cm9uZz5CZXRhbGRhdHVtOjwvc3Ryb25nPjwvdGQ+PHRkPjIwMjYtMDktMjYgMDA6MDA8
+L3RkPjwvdHI+DQogICAgICAgICAgICAgICAgPHRyPjx0ZD48c3Ryb25nPkJldGFsbmlu
+Z3NtZXRvZDo8L3N0cm9uZz48L3RkPjx0ZD5Td2lzaDwvdGQ+PC90cj4NCiAgICAgICAg
+ICAgICAgICA8dHI+PHRkPjxzdHJvbmc+QmVsb3BwOjwvc3Ryb25nPjwvdGQ+PHRkPjEw
+MCBrcjwvdGQ+PC90cj4NCiAgICAgICAgICAgICAgICA8dHI+PHRkPjxzdHJvbmc+UmVm
+ZXJlbnM6PC9zdHJvbmc+PC90ZD48dGQ+NDAwNS03MzM5LTE8L3RkPjwvdHI+DQogICAg
+ICAgICAgICA8L3RhYmxlPg0KICAgICAgICAgICAgPGRpdiBjbGFzcz0na3ZpdHRvLWJv
+eCc+DQogICAgICAgICAgICAgICAgPHAgc3R5bGU9J21hcmdpbi10b3A6MCc+PHN0cm9u
+Zz5CZWjDtnZlciBkdSBldHQga3ZpdHRvPzwvc3Ryb25nPjwvcD4NCiAgICAgICAgICAg
+ICAgICA8cD5EdSBrYW4gc2tyaXZhIHV0IGV0dCBrdml0dG8g4oCTIHQuZXguIGbDtnIg
+ZnJpc2t2w6VyZHNiaWRyYWcg4oCTIHDDpSA8c3Ryb25nPk1pbiBzaWRhPC9zdHJvbmc+
+DQogICAgICAgICAgICAgICAgICAgdW5kZXIgZmxpa2VuIDxzdHJvbmc+VMOkdmxpbmdh
+cjwvc3Ryb25nPi4gS2xpY2thIHDDpSBrdml0dG9rbmFwcGVuIHDDpSByYWRlbiBmw7Zy
+IGRlbiBow6RyIHTDpHZsaW5nZW4uPC9wPg0KICAgICAgICAgICAgICAgIDxhIGNsYXNz
+PSdidG4nIGhyZWY9J2h0dHBzOi8vcGlzdG9sLm51L3VzZXItcHJvZmlsZS1wYWdlI3Rh
+dmxpbmdhcic+VGlsbCBNaW5hIHTDpHZsaW5nYXI8L2E+DQogICAgICAgICAgICA8L2Rp
+dj4NCiAgICAgICAgPC9kaXY+DQogICAgICAgIDxkaXYgY2xhc3M9J2Zvb3Rlcic+UGlz
+dG9sLm51IOKAlCBhdXRvbWF0aXNrIGJldGFsbmluZ3NiZWtyw6RmdGVsc2UuIFN2YXJh
+IGVqIHDDpSBkZXR0YSBtZWpsLjwvZGl2Pg0KICAgIDwvZGl2Pg0KPGhyIHN0eWxlPSJi
+b3JkZXI6bm9uZTtib3JkZXItdG9wOjFweCBzb2xpZCAjZTVlN2ViO21hcmdpbjoyMnB4
+IDAgMTBweDsiLz48cCBzdHlsZT0iZm9udC1zaXplOjEycHg7Y29sb3I6IzZiNzI4MDtt
+YXJnaW46MDsiPlN2YXJhciBkdSBww6UgZGV0IGjDpHIgbWVqbGV0IGfDpXIgc3ZhcmV0
+IHRpbGwgUyYjMjI4O3RlcnMgUGlzdG9sc2t5dHRlZiYjMjQ2O3JlbmluZyAocG93aTc4
+QGdtYWlsLmNvbSkuPC9wPjwvYm9keT4NCjwvaHRtbD4=
+
+
+--4hsKVr00FHz3hkbG.1790409028/websmtp.simply.com--

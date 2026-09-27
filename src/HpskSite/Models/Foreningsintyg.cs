@@ -475,6 +475,14 @@ namespace HpskSite.Models
         public bool SkjutskicklighetAnnat { get; set; }
         public string SkjutskicklighetAnnatText { get; set; } = "";
 
+        /// <summary>
+        /// INTYGSFÄLT — licensansökans diarienummer hos Polisen, så att intyget kan kopplas till rätt
+        /// ärende. Medlemmen anger det i förfrågan och det förifylls; utfärdaren kan rätta det.
+        /// Tomt = rutan lämnas tom på blanketten. (Vi trodde först att Polisen fyller i den — men
+        /// numret finns redan på medlemmens ansökan.)
+        /// </summary>
+        public string Diarienummer { get; set; } = "";
+
         // ── Underskrift ──────────────────────────────────────────────
 
         /// <summary>INTYGSFÄLT — dagens datum vid utfärdandet.</summary>
@@ -484,8 +492,15 @@ namespace HpskSite.Models
         /// FÖRSLAG; styrelsen kan skriva under någon annanstans.</summary>
         public string UnderskriftOrt { get; set; } = "";
 
-        /// <summary>REGISTERFÄLT-förslag — ordförandens namn ur styrelseregistret.</summary>
+        /// <summary>REGISTERFÄLT — undertecknarens namn ur styrelseregistret. Ordföranden föreslås;
+        /// utfärdaren kan välja en annan ledamot (<see cref="UnderskriftRollId"/>), men namnet läses
+        /// alltid ur registret och kan aldrig skrivas in.</summary>
         public string Namnfortydligande { get; set; } = "";
+
+        /// <summary>Styrelseraden (<c>BoardRoles.Id</c>) som undertecknar. Raden och inte medlemmen,
+        /// eftersom samma person kan ha flera uppdrag och titeln på blanketten följer raden.
+        /// 0 = ingen styrelse hittades.</summary>
+        public int UnderskriftRollId { get; set; }
 
         /// <summary>REGISTERFÄLT-förslag — <c>BoardRole.DisplayTitle</c>, som hanterar egen titel.</summary>
         public string BefattningFunktion { get; set; } = "";
@@ -534,5 +549,19 @@ namespace HpskSite.Models
             try { return JsonSerializer.Deserialize<ForeningsintygDocument>(json, SnapshotJson); }
             catch { return null; }
         }
+    }
+
+    /// <summary>En styrelseledamot som kan underteckna ett föreningsintyg (väljaren i utfärdandet).</summary>
+    public class ForeningsintygSignatoryOption
+    {
+        public int RoleId { get; set; }
+        public string Name { get; set; } = "";
+        public string Title { get; set; } = "";
+        /// <summary>Raden är ordförandeposten.</summary>
+        public bool IsChair { get; set; }
+        /// <summary>Personen är utsedd föreningsintygsansvarig för klubben.</summary>
+        public bool IsAppointed { get; set; }
+        /// <summary>E-post eller telefon saknas i medlemsprofilen — blankettens kontaktrader blir tomma.</summary>
+        public bool MissingContact { get; set; }
     }
 }

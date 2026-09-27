@@ -152,25 +152,14 @@
                         </button>
                     </li>
                 }
-                <li><hr class="dropdown-divider"></li>
-                <li><h6 class="dropdown-header">Betalningar</h6></li>
-                @if (isLedgerFees)
+                @* ⚠️ Den nya modellen har INGEN Betalningar-grupp här (Stefans beslut 2026-09-26):
+                   fakturering av klubbar, påminnelser och avstämning mot Swish och banken är
+                   KASSÖRENS arbete och görs i Ekonomi → Fakturor. Tävlingsledningen behåller det disken
+                   behöver — betalstatus och "Markera som betald" på varje rad. *@
+                @if (!isLedgerFees)
                 {
-                    @* Den nya modellen: en faktura till en klubb över dess öppna avgifter — samma handling
-                       som i Ekonomi. Klubben loggar aldrig in; mejlet bär en länk till fakturan. *@
-                    <li>
-                        <button class="dropdown-item" type="button" onclick="HpskFees.openInvoiceClub(@competitionId, feesChanged)">
-                            <i class="bi bi-receipt-cutoff me-2 text-primary"></i>Fakturera en klubb
-                        </button>
-                    </li>
-                    <li>
-                        <button class="dropdown-item" type="button" onclick="document.getElementById('competitionFeesCard')?.scrollIntoView({behavior:'smooth'})">
-                            <i class="bi bi-cash-coin me-2 text-primary"></i>Avgifter och fakturor
-                        </button>
-                    </li>
-                }
-                else
-                {
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">Betalningar</h6></li>
                     @* The organiser-side samlingsfaktura. Until 2026-08-20 only the PAYING club could build
                        one, on its own klubbsida — the page the clubs who most need it have never opened. *@
                     <li>
@@ -296,18 +285,12 @@
 
     @if (isLedgerFees)
     {
-        @* ⚠️ Den nya modellen: arrangörens avprickning och fakturorna till klubbar. SAMMA modul och
-           samma data som Ekonomi → Avgifter (Stefans beslut 2026-09-24) — en bekräftelse här syns där. *@
-        <div class="card mb-3" id="competitionFeesCard">
-            <div class="card-header d-flex justify-content-between align-items-center" role="button"
-                 data-bs-toggle="collapse" data-bs-target="#competitionFeesCollapse" aria-expanded="true">
-                <span class="fw-semibold"><i class="bi bi-cash-coin me-2"></i>Avgifter och fakturor</span>
-                <i class="bi bi-chevron-down"></i>
-            </div>
-            <div class="collapse show" id="competitionFeesCollapse">
-                <div class="card-body" id="competitionFeesPanel"></div>
-            </div>
-        </div>
+        @* ⚠️⚠️ Här finns MEDVETET ingen avgiftspanel (borttagen 2026-09-26, Stefans beslut).
+           Avstämningen mot Swish och banken, fakturorna till klubbar och påminnelserna är kassörens
+           arbete och bor i Ekonomi → Fakturor. Panelen här var en kopia av den, med en andra tabell
+           över samma anmälningar som raderna ovanför — och den visades även på tävlingar utan
+           avgifter. "Får klubben betala…" sätts i tävlingsdialogerna (_ClubPaysFeeSetting).
+           Modulen laddas ändå: radernas Åtgärder (Markera som betald m.fl.) går genom den. *@
         <script src="/js/competition-fees.js?v=@DateTime.Now.Ticks"></script>
     }
 
@@ -1609,16 +1592,10 @@ function updateCompetitionSortIndicators() {
 window.hpskFeeModel = $('.competition-registration-management').data('fee-model') || 'legacy';
 function isLedgerFees() { return window.hpskFeeModel === 'ledger'; }
 function feesCompetitionId() { return parseInt($('.competition-registration-management').data('competition-id'), 10); }
-// Både tabellen och avgiftspanelen laddas om efter en betalning — annars säger de olika saker.
+// Tabellen laddas om efter en betalning, så radens betalstatus följer liggaren.
 function feesChanged() {
     if (typeof loadCompetitionRegistrations === 'function') loadCompetitionRegistrations();
-    const panel = document.getElementById('competitionFeesPanel');
-    if (panel && window.HpskFees) HpskFees.renderOrganiserPanel(panel, feesCompetitionId(), { onChange: () => loadCompetitionRegistrations() });
 }
-$(function () {
-    const panel = document.getElementById('competitionFeesPanel');
-    if (panel && window.HpskFees) HpskFees.renderOrganiserPanel(panel, feesCompetitionId(), { onChange: () => loadCompetitionRegistrations() });
-});
 
 // Helper function to get payment status badge class
 function getPaymentStatusBadgeClass(status) {
@@ -3373,8 +3350,6 @@ function updatePaymentSummary() {
             .sort((a, b) => startsByWeapon[b] - startsByWeapon[a] || a.localeCompare(b, 'sv'))
             .map(wc => `${wc} ${startsByWeapon[wc]}`);
         byWeaponEl.textContent = parts.join(' · ');
-    const sc = window.getShootingClass(classId);
-    if (sc) return sc.weaponLabel;
         // The cell clips at one line, so keep the whole list reachable on hover.
         byWeaponEl.title = parts.length ? 'Starter per vapengrupp: ' + parts.join(', ') : '';
     }
@@ -3398,6 +3373,8 @@ function updatePaymentSummary() {
 // ids ("A-D 21") are not in the registry and keep their first letter. Returns '' for anything
 // else, so an unexpected id is dropped from the breakdown rather than inventing a group.
 function weaponClassOf(classId) {
+    const sc = window.getShootingClass(classId);
+    if (sc) return sc.weaponLabel;
     const c = (classId || '').trim().charAt(0).toUpperCase();
     return 'ABCRLM'.includes(c) ? c : '';
 }
@@ -4980,8 +4957,6 @@ async function setCheckedIn(registrationId, checkedIn) {
             },
             body: JSON.stringify({ registrationId, checkedIn })
         });
-// Display name of a class, from the class registry ("C_Vet_Y" → "C Vet Y", "A_m_1" → "AM1").
-// The home-made converter this replaced got A Opt, AM/AP/AG and L Vet Ä wrong.
         const data = await resp.json();
         if (!data.success) {
             throw new Error(data.message || 'Misslyckades att spara närvaro.');
@@ -5005,6 +4980,8 @@ function getPreferenceBadgeClass(preference) {
     }
 }
 
+// Display name of a class, from the class registry ("C_Vet_Y" → "C Vet Y", "A_m_1" → "AM1").
+// The home-made converter this replaced got A Opt, AM/AP/AG and L Vet Ä wrong.
 function normalizeShootingClass(raw) {
     return window.getShootingClassName(raw);
 }

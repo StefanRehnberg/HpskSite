@@ -531,6 +531,26 @@ namespace HpskSite.Controllers
         private string DocumentUrl(int chargeId)
             => $"{Request.Scheme}://{Request.Host}/klubbfaktura/{chargeId}?t={Uri.EscapeDataString(_documentProtector.Protect(chargeId.ToString()))}";
 
+        /// <summary>
+        /// GET GetSettings — tävlingsdialogernas ruta "Får klubben betala i stället för skytten?".
+        /// <para>Inställningen hör till TÄVLINGEN och sätts där tävlingen skapas och redigeras, inte på
+        /// Anmälningar eller i Ekonomi. <c>model</c> följer med: i den gamla fakturamodellen har valet
+        /// ingen verkan, och dialogen döljer då rutan.</para>
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetSettings(int competitionId)
+        {
+            if (!await IsOrganiserAsync(competitionId)) return Json(new { success = false, message = Denied });
+            var settings = _fees.GetSettings(competitionId);
+            return Json(new
+            {
+                success = true,
+                model = _models.Get(competitionId),
+                clubPayableTypes = settings.ClubPayable,
+                allTypes = CompetitionFeeTypes.All.Select(t => new { key = t, label = CompetitionFeeTypes.Label(t) })
+            });
+        }
+
         /// <summary>POST SaveSettings — vilka anmälningstyper klubben får betala för.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -939,6 +959,11 @@ namespace HpskSite.Controllers
                     invoicedOpen = invoices.Where(v => v.Charge.SourceId == id && !v.Charge.IsVoided).Sum(v => v.Balance.Outstanding)
                 };
             })
+            // En tävling vars avgifter alla är makulerade (avgiften sattes till 0 efter anmälan) har
+            // ingenting för kassören att göra — den visas inte. Pengar som redan kommit in eller
+            // fakturor som finns håller den kvar, så inget försvinner ur listan som har ett värde.
+            .Where(c => c.received > 0 || c.claimed > 0 || c.open > 0 || c.invoicedOpen > 0
+                        || invoices.Any(v => v.Charge.SourceId == c.competitionId))
             .OrderByDescending(c => c.claimed > 0).ThenByDescending(c => c.date).ToList();
 
             var incoming = ownerType == DocumentOwnerType.Club
