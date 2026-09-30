@@ -82,6 +82,61 @@ namespace HpskSite.Controllers
                 clubId, competition.GetValue<string>("regionalFederation"));
         }
 
+        public class PreviewDirektplaceringRequest
+        {
+            public int CompetitionId { get; set; }
+            /// <summary>The Egenbokning config as the modal would save it (JSON string).</summary>
+            public string? Config { get; set; }
+        }
+
+        /// <summary>
+        /// What switching Egenbokning on (with the config in the modal) would do to existing
+        /// registrations and an existing start list. Read-only — the save applies it only when
+        /// the client sends ApplyDirektplaceringAssignments after the organiser confirmed.
+        /// </summary>
+        [HttpPost]
+        public async Task<IActionResult> PreviewDirektplacering([FromBody] PreviewDirektplaceringRequest request)
+        {
+            if (request == null || !await CanEditCompetitionAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            try
+            {
+                var competition = _contentService.GetById(request.CompetitionId);
+                if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+                var config = HpskSite.Models.DirektplaceringConfig.Parse(request.Config);
+                if (config == null) return Json(new { success = true, needsConfirmation = false });
+
+                var dp = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.DirektplaceringStartListService))
+                    as HpskSite.Services.DirektplaceringStartListService;
+                if (dp == null) return Json(new { success = false, message = "Tjänsten saknas." });
+
+                var plan = dp.Plan(competition, config);
+                return Json(new
+                {
+                    success = true,
+                    needsConfirmation = plan.NeedsConfirmation,
+                    hasStartList = plan.HasStartList,
+                    startListIsManual = plan.StartListIsManual,
+                    startListIsPublished = plan.StartListIsPublished,
+                    droppedFromList = plan.DroppedFromList,
+                    rows = plan.Rows.Select(r => new
+                    {
+                        name = r.MemberName,
+                        shootingClass = HpskSite.Models.ShootingClasses.DisplayName(r.ShootingClass),
+                        teamNumber = r.TeamNumber,
+                        fromExistingList = r.FromExistingList
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "PreviewDirektplacering failed for competition {CompetitionId}", request.CompetitionId);
+                return Json(new { success = false, message = "Kunde inte förhandsgranska egenbokningen: " + ex.Message });
+            }
+        }
+
         /// <summary>
         /// Get competition data for editing.
         /// </summary>
@@ -345,6 +400,43 @@ namespace HpskSite.Controllers
 
                 // Route to type-specific save logic
                 var result = await RouteToTypeSpecificSave(request, content);
+
+                // Egenbokning switched on (or re-saved) over registrations that never booked a
+                // skjutlag: the organiser has seen PreviewDirektplacering and confirmed, so seat
+                // them now. After the save, because Apply reads the config the save just wrote.
+                var saved = result?.GetType().GetProperty("success")?.GetValue(result) is true;
+                if (request.ApplyDirektplaceringAssignments && saved)
+                {
+                    var er = new CompetitionEditResult
+                    {
+                        Success = true,
+                        Message = result!.GetType().GetProperty("message")?.GetValue(result) as string ?? "",
+                        Data = result.GetType().GetProperty("data")?.GetValue(result)
+                    };
+                    try
+                    {
+                        var dp = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.DirektplaceringStartListService))
+                            as HpskSite.Services.DirektplaceringStartListService;
+                        var applied = dp?.Apply(request.CompetitionId);
+                        if (applied != null)
+                        {
+                            var placed = applied.Rows.Count(r => r.TeamNumber.HasValue);
+                            var unplaced = applied.Rows.Count(r => !r.TeamNumber.HasValue);
+                            var note = $" Egenbokning: {placed} anmälning{(placed == 1 ? "" : "ar")} fick skjutlag och startlistan byggdes om.";
+                            if (unplaced > 0) note += $" {unplaced} fick inget skjutlag — det fanns ingen passande plats.";
+                            er.Message = (er.Message ?? "") + note;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // The competition IS saved; say that the seating did not happen instead of
+                        // reporting the whole save as failed.
+                        _logger.LogError(ex, "Egenbokning assignment failed on competition {CompetitionId}", request.CompetitionId);
+                        er.Message = (er.Message ?? "") + " Tävlingen sparades, men skjutlagen kunde inte tilldelas — kontrollera Startlistor-fliken.";
+                    }
+                    var baseMessage = result!.GetType().GetProperty("message")?.GetValue(result) as string ?? "";
+                    result = new { success = true, message = er.Message, data = er.Data, dpNote = (er.Message ?? "").Substring(Math.Min(baseMessage.Length, (er.Message ?? "").Length)).Trim() };
+                }
 
                 // Invalidate admin competition/series list caches so edits are reflected
                 AppCaches.RuntimeCache.ClearByKey("admin_series_list");
@@ -833,6 +925,12 @@ namespace HpskSite.Controllers
         /// Example: { "competitionName": "New Name", "maxParticipants": 100 }
         /// </summary>
         public Dictionary<string, object> Fields { get; set; } = new Dictionary<string, object>();
+
+        /// <summary>
+        /// The organiser confirmed PreviewDirektplacering: seat registrations without a skjutlag
+        /// and rebuild the Egenbokning list after saving. Never set without that confirmation.
+        /// </summary>
+        public bool ApplyDirektplaceringAssignments { get; set; }
 
         public bool IsValid()
         {

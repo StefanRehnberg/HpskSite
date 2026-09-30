@@ -1467,7 +1467,41 @@ function saveCompetition() {
         };
     }
 
-    fetch(endpoint, {
+    // Egenbokning över befintliga anmälningar/startlista: fråga servern vad som händer och låt
+    // arrangören bekräfta INNAN något sparas. Avbryter hen sparas ingenting alls.
+    const dpChecked = document.getElementById('edit_enableDirektplacering').checked;
+    const precheck = (!isNewCompetition && dpChecked)
+        ? fetch('/umbraco/surface/CompetitionEdit/PreviewDirektplacering', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value
+              },
+              body: JSON.stringify({ competitionId: competitionId, config: fields.direktplaceringConfig })
+          }).then(r => r.json())
+        : Promise.resolve(null);
+
+    precheck.then(preview => {
+        if (preview && preview.success === false) {
+            throw new Error(preview.message || 'Egenbokningen kunde inte förhandsgranskas.');
+        }
+        if (preview && preview.needsConfirmation) {
+            if (!confirm(describeDpPreview(preview))) {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = originalText;
+                return null;
+            }
+            requestBody.applyDirektplaceringAssignments = true;
+        }
+        return sendCompetitionSave();
+    }).catch(error => {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalText;
+        showNotification('Fel vid sparning: ' + error.message, 'error');
+    });
+
+    function sendCompetitionSave() {
+    return fetch(endpoint, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -1543,7 +1577,8 @@ function saveCompetition() {
                 return; // Don't run the normal success flow below
             }
 
-            const message = isNewCompetition ? 'Tävlingen skapades framgångsrikt!' : 'Tävlingen uppdaterades framgångsrikt!';
+            let message = isNewCompetition ? 'Tävlingen skapades framgångsrikt!' : 'Tävlingen uppdaterades framgångsrikt!';
+            if (data.dpNote) message += ' ' + data.dpNote;
             showNotification(message, 'success');
             bootstrap.Modal.getInstance(editModal).hide();
 
@@ -1580,6 +1615,38 @@ function saveCompetition() {
         console.error('Error saving competition:', error);
         showNotification('Fel vid sparning: ' + error.message, 'error');
     });
+    }
+}
+
+// Texten i bekräftelsen när Egenbokning slås på över befintliga anmälningar eller en
+// befintlig startlista. Säger VAD som händer med VEM — inte bara "är du säker?".
+function describeDpPreview(p) {
+    const lines = ['Egenbokning bygger startlistan ur anmälningarnas valda skjutlag.', ''];
+    const placed = (p.rows || []).filter(r => r.teamNumber);
+    const unplaced = (p.rows || []).filter(r => !r.teamNumber);
+    if (placed.length) {
+        lines.push(placed.length + ' anmälning' + (placed.length === 1 ? '' : 'ar') + ' har inget valt skjutlag och placeras automatiskt:');
+        placed.slice(0, 15).forEach(r => lines.push('  • ' + r.name + ' (' + r.shootingClass + ') → skjutlag ' + r.teamNumber
+            + (r.fromExistingList ? ' (som på nuvarande startlista)' : '')));
+        if (placed.length > 15) lines.push('  … och ' + (placed.length - 15) + ' till');
+        lines.push('');
+    }
+    if (unplaced.length) {
+        lines.push(unplaced.length + ' får INGET skjutlag — det finns ingen passande plats kvar:');
+        unplaced.slice(0, 10).forEach(r => lines.push('  • ' + r.name + ' (' + r.shootingClass + ')'));
+        lines.push('De hamnar inte på startlistan förrän de får ett skjutlag.', '');
+    }
+    if (p.hasStartList && p.startListIsManual) {
+        lines.push('Den nuvarande startlistan ersätts av Egenbokningens lista'
+            + (p.startListIsPublished ? ' (den är publicerad och uppdateras direkt).' : '.')
+            + ' Ordningen i varje skjutlag behålls för dem som redan står där.');
+        if ((p.droppedFromList || []).length) {
+            lines.push('Står på listan utan anmälan och försvinner: ' + p.droppedFromList.join(', ') + '.');
+        }
+        lines.push('');
+    }
+    lines.push('Egenbokningens startlista publiceras. Vill du fortsätta?');
+    return lines.join('\n');
 }
 
 function showNotification(message, type) {
