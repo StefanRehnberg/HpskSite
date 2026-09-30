@@ -35,9 +35,36 @@
         function token() { return document.querySelector('input[name="__RequestVerificationToken"]').value; }
         function esc(s){ return s==null?'':String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+        // A response we cannot read used to become a bare "Något gick fel", which hid the cause and led
+        // the shooter to submit the series again — each retry a new pending row (prod 2026-09-29). Say
+        // what happened, and retry with the SAME code: it is valid for 30 minutes, nothing new is needed.
+        function readJson(r) {
+            const type = r.headers.get('content-type') || '';
+            if (r.ok && type.indexOf('application/json') !== -1) return r.json();
+            const err = new Error('http');
+            err.status = r.status;
+            throw err;
+        }
+        function failureText(err) {
+            const s = err && err.status;
+            if (!s) return 'Servern gick inte att nå. Kontrollera täckningen och försök igen.';
+            if (s === 455 || s === 403) return `Anropet stoppades på vägen (fel ${s}). Försök igen — koden gäller fortfarande.`;
+            if (s === 400) return 'Sidan behöver laddas om (fel 400). Tryck Försök igen.';
+            return `Servern svarade med fel ${s}. Försök igen — koden gäller fortfarande.`;
+        }
+        function showFailure(err, retry) {
+            content.innerHTML = `<div class="alert alert-danger text-center">
+                    <i class="bi bi-exclamation-triangle"></i> ${esc(failureText(err))}</div>
+                <div class="d-grid"><button class="btn btn-primary btn-lg" id="retryBtn">
+                    <i class="bi bi-arrow-clockwise"></i> Försök igen</button></div>
+                <p class="text-center text-muted small mt-2 mb-0">Skytten behöver inte skicka in serien igen.</p>`;
+            document.getElementById('retryBtn').addEventListener('click', retry);
+        }
+
         function load() {
+            content.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
             fetch('/umbraco/surface/Marken/GetSerieForVerify?token=' + encodeURIComponent(TOKEN))
-                .then(r => r.json())
+                .then(readJson)
                 .then(d => {
                     if (d.needsLogin) {
                         content.innerHTML = `<div class="card verify-card"><div class="card-body text-center">
@@ -48,7 +75,10 @@
                     if (!d.success) { content.innerHTML = `<div class="alert alert-warning">${esc(d.message)}</div>`; return; }
                     render(d.serie);
                 })
-                .catch(() => content.innerHTML = '<div class="alert alert-danger">Något gick fel.</div>');
+                .catch(err => showFailure(err, () => {
+                    // A 400 means the page's antiforgery token is stale; only a reload renews it.
+                    if (err && err.status === 400) location.reload(); else load();
+                }));
         }
 
         function render(s) {
@@ -102,6 +132,7 @@
         function act(kind, id, approve) {
             const url = approve ? '/umbraco/surface/Marken/VerifyEvidence' : '/umbraco/surface/Marken/RejectEvidence';
             if (!approve && !confirm('Avvisa?')) return;
+            content.querySelectorAll('button').forEach(b => b.disabled = true);
             fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
@@ -110,11 +141,15 @@
                 // refuses a bare approve there.
                 body: JSON.stringify({ kind, id, token: TOKEN })
             })
-            .then(r => r.json())
+            .then(readJson)
             .then(res => {
                 content.innerHTML = `<div class="alert ${res.success ? 'alert-success' : 'alert-danger'} text-center">${esc(res.message)}</div>`;
             })
-            .catch(() => content.innerHTML = '<div class="alert alert-danger text-center">Något gick fel.</div>');
+            // Retrying reloads the series first: if the first attempt did land, the page then says
+            // "Redan godkänd" instead of approving twice.
+            .catch(err => showFailure(err, () => {
+                if (err && err.status === 400) location.reload(); else load();
+            }));
         }
 
         load();

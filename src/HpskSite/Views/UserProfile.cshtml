@@ -1674,7 +1674,7 @@ function deletePracticeRow(id) {
                         <label class="form-label small mb-1"><i class="bi bi-camera"></i> Foto (valfritt)</label>
                         <input type="file" class="form-control" id="ssPhoto" accept="image/*" capture="environment">
                     </div>
-                    <button type="button" class="btn btn-success btn-lg w-100" onclick="ssSave()">
+                    <button type="button" class="btn btn-success btn-lg w-100" id="ssSaveBtn" onclick="ssSave()">
                         <i class="bi bi-send"></i> Skicka för validering
                     </button>
                 </div>
@@ -1771,7 +1771,7 @@ function deletePracticeRow(id) {
                         <label class="form-label small mb-1"><i class="bi bi-camera"></i> Foto (valfritt)</label>
                         <input type="file" class="form-control" id="psPhoto" accept="image/*" capture="environment">
                     </div>
-                    <button type="button" class="btn btn-success btn-lg w-100" onclick="psSave()">
+                    <button type="button" class="btn btn-success btn-lg w-100" id="psSaveBtn" onclick="psSave()">
                         <i class="bi bi-send"></i> Skicka för validering
                     </button>
                 </div>
@@ -4249,7 +4249,23 @@ function ssUpdateReq() {
         document.getElementById('ssReqNote').innerHTML = `<i class="bi bi-info-circle"></i> Tillämpning, krav för ${escapeHtmlMarken(lvl.toLowerCase())}: ${reqs[lvl]}. Räknas mot Pistolskyttemärkets guldfodring (3 serier).`;
     }
 }
+// A submit button stays disabled while its request is in flight. Without this, a second tap during a
+// slow photo upload on the range created a second pending series — and the QR shown only covered the
+// last one, so the first sat in the club's queue as an unexplained duplicate (prod 2026-09-29).
+function markenBusy(btn, busy) {
+    if (!btn) return;
+    if (busy) {
+        if (!btn.dataset.idleHtml) btn.dataset.idleHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Skickar…';
+    } else {
+        btn.disabled = false;
+        if (btn.dataset.idleHtml) btn.innerHTML = btn.dataset.idleHtml;
+    }
+}
 function ssSave() {
+    const btn = document.getElementById('ssSaveBtn');
+    if (btn && btn.disabled) return;
     const clubId = markenSelectedClubId('ssClub');
     if (!clubId) { alert('Du måste vara medlem i en klubb för att skicka in.'); return; }
     const target = document.getElementById('ssTarget').value;
@@ -4262,6 +4278,7 @@ function ssSave() {
     } else {
         body.claimedLevel = document.getElementById('ssLevel').value;
     }
+    markenBusy(btn, true);
     markenUploadPhoto('ssPhoto').then(photoRef => {
         body.photoRef = photoRef;
         return fetch('/umbraco/surface/Marken/SubmitSeries', {
@@ -4270,11 +4287,12 @@ function ssSave() {
             body: JSON.stringify(body)
         });
     }).then(r => r.json()).then(res => {
+        markenBusy(btn, false);
         if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); return; }
         document.getElementById('ssForm').style.display = 'none';
         markenRenderQr(document.getElementById('ssResult'), res, 'snabbserieModal');
         loadMySeries(markenTabYear);
-    }).catch(() => alert('Något gick fel.'));
+    }).catch(() => { markenBusy(btn, false); alert('Något gick fel.'); });
 }
 
 // ── Luftpistol series modal ────────────────────────────────────────
@@ -4293,10 +4311,13 @@ function psUpdateHint() {
     document.getElementById('psTotalLabel').textContent = 'Seriens poäng';
 }
 function psSave() {
+    const btn = document.getElementById('psSaveBtn');
+    if (btn && btn.disabled) return;
     const clubId = markenSelectedClubId('psClub');
     if (!clubId) { alert('Du måste vara medlem i en klubb för att skicka in.'); return; }
     const total = parseInt(document.getElementById('psTotal').value) || 0;
     if (total <= 0) { alert('Ange seriens poäng.'); return; }
+    markenBusy(btn, true);
     markenUploadPhoto('psPhoto').then(photoRef => {
         return fetch('/umbraco/surface/Marken/SubmitProofSeries', {
             method: 'POST',
@@ -4304,11 +4325,12 @@ function psSave() {
             body: JSON.stringify({ family: 'Luftpistol', seriesType: 'Precision', clubId, total, photoRef })
         });
     }).then(r => r.json()).then(res => {
+        markenBusy(btn, false);
         if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); return; }
         document.getElementById('psForm').style.display = 'none';
         markenRenderQr(document.getElementById('psResult'), res, 'proofSerieModal');
         loadMySeries(markenTabYear);
-    }).catch(() => alert('Något gick fel.'));
+    }).catch(() => { markenBusy(btn, false); alert('Något gick fel.'); });
 }
 
 document.getElementById('marken-tab')?.addEventListener('shown.bs.tab', loadMarkenTab);

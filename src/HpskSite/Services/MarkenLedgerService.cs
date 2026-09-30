@@ -223,6 +223,28 @@ namespace HpskSite.Services
             return await db.SingleOrDefaultAsync<MarkenSeries>("WHERE Id = @0", id);
         }
 
+        /// <summary>
+        /// A still-pending series by the same shooter that is identical to <paramref name="s"/> and was
+        /// created after <paramref name="since"/> — i.e. the same submit sent twice (a double tap, or a
+        /// retry after a failed scan). Everything that describes the series must match, shots included,
+        /// so two genuinely different series are never folded together.
+        /// </summary>
+        public async Task<MarkenSeries?> FindRecentPendingTwinAsync(MarkenSeries s, DateTime since)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var candidates = await db.FetchAsync<MarkenSeries>(
+                "WHERE MemberId = @0 AND ClubId = @1 AND BadgeFamily = @2 AND SeriesType = @3 AND Status = @4 "
+                + "AND SourceResultId IS NULL AND CreatedAt >= @5 AND CAST(SeriesDate AS date) = @6 "
+                + "ORDER BY CreatedAt DESC",
+                s.MemberId, s.ClubId, s.BadgeFamily, s.SeriesType, Marken.SeriesStatusPending, since, s.SeriesDate.Date);
+            return candidates.FirstOrDefault(c =>
+                string.Equals(c.WeaponGroup, s.WeaponGroup, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(c.Target ?? "", s.Target ?? "", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(c.ClaimedLevel ?? "", s.ClaimedLevel ?? "", StringComparison.OrdinalIgnoreCase)
+                && c.Total == s.Total
+                && string.Equals(c.Shots ?? "", s.Shots ?? "", StringComparison.Ordinal));
+        }
+
         public async Task<int> InsertSeriesAsync(MarkenSeries s)
         {
             s.CreatedAt = DateTime.Now;
