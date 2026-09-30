@@ -15,11 +15,6 @@ namespace HpskSite.Services.StartListCleanup
     /// </summary>
     public sealed class PrecisionFamilyStartListCleanupSource : IStartListCleanupSource
     {
-        private static readonly HashSet<string> Types = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "Precision", "Duell", "Milsnabb", "MagnumPrecision", "NationellHelmatch"
-        };
-
         private readonly IContentService _contentService;
         private readonly StartListHtmlRenderer _renderer;
         private readonly DirektplaceringStartListService _dpService;
@@ -41,7 +36,9 @@ namespace HpskSite.Services.StartListCleanup
         }
 
         public bool Supports(string? competitionType) =>
-            string.IsNullOrWhiteSpace(competitionType) || Types.Contains(competitionType.Trim());
+            // The family registry, not a hand-written list — the old copy lacked Standardpistol and
+            // Sportpistol, so deleting a registration there left the shooter on the list.
+            string.IsNullOrWhiteSpace(competitionType) || PrecisionFamily.IsMember(competitionType);
 
         private List<IContent> StartListNodes(IContent competition) =>
             _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
@@ -140,6 +137,8 @@ namespace HpskSite.Services.StartListCleanup
                         var before = team.Shooters.Count;
                         team.Shooters = team.Shooters.Where(s => !Matches(s)).ToList();
                         removedHere += before - team.Shooters.Count;
+                        // The rendered heading reads "(N st)" from this field, not from the list.
+                        team.ShooterCount = team.Shooters.Count;
                     }
                     if (removedHere == 0) continue;
 
@@ -149,7 +148,12 @@ namespace HpskSite.Services.StartListCleanup
                     // made the same call for start numbers.
                     slotsFreed += removedHere;
 
-                    var wasPublished = IsPublished(node);
+                    // ⚠️ Umbraco's publish state, NOT isOfficialStartList. A preliminary list is
+                    // still served on the public /startlista/ page (marked "Preliminär"), so gating
+                    // on the official flag left a deleted shooter visible there while only the
+                    // draft was cleaned (competition 3468, 2026-09-30). Same rule as
+                    // RegistrationClubPropagationService. A never-published draft stays unpublished.
+                    var wasPublished = node.Published;
                     node.SetValue("configurationData", JsonConvert.SerializeObject(cfg));
                     try
                     {

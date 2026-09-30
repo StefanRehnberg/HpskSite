@@ -2041,6 +2041,22 @@ livetavlan grupperade A Opt/AM under "A" medan dess filter använde registrets k
 visade A Opt/AM/AP/AG-sektionerna i klassväljaren. Egenrapporterade standardmedaljer lagrar nu
 klassnamnet (som resultatrader).
 
+### Egenbokning påslagen i efterhand (2026-09-30)
+
+Tävling 3468: Egenbokning slogs på efter att startlistan skapats. Anmälningarna saknade
+`TeamNumber`, så översikten sa 0/30 medan listan visade fem, nya bokare kunde säljas samma
+platser, och nästa ombyggnad hade tappat alla som inte bokat.
+- **`DirektplaceringStartListService.Plan/Apply`**: anmälningar utan skjutlag placeras i det
+  skjutlag de står i på nuvarande lista, annars i första passande (kapacitet, tillåtna
+  vapengrupper när klasser inte blandas, aldrig två klasser av samma anmälan i samma skjutlag).
+- **`CompetitionEdit/PreviewDirektplacering`** (läser bara) → redigeringsdialogen visar vem som
+  hamnar var, vilka som inte får plats och att en manuell lista ersätts, och frågar. Först efter
+  ja skickas `ApplyDirektplaceringAssignments`, och servern tilldelar EFTER sparningen.
+- **`Regenerate` behåller nuvarande ordning** för dem som redan står i samma skjutlag; nya läggs
+  sist i anmälningsordning. En plats är en skjutplats.
+- Städningen vid borttagen anmälan publicerar om varje lista som ligger publicerad i Umbraco
+  (`node.Published`), inte bara officiella — en preliminär lista visas också publikt.
+
 ### Egenbokning: skjutlaget väljs direkt under klassen (2026-09-27)
 
 Skyttar tryckte Anmäl utan att se skjutlagsvalet, som låg i en egen sektion längst ner i modalen.

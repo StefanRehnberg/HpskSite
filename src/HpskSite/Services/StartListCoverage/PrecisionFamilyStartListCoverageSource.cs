@@ -12,11 +12,6 @@ namespace HpskSite.Services.StartListCoverage
     /// </summary>
     public sealed class PrecisionFamilyStartListCoverageSource : IStartListCoverageSource
     {
-        private static readonly HashSet<string> Types = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "Precision", "Duell", "Milsnabb", "MagnumPrecision", "NationellHelmatch"
-        };
-
         private readonly IContentService _contentService;
         private readonly UmbracoStartListRepository _repository;
         private readonly ILogger<PrecisionFamilyStartListCoverageSource> _logger;
@@ -34,7 +29,7 @@ namespace HpskSite.Services.StartListCoverage
         // An empty/unknown competitionType falls to Precision, the same fallback legacy nodes rely
         // on in PrecisionFamilySeriesScoreSource.
         public bool Supports(string? competitionType) =>
-            string.IsNullOrWhiteSpace(competitionType) || Types.Contains(competitionType.Trim());
+            string.IsNullOrWhiteSpace(competitionType) || HpskSite.CompetitionTypes.Common.PrecisionFamily.IsMember(competitionType);
 
         public async Task<StartListCoverageResult> BuildAsync(IContent competition)
         {
