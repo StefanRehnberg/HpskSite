@@ -303,6 +303,19 @@ namespace HpskSite.Services
                 "WHERE MemberId = @0 AND Status = @1 ORDER BY [Year], Id", memberId, Marken.StatusVerified);
         }
 
+        /// <summary>
+        /// All Verified series of one year and family, regardless of the club that validated them. The
+        /// club summary needs this: a member of several clubs has series recorded at any of them, and
+        /// each of the member's clubs must see them all.
+        /// </summary>
+        public async Task<List<MarkenSeries>> GetVerifiedSeriesForYearAsync(int year, string family = Marken.FamilyPistolskytte)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<MarkenSeries>(
+                "WHERE [Year] = @0 AND BadgeFamily = @1 AND Status = @2 ORDER BY MemberId, Id",
+                year, family, Marken.StatusVerified);
+        }
+
         /// <summary>All Verified series validated for a club (any member) — feeds the club Guldserie-ligan.</summary>
         public async Task<List<MarkenSeries>> GetVerifiedSeriesForClubAsync(int clubId)
         {
@@ -326,12 +339,17 @@ namespace HpskSite.Services
                 Marken.SeriesStatusPending);
         }
 
-        public async Task<(bool Success, string? Message)> SetSeriesStatusAsync(int id, string status, int validatorMemberId)
+        /// <param name="decidingClubId">
+        /// The club the validator acted for. When &gt; 0 it replaces <c>ClubId</c>: any of the member's
+        /// clubs may decide a series, and the row must then name the club that did.
+        /// </param>
+        public async Task<(bool Success, string? Message)> SetSeriesStatusAsync(int id, string status, int validatorMemberId, int decidingClubId = 0)
         {
             using var db = _databaseFactory.CreateDatabase();
             var s = await db.SingleOrDefaultAsync<MarkenSeries>("WHERE Id = @0", id);
             if (s == null) return (false, "Serien hittades inte.");
 
+            if (decidingClubId > 0) s.ClubId = decidingClubId;
             s.Status = status;
             if (status == Marken.StatusVerified)
             {

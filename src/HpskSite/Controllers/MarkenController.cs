@@ -39,6 +39,7 @@ namespace HpskSite.Controllers
         private readonly StandardMedalLedgerService _standardMedals;
         private readonly MarkenOrderListService _orderList;
         private readonly StandardMedalProofStorage _proofStorage;
+        private readonly MemberClubService _memberClubs;
         private readonly ITimeLimitedDataProtector _verifyProtector;
 
         /// <summary>
@@ -77,6 +78,7 @@ namespace HpskSite.Controllers
             StandardMedalLedgerService standardMedals,
             MarkenOrderListService orderList,
             StandardMedalProofStorage proofStorage,
+            MemberClubService memberClubs,
             IDataProtectionProvider dataProtectionProvider)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -94,6 +96,7 @@ namespace HpskSite.Controllers
             _standardMedals = standardMedals;
             _orderList = orderList;
             _proofStorage = proofStorage;
+            _memberClubs = memberClubs;
             _verifyProtector = dataProtectionProvider.CreateProtector("Marken.SeriesVerify.v1").ToTimeLimitedDataProtector();
         }
 
@@ -538,7 +541,7 @@ namespace HpskSite.Controllers
         {
             var s = await _ledger.GetSeriesAsync(request?.Id ?? 0);
             if (s == null) return Json(new { success = false, message = "Serien hittades inte." });
-            if (!await CanSignOffForMemberAsync(s.MemberId))
+            if (!await CanEditSeriesForMemberAsync(s.MemberId))
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
             var (ok, msg) = await _ledger.SetSeriesCountsTowardAsync(s.Id, request!.Counts);
@@ -573,7 +576,7 @@ namespace HpskSite.Controllers
         {
             var s = await _ledger.GetSeriesAsync(request?.Id ?? 0);
             if (s == null) return Json(new { success = false, message = "Serien hittades inte." });
-            if (!await CanSignOffForMemberAsync(s.MemberId))
+            if (!await CanEditSeriesForMemberAsync(s.MemberId))
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
             if (s.SourceResultId.HasValue)
@@ -884,10 +887,10 @@ namespace HpskSite.Controllers
                 ids = funcClubs;
             }
 
-            var series = await _ledger.GetPendingSeriesAsync(ids);
+            var series = await GetPendingSeriesForClubsAsync(ids);
             var comps = await _compService.GetPendingSelfReportedAsync(ids);
             var storm = await _stormastarService.GetPendingAsync(ids);
-            var items = series.Where(s => s.MemberId != me.Id).Select(SerieDto)
+            var items = (await SeriesQueueItemsAsync(series.Where(s => s.MemberId != me.Id)))
                 .Concat(comps.Where(c => c.MemberId != me.Id).Select(CompResultDto))
                 .Concat(storm.Where(e => e.MemberId != me.Id).Select(StormastarDto)).ToList();
             return Json(new { success = true, items, canViewAllClubs = isSiteAdmin, allClubs = showAll });
@@ -931,7 +934,15 @@ namespace HpskSite.Controllers
             if (series.MemberId == me.Id) return Json(new { success = false, message = SelfValidateMsg });
             if (!await CanValidateSeriesAsync(series))
                 return Json(new { success = false, message = "Du har inte behörighet att validera för den här klubben." });
-            return Json(new { success = true, serie = SerieDto(series) });
+            return Json(new { success = true, serie = await SerieDtoForValidatorAsync(series) });
+        }
+
+        /// <summary>Queue rows for series, each carrying the clubs the viewer may approve it for.</summary>
+        private async Task<List<object>> SeriesQueueItemsAsync(IEnumerable<MarkenSeries> series)
+        {
+            var list = new List<object>();
+            foreach (var s in series) list.Add(await SerieDtoForValidatorAsync(s));
+            return list;
         }
 
         private static (string Kind, int Id) ParseEvidenceToken(string raw)
@@ -951,6 +962,12 @@ namespace HpskSite.Controllers
             /// consulted by clubs that require on-site witnessing (<see cref="RequireOnSiteWitness"/>).
             /// </summary>
             public string? Token { get; set; }
+
+            /// <summary>
+            /// The club the validator approves FOR, when they may act for more than one of the shooter's
+            /// clubs. 0/null = the default (see GetValidatingClubOptionsAsync). Checked server-side.
+            /// </summary>
+            public int? ClubId { get; set; }
         }
 
         /// <summary>Unified validate — dispatches to series or competition-result by kind.</summary>
@@ -961,7 +978,7 @@ namespace HpskSite.Controllers
             {
                 "comp" => await SetCompResultStatus(request.Id, Marken.StatusVerified),
                 "stormastar" => await SetStormastarStatus(request.Id, Marken.StatusVerified),
-                _ => await SetSeriesStatus(request?.Id ?? 0, Marken.StatusVerified, request?.Token)
+                _ => await SetSeriesStatus(request?.Id ?? 0, Marken.StatusVerified, request?.Token, request?.ClubId ?? 0)
             };
 
         [HttpPost]
@@ -971,7 +988,7 @@ namespace HpskSite.Controllers
             {
                 "comp" => await SetCompResultStatus(request.Id, Marken.StatusRejected),
                 "stormastar" => await SetStormastarStatus(request.Id, Marken.StatusRejected),
-                _ => await SetSeriesStatus(request?.Id ?? 0, Marken.StatusRejected)
+                _ => await SetSeriesStatus(request?.Id ?? 0, Marken.StatusRejected, null, request?.ClubId ?? 0)
             };
 
         private async Task<IActionResult> SetCompResultStatus(int id, string status)
@@ -994,14 +1011,33 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RejectSeries([FromBody] IdRequest request) => await SetSeriesStatus(request?.Id ?? 0, Marken.StatusRejected);
 
-        private async Task<IActionResult> SetSeriesStatus(int id, string status, string? verifyToken = null)
+        private async Task<IActionResult> SetSeriesStatus(int id, string status, string? verifyToken = null, int requestedClubId = 0)
         {
             var series = await _ledger.GetSeriesAsync(id);
             if (series == null) return Json(new { success = false, message = "Serien hittades inte." });
             int validatorId = await GetCurrentMemberIdAsync();
             if (series.MemberId == validatorId) return Json(new { success = false, message = SelfValidateMsg });
-            if (!await CanValidateSeriesAsync(series))
-                return Json(new { success = false, message = "Åtkomst nekad." });
+
+            var (options, defaultClub) = await GetValidatingClubOptionsAsync(series);
+            int validatingClub;
+            if (requestedClubId > 0)
+            {
+                // The validator picked a club. It must be one they may act for AND one the shooter
+                // belongs to — both are what the option list contains.
+                if (!options.Any(o => o.Id == requestedClubId))
+                    return Json(new { success = false, message = "Du kan inte godkänna serien för den klubben — välj en klubb där du har behörighet och som skytten är medlem i." });
+                validatingClub = requestedClubId;
+            }
+            else if (defaultClub > 0)
+            {
+                validatingClub = defaultClub;
+            }
+            else
+            {
+                if (!await _auth.IsCurrentUserAdminAsync())
+                    return Json(new { success = false, message = "Åtkomst nekad." });
+                validatingClub = series.ClubId; // site admin: the series stays where it was submitted
+            }
 
             // ── On-site witnessing (opt-in per club) ──
             // Approving then requires a LIVE verify token minted for THIS series, which only the
@@ -1010,8 +1046,11 @@ namespace HpskSite.Controllers
             // still be able to clear its queue of series nobody witnessed, or the queue jams.
             // Series only — a self-reported championship result is a paper result list, not
             // something a functionary stands and watches.
+            // ⚠️ EITHER club's rule applies — the one the series was submitted to and the one approving
+            // it. Otherwise a club that demands witnessing could be sidestepped by having another of the
+            // member's clubs approve the series from its queue.
             if (status == Marken.StatusVerified
-                && RequireOnSiteWitness(series.ClubId)
+                && (RequireOnSiteWitness(series.ClubId) || RequireOnSiteWitness(validatingClub))
                 && !IsLiveVerifyToken(verifyToken, "series:" + series.Id))
             {
                 return Json(new
@@ -1022,7 +1061,8 @@ namespace HpskSite.Controllers
                 });
             }
 
-            var (ok, msg) = await _ledger.SetSeriesStatusAsync(id, status, validatorId);
+            // The deciding club is recorded on the series, so the row names the club that approved it.
+            var (ok, msg) = await _ledger.SetSeriesStatusAsync(id, status, validatorId, validatingClub);
 
             // No separate sign-off: validating a series may complete (or un-complete) a yearly badge
             // automatically. A precision series feeds Pistolskytte AND Elit, so recompute both the
@@ -1049,10 +1089,10 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
             int meId = await GetCurrentMemberIdAsync(); // never list the viewer's own submissions
-            var series = await _ledger.GetPendingSeriesAsync(new[] { clubId });
+            var series = await GetPendingSeriesForClubsAsync(new[] { clubId });
             var comps = await _compService.GetPendingSelfReportedAsync(new[] { clubId });
             var storm = await _stormastarService.GetPendingAsync(new[] { clubId });
-            var items = series.Where(s => s.MemberId != meId).Select(SerieDto)
+            var items = (await SeriesQueueItemsAsync(series.Where(s => s.MemberId != meId)))
                 .Concat(comps.Where(c => c.MemberId != meId).Select(CompResultDto))
                 .Concat(storm.Where(e => e.MemberId != meId).Select(StormastarDto)).ToList();
             return Json(new { success = true, canValidate = await CanSignOffForClubAsync(clubId), items });
@@ -1349,19 +1389,18 @@ namespace HpskSite.Controllers
             // in competitions shows up here at all.
             await EnsureCompetitionSeriesSyncedAsync(y);
 
-            // Members to show = badge/Guldfodring holders in this club PLUS anyone with verified
-            // series recorded at this club this year (so backlog/self-submitted series are visible
-            // even before a Guldfodring completes).
-            var clubSeries = (await _ledger.GetVerifiedSeriesForClubAsync(clubId))
-                .Where(s => s.Year == y && s.BadgeFamily == Family).ToList();
-            var seriesByMember = clubSeries.GroupBy(s => s.MemberId).ToDictionary(g => g.Key, g => g.ToList());
+            // Members to show = members of this club (primary OR additional) who hold a badge/Guldfodring
+            // or have verified series this year — validated at ANY club — plus anyone whose series were
+            // validated here. A member's guldserier are theirs, not the validating club's: a member of
+            // three clubs must show up with the same series in all three (Falkenbergs PK 2026-09-30).
+            var yearSeries = await _ledger.GetVerifiedSeriesForYearAsync(y, Family);
+            var seriesByMember = yearSeries.GroupBy(s => s.MemberId).ToDictionary(g => g.Key, g => g.ToList());
 
-            var memberIds = new HashSet<int>(seriesByMember.Keys);
-            foreach (var mid in await _ledger.GetAllActiveMemberIdsAsync())
+            var memberIds = new HashSet<int>(yearSeries.Where(s => s.ClubId == clubId).Select(s => s.MemberId));
+            foreach (var mid in (await _ledger.GetAllActiveMemberIdsAsync()).Concat(seriesByMember.Keys).Distinct())
             {
-                var m = _memberService.GetById(mid);
-                if (m != null && int.TryParse(m.GetValue("primaryClubId")?.ToString(), out var pc) && pc == clubId)
-                    memberIds.Add(mid);
+                if (memberIds.Contains(mid)) continue;
+                if (_memberClubs.IsMemberOfClub(_memberService.GetById(mid), clubId)) memberIds.Add(mid);
             }
 
             var rows = new List<MarkenSummaryRow>();
@@ -1378,8 +1417,13 @@ namespace HpskSite.Controllers
                 var thisYearQ = await _ledger.GetQualificationForYearAsync(mid, Family, y);
 
                 var ms = seriesByMember.GetValueOrDefault(mid) ?? new List<MarkenSeries>();
-                int part1 = ms.Count(s => s.SeriesType == Marken.SeriesTypePrecision && s.Qualifies && s.ClaimedLevel == Marken.LevelGuld);
-                int part2 = ms.Count(s => s.SeriesType == Marken.SeriesTypeSpeed && s.ClaimedLevel == Marken.LevelGuld);
+                // Same counting rules as the Guldfodring itself (MarkenCandidateService), so the summary
+                // and the Detaljer modal cannot disagree: an excluded duplicate does not count, and the
+                // speed part is tillämpningsserier only (a snabbpistol series is Elit's evidence).
+                int part1 = ms.Count(s => s.SeriesType == Marken.SeriesTypePrecision && s.Qualifies
+                    && s.CountsTowardGuldfodring && s.ClaimedLevel == Marken.LevelGuld);
+                int part2 = ms.Count(s => Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target) == Marken.DisciplineTillampning
+                    && string.Equals(s.ClaimedLevel, Marken.LevelGuld, StringComparison.OrdinalIgnoreCase));
 
                 rows.Add(new MarkenSummaryRow
                 {
@@ -1446,6 +1490,9 @@ namespace HpskSite.Controllers
             {
                 success = true,
                 canSignOff = await CanSignOffForMemberAsync(memberId),
+                // Correcting SERIES is open to every club the member belongs to; awarding märken
+                // (canSignOff) stays with the primary club.
+                canEditSeries = await CanEditSeriesForMemberAsync(memberId),
                 detail = payload,
                 families,
                 mastar,
@@ -1995,10 +2042,27 @@ namespace HpskSite.Controllers
             var thisYearQ = quals.FirstOrDefault(q => q.Year == year);
 
             // Precision series of the year, including any a functionary excluded from the count.
-            var yearPrecisionSeries = (await _ledger.GetSeriesForMemberAsync(memberId, year))
+            var yearSeries = await _ledger.GetSeriesForMemberAsync(memberId, year);
+            var yearPrecisionSeries = yearSeries
                 .Where(s => s.SeriesType == Marken.SeriesTypePrecision)
                 .OrderByDescending(s => s.Total).ThenBy(s => s.SeriesDate)
                 .ToList();
+            // The speed part's own evidence — tillämpningsserier only, the same scoping as
+            // Part2SeriesCount (a snabbpistol series is Elit's evidence and completes nothing here).
+            var yearSpeedSeries = yearSeries
+                .Where(s => Marken.SeriesDiscipline(s.BadgeFamily, s.SeriesType, s.Target) == Marken.DisciplineTillampning)
+                .OrderBy(s => s.SeriesDate).ThenBy(s => s.Id)
+                .ToList();
+
+            // Club per series. A member of several clubs shoots series validated by any of them, and
+            // every one of those clubs reads this list, so each row must say where it was shot.
+            var clubNames = new Dictionary<int, string?>();
+            string? ClubName(int clubId)
+            {
+                if (clubId <= 0) return null;
+                if (!clubNames.TryGetValue(clubId, out var n)) clubNames[clubId] = n = _clubService.GetClubNameById(clubId);
+                return n;
+            }
 
             return new
             {
@@ -2072,7 +2136,28 @@ namespace HpskSite.Controllers
                         status = s.Status,
                         counts = s.CountsTowardGuldfodring,
                         fromCompetition = s.IsFromCompetition,
-                        competitionName = s.IsFromCompetition ? s.Notes : null
+                        competitionName = s.IsFromCompetition ? s.Notes : null,
+                        // The club that APPROVED the series. A competition series was approved by no
+                        // club — its ClubId is only the shooter's own club, so it shows the competition.
+                        clubId = s.IsFromCompetition ? 0 : s.ClubId,
+                        clubName = s.IsFromCompetition ? null : ClubName(s.ClubId)
+                    }),
+                    // One row per tillämpningsserie, like the precision part — a bare count cannot show
+                    // WHEN or WHERE the three were shot, which is what a föreningsintyg rests on.
+                    allSpeedSeries = yearSpeedSeries.Select(s => new
+                    {
+                        id = s.Id,
+                        date = s.SeriesDate,
+                        weaponGroup = s.WeaponGroup,
+                        target = s.Target,
+                        targetName = Marken.SpeedTargetDisplay(s.Target),
+                        level = s.ClaimedLevel,
+                        status = s.Status,
+                        counts = s.Status == Marken.StatusVerified
+                                 && string.Equals(s.ClaimedLevel, Marken.LevelGuld, StringComparison.OrdinalIgnoreCase),
+                        clubId = s.ClubId,
+                        clubName = ClubName(s.ClubId),
+                        validatedByName = s.ValidatedByMemberId is int vid && vid > 0 ? _memberService.GetById(vid)?.Name : null
                     }),
                     part2Met = cand.Part2Met,
                     part2Source = cand.Part2Source,
@@ -2740,7 +2825,94 @@ namespace HpskSite.Controllers
             return false;
         }
 
-        private Task<bool> CanValidateSeriesAsync(MarkenSeries s) => CanSignOffForClubAsync(s.ClubId);
+        // ── Series authority: EVERY club the member belongs to (Falkenbergs PK 2026-09-30) ──
+        // A member's guldserier are the member's, not the submitting club's, so any of the member's
+        // clubs may validate, reject and correct them. Awarding märken (and the årtalsmärke/Mästar
+        // years) stays with the primary club via CanSignOffForMemberAsync — two clubs must not award
+        // the same person the same badge.
+
+        private async Task<bool> CanValidateSeriesAsync(MarkenSeries s)
+            => await ResolveValidatingClubAsync(s) > 0 || await _auth.IsCurrentUserAdminAsync();
+
+        /// <summary>
+        /// The club the current user validates <paramref name="s"/> FOR: the club it was submitted to
+        /// when the user may sign off there, otherwise the first of the member's clubs where they may.
+        /// 0 = none. This is the club recorded on the series once decided, so "Klubb" on the row names
+        /// the club that actually approved it.
+        /// </summary>
+        private async Task<int> ResolveValidatingClubAsync(MarkenSeries s)
+            => (await GetValidatingClubOptionsAsync(s)).DefaultClubId;
+
+        public record ValidatingClubOption(int Id, string Name);
+
+        /// <summary>
+        /// The clubs the current user may approve <paramref name="s"/> FOR: clubs the shooter belongs to
+        /// (plus the one the series was submitted to) where the user may sign off. We cannot know which
+        /// club a functionary is acting for on the range — they may sit on the board or be skjutledare in
+        /// several of the shooter's clubs — so when there is more than one option the functionary picks.
+        /// Default: the club the series was submitted to, else the functionary's own primary club, else
+        /// the first option. DefaultClubId 0 = the user may approve for none.
+        /// </summary>
+        private async Task<(List<ValidatingClubOption> Options, int DefaultClubId)> GetValidatingClubOptionsAsync(MarkenSeries s)
+        {
+            var candidates = new List<int>();
+            if (s.ClubId > 0) candidates.Add(s.ClubId);
+            foreach (var c in _memberClubs.GetAllClubIds(_memberService.GetById(s.MemberId)))
+                if (!candidates.Contains(c)) candidates.Add(c);
+
+            var options = new List<ValidatingClubOption>();
+            foreach (var c in candidates)
+                if (await CanSignOffForClubAsync(c))
+                    options.Add(new ValidatingClubOption(c, _clubService.GetClubNameById(c) ?? $"Klubb {c}"));
+            if (options.Count == 0) return (options, 0);
+
+            if (options.Any(o => o.Id == s.ClubId)) return (options, s.ClubId);
+            var me = await GetCurrentMemberAsync();
+            int myPrimary = me == null ? 0 : _memberClubs.GetPrimaryClubId(me);
+            if (options.Any(o => o.Id == myPrimary)) return (options, myPrimary);
+            return (options, options[0].Id);
+        }
+
+        /// <summary>SerieDto plus the clubs the current user may approve it for (queue + QR page).</summary>
+        private async Task<object> SerieDtoForValidatorAsync(MarkenSeries s)
+        {
+            var (options, def) = await GetValidatingClubOptionsAsync(s);
+            var baseDto = System.Text.Json.JsonSerializer.SerializeToElement(SerieDto(s));
+            var dict = new Dictionary<string, object?>();
+            foreach (var p in baseDto.EnumerateObject()) dict[p.Name] = p.Value;
+            dict["clubOptions"] = options.Select(o => new { id = o.Id, name = o.Name });
+            dict["defaultClubId"] = def;
+            return dict;
+        }
+
+        /// <summary>May the current user correct this member's series (count/don't count, delete)?</summary>
+        private async Task<bool> CanEditSeriesForMemberAsync(int memberId)
+        {
+            if (await _auth.IsCurrentUserAdminAsync()) return true;
+            foreach (var c in _memberClubs.GetAllClubIds(_memberService.GetById(memberId)))
+                if (await CanSignOffForClubAsync(c)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Pending series for a set of clubs' queues: those submitted to one of the clubs PLUS those
+        /// submitted elsewhere by a member of one of the clubs — every club the member belongs to may
+        /// validate. Pass null for all (site admin).
+        /// </summary>
+        private async Task<List<MarkenSeries>> GetPendingSeriesForClubsAsync(IEnumerable<int>? clubIds)
+        {
+            var all = await _ledger.GetPendingSeriesAsync(null);
+            if (clubIds == null) return all;
+            var ids = clubIds.ToHashSet();
+            var memberClubs = new Dictionary<int, List<int>>();
+            return all.Where(s =>
+            {
+                if (ids.Contains(s.ClubId)) return true;
+                if (!memberClubs.TryGetValue(s.MemberId, out var mc))
+                    memberClubs[s.MemberId] = mc = _memberClubs.GetAllClubIds(_memberService.GetById(s.MemberId));
+                return mc.Any(ids.Contains);
+            }).ToList();
+        }
 
         /// <summary>(All, ClubIds) describing where the current user may validate märke series.</summary>
         /// <summary>Clubs where the current user is a functionary who may validate märken —
@@ -2870,15 +3042,22 @@ namespace HpskSite.Controllers
             };
         }
 
-        /// <summary>Viewing detail uses the broader club-admin gate (site/regional/club admin).</summary>
+        /// <summary>
+        /// Viewing detail uses the broader club-admin gate (site/regional/club admin) — for ANY club the
+        /// member belongs to, not only the primary one. A member of three clubs shoots guldserier that
+        /// every one of those clubs relies on (each may be asked for a föreningsintyg), and a
+        /// primary-club-only gate left the other clubs unable to see the underlag at all (Falkenbergs PK
+        /// 2026-09-30). Viewing only: awarding and sign-off stay with <see cref="CanSignOffForMemberAsync"/>.
+        /// </summary>
         private async Task<bool> CanViewMemberAsync(int memberId)
         {
             if (await _auth.IsCurrentUserAdminAsync()) return true;
             // The member themselves can view their own detail.
             var self = await GetCurrentMemberAsync();
             if (self != null && self.Id == memberId) return true;
-            int clubId = GetPrimaryClubId(memberId);
-            return clubId > 0 && await _auth.IsClubAdminForClub(clubId);
+            foreach (var clubId in _memberClubs.GetAllClubIds(_memberService.GetById(memberId)))
+                if (await _auth.IsClubAdminForClub(clubId) || await CanSignOffForClubAsync(clubId)) return true;
+            return false;
         }
 
         /// <summary>Reads the per-club <c>markenSignoffSkjutledare</c> toggle (default false = board only).</summary>

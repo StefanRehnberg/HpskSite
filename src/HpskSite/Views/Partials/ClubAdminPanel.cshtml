@@ -2690,7 +2690,11 @@ function renderMemberMarkenDetail(data) {
     // tell this year's series apart and to spot a serie entered under the wrong date.
     // Every precision series of the year, counted or not — the whole point is that a duplicate is
     // visible next to the series it duplicates, and that an excluded series can be put back.
-    const seriesRows = renderMarkenSeriesLedger(gf.allPrecisionSeries || gf.bestSeries || [], canSign, memberId, name);
+    // Correcting series is open to every club the member belongs to; awarding märken (canSign) is
+    // the primary club's.
+    const canEditSeries = data.canEditSeries === undefined ? canSign : !!data.canEditSeries;
+    const seriesRows = renderMarkenSeriesLedger(gf.allPrecisionSeries || gf.bestSeries || [], canEditSeries, memberId, name);
+    const speedRows = renderMarkenSpeedLedger(gf.allSpeedSeries || []);
 
     // Read-only status — the year completes automatically when both parts are validated.
     const bothDone = gf.candidateBothMet || (p && p.fulfilled);
@@ -2721,6 +2725,7 @@ function renderMemberMarkenDetail(data) {
             ${seriesRows ? `<ul class="small text-muted mt-1 mb-1">${seriesRows}</ul>` : ''}
             <hr class="my-2">
             ${partLine('Snabbskyttedel (3 godkända snabbserier)', part2, gf.part2ViaFalt ? escapeMedalHtml(gf.part2Detail || 'fältmedalj') : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} serier`)}
+            ${speedRows ? `<ul class="small text-muted mt-1 mb-1">${speedRows}</ul>` : ''}
             <div class="mt-2">${gfStatus}</div>
         </div></div>
         <p class="text-muted small">Precisionsdelen byggs av validerade guldserier. Serier som skjutits på en
@@ -2781,7 +2786,43 @@ function renderMarkenSeriesLedger(list, canSign, memberId, name) {
             }
         }
         return `<li class="${excluded ? 'text-decoration-line-through text-muted' : ''}">${dateHtml}${escapeMedalHtml(s.weaponGroup)}: `
-             + `<strong>${s.score}</strong> (krav ${s.threshold})${src}${flags}${actions}</li>`;
+             + `<strong>${s.score}</strong> (krav ${s.threshold})${src}${markenClubTag(s)}${flags}${actions}</li>`;
+    }).join('');
+}
+
+// The club that APPROVED the series (recorded when it is decided — any of the member's clubs may).
+// Every club the member belongs to reads this list, so a series approved by ANOTHER club than the
+// one looking is marked out. A series not yet decided names the club it was submitted to.
+function markenClubTag(s) {
+    if (!s.clubName) return '';
+    const other = s.clubId && typeof clubId !== 'undefined' && Number(s.clubId) !== Number(clubId);
+    const decided = s.status === 'Verified' || s.status === 'Rejected' || s.status === undefined;
+    const title = !decided ? 'Inskickad till klubben — inte avgjord än'
+        : (s.status === 'Rejected' ? 'Avvisad av klubben' : 'Godkänd av klubben')
+          + (other ? ' (en annan klubb som skytten är medlem i)' : '');
+    const label = decided ? escapeMedalHtml(s.clubName) : `inskickad till ${escapeMedalHtml(s.clubName)}`;
+    return ` <span class="badge ${other ? 'bg-info-subtle text-info-emphasis border border-info-subtle' : 'bg-light text-dark border'}"
+        title="${title}">${label}</span>`;
+}
+
+// The speed part, one row per tillämpningsserie — date, target, valör, club and who validated it.
+// A bare "2/3 serier" could not show when or where they were shot.
+function renderMarkenSpeedLedger(list) {
+    if (!list || !list.length) return '';
+    return list.map(s => {
+        const sd = s.date ? new Date(s.date).toLocaleDateString('sv-SE') : '';
+        const dateHtml = sd ? `<span class="text-nowrap">${escapeMedalHtml(sd)}</span> · ` : '';
+        const pending = s.status === 'Pending';
+        const rejected = s.status === 'Rejected';
+        const notGuld = !pending && !rejected && s.counts === false;
+        const flags = (pending ? ' <span class="badge bg-warning text-dark">väntar på validering</span>' : '')
+            + (rejected ? ' <span class="badge bg-secondary">avvisad</span>' : '')
+            + (notGuld ? ' <span class="badge bg-light text-dark border" title="Snabbskyttedelen kräver guldvalör">räknas inte (ej guld)</span>' : '');
+        const by = s.validatedByName && !pending && !rejected
+            ? ` <span class="text-muted">· bevittnad av ${escapeMedalHtml(s.validatedByName)}</span>` : '';
+        return `<li class="${rejected ? 'text-decoration-line-through text-muted' : ''}">${dateHtml}${escapeMedalHtml(s.weaponGroup || '')}: `
+             + `<strong>${escapeMedalHtml(s.level || '')}</strong> · ${escapeMedalHtml(s.targetName || s.target || '')}`
+             + `${markenClubTag(s)}${flags}${by}</li>`;
     }).join('');
 }
 
@@ -3179,8 +3220,18 @@ function renderClubQueueItem(s, canValidate) {
     const onSite = (s.kind !== 'comp' && s.kind !== 'stormastar' && s.requiresOnSiteWitness)
         ? `<div class="small text-warning-emphasis mt-1"><i class="bi bi-qr-code-scan me-1"></i>Klubben kräver bevittning på plats — godkänn genom att skanna skyttens QR-kod.</div>`
         : '';
-    const buttons = canValidate
-        ? `<div class="text-nowrap mt-1">
+    // Which club the approval is for — only asked when the viewer may act for several of the
+    // shooter's clubs. On a club's own page that club is the natural default.
+    const opts = s.clubOptions || [];
+    const pageClub = typeof clubId !== 'undefined' ? Number(clubId) : 0;
+    const def = opts.some(o => o.id === pageClub) ? pageClub : s.defaultClubId;
+    const clubPick = (s.kind === 'series' && opts.length > 1)
+        ? `<div class="d-flex align-items-center gap-2 mt-1 small"><label for="vc_${s.id}" class="text-muted">Godkänn för</label>
+             <select id="vc_${s.id}" class="form-select form-select-sm w-auto">${opts.map(o =>
+               `<option value="${o.id}"${o.id === def ? ' selected' : ''}>${escapeMedalHtml(o.name)}</option>`).join('')}</select></div>`
+        : '';
+    const buttons = canValidate || opts.length > 0
+        ? `${clubPick}<div class="text-nowrap mt-1">
              <button class="btn btn-sm btn-success" onclick="clubQueueAct('${s.kind}', ${s.id}, true)"><i class="bi bi-check-lg me-1"></i>Godkänn</button>
              <button class="btn btn-sm btn-outline-danger" onclick="clubQueueAct('${s.kind}', ${s.id}, false)"><i class="bi bi-x-lg me-1"></i>Avvisa</button>
            </div>`
@@ -3207,10 +3258,12 @@ function markenQueueNote(s) {
 function clubQueueAct(kind, id, approve) {
     if (!approve && !confirm('Avvisa?')) return;
     const url = approve ? '/umbraco/surface/Marken/VerifyEvidence' : '/umbraco/surface/Marken/RejectEvidence';
+    const pick = document.getElementById('vc_' + id);
+    const clubIdFor = kind === 'series' && pick ? (parseInt(pick.value, 10) || 0) : 0;
     fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
-        body: JSON.stringify({ kind, id })
+        body: JSON.stringify({ kind, id, clubId: clubIdFor })
     })
     .then(r => r.json())
     .then(res => {

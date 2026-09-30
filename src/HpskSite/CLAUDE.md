@@ -3691,6 +3691,37 @@ bara den sista raden, så de andra blev kvar som väntande.
   skytt drabbades, tre koder i rad). Misstanken är Simplys WAF eller ett tillfälligt serverfel;
   prodloggen för det fönstret avgör. Felkoden på sidan säger det nästa gång.
 
+#### En medlems serier tillhör ALLA medlemmens klubbar (2026-09-30, Falkenbergs PK)
+
+Serierna är medlemmens, inte den inskickande klubbens. Regeln (Stefans beslut):
+- **Se, godkänna, avvisa och ändra serier** (räkna/räkna inte, ta bort) — varje klubb medlemmen
+  tillhör (`primaryClubId` + `memberClubIds`, via `MemberClubService.GetAllClubIds`).
+  `CanViewMemberAsync`, `CanValidateSeriesAsync`, `CanEditSeriesForMemberAsync`.
+- **Tilldela märken** (valörer, guldnummer, årtalsmärkes- och Mästarår) — bara PRIMÄRKLUBBEN,
+  `CanSignOffForMemberAsync`. Två klubbar får inte tilldela samma person samma märke.
+- **Köerna** (`GetPendingSeriesForClubsAsync`) visar serier inskickade till klubben PLUS serier
+  som klubbens medlemmar skickat in till en annan av sina klubbar.
+- **Sammanställningen** listar klubbens medlemmar (även extraklubb) och räknar serier från alla
+  klubbar med guldfodringens egna regler (tillämpning, `CountsTowardGuldfodring`).
+
+**`MarkenSeries.ClubId` = den klubb som AVGJORDE serien** — skrivs om vid godkännande/avslag
+(`SetSeriesStatusAsync(..., decidingClubId)`). Före beslutet är det klubben den skickades in till,
+och raden visar "inskickad till …". En tävlingsserie avgjordes av ingen klubb: där är `ClubId`
+skyttens egen klubb, och vyn visar tävlingen i stället.
+
+⚠️ **Vilken klubb godkännaren agerar för går inte att veta** — en funktionär kan sitta i styrelsen
+eller vara skjutledare i flera av skyttens klubbar. `GetValidatingClubOptionsAsync` ger
+alternativen (skyttens klubbar där godkännaren får signera); **fler än ett → väljaren
+"Godkänn för klubb"** på QR-sidan och i båda köerna, ett → ingen väljare. Förval: inskickad
+klubb → godkännarens primärklubb → första. Servern vägrar ett val utanför alternativen.
+⚠️ **Bevittningskravet gäller om ANTINGEN den inskickade eller den valda klubben kräver det** —
+annars kringgås en klubbs krav genom att en annan klubb godkänner från sin kö.
+
+Detaljvyn visar snabbskyttedelen rad för rad (`allSpeedSeries`) med klubb på båda delarna.
+Föreningsintyget behövde ingen ändring — det läste redan medlemmens alla serier oavsett klubb.
+Svit: `hpsk-verify/marken-multiclub-verify.mjs` 36/36 (fixtur i SQL FÖRE appomstart, eftersom
+Umbraco cachar medlemmar — `marken-multiclub-fixture-apply.sql` / `-restore.sql`).
+
 ### Anmälan och närvaro på klubbens och kretsens evenemang (2026-08-31)
 
 **Kretsen och klubben delade redan evenemangsmodell** — `ClubController.CreateRegionEvent` skapar en

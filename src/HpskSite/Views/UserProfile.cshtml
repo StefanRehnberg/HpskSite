@@ -4050,9 +4050,17 @@ function renderQueueItem(s) {
     const onSiteQ = (s.kind !== 'comp' && s.kind !== 'stormastar' && s.requiresOnSiteWitness)
         ? `<div class="small text-warning-emphasis"><i class="bi bi-qr-code-scan me-1"></i>Klubben kräver bevittning på plats — skanna skyttens QR-kod.</div>`
         : '';
+    // Which club the approval is for — only asked when the functionary may act for several of the
+    // shooter's clubs; we cannot tell which club they represent on the range.
+    const opts = s.clubOptions || [];
+    const clubPickQ = (s.kind === 'series' && opts.length > 1)
+        ? `<div class="d-flex align-items-center gap-2 mt-1 small"><label for="vcq_${s.id}" class="text-muted">Godkänn för</label>
+             <select id="vcq_${s.id}" class="form-select form-select-sm w-auto">${opts.map(o =>
+               `<option value="${o.id}"${o.id === s.defaultClubId ? ' selected' : ''}>${escapeHtmlMarken(o.name)}</option>`).join('')}</select></div>`
+        : '';
     return `<div class="border-bottom py-2">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-            <div><strong>${escapeHtmlMarken(s.memberName)}</strong> <span class="text-muted small">${escapeHtmlMarken(s.clubName || '')}</span>${dateQ}<br>${markenEvidenceDesc(s)}${photo}${shots}${noteQ}${onSiteQ}</div>
+            <div><strong>${escapeHtmlMarken(s.memberName)}</strong> <span class="text-muted small">${escapeHtmlMarken(s.clubName || '')}</span>${dateQ}<br>${markenEvidenceDesc(s)}${photo}${shots}${noteQ}${onSiteQ}${clubPickQ}</div>
             <div class="text-nowrap">
                 <button class="btn btn-sm btn-success" onclick="queueAct('${s.kind}', ${s.id}, true)"><i class="bi bi-check-lg me-1"></i>Godkänn</button>
                 <button class="btn btn-sm btn-outline-danger" onclick="queueAct('${s.kind}', ${s.id}, false)"><i class="bi bi-x-lg me-1"></i>Avvisa</button>
@@ -4063,10 +4071,12 @@ function renderQueueItem(s) {
 function queueAct(kind, id, approve) {
     if (!approve && !confirm('Avvisa?')) return;
     const url = approve ? '/umbraco/surface/Marken/VerifyEvidence' : '/umbraco/surface/Marken/RejectEvidence';
+    const pick = document.getElementById('vcq_' + id);
+    const clubIdFor = kind === 'series' && pick ? (parseInt(pick.value, 10) || 0) : 0;
     fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryTokenMarken() },
-        body: JSON.stringify({ kind, id })
+        body: JSON.stringify({ kind, id, clubId: clubIdFor })
     })
     .then(r => r.json())
     .then(res => {
