@@ -3673,6 +3673,24 @@ samlad/klassvis resultatlista. Foto i snabbinskicket väntar på Android-appen.
 **Operatörssteg:** lägg till `club.markenRequireOnSiteWitness` (True/False). Adds C# → full rebuild.
 Ingen SQL.
 
+#### Dubbletter i valideringskön (2026-09-29, Falkenbergs PK)
+
+Två orsaker, mätta i prod: ett dubbeltryck på *Skicka* (två rader 2 s isär — snabbserie- och
+luftpistoldialogen spärrade inte knappen) och **omförsök efter en misslyckad skanning** (tre rader
+inom 90 s; valideringssidan sa bara "Något gick fel", så skytten skickade in igen). QR:en gällde
+bara den sista raden, så de andra blev kvar som väntande.
+- `markenBusy(btn, on)` spärrar knappen medan anropet pågår (UserProfile; guldserien och
+  snabbinskicket hade redan en spärr).
+- `SubmitSeries` returnerar en **identisk väntande serie från de senaste 90 s**
+  (`FindRecentPendingTwinAsync`, `reused: true`) i stället för att skapa en ny. ⚠️ Fönstret måste
+  vara kortare än det tar att skjuta och räkna nästa serie — tillämpningsserier är identiska till
+  sin natur, och riktiga serier låg ~4 min isär den kvällen.
+- `MarkenVerify.cshtml` visar felkoden och har **Försök igen** med samma kod (laddar serien först,
+  så ett godkännande som ändå gick igenom visar "Redan godkänd").
+- ⚠️ **Orsaken till att skanningen misslyckades är INTE utredd** (18:06–18:08 den 29 sep, bara en
+  skytt drabbades, tre koder i rad). Misstanken är Simplys WAF eller ett tillfälligt serverfel;
+  prodloggen för det fönstret avgör. Felkoden på sidan säger det nästa gång.
+
 ### Anmälan och närvaro på klubbens och kretsens evenemang (2026-08-31)
 
 **Kretsen och klubben delade redan evenemangsmodell** — `ClubController.CreateRegionEvent` skapar en

@@ -50,6 +50,12 @@ namespace HpskSite.Controllers
         /// </summary>
         private static readonly TimeSpan VerifyTokenLifetime = TimeSpan.FromMinutes(30);
 
+        /// <summary>
+        /// How recent an identical pending series must be for a new submit to be treated as the same
+        /// submit sent again. Keep it shorter than shooting and scoring another series takes.
+        /// </summary>
+        private static readonly TimeSpan ResubmitWindow = TimeSpan.FromSeconds(90);
+
         public MarkenController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -276,6 +282,34 @@ namespace HpskSite.Controllers
                 series.Total = total;
                 series.Threshold = threshold;
                 series.Qualifies = total >= threshold;
+            }
+
+            // ── The same submit, sent again ──
+            // A double tap, or a retry after a scan that failed, used to create a second pending row
+            // each time — and the QR shown only covered the last one, so the others sat in the club's
+            // queue (prod 2026-09-29: two taps 2 s apart, and three retries within 90 s). An identical
+            // pending series from the last minutes is returned instead, with a fresh code. The window is
+            // shorter than it takes to shoot and score another series, so real consecutive tillämpnings-
+            // series (identical by nature) are never folded together — measured ~4 min apart that night.
+            var twin = await _ledger.FindRecentPendingTwinAsync(series, DateTime.Now - ResubmitWindow);
+            if (twin != null)
+            {
+                var twinToken = ProtectVerifyToken("series:" + twin.Id);
+                return Json(new
+                {
+                    success = true,
+                    id = twin.Id,
+                    reused = true,
+                    qualifies = twin.Qualifies,
+                    total = twin.Total,
+                    threshold = twin.Threshold,
+                    verifyToken = twinToken,
+                    verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(twinToken)}",
+                    requiresOnSiteWitness = RequireOnSiteWitness(twin.ClubId),
+                    seriesDate = twin.SeriesDate,
+                    duplicateWarning = (string?)null,
+                    message = "Serien var redan inskickad — koden nedan gäller den, ingen ny serie skapades."
+                });
             }
 
             // ── Probable duplicate ──
