@@ -103,6 +103,9 @@ namespace HpskSite.Models.Ledger
 
         public string SourceType { get; set; } = "";
 
+        /// <summary>Kontona verifikationen rör, stigande — kolumnen Konton i listan.</summary>
+        public List<int> Accounts { get; } = new();
+
         /// <summary>Sant när posten skrevs av en människa, falskt när den föll ut ur en avgift.</summary>
         public bool IsManual => SourceType == LedgerSourceType.Manual;
     }
@@ -182,6 +185,13 @@ namespace HpskSite.Models.Ledger
         public string MatchedByName { get; set; } = "";
 
         public DateTime? MatchedUtc { get; set; }
+    }
+
+    /// <summary>Ett konto i väljaren på Verifikationer.</summary>
+    public class LedgerAccountOption
+    {
+        public int Number { get; set; }
+        public string Name { get; set; } = "";
     }
 
     /// <summary>Huvudboken för ett konto: raderna i datumordning med löpande saldo.</summary>

@@ -281,6 +281,30 @@
   }
   .ek-page .ek-printonly { display: none; }
 
+  /* Kontot i resultat- och balansräkningen länkar till huvudboken. Diskret — räkningen ska
+     fortfarande läsas som en räkning, inte som en lista med länkar — och osynligt i utskriften. */
+  .ek-page .acc-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--bs-border-color); }
+  .ek-page .acc-link:hover, .ek-page .acc-link:focus { color: var(--bs-link-color); border-bottom-color: currentColor; }
+  @@media print { .ek-page .acc-link { border-bottom: 0; color: inherit; } }
+
+  /* ── Noterna ─────────────────────────────────────────────────────────────── */
+  /* ⚠️ "Lägg till not" står på varje kontorad. Med mus visas den bara på raden man pekar på —
+     trettio likadana länkar blir annars en vägg. På pekskärm finns ingen hover, så där står den
+     alltid (diskret). */
+  .ek-page .nref { color: var(--bs-secondary-color); font-size: .85em; margin-left: .25rem; white-space: nowrap; }
+  .ek-page .note-add { font-size: .8rem; margin-left: .4rem; padding: 0; vertical-align: baseline;
+      color: var(--bs-secondary-color); text-decoration: none; }
+  .ek-page .note-add:hover, .ek-page .note-add:focus { text-decoration: underline; color: var(--bs-link-color); }
+  @@media (hover: hover) and (pointer: fine) {
+      .ek-page tr .note-add { opacity: 0; }
+      .ek-page tr:hover .note-add, .ek-page tr:focus-within .note-add { opacity: 1; }
+  }
+  .ek-page .note-item { padding: .75rem 0; border-bottom: 1px solid var(--bs-border-color); }
+  .ek-page .note-item:last-child { border-bottom: 0; }
+  .ek-page .note-item .note-body { white-space: pre-wrap; margin-top: .25rem; }
+  .ek-page .note-item .note-accts { font-size: .85rem; color: var(--bs-secondary-color); }
+  @@media print { .ek-page #@(uid)_notesCard { break-inside: auto; } .ek-page .note-item { break-inside: avoid; } }
+
   /* ── Bokför ──────────────────────────────────────────────────────────────── */
   .ek-page .bokfor-grid { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1rem;
       align-items: start; }
@@ -1621,7 +1645,14 @@
                             <div class="btn-group" role="group" aria-label="Riktning">
                                 <button type="button" class="btn btn-outline-primary active" aria-pressed="true" id="@(uid)_bPaid">Vi betalade</button>
                                 <button type="button" class="btn btn-outline-primary" aria-pressed="false" id="@(uid)_bGot">Vi fick in</button>
+                                @* ⚠️ En överföring mellan egna konton är ingen affär — den gick inte att
+                                   bokföra alls innan det här valet fanns (kassörsrapport 2026-09-29). *@
+                                <button type="button" class="btn btn-outline-primary" aria-pressed="false" id="@(uid)_bMove">Vi flyttade pengar</button>
                             </div>
+                        </div>
+                        <div class="why d-none" id="@(uid)_bTransferWhy">
+                            En överföring mellan föreningens egna konton, till exempel från sparkontot till
+                            föreningskontot. Den påverkar inte resultatet, och ingen moms bokförs.
                         </div>
 
                         <label class="fieldlabel" for="@(uid)_bDate">När?</label>
@@ -1638,7 +1669,9 @@
                                placeholder="Ammunition till måndagsträningen">
                         <div class="chips" id="@(uid)_bChips"></div>
 
-                        <label class="fieldlabel" for="@(uid)_bAccount">Vilket konto hör det till?</label>
+                        @* ⚠️ I överföringsläget är den här listan FRÅN-kontot och den nedanför TILL-
+                           kontot (manualRequest byter plats på dem mot servern). Etiketterna sätts i JS. *@
+                        <label class="fieldlabel" for="@(uid)_bAccount" id="@(uid)_bAccountLabel">Vilket konto hör det till?</label>
                         <select id="@(uid)_bAccount" class="form-select wide-in"></select>
 
                         @* ⚠️ Bara för en momsregistrerad förening. Förvalet är KONTOTS sats —
@@ -1650,17 +1683,20 @@
                             <div class="why">Beloppet är det som betalades, med momsen i. Momsen räknas ut och bokförs på en egen rad.</div>
                         </div>
 
-                        <label class="fieldlabel" for="@(uid)_bPayAccount">Hur rörde sig pengarna?</label>
+                        <label class="fieldlabel" for="@(uid)_bPayAccount" id="@(uid)_bPayLabel">Hur rörde sig pengarna?</label>
                         <select id="@(uid)_bPayAccount" class="form-select wide-in"></select>
+                        <div class="why d-none" id="@(uid)_bMoneyHint"></div>
 
                         @* ⚠️ Projektet är FRIVILLIGT och står därför med "(inget projekt)" överst.
                            Utan det tomma valet blir varje post märkt med det första projektet i
                            listan, tyst — och märkningen på en bokförd rad går aldrig att ändra. *@
+                        <div id="@(uid)_bProjectWrap">
                         <label class="fieldlabel" for="@(uid)_bProject">Hör det till ett projekt? (frivilligt)</label>
                         <select id="@(uid)_bProject" class="form-select wide-in"></select>
                         <div class="why">
                             Avgifter för tävlingar och evenemang märks med sitt projekt av sig själva.
                             Här väljer du bara för det du bokför för hand — tavlorna, gravyren, fikat.
+                        </div>
                         </div>
 
                         @* ⚠️ "Så bokförs det" visas ALLTID, utfälld. Skissen: "Vi gömmer inte, vi
@@ -1761,11 +1797,17 @@
                    man sökt fram något helt annat. *@
                 <div class="ek-alert ek-bad d-none" id="@(uid)_verGap"></div>
 
-                <div class="ek-card wide">
+                @* ⚠️ Filtret är ett EGET kort överst: det styr både huvudboken och listan under. *@
+                <div class="ek-card wide" style="margin-bottom:1rem">
                     <div class="amount-row">
                         <label style="flex:1 1 220px">Sök
                             <input type="text" class="form-control" id="@(uid)_verSearch"
-                                   placeholder="text, motpart eller konto"></label>
+                                   placeholder="text, motpart eller kontonummer"></label>
+                        @* Konton med bokföring. Väljs ett visas kontots huvudbok ovanför listan. *@
+                        <label>Konto
+                            <select class="form-select" id="@(uid)_verAccount" style="width:16rem">
+                                <option value="">Alla konton</option>
+                            </select></label>
                         <label>Från <input type="text" class="form-control ek-date"
                                placeholder="åååå-mm-dd" id="@(uid)_verFrom"></label>
                         <label>Till <input type="text" class="form-control ek-date"
@@ -1775,12 +1817,29 @@
                         <button type="button" class="btn btn-sm btn-link"
                                 id="@(uid)_verClear">Rensa</button>
                     </div>
+                </div>
 
+                @* ⚠️⚠️ HUVUDBOKEN — kontots rader i DATUMORDNING med löpande saldo. Det är den en revisor
+                   går till när en siffra ser fel ut ("vad ligger på 1930?"). Listan under svarar på en
+                   annan fråga: vad hände, i NUMMERordning. Samma data, två frågor. *@
+                <div class="ek-card wide d-none" id="@(uid)_verLedger" style="margin-bottom:1rem">
+                    <div class="ek-cardh">
+                        <h2 id="@(uid)_verLedgerTitle">Huvudbok</h2>
+                        <span class="meta" id="@(uid)_verLedgerPeriod"></span>
+                    </div>
+                    <div id="@(uid)_verLedgerBody"></div>
+                </div>
+
+                <div class="ek-card wide">
+                    <div class="ek-cardh" style="margin-bottom:.25rem">
+                        <h2 id="@(uid)_verListTitle">Verifikationer</h2>
+                    </div>
                     <table class="t" style="margin-top:.5rem">
                         <thead><tr>
                             <th style="width:6rem">Nr</th>
                             <th style="width:7rem">Datum</th>
                             <th>Avser</th>
+                            <th style="width:9rem">Konton</th>
                             <th class="n" style="width:8rem">Belopp</th>
                             <th style="width:6rem">Underlag</th>
                             <th style="width:5rem">Bank</th>
@@ -2414,6 +2473,17 @@
                         </div>
                     </div>
 
+                    @* ⚠️ NOTERNA hör till handlingarna och skrivs ut med dem. Kortet göms i
+                       utskriften bara när det är tomt (klassen sätts i renderNotes) — ett tomt
+                       "Noter" på papperet till årsmötet läses som att något fattas. *@
+                    <div class="ek-card wide" style="margin-top:1rem" id="@(uid)_notesCard">
+                        <div class="ek-cardh">
+                            <h2>Noter</h2>
+                            <div class="d-flex align-items-center gap-2 ek-noprint" id="@(uid)_notesActions"></div>
+                        </div>
+                        <div id="@(uid)_notesBody"></div>
+                    </div>
+
                     @* ⚠️ Fastställandet ligger SIST och efter handlingarna. Det ar en enkelriktad
                        handling, och den som trycker ska ha resultat- och balansrakningen pa
                        skarmen nar hen gor det. *@
@@ -2468,6 +2538,52 @@
 
     @if (Model.CanWrite)
     {
+        @* ── Bokslut: en not ──
+           ⚠️ Öppnas både från "Lägg till not" på en kontorad (kontot förkryssat) och från kortets
+           knapp. Från en kontorad kan man i stället välja att hänvisa till en not som redan finns —
+           samma form, noten öppnas med kontot tillagt. Numret skrivs aldrig in: det följer kontonas
+           ordning i räkningarna. *@
+        <div class="modal fade" id="@(uid)_noteModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_noteTitleH">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="@(uid)_noteTitleH">Ny not</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3 d-none" id="@(uid)_noteChoiceWrap">
+                            <label class="form-label" for="@(uid)_noteChoice">Vad vill du göra?</label>
+                            <select class="form-select" id="@(uid)_noteChoice"></select>
+                        </div>
+                        <input type="hidden" id="@(uid)_noteId" value="0">
+                        <div class="mb-3">
+                            <label class="form-label" for="@(uid)_noteTitle">Rubrik</label>
+                            <input type="text" class="form-control" id="@(uid)_noteTitle" maxlength="200" autocomplete="off"
+                                   placeholder="Inventarier">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="@(uid)_noteBody">Vad noten ska säga</label>
+                            <textarea class="form-control" id="@(uid)_noteBody" rows="5" maxlength="4000"
+                                      placeholder="Vi har sålt två klubbvapen, och inventarierna har därför minskat med 12 000 kr."></textarea>
+                        </div>
+                        <div class="form-label" style="margin-bottom:.35rem">Hänvisas till från</div>
+                        <div class="muted" style="font-size:.875rem;margin-bottom:.5rem">
+                            Kryssa i de konton noten förklarar — numret hamnar intill dem i räkningarna.
+                            Kryssa inte i något för en allmän not, till exempel <em>Redovisningsprinciper</em>;
+                            allmänna noter står först.
+                        </div>
+                        <div id="@(uid)_noteAccounts" style="max-height:15rem;overflow:auto;border:1px solid var(--bs-border-color);border-radius:.375rem;padding:.5rem .75rem"></div>
+                        <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_noteError"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-danger me-auto d-none" id="@(uid)_noteDelete">Ta bort noten</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="@(uid)_noteSave">Spara noten</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         @* ── Utgifter: registrera / ändra ── *@
         <div class="modal fade" id="@(uid)_utFormModal" tabindex="-1" aria-hidden="true" aria-labelledby="@(uid)_utFormTitle">
             <div class="modal-dialog modal-lg">
@@ -3285,27 +3401,126 @@
         var f = el('verFrom') && el('verFrom').value;
         var t = el('verTo') && el('verTo').value;
         var s = el('verSearch') && el('verSearch').value;
+        var a = verAccount();
 
         if (f) q += '&from=' + encodeURIComponent(f);
         if (t) q += '&to=' + encodeURIComponent(t);
         if (s) q += '&search=' + encodeURIComponent(s);
+        if (a) q += '&accountNumber=' + a;
 
         return q;
+    }
+
+    function verAccount() { return parseInt((el('verAccount') || {}).value, 10) || 0; }
+
+    // Väljaren fylls ur servern (konton som har bokföring). Ett förvalt konto som inte finns i
+    // listan än (t.ex. från Bokslut) läggs till, annars tappas valet tyst.
+    function fillVerAccounts(options) {
+        var sel = el('verAccount');
+        if (!sel || !options) return;
+        var keep = sel.value;
+        sel.innerHTML = '<option value="">Alla konton</option>' + options.map(function (o) {
+            return '<option value="' + o.number + '">' + o.number + ' · ' + esc(o.name) + '</option>';
+        }).join('');
+        if (keep && !sel.querySelector('option[value="' + keep + '"]'))
+            sel.insertAdjacentHTML('beforeend', '<option value="' + keep + '">' + keep + '</option>');
+        sel.value = keep;
+    }
+
+    // ── Huvudboken ──
+    // ⚠️ Perioden följer Från/Till. Tomma fält = servern väljer räkenskapsåret, och svaret säger
+    //    vilken period som visas — ett saldo utan period går inte att läsa.
+    async function loadLedger() {
+        var acc = verAccount();
+        show(el('verLedger'), !!acc);
+        el('verListTitle').textContent = acc ? 'Verifikationer som rör kontot' : 'Verifikationer';
+        if (!acc) return;
+
+        el('verLedgerBody').innerHTML = '<div class="muted">Hämtar…</div>';
+        var f = el('verFrom').value, t = el('verTo').value;
+        var d;
+        try {
+            d = await fetch('/umbraco/surface/EkonomiAdmin/GetAccountLedger?issuerType=' + issuerType
+                + '&issuerId=' + issuerId + '&accountNumber=' + acc
+                + (f ? '&from=' + encodeURIComponent(f) : '') + (t ? '&to=' + encodeURIComponent(t) : ''),
+                { cache: 'no-store' }).then(function (r) { return r.json(); });
+        } catch (e) { d = { success: false }; }
+
+        if (acc !== verAccount()) return;   // ett senare val har hunnit göras
+        if (!d.success) {
+            el('verLedgerBody').innerHTML = '<div class="ek-alert ek-bad" style="margin:0">'
+                + esc(d.message || 'Huvudboken gick inte att läsa.') + '</div>';
+            return;
+        }
+
+        el('verLedgerTitle').textContent = 'Huvudbok · ' + d.account.number + ' ' + (d.account.name || '');
+        el('verLedgerPeriod').textContent = String(d.from).slice(0, 10) + ' – ' + String(d.to).slice(0, 10);
+
+        var rows = d.rows || [];
+        el('verLedgerBody').innerHTML =
+            '<table class="t"><thead><tr><th style="width:7rem">Datum</th><th style="width:6rem">Nr</th>'
+            + '<th>Text</th><th class="n" style="width:8rem">Debet</th><th class="n" style="width:8rem">Kredit</th>'
+            + '<th class="n" style="width:9rem">Saldo</th></tr></thead><tbody>'
+            // ⚠️ Inte "grp": den stilen skriver versaler, och då blev beloppet "0 KR".
+            + '<tr class="sum"><td colspan="5"><strong>Ingående saldo</strong></td><td class="n"><strong>'
+            + kr(d.openingBalance) + '</strong></td></tr>'
+            + (rows.length === 0
+                ? '<tr><td colspan="6" class="muted">Inga poster på kontot under perioden.</td></tr>'
+                : rows.map(function (r) {
+                    return '<tr class="ver-row" data-ledger-entry="' + r.entryId + '" style="cursor:pointer">'
+                         + '<td class="muted">' + esc(shortDate(r.accountingDate)) + '</td>'
+                         + '<td>' + esc(r.number) + '</td>'
+                         + '<td>' + esc(r.text) + (r.counterparty ? ' <span class="muted">· ' + esc(r.counterparty) + '</span>' : '') + '</td>'
+                         + '<td class="n">' + (r.debit ? kr(r.debit) : '') + '</td>'
+                         + '<td class="n">' + (r.credit ? kr(r.credit) : '') + '</td>'
+                         + '<td class="n">' + kr(r.balance) + '</td></tr>';
+                }).join(''))
+            + '<tr class="sum"><td colspan="3">Summa under perioden</td><td class="n">' + kr(d.debitTotal) + '</td>'
+            + '<td class="n">' + kr(d.creditTotal) + '</td><td></td></tr>'
+            + '<tr class="sum"><td colspan="5"><strong>Utgående saldo</strong></td><td class="n"><strong>'
+            + kr(d.closingBalance) + '</strong></td></tr>'
+            + '</tbody></table>'
+            + '<div class="muted" style="font-size:.85rem;margin-top:.5rem">Klicka på en rad för att öppna verifikationen.</div>';
+    }
+
+    // Klick på en rad i huvudboken öppnar verifikationen under listan. Delegerat: raderna ritas om.
+    if (el('verLedgerBody')) el('verLedgerBody').addEventListener('click', function (ev) {
+        var tr = ev.target.closest('tr[data-ledger-entry]');
+        if (tr) openEntry({ entryId: parseInt(tr.dataset.ledgerEntry, 10) });
+    });
+
+    // Från Bokslut (eller annan yta): visa ett kontos huvudbok för en bestämd period.
+    function openAccountLedger(accountNumber, from, to) {
+        // ⚠️ verLoaded FÖRE showView — annars laddar showView listan en gång utan kontot, och det
+        //    svaret kan komma sist och skriva över det rätta.
+        verLoaded = true;
+        showView('verifikationer');
+        var sel = el('verAccount');
+        if (!sel.querySelector('option[value="' + accountNumber + '"]'))
+            sel.insertAdjacentHTML('beforeend', '<option value="' + accountNumber + '">' + accountNumber + '</option>');
+        sel.value = String(accountNumber);
+        el('verSearch').value = '';
+        setDateField('verFrom', from ? String(from).slice(0, 10) : '');
+        setDateField('verTo', to ? String(to).slice(0, 10) : '');
+        loadJournal(true);
+        window.scrollTo(0, 0);
     }
 
     // ⚠️ `reset` skiljer "visa fler" från en ny sökning. Utan den växer listan när man
     //    filtrerar, och träffarna blandas med de gamla — vilket ser ut som att filtret inte tog.
     async function loadJournal(reset) {
-        if (reset) { verSkip = 0; verRows = []; closeEntry(); }
+        if (reset) { verSkip = 0; verRows = []; closeEntry(); loadLedger(); }
 
         var d = await fetch('/umbraco/surface/EkonomiAdmin/GetJournal' + verQuery(verSkip),
                             { cache: 'no-store' }).then(function (r) { return r.json(); });
 
         if (!d.success) {
-            el('verBody').innerHTML = '<tr><td colspan="6" class="muted">'
+            el('verBody').innerHTML = '<tr><td colspan="7" class="muted">'
                 + esc(d.message || 'Listan gick inte att läsa.') + '</td></tr>';
             return;
         }
+
+        if (d.accountOptions) fillVerAccounts(d.accountOptions);
 
         verRows = verRows.concat(d.rows || []);
         verSkip = verRows.length;
@@ -3333,8 +3548,9 @@
     }
 
     function renderJournal(total) {
+        var selAcc = verAccount();
         el('verBody').innerHTML = verRows.length === 0
-            ? '<tr><td colspan="6" class="muted">Inga verifikationer i urvalet.</td></tr>'
+            ? '<tr><td colspan="7" class="muted">Inga verifikationer i urvalet.</td></tr>'
             : verRows.map(function (v, i) {
                 // ⚠️ Kedjans två sista led som EGNA kolumner. En bock räcker: frågan är
                 //    "finns det underlag" och "syns betalningen på banken", inte hur många.
@@ -3356,6 +3572,10 @@
                      + (v.counterparty ? ' <span class="muted">· ' + esc(v.counterparty) + '</span>' : '')
                      + (v.correctsEntryId ? ' <span class="muted">(rättelse)</span>' : '')
                      + '</td>'
+                     // Kontona verifikationen rör; det valda kontot i fetstil.
+                     + '<td class="muted" style="font-variant-numeric:tabular-nums">' + (v.accounts || []).map(function (n) {
+                           return n === selAcc ? '<strong style="color:var(--bs-body-color)">' + n + '</strong>' : String(n);
+                       }).join(' · ') + '</td>'
                      + '<td class="n">' + kr(v.amount) + '</td>'
                      + '<td>' + underlag + '</td>'
                      + '<td>' + bank + '</td></tr>';
@@ -3573,8 +3793,12 @@
     if (el('verMore')) el('verMore').addEventListener('click', function () { loadJournal(false); });
     if (el('verClose')) el('verClose').addEventListener('click', closeEntry);
 
+    // Kontovalet gäller direkt — att behöva trycka Visa efter ett val i en lista känns trasigt.
+    if (el('verAccount')) el('verAccount').addEventListener('change', function () { loadJournal(true); });
+
     if (el('verClear')) el('verClear').addEventListener('click', function () {
         el('verSearch').value = '';
+        el('verAccount').value = '';
         setDateField('verFrom', '');
         setDateField('verTo', '');
         loadJournal(true);
@@ -4791,9 +5015,268 @@
         var pick = el('closeYear');
         if (pick) pick.addEventListener('change', function () { loadClosing(pick.value); });
 
+        // ⚠️ Noterna FÖRE räkningarna: renderStatements skriver notnumren intill kontona.
+        closeNotes = d.notes || null;
+        closeStmt = d.statements;
+
         renderSteps(d.checklist);
         renderStatements(d.statements);
+        renderNotes();
         renderEstablish(d.checklist, d.statements);
+    }
+
+    // ── Noterna ──────────────────────────────────────────────────────────────────────────
+    // ⚠️⚠️ NUMRET KOMMER ALLTID FRÅN SERVERN (LedgerNoteNumbering). Klienten räknar aldrig fram
+    //    ett eget — två numreringar hade kunnat säga olika saker på skärmen och på papperet.
+    var closeNotes = null, closeStmt = null, noteFromAcc = 0;
+
+    function noteRefs(acc) {
+        var r = closeNotes && closeNotes.accountRefs ? closeNotes.accountRefs[acc] : null;
+        return r && r.length ? '<span class="nref">(' + r.join(', ') + ')</span>' : '';
+    }
+
+    function noteAddLink(acc) {
+        if (!canWrite || !closeNotes || closeNotes.locked) return '';
+        return '<button type="button" class="btn btn-link note-add ek-noprint" data-note-acc="' + acc + '">Lägg till not</button>';
+    }
+
+    function renderNotes() {
+        var card = el('notesCard'), body = el('notesBody'), acts = el('notesActions');
+        var n = closeNotes;
+
+        if (!n) {
+            card.classList.remove('ek-noprint');
+            acts.innerHTML = '';
+            body.innerHTML = '<div class="ek-alert ek-bad" style="margin:0">Noterna gick inte att läsa just nu.</div>';
+            return;
+        }
+
+        var editable = canWrite && !n.locked;
+        card.classList.toggle('ek-noprint', n.notes.length === 0);
+
+        acts.innerHTML = !editable ? '' :
+              (n.copyFromYear
+                ? '<button type="button" class="btn btn-sm btn-outline-secondary" id="' + uid + '_noteCopy">'
+                  + 'Hämta noterna från ' + n.copyFromYear + ' (' + n.copyFromCount + ')</button>' : '')
+            + '<button type="button" class="btn btn-sm btn-primary" id="' + uid + '_noteNew">Ny not</button>';
+
+        if (n.notes.length === 0) {
+            body.innerHTML = '<p class="muted" style="margin:0">'
+                + (n.locked ? 'Året fastställdes utan noter.'
+                  : editable
+                    ? 'Inga noter ännu. En not förklarar en siffra för styrelsen och årsmötet — till exempel '
+                      + 'varför inventarierna minskat. Tryck <strong>Lägg till not</strong> på ett konto i '
+                      + 'räkningarna ovan, eller <strong>Ny not</strong> för en allmän not som '
+                      + '<em>Redovisningsprinciper</em>.'
+                    : 'Inga noter.')
+                + '</p>';
+        } else {
+            body.innerHTML = n.notes.map(function (note) {
+                var accts = note.isGeneral ? 'Allmän not'
+                    : 'Hänvisas från ' + note.accounts.map(function (a) {
+                        return a.number + ' ' + esc(a.name);
+                    }).join(', ');
+
+                // ⚠️ Syns inte kontot i årets räkningar hänvisar ingenting till noten. Den skrivs
+                //    ändå ut — texten kan vara riktig — men kassören ska veta om det.
+                var warn = note.isUnreferenced
+                    ? '<div class="ek-noprint" style="font-size:.85rem;color:var(--ek-attn)">Kontot har inget saldo i år '
+                      + 'och syns inte i räkningarna — ingenting hänvisar till noten.</div>'
+                    : (note.missingAccounts && note.missingAccounts.length
+                        ? '<div class="ek-noprint" style="font-size:.85rem;color:var(--ek-attn)">Syns inte i årets räkningar: '
+                          + note.missingAccounts.join(', ') + '.</div>' : '');
+
+                return '<div class="note-item">'
+                     + '<div class="d-flex justify-content-between align-items-baseline gap-2">'
+                     + '<strong>Not ' + note.number + ' — ' + esc(note.title) + '</strong>'
+                     + (editable ? '<button type="button" class="btn btn-sm btn-outline-secondary ek-noprint" '
+                        + 'data-note-edit="' + note.id + '">Ändra</button>' : '')
+                     + '</div>'
+                     + '<div class="note-accts ek-noprint">' + accts + '</div>'
+                     + warn
+                     + '<div class="note-body">' + esc(note.body) + '</div>'
+                     + '</div>';
+            }).join('')
+            + (n.locked && canWrite
+                ? '<div class="muted ek-noprint" style="font-size:.875rem;margin-top:.5rem">'
+                  + 'Året är fastställt, så noterna kan inte ändras.</div>' : '');
+        }
+
+        var nb = el('noteNew');
+        if (nb) nb.addEventListener('click', function () { openNote(0, 0); });
+        var cb = el('noteCopy');
+        if (cb) cb.addEventListener('click', copyNotes);
+    }
+
+    function findNote(id) {
+        return (closeNotes && closeNotes.notes || []).filter(function (x) { return x.id === id; })[0] || null;
+    }
+
+    function accountName(acc) {
+        var s = closeStmt || {};
+        var all = [].concat(s.revenue || [], s.costs || [], s.assets || [], s.equityAndLiabilities || []);
+        var hit = all.filter(function (r) { return r.accountNumber === acc; })[0];
+        return hit ? hit.accountName : '';
+    }
+
+    function openNote(noteId, fromAcc) {
+        if (!el('noteModal')) return;
+        noteFromAcc = fromAcc || 0;
+        show(el('noteError'), false);
+
+        // Från en kontorad: erbjud att hänvisa till en not som redan finns.
+        var choiceWrap = el('noteChoiceWrap'), choice = el('noteChoice');
+        var others = (closeNotes && closeNotes.notes || []).filter(function (x) {
+            return !x.accounts.some(function (a) { return a.number === fromAcc; });
+        });
+        if (fromAcc && !noteId && others.length) {
+            choice.innerHTML = '<option value="0">Skriv en ny not för ' + fromAcc + ' ' + esc(accountName(fromAcc)) + '</option>'
+                + others.map(function (x) {
+                    return '<option value="' + x.id + '">Hänvisa till not ' + x.number + ' — ' + esc(x.title) + '</option>';
+                }).join('');
+            choice.value = '0';
+            show(choiceWrap, true);
+        } else {
+            show(choiceWrap, false);
+        }
+
+        fillNoteForm(noteId ? findNote(noteId) : null, noteFromAcc);
+        openModal('noteModal');
+        setTimeout(function () { el('noteTitle').focus(); }, 300);
+    }
+
+    function fillNoteForm(note, extraAcc) {
+        el('noteId').value = note ? note.id : 0;
+        el('noteTitleH').textContent = note ? 'Not ' + note.number : 'Ny not';
+        el('noteTitle').value = note ? note.title : '';
+        el('noteBody').value = note ? note.body : '';
+        show(el('noteDelete'), !!note);
+
+        var checked = {};
+        (note ? note.accounts : []).forEach(function (a) { checked[a.number] = true; });
+        if (extraAcc) checked[extraAcc] = true;
+
+        var s = closeStmt || {};
+        var groups = [
+            { label: 'Resultaträkning', rows: [].concat(s.revenue || [], s.costs || []) },
+            { label: 'Balansräkning', rows: [].concat(s.assets || [], s.equityAndLiabilities || []) }
+        ];
+
+        // Konton noten redan pekar på men som saknar saldo i år — annars försvann de ur noten
+        // vid nästa sparning utan att någon valt det.
+        var shown = {};
+        groups.forEach(function (g) { g.rows.forEach(function (r) { shown[r.accountNumber] = true; }); });
+        var hidden = (note ? note.accounts : []).filter(function (a) { return !shown[a.number]; })
+            .map(function (a) { return { accountNumber: a.number, accountName: a.name }; });
+        if (hidden.length) groups.push({ label: 'Utan saldo i år', rows: hidden });
+
+        el('noteAccounts').innerHTML = groups.filter(function (g) { return g.rows.length; }).map(function (g) {
+            return '<div class="muted" style="font-size:.8rem;font-weight:600;margin:.35rem 0 .15rem">' + g.label + '</div>'
+                + g.rows.map(function (r) {
+                    return '<label class="form-check" style="margin:0 0 .15rem">'
+                         + '<input class="form-check-input" type="checkbox" data-acc="' + r.accountNumber + '"'
+                         + (checked[r.accountNumber] ? ' checked' : '') + '> '
+                         + '<span class="form-check-label">' + r.accountNumber + ' ' + esc(r.accountName) + '</span></label>';
+                }).join('');
+        }).join('') || '<div class="muted">Räkningarna har inga konton ännu.</div>';
+    }
+
+    // Klick på "Lägg till not" i räkningarna. Delegerat: raderna ritas om vid varje laddning.
+    [el('resBody'), el('balBody')].forEach(function (tb) {
+        if (!tb) return;
+        tb.addEventListener('click', function (ev) {
+            var b = ev.target.closest('[data-note-acc]');
+            if (b) { openNote(0, parseInt(b.dataset.noteAcc, 10)); return; }
+
+            // Kontot → huvudboken för just det räkenskapsår räkningarna visar, så att siffrorna
+            // i huvudboken är samma som i räkningen.
+            var a = ev.target.closest('[data-ledger-acc]');
+            if (a) {
+                ev.preventDefault();
+                openAccountLedger(parseInt(a.dataset.ledgerAcc, 10),
+                    closeStmt && closeStmt.from, closeStmt && closeStmt.to);
+            }
+        });
+    });
+    if (el('notesBody')) el('notesBody').addEventListener('click', function (ev) {
+        var b = ev.target.closest('[data-note-edit]');
+        if (b) openNote(parseInt(b.dataset.noteEdit, 10), 0);
+    });
+
+    if (el('noteChoice')) el('noteChoice').addEventListener('change', function () {
+        var id = parseInt(this.value, 10);
+        fillNoteForm(id ? findNote(id) : null, noteFromAcc);
+    });
+
+    if (el('noteSave')) el('noteSave').addEventListener('click', async function () {
+        var btn = this;
+        var accs = Array.prototype.map.call(
+            el('noteAccounts').querySelectorAll('input[data-acc]:checked'),
+            function (i) { return parseInt(i.dataset.acc, 10); });
+
+        btn.disabled = true;
+        try {
+            var d = await postJson('/umbraco/surface/EkonomiAdmin/SaveNote', {
+                issuerType: issuerType, issuerId: issuerId, fiscalYearId: closeYearId,
+                noteId: parseInt(el('noteId').value, 10) || 0,
+                title: el('noteTitle').value, body: el('noteBody').value, accountNumbers: accs
+            });
+            if (!d.success) throw new Error(d.message || 'Noten gick inte att spara.');
+            closeModal('noteModal');
+            await loadClosing(closeYearId);
+        } catch (e) {
+            el('noteError').textContent = e.message;
+            show(el('noteError'), true);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    if (el('noteDelete')) el('noteDelete').addEventListener('click', function () {
+        var id = parseInt(el('noteId').value, 10);
+        var note = findNote(id);
+        if (!note) return;
+
+        // ⚠️ Två dialoger ovanpå varandra går inte att klicka i. Notdialogen stängs helt först.
+        el('noteModal').addEventListener('hidden.bs.modal', async function once() {
+            el('noteModal').removeEventListener('hidden.bs.modal', once);
+            var go = await ask({
+                title: 'Ta bort not ' + note.number + '?',
+                text: '"' + note.title + '" tas bort. Noterna efter den numreras om av sig själva.',
+                ok: 'Ta bort noten', danger: true
+            });
+            if (go === null) return;
+            try {
+                var d = await postJson('/umbraco/surface/EkonomiAdmin/DeleteNote', {
+                    issuerType: issuerType, issuerId: issuerId, noteId: id
+                });
+                if (!d.success) throw new Error(d.message || 'Noten gick inte att ta bort.');
+                await loadClosing(closeYearId);
+            } catch (e) {
+                el('closeError').textContent = e.message;
+                show(el('closeError'), true);
+            }
+        });
+        closeModal('noteModal');
+    });
+
+    async function copyNotes() {
+        try {
+            var d = await postJson('/umbraco/surface/EkonomiAdmin/CopyNotesFromPreviousYear', {
+                issuerType: issuerType, issuerId: issuerId, fiscalYearId: closeYearId
+            });
+            if (!d.success) throw new Error(d.message || 'Noterna gick inte att hämta.');
+            show(el('closeError'), false);
+            // Siffror i en kopierad text gäller förra året — det måste sägas, inte antas.
+            el('closeOk').textContent = d.copied + (d.copied === 1 ? ' not hämtad' : ' noter hämtade')
+                + ' från förra året. Läs igenom dem — belopp och händelser i texten gäller förra året.';
+            show(el('closeOk'), true);
+            await loadClosing(closeYearId);
+        } catch (e) {
+            show(el('closeOk'), false);
+            el('closeError').textContent = e.message;
+            show(el('closeError'), true);
+        }
     }
 
     function renderSteps(c) {
@@ -4818,8 +5301,14 @@
 
     function stmtRows(rows, total, totalLabel) {
         var body = rows.map(function (r) {
-            return '<tr><td class="muted" style="width:4rem">' + r.accountNumber + '</td>'
-                 + '<td>' + esc(r.accountName) + '</td>'
+            // Kontot är en länk till sin huvudbok — den som ser en siffra som verkar fel ska kunna
+            // gå direkt till vad som ligger bakom den.
+            var link = function (text) {
+                return '<a href="#" class="acc-link" data-ledger-acc="' + r.accountNumber + '" '
+                     + 'title="Visa vad som är bokfört på kontot">' + text + '</a>';
+            };
+            return '<tr><td class="muted" style="width:4rem">' + link(String(r.accountNumber)) + '</td>'
+                 + '<td>' + link(esc(r.accountName)) + noteRefs(r.accountNumber) + noteAddLink(r.accountNumber) + '</td>'
                  + '<td class="n">' + kr(r.amount) + '</td></tr>';
         }).join('');
 
@@ -5357,9 +5846,16 @@
                 ? bpRows.filter(function (x) { return x.amount > 0; }).length * 2 >= bpRows.length
                 : b.amount > 0;
             var list = bpAccounts.filter(function (a) { return !a.isBalance; });
-            el('bpAccount').innerHTML = list.map(function (a) {
+            var opt = function (a) {
                 return '<option value="' + a.number + '">' + a.number + ' · ' + esc(a.name) + '</option>';
-            }).join('');
+            };
+            // ⚠️ En bankrad kan vara en ÖVERFÖRING till eller från ett annat eget konto (sparkontot).
+            //    Utan de kontona i listan låg en sådan rad kvar som "inte bokförd" för alltid.
+            //    Servern känner igen ett 19xx-motkonto och bokför det utan moms och projekt.
+            var money = bpAccounts.filter(function (a) { return isMoney(a.number) && a.number !== recAccount; });
+            el('bpAccount').innerHTML = '<optgroup label="Vad det var">' + list.map(opt).join('') + '</optgroup>'
+                + (money.length ? '<optgroup label="Överföring till eller från ett eget konto">'
+                    + money.map(opt).join('') + '</optgroup>' : '');
             var hit = list.find(function (a) { return (a.number >= 3000 && a.number < 4000) === wantRevenue; });
             if (hit) el('bpAccount').value = String(hit.number);
         };
@@ -5657,7 +6153,11 @@
         var labels = { open: 'öppet', closing: 'bokslut pågår', established: 'fastställt' };
         el('yearSummary').innerHTML = years.length === 0 ? 'Inget år upplagt'
             : years.slice(0, 3).map(function (y) {
-                return '<div>' + y.year + ' <span class="muted">' + (labels[y.status] || y.status) + '</span></div>';
+                // Datumen står med: ett år upplagt med fel start syntes annars bara i statusraden.
+                var span = y.startDate && y.endDate
+                    ? ' <span class="muted">' + String(y.startDate).slice(0, 10) + '–' + String(y.endDate).slice(0, 10) + '</span>'
+                    : '';
+                return '<div>' + y.year + span + ' <span class="muted">· ' + (labels[y.status] || y.status) + '</span></div>';
             }).join('');
         el('accountSummary').textContent = status.accountCount + ' konton';
 
@@ -5775,6 +6275,9 @@
     // ══ Bokför ═══════════════════════════════════════════════════════════════════════════
     var bokforCtx = null;
     var weReceived = false;
+    // "Vi flyttade pengar": bAccount = FRÅN-kontot, bPayAccount = TILL-kontot (se manualRequest).
+    var transferMode = false;
+    var isMoney = function (n) { return n >= 1900 && n <= 1999; };   // speglar LedgerMoneyAccount
 
     // Förslagen i skissen. ⚠️ De fyller bara TEXTEN — kontot väljer kassören, för vilka konton
     // som finns är föreningens sak, inte vår.
@@ -5790,20 +6293,62 @@
         }
     }
 
-    function renderBokforContext(c) {
-        bokforCtx = c;
+    // Kontolistorna i Bokför, efter läget.
+    // ⚠️ Ett val står kvar när det finns i den nya listan — en kassör som bokför fem kvitton på
+    //    samma konto ska inte behöva välja om det efter varje post.
+    function fillBokforSelects() {
+        var c = bokforCtx;
+        if (!c) return;
+        var acc = el('bAccount'), pay = el('bPayAccount');
+        var keepA = acc.value, keepP = pay.value;
+        var hint = el('bMoneyHint');
+
+        if (transferMode) {
+            var money = (c.accounts || []).filter(function (a) { return isMoney(a.number); });
+            fillSelect(acc, money);
+            fillSelect(pay, money);
+
+            // Till: föreningens bankkonto (rollen). Från: ett annat pengakonto, helst 1940.
+            var bank = (c.paymentAccounts || [])[0];
+            var to = bank && money.some(function (a) { return a.number === bank.number; })
+                ? bank.number : (money[0] || {}).number;
+            var from = money.filter(function (a) { return a.number !== to; });
+            var pick = from.find(function (a) { return a.number === 1940; }) || from[0];
+            if (to) pay.value = String(to);
+            if (pick) acc.value = String(pick.number);
+
+            // ⚠️ Med ett enda pengakonto finns inget att flytta mellan — säg vad som saknas och
+            //    var det läggs till, i stället för två listor med samma konto.
+            if (money.length < 2) {
+                hint.textContent = 'Kontoplanen har bara ett kassa- eller bankkonto. Lägg till det andra '
+                    + '(till exempel 1940 Placeringskonto) under Inställningar → Kontoplan.';
+                show(hint, true);
+            } else show(hint, false);
+            return;
+        }
+
+        show(hint, false);
 
         // Kostnads- och intäktskonton i den stora listan; balanskonton hör till pengarnas väg.
         var resultAccounts = (c.accounts || []).filter(function (a) { return !a.isBalance; });
-        fillSelect(el('bAccount'), resultAccounts.length ? resultAccounts : (c.accounts || []));
+        fillSelect(acc, resultAccounts.length ? resultAccounts : (c.accounts || []));
 
-        var pay = (c.paymentAccounts || []);
-        fillSelect(el('bPayAccount'), pay.length ? pay : (c.accounts || []).filter(function (a) { return a.isBalance; }));
+        var payList = (c.paymentAccounts || []);
+        fillSelect(pay, payList.length ? payList : (c.accounts || []).filter(function (a) { return a.isBalance; }));
+
+        if (keepA) fillSelectValue(acc, keepA);
+        if (keepP) fillSelectValue(pay, keepP);
 
         // Förvalet sätts EFTER att listan fyllts, annars finns inget att välja bland.
         pickAccountForDirection();
+    }
 
-        show(el('bVatWrap'), c.isVatRegistered === true);
+    function renderBokforContext(c) {
+        bokforCtx = c;
+
+        fillBokforSelects();
+
+        show(el('bVatWrap'), c.isVatRegistered === true && !transferMode);
         fillVatChoice();
 
         // ⚠️ Valet står KVAR efter en bokföring. En kassör som bokför fem kvitton till samma
@@ -5856,6 +6401,20 @@
     }
 
     function manualRequest() {
+        // ⚠️ Överföring: den ÖVRE listan är från-kontot och den UNDRE till-kontot. Servern vill ha
+        //    till-kontot som accountNumber och från-kontot som paymentAccountNumber.
+        if (transferMode) return {
+            issuerType: issuerType, issuerId: issuerId,
+            amount: parseFloat(el('bAmount').value || '0') || 0,
+            weReceived: false,
+            isTransfer: true,
+            date: el('bDate').value || null,
+            description: el('bText').value,
+            accountNumber: parseInt(el('bPayAccount').value, 10) || 0,
+            paymentAccountNumber: parseInt(el('bAccount').value, 10) || 0,
+            projectId: null,
+            vatRate: null
+        };
         return {
             issuerType: issuerType, issuerId: issuerId,
             amount: parseFloat(el('bAmount').value || '0') || 0,
@@ -5901,7 +6460,8 @@
     //    bokförs. Ändras den ena MÅSTE den andra ändras — sviten LedgerManualPostingTests pinnar
     //    serverns sida. Med moms räknar servern (ovan).
     function renderPreview() {
-        if (bokforCtx && bokforCtx.isVatRegistered) {
+        // En överföring bär aldrig moms, så den speglas här även för en momsregistrerad förening.
+        if (bokforCtx && bokforCtx.isVatRegistered && !transferMode) {
             fillVatChoice();
             var ready = (parseFloat(el('bAmount').value || '0') || 0) > 0
                 && parseInt(el('bAccount').value, 10) && parseInt(el('bPayAccount').value, 10);
@@ -5929,9 +6489,18 @@
             return;
         }
 
-        var rows = weReceived
+        // Överföring: till-kontot (undre listan) i debet, från-kontot (övre) i kredit.
+        var rows = transferMode
             ? [[payNum, amount, null], [accNum, null, amount]]
-            : [[accNum, amount, null], [payNum, null, amount]];
+            : weReceived
+                ? [[payNum, amount, null], [accNum, null, amount]]
+                : [[accNum, amount, null], [payNum, null, amount]];
+
+        if (transferMode && accNum === payNum) {
+            el('bPreview').innerHTML = '<tr><td colspan="4" class="muted">'
+                + 'Välj två olika konton — pengarna kan inte flyttas till samma konto.</td></tr>';
+            return;
+        }
 
         el('bPreview').innerHTML = rows.map(function (r) {
             return '<tr><td>' + r[0] + '</td><td>' + esc(nameOf(r[0])) + '</td>'
@@ -5946,6 +6515,7 @@
     //    balanserar, liggaren tar emot den, och felet syns först i resultatrapporten.
     //    Ett förval som är fel åt fel håll är värre än inget förval.
     function pickAccountForDirection() {
+        if (transferMode) return;
         var sel = el('bAccount');
         var cur = parseInt(sel.value, 10);
         var wantRevenue = weReceived;
@@ -5958,18 +6528,35 @@
         if (hit) sel.value = String(hit);
     }
 
-    function setDirection(received) {
-        weReceived = received;
-        el('bPaid').classList.toggle('active', !received);
-        el('bGot').classList.toggle('active', received);
-        el('bPaid').setAttribute('aria-pressed', String(!received));
-        el('bGot').setAttribute('aria-pressed', String(received));
-        pickAccountForDirection();
+    // mode: 'paid' | 'got' | 'move'
+    function setMode(mode) {
+        var wasTransfer = transferMode;
+        transferMode = mode === 'move';
+        weReceived = mode === 'got';
+
+        [['bPaid', 'paid'], ['bGot', 'got'], ['bMove', 'move']].forEach(function (x) {
+            el(x[0]).classList.toggle('active', mode === x[1]);
+            el(x[0]).setAttribute('aria-pressed', String(mode === x[1]));
+        });
+
+        // Formuläret byter FRÅGOR, inte bara listor — "Vilket konto hör det till?" betyder ingenting
+        // för en flytt mellan två egna konton.
+        el('bAccountLabel').textContent = transferMode ? 'Från vilket konto?' : 'Vilket konto hör det till?';
+        el('bPayLabel').textContent = transferMode ? 'Till vilket konto?' : 'Hur rörde sig pengarna?';
+        el('bText').placeholder = transferMode ? 'Överföring från sparkontot' : 'Ammunition till måndagsträningen';
+        show(el('bTransferWhy'), transferMode);
+        show(el('bChips'), !transferMode);
+        show(el('bProjectWrap'), !transferMode);
+        show(el('bVatWrap'), !!(bokforCtx && bokforCtx.isVatRegistered) && !transferMode);
+
+        if (transferMode !== wasTransfer) fillBokforSelects();
+        else pickAccountForDirection();
         renderPreview();
     }
 
-    el('bPaid').addEventListener('click', function () { setDirection(false); });
-    el('bGot').addEventListener('click', function () { setDirection(true); });
+    el('bPaid').addEventListener('click', function () { setMode('paid'); });
+    el('bGot').addEventListener('click', function () { setMode('got'); });
+    el('bMove').addEventListener('click', function () { setMode('move'); });
     ['bAmount', 'bAccount', 'bPayAccount', 'bVat'].forEach(function (f) {
         el(f).addEventListener('input', renderPreview);
         el(f).addEventListener('change', renderPreview);
@@ -6096,7 +6683,8 @@
     });
 
     function loadBokfor() {
-        fetch('/umbraco/surface/EkonomiAdmin/GetPostingContext?issuerType=' + issuerType + '&issuerId=' + issuerId)
+        fetch('/umbraco/surface/EkonomiAdmin/GetPostingContext?issuerType=' + issuerType + '&issuerId=' + issuerId,
+              { cache: 'no-store' })
             .then(function (r) { return r.json(); })
             .then(function (d) { if (d.success && d.context) renderBokforContext(d.context); })
             .catch(function () { });
@@ -6687,7 +7275,7 @@
             postForm('/umbraco/surface/EkonomiAdmin/AddSieAccounts', sieForm()).then(function (d) {
                 sieTell(d.success, d.message);
                 if (d.preview) renderSiePreview(d.preview);
-                if (d.success) loadChart();
+                if (d.success) { loadChart(); accountsChanged(); }
             }).catch(function (e) { sieTell(false, e.message); add.disabled = false; });
         });
         var imp = document.getElementById(uid + '_sieImport');
@@ -6783,11 +7371,15 @@
                 }
                 var c = d.created || {}, parts = [];
                 if (c.fiscalYear) parts.push('räkenskapsåret lades upp');
+                if (c.datesChanged) parts.push('räkenskapsårets datum ändrades');
                 if (c.accounts) parts.push(c.accounts + ' konton');
                 if (c.roles) parts.push(c.roles + ' kontoroller');
                 if (c.shapeChanged) parts.push('föreningsformen ändrades');
                 okNote.textContent = parts.length ? 'Sparat — ' + parts.join(', ') + '.' : 'Sparat. Allt fanns redan.';
                 show(okNote, true);
+                // Ändringen gick igenom men något återstår — sägs i den röda rutan, inte i kvittot,
+                // så den inte läses förbi som en del av "Sparat".
+                if (d.dateWarning) { err.textContent = d.dateWarning; err.classList.remove('d-none'); }
                 // keepSetupOpen: kvittot ligger inuti uppsättningen och får inte gömmas av svaret.
                 render(d.status, true);
             })
@@ -7237,6 +7829,7 @@
                     if (!d.success) { el('roleError').textContent = d.message; show(el('roleError'), true); return; }
                     show(el('roleError'), false);
                     loadChart();
+                    accountsChanged();   // betalkontot i Bokför kommer ur rollerna
                 }).catch(function (e) {
                     el('roleError').textContent = e.message; show(el('roleError'), true);
                 });
@@ -7408,6 +8001,18 @@
         el('chartOk').textContent = d.message;
         show(el('chartOk'), true);
         loadChart();
+        accountsChanged();
+    }
+
+    // ⚠️⚠️ KONTOPLANEN HAR KOPIOR PÅ FLERA YTOR, och varje ändring måste nå dem alla.
+    //    Rapporterat av en kassör (2026-09-29): ett nytt konto 5800 syntes inte i Bokför förrän
+    //    hon loggat ut och in igen — listan där hämtades en gång vid sidladdning och aldrig om.
+    //    Lägger du till en yta som mellanlagrar konton: nollställ den HÄR.
+    function accountsChanged() {
+        if (bokforCtx) loadBokfor();                           // Bokför (bara om den laddats, dvs. hel bokföring)
+        bpAccounts = null;                                     // bankradsdialogen hämtar vid nästa öppning
+        assetAccounts = null;                                  // tillgångsdialogen likaså
+        if (expenseLoaded) loadExpenses();                     // utgiftsformulärets kontolista
     }
 
     function chartFailed(e) {

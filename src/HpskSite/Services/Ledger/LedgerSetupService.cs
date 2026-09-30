@@ -151,12 +151,22 @@ namespace HpskSite.Services.Ledger
 
             if (fiscalYearId is null)
             {
+                var newStart = (startDate ?? new DateTime(year, 1, 1)).Date;
+                var newEnd = (endDate ?? new DateTime(year, 12, 31)).Date;
+
+                var lengthRefusal = LedgerFiscalYearDates.LengthRefusal(newStart, newEnd);
+                if (lengthRefusal is not null) throw new ArgumentException(lengthRefusal);
+
+                var overlapping = FindOverlappingYear(ldb, issuerType, issuerId, 0, newStart, newEnd);
+                if (overlapping is not null)
+                    throw new ArgumentException(OverlapMessage(overlapping));
+
                 ldb.Execute(
                     @"INSERT INTO dbo.LedgerFiscalYear (IssuerType, IssuerId, Year, StartDate, EndDate, Status)
                       VALUES (@0, @1, @2, @3, @4, @5)",
                     issuerType, issuerId, year,
-                    startDate ?? new DateTime(year, 1, 1),
-                    endDate ?? new DateTime(year, 12, 31),
+                    newStart,
+                    newEnd,
                     LedgerFiscalYearStatus.Open);
 
                 result.FiscalYearCreated = true;
@@ -190,6 +200,136 @@ namespace HpskSite.Services.Ledger
                 result.AccountsAdded, result.RolesMapped, result.SeriesCreated);
 
             return result;
+        }
+
+        /// <summary>
+        /// Ändrar start- och slutdatum på ett räkenskapsår som redan finns.
+        ///
+        /// <para><b>⚠️ Fanns inte före 2026-09-29.</b> <see cref="EnsureIssuer"/> hoppar över ett år
+        /// som redan finns, så ett år som lagts upp med fel datum gick inte att rätta — och sidan
+        /// svarade ändå "Sparat". Se <see cref="LedgerFiscalYearDates"/>.</para>
+        ///
+        /// <para>Datumen får bara ändras när ingenting blir fel av det:</para>
+        /// <list type="bullet">
+        /// <item>året är ÖPPET — ett år i bokslut eller fastställt av årsmötet rörs inte;</item>
+        /// <item>perioden är högst arton månader;</item>
+        /// <item>den krockar inte med ett annat av föreningens räkenskapsår;</item>
+        /// <item>ingen verifikation i året hamnar utanför den nya perioden.</item>
+        /// </list>
+        ///
+        /// <para>Verifikationerna pekar på året med <c>FiscalYearId</c>, inte med datum, så en
+        /// giltig ändring flyttar inga poster. <b>Ingående balanser</b> ska däremot ligga på årets
+        /// första dag; flyttas starten svarar metoden med en uppmaning att lägga in dem igen.</para>
+        /// </summary>
+        /// <param name="startDate">Ny start. Null = behåll den nuvarande.</param>
+        /// <param name="endDate">Nytt slut. Null = behåll det nuvarande.</param>
+        public LedgerFiscalYearDateChange ChangeFiscalYearDates(
+            int issuerType, int issuerId, int year, DateTime? startDate, DateTime? endDate)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var ldb = new LedgerDb(db, issuerId);
+
+            var fy = ldb.FirstOrDefault<LedgerFiscalYear>(
+                @"SELECT * FROM dbo.LedgerFiscalYear
+                   WHERE IssuerType = @0 AND IssuerId = @1 AND Year = @2",
+                issuerType, issuerId, year);
+
+            var change = new LedgerFiscalYearDateChange();
+            if (fy is null) return change;
+
+            change.OldStart = fy.StartDate.Date;
+            change.OldEnd = fy.EndDate.Date;
+
+            var newStart = (startDate ?? fy.StartDate).Date;
+            var newEnd = (endDate ?? fy.EndDate).Date;
+
+            if (newStart == change.OldStart && newEnd == change.OldEnd) return change;
+
+            if (fy.Status != LedgerFiscalYearStatus.Open)
+            {
+                change.Refusal = fy.Status == LedgerFiscalYearStatus.Established
+                    ? $"Räkenskapsåret {year} är fastställt av årsmötet, och dess datum kan inte ändras."
+                    : $"Bokslutet för räkenskapsåret {year} pågår, och dess datum kan inte ändras.";
+                return change;
+            }
+
+            change.Refusal = LedgerFiscalYearDates.LengthRefusal(newStart, newEnd);
+            if (change.Refusal is not null) return change;
+
+            var overlapping = FindOverlappingYear(ldb, issuerType, issuerId, fy.Id, newStart, newEnd);
+            if (overlapping is not null)
+            {
+                change.Refusal = OverlapMessage(overlapping);
+                return change;
+            }
+
+            var outside = ldb.FirstOrDefault<EntrySpan>(
+                @"SELECT COUNT(1) AS Count, MIN(AccountingDate) AS FirstDate, MAX(AccountingDate) AS LastDate
+                    FROM dbo.LedgerJournalEntry
+                   WHERE FiscalYearId = @0 AND (AccountingDate < @1 OR AccountingDate > @2)",
+                fy.Id, newStart, newEnd);
+
+            if (outside is not null && outside.Count > 0)
+            {
+                change.Refusal = outside.Count == 1
+                    ? $"En verifikation i {year} är bokförd {outside.FirstDate:yyyy-MM-dd}, utanför "
+                      + $"{newStart:yyyy-MM-dd}–{newEnd:yyyy-MM-dd}. Välj datum som omfattar den."
+                    : $"{outside.Count} verifikationer i {year} är bokförda mellan "
+                      + $"{outside.FirstDate:yyyy-MM-dd} och {outside.LastDate:yyyy-MM-dd}, utanför "
+                      + $"{newStart:yyyy-MM-dd}–{newEnd:yyyy-MM-dd}. Välj datum som omfattar dem.";
+                return change;
+            }
+
+            ldb.Execute(
+                @"UPDATE dbo.LedgerFiscalYear SET StartDate = @0, EndDate = @1
+                   WHERE Id = @2 AND Status = @3",
+                newStart, newEnd, fy.Id, LedgerFiscalYearStatus.Open);
+
+            change.Changed = true;
+            change.NewStart = newStart;
+            change.NewEnd = newEnd;
+
+            // Ingående balanser ligger på årets första dag. Flyttas starten står de kvar på det
+            // gamla datumet och läses då som en vanlig verifikation — bl.a. i SIE-exporten.
+            if (newStart != change.OldStart)
+            {
+                var openingBalances = ldb.ExecuteScalar<int>(
+                    @"SELECT COUNT(1) FROM dbo.LedgerJournalEntry
+                       WHERE FiscalYearId = @0 AND SourceType = @1 AND AccountingDate <> @2",
+                    fy.Id, LedgerSourceType.OpeningBalance, newStart);
+
+                if (openingBalances > 0)
+                    change.Warning = "De ingående balanserna är bokförda på det gamla startdatumet "
+                        + $"({change.OldStart:yyyy-MM-dd}). Spara dem igen under Ingående balanser, så "
+                        + $"hamnar de på {newStart:yyyy-MM-dd}.";
+            }
+
+            _logger.LogInformation(
+                "Verifikationsliggaren: räkenskapsår {Ar} för utställare {Typ}/{Id} ändrat från "
+                + "{GammalStart:yyyy-MM-dd}–{GammaltSlut:yyyy-MM-dd} till {NyStart:yyyy-MM-dd}–{NyttSlut:yyyy-MM-dd}.",
+                year, issuerType, issuerId, change.OldStart, change.OldEnd, newStart, newEnd);
+
+            return change;
+        }
+
+        private static LedgerFiscalYear? FindOverlappingYear(
+            LedgerDb ldb, int issuerType, int issuerId, int exceptId, DateTime start, DateTime end)
+            => ldb.FirstOrDefault<LedgerFiscalYear>(
+                @"SELECT TOP 1 * FROM dbo.LedgerFiscalYear
+                   WHERE IssuerType = @0 AND IssuerId = @1 AND Id <> @2
+                     AND StartDate <= @4 AND EndDate >= @3
+                   ORDER BY StartDate",
+                issuerType, issuerId, exceptId, start, end);
+
+        private static string OverlapMessage(LedgerFiscalYear other)
+            => $"Perioden krockar med räkenskapsåret {other.Year} "
+             + $"({other.StartDate:yyyy-MM-dd}–{other.EndDate:yyyy-MM-dd}).";
+
+        private sealed class EntrySpan
+        {
+            public int Count { get; set; }
+            public DateTime? FirstDate { get; set; }
+            public DateTime? LastDate { get; set; }
         }
 
         /// <summary>
@@ -382,6 +522,24 @@ namespace HpskSite.Services.Ledger
 
             return rows > 0;
         }
+    }
+
+    /// <summary>Utfallet av <see cref="LedgerSetupService.ChangeFiscalYearDates"/>.</summary>
+    public class LedgerFiscalYearDateChange
+    {
+        /// <summary>Datumen skrevs om.</summary>
+        public bool Changed { get; set; }
+
+        /// <summary>Null = ingen invändning. Annars varför datumen inte ändrades.</summary>
+        public string? Refusal { get; set; }
+
+        /// <summary>Ändringen gjordes, men något behöver göras efteråt.</summary>
+        public string? Warning { get; set; }
+
+        public DateTime? OldStart { get; set; }
+        public DateTime? OldEnd { get; set; }
+        public DateTime? NewStart { get; set; }
+        public DateTime? NewEnd { get; set; }
     }
 
     /// <summary>Vad uppsättningen faktiskt gjorde. Noll överallt = allt fanns redan.</summary>

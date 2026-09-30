@@ -47,6 +47,7 @@ namespace HpskSite.Controllers
         private readonly LedgerAccessService _access;
         private readonly LedgerBankImportService _bankService;
         private readonly LedgerClosingService _closingService;
+        private readonly LedgerNoteService _noteService;
         private readonly LedgerSieExportService _sieService;
         private readonly LedgerReceivableExportService _receivableService;
         private readonly LedgerJournalService _journalService;
@@ -94,6 +95,7 @@ namespace HpskSite.Controllers
             LedgerAccessService access,
             LedgerBankImportService bankService,
             LedgerClosingService closingService,
+            LedgerNoteService noteService,
             LedgerSieExportService sieService,
             LedgerReceivableExportService receivableService,
             LedgerJournalService journalService,
@@ -122,6 +124,7 @@ namespace HpskSite.Controllers
             _chartService = chartService;
             _bankService = bankService;
             _closingService = closingService;
+            _noteService = noteService;
             _sieService = sieService;
             _receivableService = receivableService;
             _journalService = journalService;
@@ -356,7 +359,9 @@ namespace HpskSite.Controllers
                     //    vara luckfri; det påståendet är värdelöst om det inte går att pröva.
                     hasGaps = page.HasGaps,
                     series = page.Series,
-                    rows = page.Rows
+                    rows = page.Rows,
+                    // Kontoväljaren behöver listan bara en gång — inte vid varje "Visa fler".
+                    accountOptions = skip == 0 ? _journalService.UsedAccounts(issuerType, issuerId) : null
                 });
             }
             catch (Exception ex)
@@ -2091,6 +2096,17 @@ namespace HpskSite.Controllers
                 var checklist = _closingService.Checklist(issuerType, issuerId, yearId);
                 var statements = _closingService.Statements(issuerType, issuerId, yearId);
 
+                // ⚠️ Noterna får inte fälla bokslutet. Saknas tabellen (migreringen inte körd)
+                //    ska räkningarna ändå visas — och kortet säga att noterna inte gick att läsa,
+                //    i stället för att tyst visa "inga noter".
+                LedgerNotesView? notes = null;
+                try { notes = _noteService.Get(issuerType, issuerId, statements); }
+                catch (Exception nex)
+                {
+                    _logger.LogError(nex, "Noterna gick inte att läsa för {Typ}/{Id}, år {Ar}.",
+                        issuerType, issuerId, yearId);
+                }
+
                 return Json(new
                 {
                     success = true,
@@ -2099,7 +2115,8 @@ namespace HpskSite.Controllers
                     years = years.OrderByDescending(y => y.Year)
                                  .Select(y => new { id = y.Id, year = y.Year, status = y.Status }),
                     checklist,
-                    statements
+                    statements,
+                    notes
                 });
             }
             catch (Exception ex)
@@ -2139,6 +2156,89 @@ namespace HpskSite.Controllers
             public int IssuerId { get; set; }
             public int FiscalYearId { get; set; }
             public string? Status { get; set; }
+        }
+
+        // ══ NOTERNA TILL RESULTAT- OCH BALANSRÄKNINGEN ═══════════════════════════════════════
+        //
+        // ⚠️ Läses via GetClosing (samma anrop som räkningarna, så numreringen och räkningarna
+        //    aldrig kan komma ur olika lägen). Här ligger bara skrivvägarna, alla med skrivrätt.
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveNote([FromBody] NoteRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Ogiltig begäran." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            try
+            {
+                var (saved, message, id) = _noteService.Save(
+                    request.IssuerType, request.IssuerId, request.FiscalYearId, request.NoteId,
+                    request.Title, request.Body, request.AccountNumbers, await CurrentMemberIdAsync());
+
+                return Json(new { success = saved, message, id });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Noten gick inte att spara för {Typ}/{Id}.", request.IssuerType, request.IssuerId);
+                return Json(new { success = false, message = "Noten gick inte att spara. Försök igen." });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteNote([FromBody] NoteRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Ogiltig begäran." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            try
+            {
+                var (done, message) = _noteService.Delete(request.IssuerType, request.IssuerId, request.NoteId);
+                return Json(new { success = done, message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Noten gick inte att ta bort för {Typ}/{Id}.", request.IssuerType, request.IssuerId);
+                return Json(new { success = false, message = "Noten gick inte att ta bort. Försök igen." });
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CopyNotesFromPreviousYear([FromBody] NoteRequest request)
+        {
+            if (request is null) return Json(new { success = false, message = "Ogiltig begäran." });
+
+            var (ok, _) = await AuthorizeWriteAsync(request.IssuerType, request.IssuerId);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+
+            try
+            {
+                var (done, message, copied) = _noteService.CopyFromPreviousYear(
+                    request.IssuerType, request.IssuerId, request.FiscalYearId, await CurrentMemberIdAsync());
+                return Json(new { success = done, message, copied });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Noterna gick inte att kopiera för {Typ}/{Id}.", request.IssuerType, request.IssuerId);
+                return Json(new { success = false, message = "Noterna gick inte att kopiera. Försök igen." });
+            }
+        }
+
+        public class NoteRequest
+        {
+            public int IssuerType { get; set; }
+            public int IssuerId { get; set; }
+            public int FiscalYearId { get; set; }
+            public int NoteId { get; set; }
+            public string? Title { get; set; }
+            public string? Body { get; set; }
+            public List<int>? AccountNumbers { get; set; }
         }
 
         // ══ BANKAVSTÄMNINGEN (P11) ═══════════════════════════════════════════════════════════
@@ -2513,18 +2613,26 @@ namespace HpskSite.Controllers
 
             var (row, bankAccount) = found.Value;
 
+            // ⚠️ Ett motkonto bland föreningens egna pengakonton (19xx) gör raden till en ÖVERFÖRING
+            //    (t.ex. från sparkontot). Riktningen kommer ur bankraden: pengar in = från det andra
+            //    kontot till banken, pengar ut = från banken till det andra kontot. Ingen moms, inget
+            //    projekt.
+            var received = row.Amount > 0;
+            var transfer = LedgerMoneyAccount.Is(accountNumber);
+
             var result = _manualPosting.Post(new ManualEntryRequest
             {
                 IssuerType = issuerType,
                 IssuerId = issuerId,
                 Amount = Math.Abs(row.Amount),
-                WeReceived = row.Amount > 0,
+                WeReceived = received,
                 Date = row.BookedDate.Date,
                 Description = string.IsNullOrWhiteSpace(description) ? row.Text : description.Trim(),
-                AccountNumber = accountNumber,
-                PaymentAccountNumber = bankAccount,
+                IsTransfer = transfer,
+                AccountNumber = transfer ? (received ? bankAccount : accountNumber) : accountNumber,
+                PaymentAccountNumber = transfer ? (received ? accountNumber : bankAccount) : bankAccount,
                 ProjectId = projectId is int p && p != 0 ? p : null,
-                VatRate = vatRate
+                VatRate = transfer ? null : vatRate
             }, actorId);
 
             if (!result.Success) return (false, result.Error, null, false);
@@ -3164,6 +3272,18 @@ namespace HpskSite.Controllers
 
             try
             {
+                // ⚠️ FÖRE EnsureIssuer: den hoppar över ett år som redan finns, och utan det här
+                // steget kastades rättade datum tyst medan svaret sa "Sparat" (felrapport
+                // 2026-09-28). Tomma datum betyder "behåll" för ett befintligt år — annars hade
+                // ett brutet räkenskapsår återställts till kalenderår av en sparning som bara
+                // gällde föreningsformen.
+                var dateChange = _setupService.ChangeFiscalYearDates(
+                    request.IssuerType, request.IssuerId, request.Year,
+                    request.StartDate, request.EndDate);
+
+                if (dateChange.Refusal is not null)
+                    return Json(new { success = false, message = dateChange.Refusal });
+
                 var result = _setupService.EnsureIssuer(
                     request.IssuerType,
                     request.IssuerId,
@@ -3193,8 +3313,10 @@ namespace HpskSite.Controllers
                         series = result.SeriesCreated,
                         fiscalYear = result.FiscalYearCreated,
                         settings = result.SettingsCreated,
-                        shapeChanged
+                        shapeChanged,
+                        datesChanged = dateChange.Changed
                     },
+                    dateWarning = dateChange.Warning,
                     // Tom lista är det normala. Är den inte tom är varje rad en betalning som inte
                     // går att bokföra, och då ska det synas — inte loggas tyst.
                     rolesWithoutDefault = result.RolesWithoutDefault

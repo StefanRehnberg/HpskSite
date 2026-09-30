@@ -5564,6 +5564,84 @@ projekt 100/100, styrelsens läsrätt 44/44.
 ingen ny kolumn. Bara klubbens riktiga liggare; en sandlåda får inga. Svit:
 `hpsk-verify/ekonomi-kretsavgift-klubbsida-verify.mjs` 22/22.
 
+## Noter i bokslutet, och räkenskapsårets datum (2026-09-29)
+
+Två rapporter från Michael Henriksson (Åmåls PK).
+
+**Räkenskapsårets datum gick inte att rätta.** `EnsureIssuer` hoppar över ett år som redan finns, så
+rättade datum kastades medan sidan svarade *"Sparat. Allt fanns redan."*
+`LedgerSetupService.ChangeFiscalYearDates` körs nu FÖRE uppsättningen i `SaveSetup`: bara ett ÖPPET år,
+högst 18 månader (`LedgerFiscalYearDates.LengthRefusal`), ingen krock med ett annat år, och ingen
+verifikation i året utanför de nya datumen. Avslaget namnger skälet. **Tomma datum = behåll** för ett
+befintligt år (annars återställdes ett brutet år av en sparning som bara gällde formen). Flyttas starten
+och ingående balanser finns svarar den med `dateWarning` (de ska sparas om till nya första dagen).
+Längd- och krockregeln gäller också när ett nytt år läggs upp.
+
+**Noterna** (`LedgerNote` + `LedgerNoteAccount`, `LedgerNoteService`, kort *Noter* under räkningarna i
+Bokslut, och på `/revision`):
+- ⚠️⚠️ **Numret lagras aldrig** — `LedgerNoteNumbering.Number` härleder det vid varje läsning: allmänna
+  noter (utan konto) först i skrivordning, sedan kontonoter i ordningen deras första konto står i
+  räkningarna (intäkter, kostnader, tillgångar, kapital), sist noter vars konton saknar saldo i år
+  (`IsUnreferenced`, flaggas på skärmen). Klienten räknar aldrig ett eget nummer.
+- Läses i `GetClosing` (samma anrop som räkningarna) och får inte fälla bokslutet — `notes: null` ⇒ kortet
+  säger att noterna inte gick att läsa. Skriv: `SaveNote`, `DeleteNote`, `CopyNotesFromPreviousYear`
+  (bara till ett år utan noter), alla med skrivrätt.
+- **Låses när året är fastställt** (prövas i tjänsten). En not kan gälla flera konton; kontolistan
+  ERSÄTTER den gamla vid sparning.
+- Ytan: *Lägg till not* på varje kontorad (visas vid hover med mus, alltid på pekskärm), dialogen kan
+  i stället hänvisa till en befintlig not. Utskriften tar med kortet utan knappar; ett tomt kort skrivs
+  inte ut.
+
+**Operatörssteg:** `Migrations/create-ledger-note-tables.sql` **FÖRE deploy** (B23; båda schemana,
+sandlådespärrarna). Körd i dev 2026-09-29, **EJ i prod**. Adds C# → full ombyggnad. Test:
+`LedgerNoteNumberingTests` 8, `LedgerFiscalYearDatesTests` 9. Svit:
+`hpsk-verify/ekonomi-noter-verify.mjs` (egen sandlåda).
+
+## Verifikationer: kontofilter, huvudbok och kontolänkar (2026-09-30)
+
+Efter Michael Henriksson: *"se vilka konton de bokförts på, filtrera och söka — framför allt för
+revisorerna"*. Servern hade redan kontofiltret (`List(accountNumber)`) och huvudboken
+(`GetAccountLedger` / `LedgerJournalService.AccountLedger`, med ingående saldo ur ALLT före perioden)
+— men ingen yta använde dem.
+- **Kontoväljare** på Verifikationer (`verAccount`) fylld ur `GetJournal.accountOptions`
+  (`UsedAccounts` = konton med minst en rad; bara på första sidan). Byte laddar direkt.
+- **Huvudboken** (`#verLedger`, `loadLedger()`) visas ovanför listan när ett konto är valt; Från/Till
+  styr perioden (tomt = serverns period, som svaret skriver ut). Rad → `openEntry`.
+- **Kolumnen Konton** — `LedgerJournalRow.Accounts`, hämtad i EN fråga för sidan.
+- **Sökrutan** matchar nu ett fyrsiffrigt kontonummer exakt (platshållaren lovade "konto" men sökte
+  bara namnet).
+- **Bokslut:** kontonummer och namn är länkar (`data-ledger-acc`) → `openAccountLedger(n, from, to)`
+  med räkningens period, så att huvudboken visar samma siffror. ⚠️ `verLoaded = true` sätts FÖRE
+  `showView`, annars laddar showView listan utan konto och det svaret kan skriva över det rätta.
+Svit: `hpsk-verify/ekonomi-huvudbok-verify.mjs`. Adds C# → full ombyggnad. Ingen SQL.
+
+## Bokför: överföring mellan egna konton, och kontolistorna följer kontoplanen (2026-09-29)
+
+Två rapporter från Lis Erevall.
+
+**Ett nytt konto syntes inte i Bokför** förrän sidan laddats om: listan hämtades en gång vid
+sidladdning. `accountsChanged()` i `Ekonomi.cshtml` körs nu efter VARJE ändring av kontoplanen
+(nytt konto, namn, stängt, moms, kontoroll, SIE "lägg upp kontona") och läser om Bokför samt
+nollställer bankradsdialogens, tillgångarnas och utgifternas kopior. ⚠️ **Lägger du till en yta som
+mellanlagrar konton: nollställ den där.** Svit: `hpsk-verify/ekonomi-nytt-konto-bokfor-verify.mjs`.
+
+**En överföring (1940 → 1930) gick inte att bokföra alls** — Bokför visade bara intäkts-/kostnadskonton
+och rollernas betalkonton. Nu:
+- Tredje valet **Vi flyttade pengar** (`setMode('move')`). ⚠️ I det läget är den ÖVRE listan
+  (`bAccount`) FRÅN-kontot och den UNDRE (`bPayAccount`) TILL-kontot; `manualRequest` byter plats mot
+  servern, som vill ha till = `AccountNumber`, från = `PaymentAccountNumber`, `IsTransfer = true`.
+- `LedgerManualPostingService`: `Validate` kräver att båda är pengakonton (`LedgerMoneyAccount.Is`,
+  1900–1999) och olika; `BuildLines` ger till i debet, från i kredit, `VatRate = 0` på båda (null vore
+  kontots sats); `Post` sätter aldrig projekt.
+- **Bankraden:** ett 19xx-motkonto i *Bokför…* gör raden till en överföring (`PostOneBankRow`), med
+  riktningen ur bankraden. Listan har en egen grupp *Överföring till eller från ett eget konto*
+  (bankradens eget konto utesluts).
+- ⚠️ **Begränsat till 19xx med flit** (Stefans beslut). Lån/amortering (2350 mot 1930) läggs till när
+  någon behöver det — vidga `LedgerMoneyAccount` och klientens `isMoney` tillsammans.
+
+Test: `LedgerManualTransferTests` (15). Svit: `hpsk-verify/ekonomi-overforing-verify.mjs`. Adds C# →
+full ombyggnad. Ingen SQL.
+
 ## Ekonomigenomgången 2026-09-24 — liggarfel som bara syns över ÅR
 
 Hittat genom att gå igenom ett kassörsår som tre personer (lekmannakassör, ekonom med eget
