@@ -113,9 +113,19 @@
             const photo = s.hasPhoto ? `<div class="text-center my-2"><a href="${photoUrl}" target="_blank" rel="noopener"><img src="${photoUrl}" class="img-fluid rounded border" style="max-height:280px;"></a></div>` : '';
             const date = (s.kind === 'comp' ? s.competitionDate : s.seriesDate) ? new Date(s.kind === 'comp' ? s.competitionDate : s.seriesDate).toLocaleDateString('sv-SE') : '';
 
+            // Which club the approval is FOR. Only asked when the functionary may act for more than one
+            // of the shooter's clubs — we cannot tell from the range which club they represent.
+            const opts = s.clubOptions || [];
+            const clubPick = (s.status === 'Pending' && opts.length > 1)
+                ? `<div class="mt-3"><label class="form-label small mb-1" for="validateClub">Godkänn för klubb</label>
+                     <select class="form-select" id="validateClub">${opts.map(o =>
+                        `<option value="${o.id}"${o.id === s.defaultClubId ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select>
+                     <div class="form-text">Du har behörighet i flera av skyttens klubbar. Välj den klubb du godkänner för.</div></div>`
+                : '';
+
             let actions;
             if (s.status === 'Pending') {
-                actions = `<div class="d-grid gap-2 mt-3">
+                actions = clubPick + `<div class="d-grid gap-2 mt-3">
                     <button class="btn btn-success btn-lg" onclick="act('${s.kind}', ${s.id}, true)"><i class="bi bi-check-lg"></i> Godkänn</button>
                     <button class="btn btn-outline-danger" onclick="act('${s.kind}', ${s.id}, false)"><i class="bi bi-x-lg"></i> Avvisa</button></div>`;
             } else {
@@ -132,14 +142,16 @@
         function act(kind, id, approve) {
             const url = approve ? '/umbraco/surface/Marken/VerifyEvidence' : '/umbraco/surface/Marken/RejectEvidence';
             if (!approve && !confirm('Avvisa?')) return;
-            content.querySelectorAll('button').forEach(b => b.disabled = true);
+            const pick = document.getElementById('validateClub');
+            const clubId = pick ? parseInt(pick.value, 10) || 0 : 0;
+            content.querySelectorAll('button, select').forEach(b => b.disabled = true);
             fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
                 // Pass the scanned token along: on a club that requires on-site witnessing it is the
                 // PROOF that this approval came from scanning the shooter's live code, and the server
                 // refuses a bare approve there.
-                body: JSON.stringify({ kind, id, token: TOKEN })
+                body: JSON.stringify({ kind, id, token: TOKEN, clubId })
             })
             .then(readJson)
             .then(res => {
