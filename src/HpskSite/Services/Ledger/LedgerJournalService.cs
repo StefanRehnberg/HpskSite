@@ -99,13 +99,24 @@ namespace HpskSite.Services.Ledger
                 if (!string.IsNullOrWhiteSpace(search))
                 {
                     var like = "%" + search.Trim() + "%";
-                    where += $@" AND (e.Description LIKE @{args.Count}
-                                   OR e.CounterpartyName LIKE @{args.Count}
+                    var likeIx = args.Count;
+                    args.Add(like);
+
+                    // ⚠️ Ett KONTONUMMER matchar kontot exakt. Sökrutan lovade "konto" men sökte bara
+                    //    i kontots namn, så "1930" gav noll träffar (Michael Henriksson 2026-09-29).
+                    var accountClause = "";
+                    if (int.TryParse(search.Trim(), out var searchAccount) && searchAccount is >= 1000 and <= 9999)
+                    {
+                        accountClause = $" OR sl.AccountNumber = @{args.Count}";
+                        args.Add(searchAccount);
+                    }
+
+                    where += $@" AND (e.Description LIKE @{likeIx}
+                                   OR e.CounterpartyName LIKE @{likeIx}
                                    OR EXISTS (SELECT 1 FROM dbo.LedgerJournalEntryLine sl
                                                WHERE sl.JournalEntryId = e.Id
-                                                 AND (sl.Text LIKE @{args.Count}
-                                                   OR sl.AccountName LIKE @{args.Count})))";
-                    args.Add(like);
+                                                 AND (sl.Text LIKE @{likeIx}
+                                                   OR sl.AccountName LIKE @{likeIx}{accountClause})))";
                 }
 
                 page.TotalCount = ldb.ExecuteScalar<int>(
@@ -129,6 +140,21 @@ namespace HpskSite.Services.Ledger
                     args.ToArray());
 
                 foreach (var r in rows) page.Rows.Add(ToRow(r));
+
+                // Vilka konton varje verifikation rör — EN fråga för hela sidan (högst MaxTake
+                // verifikationer), aldrig en per rad.
+                if (page.Rows.Count > 0)
+                {
+                    var byEntry = ldb.Fetch<EntryAccount>(
+                            @"SELECT DISTINCT JournalEntryId, AccountNumber FROM dbo.LedgerJournalEntryLine
+                               WHERE JournalEntryId IN (@0)",
+                            page.Rows.Select(x => x.EntryId).ToList())
+                        .GroupBy(x => x.JournalEntryId)
+                        .ToDictionary(g => g.Key, g => g.Select(x => x.AccountNumber).OrderBy(n => n).ToList());
+
+                    foreach (var row in page.Rows)
+                        if (byEntry.TryGetValue(row.EntryId, out var accs)) row.Accounts.AddRange(accs);
+                }
 
                 BuildSeriesSpans(ldb, page, issuerType, issuerId, fiscalYearId);
             }
@@ -377,6 +403,41 @@ namespace HpskSite.Services.Ledger
                     accountNumber, issuerType, issuerId);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Konton som har bokföring, med namn — väljaren på Verifikationer. Ett konto utan en enda
+        /// rad har ingen huvudbok att visa och gör bara listan längre.
+        /// </summary>
+        public List<LedgerAccountOption> UsedAccounts(int issuerType, int issuerId)
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                var ldb = new LedgerDb(db, issuerId);
+
+                return ldb.Fetch<LedgerAccountOption>(
+                    @"SELECT u.AccountNumber AS Number,
+                             ISNULL((SELECT TOP 1 a.Name FROM dbo.LedgerAccount a
+                                      WHERE a.IssuerType = @0 AND a.IssuerId = @1 AND a.Number = u.AccountNumber), '') AS Name
+                        FROM (SELECT DISTINCT l.AccountNumber
+                                FROM dbo.LedgerJournalEntryLine l
+                                JOIN dbo.LedgerJournalEntry e ON e.Id = l.JournalEntryId
+                               WHERE e.IssuerType = @0 AND e.IssuerId = @1) u
+                       ORDER BY u.AccountNumber",
+                    issuerType, issuerId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Kunde inte läsa bokförda konton för {Typ}/{Id}.", issuerType, issuerId);
+                return new List<LedgerAccountOption>();
+            }
+        }
+
+        private class EntryAccount
+        {
+            public int JournalEntryId { get; set; }
+            public int AccountNumber { get; set; }
         }
 
         private Dictionary<int, string> ResolveNames(IEnumerable<int> memberIds)

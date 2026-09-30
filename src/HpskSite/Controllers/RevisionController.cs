@@ -42,6 +42,7 @@ namespace HpskSite.Controllers
         private readonly LedgerAuditorService _auditors;
         private readonly LedgerAccessService _access;
         private readonly LedgerClosingService _closing;
+        private readonly LedgerNoteService _notes;
         private readonly LedgerSetupService _setup;
         private readonly LedgerBankImportService _bank;
         private readonly LedgerAttachmentService _attachments;
@@ -55,6 +56,7 @@ namespace HpskSite.Controllers
             LedgerAuditorService auditors,
             LedgerAccessService access,
             LedgerClosingService closing,
+            LedgerNoteService notes,
             LedgerSetupService setup,
             LedgerBankImportService bank,
             LedgerAttachmentService attachments,
@@ -67,6 +69,7 @@ namespace HpskSite.Controllers
             _auditors = auditors;
             _access = access;
             _closing = closing;
+            _notes = notes;
             _setup = setup;
             _bank = bank;
             _attachments = attachments;
@@ -314,6 +317,15 @@ namespace HpskSite.Controllers
                 model.Checklist = _closing.Checklist(pick.OwnerType, pick.OwnerId, yearId);
                 model.Statements = _closing.Statements(pick.OwnerType, pick.OwnerId, yearId);
 
+                // Noterna hör till handlingarna revisorn granskar. Får inte fälla sidan.
+                try { model.Notes = _notes.Get(pick.OwnerType, pick.OwnerId, model.Statements); }
+                catch (Exception nex)
+                {
+                    model.NotesUnreadable = true;
+                    _logger.LogError(nex, "Noterna gick inte att läsa på revisionssidan för {Typ}/{Id}.",
+                        pick.OwnerType, pick.OwnerId);
+                }
+
                 var (missing, total) = _attachments.MissingForYear(pick.OwnerType, pick.OwnerId, yearId);
                 model.AttachmentsMissing = missing;
                 model.AttachmentsTotal = total;
@@ -492,6 +504,8 @@ namespace HpskSite.Controllers
         public bool ReadOnly { get; set; } = true;
 
         public LedgerFinancialStatements? Statements { get; set; }
+        public LedgerNotesView? Notes { get; set; }
+        public bool NotesUnreadable { get; set; }
 
         public LedgerClosingChecklist? Checklist { get; set; }
 

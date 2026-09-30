@@ -4,6 +4,9 @@
 
     var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
     string Kr(decimal v) => v.ToString("#,##0", sv) + " kr";
+    // Notnumren intill kontot, som i handlingarna: "Inventarier (2)".
+    string Refs(int acc) => Model.Notes is not null && Model.Notes.AccountRefs.TryGetValue(acc, out var r)
+        ? " (" + string.Join(", ", r) + ")" : "";
     var s = Model.Selected;
 }
 <!DOCTYPE html>
@@ -169,12 +172,12 @@
                                 <tr class="grp"><td colspan="3">Intäkter</td></tr>
                                 @foreach (var r in st.Revenue)
                                 {
-                                    <tr><td class="muted" style="width:3.5rem">@r.AccountNumber</td><td>@r.AccountName</td><td class="n">@Kr(r.Amount)</td></tr>
+                                    <tr><td class="muted" style="width:3.5rem">@r.AccountNumber</td><td>@r.AccountName<span class="muted">@Refs(r.AccountNumber)</span></td><td class="n">@Kr(r.Amount)</td></tr>
                                 }
                                 <tr class="grp"><td colspan="3">Kostnader</td></tr>
                                 @foreach (var r in st.Costs)
                                 {
-                                    <tr><td class="muted">@r.AccountNumber</td><td>@r.AccountName</td><td class="n">@Kr(r.Amount)</td></tr>
+                                    <tr><td class="muted">@r.AccountNumber</td><td>@r.AccountName<span class="muted">@Refs(r.AccountNumber)</span></td><td class="n">@Kr(r.Amount)</td></tr>
                                 }
                                 <tr class="sum"><td></td><td>Årets resultat</td><td class="n">@Kr(st.Result)</td></tr>
                             </table>
@@ -182,13 +185,13 @@
                                 <tr class="grp"><td colspan="3">Tillgångar</td></tr>
                                 @foreach (var r in st.Assets)
                                 {
-                                    <tr><td class="muted" style="width:3.5rem">@r.AccountNumber</td><td>@r.AccountName</td><td class="n">@Kr(r.Amount)</td></tr>
+                                    <tr><td class="muted" style="width:3.5rem">@r.AccountNumber</td><td>@r.AccountName<span class="muted">@Refs(r.AccountNumber)</span></td><td class="n">@Kr(r.Amount)</td></tr>
                                 }
                                 <tr class="sum"><td></td><td>Summa tillgångar</td><td class="n">@Kr(st.AssetTotal)</td></tr>
                                 <tr class="grp"><td colspan="3">Eget kapital och skulder</td></tr>
                                 @foreach (var r in st.EquityAndLiabilities)
                                 {
-                                    <tr><td class="muted">@r.AccountNumber</td><td>@r.AccountName</td><td class="n">@Kr(r.Amount)</td></tr>
+                                    <tr><td class="muted">@r.AccountNumber</td><td>@r.AccountName<span class="muted">@Refs(r.AccountNumber)</span></td><td class="n">@Kr(r.Amount)</td></tr>
                                 }
                                 @if (st.PriorResult != 0m)
                                 {
@@ -199,6 +202,27 @@
                             </table>
                         </div>
                     </details>
+
+                    @* Noterna hör till handlingarna och står därför öppet, inte inne i detaljvyn. *@
+                    @if (Model.NotesUnreadable)
+                    {
+                        <div class="warn" style="margin-top:16px">Noterna gick inte att läsa just nu.</div>
+                    }
+                    else if (Model.Notes is not null && Model.Notes.Notes.Count > 0)
+                    {
+                        <h2 style="margin-top:20px">Noter</h2>
+                        @foreach (var n in Model.Notes.Notes)
+                        {
+                            <div style="margin-bottom:12px">
+                                <strong>Not @n.Number — @n.Title</strong>
+                                @if (n.Accounts.Count > 0)
+                                {
+                                    <span class="muted"> · @string.Join(", ", n.Accounts.Select(a => a.Number + " " + a.Name))</span>
+                                }
+                                <div style="white-space:pre-wrap">@n.Body</div>
+                            </div>
+                        }
+                    }
 
                     <div style="margin-top:16px">
                         @* ⚠️ Balanskontrollen visas ALLTID, också när den går ihop. Det är den

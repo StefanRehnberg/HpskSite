@@ -80,7 +80,12 @@ namespace HpskSite.Services.Ledger
             //    create-competition-fee-tables.sql lägger också fem kolumner på LedgerPayment —
             //    utan den faller VARJE läsning av betalningar, även evenemangens.
             typeof(LedgerCharge),
-            typeof(LedgerChargeLine)
+            typeof(LedgerChargeLine),
+
+            // ⚠️ Noterna till resultat- och balansräkningen (create-ledger-note-tables.sql).
+            //    Kontoraden har inget IssuerId och hålls i rätt schema av sin FK, som projektgruppens.
+            typeof(LedgerNote),
+            typeof(LedgerNoteAccount)
         };
 
         /// <summary>
@@ -132,7 +137,7 @@ namespace HpskSite.Services.Ledger
             + "+ create-ledger-payment-tables.sql + add-project-dimension-to-ledger.sql "
             + "+ create-ledger-budget-tables.sql + create-ledger-expense-table.sql "
             + "+ create-ledger-asset-table.sql + create-ledger-project-group-tables.sql "
-            + "+ create-competition-fee-tables.sql";
+            + "+ create-competition-fee-tables.sql + create-ledger-note-tables.sql";
 
         /// <summary>Skriptet som skapar sandlådans schema. Ett eget svar kräver ett eget skript.</summary>
         public const string SandboxMigrationScript =

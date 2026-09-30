@@ -165,7 +165,8 @@ namespace HpskSite.Services.Ledger
                 CreatedByMemberId = byMemberId,
                 // ⚠️ `!= 0`, aldrig `> 0`: ett sandlådeprojekt har NEGATIVT id. Noll är väljarens
                 //    "(inget projekt)" och får inte nå liggaren, som då svarar "projektet 0 finns inte".
-                ProjectId = r.ProjectId is int p && p != 0 ? p : null,
+                // En överföring är ingen affär och hör inte till något projekt.
+                ProjectId = !r.IsTransfer && r.ProjectId is int p && p != 0 ? p : null,
                 Lines = lines
             });
 
@@ -255,6 +256,20 @@ namespace HpskSite.Services.Ledger
             if (string.IsNullOrWhiteSpace(r.Description))
                 return "Skriv vad posten avser — det är den texten som står i bokföringen.";
 
+            if (r.IsTransfer)
+            {
+                if (r.PaymentAccountNumber <= 0)
+                    return "Välj vilket konto pengarna flyttades från.";
+                if (r.AccountNumber <= 0)
+                    return "Välj vilket konto pengarna flyttades till.";
+
+                // ⚠️ Bara pengakonton. En "överföring" till ett kostnadskonto är en utgift, och den
+                //    ska bokföras som en — med moms och projekt — inte smyga förbi som en flytt.
+                if (!LedgerMoneyAccount.Is(r.PaymentAccountNumber) || !LedgerMoneyAccount.Is(r.AccountNumber))
+                    return "En överföring görs mellan föreningens egna kassa- och bankkonton (19xx). "
+                         + "Välj Vi betalade eller Vi fick in för allt annat.";
+            }
+
             if (r.AccountNumber <= 0)
                 return "Välj vilket konto posten hör till.";
 
@@ -265,7 +280,9 @@ namespace HpskSite.Services.Ledger
             // något — 3 150 in och 3 150 ut på föreningskontot. Den ser korrekt ut i varje
             // kontroll utom den mänskliga.
             if (r.AccountNumber == r.PaymentAccountNumber)
-                return "Posten skulle bokföras mot samma konto på båda sidor. Välj olika konton.";
+                return r.IsTransfer
+                    ? "Pengarna kan inte flyttas till samma konto som de kommer från. Välj två olika konton."
+                    : "Posten skulle bokföras mot samma konto på båda sidor. Välj olika konton.";
 
             if (!LedgerVat.IsAllowedRate(r.VatRate))
                 return "Momssatsen ska vara 25, 12 eller 6 procent — eller ingen moms.";
@@ -294,6 +311,15 @@ namespace HpskSite.Services.Ledger
             //    upp i stället för ruta 05/11 ned. Bokföringens egen regel (klass 3 = utgående,
             //    annars ingående) är den rätta, så inget uttryckligt val här.
             var text = r.Description.Trim();
+
+            // Vi flyttade pengar: till-kontot i debet, från-kontot i kredit. Ingen moms — det är
+            // ingen affär. VatRate 0 uttryckligen: null betyder "kontots sats".
+            if (r.IsTransfer)
+                return new List<LedgerPostingLine>
+                {
+                    new() { AccountNumber = r.AccountNumber, Debit = amount, Text = text, VatRate = 0 },
+                    new() { AccountNumber = r.PaymentAccountNumber, Credit = amount, VatRate = 0 }
+                };
 
             // Vi betalade: kostnaden i debet, pengarna ut ur betalkontot (kredit).
             // Vi fick in:  pengarna in på betalkontot (debet), intäkten i kredit.
@@ -337,6 +363,14 @@ namespace HpskSite.Services.Ledger
 
         /// <summary>Betalkontot — pengarnas VÄG.</summary>
         public int PaymentAccountNumber { get; set; }
+
+        /// <summary>
+        /// "Vi flyttade pengar" mellan två egna pengakonton (19xx). Då är
+        /// <see cref="PaymentAccountNumber"/> kontot pengarna kom FRÅN och <see cref="AccountNumber"/>
+        /// kontot de gick TILL. Ingen moms, inget projekt, och riktningen (<see cref="WeReceived"/>)
+        /// betyder ingenting.
+        /// </summary>
+        public bool IsTransfer { get; set; }
 
         public int? ProjectId { get; set; }
 
