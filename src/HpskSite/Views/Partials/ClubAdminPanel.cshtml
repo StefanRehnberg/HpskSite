@@ -2724,7 +2724,8 @@ function renderMemberMarkenDetail(data) {
             ${gf.part1Note ? `<div class="small text-muted mt-1"><i class="bi bi-info-circle me-1"></i>${escapeMedalHtml(gf.part1Note)}</div>` : ''}
             ${seriesRows ? `<ul class="small text-muted mt-1 mb-1">${seriesRows}</ul>` : ''}
             <hr class="my-2">
-            ${partLine('Snabbskyttedel (3 godkända snabbserier)', part2, gf.part2ViaFalt ? escapeMedalHtml(gf.part2Detail || 'fältmedalj') : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} serier`)}
+            ${partLine('Snabbskyttedel', part2, gf.part2ViaFalt ? 'fältmedalj' : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} serier`)}
+            ${gf.part2Explain ? `<div class="small text-muted mt-1"><i class="bi bi-info-circle me-1"></i>${escapeMedalHtml(gf.part2Explain)}</div>` : ''}
             ${speedRows ? `<ul class="small text-muted mt-1 mb-1">${speedRows}</ul>` : ''}
             <div class="mt-2">${gfStatus}</div>
         </div></div>
