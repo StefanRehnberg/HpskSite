@@ -129,14 +129,20 @@ namespace HpskSite.Controllers
         /// Get the list of predefined roles.
         /// </summary>
         [HttpGet]
-        public IActionResult GetAvailableRoles()
+        public IActionResult GetAvailableRoles(int? ownerType = null)
         {
-            var roles = BoardRoleDefinitions.AllRoles.Select(r => new
+            // ⚠️ Filtered by owner type so a club is never OFFERED a krets assignment. The write
+            // paths refuse it as well — the picker is a convenience, not the gate. Without
+            // ownerType (older callers) every role is listed, as before.
+            var roles = BoardRoleDefinitions.AllRoles
+                .Where(r => ownerType == null || BoardRoleDefinitions.AppliesTo(r.Key, ownerType.Value))
+                .Select(r => new
             {
                 key = r.Key,
                 label = r.Label,
                 defaultSort = r.DefaultSort,
-                isBoardMember = r.IsBoardMember
+                isBoardMember = r.IsBoardMember,
+                isKretsUppdrag = BoardRoleDefinitions.IsKretsUppdrag(r.Key)
             }).ToList();
 
             return Json(new { success = true, data = roles });
@@ -205,6 +211,14 @@ namespace HpskSite.Controllers
 
                 if (roleKey == "Custom" && string.IsNullOrWhiteSpace(customTitle))
                     return Json(new { success = false, message = "Titel måste anges för anpassad roll" });
+
+                var refusal = RoleRefusal(roleKey, ownerType);
+                if (refusal != null)
+                    return Json(new { success = false, message = refusal });
+
+                // A krets assignment is never a board seat — it must not count toward quorum or be
+                // seeded into meeting attendance, whatever the client posted.
+                if (BoardRoleDefinitions.IsKretsUppdrag(roleKey)) isBoardMember = false;
 
                 // Verify member exists
                 var member = _memberService.GetById(memberId);
@@ -279,6 +293,16 @@ namespace HpskSite.Controllers
                 if (!await CanManageBoardRoles(role.OwnerType, role.OwnerId))
                     return Json(new { success = false, message = "Åtkomst nekad" });
 
+                // An unchanged key is let through even if it is no longer in AllRoles — a legacy
+                // row must stay editable (dates, sort order). A krets assignment on a club is
+                // refused regardless.
+                var refusal = roleKey == role.RoleKey && !BoardRoleDefinitions.IsKretsUppdrag(roleKey)
+                    ? null
+                    : RoleRefusal(roleKey, role.OwnerType);
+                if (refusal != null)
+                    return Json(new { success = false, message = refusal });
+                if (BoardRoleDefinitions.IsKretsUppdrag(roleKey)) isBoardMember = false;
+
                 _boardRoleService.UpdateBoardRole(boardRoleId, roleKey, customTitle, isBoardMember, sortOrder,
                     ParseDate(electedDate), ParseDate(termEndsDate), termYears);
 
@@ -289,6 +313,18 @@ namespace HpskSite.Controllers
                 _logger.LogError(ex, "Error updating board role {Id}", boardRoleId);
                 return Json(new { success = false, message = "Ett fel uppstod" });
             }
+        }
+
+        /// <summary>
+        /// Why this role may not be given to this owner type, or null when it may. The server's own
+        /// rule, not the picker's — a hand-posted request must be refused just the same.
+        /// </summary>
+        private static string? RoleRefusal(string roleKey, int ownerType)
+        {
+            if (BoardRoleDefinitions.AppliesTo(roleKey, ownerType)) return null;
+            if (BoardRoleDefinitions.IsKretsUppdrag(roleKey))
+                return $"{BoardRoleDefinitions.GetLabel(roleKey)} är ett uppdrag i kretsen och kan inte ges i en klubbstyrelse.";
+            return "Okänd roll.";
         }
 
         /// <summary>

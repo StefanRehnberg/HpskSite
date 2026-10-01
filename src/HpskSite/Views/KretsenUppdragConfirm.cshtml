@@ -1,0 +1,72 @@
+@using HpskSite.Controllers
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var m = ViewData["UppdragConfirm"] as KretsUppdragConfirmModel ?? new KretsUppdragConfirmModel();
+    ViewBag.Title = "Bekräfta uppdrag";
+    var returnUrl = Uri.EscapeDataString($"/kretsen/uppdrag?t={m.Token}");
+}
+
+@* Kretsgranskning fas 1: bekräfta att en medlem får ett av kretsens uppdrag. Länken säger bara VAD
+   som ska bekräftas — bekräftaren loggar in, och servern prövar att hen är kretsadministratör eller
+   kretsens ordförande. *@
+
+<div class="container" style="max-width:640px; padding:1.5rem 0 4rem; font-size:1.1rem;">
+    @Html.AntiForgeryToken()
+    <h1 class="mb-3" style="font-size:1.7rem;font-weight:700;"><i class="bi bi-person-check me-2"></i>Bekräfta uppdrag</h1>
+
+    @if (m.Invalid)
+    {
+        <div class="alert alert-warning" id="ucInvalid">
+            Länken gäller inte längre. Den kan ha gått ut (den gäller i 30 dagar) eller ha klippts av i mejlet.
+            Be medlemmen skicka förfrågan igen från kretsens sida <em>Kom igång</em>.
+        </div>
+    }
+    else
+    {
+        <div class="card mb-3"><div class="card-body">
+            <p class="mb-1"><strong>@m.RequesterName</strong> vill bli <strong>@m.RoleLabel.ToLowerInvariant()</strong> i @m.RegionName.</p>
+            <p class="text-muted mb-0" style="font-size:.95rem;">Förfrågan skickades @m.RequestedAt.ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")).</p>
+        </div></div>
+
+        @if (m.AlreadyHolder)
+        {
+            <div class="alert alert-success" id="ucAlready">@m.RequesterName har redan uppdraget. Inget mer behöver göras.</div>
+        }
+        else if (!m.IsLoggedIn)
+        {
+            <p>Logga in för att bekräfta. Bara kretsens administratör eller ordförande kan bekräfta.</p>
+            <a class="btn btn-primary btn-lg" href="/login-register/?tab=login&returnUrl=@returnUrl">Logga in</a>
+        }
+        else if (!m.CanConfirm)
+        {
+            <div class="alert alert-secondary" id="ucNotAllowed">Bara kretsens administratör eller ordförande kan bekräfta den här förfrågan.</div>
+        }
+        else
+        {
+            <p>Uppdraget är ingen styrelseplats. Det syns sedan under Styrelsearbete → Styrelsen → Kretsens uppdrag, och tas bort där.</p>
+            <button type="button" class="btn btn-success btn-lg" id="ucConfirm"><i class="bi bi-check-lg me-1"></i>Ja, ge @m.RequesterName uppdraget</button>
+            <div id="ucResult" class="mt-3" role="status"></div>
+            <script>
+            (function () {
+                var btn = document.getElementById('ucConfirm');
+                btn.addEventListener('click', function () {
+                    btn.disabled = true;
+                    fetch('/umbraco/surface/KretsUppdrag/ConfirmUppdrag', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded',
+                                   'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+                        body: new URLSearchParams({ t: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(m.Token)) }).toString()
+                    }).then(function (r) { return r.json(); })
+                      .then(function (d) {
+                          var box = document.getElementById('ucResult');
+                          box.className = 'mt-3 alert ' + (d.success ? 'alert-success' : 'alert-warning');
+                          box.textContent = d.message || '';
+                          if (d.success) btn.classList.add('d-none'); else btn.disabled = false;
+                      });
+                });
+            })();
+            </script>
+        }
+    }
+</div>

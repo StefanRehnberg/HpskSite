@@ -278,6 +278,21 @@ namespace HpskSite.Services
                 .ToList();
         }
 
+        /// <summary>
+        /// Distinct (OwnerType, OwnerId) scopes where the member holds any of the given roles,
+        /// ACTIVE, regardless of IsBoardMember — the krets assignments have it false.
+        /// </summary>
+        public List<(int OwnerType, int OwnerId)> GetBoardMembershipsAnyRole(int memberId, params string[] roleKeys)
+        {
+            if (memberId <= 0 || roleKeys.Length == 0) return new();
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<BoardRole>(
+                    "SELECT DISTINCT OwnerType, OwnerId FROM BoardRoles WHERE MemberId = @0 AND IsActive = 1 AND RoleKey IN (@1)",
+                    memberId, roleKeys)
+                .Select(r => (r.OwnerType, r.OwnerId))
+                .ToList();
+        }
+
         // ---- Valberedning (elected, but NOT board members) -----------------
         // Valberedning members get scoped board-work access: they reach /styrelse but only the
         // Valberedning tab. These checks deliberately do NOT require IsBoardMember.
