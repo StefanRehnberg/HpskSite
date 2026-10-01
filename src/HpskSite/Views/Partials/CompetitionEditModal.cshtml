@@ -206,32 +206,14 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
 
                     <hr>
                     </section>
-                    <section class="hpsk-section" data-title="Omfattning & serie">
+                    <section class="hpsk-section" data-title="Tävlingsserie">
                     <div class="row">
                         <div class="col-12">
-                            <h6 class="mb-3 text-primary"><i class="bi bi-diagram-3 me-1"></i>Omfattning &amp; serie</h6>
+                            <h6 class="mb-3 text-primary"><i class="bi bi-collection me-1"></i>Tävlingsserie</h6>
                         </div>
                     </div>
 
-                    <div class="mb-3">
-                        <label for="edit_competitionScope" class="form-label">Omfattning</label>
-                        <select class="form-select" id="edit_competitionScope" name="competitionScope">
-                            <option value="">-- Välj omfattning --</option>
-                            @foreach (var scopeOption in HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.All)
-                            {
-                                @if (string.Equals(competitionScope, scopeOption, StringComparison.Ordinal))
-                                {
-                                    <option value="@scopeOption" selected>@scopeOption</option>
-                                }
-                                else
-                                {
-                                    <option value="@scopeOption">@scopeOption</option>
-                                }
-                            }
-                        </select>
-                        <small class="form-text text-muted">Avgör hur standardmedaljer beräknas</small>
-                    </div>
-
+                    @* Mästerskapet flyttat till "Tävlingens status" (2026-10-01). *@
                     <div class="mb-3">
                         <label for="edit_seriesId" class="form-label">Tävlingsserie (valfritt)</label>
                         <select class="form-select" id="edit_seriesId" name="seriesId">
@@ -456,40 +438,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                     </label>
                                 </div>
                             </div>
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="edit_isAwardingStandardMedals" name="isAwardingStandardMedals" @(isAwardingStandardMedals == true ? "checked" : "")>
-                                    <label class="form-check-label" for="edit_isAwardingStandardMedals">
-                                        Standardmedaljsgrundande
-                                    </label>
-                                    <small class="form-text text-muted d-block mt-1" id="standardMedalsClubOnlyHint" style="display:none">
-                                        Standardmedaljer får inte delas ut vid klubbtävlingar (BR-PS.1.3).
-                                    </small>
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="edit_isAwardingHonoraryAward" name="isAwardingHonoraryAward" @(isAwardingHonoraryAward ? "checked" : "") @(honoraryPropertyExists ? "" : "disabled")>
-                                    <label class="form-check-label" for="edit_isAwardingHonoraryAward">
-                                        Hederspriser utgår
-                                    </label>
-                                    @if (honoraryPropertyExists)
-                                    {
-                                        <small class="form-text text-muted d-block mt-1">
-                                            Hederspriser skall tillfalla minst en fjärdedel av deltagarna
-                                            (SHB C.3.4.2). Utgår de inte skall det anges på tävlingsinbjudan.
-                                        </small>
-                                    }
-                                    else
-                                    {
-                                        <small class="form-text text-danger d-block mt-1">
-                                            Egenskapen <code>isAwardingHonoraryAward</code> saknas på
-                                            dokumenttypen <code>competition</code>. Lägg till den i Umbraco
-                                            backoffice (True/False) för att kunna använda hederspriser.
-                                        </small>
-                                    }
-                                </div>
-                            </div>
+                            @* Standardmedaljsgrundande och Hederspriser flyttade till "Tävlingens status" (2026-10-01). *@
                             <div class="mb-3" id="edit_selfReportingGroup">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="edit_allowSelfReporting" name="allowSelfReporting" @(allowSelfReporting == true ? "checked" : "")>
@@ -592,14 +541,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 Välj <strong>krets</strong> om tävlingen arrangeras av en krets (t.ex. Hemmabana).
                                 Lämna båda tomma för nationella tävlingar som ska synas överallt.
                             </p>
-                            <div class="form-check mb-3">
-                                <input class="form-check-input" type="checkbox" id="edit_isClubOnly" name="isClubOnly" @(isClubOnly == true ? "checked" : "") onchange="onEditIsClubOnlyChange()">
-                                <label class="form-check-label" for="edit_isClubOnly">
-                                    <i class="bi bi-shield-check me-1"></i>Endast för specifik klubb
-                                </label>
-                                <small class="form-text text-muted d-block mt-1">Begränsa denna tävling till medlemmar från en specifik klubb</small>
-                            </div>
-
+                            @* "Endast klubbens egna medlemmar" flyttad till "Tävlingens status" (2026-10-01). *@
                             <div class="row">
                                 <div class="col-md-6" id="clubSelectorContainer">
                                     <div class="mb-3">
@@ -621,8 +563,6 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 </div>
                             </div>
 
-                            @await Html.PartialAsync("_CompetitionLevelField", "edit_")
-
                             <div class="alert alert-warning py-2 d-none" id="edit_clubMismatchWarning">
                                 <i class="bi bi-exclamation-triangle me-1"></i>
                                 <span id="edit_clubMismatchText"></span>
@@ -637,6 +577,84 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
 
                     <hr>
 
+                    </section>
+                    @* TÄVLINGENS STATUS (2026-10-01): kategori, vem som får anmäla sig, mästerskap,
+                       standardmedaljer och hederspriser i ETT avsnitt, eftersom de hänger ihop —
+                       kategorin avgör om standardmedaljer och "endast egna medlemmar" är möjliga.
+                       Reglerna bor i _CompetitionLevelField; fälten och deras id:n är oförändrade. *@
+                    <section class="hpsk-section" data-title="Tävlingens status">
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-patch-check me-1"></i>Tävlingens status</h6>
+                        </div>
+                    </div>
+
+                    @await Html.PartialAsync("_CompetitionLevelField", "edit_")
+
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="edit_isClubOnly" name="isClubOnly" @(isClubOnly == true ? "checked" : "") onchange="onEditIsClubOnlyChange()">
+                        <label class="form-check-label" for="edit_isClubOnly">
+                            Endast klubbens egna medlemmar får anmäla sig
+                        </label>
+                        <small class="form-text text-muted d-block mt-1">Annars får alla anmäla sig. Tävlingen syns då bara för klubbens medlemmar.</small>
+                        <small class="form-text text-muted d-block d-none" id="edit_clubOnlyLevelNote">Bara en föreningstävling kan begränsas till klubbens egna medlemmar.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="edit_competitionScope" class="form-label">Mästerskap</label>
+                        <select class="form-select" id="edit_competitionScope" name="competitionScope">
+                            <option value="">Inget mästerskap</option>
+                            @foreach (var scopeOption in HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.All)
+                            {
+                                @if (string.Equals(competitionScope, scopeOption, StringComparison.Ordinal))
+                                {
+                                    <option value="@scopeOption" selected>@scopeOption</option>
+                                }
+                                else
+                                {
+                                    <option value="@scopeOption">@scopeOption</option>
+                                }
+                            }
+                        </select>
+                        <small class="form-text text-muted">Om en mästartitel avgörs. Ett mästerskap kan ingå i en tävling i vilken kategori som helst. Avgör hur standardmedaljer beräknas.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="edit_isAwardingStandardMedals" name="isAwardingStandardMedals" @(isAwardingStandardMedals == true ? "checked" : "")>
+                            <label class="form-check-label" for="edit_isAwardingStandardMedals">
+                                Standardmedaljsgrundande
+                            </label>
+                            <small class="form-text text-muted d-block mt-1" id="standardMedalsClubOnlyHint" style="display:none">
+                                Standardmedaljer delas bara ut vid kretstävling eller högre (SHB C.5.1.1).
+                            </small>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="edit_isAwardingHonoraryAward" name="isAwardingHonoraryAward" @(isAwardingHonoraryAward ? "checked" : "") @(honoraryPropertyExists ? "" : "disabled")>
+                            <label class="form-check-label" for="edit_isAwardingHonoraryAward">
+                                Hederspriser utgår
+                            </label>
+                            @if (honoraryPropertyExists)
+                            {
+                                <small class="form-text text-muted d-block mt-1">
+                                    Hederspriser skall tillfalla minst en fjärdedel av deltagarna
+                                    (SHB C.3.4.2). Utgår de inte skall det anges på tävlingsinbjudan.
+                                </small>
+                            }
+                            else
+                            {
+                                <small class="form-text text-danger d-block mt-1">
+                                    Egenskapen <code>isAwardingHonoraryAward</code> saknas på
+                                    dokumenttypen <code>competition</code>. Lägg till den i Umbraco
+                                    backoffice (True/False) för att kunna använda hederspriser.
+                                </small>
+                            }
+                        </div>
+                    </div>
+
+                    <hr>
                     </section>
                     <section class="hpsk-section" data-title="Tävlingsledning & Betalning">
                     <div class="row">

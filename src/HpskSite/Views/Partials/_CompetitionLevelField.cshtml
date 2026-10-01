@@ -2,27 +2,30 @@
 @using HpskSite.CompetitionTypes.Common
 @inject Umbraco.Cms.Core.Services.IContentTypeService LevelContentTypeService
 @*
-    TÄVLINGSNIVÅ — frågan "Vem får anmäla sig?" (SHB C.3.1), delad av tävlingsguiden,
-    redigeringsmodalen och Springskyttemodalen. Modellen är dialogens id-prefix
-    (wizard_ / edit_ / springEdit_), samma konvention som _ClubPaysFeeSetting.
+    TÄVLINGENS KATEGORI — "Vad är tävlingen godkänd som?" (SHB C.3.1), delad av
+    tävlingsguiden, redigeringsmodalen och Springskyttemodalen. Modellen är dialogens
+    id-prefix (wizard_ / edit_ / springEdit_). Renderas i avsnittet/steget
+    "Tävlingens status", tillsammans med isClubOnly, mästerskapet, standardmedaljer och
+    hederspriser — de fälten ägs av dialogen, den här partialen äger bara valet och reglerna.
 
-    ⚠️ Värden, etiketter, förklaringar och förvalsregeln kommer ur CompetitionLevel (C#) —
-    ingenting skrivs av här. Förslagsregeln finns i JS av nödvändighet (den följer
-    dialogens val medan man fyller i), men den läser SAMMA mästerskapskarta som servern.
+    ⚠️⚠️ KATEGORIN ÄR INTE "VEM FÅR ANMÄLA SIG" — se CompetitionLevel. Vilka som får anmäla
+    sig är bara isClubOnly-rutan.
 
-    ⚠️ VALET STYR isClubOnly-RUTAN, som döljs när egenskapen finns. Nivån och "endast för
-    klubben" beskriver samma fakta för en klubbintern tävling och får aldrig säga emot
-    varandra — servern vägrar en sparning där de gör det (CompetitionLevel.ConsistencyError).
-    Rutan ligger kvar i formuläret, så resten av dialogens logik (standardmedaljspärren,
-    "Var hamnar tävlingen?") fungerar som förut.
+    REGLERNA, i klienten och på servern (CompetitionLevel.ConsistencyError):
+      - Bara en föreningstävling kan vara stängd för klubbens egna medlemmar. Annan
+        kategori kryssar ur och stänger isClubOnly-rutan.
+      - En föreningstävling ger inga standardmedaljer: rutan kryssas ur och stängs.
+      - En föreningstävling kräver en klubb som arrangör.
 
-    ⚠️ SAKNAS EGENSKAPEN competitionLevel på doctypen visas en förklaring i stället, och
-    rutan "Endast för klubben" står kvar synlig. SetValue på en saknad egenskap är en TYST
-    no-op, så en väljare som såg ut att spara hade varit värre än ingen.
+    ⚠️ Värden, etiketter, förklaringar och mästerskapskartan kommer ur CompetitionLevel (C#).
+    Förslagsregeln finns i JS av nödvändighet (den följer dialogens val medan man fyller i),
+    men läser SAMMA karta som servern.
 
-    ⚠️ EN BEKRÄFTAD NIVÅ ÄNDRAS ALDRIG AV SIG SJÄLV. Klubblistorna laddas asynkront, så
-    "ingen klubb vald" kan betyda "inte laddad än" — en nivå som kräver klubb får då en
-    varning, aldrig ett tyst byte.
+    ⚠️ SAKNAS EGENSKAPEN competitionLevel visas en förklaring och inga regler tillämpas —
+    SetValue på en saknad egenskap är en TYST no-op.
+
+    ⚠️ EN BEKRÄFTAD KATEGORI ÄNDRAS ALDRIG AV SIG SJÄLV, och ett FÖRSLAG får aldrig stänga av
+    standardmedaljer: en standardmedaljsgrundande tävling föreslås som kretstävling.
 *@
 @{
     var prefix = Model ?? "";
@@ -39,7 +42,7 @@
 
 <div class="mb-3 hpsk-level-block" id="@(prefix)competitionLevelBlock"
      data-level-prefix="@prefix" data-level-property="@(levelPropertyExists ? "1" : "0")">
-    <label for="@selectId" class="form-label fw-semibold">Vem får anmäla sig?</label>
+    <label for="@selectId" class="form-label fw-semibold">Vad är tävlingen godkänd som?</label>
     @if (levelPropertyExists)
     {
         <select class="form-select" id="@selectId" name="@CompetitionLevel.PropertyAlias">
@@ -50,20 +53,15 @@
         </select>
         <div class="form-text" id="@(prefix)competitionLevelExplain"></div>
         <div class="small text-warning-emphasis mt-1 d-none" id="@(prefix)competitionLevelSuggested">
-            <i class="bi bi-lightbulb me-1"></i>Förslag utifrån arrangör och mästerskap — kontrollera att det stämmer innan du sparar.
+            <i class="bi bi-lightbulb me-1"></i>Förslag utifrån arrangör, mästerskap och standardmedaljer — kontrollera att det stämmer innan du sparar.
         </div>
         <div class="small text-danger mt-1 d-none" id="@(prefix)competitionLevelWarning"></div>
-        <div class="form-text text-muted">
-            Ett mästerskap kan ingå i en tävling på vilken nivå som helst, t.ex. ett kretsmästerskap som skjuts i en nationell tävling.
-            Mästerskapet väljs separat.
-        </div>
     }
     else
     {
         <div class="small text-muted border rounded p-2">
-            <i class="bi bi-info-circle me-1"></i>Tävlingsnivån kan inte sparas ännu: egenskapen
+            <i class="bi bi-info-circle me-1"></i>Kategorin kan inte sparas ännu: egenskapen
             <code>@CompetitionLevel.PropertyAlias</code> saknas på dokumenttypen <code>competition</code>.
-            Använd rutan för klubbens egna medlemmar som tidigare.
         </div>
     }
 </div>
@@ -80,12 +78,15 @@
         var LEVELS = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
             CompetitionLevel.All.Select(o => new { value = o.Value, label = o.Label, explanation = o.Explanation, requiresClub = o.RequiresClub })));
         var SCOPE_TO_LEVEL = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(CompetitionLevel.ScopeSuggestions));
-        var FORENING = '@CompetitionLevel.Forening', FORENING_OPPEN = '@CompetitionLevel.ForeningOppen',
-            KRETS = '@CompetitionLevel.Krets', NATIONELL = '@CompetitionLevel.Nationell';
+        var FORENING = '@CompetitionLevel.Forening', KRETS = '@CompetitionLevel.Krets', NATIONELL = '@CompetitionLevel.Nationell';
 
         function el(prefix, name) { return document.getElementById(prefix + name); }
         function level(v) { for (var i = 0; i < LEVELS.length; i++) if (LEVELS[i].value === v) return LEVELS[i]; return null; }
         function hasProperty(prefix) { var b = el(prefix, 'competitionLevelBlock'); return !!b && b.dataset.levelProperty === '1'; }
+        // Redigeringsmodalens tips saknar prefix (befintligt id), de andra har det.
+        function medalHint(prefix) {
+            return document.getElementById(prefix === 'edit_' ? 'standardMedalsClubOnlyHint' : prefix + 'standardMedalsClubOnlyHint');
+        }
 
         // Klubblistan laddas asynkront; dialogerna lägger det kommande värdet i dataset.
         function hasClub(prefix) {
@@ -111,58 +112,84 @@
         // Speglar CompetitionLevel.Suggest — samma ordning, samma mästerskapskarta.
         function suggest(prefix) {
             var cb = el(prefix, 'isClubOnly');
+            var medals = el(prefix, 'isAwardingStandardMedals');
             var club = hasClub(prefix);
             if (cb && cb.checked && club) return FORENING;
+            var result;
             var fromScope = SCOPE_TO_LEVEL[scopeValue(prefix)];
-            if (fromScope) return (fromScope === FORENING && !club) ? KRETS : fromScope;
-            if (club) return FORENING_OPPEN;
-            if (hasRegion(prefix)) return KRETS;
-            return NATIONELL;
+            if (fromScope) result = (fromScope === FORENING && !club) ? KRETS : fromScope;
+            else if (club) result = FORENING;
+            else if (hasRegion(prefix)) result = KRETS;
+            else result = NATIONELL;
+            return (result === FORENING && medals && medals.checked) ? KRETS : result;
         }
 
-        var syncing = {};
-        function syncClubOnly(prefix, value) {
-            var cb = el(prefix, 'isClubOnly');
-            if (!cb || !hasProperty(prefix)) return;
-            // Utan klubb står rutan avstängd (dialogens egen regel) — rör den inte då.
-            if (!hasClub(prefix) && value === FORENING) return;
-            var desired = value === FORENING;
-            if (cb.checked === desired) return;
-            cb.checked = desired;
-            if (syncing[prefix]) return;
-            syncing[prefix] = true;
-            try { cb.dispatchEvent(new Event('change', { bubbles: true })); }
-            finally { syncing[prefix] = false; }
+        var busy = {};
+        function setChecked(box, value) {
+            if (!box || box.checked === value) return;
+            box.checked = value;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
         function refresh(prefix) {
             var sel = el(prefix, 'competitionLevel');
-            if (!sel || !hasProperty(prefix)) return;
-            if (syncing[prefix]) return;
+            if (!sel || !hasProperty(prefix) || busy[prefix]) return;
+            busy[prefix] = true;
+            try {
+                var club = hasClub(prefix);
+                var locked = sel.dataset.confirmed === '1' || sel.dataset.touched === '1';
+                if (!locked) sel.value = suggest(prefix);
 
-            var club = hasClub(prefix);
-            var locked = sel.dataset.confirmed === '1' || sel.dataset.touched === '1';
-            if (!locked) sel.value = suggest(prefix);
+                for (var i = 0; i < sel.options.length; i++) {
+                    var o = level(sel.options[i].value);
+                    sel.options[i].disabled = !!(o && o.requiresClub && !club && sel.options[i].value !== sel.value);
+                }
 
-            for (var i = 0; i < sel.options.length; i++) {
-                var o = level(sel.options[i].value);
-                sel.options[i].disabled = !!(o && o.requiresClub && !club && sel.options[i].value !== sel.value);
+                var cur = level(sel.value);
+                var explain = el(prefix, 'competitionLevelExplain');
+                if (explain) explain.textContent = cur ? cur.explanation : '';
+                var sugg = el(prefix, 'competitionLevelSuggested');
+                if (sugg) sugg.classList.toggle('d-none', locked);
+                var warn = el(prefix, 'competitionLevelWarning');
+                if (warn) {
+                    var msg = (cur && cur.requiresClub && !club)
+                        ? 'En föreningstävling kräver att en klubb är arrangör. Välj en klubb eller en annan kategori.'
+                        : '';
+                    warn.textContent = msg;
+                    warn.classList.toggle('d-none', !msg);
+                }
+
+                var isForening = sel.value === FORENING;
+
+                // Bara en föreningstävling kan vara stängd för klubbens egna medlemmar.
+                var cb = el(prefix, 'isClubOnly');
+                if (cb && !isForening) {
+                    setChecked(cb, false);
+                    cb.disabled = true;
+                    cb.dataset.levelLocked = '1';
+                } else if (cb && cb.dataset.levelLocked === '1') {
+                    // Släpp bara det VI stängde — utan klubb står den stängd av dialogens egen regel.
+                    cb.dataset.levelLocked = '';
+                    cb.disabled = !club;
+                }
+                var cbNote = el(prefix, 'clubOnlyLevelNote');
+                if (cbNote) cbNote.classList.toggle('d-none', isForening);
+
+                // En föreningstävling ger inga standardmedaljer (SHB C.5.1.1, Stefans beslut 2026-10-01).
+                var medals = el(prefix, 'isAwardingStandardMedals');
+                if (medals) {
+                    if (isForening) {
+                        setChecked(medals, false);
+                        medals.disabled = true;
+                    } else if (!(cb && cb.checked)) {
+                        medals.disabled = false;
+                    }
+                }
+                var hint = medalHint(prefix);
+                if (hint) hint.style.display = (isForening || (cb && cb.checked)) ? '' : 'none';
+            } finally {
+                busy[prefix] = false;
             }
-
-            var cur = level(sel.value);
-            var explain = el(prefix, 'competitionLevelExplain');
-            if (explain) explain.textContent = cur ? cur.explanation : '';
-            var sugg = el(prefix, 'competitionLevelSuggested');
-            if (sugg) sugg.classList.toggle('d-none', locked);
-            var warn = el(prefix, 'competitionLevelWarning');
-            if (warn) {
-                var msg = (cur && cur.requiresClub && !club)
-                    ? 'Det här valet kräver att en klubb är arrangör. Välj en klubb ovan eller en annan nivå.'
-                    : '';
-                warn.textContent = msg;
-                warn.classList.toggle('d-none', !msg);
-            }
-            syncClubOnly(prefix, sel.value);
         }
 
         /** Fyller valet ur lagrat värde. Tomt = ej bekräftad, förslaget visas. */
@@ -182,21 +209,15 @@
             block.dataset.levelInit = '1';
             if (!hasProperty(prefix)) return;
 
-            // Rutan "endast för klubben" styrs nu av valet och döljs.
-            var cb = el(prefix, 'isClubOnly');
-            var cbWrap = cb ? cb.closest('.form-check') : null;
-            if (cbWrap) cbWrap.classList.add('d-none');
-
             var sel = el(prefix, 'competitionLevel');
             sel.addEventListener('change', function () {
                 sel.dataset.touched = '1';
                 refresh(prefix);
             });
-            ['clubId', 'regionalFederation', 'competitionScope'].forEach(function (n) {
+            ['clubId', 'regionalFederation', 'competitionScope', 'isClubOnly', 'isAwardingStandardMedals'].forEach(function (n) {
                 var e = el(prefix, n);
                 if (e) e.addEventListener('change', function () { refresh(prefix); });
             });
-            if (cb) cb.addEventListener('change', function () { refresh(prefix); });
 
             // Varje öppning börjar om; redigeringsdialogerna fyller sedan i lagrat värde.
             var modal = block.closest('.modal');
