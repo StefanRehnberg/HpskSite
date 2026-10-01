@@ -900,16 +900,23 @@ avstyrker kretsen, och Förbundet beslutar (kretsen registrerar beslutet).
   utskriftsvänlig sida. **⚠️ Förbundets ifyllbara pdf fylls INTE** — det kräver ett pdf-bibliotek och är
   ett eget beslut. Kretsmästerskapen förs inte in automatiskt ännu.
 
-**Inte byggt ännu:** påminnelser (8 veckor före utan tävling, Förbundets gräns), inläsning av en
-befintlig kalender, stomprogrammet, kretsens arrangörschecklista, `RegionCalendarSettings`-ytan
-(tabellen finns), räknarna per krets på sajtadmins statistik.
+- **Påminnelser** (`CompetitionApplicationReminderHostedService`, var 12:e timme, claim-then-send
+  med unikt index i `KretsgranskningReminder`): arrangören 8 veckor före om en godkänd ansökan
+  saknar tävling; kretsen efter 14 dagar om en inskickad ansökan inte rörts (nyckeln bär dagen den
+  senast ändrades, så en komplettering beväpnar om); kretsen 14 dagar före Förbundets gräns om
+  nationella ansökningar ligger obehandlade. Reglerna som ren funktion i
+  `CompetitionApplicationReminders.Compute`. Sajtadmin kan köra varvet nu (`RunRemindersNow`).
+
+**Inte byggt ännu:** inläsning av en befintlig kalender, stomprogrammet, kretsens
+arrangörschecklista, `RegionCalendarSettings`-ytan (tabellen finns), räknarna per krets på
+sajtadmins statistik.
 
 **Operatörssteg:** `Migrations/create-competition-application-tables.sql` **FÖRE deployen**
 (körd i dev 2026-10-01). Startkontrollen `CompetitionApplicationSchemaGuardHostedService` larmar
 Critical om tabellerna saknas. Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod.
 
-Test: `CompetitionApplicationRulesTests`, `KretsCalendarConflictsTests`. Svit:
-`hpsk-verify/tavlingsansokan-fas4-verify.mjs` 77/77, två körningar i rad (A/B: grannregeln borttagen
+Test: `CompetitionApplicationRulesTests`, `CompetitionApplicationRemindersTests`, `KretsCalendarConflictsTests`. Svit:
+`hpsk-verify/tavlingsansokan-fas4-verify.mjs` 83/83, två körningar i rad (A/B: grannregeln borttagen
 → 1 röd; kontrollsumman borttagen → sviten avbryter vid "länken slutar gälla"). Skärmdumpar:
 `tavlingsansokan-fas4-shot.mjs`.
 

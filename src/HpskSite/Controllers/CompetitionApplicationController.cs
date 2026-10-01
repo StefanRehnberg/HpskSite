@@ -8,6 +8,7 @@ using HpskSite.Services;
 using HpskSite.Services.Kretsgranskning;
 using HpskSite.Services.Mail;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Routing;
@@ -565,6 +566,22 @@ namespace HpskSite.Controllers
             return Json(new { success = sent > 0, sent, message = sent > 0 ? $"Mejlet är skickat till {string.Join(", ", recipients.Select(r => r.Name))}." : "Mejlet kunde inte skickas." });
         }
 
+        /// <summary>
+        /// Supportväg: kör påminnelsevarvet nu (annars var 12:e timme). Bara sajtadmin. Spärren
+        /// mot dubbletter är densamma — ett andra varv skickar ingenting som redan gått ut.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RunRemindersNow()
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = "Åtkomst nekad" });
+            var svc = HttpContext.RequestServices.GetServices<Microsoft.Extensions.Hosting.IHostedService>()
+                .OfType<CompetitionApplicationReminderHostedService>().FirstOrDefault();
+            if (svc == null) return Json(new { success = false, message = "Påminnelsetjänsten är inte registrerad." });
+            var n = await svc.RunOnceAsync(DateTime.Today);
+            return Json(new { success = true, sent = n });
+        }
+
         // ════════════════════════════════════════════════════════════════════════════════
         //  Kalendern (öppen)
         // ════════════════════════════════════════════════════════════════════════════════
@@ -751,13 +768,7 @@ namespace HpskSite.Controllers
             }
         }
 
-        /// <summary>Kontrollsumma över det kretsen tar ställning till. En ändring gör en utskickad länk ogiltig.</summary>
-        public static string Checksum(CompetitionApplication a)
-        {
-            var s = string.Join("|", a.Level, a.Discipline, a.Name, a.CompetitionDate.ToString("yyyy-MM-dd"),
-                a.EndDate?.ToString("yyyy-MM-dd"), a.ReserveDate?.ToString("yyyy-MM-dd"), a.Place, a.Classes, a.Note, a.CompletionReply);
-            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(s)))[..16];
-        }
+        public static string Checksum(CompetitionApplication a) => CompetitionApplicationRules.Checksum(a);
 
         private (CompetitionApplication? App, CaseLinkPayload? Link, string? Error) ReadCaseLink(string? t)
         {

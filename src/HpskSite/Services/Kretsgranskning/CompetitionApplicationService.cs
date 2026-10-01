@@ -31,7 +31,7 @@ namespace HpskSite.Services.Kretsgranskning
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.ExecuteScalar<int>(
-                "SELECT COUNT(*) FROM sys.tables WHERE name IN ('CompetitionApplication','CompetitionApplicationEvent','RegionApplicationDeadline','RegionCalendarSettings')") == 4;
+                "SELECT COUNT(*) FROM sys.tables WHERE name IN ('CompetitionApplication','CompetitionApplicationEvent','RegionApplicationDeadline','RegionCalendarSettings','KretsgranskningReminder')") == 5;
         }
 
         public CompetitionApplication? Get(int id)
@@ -299,6 +299,44 @@ namespace HpskSite.Services.Kretsgranskning
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             scope.Database.Execute("UPDATE CompetitionApplication SET LinkSentTo = @1 WHERE Id = @0", id,
                 email.Length > 200 ? email[..200] : email);
+        }
+
+        // ── Påminnelser ──────────────────────────────────────────────────────────────────
+
+        /// <summary>Öppna och godkända ansökningar vars tävling inte passerat — påminnelsernas underlag.</summary>
+        public List<CompetitionApplication> ForReminders(DateTime today)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<CompetitionApplication>(
+                "SELECT * FROM CompetitionApplication WHERE Status IN (@0) AND COALESCE(EndDate, GrantedDate, CompetitionDate) >= @1",
+                new[] { CompetitionApplicationStatus.Inskickad, CompetitionApplicationStatus.Komplettering,
+                        CompetitionApplicationStatus.HosForbundet, CompetitionApplicationStatus.Beviljad },
+                today.Date);
+        }
+
+        /// <summary>
+        /// Gör anspråk på en påminnelse INNAN den skickas. Det unika indexet är spärren: en krasch
+        /// mellan anspråk och utskick kostar en missad påminnelse, motsatt ordning kostar spam.
+        /// </summary>
+        public bool TryClaimReminder(string key)
+        {
+            try
+            {
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                scope.Database.Execute(
+                    "INSERT INTO KretsgranskningReminder (ReminderKey, SentAt, Recipients) VALUES (@0, @1, 0)", key, DateTime.Now);
+                return true;
+            }
+            catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
+            {
+                return false;
+            }
+        }
+
+        public void SetReminderRecipients(string key, int n)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            scope.Database.Execute("UPDATE KretsgranskningReminder SET Recipients = @1 WHERE ReminderKey = @0", key, n);
         }
 
         // ── Kretsens inställningar ───────────────────────────────────────────────────────
