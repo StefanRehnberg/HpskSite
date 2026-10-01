@@ -768,47 +768,231 @@
                     {
                         <div class="ek-card wide d-none" id="@(uid)_legacyPost">
                             <div class="ek-cardh"><h2>Betalda fakturor enligt det gamla sättet</h2><span class="meta" id="@(uid)_legacyPostMeta"></span></div>
-                            <p class="muted" style="margin-top:0">Tävlingar som fick sina första anmälningar före bytet har kvar de gamla fakturorna. De som betalats sedan ni började bokföra här ska bli verifikationer.</p>
-                            <table class="t"><thead><tr><th>Betald</th><th>Faktura</th><th>Betalare</th><th class="n">Belopp</th></tr></thead><tbody id="@(uid)_legacyPostBody"></tbody></table>
+                            @* ⚠️⚠️ Kortet SÄGER vad knappen gör och vad som kan krocka (Michael Henriksson
+                               2026-10-01: "Vågar inte klicka bokföra då jag lagt in vår live bokföring").
+                               Förut påstod det bara att fakturorna "ska bli verifikationer" — fel för den
+                               som redan bokfört Swish-insättningarna från kontoutdraget. *@
+                            <p style="margin-top:0">Tävlingar som fick sina första anmälningar före bytet har kvar de gamla fakturorna. Pengarna för var och en ska finnas i bokföringen <strong>en gång</strong>.</p>
+                            <ul class="small" style="padding-left:1.2rem">
+                                <li><strong>Bokför</strong> gör en verifikation per faktura: bankkontot mot anmälningsavgifter, på betaldagen och på tävlingens projekt. När du läser in kontoutdraget paras Swish-insättningen ihop med den.</li>
+                                <li>Har du redan bokfört insättningen själv, från kontoutdraget eller under Bokför, ska fakturan <strong>inte</strong> bokföras igen. Vi letar efter sådana verifikationer (samma belopp, högst en vecka från betaldagen) och visar dem på raden. Välj <strong>Redan bokförd</strong> så försvinner fakturan ur listan utan att något bokförs.</li>
+                            </ul>
+                            <div class="ek-alert ek-bad d-none" id="@(uid)_legacyPostError"></div>
+                            <table class="t"><thead><tr><th>Betald</th><th>Faktura</th><th>Betalare</th><th class="n">Belopp</th><th>Redan bokförd?</th></tr></thead><tbody id="@(uid)_legacyPostBody"></tbody></table>
+                            <div class="small mt-2" id="@(uid)_legacyPostWaiting"></div>
                             @if (Model.CanWrite)
                             {
                                 <button type="button" class="btn btn-sm btn-primary mt-2" id="@(uid)_legacyPostBtn">Bokför dem</button>
                             }
                             <div class="small mt-2" id="@(uid)_legacyPostMsg"></div>
+                            <details class="mt-3 d-none" id="@(uid)_legacyLinked">
+                                <summary class="small" id="@(uid)_legacyLinkedSummary">Markerade som redan bokförda</summary>
+                                <table class="t mt-2"><thead><tr><th>Faktura</th><th class="n">Belopp</th><th>Bokförd i</th><th></th></tr></thead><tbody id="@(uid)_legacyLinkedBody"></tbody></table>
+                            </details>
+                            @* ⚠️ "Pengarna kom aldrig in" — fakturan står som betald i det gamla systemet men
+                               ingen insättning finns. Att bokföra den vore fel; att låta den stå gjorde att
+                               raden aldrig försvann (Michael Henriksson 2026-10-01). *@
+                            <details class="mt-2 d-none" id="@(uid)_legacyDismissed">
+                                <summary class="small" id="@(uid)_legacyDismissedSummary">Pengarna kom aldrig in</summary>
+                                <p class="small muted mt-2 mb-1">Fakturorna är borttagna ur listan utan att något bokförts. I det gamla systemet står de fortfarande som betalda.</p>
+                                <table class="t"><thead><tr><th>Faktura</th><th>Betalare</th><th class="n">Belopp</th><th>Varför</th><th></th></tr></thead><tbody id="@(uid)_legacyDismissedBody"></tbody></table>
+                            </details>
                         </div>
                         <script>
                         (function () {
                             var uid = '@uid', issuerType = @Model.IssuerType, issuerId = @Model.IssuerId;
+                            var canWrite = @(Model.CanWrite ? "true" : "false");
                             var $ = function (s) { return document.getElementById(uid + '_' + s); };
                             var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); };
                             var kr = function (v) { return (Number(v) || 0).toLocaleString('sv-SE') + ' kr'; };
+                            var shortD = function (s) {
+                                var d = new Date(s + 'T12:00:00');
+                                return isNaN(d) ? s : d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+                            };
+
+                            function candLabel(c) {
+                                return c.number + ' · ' + shortD(c.date) + ' · ' + (c.description || '') + ' (konto ' + c.account + ')';
+                            }
+
+                            // ⚠️ Raden SÄGER om en befintlig verifikation saknar projekt: då syns intäkten
+                            //    inte under tävlingen även om fakturan markeras som redan bokförd.
+                            // Sista utvägen på varje rad: pengarna finns inte på kontot alls.
+                            function neverCameLink(i) {
+                                return canWrite
+                                    ? '<div class="mt-1"><button type="button" class="btn btn-link btn-sm p-0" data-dismiss-open="' + i.invoiceId + '">Pengarna kom aldrig in…</button></div>'
+                                    : '';
+                            }
+
+                            function dismissRow(i) {
+                                return '<tr class="d-none" data-dismiss-row="' + i.invoiceId + '"><td colspan="5">'
+                                    + '<div class="ek-alert ek-warn mb-0">'
+                                    + '<div><strong>Pengarna för ' + esc(i.number) + ' (' + kr(i.amount) + ', ' + esc(i.payer) + ') kom aldrig in?</strong></div>'
+                                    + '<div class="small">Fakturan tas bort ur listan och <strong>ingenting bokförs</strong>. I det gamla systemet står den fortfarande som betald. '
+                                    + 'Du kan ångra under "Pengarna kom aldrig in" längre ned.</div>'
+                                    + '<label class="form-label small mt-2 mb-1" for="' + uid + '_dr' + i.invoiceId + '">Varför? (syns för den som läser bokföringen i efterhand)</label>'
+                                    + '<input type="text" class="form-control form-control-sm" maxlength="400" id="' + uid + '_dr' + i.invoiceId + '"'
+                                    + ' placeholder="Till exempel: ingen insättning på kontot, betalaren kontaktad">'
+                                    + '<div class="mt-2" style="display:flex;gap:6px">'
+                                    + '<button type="button" class="btn btn-sm btn-primary" data-dismiss="' + i.invoiceId + '">Ta bort ur listan</button>'
+                                    + '<button type="button" class="btn btn-sm btn-outline-secondary" data-dismiss-cancel="' + i.invoiceId + '">Avbryt</button>'
+                                    + '</div></div></td></tr>';
+                            }
+
+                            function candCell(i) {
+                                var cs = i.candidates || [];
+                                if (!cs.length) return '<span class="muted">Hittade ingen liknande verifikation</span>' + neverCameLink(i);
+                                var first = cs[0];
+                                var noProj = '<div class="muted small" data-noproj>' + (first.project
+                                    ? 'Ligger på projektet ' + esc(first.project) + '.'
+                                    : 'Verifikationen har inget projekt, så intäkten syns inte under tävlingen.') + '</div>';
+                                var what = cs.length === 1
+                                    ? '<div><strong>Troligen redan bokförd:</strong> ' + esc(candLabel(first)) + '</div>'
+                                    : '<div><strong>Kan redan vara bokförd</strong> — ' + cs.length + ' verifikationer har samma belopp. Välj den som är den här betalningen:</div>'
+                                      + '<select class="form-select form-select-sm mt-1" data-cand-for="' + i.invoiceId + '">'
+                                      + cs.map(function (c) { return '<option value="' + c.entryId + '">' + esc(candLabel(c)) + '</option>'; }).join('')
+                                      + '</select>';
+                                var acts = canWrite
+                                    ? '<div class="mt-1" style="display:flex;gap:6px;flex-wrap:wrap">'
+                                      + '<button type="button" class="btn btn-sm btn-primary" data-link="' + i.invoiceId + '"'
+                                      + (cs.length === 1 ? ' data-entry="' + first.entryId + '"' : '') + '>Redan bokförd</button>'
+                                      + '<button type="button" class="btn btn-sm btn-outline-secondary" data-force="' + i.invoiceId + '"'
+                                      + ' title="Förslaget är fel — det här är en annan betalning">Bokför ändå</button></div>'
+                                    : '';
+                                return what + noProj + acts + neverCameLink(i);
+                            }
+
+                            function token() {
+                                return fetch('/umbraco/surface/Club/GetFormToken', { credentials: 'same-origin' })
+                                    .then(function (r) { return r.json(); }).then(function (t) { return t.token; });
+                            }
+                            function postIt(url, body) {
+                                return token().then(function (t) {
+                                    return fetch(url, {
+                                        method: 'POST', credentials: 'same-origin',
+                                        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': t },
+                                        body: JSON.stringify(body)
+                                    });
+                                }).then(function (r) {
+                                    if (!r.ok) throw new Error(hpskReqMsg(r.status));
+                                    return r.json();
+                                });
+                            }
+                            function hpskReqMsg(status) {
+                                return typeof window.hpskRequestFailureMessage === 'function'
+                                    ? window.hpskRequestFailureMessage(status) : 'Något gick fel (' + status + ').';
+                            }
+                            function say(ok, text) {
+                                var m = $('legacyPostMsg');
+                                m.className = 'small mt-2 ' + (ok ? 'text-success' : 'text-danger');
+                                m.textContent = text || '';
+                            }
+
                             function load() {
-                                fetch('/umbraco/surface/EkonomiAdmin/GetLegacyInvoicesToPost?issuerType=' + issuerType + '&issuerId=' + issuerId, { credentials: 'same-origin' })
+                                return fetch('/umbraco/surface/EkonomiAdmin/GetLegacyInvoicesToPost?issuerType=' + issuerType + '&issuerId=' + issuerId, { credentials: 'same-origin', cache: 'no-store' })
                                     .then(function (r) { return r.json(); })
                                     .then(function (d) {
                                         var card = $('legacyPost');
-                                        if (!d.success || !d.invoices || !d.invoices.length) { card.classList.add('d-none'); return; }
+                                        var err = $('legacyPostError');
+                                        // ⚠️ Ett fel får inte gömma kortet tyst — det är dubblettkontrollen som fallerat.
+                                        if (!d.success) {
+                                            card.classList.remove('d-none');
+                                            err.textContent = d.message || 'Listan kunde inte läsas.';
+                                            err.classList.remove('d-none');
+                                            $('legacyPostBody').innerHTML = '';
+                                            if ($('legacyPostBtn')) $('legacyPostBtn').classList.add('d-none');
+                                            return;
+                                        }
+                                        err.classList.add('d-none');
+                                        var inv = d.invoices || [], linked = d.linked || [], dismissed = d.dismissed || [];
+                                        if (!inv.length && !linked.length && !dismissed.length) { card.classList.add('d-none'); return; }
                                         card.classList.remove('d-none');
-                                        $('legacyPostMeta').textContent = d.invoices.length + ' st · ' + kr(d.total);
-                                        $('legacyPostBody').innerHTML = d.invoices.map(function (i) {
-                                            return '<tr class="gap"><td>' + esc(i.paidDate) + '</td><td>' + esc(i.number) + ' <span class="muted">' + esc(i.competition) + '</span></td><td>' + esc(i.payer) + '</td><td class="n">' + kr(i.amount) + '</td></tr>';
+
+                                        var safe = inv.filter(function (i) { return !(i.candidates || []).length; });
+                                        var waiting = inv.length - safe.length;
+                                        $('legacyPostMeta').textContent = inv.length
+                                            ? inv.length + ' st · ' + kr(d.total) : 'Alla är hanterade';
+                                        $('legacyPostBody').innerHTML = inv.length ? inv.map(function (i) {
+                                            return '<tr class="gap" data-inv-row="' + i.invoiceId + '"><td>' + esc(i.paidDate) + '</td><td>' + esc(i.number)
+                                                + ' <span class="muted">' + esc(i.competition) + '</span></td><td>' + esc(i.payer)
+                                                + '</td><td class="n">' + kr(i.amount) + '</td><td>' + candCell(i) + '</td></tr>'
+                                                + (canWrite ? dismissRow(i) : '');
+                                        }).join('') : '<tr><td colspan="5" class="muted">Inga fakturor väntar.</td></tr>';
+
+                                        var dd = $('legacyDismissed');
+                                        dd.classList.toggle('d-none', dismissed.length === 0);
+                                        $('legacyDismissedSummary').textContent = 'Pengarna kom aldrig in (' + dismissed.length + ')';
+                                        $('legacyDismissedBody').innerHTML = dismissed.map(function (x) {
+                                            return '<tr><td>' + esc(x.number) + ' <span class="muted">' + esc(x.competition) + '</span></td>'
+                                                + '<td>' + esc(x.payer) + '</td><td class="n">' + kr(x.amount) + '</td>'
+                                                + '<td>' + esc(x.reason) + ' <span class="muted small">— ' + esc(x.by) + ', ' + esc(x.date) + '</span></td>'
+                                                + '<td class="n">' + (canWrite ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-undismiss="' + x.invoiceId + '">Ångra</button>' : '') + '</td></tr>';
+                                        }).join('');
+
+                                        $('legacyPostWaiting').innerHTML = waiting
+                                            ? '<span class="text-warning-emphasis">' + waiting + (waiting === 1 ? ' faktura ser redan bokförd ut' : ' fakturor ser redan bokförda ut')
+                                              + ' och bokförs inte av knappen nedan. Välj på raden.</span>'
+                                            : '';
+                                        var b = $('legacyPostBtn');
+                                        if (b) {
+                                            b.classList.toggle('d-none', safe.length === 0);
+                                            b.textContent = 'Bokför ' + safe.length + (safe.length === 1 ? ' faktura' : ' fakturor')
+                                                + (waiting ? ' som inte ser bokförda ut' : '');
+                                        }
+
+                                        var det = $('legacyLinked');
+                                        det.classList.toggle('d-none', linked.length === 0);
+                                        $('legacyLinkedSummary').textContent = 'Markerade som redan bokförda (' + linked.length + ')';
+                                        $('legacyLinkedBody').innerHTML = linked.map(function (l) {
+                                            return '<tr><td>' + esc(l.number) + ' <span class="muted">' + esc(l.competition) + '</span></td>'
+                                                + '<td class="n">' + kr(l.amount) + '</td><td>' + esc(l.entryNumber) + '</td>'
+                                                + '<td class="n">' + (canWrite ? '<button type="button" class="btn btn-sm btn-outline-secondary" data-unlink="' + l.invoiceId + '">Ångra</button>' : '') + '</td></tr>';
                                         }).join('');
                                     });
                             }
                             window.hpskEkonomiLoadLegacyPost = load;
-                            var btn = $('legacyPostBtn');
-                            if (btn) btn.addEventListener('click', function () {
-                                btn.disabled = true;
-                                fetch('/umbraco/surface/Club/GetFormToken', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (t) {
-                                    return fetch('/umbraco/surface/EkonomiAdmin/PostLegacyInvoices', {
-                                        method: 'POST', credentials: 'same-origin',
-                                        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': t.token },
-                                        body: JSON.stringify({ issuerType: issuerType, issuerId: issuerId })
-                                    });
-                                }).then(function (r) { return r.json(); }).then(function (d) {
-                                    var m = $('legacyPostMsg'); m.className = 'small mt-2 ' + (d.success ? 'text-success' : 'text-danger'); m.textContent = d.message;
-                                    btn.disabled = false; load();
-                                });
+
+                            // Delegerat: raderna byts ut vid varje omläsning.
+                            $('legacyPost').addEventListener('click', function (e) {
+                                var t = e.target.closest('button');
+                                if (!t || t.disabled) return;
+                                var done = function (d) { say(d.success, d.message); t.disabled = false; return load(); };
+                                var fail = function (ex) { say(false, ex.message); t.disabled = false; };
+                                if (t.dataset.link) {
+                                    var entry = t.dataset.entry;
+                                    if (!entry) { var sel = $('legacyPost').querySelector('select[data-cand-for="' + t.dataset.link + '"]'); entry = sel && sel.value; }
+                                    t.disabled = true;
+                                    postIt('/umbraco/surface/EkonomiAdmin/LinkLegacyInvoice',
+                                        { issuerType: issuerType, issuerId: issuerId, invoiceId: +t.dataset.link, entryId: +entry }).then(done, fail);
+                                } else if (t.dataset.force) {
+                                    t.disabled = true;
+                                    postIt('/umbraco/surface/EkonomiAdmin/PostLegacyInvoices',
+                                        { issuerType: issuerType, issuerId: issuerId, invoiceIds: [+t.dataset.force] }).then(done, fail);
+                                } else if (t.dataset.dismissOpen || t.dataset.dismissCancel) {
+                                    var rid = t.dataset.dismissOpen || t.dataset.dismissCancel;
+                                    var tr = $('legacyPost').querySelector('tr[data-dismiss-row="' + rid + '"]');
+                                    if (tr) {
+                                        tr.classList.toggle('d-none', !!t.dataset.dismissCancel);
+                                        if (t.dataset.dismissOpen) { var inp = document.getElementById(uid + '_dr' + rid); if (inp) inp.focus(); }
+                                    }
+                                } else if (t.dataset.dismiss) {
+                                    var reason = (document.getElementById(uid + '_dr' + t.dataset.dismiss) || {}).value || '';
+                                    if (!reason.trim()) { say(false, 'Skriv varför pengarna inte kom in.'); return; }
+                                    t.disabled = true;
+                                    postIt('/umbraco/surface/EkonomiAdmin/DismissLegacyInvoice',
+                                        { issuerType: issuerType, issuerId: issuerId, invoiceId: +t.dataset.dismiss, reason: reason }).then(done, fail);
+                                } else if (t.dataset.undismiss) {
+                                    t.disabled = true;
+                                    postIt('/umbraco/surface/EkonomiAdmin/UndismissLegacyInvoice',
+                                        { issuerType: issuerType, issuerId: issuerId, invoiceId: +t.dataset.undismiss }).then(done, fail);
+                                } else if (t.dataset.unlink) {
+                                    t.disabled = true;
+                                    postIt('/umbraco/surface/EkonomiAdmin/UnlinkLegacyInvoice',
+                                        { issuerType: issuerType, issuerId: issuerId, invoiceId: +t.dataset.unlink }).then(done, fail);
+                                } else if (t.id === uid + '_legacyPostBtn') {
+                                    t.disabled = true;
+                                    postIt('/umbraco/surface/EkonomiAdmin/PostLegacyInvoices',
+                                        { issuerType: issuerType, issuerId: issuerId }).then(done, fail);
+                                }
                             });
                         })();
                         </script>
@@ -2900,6 +3084,14 @@
                         <div class="mb-2">
                             <label class="form-label" for="@(uid)_bpText">Vad var det?</label>
                             <input type="text" class="form-control" id="@(uid)_bpText" maxlength="200">
+                        </div>
+                        @* ⚠️ Projektet är FRIVILLIGT, samma väljare som i Bokför. Utan den kunde en
+                           bankrad aldrig hamna på en tävling, och tävlingens resultat under Projekt
+                           saknade allt som bokförts från kontoutdraget (Michael Henriksson 2026-10-01).
+                           Göms för en överföring — servern sätter aldrig projekt på en sådan. *@
+                        <div class="mb-2" id="@(uid)_bpProjectWrap">
+                            <label class="form-label" for="@(uid)_bpProject">Hör det till en tävling eller ett projekt?</label>
+                            <select class="form-select" id="@(uid)_bpProject"></select>
                         </div>
                         <div class="form-text">Posten bokförs med bankens belopp och datum, och paras ihop med raden direkt.</div>
                         <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_bpError"></div>
@@ -5782,7 +5974,7 @@
     // ── Bokför en bankrad ─────────────────────────────────────────────────────────────────
     // ⚠️ Belopp, datum, riktning och bankkonto kommer ur BANKRADEN (servern läser dem själv,
     //    PostBankRow) — dialogen visar dem bara. Kassören väljer vad posten VAR.
-    var bpAccounts = null, bpRow = null, bpRows = null;
+    var bpAccounts = null, bpProjects = null, bpRow = null, bpRows = null;
 
     // Flera rader: listan i dialogen går att rensa, och summan följer med.
     function bpRenderBulk() {
@@ -5858,15 +6050,43 @@
                     + money.map(opt).join('') + '</optgroup>' : '');
             var hit = list.find(function (a) { return (a.number >= 3000 && a.number < 4000) === wantRevenue; });
             if (hit) el('bpAccount').value = String(hit.number);
+
+            // ⚠️ Valet står KVAR mellan öppningarna — en kassör som bokför en tävlingsdags
+            //    Swishar en i taget ska inte behöva välja tävlingen om för varje rad.
+            var projSel = el('bpProject');
+            var keep = projSel.value;
+            projSel.innerHTML = '<option value="0">(inget projekt)</option>'
+                + (bpProjects || []).map(function (p) {
+                    return '<option value="' + p.id + '">' + esc(p.name) + '</option>';
+                }).join('');
+            if (keep && projSel.querySelector('option[value="' + keep + '"]')) projSel.value = keep;
+            bpSyncProject();
         };
 
-        if (bpAccounts) { fill(); openModal('bpModal'); return; }
+        // ⚠️ Projekten hämtas om vid VARJE öppning (kontona mellanlagras). Ett projekt som just
+        //    skapats under Projekt, eller en tävling som fått sin första krona, ska synas direkt.
         fetch('/umbraco/surface/EkonomiAdmin/GetPostingContext?issuerType=' + issuerType + '&issuerId=' + issuerId,
               { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
             if (!d.success) { el('bankError').textContent = d.message; show(el('bankError'), true); return; }
             bpAccounts = d.context.accounts || [];
+            bpProjects = d.context.projects || [];
             fill(); openModal('bpModal');
         });
+    }
+
+    // En överföring mellan egna konton bär aldrig projekt (servern ignorerar det) — visa inte valet.
+    function bpSyncProject() {
+        var n = parseInt(el('bpAccount').value, 10) || 0;
+        show(el('bpProjectWrap'), !isMoney(n) && (bpProjects || []).length > 0);
+    }
+    if (el('bpAccount')) el('bpAccount').addEventListener('change', bpSyncProject);
+
+    function bpProjectValue() {
+        var n = parseInt(el('bpAccount').value, 10) || 0;
+        if (isMoney(n)) return null;
+        // 0 = "(inget projekt)" → null; ett sandlådeprojekt har NEGATIVT id och är giltigt.
+        var p = parseInt(el('bpProject').value, 10) || 0;
+        return p !== 0 ? p : null;
     }
 
     if (el('bpSave')) el('bpSave').addEventListener('click', function () {
@@ -5878,7 +6098,8 @@
                 issuerType: issuerType, issuerId: issuerId,
                 rowIds: bpRows.map(function (x) { return x.id; }),
                 accountNumber: parseInt(el('bpAccount').value, 10) || 0,
-                description: el('bpText').value
+                description: el('bpText').value,
+                projectId: bpProjectValue()
             }).then(function (j) {
                 btn.disabled = false;
                 if (!j.success && !(j.failed && j.failed.length)) {
@@ -5905,7 +6126,8 @@
         postJson('/umbraco/surface/EkonomiAdmin/PostBankRow', {
             issuerType: issuerType, issuerId: issuerId, rowId: bpRow.id,
             accountNumber: parseInt(el('bpAccount').value, 10) || 0,
-            description: el('bpText').value
+            description: el('bpText').value,
+            projectId: bpProjectValue()
         }).then(function (j) {
             btn.disabled = false;
             if (!j.success) { el('bpError').textContent = j.message; show(el('bpError'), true); return; }

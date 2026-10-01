@@ -3115,7 +3115,16 @@ namespace HpskSite.Controllers
                 as HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge;
             if (bridge == null) return Json(new { success = true, invoices = Array.Empty<object>() });
 
-            var list = bridge.Unposted(issuerType, issuerId);
+            List<HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge.LegacyPaidInvoice> list;
+            try { list = bridge.Unposted(issuerType, issuerId); }
+            catch (Exception ex)
+            {
+                // ⚠️ Kortet får inte tyst försvinna: utan dubblettkontrollen vore "Bokför" farlig.
+                _logger.LogError(ex, "Gamla fakturor kunde inte läsas för {Typ}/{Id}.", issuerType, issuerId);
+                return Json(new { success = false, message = "De gamla fakturorna kunde inte läsas just nu. Bokför ingenting här förrän listan visas igen." });
+            }
+            var linked = bridge.Linked(issuerType, issuerId);
+            var dismissed = bridge.Dismissed(issuerType, issuerId);
             return Json(new
             {
                 success = true,
@@ -3123,32 +3132,154 @@ namespace HpskSite.Controllers
                 invoices = list.Select(i => new
                 {
                     invoiceId = i.InvoiceId, number = i.InvoiceNumber, payer = i.PayerName,
-                    competition = i.CompetitionName, amount = i.Amount, paidDate = i.PaidDate.ToString("yyyy-MM-dd")
+                    competition = i.CompetitionName, amount = i.Amount, paidDate = i.PaidDate.ToString("yyyy-MM-dd"),
+                    candidates = i.Candidates.Select(c => new
+                    {
+                        entryId = c.EntryId, number = c.Number, date = c.AccountingDate.ToString("yyyy-MM-dd"),
+                        description = c.Description, account = c.AccountNumber, project = c.ProjectName
+                    })
+                }),
+                linked = linked.Select(l => new
+                {
+                    invoiceId = l.InvoiceId, number = l.InvoiceNumber, competition = l.CompetitionName,
+                    amount = l.Amount, entryNumber = l.EntryNumber
+                }),
+                dismissed = dismissed.Select(x => new
+                {
+                    invoiceId = x.InvoiceId, number = x.InvoiceNumber, competition = x.CompetitionName,
+                    payer = x.PayerName, amount = x.Amount, reason = x.Reason, by = x.DismissedByName,
+                    date = x.DismissedUtc.ToLocalTime().ToString("yyyy-MM-dd")
                 })
             });
+        }
+
+        public class LegacyInvoiceDismissRequest
+        {
+            public int IssuerType { get; set; }
+            public int IssuerId { get; set; }
+            public int InvoiceId { get; set; }
+            public string? Reason { get; set; }
+        }
+
+        /// <summary>
+        /// POST DismissLegacyInvoice — "Pengarna kom aldrig in". Fakturan tas bort ur listan utan att
+        /// något bokförs. Skälet är obligatoriskt.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DismissLegacyInvoice([FromBody] LegacyInvoiceDismissRequest request)
+        {
+            var (ok, _) = await AuthorizeWriteAsync(request?.IssuerType ?? 0, request?.IssuerId ?? 0);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+            if (request!.IssuerId < 0) return Json(new { success = false, message = "En sandlåda har inga gamla fakturor." });
+            var bridge = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge))
+                as HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge;
+            if (bridge == null) return Json(new { success = false, message = "Bryggan saknas." });
+            var (actorId, actorName) = await GetCurrentActorAsync();
+            if (actorId is null) return Json(new { success = false, message = "Du måste vara inloggad." });
+
+            var (done, error) = bridge.Dismiss(request.IssuerType, request.IssuerId, request.InvoiceId,
+                request.Reason, actorId.Value, actorName ?? "");
+            return Json(new { success = done, message = done ? "Fakturan är borttagen ur listan. Ingenting bokfördes." : error });
+        }
+
+        /// <summary>POST UndismissLegacyInvoice — ångra "Pengarna kom aldrig in".</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UndismissLegacyInvoice([FromBody] LegacyInvoiceDismissRequest request)
+        {
+            var (ok, _) = await AuthorizeWriteAsync(request?.IssuerType ?? 0, request?.IssuerId ?? 0);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+            var bridge = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge))
+                as HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge;
+            if (bridge == null) return Json(new { success = false, message = "Bryggan saknas." });
+            var gone = bridge.Undismiss(request!.IssuerType, request.IssuerId, request.InvoiceId);
+            return Json(new { success = gone, message = gone ? "Fakturan är tillbaka i listan." : "Valet fanns inte." });
+        }
+
+        public class PostLegacyInvoicesRequest
+        {
+            public int IssuerType { get; set; }
+            public int IssuerId { get; set; }
+            /// <summary>
+            /// Tomt = alla fakturor UTAN trolig dubblett. Satt = bara de här ("Bokför ändå" på en rad
+            /// där kassören bedömt att förslaget var fel).
+            /// </summary>
+            public List<int>? InvoiceIds { get; set; }
         }
 
         /// <summary>POST PostLegacyInvoices — bokför dem, med betaldagen som bokföringsdag.</summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> PostLegacyInvoices([FromBody] FiscalYearStatusRequest request)
+        public async Task<IActionResult> PostLegacyInvoices([FromBody] PostLegacyInvoicesRequest request)
         {
             var (ok, name) = await AuthorizeWriteAsync(request?.IssuerType ?? 0, request?.IssuerId ?? 0);
             if (!ok) return Json(new { success = false, message = DeniedMessage });
+            if (request!.IssuerId < 0) return Json(new { success = false, message = "En sandlåda har inga gamla fakturor." });
             var bridge = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge))
                 as HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge;
             if (bridge == null) return Json(new { success = false, message = "Bryggan saknas." });
 
-            var before = bridge.Unposted(request!.IssuerType, request.IssuerId).Count;
-            var posted = bridge.PostAll(request.IssuerType, request.IssuerId, await CurrentMemberIdAsync());
-            _logger.LogInformation("Ekonomi: {Forening} bokförde {Antal} gamla fakturor.", name, posted);
+            var (posted, attempted, skipped) = bridge.PostAll(request.IssuerType, request.IssuerId,
+                await CurrentMemberIdAsync(), request.InvoiceIds);
+            _logger.LogInformation("Ekonomi: {Forening} bokförde {Antal} av {Forsok} gamla fakturor ({Kvar} väntar på beslut).",
+                name, posted, attempted, skipped);
+
+            var waiting = skipped > 0 && (request.InvoiceIds == null || request.InvoiceIds.Count == 0)
+                ? $" {skipped} {(skipped == 1 ? "faktura" : "fakturor")} ser redan bokförda ut och väntar på att du väljer."
+                : "";
             return Json(new
             {
-                success = posted == before,
-                message = posted == before
-                    ? $"{posted} betalda fakturor är bokförda."
-                    : $"{posted} av {before} bokfördes. De övriga ligger kvar — se om räkenskapsåret är öppet och kontona finns."
+                success = posted == attempted,
+                posted,
+                message = attempted == 0
+                    ? "Inget bokfördes." + waiting
+                    : posted == attempted
+                        ? $"{posted} {(posted == 1 ? "faktura är bokförd" : "fakturor är bokförda")}." + waiting
+                        : $"{posted} av {attempted} bokfördes. De övriga ligger kvar — se om räkenskapsåret är öppet och kontona finns." + waiting
             });
+        }
+
+        public class LegacyInvoiceLinkRequest
+        {
+            public int IssuerType { get; set; }
+            public int IssuerId { get; set; }
+            public int InvoiceId { get; set; }
+            public int EntryId { get; set; }
+        }
+
+        /// <summary>
+        /// POST LinkLegacyInvoice — "den här fakturan är redan bokförd i den här verifikationen".
+        /// Skriver ingenting i liggaren; fakturan försvinner ur listan över obokförda.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> LinkLegacyInvoice([FromBody] LegacyInvoiceLinkRequest request)
+        {
+            var (ok, _) = await AuthorizeWriteAsync(request?.IssuerType ?? 0, request?.IssuerId ?? 0);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+            if (request!.IssuerId < 0) return Json(new { success = false, message = "En sandlåda har inga gamla fakturor." });
+            var bridge = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge))
+                as HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge;
+            if (bridge == null) return Json(new { success = false, message = "Bryggan saknas." });
+
+            var (linkedOk, error) = bridge.Link(request.IssuerType, request.IssuerId, request.InvoiceId,
+                request.EntryId, await CurrentMemberIdAsync());
+            return Json(new { success = linkedOk, message = linkedOk ? "Fakturan är markerad som redan bokförd." : error });
+        }
+
+        /// <summary>POST UnlinkLegacyInvoice — ångra en koppling. Fakturan kommer tillbaka i listan.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UnlinkLegacyInvoice([FromBody] LegacyInvoiceLinkRequest request)
+        {
+            var (ok, _) = await AuthorizeWriteAsync(request?.IssuerType ?? 0, request?.IssuerId ?? 0);
+            if (!ok) return Json(new { success = false, message = DeniedMessage });
+            var bridge = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge))
+                as HpskSite.Services.CompetitionFees.LedgerLegacyInvoiceBridge;
+            if (bridge == null) return Json(new { success = false, message = "Bryggan saknas." });
+            var gone = bridge.Unlink(request!.IssuerType, request.IssuerId, request.InvoiceId);
+            return Json(new { success = gone, message = gone ? "Kopplingen är borttagen." : "Kopplingen fanns inte." });
         }
 
         [HttpPost]
