@@ -230,6 +230,7 @@
                     <option value="#regionEventsTab">Händelser</option>
                     <option value="#regionAdminCompetitionsTab">Tävlingar</option>
                     <option value="#regionSeriesTab">Serier</option>
+                    <option value="/kretsen/ansokningar?krets=@regionContentId">Ansökningar ↗</option>
                 </optgroup>
                 <optgroup label="Medlemmar">
                     <option value="#regionCertificationsTab">Certifieringar</option>
@@ -266,6 +267,12 @@
                         data-region-code="@(ViewBag.regionCode as string ?? "")">
                     <i class="bi bi-collection me-2"></i>Serier
                 </button>
+                @* Kretsgranskning fas 4: EGEN SIDA — den tävlingsansvarige är ofta inte kretsadmin
+                   och når inte den här panelen, så inkorgen kan inte vara en flik här. *@
+                <a class="nav-link d-flex align-items-center" id="regionApplications-link" href="/kretsen/ansokningar?krets=@regionContentId">
+                    <i class="bi bi-envelope-paper me-2"></i>Ansökningar
+                    <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar kretsens ansökningar"></i>
+                </a>
 
                 <div class="admin-rail-group">Medlemmar</div>
                 <button class="nav-link" id="regionCertifications-tab" data-bs-toggle="tab" data-bs-target="#regionCertificationsTab" type="button" role="tab" aria-controls="regionCertificationsTab" aria-selected="false">

@@ -287,6 +287,11 @@
                 </button>
             </div>
 
+            @* Kretsgranskning fas 4: ansökningar till kretsen, överst i fliken — en godkänd ansökan
+               blir en tävling härifrån (Skapa tävlingen öppnar guiden förifylld). *@
+            @{ ViewData["ApplicationsClubId"] = clubId; }
+            @await Html.PartialAsync("_CompetitionApplications", ViewData)
+
             <!-- Filter Section -->
             <div class="card mb-3">
                 <div class="card-body">

@@ -1,0 +1,224 @@
+@using HpskSite.Controllers
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var m = ViewData["KretsAnsokningar"] as KretsAnsokningarModel ?? new KretsAnsokningarModel();
+    ViewBag.Title = "Ansökningar — " + m.RegionName;
+}
+
+@* Kretsgranskning fas 4: kretsens inkorg för tävlingsansökningar. Egen sida, eftersom den
+   tävlingsansvarige ofta inte är kretsadministratör. Behörigheten prövas på servern av varje
+   endpoint; sidan visar bara en förklaring när besökaren inte får arbeta här. *@
+
+<style>
+    .ka-page { font-size: 1.05rem; padding: 1.5rem 0 4rem; }
+    .ka-page h1 { font-size: 1.8rem; font-weight: 700; }
+    .ka-card { border: 1px solid var(--bs-border-color); border-radius: .8rem; padding: 1rem 1.15rem; margin-bottom: 1rem; background: var(--bs-body-bg); }
+    .ka-app { border-top: 1px solid var(--bs-border-color); padding: .85rem 0; }
+    .ka-app:first-of-type { border-top: 0; }
+    .ka-meta { color: var(--bs-secondary-color); font-size: .95rem; }
+    .ka-panel { background: var(--bs-tertiary-bg); border-radius: .6rem; padding: .75rem; margin-top: .6rem; }
+</style>
+
+<div class="container ka-page">
+    @Html.AntiForgeryToken()
+    <h1 class="mb-1"><i class="bi bi-envelope-paper me-2"></i>Tävlingsansökningar — @m.RegionName</h1>
+
+    @if (!m.Allowed)
+    {
+        <div class="alert alert-secondary mt-3" id="kaNotAllowed">
+            Den här sidan är för kretsens tävlingsansvarige och kretsadministratören.
+            Ska du ha uppdraget kan du be om det på <a href="/kretsen/kom-igang?krets=@m.RegionId">Kom igång</a>.
+        </div>
+    }
+    else
+    {
+        <p class="ka-meta mb-3">Klubbarnas ansökningar om att arrangera tävlingar. En kretstävling beslutar kretsen själv; en landsdelstävling och en nationell tävling tillstyrker eller avstyrker kretsen, och Förbundet beslutar.</p>
+
+        <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+            <label for="kaYear" class="form-label mb-0">Tävlingsår</label>
+            <select id="kaYear" class="form-select w-auto"></select>
+            <span class="ka-meta" id="kaForbundetDeadline"></span>
+        </div>
+
+        <div id="kaTopMessage"></div>
+
+        <div class="ka-card" id="kaInbox"><h2 class="h5">Att behandla</h2><div class="ka-meta">Hämtar…</div></div>
+        <div class="ka-card" id="kaForbundet"><h2 class="h5">Hos Förbundet</h2></div>
+        <details class="ka-card" id="kaDecidedWrap"><summary class="h5 mb-0">Beslutade och återkallade <span class="badge bg-secondary" id="kaDecidedCount">0</span></summary><div id="kaDecided" class="mt-2"></div></details>
+
+        <details class="ka-card" id="kaDeadlinesWrap">
+            <summary class="h5 mb-0">Kretsens sista ansökningsdagar</summary>
+            <p class="ka-meta mt-2">Klubbarna ser dagen när de ansöker. En ansökan som kommer senare märks som sen, men stoppas inte.</p>
+            <div id="kaDeadlines" class="row g-2"></div>
+        </details>
+    }
+    <p class="mt-3"><a href="@m.RegionUrl"><i class="bi bi-arrow-left me-1"></i>Till @m.RegionName</a></p>
+</div>
+
+@if (m.Allowed)
+{
+@await Html.PartialAsync("_HtmlEscape")
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script>
+(function () {
+    const REGION_ID = @m.RegionId;
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc(s);
+    const token = () => document.querySelector('input[name="__RequestVerificationToken"]').value;
+    const base = '/umbraco/surface/CompetitionApplication/';
+    let apps = {}, year = new Date().getFullYear() + 1;
+
+    const post = (action, body) => fetch(base + action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() },
+        body: new URLSearchParams(body).toString()
+    }).then(r => r.json());
+
+    const yearSel = $('kaYear');
+    const now = new Date().getFullYear();
+    for (let y = now - 1; y <= now + 2; y++) yearSel.innerHTML += '<option value="' + y + '"' + (y === year ? ' selected' : '') + '>' + y + '</option>';
+    yearSel.addEventListener('change', () => { year = parseInt(yearSel.value, 10); load(); });
+
+    function message(msg, ok) {
+        const el = $('kaTopMessage');
+        el.className = 'alert ' + (ok ? 'alert-success' : 'alert-warning') + ' py-2';
+        el.textContent = msg;
+    }
+
+    function load() {
+        return fetch(base + 'GetRegionApplications?regionId=' + REGION_ID + '&year=' + year, { credentials: 'same-origin' })
+            .then(r => r.json()).then(d => {
+                if (!d.success) { $('kaInbox').innerHTML = '<div class="text-danger">' + esc(d.message) + '</div>'; return; }
+                apps = {}; d.applications.forEach(a => apps[a.id] = a);
+                $('kaForbundetDeadline').textContent = 'Förbundets sista dag för nationella tävlingar och landsdelstävlingar: ' + d.forbundetDeadline + '.';
+                const inbox = d.applications.filter(a => a.status === 'Inskickad' || a.status === 'Komplettering');
+                const forb = d.applications.filter(a => a.status === 'HosForbundet');
+                const done = d.applications.filter(a => ['Beviljad', 'Avslagen', 'Aterkallad'].includes(a.status));
+                $('kaInbox').innerHTML = '<h2 class="h5">Att behandla <span class="badge bg-primary">' + inbox.length + '</span></h2>'
+                    + (inbox.length ? inbox.map(row).join('') : '<div class="ka-meta">Inga ansökningar väntar på kretsen.</div>');
+                $('kaForbundet').innerHTML = '<div class="d-flex justify-content-between align-items-start flex-wrap gap-2"><h2 class="h5 mb-0">Hos Förbundet <span class="badge bg-info">' + forb.length + '</span></h2>'
+                    + '<div><a class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener" id="kaSummaryLink" href="/kretsen/sammanstallning?krets=' + REGION_ID + '&year=' + year + '"><i class="bi bi-printer me-1"></i>Sammanställning till Förbundet</a></div></div>'
+                    + '<p class="ka-meta mt-2 mb-2">Skriv ut sammanställningen (eller spara den som pdf) och mejla den till tavling@pistolskytteforbundet.se. Markera sedan vilka som skickats, och registrera Förbundets beslut när det kommer.</p>'
+                    + (forb.length ? forb.map(row).join('') : '<div class="ka-meta">Inga ansökningar ligger hos Förbundet.</div>');
+                $('kaDecided').innerHTML = done.length ? done.map(row).join('') : '<div class="ka-meta">Inga ännu.</div>';
+                $('kaDecidedCount').textContent = done.length;
+                renderDeadlines(d.deadlines || []);
+            });
+    }
+
+    function row(a) {
+        let actions = '';
+        if (a.status === 'Inskickad' || a.status === 'Komplettering') {
+            actions = a.needsForbundet
+                ? btn('tillstyrk', a.id, 'Tillstyrk', 'success') + btn('avstyrk', a.id, 'Avstyrk', 'outline-danger') + btn('complete', a.id, 'Begär komplettering', 'outline-secondary')
+                : btn('approve', a.id, 'Godkänn', 'success') + btn('reject', a.id, 'Avslå', 'outline-danger') + btn('complete', a.id, 'Begär komplettering', 'outline-secondary');
+        } else if (a.status === 'HosForbundet') {
+            actions = btn('forbundet', a.id, 'Registrera Förbundets beslut', 'primary')
+                + (a.sentToForbundetAt ? '<span class="ka-meta ms-2">Skickad till Förbundet ' + esc(a.sentToForbundetAt) + '</span>' : btn('markSent', a.id, 'Markera som skickad', 'outline-secondary'));
+        }
+        const state = a.status === 'Komplettering'
+            ? '<span class="badge bg-warning-subtle text-warning-emphasis">Väntar på klubben</span>'
+            : '<span class="badge bg-secondary-subtle text-secondary-emphasis">' + esc(a.statusLabel) + '</span>';
+        return '<div class="ka-app" data-app-id="' + a.id + '">'
+            + '<div class="d-flex justify-content-between flex-wrap gap-2"><div>'
+            + '<div class="fw-semibold">' + esc(a.name) + ' ' + state + '</div>'
+            + '<div class="ka-meta">' + esc(a.clubName) + ' · ' + esc(a.levelLabel) + ' · ' + esc(a.disciplineLabel) + ' · ' + esc(a.grantedDate || a.competitionDate)
+            + (a.reserveDate ? ' (reserv ' + esc(a.reserveDate) + ')' : '') + (a.place ? ' · ' + esc(a.place) : '') + '</div>'
+            + (a.note ? '<div class="small mt-1">' + esc(a.note) + '</div>' : '')
+            + (a.status === 'Komplettering' ? '<div class="small mt-1 text-warning-emphasis">Ni bad om: ' + esc(a.completionRequest) + '</div>' : '')
+            + (a.completionReply && a.status === 'Inskickad' ? '<div class="small mt-1 text-success-emphasis">Klubbens komplettering: ' + esc(a.completionReply) + '</div>' : '')
+            + (a.kretsOpinion ? '<div class="small mt-1">Kretsen ' + esc(a.kretsOpinion.toLowerCase()) + (a.kretsOpinionText ? ': ' + esc(a.kretsOpinionText) : '') + (a.deciderName ? ' — ' + esc(a.deciderName) + (a.deciderRole ? ', ' + esc(a.deciderRole) : '') : '') + '</div>' : '')
+            + (a.decisionText && ['Beviljad', 'Avslagen'].includes(a.status) ? '<div class="small mt-1">' + esc(a.decisionText) + '</div>' : '')
+            + (a.lateNote ? '<div class="small mt-1 text-warning-emphasis"><i class="bi bi-clock-history me-1"></i>' + esc(a.lateNote) + '</div>' : '')
+            + '<div class="ka-meta small mt-1">Kontakt: ' + esc(a.contactName || '') + (a.contactEmail ? ', ' + esc(a.contactEmail) : '') + (a.contactPhone ? ', ' + esc(a.contactPhone) : '')
+            + (a.classes ? ' · Klasser: ' + esc(a.classes) : '') + '</div>'
+            + '</div><div class="text-nowrap">' + actions + ' ' + btn('history', a.id, 'Historik', 'link') + '</div></div>'
+            + '<div data-panel="' + a.id + '"></div></div>';
+    }
+
+    const btn = (act, id, label, variant) => '<button type="button" class="btn btn-' + variant + ' btn-sm ms-1 mt-1" data-ka="' + act + '" data-id="' + id + '">' + label + '</button>';
+
+    function panel(id, html) {
+        const el = document.querySelector('[data-panel="' + id + '"]');
+        el.innerHTML = '<div class="ka-panel">' + html + '<div class="small mt-2" data-panel-result></div></div>';
+        return el;
+    }
+    function textPanel(id, label, required, sendAct, sendLabel, variant) {
+        panel(id, '<label class="form-label small mb-1" for="kaText' + id + '">' + label + (required ? '' : ' <span class="ka-meta">(valfritt)</span>') + '</label>'
+            + '<textarea class="form-control" id="kaText' + id + '" rows="3" maxlength="4000"></textarea>'
+            + '<div class="mt-2">' + btn(sendAct, id, sendLabel, variant) + btn('close', id, 'Avbryt', 'link') + '</div>');
+    }
+
+    document.addEventListener('click', function (e) {
+        const b = e.target.closest('[data-ka]');
+        if (!b) return;
+        const id = parseInt(b.dataset.id || '0', 10);
+        const t = () => ($('kaText' + id)?.value || '');
+        const done = r => {
+            if (!r.success) {
+                const res = document.querySelector('[data-panel="' + id + '"] [data-panel-result]');
+                if (res) { res.className = 'small mt-2 text-danger'; res.textContent = r.message; } else message(r.message, false);
+                return;
+            }
+            message(r.message, true); load();
+        };
+        switch (b.dataset.ka) {
+            case 'approve': return textPanel(id, 'Kommentar till klubben', false, 'approveSend', 'Godkänn ansökan', 'success');
+            case 'reject': return textPanel(id, 'Varför avslås ansökan? Klubben ser motiveringen.', true, 'rejectSend', 'Avslå ansökan', 'danger');
+            case 'complete': return textPanel(id, 'Vad behöver klubben komplettera?', true, 'completeSend', 'Skicka till klubben', 'primary');
+            case 'tillstyrk': return textPanel(id, 'Motivering till Förbundet', false, 'tillstyrkSend', 'Tillstyrk', 'success');
+            case 'avstyrk': return textPanel(id, 'Varför avstyrker kretsen? Både klubben och Förbundet läser motiveringen.', true, 'avstyrkSend', 'Avstyrk', 'danger');
+            case 'approveSend': return post('DecideApplication', { id, decision: 'approve', text: t() }).then(done);
+            case 'rejectSend': return post('DecideApplication', { id, decision: 'reject', text: t() }).then(done);
+            case 'completeSend': return post('RequestCompletion', { id, text: t() }).then(done);
+            case 'tillstyrkSend': return post('GiveOpinion', { id, opinion: 'Tillstyrker', text: t() }).then(done);
+            case 'avstyrkSend': return post('GiveOpinion', { id, opinion: 'Avstyrker', text: t() }).then(done);
+            case 'markSent': return post('MarkSentToForbundet', { regionId: REGION_ID, ids: String(id) }).then(done);
+            case 'forbundet': {
+                const a = apps[id];
+                panel(id, '<div class="row g-2">'
+                    + '<div class="col-md-4"><label class="form-label small mb-1" for="kaFd' + id + '">Förbundets beslut</label><select class="form-select form-select-sm" id="kaFd' + id + '"><option value="granted">Beviljad</option><option value="rejected">Avslagen</option></select></div>'
+                    + '<div class="col-md-4"><label class="form-label small mb-1" for="kaFdDate' + id + '">Beslutsdatum</label><input class="form-control form-control-sm" id="kaFdDate' + id + '" placeholder="ÅÅÅÅ-MM-DD"></div>'
+                    + '<div class="col-md-4"><label class="form-label small mb-1" for="kaFdGranted' + id + '">Beviljat datum, om ändrat</label><input class="form-control form-control-sm" id="kaFdGranted' + id + '" placeholder="' + esc(a ? a.competitionDate : '') + '"></div>'
+                    + '<div class="col-12"><label class="form-label small mb-1" for="kaText' + id + '">Förbundets motivering eller anteckning</label><textarea class="form-control" id="kaText' + id + '" rows="2" maxlength="4000"></textarea></div>'
+                    + '</div><div class="mt-2">' + btn('forbundetSend', id, 'Registrera beslutet', 'primary') + btn('close', id, 'Avbryt', 'link') + '</div>');
+                if (typeof flatpickr !== 'undefined') { flatpickr('#kaFdDate' + id, { locale: 'sv', dateFormat: 'Y-m-d', maxDate: 'today', defaultDate: 'today' }); flatpickr('#kaFdGranted' + id, { locale: 'sv', dateFormat: 'Y-m-d' }); }
+                return;
+            }
+            case 'forbundetSend': return post('RegisterForbundetDecision', { id, decision: $('kaFd' + id).value, decisionDate: $('kaFdDate' + id).value, grantedDate: $('kaFdGranted' + id).value, text: t() }).then(done);
+            case 'history':
+                return fetch(base + 'GetApplication?id=' + id, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+                    if (!d.success) return;
+                    panel(id, '<ul class="list-unstyled small mb-1">' + d.events.map(ev => '<li><span class="ka-meta">' + esc(ev.at) + '</span> · <strong>' + esc(ev.kindLabel) + '</strong>' + (ev.byName ? ' · ' + esc(ev.byName) : '') + (ev.text ? '<div class="ms-3">' + esc(ev.text) + '</div>' : '') + '</li>').join('') + '</ul>' + btn('close', id, 'Stäng', 'link'));
+                });
+            case 'close': { const el = document.querySelector('[data-panel="' + id + '"]'); if (el) el.innerHTML = ''; return; }
+        }
+    });
+
+    const LEVELS = [['Krets', 'Kretstävling'], ['Landsdel', 'Landsdelstävling'], ['Nationell', 'Nationell tävling']];
+    function renderDeadlines(list) {
+        const box = $('kaDeadlines');
+        box.innerHTML = LEVELS.map(([v, l]) => {
+            const cur = list.find(x => x.level === v);
+            return '<div class="col-md-4"><label class="form-label small mb-1" for="kaDl' + v + '">' + l + ' ' + year + '</label>'
+                + '<div class="input-group input-group-sm"><input class="form-control" id="kaDl' + v + '" data-level="' + v + '" value="' + esc(cur ? cur.lastDate : '') + '" placeholder="ingen">'
+                + '<button class="btn btn-outline-primary" type="button" data-dl-save="' + v + '">Spara</button></div></div>';
+        }).join('') + '<div class="col-12 small" id="kaDlResult"></div>';
+        if (typeof flatpickr !== 'undefined') LEVELS.forEach(([v]) => flatpickr('#kaDl' + v, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true }));
+    }
+    document.addEventListener('click', function (e) {
+        const b = e.target.closest('[data-dl-save]');
+        if (!b) return;
+        const lvl = b.dataset.dlSave;
+        post('SetDeadline', { regionId: REGION_ID, year, level: lvl, lastDate: $('kaDl' + lvl).value }).then(r => {
+            const res = $('kaDlResult'); res.className = 'col-12 small ' + (r.success ? 'text-success' : 'text-danger'); res.textContent = r.message;
+        });
+    });
+
+    load();
+})();
+</script>
+}

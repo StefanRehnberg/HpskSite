@@ -207,6 +207,11 @@
         @await Html.PartialAsync("RegionCompetitionsList")
     </div>
 
+    <!-- Kretskalendern (kretsgranskning fas 4) — öppen för alla, laddas när fliken visas -->
+    <div class="tab-pane fade" id="regionCalendar" role="tabpanel" aria-labelledby="regionCalendar-tab">
+        @await Html.PartialAsync("_KretsCalendar", Model.Id)
+    </div>
+
     @if (isLoggedIn)
     {
         <!-- Records (Hall of Fame) Tab -->
