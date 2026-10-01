@@ -153,7 +153,7 @@ namespace HpskSite.CompetitionTypes.Common
                 note: "_CompetitionLevelField. Kategorin enligt SHB C.3.1 (vem som godkänt tävlingen), INTE vem som får anmäla sig. " +
                       "Tomt = ej bekräftad, dialogen föreslår en kategori (CompetitionLevel.Suggest)."),
             new("isClubOnly", "Endast klubbens egna medlemmar får anmäla sig", FieldControl.Checkbox, "Tävlingens status", 2,
-                help: "Annars får alla anmäla sig. Tävlingen syns då bara för klubbens medlemmar."),
+                help: "Kryssar du i rutan syns tävlingen bara för klubbens medlemmar. Annars får alla anmäla sig."),
             new("competitionScope", "Mästerskap", FieldControl.Select, "Tävlingens status", 3,
                 help: "Om en mästartitel avgörs. Ett mästerskap kan ingå i en tävling i vilken kategori som helst. Avgör hur standardmedaljer beräknas."),
             new("isAwardingStandardMedals", "Standardmedaljsgrundande", FieldControl.Checkbox, "Tävlingens status", 4,
