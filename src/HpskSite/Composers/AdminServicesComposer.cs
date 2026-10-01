@@ -87,6 +87,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.CompetitionApplicationService>();
             builder.Services.AddHostedService<HpskSite.Services.Kretsgranskning.CompetitionApplicationSchemaGuardHostedService>();
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.KretsCalendarService>();
+            builder.Services.AddHostedService<HpskSite.Services.Kretsgranskning.CompetitionApplicationReminderHostedService>();
             // Member-database expansion (see Documentation/MEMBER_DATABASE.md)
             builder.Services.AddScoped<ClubMembershipService>();
             builder.Services.AddScoped<MemberAccessKeyService>();

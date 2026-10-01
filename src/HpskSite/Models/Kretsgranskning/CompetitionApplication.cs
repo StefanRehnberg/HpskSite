@@ -224,5 +224,65 @@ namespace HpskSite.Models.Kretsgranskning
 
         /// <summary>Är ansökan sen i förhållande till en sista dag? Inskickningsdagen räknas med.</summary>
         public static bool IsLate(DateTime submittedOrToday, DateTime lastDate) => submittedOrToday.Date > lastDate.Date;
+
+        /// <summary>
+        /// Kontrollsumma över det kretsen tar ställning till. En utskickad länk bär summan och slutar
+        /// gälla när klubben ändrar något av det här.
+        /// </summary>
+        public static string Checksum(CompetitionApplication a)
+        {
+            var s = string.Join("|", a.Level, a.Discipline, a.Name, a.CompetitionDate.ToString("yyyy-MM-dd"),
+                a.EndDate?.ToString("yyyy-MM-dd"), a.ReserveDate?.ToString("yyyy-MM-dd"), a.Place, a.Classes, a.Note, a.CompletionReply);
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(s)))[..16];
+        }
+    }
+
+    /// <summary>
+    /// Påminnelserna för tävlingsansökan som ren funktion: vilka som är förfallna i dag, och med
+    /// vilken nyckel. Nyckeln är spärren mot dubbletter (unikt index i KretsgranskningReminder).
+    /// Påminnelserna ska alltid ha ett nästa steg som går att göra direkt — aldrig bara tjat.
+    /// </summary>
+    public static class CompetitionApplicationReminders
+    {
+        /// <summary>Godkänd ansökan utan tävling: påminn arrangören 8 veckor före.</summary>
+        public const int CreateCompetitionDays = 56;
+        /// <summary>Inskickad ansökan som kretsen inte rört: påminn kretsen efter 14 dagar.</summary>
+        public const int KretsStaleDays = 14;
+        /// <summary>Förbundets gräns: påminn kretsen 14 dagar före om ansökningar ligger obehandlade.</summary>
+        public const int ForbundetLeadDays = 14;
+
+        public record Due(string Key, string Kind, int RegionId, CompetitionApplication? App, List<CompetitionApplication>? Apps);
+
+        public const string KindCreateCompetition = "create-competition";
+        public const string KindKretsStale = "krets-stale";
+        public const string KindForbundet = "forbundet-deadline";
+
+        public static List<Due> Compute(IEnumerable<CompetitionApplication> apps, DateTime today)
+        {
+            var list = new List<Due>();
+            var all = apps.ToList();
+            foreach (var a in all)
+            {
+                var days = (a.EffectiveDate.Date - today.Date).TotalDays;
+                if (CompetitionApplicationRules.CanCreateCompetition(a) && days >= 0 && days <= CreateCompetitionDays)
+                    list.Add(new Due($"app-8w-{a.Id}", KindCreateCompetition, a.RegionId, a, null));
+
+                // Nyckeln bär dagen ansökan senast ändrades, så att en ny komplettering beväpnar om.
+                if (a.Status == CompetitionApplicationStatus.Inskickad && (today.Date - a.UpdatedAt.Date).TotalDays >= KretsStaleDays)
+                    list.Add(new Due($"krets-14d-{a.Id}-{a.UpdatedAt:yyyyMMdd}", KindKretsStale, a.RegionId, a, null));
+            }
+
+            var year = today.Year + 1;
+            var deadline = CompetitionApplicationRules.ForbundetDeadline(year);
+            var lead = (deadline.Date - today.Date).TotalDays;
+            if (lead >= 0 && lead <= ForbundetLeadDays)
+            {
+                foreach (var g in all.Where(a => a.NeedsForbundet && a.CompetitionDate.Year == year
+                                                 && CompetitionApplicationStatus.AtKrets.Contains(a.Status))
+                                     .GroupBy(a => a.RegionId))
+                    list.Add(new Due($"forbundet-{g.Key}-{year}", KindForbundet, g.Key, null, g.ToList()));
+            }
+            return list;
+        }
     }
 }
