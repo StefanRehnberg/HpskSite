@@ -217,6 +217,8 @@ namespace HpskSite.Controllers
                     competitionManagers = competitionManagerIds,
                     shootingClassIds = GetShootingClassIdsString(content),
                     competitionScope = content.GetValue<string>("competitionScope") ?? "",
+                    // Tom = ej bekräftad; dialogen föreslår då en nivå (_CompetitionLevelField).
+                    competitionLevel = HpskSite.CompetitionTypes.Common.CompetitionLevel.Read(content),
                     isAwardingStandardMedals = content.GetValue<bool>("isAwardingStandardMedals"),
                     allowSelfReporting = content.GetValue<bool>("allowSelfReporting"),
                     isExternal = content.GetValue<bool>("isExternal"),
@@ -385,6 +387,20 @@ namespace HpskSite.Controllers
                     });
                 }
 
+                // Tävlingsnivån: ett okänt värde vägras, och nivån får inte säga emot "endast för
+                // klubben" eller kräva en klubb som inte finns. Bara när fältet skickas — en äldre
+                // klient som inte känner till nivån ska kunna spara som förut.
+                if (request.Fields != null && request.Fields.ContainsKey(HpskSite.CompetitionTypes.Common.CompetitionLevel.PropertyAlias))
+                {
+                    var levelRaw = ReadFieldOrContentAsString(request.Fields, HpskSite.CompetitionTypes.Common.CompetitionLevel.PropertyAlias, content);
+                    if (!HpskSite.CompetitionTypes.Common.CompetitionLevel.IsValid(levelRaw))
+                        return Ok(new { success = false, message = $"Okänd tävlingsnivå: \"{levelRaw}\"." });
+                    var levelError = HpskSite.CompetitionTypes.Common.CompetitionLevel.ConsistencyError(
+                        levelRaw, ReadFieldOrContentAsBool(request.Fields, "isClubOnly", content), hostClubId > 0);
+                    if (levelError != null)
+                        return Ok(new { success = false, message = levelError });
+                }
+
                 // Persist the shooting-range link here (type-agnostic): the per-type save
                 // services map only their own fields and would drop "rangeId". Only act when
                 // the field is actually present so a partial-update client can't clear it by
@@ -511,6 +527,27 @@ namespace HpskSite.Controllers
         /// Read a field from the request Fields dict as a trimmed string; falls back to the
         /// content node's stored value when the key isn't in the request.
         /// </summary>
+        /// <summary>
+        /// Read a field from the request Fields dict as a bool; falls back to the content node's
+        /// stored value when the key isn't in the request. Accepts true/false and "true"/"false".
+        /// </summary>
+        private static bool ReadFieldOrContentAsBool(Dictionary<string, object>? fields, string key, Umbraco.Cms.Core.Models.IContent content)
+        {
+            if (fields != null && fields.TryGetValue(key, out var obj) && obj != null)
+            {
+                if (obj is System.Text.Json.JsonElement je)
+                {
+                    if (je.ValueKind == System.Text.Json.JsonValueKind.True) return true;
+                    if (je.ValueKind == System.Text.Json.JsonValueKind.False) return false;
+                    if (je.ValueKind == System.Text.Json.JsonValueKind.String) return bool.TryParse(je.GetString(), out var sb) && sb;
+                    return false;
+                }
+                if (obj is bool b) return b;
+                return bool.TryParse(obj.ToString(), out var pb) && pb;
+            }
+            return content.GetValue<bool>(key);
+        }
+
         private static string ReadFieldOrContentAsString(Dictionary<string, object>? fields, string key, Umbraco.Cms.Core.Models.IContent content)
         {
             if (fields != null && fields.TryGetValue(key, out var obj) && obj != null)
