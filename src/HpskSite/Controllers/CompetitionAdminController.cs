@@ -1287,6 +1287,12 @@ namespace HpskSite.Controllers
                 // first tab open for legacy comps that pre-date this change.)
                 EnsureCompetitionResultPage(newCompetition, competitionTypeId);
 
+                // Kretsgranskning fas 4: skapades tävlingen ur en ansökan kopplas de HÄR, på
+                // servern, i samma begäran. Ett separat klientanrop efteråt hade kunnat utebli, och
+                // då hade kalendern visat både ansökan och tävlingen. Värdens klubb måste vara
+                // ansökans — en ansökan kan inte kopplas till en annan klubbs tävling.
+                var applicationNote = LinkApplicationIfAny(request.Fields, newCompetition.Id, _hostClubId);
+
                 // Invalidate caches
                 InvalidateCompetitionCaches();
 
@@ -1303,12 +1309,48 @@ namespace HpskSite.Controllers
                         startDate = newCompetition.GetValue<DateTime?>("competitionDate"),
                         status = GetCompetitionStatus(newCompetition),
                         registrationCount = 0 // New competition has no registrations
-                    }
+                    },
+                    applicationNote
                 });
             }
             catch (Exception ex)
             {
                 return Ok(new { success = false, message = "Error creating competition: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Kopplar en nyskapad tävling till ansökan den skapades ur (fältet <c>applicationId</c>,
+        /// som annars släpps av fältkatalogen). Returnerar ett besked när kopplingen inte gick —
+        /// tävlingen är då skapad ändå, och det ska sägas i stället för att tigas om.
+        /// </summary>
+        private string? LinkApplicationIfAny(Dictionary<string, object>? fields, int competitionId, int hostClubId)
+        {
+            var appId = ReadFieldAsInt(fields, "applicationId");
+            if (appId <= 0) return null;
+            try
+            {
+                // Hämtas ur RequestServices i stället för konstruktorn: den här kontrollern har redan
+                // ett tjugotal beroenden, och kopplingen är en sidoväg i ett enda anrop.
+                var apps = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Kretsgranskning.CompetitionApplicationService))
+                    as HpskSite.Services.Kretsgranskning.CompetitionApplicationService;
+                var cal = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Kretsgranskning.KretsCalendarService))
+                    as HpskSite.Services.Kretsgranskning.KretsCalendarService;
+                if (apps == null) return null;
+                var a = apps.Get(appId);
+                if (a == null) return "Ansökan som tävlingen skulle kopplas till finns inte.";
+                if (a.ClubId != Math.Max(0, hostClubId)) return "Tävlingen har en annan arrangör än ansökan och kopplades inte till den.";
+
+                var me = _memberManager.GetCurrentMemberAsync().GetAwaiter().GetResult();
+                var data = me?.Email == null ? null : _memberService.GetByEmail(me.Email);
+                var (linked, err) = apps.LinkCompetition(appId, competitionId, data?.Id ?? 0, data?.Name ?? "");
+                cal?.Invalidate();
+                return linked == null ? err : null;
+            }
+            catch (Exception ex)
+            {
+                (HttpContext.RequestServices.GetService(typeof(Microsoft.Extensions.Logging.ILogger<CompetitionAdminController>)) as Microsoft.Extensions.Logging.ILogger)?.LogError(ex, "Competition {Comp}: linking to application {App} failed.", competitionId, appId);
+                return "Tävlingen är skapad, men kopplingen till ansökan misslyckades.";
             }
         }
 

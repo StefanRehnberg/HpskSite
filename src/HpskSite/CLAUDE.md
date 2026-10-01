@@ -856,6 +856,63 @@ medlem kan be om ett uppdrag (`KretsUppdrag/RequestUppdrag`) → mejl till krets
 Test: `BoardRoleOwnerTests`. Svit: `hpsk-verify/kretsuppdrag-fas1-verify.mjs` 48/48 (A/B: båda
 serverreglerna borttagna → 4 röda). Adds C# → full ombyggnad. **Ingen SQL, ingen doctype-egenskap.**
 
+### Tävlingsansökan och kretskalendern (2026-10-01, fas 4, branch `kretsgranskning`)
+
+En klubb söker hos sin krets om att få arrangera en kretstävling, landsdelstävling eller nationell
+tävling. **En föreningstävling söks inte** (den har inget godkännande, SHB C.3.1) och en rikstävling
+är Förbundets uppdrag. Kretstävlingen beslutar kretsen; landsdel och nationell tillstyrker eller
+avstyrker kretsen, och Förbundet beslutar (kretsen registrerar beslutet).
+
+- **⚠️ EN RAD, INTE EN TÄVLINGSNOD** (`CompetitionApplication`). En nod syns på ett tjugotal ställen
+  som alla hade behövt lära sig att en ansökan inte är en tävling. Tävlingen skapas först när
+  arrangören väljer det, ur **Skapa tävlingen** (guiden förifylld via `hpskWizardFromApplication`).
+- **⚠️ Kopplingen görs på SERVERN** i `CreateCompetition` (fältet `applicationId`, som
+  `LinkApplicationIfAny` läser — det ligger inte i formuläret eftersom katalogen inte känner det).
+  Ett separat klientanrop hade kunnat utebli, och då hade kalendern visat både ansökan och
+  tävlingen. Värdens klubb måste vara ansökans.
+- **⚠️ Kretsen härleds ur KLUBBEN på servern** (`KretsCalendarService.RegionIdForClub`), aldrig ur
+  klienten. Kretsens egna ansökningar har `ClubId = 0`.
+- **Regler som rena funktioner** i `CompetitionApplicationRules` (validering, vem får göra vad i
+  vilket läge, Förbundets gräns 30 september året före). **Alla tillståndsbyten** går genom
+  `CompetitionApplicationService.Transition`, som skriver raden OCH händelsen (`…Event`) i samma
+  transaktion. Statusarna är text: Utkast, Inskickad, Komplettering, HosForbundet, Beviljad,
+  Avslagen, Aterkallad (egen status — ingen prövade den).
+- **Behörighet:** klubbsidan = klubbadmin (kretsadmin för kretsens egna); kretssidan =
+  **Tävlingsansvarig** (uppdraget, fas 1), kretsadmin eller sajtadmin. Beslutet stämplas med rollen
+  vägen kom genom (`DeciderRole`) och kanalen (`Channel`: Inloggad / Lank).
+- **⚠️ Kretsens inkorg är en EGEN SIDA, `/kretsen/ansokningar?krets=`** — den tävlingsansvarige är
+  ofta inte kretsadmin och når inte adminpanelen. Rälsen har en länk dit.
+- **Länkläget:** utan tävlingsansvarig går aviseringen via `KretsUppdragService.Recipients` till
+  kretsens kontaktadress (en länk utan inloggning, `/kretsen/arende?t=`, 60 dagar) och till
+  kretsadministratörerna (inkorgen). Länken bär en **kontrollsumma** av ansökans innehåll och slutar
+  gälla när klubben ändrar den. Den som beslutar via länk skriver namn och roll. Sajtadmin får
+  länkarna i svaret (`caseLinks`) — supportvägen, och så verifieras läget utan SMTP.
+- **"Be kretsen komma igång"** (`AskKretsToStart`): arrangörens redigerbara mejl till kretsens
+  ordförande, med svarsadress till arrangören. Klubbens flik visar påminnelsen med antalet länkar i år.
+- **Kretskalendern** (`_KretsCalendar`, fliken *Kalender* på kretssidan, öppen): tävlingar,
+  ansökningar utan tävling (preliminär/godkänd) och kretsens händelser, genom EN tjänst
+  (`KretsCalendarService`, indexet över trädet cachat 60 s). **Samma tävling står aldrig två gånger.**
+  Grannkretsar ur `RegionAdjacency`; deras preliminära ansökningar syns bara för inloggade klubb- och
+  kretsadmins. **Krockvarningar** (samma gren samma dag i kretsen eller hos en granne, SM i grenen)
+  som ren funktion i `KretsCalendarConflicts` — aldrig stopp. Klicka på en dag för att ansöka.
+- **Sista ansökningsdag** per år och nivå (`RegionApplicationDeadline`); en sen ansökan märks, stoppas inte.
+- **Sammanställningen till Förbundet** (`/kretsen/sammanstallning?krets=&year=`): blankettens kolumner,
+  utskriftsvänlig sida. **⚠️ Förbundets ifyllbara pdf fylls INTE** — det kräver ett pdf-bibliotek och är
+  ett eget beslut. Kretsmästerskapen förs inte in automatiskt ännu.
+
+**Inte byggt ännu:** påminnelser (8 veckor före utan tävling, Förbundets gräns), inläsning av en
+befintlig kalender, stomprogrammet, kretsens arrangörschecklista, `RegionCalendarSettings`-ytan
+(tabellen finns), räknarna per krets på sajtadmins statistik.
+
+**Operatörssteg:** `Migrations/create-competition-application-tables.sql` **FÖRE deployen**
+(körd i dev 2026-10-01). Startkontrollen `CompetitionApplicationSchemaGuardHostedService` larmar
+Critical om tabellerna saknas. Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod.
+
+Test: `CompetitionApplicationRulesTests`, `KretsCalendarConflictsTests`. Svit:
+`hpsk-verify/tavlingsansokan-fas4-verify.mjs` 77/77, två körningar i rad (A/B: grannregeln borttagen
+→ 1 röd; kontrollsumman borttagen → sviten avbryter vid "länken slutar gälla"). Skärmdumpar:
+`tavlingsansokan-fas4-shot.mjs`.
+
 ### Competition Admin System ✅ COMPLETE
 **Location:** Admin Page → Competitions tab (default)
 

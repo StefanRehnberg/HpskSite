@@ -1,0 +1,69 @@
+@using HpskSite.Controllers
+@{
+    Layout = null;
+    var m = ViewData["Sammanstallning"] as KretsSammanstallningModel ?? new KretsSammanstallningModel();
+    var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sammanställning @m.Year — @m.RegionName</title>
+    @* Kretsgranskning fas 4. Förbundets blankett har kolumnerna Datum, Namn, Gren, Plats, Arrangör,
+       Tillstyrks, Avstyrks. Vi har ingen pdf-motor; sidan skrivs ut eller sparas som pdf ur
+       webbläsaren och bifogas mejlet till tavling@pistolskytteforbundet.se. Att fylla i Förbundets
+       ifyllbara pdf programmatiskt kräver ett pdf-bibliotek och är ett eget beslut. *@
+    <style>
+        body { font-family: Arial, sans-serif; color: #111; margin: 24px; }
+        h1 { font-size: 20px; margin: 0 0 4px; }
+        .meta { color: #555; font-size: 13px; margin-bottom: 14px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+        th, td { border: 1px solid #999; padding: 5px 6px; vertical-align: top; text-align: left; }
+        th { background: #eee; }
+        td.x { text-align: center; font-weight: bold; width: 70px; }
+        .note { font-size: 11.5px; color: #333; }
+        .noprint { margin-bottom: 14px; }
+        @@media print { .noprint { display: none; } body { margin: 10mm; } }
+    </style>
+</head>
+<body>
+    <div class="noprint">
+        <button onclick="window.print()">Skriv ut / spara som pdf</button>
+        <span class="meta">Mejla sedan till tavling@pistolskytteforbundet.se och markera ansökningarna som skickade på kretsens ansökningssida.</span>
+    </div>
+    <h1>Sammanställning av nationella tävlingar och landsdelstävlingar inom krets</h1>
+    <div class="meta">@m.RegionName · tävlingsår @m.Year · Förbundets sista dag @m.Deadline.ToString("d MMMM yyyy", sv) · utskriven @DateTime.Today.ToString("yyyy-MM-dd")</div>
+
+    @if (m.Rows.Count == 0)
+    {
+        <p id="smEmpty">Inga nationella tävlingar eller landsdelstävlingar har yttrande ännu för @m.Year.</p>
+    }
+    else
+    {
+        <table id="smTable">
+            <thead>
+                <tr><th>Datum</th><th>Namn</th><th>Gren</th><th>Plats</th><th>Arrangör</th><th>Tillstyrks</th><th>Avstyrks</th></tr>
+            </thead>
+            <tbody>
+            @foreach (var r in m.Rows)
+            {
+                <tr data-app-id="@r.Id">
+                    <td>@r.Date.ToString("yyyy-MM-dd")</td>
+                    <td>@r.Name<div class="note">@r.Level</div></td>
+                    <td>@r.Discipline</td>
+                    <td>@r.Place</td>
+                    <td>@r.Organiser</td>
+                    <td class="x">@(r.Tillstyrks ? "X" : "")</td>
+                    <td class="x">@(r.Tillstyrks ? "" : "X")</td>
+                </tr>
+                @if (!string.IsNullOrWhiteSpace(r.Motivering))
+                {
+                    <tr><td></td><td colspan="6" class="note">Kretsens motivering: @r.Motivering</td></tr>
+                }
+            }
+            </tbody>
+        </table>
+    }
+</body>
+</html>

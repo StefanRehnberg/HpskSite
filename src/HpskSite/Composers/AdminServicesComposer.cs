@@ -82,6 +82,11 @@ namespace HpskSite.Composers
             // Kretsens uppdrag (kretsgranskning fas 1) - enda svaret pa "har medlemmen uppdraget".
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.KretsUppdragService>();
             builder.Services.AddSingleton<HpskSite.Services.Kretsgranskning.KretsLinkTokenService>();
+            // Tavlingsansokan (fas 4). Startkontrollen larmar om tabellerna saknas - en okord
+            // migrering gor annars varje ansokan tyst dod.
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.CompetitionApplicationService>();
+            builder.Services.AddHostedService<HpskSite.Services.Kretsgranskning.CompetitionApplicationSchemaGuardHostedService>();
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.KretsCalendarService>();
             // Member-database expansion (see Documentation/MEMBER_DATABASE.md)
             builder.Services.AddScoped<ClubMembershipService>();
             builder.Services.AddScoped<MemberAccessKeyService>();

@@ -7,6 +7,7 @@ using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Web;
 using Umbraco.Extensions;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HpskSite.Controllers
 {
@@ -123,6 +124,96 @@ namespace HpskSite.Controllers
             return View("KretsenUppdragConfirm", root);
         }
 
+        /// <summary>
+        /// Kretsens inkorg för tävlingsansökningar. En EGEN sida och inte en flik i kretsens
+        /// adminpanel: den tävlingsansvarige är ofta inte kretsadministratör och når inte panelen.
+        /// Själva datat och behörigheten ligger i CompetitionApplication-endpointsen.
+        /// </summary>
+        [HttpGet("ansokningar")]
+        public async Task<IActionResult> Ansokningar(int? krets)
+        {
+            if (!TryRoot(out var root, out var ctx)) return StatusCode(500, "Umbraco-kontext saknas.");
+            var region = krets is > 0 ? ctx!.Content!.GetById(krets.Value) : null;
+            if (region == null || region.ContentType.Alias != "regionalPage") return NotFound("Kretsen hittades inte.");
+
+            var me = await CurrentMemberAsync();
+            if (me == null)
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/kretsen/ansokningar?krets={region.Id}")}");
+
+            var code = region.Value<string>("regionCode") ?? "";
+            var allowed = _uppdrag.HasUppdrag(region.Id, me.Id, BoardRoleDefinitions.RoleTavlingsansvarig)
+                          || (!string.IsNullOrEmpty(code) && await _auth.IsRegionalAdminForRegion(code));
+            ViewData["KretsAnsokningar"] = new KretsAnsokningarModel
+            {
+                RegionId = region.Id,
+                RegionName = region.Value<string>("regionName") ?? region.Name ?? "",
+                RegionUrl = region.Url(),
+                Allowed = allowed
+            };
+            return View("KretsenAnsokningar", root);
+        }
+
+        /// <summary>Länkläget: ett ärende utan inloggning. Länken bär ärendet; sidan hämtar det.</summary>
+        [HttpGet("arende")]
+        public IActionResult Arende(string? t)
+        {
+            if (!TryRoot(out var root, out _)) return StatusCode(500, "Umbraco-kontext saknas.");
+            ViewData["ArendeToken"] = t ?? "";
+            return View("KretsenArende", root);
+        }
+
+        /// <summary>
+        /// Kretsens sammanställning till Förbundet: nationella och landsdelsansökningar med kretsens
+        /// yttrande, i blankettens kolumner (Datum, Namn, Gren, Plats, Arrangör, Tillstyrks/Avstyrks).
+        /// Utskriftsvänlig sida — vi har ingen pdf-motor. Sparas som pdf ur webbläsaren och bifogas.
+        /// </summary>
+        [HttpGet("sammanstallning")]
+        public async Task<IActionResult> Sammanstallning(int? krets, int? year)
+        {
+            if (!TryRoot(out var root, out var ctx)) return StatusCode(500, "Umbraco-kontext saknas.");
+            var region = krets is > 0 ? ctx!.Content!.GetById(krets.Value) : null;
+            if (region == null || region.ContentType.Alias != "regionalPage") return NotFound("Kretsen hittades inte.");
+            var me = await CurrentMemberAsync();
+            if (me == null) return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString(Request.Path + Request.QueryString)}");
+            var code = region.Value<string>("regionCode") ?? "";
+            if (!_uppdrag.HasUppdrag(region.Id, me.Id, BoardRoleDefinitions.RoleTavlingsansvarig)
+                && !(!string.IsNullOrEmpty(code) && await _auth.IsRegionalAdminForRegion(code)))
+                return StatusCode(403, "Bara kretsens tävlingsansvarige eller kretsadministratören kan se sammanställningen.");
+
+            var y = year ?? DateTime.Today.Year + 1;
+            var apps = HttpContext.RequestServices.GetRequiredService<CompetitionApplicationService>()
+                .ForRegion(region.Id, new DateTime(y, 1, 1), new DateTime(y, 12, 31))
+                .Where(a => a.NeedsForbundet && a.KretsOpinion != null
+                            && (a.Status == HpskSite.Models.Kretsgranskning.CompetitionApplicationStatus.HosForbundet
+                                || a.Status == HpskSite.Models.Kretsgranskning.CompetitionApplicationStatus.Beviljad
+                                || a.Status == HpskSite.Models.Kretsgranskning.CompetitionApplicationStatus.Avslagen))
+                .OrderBy(a => a.CompetitionDate).ToList();
+            var cal = HttpContext.RequestServices.GetRequiredService<KretsCalendarService>();
+            var clubs = HttpContext.RequestServices.GetRequiredService<ClubService>();
+
+            ViewData["Sammanstallning"] = new KretsSammanstallningModel
+            {
+                RegionId = region.Id,
+                RegionName = region.Value<string>("regionName") ?? region.Name ?? "",
+                Year = y,
+                Deadline = HpskSite.Models.Kretsgranskning.CompetitionApplicationRules.ForbundetDeadline(y),
+                Rows = apps.Select(a => new KretsSammanstallningRow
+                {
+                    Id = a.Id,
+                    Date = a.CompetitionDate,
+                    Name = a.Name,
+                    Discipline = ActivityDiscipline.Label(a.Discipline),
+                    Level = HpskSite.CompetitionTypes.Common.CompetitionLevel.Find(a.Level)?.Label ?? a.Level,
+                    Place = a.Place ?? "",
+                    Organiser = a.ClubId > 0 ? (clubs.GetClubNameById(a.ClubId) ?? "") : (cal.Region(a.RegionId)?.Name ?? ""),
+                    Tillstyrks = a.KretsOpinion == HpskSite.Models.Kretsgranskning.CompetitionApplicationOpinion.Tillstyrker,
+                    Motivering = a.KretsOpinionText ?? "",
+                    SentAt = a.SentToForbundetAt
+                }).ToList()
+            };
+            return View("KretsenSammanstallning");
+        }
+
         private bool TryRoot(out IPublishedContent? root, out IUmbracoContext? ctx)
         {
             root = null;
@@ -164,6 +255,37 @@ namespace HpskSite.Controllers
         public bool IsFilled { get; set; }
         public bool IHaveIt { get; set; }
         public List<string> HolderNames { get; set; } = new();
+    }
+
+    public class KretsAnsokningarModel
+    {
+        public int RegionId { get; set; }
+        public string RegionName { get; set; } = "";
+        public string RegionUrl { get; set; } = "";
+        public bool Allowed { get; set; }
+    }
+
+    public class KretsSammanstallningModel
+    {
+        public int RegionId { get; set; }
+        public string RegionName { get; set; } = "";
+        public int Year { get; set; }
+        public DateTime Deadline { get; set; }
+        public List<KretsSammanstallningRow> Rows { get; set; } = new();
+    }
+
+    public class KretsSammanstallningRow
+    {
+        public int Id { get; set; }
+        public DateTime Date { get; set; }
+        public string Name { get; set; } = "";
+        public string Discipline { get; set; } = "";
+        public string Level { get; set; } = "";
+        public string Place { get; set; } = "";
+        public string Organiser { get; set; } = "";
+        public bool Tillstyrks { get; set; }
+        public string Motivering { get; set; } = "";
+        public DateTime? SentAt { get; set; }
     }
 
     public class KretsUppdragConfirmModel

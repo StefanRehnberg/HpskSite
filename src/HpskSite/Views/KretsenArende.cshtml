@@ -1,0 +1,94 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var token = ViewData["ArendeToken"] as string ?? "";
+    ViewBag.Title = "Kretsens granskning";
+}
+
+@* Kretsgranskning — länkläget. En krets som inte utsett någon i rollen får ärendet som en länk utan
+   inloggning. Länken gäller ETT ärende, i 60 dagar, och slutar gälla om ärendet ändras (servern
+   jämför kontrollsumman). Beslutet stämplas med namnet och rollen den som beslutar skriver in.
+   Varje besök används för att få kretsen att börja använda pistol.nu — men alltid med något att
+   göra direkt, aldrig bara tjat. *@
+
+<div class="container" style="max-width:760px; padding:1.5rem 0 4rem; font-size:1.08rem;">
+    @Html.AntiForgeryToken()
+    <h1 class="mb-3" style="font-size:1.7rem;font-weight:700;"><i class="bi bi-clipboard-check me-2"></i>Kretsens granskning</h1>
+    <div id="arContent"><div class="text-muted">Hämtar…</div></div>
+</div>
+
+@await Html.PartialAsync("_HtmlEscape")
+<script>
+(function () {
+    const T = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(token));
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc(s);
+    const box = $('arContent');
+
+    function load() {
+        fetch('/umbraco/surface/CompetitionApplication/GetCaseByLink?t=' + encodeURIComponent(T)).then(r => r.json()).then(d => {
+            if (!d.success) { box.innerHTML = '<div class="alert alert-warning" id="arInvalid">' + esc(d.message) + '</div>'; return; }
+            render(d);
+        }).catch(() => { box.innerHTML = '<div class="alert alert-warning">Ärendet kunde inte hämtas. Försök igen om en stund.</div>'; });
+    }
+
+    function render(d) {
+        const a = d.application, r = d.region || { name: 'Kretsen', id: a.regionId };
+        const n = d.viaLinkThisYear || 0;
+        let html = '<div class="alert alert-light border small" id="arNudge"><i class="bi bi-lightbulb me-1"></i>'
+            + (n > 0 ? esc(r.name) + ' har granskat ' + n + (n === 1 ? ' ärende' : ' ärenden') + ' via länk i år. ' : '')
+            + 'Utser ni en tävlingsansvarig på pistol.nu hamnar ärendena direkt hos den personen, med en knapp i mejlet. '
+            + '<a href="/kretsen/kom-igang?krets=' + r.id + '">Jag vill bli kretsens tävlingsansvarige</a></div>';
+
+        html += '<div class="card mb-3"><div class="card-body">'
+            + '<div class="fw-semibold fs-5">' + esc(a.name) + '</div>'
+            + '<div class="text-muted">' + esc(a.clubName) + ' ansöker om att arrangera en ' + esc(a.levelLabel.toLowerCase()) + ' i ' + esc(a.disciplineLabel.toLowerCase()) + '.</div>'
+            + '<dl class="row mt-2 mb-0 small">'
+            + dt('Datum', a.competitionDate + (a.endDate ? ' – ' + a.endDate : '')) + dt('Reservdatum', a.reserveDate) + dt('Plats', a.place)
+            + dt('Klasser', a.classes) + dt('Kontakt', [a.contactName, a.contactEmail, a.contactPhone].filter(Boolean).join(', ')) + dt('Meddelande', a.note)
+            + (a.completionReply ? dt('Klubbens komplettering', a.completionReply) : '')
+            + '</dl></div></div>';
+
+        if (!d.canAct) {
+            html += '<div class="alert alert-success" id="arDone">Ansökan är redan behandlad: ' + esc(a.statusLabel)
+                + (a.deciderName ? ' (' + esc(a.deciderName) + (a.deciderRole ? ', ' + esc(a.deciderRole) : '') + ')' : '') + '.</div>';
+            box.innerHTML = html; return;
+        }
+
+        const choices = a.needsForbundet
+            ? [['tillstyrk', 'Tillstyrk — skicka vidare till Förbundet'], ['avstyrk', 'Avstyrk'], ['complete', 'Be klubben komplettera']]
+            : [['approve', 'Godkänn'], ['reject', 'Avslå'], ['complete', 'Be klubben komplettera']];
+        html += '<div class="card"><div class="card-body">'
+            + '<p class="mb-2">' + (a.needsForbundet ? 'En nationell tävling och en landsdelstävling beslutas av Förbundet. Kretsen tillstyrker eller avstyrker.' : 'En kretstävling beslutar kretsen själv.') + '</p>'
+            + '<div class="mb-2" role="radiogroup">' + choices.map(([v, l], i) => '<div class="form-check"><input class="form-check-input" type="radio" name="arAction" id="arA' + v + '" value="' + v + '"' + (i === 0 ? ' checked' : '') + '><label class="form-check-label" for="arA' + v + '">' + l + '</label></div>').join('') + '</div>'
+            + '<label class="form-label" for="arText">Kommentar till klubben <span class="text-muted small">(krävs vid avslag, avstyrkan och komplettering)</span></label>'
+            + '<textarea class="form-control mb-2" id="arText" rows="3" maxlength="4000"></textarea>'
+            + '<div class="row g-2"><div class="col-md-6"><label class="form-label" for="arName">Ditt namn</label><input class="form-control" id="arName" maxlength="200" autocomplete="name"></div>'
+            + '<div class="col-md-6"><label class="form-label" for="arRole">Din roll i kretsen</label><input class="form-control" id="arRole" maxlength="200" placeholder="t.ex. ordförande, sekreterare"></div></div>'
+            + '<p class="small text-muted mt-2 mb-2">Namnet och rollen står med på beslutet, tillsammans med adressen länken skickades till.</p>'
+            + '<button type="button" class="btn btn-primary" id="arSend">Skicka beslutet</button><div id="arResult" class="mt-2" role="status"></div>'
+            + '</div></div>';
+        box.innerHTML = html;
+        $('arSend').addEventListener('click', send);
+    }
+
+    const dt = (k, v) => v ? '<dt class="col-sm-4">' + esc(k) + '</dt><dd class="col-sm-8">' + esc(v) + '</dd>' : '';
+
+    function send() {
+        const btn = $('arSend'); btn.disabled = true;
+        const act = document.querySelector('input[name="arAction"]:checked').value;
+        fetch('/umbraco/surface/CompetitionApplication/ActByLink', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+            body: new URLSearchParams({ t: T, action: act, text: $('arText').value, name: $('arName').value, role: $('arRole').value }).toString()
+        }).then(r => r.json()).then(r => {
+            const res = $('arResult');
+            res.className = 'mt-2 alert ' + (r.success ? 'alert-success' : 'alert-warning') + ' py-2';
+            res.textContent = r.message || '';
+            if (r.success) btn.classList.add('d-none'); else btn.disabled = false;
+        });
+    }
+
+    load();
+})();
+</script>

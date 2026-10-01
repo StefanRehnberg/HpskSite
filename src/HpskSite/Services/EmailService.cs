@@ -1088,6 +1088,45 @@ namespace HpskSite.Services
             return await SendEmailAsync(toEmail, subject, body, replyTo);
         }
 
+        /// <summary>
+        /// Kretsgranskningens mejl (ansökan, beslut, komplettering, "be kretsen komma igång"): EN
+        /// layout med en knapp, så de sex meddelandetyperna inte bär var sin kopia av HTML:en.
+        ///
+        /// <para><b>⚠️ <paramref name="paragraphs"/> är OSKYDDAD text</b> — metoden HTML-kodar varje
+        /// stycke själv. Skicka aldrig in färdig HTML; en klubbs fritext hamnar annars rakt i mejlet.</para>
+        /// </summary>
+        public async Task<bool> SendKretsgranskningAsync(string toEmail, string toName, string subject,
+            IEnumerable<string> paragraphs, string? buttonText, string? buttonUrl, string? notice, MailReplyTo replyTo)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail)) return false;
+            static string H(string? s) => System.Web.HttpUtility.HtmlEncode(s ?? "").Replace("\n", "<br/>");
+
+            var paras = string.Join("\n", paragraphs.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => $"<p>{H(p)}</p>"));
+            var button = string.IsNullOrWhiteSpace(buttonUrl) || string.IsNullOrWhiteSpace(buttonText)
+                ? ""
+                : $"<p><a class=\"btn\" href=\"{System.Web.HttpUtility.HtmlAttributeEncode(buttonUrl)}\">{H(buttonText)}</a></p>";
+            var foot = string.IsNullOrWhiteSpace(notice) ? "" : $"<p class=\"notice\">{H(notice)}</p>";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .btn {{ display:inline-block; background:#0d6efd; color:#fff !important; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold; }}
+        .notice {{ color: #666; font-size: 13px; margin-top: 14px; }}
+    </style>
+</head>
+<body>
+    <h2>{(string.IsNullOrWhiteSpace(toName) ? "Hej!" : $"Hej {H(toName)},")}</h2>
+    {paras}
+    {button}
+    {foot}
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+            return await SendEmailAsync(toEmail, subject, body, replyTo);
+        }
+
         public async Task<bool> SendForeningsintygRequestSubmittedAsync(
             string toEmail, string toName, string memberName, string kindLabel,
             string firearmLabel, string clubName, MailReplyTo replyTo)

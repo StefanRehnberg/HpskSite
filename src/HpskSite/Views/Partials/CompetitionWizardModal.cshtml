@@ -1834,6 +1834,19 @@ function submitWizard() {
         fields.direktplaceringConfig = JSON.stringify(collectDirektplaceringConfig());
     }
 
+    // Kretsgranskning fas 4: skapas tävlingen ur en godkänd ansökan kopplar servern dem i samma
+    // anrop. Fältet ligger medvetet INTE i formuläret (katalogen känner inte det) utan läggs på här.
+    if (window.hpskWizardApplication && window.hpskWizardApplication.applicationId) {
+        const app = window.hpskWizardApplication;
+        const diffs = [];
+        const date = (document.getElementById('wizard_competitionDate').value || '').slice(0, 10);
+        if (app.date && date && date !== app.date) diffs.push('datumet (' + app.date + ' → ' + date + ')');
+        if (app.discipline && fields.competitionType !== app.discipline) diffs.push('grenen');
+        if (app.level && fields.competitionLevel && fields.competitionLevel !== app.level) diffs.push('vad tävlingen är godkänd som');
+        if (diffs.length && !confirm('Du har ändrat ' + diffs.join(', ') + ' bort från det kretsen godkände. Skapa tävlingen ändå?')) return;
+        fields.applicationId = app.applicationId;
+    }
+
     const requestBody = { fields: fields };
 
     // Show loading state
@@ -1898,7 +1911,8 @@ function submitWizard() {
             } else {
                 _where = 'Den är nationell och hanteras via den allmänna administrationssidan.';
             }
-            alert('Tävling skapad!\n\n' + _where);
+            window.hpskWizardApplication = null;
+            alert('Tävling skapad!\n\n' + _where + (data.applicationNote ? '\n\nOBS: ' + data.applicationNote : ''));
         } else {
             alert('Fel vid skapande av tävling: ' + (data.message || 'Okänt fel'));
             btnCreate.disabled = false;
@@ -1999,10 +2013,52 @@ window.resetWizard = function() {
     // Re-initialize date pickers with defaults
     initializeWizardDatePickers();
 
+    // A plain reset never carries an application — only hpskWizardFromApplication sets it.
+    window.hpskWizardApplication = null;
+    const appBanner = document.getElementById('wizard_applicationBanner');
+    if (appBanner) appBanner.remove();
+
     // Update UI to show step 0
     updateWizardUI();
 
     console.log('Wizard reset to initial state');
+};
+
+// Kretsgranskning fas 4: öppna guiden delvis förifylld ur en godkänd ansökan. Anroparen har redan
+// visat och nollställt guiden (show + resetWizard). Inget sparas här — tävlingen skapas först när
+// arrangören går igenom stegen och trycker Skapa, och kopplingen görs då på servern.
+window.hpskWizardFromApplication = function (p) {
+    if (!p) return;
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null && v !== '') { el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); } };
+    const setDate = (id, v) => { const el = document.getElementById(id); if (!el || !v) return; if (el._flatpickr) el._flatpickr.setDate(v, true); else el.value = v; };
+
+    setVal('wizard_competitionType', p.discipline);
+    if (typeof onCompetitionTypeChange === 'function') onCompetitionTypeChange();
+    setVal('wizard_competitionName', p.name);
+    setDate('wizard_competitionDate', p.date);
+    if (p.endDate) setDate('wizard_competitionEndDate', p.endDate);
+    setVal('wizard_venue', p.venue);
+    if (p.clubId > 0) setVal('wizard_clubId', String(p.clubId));
+    else if (p.regionCode) setVal('wizard_regionalFederation', p.regionCode);
+
+    // En sökt tävling är aldrig klubbintern, och kategorin är den kretsen godkänt.
+    const co = document.getElementById('wizard_isClubOnly');
+    if (co && co.checked) { co.checked = false; co.dispatchEvent(new Event('change', { bubbles: true })); }
+    const lvl = document.getElementById('wizard_competitionLevel');
+    if (lvl && p.level) { lvl.value = p.level; lvl.dataset.touched = '1'; lvl.dispatchEvent(new Event('change', { bubbles: true })); }
+
+    window.hpskWizardApplication = p;
+
+    const body = document.querySelector('#competitionWizardModal .modal-body');
+    if (body && !document.getElementById('wizard_applicationBanner')) {
+        const b = document.createElement('div');
+        b.id = 'wizard_applicationBanner';
+        b.className = 'alert alert-success py-2';
+        b.innerHTML = '<i class="bi bi-check2-circle me-1"></i><strong>Skapas ur kretsens godkända ansökan.</strong> '
+            + 'Namn, datum, gren, kategori och arrangör är ifyllda. Gå igenom stegen och gör övriga inställningar som vanligt.'
+            + (p.awaitingForbundet ? '<div class="small mt-1">Förbundet har inte beslutat ännu. Ansökan visar "Hos Förbundet" tills kretsen registrerar beslutet, och flyttar Förbundet datumet får ni veta det.</div>' : '');
+        body.insertBefore(b, body.firstChild);
+    }
 };
 
 // ============================================================================

@@ -1,0 +1,232 @@
+@model int
+@*
+    Kretskalendern (kretsgranskning fas 4) — modell = kretsnodens id.
+
+    Visar tävlingar, kretsens egna ansökningar (preliminära och godkända) och kretsens händelser,
+    med växeln "Visa grannkretsar". Allt läses genom CompetitionApplication/GetCalendar, som avgör
+    vad besökaren får se. En inloggad klubbadministratör i kretsen kan klicka på en dag och ansöka.
+
+    ⚠️ Egna id:n och funktioner med prefixet kc — ClubCalendar har globala namn utan prefix och de
+    får aldrig krocka om båda en dag hamnar på samma sida.
+*@
+@await Html.PartialAsync("_HtmlEscape")
+
+<style>
+    .kc-wrap { font-size: 1rem; }
+    .kc-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem; }
+    .kc-head h3 { font-size: 1.25rem; margin: 0 .5rem 0 0; min-width: 11rem; }
+    .kc-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-left: 1px solid var(--bs-border-color); border-top: 1px solid var(--bs-border-color); }
+    .kc-dow { font-size: .8rem; font-weight: 600; text-align: center; padding: .25rem; background: var(--bs-tertiary-bg); border-right: 1px solid var(--bs-border-color); border-bottom: 1px solid var(--bs-border-color); }
+    .kc-day { min-height: 6.2rem; padding: .25rem; border-right: 1px solid var(--bs-border-color); border-bottom: 1px solid var(--bs-border-color); cursor: pointer; background: var(--bs-body-bg); }
+    .kc-day.kc-other { background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); }
+    .kc-day.kc-today .kc-num { background: var(--bs-primary); color: #fff; border-radius: 50%; }
+    .kc-day:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: -2px; }
+    .kc-num { display: inline-flex; width: 1.6rem; height: 1.6rem; align-items: center; justify-content: center; font-size: .85rem; }
+    .kc-chip { display: block; font-size: .74rem; line-height: 1.25; padding: .1rem .3rem; border-radius: .3rem; margin-top: .15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid transparent; }
+    .kc-s-tavling { background: var(--bs-primary-bg-subtle); border-left-color: var(--bs-primary); }
+    .kc-s-godkand { background: var(--bs-success-bg-subtle); border-left-color: var(--bs-success); }
+    .kc-s-preliminar { background: var(--bs-warning-bg-subtle); border-left-color: var(--bs-warning); border-left-style: dashed; }
+    .kc-s-handelse { background: var(--bs-secondary-bg-subtle); border-left-color: var(--bs-secondary); }
+    .kc-neighbour { opacity: .6; }
+    .kc-legend span { display: inline-flex; align-items: center; gap: .3rem; margin-right: .9rem; font-size: .85rem; }
+    .kc-legend i.sw { width: .9rem; height: .9rem; border-radius: .2rem; display: inline-block; }
+    .kc-list-month { font-weight: 700; margin: 1rem 0 .35rem; }
+    .kc-list-row { display: flex; gap: .75rem; padding: .45rem 0; border-top: 1px solid var(--bs-border-color); }
+    .kc-list-date { flex: none; width: 6.5rem; font-variant-numeric: tabular-nums; }
+    .kc-warn { color: var(--bs-warning-text-emphasis); font-size: .85rem; }
+    @@media (max-width: 767.98px) { .kc-day { min-height: 3.6rem; } .kc-chip { font-size: .68rem; } }
+</style>
+
+<div class="kc-wrap" id="kcRoot" data-region-id="@Model">
+    <div class="kc-head">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="kcPrev" aria-label="Föregående"><i class="bi bi-chevron-left"></i></button>
+        <h3 id="kcTitle" aria-live="polite"></h3>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="kcNext" aria-label="Nästa"><i class="bi bi-chevron-right"></i></button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="kcToday">I dag</button>
+        <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Visning">
+            <button type="button" class="btn btn-outline-primary active" id="kcMonthBtn">Månad</button>
+            <button type="button" class="btn btn-outline-primary" id="kcListBtn">Lista</button>
+        </div>
+        <div class="form-check form-switch ms-2 mb-0">
+            <input class="form-check-input" type="checkbox" role="switch" id="kcNeighbours">
+            <label class="form-check-label small" for="kcNeighbours" id="kcNeighboursLabel">Visa grannkretsar</label>
+        </div>
+    </div>
+    <div class="kc-legend mb-2">
+        <span><i class="sw kc-s-tavling"></i>Tävling</span>
+        <span><i class="sw kc-s-godkand"></i>Godkänd ansökan</span>
+        <span><i class="sw kc-s-preliminar"></i>Preliminär (sökt)</span>
+        <span><i class="sw kc-s-handelse"></i>Kretsens händelse</span>
+        <span class="kc-warn"><i class="bi bi-exclamation-triangle"></i>Krock</span>
+    </div>
+    <div id="kcApplyHint" class="small text-muted mb-2 d-none"><i class="bi bi-hand-index me-1"></i>Klicka på en dag för att ansöka om en tävling.</div>
+    <div id="kcBody"><div class="text-muted small">Hämtar…</div></div>
+    <div id="kcDay" class="mt-3"></div>
+</div>
+
+@await Html.PartialAsync("_CompetitionApplications")
+
+<script>
+(function () {
+    const root = document.getElementById('kcRoot');
+    if (!root || root.dataset.kcInit) return;
+    root.dataset.kcInit = '1';
+    const REGION_ID = parseInt(root.dataset.regionId, 10);
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc(s);
+    const MONTHS = ['januari', 'februari', 'mars', 'april', 'maj', 'juni', 'juli', 'augusti', 'september', 'oktober', 'november', 'december'];
+    const DOW = ['Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör', 'Sön'];
+
+    const pref = (k, d) => { try { return localStorage.getItem('kc_' + k) ?? d; } catch (e) { return d; } };
+    const setPref = (k, v) => { try { localStorage.setItem('kc_' + k, v); } catch (e) { } };
+
+    let view = pref('view', 'month');
+    let cursor = new Date(); cursor.setDate(1);
+    let data = null;
+    $('kcNeighbours').checked = pref('neighbours', '0') === '1';
+
+    const pad = n => String(n).padStart(2, '0');
+    const key = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+
+    function range() {
+        if (view === 'list') {
+            const f = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+            const t = new Date(cursor.getFullYear(), cursor.getMonth() + 12, 0);
+            return [f, t];
+        }
+        const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+        const start = new Date(first); start.setDate(first.getDate() - ((first.getDay() + 6) % 7));
+        const last = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+        const end = new Date(last); end.setDate(last.getDate() + (6 - ((last.getDay() + 6) % 7)));
+        return [start, end];
+    }
+
+    function load() {
+        const [f, t] = range();
+        $('kcTitle').textContent = view === 'list'
+            ? 'Från ' + MONTHS[cursor.getMonth()] + ' ' + cursor.getFullYear()
+            : MONTHS[cursor.getMonth()].charAt(0).toUpperCase() + MONTHS[cursor.getMonth()].slice(1) + ' ' + cursor.getFullYear();
+        const qs = 'regionId=' + REGION_ID + '&from=' + key(f) + '&to=' + key(t) + '&neighbours=' + ($('kcNeighbours').checked ? 'true' : 'false');
+        return fetch('/umbraco/surface/CompetitionApplication/GetCalendar?' + qs, { credentials: 'same-origin' })
+            .then(r => r.json()).then(d => {
+                if (!d.success) { $('kcBody').innerHTML = '<div class="text-danger small">' + esc(d.message) + '</div>'; return; }
+                data = d;
+                // Antalet i etiketten, namnen i title — sex kretsnamn på en rad bryter huvudet.
+                if (d.neighbours && d.neighbours.length) {
+                    $('kcNeighboursLabel').textContent = 'Visa grannkretsar (' + d.neighbours.length + ')';
+                    $('kcNeighboursLabel').title = d.neighbours.join(', ');
+                }
+                // Tipset bara i månadsvyn — listan har inga dagar att klicka på.
+                $('kcApplyHint').classList.toggle('d-none', view !== 'month' || !(d.applyClubs.length || d.canApplyAsRegion));
+                view === 'list' ? renderList(f, t) : renderMonth(f, t);
+            })
+            .catch(() => { $('kcBody').innerHTML = '<div class="text-danger small">Kalendern kunde inte hämtas.</div>'; });
+    }
+
+    function entriesOn(k) {
+        return data.entries.filter(e => e.date <= k && (e.endDate || e.date) >= k);
+    }
+
+    function chip(e) {
+        const cls = 'kc-chip kc-s-' + e.status + (e.isNeighbour ? ' kc-neighbour' : '');
+        const warn = e.conflicts && e.conflicts.length ? '<i class="bi bi-exclamation-triangle kc-warn me-1"></i>' : '';
+        const label = (e.isNeighbour && !e.isSm ? e.regionName + ': ' : '') + e.name;
+        return '<span class="' + cls + '" title="' + esc(label + ' · ' + e.statusLabel) + '">' + warn + esc(label) + '</span>';
+    }
+
+    function renderMonth(f, t) {
+        let html = '<div class="kc-grid" id="kcGrid">' + DOW.map(d => '<div class="kc-dow">' + d + '</div>').join('');
+        const today = key(new Date());
+        for (let d = new Date(f); d <= t; d.setDate(d.getDate() + 1)) {
+            const k = key(d);
+            const items = entriesOn(k);
+            const other = d.getMonth() !== cursor.getMonth();
+            html += '<div class="kc-day' + (other ? ' kc-other' : '') + (k === today ? ' kc-today' : '') + '" tabindex="0" role="button" data-kc-day="' + k + '" aria-label="' + d.getDate() + ' ' + MONTHS[d.getMonth()] + (items.length ? ', ' + items.length + ' poster' : '') + '">'
+                + '<span class="kc-num">' + d.getDate() + '</span>'
+                + items.slice(0, 3).map(chip).join('')
+                + (items.length > 3 ? '<span class="kc-chip">+' + (items.length - 3) + ' till</span>' : '')
+                + '</div>';
+        }
+        html += '</div>';
+        $('kcBody').innerHTML = html;
+    }
+
+    function renderList(f, t) {
+        const items = data.entries.slice().sort((a, b) => a.date.localeCompare(b.date));
+        if (!items.length) { $('kcBody').innerHTML = '<div class="text-muted">Inget i kalendern de kommande tolv månaderna.</div>'; return; }
+        let html = '', lastMonth = '';
+        items.forEach(e => {
+            const m = e.date.slice(0, 7);
+            if (m !== lastMonth) {
+                const [y, mo] = m.split('-');
+                html += '<div class="kc-list-month">' + MONTHS[parseInt(mo, 10) - 1].replace(/^./, c => c.toUpperCase()) + ' ' + y + '</div>';
+                lastMonth = m;
+            }
+            html += row(e);
+        });
+        $('kcBody').innerHTML = '<div id="kcList">' + html + '</div>';
+    }
+
+    function row(e) {
+        const name = e.url ? '<a href="' + esc(e.url) + '">' + esc(e.name) + '</a>' : esc(e.name);
+        return '<div class="kc-list-row' + (e.isNeighbour ? ' kc-neighbour' : '') + '" data-kc-entry="' + esc(e.kind + '-' + e.id) + '">'
+            + '<div class="kc-list-date">' + esc(e.date) + (e.endDate && e.endDate !== e.date ? '<div class="small text-muted">– ' + esc(e.endDate) + '</div>' : '') + '</div>'
+            + '<div class="flex-grow-1"><div><span class="kc-chip kc-s-' + e.status + ' d-inline-block me-1">' + esc(e.statusLabel) + '</span>' + name + '</div>'
+            + '<div class="small text-muted">' + [e.organiser, e.disciplineLabel, e.levelLabel, e.place, e.isNeighbour && !e.isSm ? e.regionName : ''].filter(Boolean).map(esc).join(' · ') + '</div>'
+            + (e.conflicts && e.conflicts.length ? '<div class="kc-warn"><i class="bi bi-exclamation-triangle me-1"></i>' + e.conflicts.map(esc).join(' · ') + '</div>' : '')
+            + '</div></div>';
+    }
+
+    function showDay(k) {
+        const items = entriesOn(k);
+        const [y, mo, d] = k.split('-');
+        let html = '<div class="card"><div class="card-body"><h4 class="h6 mb-2">' + parseInt(d, 10) + ' ' + MONTHS[parseInt(mo, 10) - 1] + ' ' + y + '</h4>';
+        html += items.length ? items.map(row).join('') : '<div class="text-muted small">Inget den dagen.</div>';
+        const clubs = data.applyClubs || [];
+        if (clubs.length || data.canApplyAsRegion) {
+            html += '<div class="mt-3"><button type="button" class="btn btn-primary btn-sm" id="kcApply" data-date="' + k + '"><i class="bi bi-plus-lg me-1"></i>Ansök om en tävling den här dagen</button>'
+                + (items.some(e => e.kind !== 'event') ? '<div class="small text-muted mt-1">Det finns redan något i kalendern den dagen — kretsen ser krockar, men de stoppar inte en ansökan.</div>' : '') + '</div>';
+        }
+        html += '</div></div>';
+        $('kcDay').innerHTML = html;
+    }
+
+    document.addEventListener('click', function (e) {
+        const day = e.target.closest('[data-kc-day]');
+        if (day && root.contains(day)) { showDay(day.dataset.kcDay); return; }
+        const apply = e.target.closest('#kcApply');
+        if (apply) {
+            const clubs = (data.applyClubs || []).slice();
+            if (!clubs.length && data.canApplyAsRegion) clubs.push({ id: 0, name: data.region.name + ' (kretsen själv)' });
+            window.hpskAppOpenForm({ clubs: clubs, date: apply.dataset.date, regionId: REGION_ID });
+        }
+    });
+    document.addEventListener('keydown', function (e) {
+        const day = e.target.closest && e.target.closest('[data-kc-day]');
+        if (day && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showDay(day.dataset.kcDay); }
+    });
+    // Efter en ansökan från kalendern: läs om, så att den preliminära posten syns direkt.
+    window.hpskAppSaved = function () { load(); $('kcDay').innerHTML = '<div class="alert alert-success py-2">Ansökan är skickad. Den syns i kalendern som preliminär tills kretsen beslutat.</div>'; };
+
+    $('kcPrev').addEventListener('click', () => { cursor.setMonth(cursor.getMonth() - 1); load(); });
+    $('kcNext').addEventListener('click', () => { cursor.setMonth(cursor.getMonth() + 1); load(); });
+    $('kcToday').addEventListener('click', () => { cursor = new Date(); cursor.setDate(1); load(); });
+    function setView(v) {
+        view = v; setPref('view', v);
+        $('kcMonthBtn').classList.toggle('active', v === 'month');
+        $('kcListBtn').classList.toggle('active', v === 'list');
+        $('kcDay').innerHTML = '';
+        load();
+    }
+    $('kcMonthBtn').addEventListener('click', () => setView('month'));
+    $('kcListBtn').addEventListener('click', () => setView('list'));
+    $('kcNeighbours').addEventListener('change', () => { setPref('neighbours', $('kcNeighbours').checked ? '1' : '0'); load(); });
+
+    // Ladda när fliken visas första gången (sidan har många flikar).
+    let started = false;
+    const start = () => { if (started) return; started = true; setView(view); };
+    const tab = document.getElementById('regionCalendar-tab');
+    if (tab) { tab.addEventListener('shown.bs.tab', start); tab.addEventListener('click', start); }
+    if (document.getElementById('regionCalendar')?.classList.contains('active')) start();
+})();
+</script>

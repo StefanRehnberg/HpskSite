@@ -1,0 +1,479 @@
+@*
+    Tävlingsansökan (kretsgranskning fas 4) — klubbens sida.
+
+    Två lägen, samma partial:
+      * ViewData["ApplicationsClubId"] > 0  → sektionen "Ansökningar" i klubbens Tävlingar-flik
+        (lista + knapp), plus dialogen.
+      * annars                               → bara dialogen, för kretskalendern ("klicka på en dag").
+
+    Exporterar (guardat mot dubbel inkludering):
+      window.hpskAppsLoad(clubId)                    — läs om listan
+      window.hpskAppOpenForm({clubId, clubs, date})  — öppna dialogen för en ny ansökan
+      window.hpskAppCreateCompetition(id)            — öppna tävlingsguiden förifylld (kräver guiden på sidan)
+
+    ⚠️ Inga prompt()/alert()-flöden för avslag, svar eller återkallande — en blockerande dialog har
+    redan en gång rapporterats som att "sidan frös". Allt sker i rader på sidan.
+    ⚠️ Knapparna bär ett ID, aldrig ansökans namn i ett onclick (fritext → attribut = kodexekvering).
+*@
+@{
+    var appsClubId = ViewData["ApplicationsClubId"] as int? ?? 0;
+}
+@await Html.PartialAsync("_HtmlEscape")
+
+@if (appsClubId > 0)
+{
+<div class="card mb-3" id="caAppsCard" data-club-id="@appsClubId">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <strong><i class="bi bi-envelope-paper me-1"></i>Ansökningar till kretsen</strong>
+            <span class="text-muted small d-block">Kretstävlingar, landsdelstävlingar och nationella tävlingar söks hos kretsen. En föreningstävling söks inte.</span>
+        </div>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="caNewBtn"><i class="bi bi-plus-lg me-1"></i>Ansök om en tävling</button>
+    </div>
+    <div class="card-body" id="caAppsBox"><div class="text-muted small">Hämtar…</div></div>
+</div>
+}
+
+<div class="modal fade" id="caAppModal" tabindex="-1" aria-labelledby="caAppModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="caAppModalTitle">Ansök om en tävling</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div id="caFormNotice"></div>
+                <input type="hidden" id="caId">
+                <div class="row g-3">
+                    <div class="col-12 d-none" id="caClubWrap">
+                        <label class="form-label" for="caClub">Arrangerande klubb</label>
+                        <select class="form-select" id="caClub"></select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="caLevel">Vad söks tävlingen som?</label>
+                        <select class="form-select" id="caLevel"></select>
+                        <div class="form-text" id="caLevelHelp"></div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="caDiscipline">Gren</label>
+                        <select class="form-select" id="caDiscipline"></select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="caName">Tävlingens namn</label>
+                        <input type="text" class="form-control" id="caName" maxlength="200" autocomplete="off">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="caDate">Datum</label>
+                        <input type="text" class="form-control" id="caDate" placeholder="ÅÅÅÅ-MM-DD" autocomplete="off">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="caEndDate">Slutdatum <span class="text-muted small">(flera dagar)</span></label>
+                        <input type="text" class="form-control" id="caEndDate" placeholder="valfritt" autocomplete="off">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="caReserveDate">Reservdatum</label>
+                        <input type="text" class="form-control" id="caReserveDate" placeholder="valfritt" autocomplete="off">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="caPlace">Plats / skjutbana</label>
+                        <input type="text" class="form-control" id="caPlace" maxlength="200" autocomplete="off">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="caContactName">Kontaktperson</label>
+                        <input type="text" class="form-control" id="caContactName" maxlength="200" autocomplete="off" placeholder="du, om tomt">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="caContactEmail">E-post</label>
+                        <input type="email" class="form-control" id="caContactEmail" maxlength="200" autocomplete="off" placeholder="din, om tomt">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="caContactPhone">Telefon</label>
+                        <input type="text" class="form-control" id="caContactPhone" maxlength="50" autocomplete="off">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="caClasses">Preliminära klasser</label>
+                        <input type="text" class="form-control" id="caClasses" maxlength="400" autocomplete="off" placeholder="t.ex. A, B, C, R">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="caNote">Meddelande till kretsen</label>
+                        <textarea class="form-control" id="caNote" rows="3" maxlength="4000"></textarea>
+                    </div>
+                </div>
+                <div id="caFormResult" class="mt-3" role="status"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-outline-primary" id="caSaveDraft">Spara utkast</button>
+                <button type="button" class="btn btn-primary" id="caSubmit"><i class="bi bi-send me-1"></i>Skicka in till kretsen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="caAskModal" tabindex="-1" aria-labelledby="caAskTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="caAskTitle">Be kretsen komma igång</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2">Mejlet går till kretsens ordförande (annars kretsens kontaktadress), med en knapp till sidan <em>Kom igång</em>. Svarar de, når svaret dig. Ändra texten som du vill.</p>
+                <textarea class="form-control" id="caAskText" rows="9" maxlength="3000"></textarea>
+                <div id="caAskResult" class="mt-2" role="status"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="caAskSend"><i class="bi bi-send me-1"></i>Skicka</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    if (window.hpskAppsLoaded) return;
+    window.hpskAppsLoaded = true;
+
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc ? window.hpskEsc(s) : String(s ?? '');
+    const token = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    const base = '/umbraco/surface/CompetitionApplication/';
+    let state = { clubId: 0, data: null, apps: {} };
+    let meta = { levels: [], disciplines: [] };
+
+    function postForm(action, body) {
+        return fetch(base + action, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() },
+            body: new URLSearchParams(body).toString()
+        }).then(r => r.json());
+    }
+
+    const STATUS_CLASS = {
+        Utkast: 'bg-secondary-subtle text-secondary-emphasis',
+        Inskickad: 'bg-primary-subtle text-primary-emphasis',
+        Komplettering: 'bg-warning-subtle text-warning-emphasis',
+        HosForbundet: 'bg-info-subtle text-info-emphasis',
+        Beviljad: 'bg-success-subtle text-success-emphasis',
+        Avslagen: 'bg-danger-subtle text-danger-emphasis',
+        Aterkallad: 'bg-secondary-subtle text-secondary-emphasis'
+    };
+
+    // ── Listan ───────────────────────────────────────────────────────────────────────
+    window.hpskAppsLoad = function (clubId) {
+        state.clubId = clubId;
+        const box = $('caAppsBox');
+        if (!box) return Promise.resolve();
+        return fetch(base + 'GetClubApplications?clubId=' + clubId, { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) { box.innerHTML = '<div class="text-danger small">' + esc(d.message || 'Kunde inte hämta ansökningarna.') + '</div>'; return; }
+                state.data = d;
+                meta.levels = d.levels || []; meta.disciplines = d.disciplines || [];
+                state.apps = {};
+                (d.applications || []).forEach(a => state.apps[a.id] = a);
+                render(box, d);
+            })
+            .catch(() => { box.innerHTML = '<div class="text-danger small">Kunde inte hämta ansökningarna.</div>'; });
+    };
+
+    function kretsNotice(d) {
+        if (!d.region || d.kretsReceivesLoggedIn) return '';
+        const n = d.linksThisYear || 0;
+        return '<div class="alert alert-light border small py-2 mb-3" id="caKretsNotice">'
+            + '<i class="bi bi-info-circle me-1"></i>' + esc(d.region.name) + ' har inte börjat använda pistol.nu för ansökningar. '
+            + 'Era ansökningar går dit som en länk till kretsens mejladress' + (n > 0 ? ' — ni har skickat ' + n + ' i år' : '') + '. '
+            + 'Be dem utse en tävlingsansvarig, så går det fortare nästa gång. '
+            + '<button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ca="ask">Be kretsen komma igång</button>'
+            + '</div>';
+    }
+
+    function render(box, d) {
+        const list = d.applications || [];
+        let html = kretsNotice(d);
+        if (d.deadlines && d.deadlines.length) {
+            html += '<div class="small text-muted mb-2"><i class="bi bi-calendar-x me-1"></i>Kretsens sista ansökningsdag: '
+                + d.deadlines.map(x => esc(x.year + ' ' + levelLabel(x.level).toLocaleLowerCase('sv-SE') + ': ' + x.lastDate)).join(' · ') + '</div>';
+        }
+        if (!list.length) {
+            box.innerHTML = html + '<div class="text-muted">Klubben har inga ansökningar. Tryck <strong>Ansök om en tävling</strong> för att söka en kretstävling eller en nationell tävling.</div>';
+            return;
+        }
+        html += '<div class="table-responsive"><table class="table table-sm align-middle mb-0" id="caAppsTable"><thead><tr>'
+            + '<th>Tävling</th><th>Datum</th><th>Söks som</th><th>Läge</th><th class="text-end"></th></tr></thead><tbody>';
+        list.forEach(a => {
+            html += '<tr data-app-id="' + a.id + '">'
+                + '<td><div class="fw-semibold">' + esc(a.name) + '</div><div class="small text-muted">' + esc(a.disciplineLabel) + (a.place ? ' · ' + esc(a.place) : '') + '</div>'
+                + kretsComment(a) + '</td>'
+                + '<td class="text-nowrap">' + esc(a.grantedDate || a.competitionDate) + (a.grantedDate ? '<div class="small text-warning-emphasis">flyttad av Förbundet</div>' : '') + '</td>'
+                + '<td>' + esc(a.levelLabel) + '</td>'
+                + '<td><span class="badge ' + (STATUS_CLASS[a.status] || 'bg-secondary') + '">' + esc(a.statusLabel) + '</span>'
+                + (a.lateNote ? '<div class="small text-warning-emphasis mt-1">' + esc(a.lateNote) + '</div>' : '') + '</td>'
+                + '<td class="text-end text-nowrap">' + actions(a) + '</td></tr>'
+                + '<tr class="d-none" data-app-inline="' + a.id + '"><td colspan="5"></td></tr>';
+        });
+        html += '</tbody></table></div>';
+        box.innerHTML = html;
+    }
+
+    function kretsComment(a) {
+        const parts = [];
+        if (a.status === 'Komplettering' && a.completionRequest)
+            parts.push('<div class="small mt-1 text-warning-emphasis"><i class="bi bi-chat-left-text me-1"></i>Kretsen ber om: ' + esc(a.completionRequest) + '</div>');
+        if (a.kretsOpinion)
+            parts.push('<div class="small mt-1"><i class="bi bi-chat-left-text me-1"></i>Kretsen ' + esc(a.kretsOpinion.toLowerCase()) + (a.kretsOpinionText ? ': ' + esc(a.kretsOpinionText) : '') + '</div>');
+        if (a.decisionText && (a.status === 'Beviljad' || a.status === 'Avslagen'))
+            parts.push('<div class="small mt-1"><i class="bi bi-chat-left-text me-1"></i>' + esc(a.decisionText) + '</div>');
+        if (a.competitionUrl)
+            parts.push('<div class="small mt-1"><a href="' + esc(a.competitionUrl) + '">Tävlingen är skapad</a></div>');
+        return parts.join('');
+    }
+
+    // Synligt = steget du står på. Menyn = allt annat.
+    function actions(a) {
+        let primary = '';
+        if (a.canReply) primary = '<button type="button" class="btn btn-warning btn-sm" data-ca="reply" data-id="' + a.id + '">Svara kretsen</button>';
+        else if (a.canCreateCompetition) primary = '<button type="button" class="btn btn-success btn-sm" data-ca="create" data-id="' + a.id + '">Skapa tävlingen</button>';
+        else if (a.canSubmit) primary = '<button type="button" class="btn btn-primary btn-sm" data-ca="submit" data-id="' + a.id + '">Skicka in</button>';
+        else if (a.competitionUrl) primary = '<a class="btn btn-outline-secondary btn-sm" href="' + esc(a.competitionUrl) + '">Öppna tävlingen</a>';
+
+        const items = [];
+        if (a.canEdit) items.push('<li><button class="dropdown-item" type="button" data-ca="edit" data-id="' + a.id + '">Ändra ansökan</button></li>');
+        items.push('<li><button class="dropdown-item" type="button" data-ca="history" data-id="' + a.id + '">Visa historik</button></li>');
+        if (a.canWithdraw) items.push('<li><hr class="dropdown-divider"></li><li><button class="dropdown-item text-danger" type="button" data-ca="withdraw" data-id="' + a.id + '">Återkalla ansökan…</button></li>');
+        const menu = '<div class="btn-group ms-1"><button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false">Åtgärder</button>'
+            + '<ul class="dropdown-menu dropdown-menu-end">' + items.join('') + '</ul></div>';
+        return primary + menu;
+    }
+
+    function levelLabel(v) { return (meta.levels.find(l => l.value === v) || {}).label || v; }
+
+    function inlineRow(id) {
+        const tr = document.querySelector('[data-app-inline="' + id + '"]');
+        if (!tr) return null;
+        tr.classList.remove('d-none');
+        return tr.firstElementChild;
+    }
+
+    // ── Händelser i listan (delegerad) ────────────────────────────────────────────────
+    document.addEventListener('click', function (e) {
+        const b = e.target.closest('[data-ca]');
+        if (!b) return;
+        const id = parseInt(b.dataset.id || '0', 10);
+        const a = state.apps[id];
+        switch (b.dataset.ca) {
+            case 'ask': return openAsk();
+            case 'edit': return a && window.hpskAppOpenForm({ clubId: state.clubId, app: a });
+            case 'submit': return act('SubmitApplication', { id }, id);
+            case 'create': return window.hpskAppCreateCompetition(id);
+            case 'history': return showHistory(id);
+            case 'reply': {
+                const cell = inlineRow(id); if (!cell) return;
+                cell.innerHTML = '<div class="p-2 bg-body-tertiary rounded"><label class="form-label small mb-1" for="caReply' + id + '">Ditt svar till kretsen</label>'
+                    + '<textarea class="form-control" id="caReply' + id + '" rows="3" maxlength="4000"></textarea>'
+                    + '<div class="mt-2"><button type="button" class="btn btn-primary btn-sm" data-ca="replySend" data-id="' + id + '">Skicka svaret</button> '
+                    + '<button type="button" class="btn btn-link btn-sm" data-ca="closeInline" data-id="' + id + '">Avbryt</button></div><div class="small mt-1" data-inline-result></div></div>';
+                return;
+            }
+            case 'replySend': return act('ReplyApplication', { id, text: ($('caReply' + id)?.value || '') }, id);
+            case 'withdraw': {
+                const cell = inlineRow(id); if (!cell) return;
+                cell.innerHTML = '<div class="p-2 bg-body-tertiary rounded"><div class="small mb-1">Återkalla ansökan om <strong>' + esc(a ? a.name : '') + '</strong>? Kretsen ser att den är återkallad.</div>'
+                    + '<input class="form-control form-control-sm" id="caWithdrawReason' + id + '" maxlength="500" placeholder="Skäl (valfritt)">'
+                    + '<div class="mt-2"><button type="button" class="btn btn-danger btn-sm" data-ca="withdrawSend" data-id="' + id + '">Återkalla</button> '
+                    + '<button type="button" class="btn btn-link btn-sm" data-ca="closeInline" data-id="' + id + '">Avbryt</button></div><div class="small mt-1" data-inline-result></div></div>';
+                return;
+            }
+            case 'withdrawSend': return act('WithdrawApplication', { id, reason: ($('caWithdrawReason' + id)?.value || '') }, id);
+            case 'closeInline': {
+                const tr = document.querySelector('[data-app-inline="' + id + '"]');
+                if (tr) { tr.classList.add('d-none'); tr.firstElementChild.innerHTML = ''; }
+                return;
+            }
+        }
+    });
+
+    function act(action, body, id) {
+        return postForm(action, body).then(r => {
+            const cell = document.querySelector('[data-app-inline="' + id + '"] [data-inline-result]');
+            if (!r.success) {
+                if (cell) { cell.className = 'small mt-1 text-danger'; cell.textContent = r.message || 'Det gick inte.'; }
+                else showTopMessage(r.message || 'Det gick inte.', false);
+                return;
+            }
+            showTopMessage(r.message || 'Klart.', true);
+            window.hpskAppsLoad(state.clubId);
+        });
+    }
+
+    function showTopMessage(msg, ok) {
+        const box = $('caAppsBox'); if (!box) return;
+        let el = $('caTopMessage');
+        if (!el) { el = document.createElement('div'); el.id = 'caTopMessage'; box.parentNode.insertBefore(el, box); }
+        el.className = 'alert ' + (ok ? 'alert-success' : 'alert-warning') + ' mx-3 mt-3 mb-0 py-2';
+        el.textContent = msg;
+    }
+
+    function showHistory(id) {
+        const cell = inlineRow(id); if (!cell) return;
+        cell.innerHTML = '<div class="small text-muted p-2">Hämtar…</div>';
+        fetch(base + 'GetApplication?id=' + id, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            if (!d.success) { cell.innerHTML = '<div class="small text-danger p-2">' + esc(d.message) + '</div>'; return; }
+            cell.innerHTML = '<div class="p-2 bg-body-tertiary rounded"><ul class="list-unstyled small mb-1" data-ca-history>'
+                + d.events.map(ev => '<li><span class="text-muted">' + esc(ev.at) + '</span> · <strong>' + esc(ev.kindLabel) + '</strong>'
+                    + (ev.byName ? ' · ' + esc(ev.byName) : '') + (ev.text ? '<div class="ms-3">' + esc(ev.text) + '</div>' : '') + '</li>').join('')
+                + '</ul><button type="button" class="btn btn-link btn-sm p-0" data-ca="closeInline" data-id="' + id + '">Stäng</button></div>';
+        });
+    }
+
+    // ── Dialogen ─────────────────────────────────────────────────────────────────────
+    function fillSelect(sel, items, value) {
+        sel.innerHTML = items.map(i => '<option value="' + esc(i.value) + '"' + (i.value === value ? ' selected' : '') + '>' + esc(i.label) + '</option>').join('');
+    }
+    const LEVEL_HELP = {
+        Krets: 'Kretsen beslutar.',
+        Landsdel: 'Kretsen yttrar sig och skickar vidare. Förbundet beslutar (sista dag 30 september året före).',
+        Nationell: 'Kretsen yttrar sig och skickar vidare. Förbundet beslutar (sista dag 30 september året före).'
+    };
+
+    function ensureMeta() {
+        if (meta.levels.length && meta.disciplines.length) return Promise.resolve();
+        return fetch(base + 'GetApplicationOptions', { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            if (d.success) { meta.levels = d.levels || []; meta.disciplines = d.disciplines || []; }
+        });
+    }
+
+    function datePicker(id) {
+        const el = $(id);
+        if (el && typeof flatpickr !== 'undefined' && !el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', minDate: 'today' });
+    }
+    function setDate(id, v) { const el = $(id); if (!el) return; if (el._flatpickr) { if (v) el._flatpickr.setDate(v, false); else el._flatpickr.clear(); } else el.value = v || ''; }
+
+    window.hpskAppOpenForm = function (opts) {
+        opts = opts || {};
+        state.pendingClubs = opts.clubs || null;
+        if (opts.clubId) state.clubId = opts.clubId;
+        if (opts.regionId) state.regionId = opts.regionId;
+        return ensureMeta().then(() => {
+            const a = opts.app || null;
+            $('caId').value = a ? a.id : '';
+            $('caAppModalTitle').textContent = a ? 'Ändra ansökan' : 'Ansök om en tävling';
+            $('caFormNotice').innerHTML = a && a.status !== 'Utkast'
+                ? '<div class="alert alert-info small py-2">Ansökan är redan hos kretsen. Sparar du en ändring får kretsen veta det.</div>' : '';
+            $('caFormResult').innerHTML = '';
+
+            const clubWrap = $('caClubWrap');
+            if (!a && opts.clubs && opts.clubs.length) {
+                fillSelect($('caClub'), opts.clubs.map(c => ({ value: String(c.id), label: c.name })), String(opts.clubs[0].id));
+                clubWrap.classList.toggle('d-none', opts.clubs.length < 2);
+            } else clubWrap.classList.add('d-none');
+
+            fillSelect($('caLevel'), meta.levels, a ? a.level : 'Krets');
+            fillSelect($('caDiscipline'), meta.disciplines, a ? a.discipline : 'Precision');
+            $('caName').value = a ? a.name : '';
+            ['caDate', 'caEndDate', 'caReserveDate'].forEach(datePicker);
+            setDate('caDate', a ? a.competitionDate : (opts.date || ''));
+            setDate('caEndDate', a ? a.endDate : '');
+            setDate('caReserveDate', a ? a.reserveDate : '');
+            $('caPlace').value = a ? (a.place || '') : '';
+            $('caContactName').value = a ? (a.contactName || '') : '';
+            $('caContactEmail').value = a ? (a.contactEmail || '') : '';
+            $('caContactPhone').value = a ? (a.contactPhone || '') : '';
+            $('caClasses').value = a ? (a.classes || '') : '';
+            $('caNote').value = a ? (a.note || '') : '';
+            $('caSaveDraft').classList.toggle('d-none', !!(a && a.status !== 'Utkast'));
+            $('caSubmit').innerHTML = a && a.status !== 'Utkast' ? '<i class="bi bi-check-lg me-1"></i>Spara ändringen' : '<i class="bi bi-send me-1"></i>Skicka in till kretsen';
+            updateLevelHelp();
+            bootstrap.Modal.getOrCreateInstance($('caAppModal')).show();
+        });
+    };
+
+    function updateLevelHelp() { $('caLevelHelp').textContent = LEVEL_HELP[$('caLevel').value] || ''; }
+    document.addEventListener('change', e => { if (e.target && e.target.id === 'caLevel') updateLevelHelp(); });
+
+    function save(submit) {
+        const id = parseInt($('caId').value || '0', 10);
+        const existing = id ? state.apps[id] : null;
+        // Befintlig ansökan: dess klubb. Ny ur kalendern: vald klubb. Ny ur klubbens flik: klubben.
+        const clubId = existing ? existing.clubId
+            : (state.pendingClubs && state.pendingClubs.length ? parseInt($('caClub').value || '0', 10) : state.clubId);
+        const body = {
+            id: id, clubId: clubId, regionId: state.regionId || 0,
+            level: $('caLevel').value, discipline: $('caDiscipline').value, name: $('caName').value,
+            competitionDate: $('caDate').value, endDate: $('caEndDate').value, reserveDate: $('caReserveDate').value,
+            place: $('caPlace').value, contactName: $('caContactName').value, contactEmail: $('caContactEmail').value,
+            contactPhone: $('caContactPhone').value, classes: $('caClasses').value, note: $('caNote').value,
+            submit: submit ? '1' : '0'
+        };
+        const res = $('caFormResult');
+        res.className = 'mt-3 small text-muted'; res.textContent = 'Sparar…';
+        $('caSubmit').disabled = $('caSaveDraft').disabled = true;
+        fetch(base + 'SaveApplication', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+            body: JSON.stringify(body)
+        }).then(r => r.json()).then(r => {
+            $('caSubmit').disabled = $('caSaveDraft').disabled = false;
+            if (!r.success) { res.className = 'mt-3 alert alert-warning py-2'; res.textContent = r.message || 'Det gick inte att spara.'; return; }
+            bootstrap.Modal.getInstance($('caAppModal')).hide();
+            if ($('caAppsBox') && clubId === state.clubId) { showTopMessage(r.message, true); window.hpskAppsLoad(state.clubId); }
+            if (typeof window.hpskAppSaved === 'function') window.hpskAppSaved(r);
+        }).catch(() => { $('caSubmit').disabled = $('caSaveDraft').disabled = false; res.className = 'mt-3 alert alert-warning py-2'; res.textContent = 'Det gick inte att spara.'; });
+    }
+    $('caSubmit')?.addEventListener('click', () => save(true));
+    $('caSaveDraft')?.addEventListener('click', () => save(false));
+    $('caNewBtn')?.addEventListener('click', () => window.hpskAppOpenForm({ clubId: state.clubId }));
+
+    // ── Skapa tävlingen ──────────────────────────────────────────────────────────────
+    window.hpskAppCreateCompetition = function (id) {
+        fetch(base + 'GetPrefill?id=' + id, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            if (!d.success) { showTopMessage(d.message || 'Det gick inte.', false); return; }
+            const el = $('competitionWizardModal');
+            if (!el || typeof window.hpskWizardFromApplication !== 'function') { showTopMessage('Tävlingsguiden finns inte på den här sidan.', false); return; }
+            const modal = window.competitionWizardModalInstance || new bootstrap.Modal(el);
+            window.competitionWizardModalInstance = modal;
+            modal.show();
+            if (typeof window.resetWizard === 'function') window.resetWizard();
+            window.hpskWizardFromApplication(d.prefill);
+            window.onCompetitionSaved = function () { window.hpskAppsLoad(state.clubId); if (typeof loadClubCompetitions === 'function') loadClubCompetitions(); };
+        });
+    };
+
+    // ── Be kretsen komma igång ───────────────────────────────────────────────────────
+    function openAsk() {
+        const d = state.data || {};
+        const name = d.region ? d.region.name : 'kretsen';
+        const n = d.linksThisYear || 0;
+        $('caAskText').value =
+            'Hej,\n\nVi skickar våra tävlingsansökningar och resultat till ' + name + ' via pistol.nu.'
+            + (n > 0 ? ' Hittills i år har ' + n + (n === 1 ? ' ärende' : ' ärenden') + ' kommit till er som länkar till kretsens mejladress.' : '')
+            + '\n\nOm kretsen utser en tävlingsansvarig och en resultatgranskare på pistol.nu hamnar ärendena direkt hos rätt person, och vi ser direkt när ni beslutat. '
+            + 'Det tar några minuter: logga in, välj vem som har vilket uppdrag, klart.\n\nTack!';
+        $('caAskResult').innerHTML = '';
+        $('caAskSend').disabled = false;
+        bootstrap.Modal.getOrCreateInstance($('caAskModal')).show();
+    }
+    $('caAskSend')?.addEventListener('click', function () {
+        const btn = this; btn.disabled = true;
+        postForm('AskKretsToStart', { clubId: state.clubId, text: $('caAskText').value }).then(r => {
+            const box = $('caAskResult');
+            box.className = 'mt-2 alert ' + (r.success ? 'alert-success' : 'alert-warning') + ' py-2';
+            box.textContent = r.message || '';
+            if (!r.success) btn.disabled = false;
+        });
+    });
+
+    // Klubbens Tävlingar-flik: läs in när fliken visas första gången.
+    const card = $('caAppsCard');
+    if (card) {
+        const cid = parseInt(card.dataset.clubId, 10);
+        state.clubId = cid;
+        const tab = document.getElementById('competitions-tab');
+        let loaded = false;
+        const load = () => { if (!loaded) { loaded = true; window.hpskAppsLoad(cid); } };
+        if (tab) { tab.addEventListener('shown.bs.tab', load); tab.addEventListener('click', load); }
+        if (document.getElementById('competitionsTab')?.classList.contains('active')) load();
+    }
+})();
+</script>
