@@ -726,6 +726,8 @@ namespace HpskSite.Controllers
                             registrationCloseDate = comp.Value<DateTime?>("registrationCloseDate"),
                             isActive = isActive,
                             isClubOnly = comp.Value<bool>("isClubOnly"),
+                            // Bekräftad nivå eller tomt; listan faller då tillbaka på värdbrickan.
+                            competitionLevel = HpskSite.CompetitionTypes.Common.CompetitionLevel.Read(comp),
                             isExternal = comp.Value<bool>("isExternal"),
                             clubId = comp.Value<int?>("clubId") ?? 0,
                             // Surfaced so the list can tag each row Klubb / Krets / Nationell — lets a
@@ -1009,6 +1011,19 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Välj antingen ansvarig klubb, krets eller mästerskapstyp — annars går det inte att skapa en lättläst URL för tävlingen." });
                 }
 
+                // Tävlingsnivån — samma regel som redigeringen (CompetitionEditController.SaveCompetition).
+                var _level = ReadFieldAsString(request.Fields, HpskSite.CompetitionTypes.Common.CompetitionLevel.PropertyAlias);
+                if (!HpskSite.CompetitionTypes.Common.CompetitionLevel.IsValid(_level))
+                {
+                    return Ok(new { success = false, message = $"Okänd tävlingsnivå: \"{_level}\"." });
+                }
+                var _levelError = HpskSite.CompetitionTypes.Common.CompetitionLevel.ConsistencyError(
+                    _level, ReadFieldAsBool(request.Fields, "isClubOnly"), _hostClubId > 0);
+                if (_levelError != null)
+                {
+                    return Ok(new { success = false, message = _levelError });
+                }
+
                 if (!request.Fields.TryGetValue("competitionType", out var typeIdObj) || typeIdObj == null)
                 {
                     return Ok(new { success = false, message = "Competition type is required" });
@@ -1214,6 +1229,12 @@ namespace HpskSite.Controllers
                             // sträng- eller Array-grenen fångade. Det råa elementet lagrades och
                             // varje guide-skapad tävling fick CSV i stället för JSON.
                             value = HpskSite.Models.ShootingClassIdsValue.Normalize(value);
+                        }
+                        else if (field.Key == HpskSite.CompetitionTypes.Common.CompetitionLevel.PropertyAlias)
+                        {
+                            // Kanoniskt värde; tomt skrivs inte (= ej bekräftad). Validerat ovan.
+                            var level = HpskSite.CompetitionTypes.Common.CompetitionLevel.Normalize(ReadFieldAsString(request.Fields, field.Key));
+                            value = level == "" ? null : level;
                         }
 
                         if (value != null)
@@ -3894,6 +3915,23 @@ namespace HpskSite.Controllers
             }
             if (obj is int direct) return direct;
             return int.TryParse(obj.ToString(), out var parsed) ? parsed : 0;
+        }
+
+        /// <summary>
+        /// Read a field from the request Fields dict as a bool. Accepts JSON true/false and the
+        /// strings "true"/"false"; anything else, or a missing field, is false.
+        /// </summary>
+        private static bool ReadFieldAsBool(Dictionary<string, object>? fields, string key)
+        {
+            if (fields == null || !fields.TryGetValue(key, out var obj) || obj == null) return false;
+            if (obj is System.Text.Json.JsonElement je)
+            {
+                if (je.ValueKind == System.Text.Json.JsonValueKind.True) return true;
+                if (je.ValueKind == System.Text.Json.JsonValueKind.String) return bool.TryParse(je.GetString(), out var sb) && sb;
+                return false;
+            }
+            if (obj is bool b) return b;
+            return bool.TryParse(obj.ToString(), out var pb) && pb;
         }
 
         /// <summary>

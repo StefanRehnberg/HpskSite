@@ -1,3 +1,4 @@
+using HpskSite.CompetitionTypes.Common;
 using HpskSite.CompetitionTypes.Common.Utilities;
 using HpskSite.Models;
 using NPoco;
@@ -223,9 +224,16 @@ namespace HpskSite.Services
                         ci = (0, "", false);
                     else
                     {
-                        // Untyped read — competitionScope is a FlexibleDropdown that throws on Value<string>().
-                        var scope = comp.Value("competitionScope")?.ToString();
-                        bool eligible = !def.RequiresKretsScope || IsKretsOrAbove(scope);
+                        // ReadScope — even the untyped Value("competitionScope") can throw on a
+                        // plain-string value (see CompetitionScopeHelper.ReadScope).
+                        var scope = CompetitionScopeHelper.ReadScope(comp);
+                        // Krets level counts whether it comes from the championship OR from a
+                        // CONFIRMED competition level (an open krets competition without a
+                        // championship was never counted before). An unconfirmed level is only a
+                        // suggestion and is never read here — badge awards are one-way.
+                        bool eligible = !def.RequiresKretsScope
+                            || IsKretsOrAbove(scope)
+                            || CompetitionLevel.IsKretsOrAbove(CompetitionLevel.Read(comp));
                         ci = (comp.Value<DateTime?>("competitionDate")?.Year ?? 0, comp.Name ?? "Tävling", eligible);
                     }
                     compInfo[compId] = ci;

@@ -151,6 +151,12 @@ namespace HpskSite.CompetitionTypes.Common
                       "CompetitionUrlProvider inte bilda någon URL."),
             new("regionalFederation", "Krets (endast om ingen klubb)", FieldControl.Select, "Arrangör / Synlighet", 2),
             new("isClubOnly", "Endast för specifik klubb", FieldControl.Checkbox, "Arrangör / Synlighet", 3),
+            // ⚠ Namnet skrivs som LITERAL (= CompetitionLevel.PropertyAlias): kontraktssviterna
+            // läser katalogen ur källan och känner bara igen new("namn", ...).
+            new("competitionLevel", "Vem får anmäla sig?", FieldControl.Slot, "Arrangör / Synlighet", 4,
+                slot: "competition-level",
+                note: "_CompetitionLevelField — styr isClubOnly-rutan, som döljs när egenskapen finns. " +
+                      "Tomt = ej bekräftad, dialogen föreslår en nivå (CompetitionLevel.Suggest)."),
 
             // ── Tävlingsledning & Betalning ─────────────────────────────────────
             new("competitionDirector", "Tävlingsledare", FieldControl.Text, "Tävlingsledning & Betalning", 1, required: true),

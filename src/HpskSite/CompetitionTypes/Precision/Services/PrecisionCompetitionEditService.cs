@@ -432,6 +432,14 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                     : ConvertCompetitionManagers(value);
             }
 
+            // Kanoniskt värde, eller null (= ej bekräftad) för okänt — CompetitionEditController
+            // har redan vägrat ett okänt värde innan vi kommer hit.
+            if (fieldName.Equals(CompetitionLevel.PropertyAlias, StringComparison.OrdinalIgnoreCase))
+            {
+                var level = CompetitionLevel.Normalize(text);
+                return level == "" ? null : level;
+            }
+
             if (BeloppsFalt.Contains(fieldName))
                 return decimal.TryParse(text, out var dec) && dec >= 0 ? dec : (object?)null;
 

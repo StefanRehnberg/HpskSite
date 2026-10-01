@@ -94,8 +94,20 @@
 
         // Both club badges stay in the BLUE family on purpose — the old yellow read as a
         // warning, which an internal competition is not.
+        // A CONFIRMED competition level (CompetitionLevel) names itself; without one the
+        // badge falls back to what the host says, as before. Krets level and above get their
+        // own wording — "Krets" alone said only who arranges, not who may enter.
+        const LEVEL_BADGE = {
+            'Krets':     '<span class="badge bg-info text-dark ms-2" title="Kretstävling – alla föreningar i kretsen"><i class="bi bi-diagram-3 me-1"></i>Kretstävling</span>',
+            'Landsdel':  '<span class="badge bg-info text-dark ms-2" title="Landsdelstävling – alla kretsar i landsdelen"><i class="bi bi-map me-1"></i>Landsdelstävling</span>',
+            'Nationell': '<span class="badge bg-dark ms-2" title="Nationell tävling – alla föreningar i Förbundet"><i class="bi bi-globe me-1"></i>Nationell</span>',
+            'Riks':      '<span class="badge bg-dark ms-2" title="Rikstävling på Förbundets uppdrag"><i class="bi bi-trophy me-1"></i>Rikstävling</span>'
+        };
         window.hpskCompetitionScopeBadge = function (comp, scope) {
             const kind = (scope && scope.kind) || 'site';
+            if (comp.competitionLevel && LEVEL_BADGE[comp.competitionLevel]) {
+                return LEVEL_BADGE[comp.competitionLevel];
+            }
             if (comp.clubId && comp.clubId > 0) {
                 if (comp.isClubOnly) {
                     return '<span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle ms-2" title="Klubbtävling – endast klubbens egna medlemmar"><i class="bi bi-shield-lock me-1"></i>Endast klubb</span>';
