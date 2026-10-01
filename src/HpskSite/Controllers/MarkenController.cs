@@ -2163,6 +2163,7 @@ namespace HpskSite.Controllers
                     part2Source = cand.Part2Source,
                     part2Detail = cand.Part2Detail,
                     part2ViaFalt = cand.Part2ViaFalt,
+                    part2Explain = cand.Part2Note,
                     part2SeriesCount = cand.Part2SeriesCount,
                     pendingSpeedCount = cand.PendingSpeedCount,
                     part2Required = cand.RequiredSpeedSeries,

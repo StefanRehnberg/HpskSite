@@ -3901,11 +3901,14 @@ function renderMarken(data, year) {
             const pendingTxt = gf.pendingPrecisionCount > 0 ? ` <span class="text-muted">(${gf.pendingPrecisionCount} väntar)</span>` : '';
             const speedPending = gf.pendingSpeedCount > 0 ? ` <span class="text-muted">(${gf.pendingSpeedCount} väntar)</span>` : '';
             const speedDetail = gf.part2ViaFalt
-                ? (gf.part2Detail || 'fältmedalj')
+                ? 'fältmedalj'
                 : `${gf.part2SeriesCount || 0}/${gf.part2Required || 3} godkända snabbserier${speedPending}`;
+            // Each part carries its own explanation directly under it, so the fältmedalj route is
+            // named where the speed part is — not only as a detail in the right-hand column.
             let html = partRow('Precisionsdel', part1, `${gf.qualifyingSeriesCount || 0}/${gf.requiredSeries} godkända serier${pendingTxt}`);
+            if (gf.part1Note) html += `<div class="small text-muted mb-1">${escapeHtmlMarken(gf.part1Note)}</div>`;
             html += partRow('Snabbskyttedel', part2, speedDetail);
-            if (gf.part1Note) html += `<div class="small text-muted mt-1">${escapeHtmlMarken(gf.part1Note)}</div>`;
+            if (gf.part2Explain) html += `<div class="small text-muted mb-1">${escapeHtmlMarken(gf.part2Explain)}</div>`;
             if (done) {
                 html += `<div class="mt-2"><span class="badge bg-success"><i class="bi bi-check2-all me-1"></i>Guldfodring ${data.year} uppfylld</span></div>`;
             } else {

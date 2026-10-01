@@ -158,6 +158,15 @@ namespace HpskSite.Services
         public string? Part2Source { get; set; }
         public string? Part2Detail { get; set; }
         public bool Part2ViaFalt { get; set; }
+
+        /// <summary>
+        /// One line under the speed part saying how it can be — or was — fulfilled. The part has two
+        /// routes (SHB 5.1.1.1 pt 2), and a heading that names only "3 snabbserier" reads as wrong the
+        /// moment it is met by a fältmedalj instead (Falkenbergs PK 2026-09-30).
+        /// </summary>
+        public string Part2Note => Part2ViaFalt
+            ? $"Uppfylld genom standardmedalj i fältskytte ({Part2Detail ?? "fältskytte"}), som ersätter de tre snabbserierna."
+            : "Tre godkända snabbserier (tillämpning) i guld — eller en standardmedalj i fältskytte samma år.";
         public int Part2SeriesCount { get; set; }
         public int PendingSpeedCount { get; set; }
         public int RequiredSpeedSeries => Marken.GuldfodringSpeedSeriesRequired;
