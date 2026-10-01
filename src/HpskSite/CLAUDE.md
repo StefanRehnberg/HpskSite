@@ -768,6 +768,37 @@ generisk renderare hade behövt uttrycka layout, ordning och villkor för tre ge
 gränssnitt — alltså ett mallspråk. Drift fångas i stället av kontrakten
 (`wizard-catalog-verify`, `compedit-catalog-verify`), som täcker alla tre ytor.
 
+### Tävlingsnivå — vilka får delta, skilt från mästerskapet (2026-10-01, fas 0)
+
+Kretsgranskningens grund (design: Claude Docs "Kretsens granskning och tävlingsansökan").
+`competitionScope` bär bara MÄSTERSKAPET; vilka som får delta lagras nu i
+**`competitionLevel`**: `Forening` (bara egna medlemmar, alltid med `isClubOnly`) ·
+`ForeningOppen` (öppen föreningstävling, kräver kretsens tillstånd) · `Krets` · `Landsdel` ·
+`Nationell` · `Riks`.
+
+- **`CompetitionTypes/Common/CompetitionLevel.cs` är enda källan** — värden, etiketter,
+  förklaringar, `Suggest`, `ConsistencyError`, `IsKretsOrAbove`, `Read`.
+- **Tomt = ej bekräftat. Ingen backfill.** Dialogerna FÖRESLÅR en nivå (klubbintern vinner,
+  sedan mästerskapet, sedan värden) och den sparas när någon sparar tävlingen. Allt med
+  officiell följd läser bara en bekräftad nivå.
+- **`Views/Partials/_CompetitionLevelField.cshtml`** (modell = prefix) i alla tre dialogerna.
+  ⚠️ **Valet STYR `isClubOnly`-rutan, som döljs** när egenskapen finns; rutan ligger kvar i
+  formuläret så standardmedaljspärren och "Var hamnar tävlingen?" fungerar oförändrat.
+  Dialogerna anropar `hpskLevelFill(prefix, stored)` efter ifyllnad och
+  `hpskLevelRefresh(prefix)` i sina klubb-/klubbintern-funktioner. ⚠️ En bekräftad nivå ändras
+  aldrig av sig själv: klubblistan laddas asynkront, så "ingen klubb" kan betyda "inte laddad".
+- **Servern vägrar** okänt värde och en nivå som säger emot `isClubOnly` eller kräver klubb
+  som saknas (`SaveCompetition` + `CreateCompetition`), bara när fältet skickas.
+- **Märken:** "krets eller högre" = mästerskapet ELLER en bekräftad nivå ≥ krets.
+  ⚠️ `ForeningOppen` räknas INTE (öppen fråga; märkestilldelning är enkelriktad).
+- **Listan:** bekräftad nivå ≥ krets ger egen bricka (Kretstävling/Landsdelstävling/
+  Nationell/Rikstävling); annars värdbrickan som förut.
+- **Standardmedaljerna är oförändrade:** klubbinterna ger inga (`isAwardingStandardMedals &&
+  !isClubOnly`), öppna föreningstävlingar ger som alla andra.
+
+Test: `CompetitionLevelTests` 33 (A/B: klubbintern-regeln flyttad efter mästerskapet → 1 faller).
+Adds C# → full ombyggnad. **En doctype-egenskap** (`competition.competitionLevel`, Textstring).
+
 ### Competition Admin System ✅ COMPLETE
 **Location:** Admin Page → Competitions tab (default)
 
@@ -3130,6 +3161,7 @@ Navigate to **Members → Member Groups**:
 - **club**: add `activityFromRangeCheckIn` True/False property (optional, default false, label "Incheckning på banan räknas som aktivitet"). Låter QR-incheckningar på klubbens länkade banor räknas i aktivitetssammanställningen. **Av som standard, så en deploy ändrar ingen klubbs siffror.** Utan egenskapen är `SetValue` en tyst no-op — därför **vägrar** skrivvägen och namnger egenskapen, och switchen renderas låst med förklaringen intill. Added 2026-09-01.
 - **competition**: add `isAwardingHonoraryAward` True/False property (optional, default false, label "Hederspriser utgår"). Arrangören avgör om hederspriser utgår (SHB C.3.4.2); styr hedersprissektionen på **/prisutdelning**. Utan egenskapen degraderar läsvägen till "utgår inte" **och säger vilken egenskap som saknas** — en tyst utelämnad sektion är oskiljbar från att arrangören valt bort hederspriser. Kryssrutan finns i tävlingsguiden, redigeringsmodalen OCH Springskyttemodalen (samt i `CompetitionFieldCatalog`); redigeringsmodalen renderar den **avstängd** och namnger egenskapen när den saknas. Added 2026-09-08.
 - **competitionResult**: add `honoraryAwardConfig` Textarea property (optional, label "Hedersprisfördelning (JSON)"). Arrangörens egen fördelning av hederspriser — JSON, kategorinamn → antal. **⚠️ EGEN egenskap, skild från `resultData`:** fördelningen är ett manuellt beslut och måste överleva att resultatlistan räknas om (samma lärdom som `mergeConfig`). Utan egenskapen visas systemets förslag men **sparningen VÄGRAR och namnger egenskapen** i stället för att rapportera lyckat och vara borta vid nästa laddning. Added 2026-09-08.
+- **competition**: add `competitionLevel` **Textstring** property (optional, label "Tävlingsnivå"). Tävlingens nivå enligt SHB C.3.1 — se *Tävlingsnivå* nedan. ⚠️ **Textstring, inte FlexibleDropdown** (den kastar på rena strängvärden). Utan egenskapen visar dialogerna en förklaring i stället för valet och rutan "Endast för klubben" står kvar som förut. Added 2026-10-01 (branch `kretsgranskning`, fas 0).
 - **competition**: add `medalsPerWeaponGroup` True/False property (optional, default false, label "En uppsättning medaljer per vapengrupp"). Arrangörens val: delas vapengrupp C i sina mästerskapsklasser (C, C Dam, C Vet Y, C Vet Ä, C Jun) eller delas EN uppsättning medaljer ut per vapengrupp? **Default false = dagens beteende, så en deploy utan operatörssteget ändrar ingen befintlig tävling.** Erbjuds bara vid klubb- och kretsmästerskap; `MedalGrouping` ignorerar värdet över den nivån. Utan egenskapen degraderar läsvägen till dagens indelning men **`SetMedalGrouping` VÄGRAR och namnger egenskapen** — `SetValue` på en saknad egenskap är en tyst no-op, och en kryssruta som rapporterar lyckat och är borta vid nästa laddning är värre än en låst. Added 2026-09-20.
 - **competition**: add `teamResultSeriesCount` Integer property (optional, default 0, label "Antal serier i lagresultat"). How many series count toward a team's total — surfaced next to "Tillåt laganmälan" in the competition wizard + edit modals. 0/empty = auto (defaults to the qualification series count = `numberOfSeriesOrStations − numberOfFinalSeries`), so a 7+3 finals comp counts only the 7 qualifying series without any config. Set a value to override. Read by `CompetitionTeamController.GetTeamResultSeriesCount`. **The team-results-show-0 fix does NOT depend on this property** (the qualification default handles it); the property only adds explicit override. Missing property = silent no-op (auto default used). Added 2026-07-22.
 
