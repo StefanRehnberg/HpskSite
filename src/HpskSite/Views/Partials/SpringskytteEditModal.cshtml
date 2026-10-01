@@ -418,6 +418,8 @@
                                     </div>
                                 </div>
                             </div>
+
+                            @await Html.PartialAsync("_CompetitionLevelField", "springEdit_")
                         </div>
                     </div>
 
@@ -679,6 +681,9 @@ window.populateSpringEditModal = function(comp) {
     const regionSelect = document.getElementById('springEdit_regionalFederation');
     if (regionSelect) regionSelect.dataset.currentValue = comp.regionalFederation || '';
 
+    // Tävlingsnivån — efter isClubOnly (katalogdrivningen ovan) och värdarna.
+    if (window.hpskLevelFill) hpskLevelFill('springEdit_', comp.competitionLevel || '');
+
     // Series dropdown
     const seriesDropdown = document.getElementById('springEdit_seriesId');
     if (seriesDropdown) {
@@ -736,6 +741,8 @@ function springEditApplyHostValues() {
         const v = regionSelect.dataset.currentValue;
         if (v && [].some.call(regionSelect.options, o => o.value === v)) regionSelect.value = v;
     }
+    // Värdena sätts utan change-event — nivåns förslag och "kräver klubb" följer värden.
+    if (window.hpskLevelRefresh) hpskLevelRefresh('springEdit_');
 }
 window.springEditApplyHostValues = springEditApplyHostValues;
 

@@ -1,0 +1,225 @@
+@model string
+@using HpskSite.CompetitionTypes.Common
+@inject Umbraco.Cms.Core.Services.IContentTypeService LevelContentTypeService
+@*
+    TÄVLINGSNIVÅ — frågan "Vem får anmäla sig?" (SHB C.3.1), delad av tävlingsguiden,
+    redigeringsmodalen och Springskyttemodalen. Modellen är dialogens id-prefix
+    (wizard_ / edit_ / springEdit_), samma konvention som _ClubPaysFeeSetting.
+
+    ⚠️ Värden, etiketter, förklaringar och förvalsregeln kommer ur CompetitionLevel (C#) —
+    ingenting skrivs av här. Förslagsregeln finns i JS av nödvändighet (den följer
+    dialogens val medan man fyller i), men den läser SAMMA mästerskapskarta som servern.
+
+    ⚠️ VALET STYR isClubOnly-RUTAN, som döljs när egenskapen finns. Nivån och "endast för
+    klubben" beskriver samma fakta för en klubbintern tävling och får aldrig säga emot
+    varandra — servern vägrar en sparning där de gör det (CompetitionLevel.ConsistencyError).
+    Rutan ligger kvar i formuläret, så resten av dialogens logik (standardmedaljspärren,
+    "Var hamnar tävlingen?") fungerar som förut.
+
+    ⚠️ SAKNAS EGENSKAPEN competitionLevel på doctypen visas en förklaring i stället, och
+    rutan "Endast för klubben" står kvar synlig. SetValue på en saknad egenskap är en TYST
+    no-op, så en väljare som såg ut att spara hade varit värre än ingen.
+
+    ⚠️ EN BEKRÄFTAD NIVÅ ÄNDRAS ALDRIG AV SIG SJÄLV. Klubblistorna laddas asynkront, så
+    "ingen klubb vald" kan betyda "inte laddad än" — en nivå som kräver klubb får då en
+    varning, aldrig ett tyst byte.
+*@
+@{
+    var prefix = Model ?? "";
+    var levelPropertyExists = false;
+    try
+    {
+        levelPropertyExists = LevelContentTypeService.Get("competition")?.PropertyTypeExists(CompetitionLevel.PropertyAlias) ?? false;
+    }
+    catch { levelPropertyExists = false; }
+    var selectId = prefix + CompetitionLevel.PropertyAlias;
+    var scriptIncluded = Context.Items.ContainsKey("hpskCompetitionLevelScript");
+    Context.Items["hpskCompetitionLevelScript"] = true;
+}
+
+<div class="mb-3 hpsk-level-block" id="@(prefix)competitionLevelBlock"
+     data-level-prefix="@prefix" data-level-property="@(levelPropertyExists ? "1" : "0")">
+    <label for="@selectId" class="form-label fw-semibold">Vem får anmäla sig?</label>
+    @if (levelPropertyExists)
+    {
+        <select class="form-select" id="@selectId" name="@CompetitionLevel.PropertyAlias">
+            @foreach (var o in CompetitionLevel.All)
+            {
+                <option value="@o.Value">@o.Label</option>
+            }
+        </select>
+        <div class="form-text" id="@(prefix)competitionLevelExplain"></div>
+        <div class="small text-warning-emphasis mt-1 d-none" id="@(prefix)competitionLevelSuggested">
+            <i class="bi bi-lightbulb me-1"></i>Förslag utifrån arrangör och mästerskap — kontrollera att det stämmer innan du sparar.
+        </div>
+        <div class="small text-danger mt-1 d-none" id="@(prefix)competitionLevelWarning"></div>
+        <div class="form-text text-muted">
+            Ett mästerskap kan ingå i en tävling på vilken nivå som helst, t.ex. ett kretsmästerskap som skjuts i en nationell tävling.
+            Mästerskapet väljs separat.
+        </div>
+    }
+    else
+    {
+        <div class="small text-muted border rounded p-2">
+            <i class="bi bi-info-circle me-1"></i>Tävlingsnivån kan inte sparas ännu: egenskapen
+            <code>@CompetitionLevel.PropertyAlias</code> saknas på dokumenttypen <code>competition</code>.
+            Använd rutan för klubbens egna medlemmar som tidigare.
+        </div>
+    }
+</div>
+
+@if (!scriptIncluded)
+{
+    <script>
+    (function () {
+        'use strict';
+        if (window.hpskLevelLoaded) return;
+        window.hpskLevelLoaded = true;
+
+        // Ur CompetitionLevel (C#) — inte avskrivet.
+        var LEVELS = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+            CompetitionLevel.All.Select(o => new { value = o.Value, label = o.Label, explanation = o.Explanation, requiresClub = o.RequiresClub })));
+        var SCOPE_TO_LEVEL = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(CompetitionLevel.ScopeSuggestions));
+        var FORENING = '@CompetitionLevel.Forening', FORENING_OPPEN = '@CompetitionLevel.ForeningOppen',
+            KRETS = '@CompetitionLevel.Krets', NATIONELL = '@CompetitionLevel.Nationell';
+
+        function el(prefix, name) { return document.getElementById(prefix + name); }
+        function level(v) { for (var i = 0; i < LEVELS.length; i++) if (LEVELS[i].value === v) return LEVELS[i]; return null; }
+        function hasProperty(prefix) { var b = el(prefix, 'competitionLevelBlock'); return !!b && b.dataset.levelProperty === '1'; }
+
+        // Klubblistan laddas asynkront; dialogerna lägger det kommande värdet i dataset.
+        function hasClub(prefix) {
+            var s = el(prefix, 'clubId');
+            if (!s) return false;
+            var v = (s.value || '').trim();
+            if (v && v !== '0') return true;
+            var pending = (s.dataset.currentValue || s.dataset.pendingValue || '').trim();
+            return !!pending && pending !== '0' && !(s.options.length > 1);
+        }
+        function hasRegion(prefix) {
+            var s = el(prefix, 'regionalFederation');
+            if (!s) return false;
+            return !!((s.value || '').trim() || (!(s.options.length > 1) && (s.dataset.currentValue || '').trim()));
+        }
+        function scopeValue(prefix) {
+            var s = el(prefix, 'competitionScope');
+            var v = s ? (s.value || '').trim() : '';
+            if (v.charAt(0) === '[' && v.charAt(v.length - 1) === ']') v = v.slice(1, -1).trim().replace(/^"|"$/g, '');
+            return v;
+        }
+
+        // Speglar CompetitionLevel.Suggest — samma ordning, samma mästerskapskarta.
+        function suggest(prefix) {
+            var cb = el(prefix, 'isClubOnly');
+            var club = hasClub(prefix);
+            if (cb && cb.checked && club) return FORENING;
+            var fromScope = SCOPE_TO_LEVEL[scopeValue(prefix)];
+            if (fromScope) return (fromScope === FORENING && !club) ? KRETS : fromScope;
+            if (club) return FORENING_OPPEN;
+            if (hasRegion(prefix)) return KRETS;
+            return NATIONELL;
+        }
+
+        var syncing = {};
+        function syncClubOnly(prefix, value) {
+            var cb = el(prefix, 'isClubOnly');
+            if (!cb || !hasProperty(prefix)) return;
+            // Utan klubb står rutan avstängd (dialogens egen regel) — rör den inte då.
+            if (!hasClub(prefix) && value === FORENING) return;
+            var desired = value === FORENING;
+            if (cb.checked === desired) return;
+            cb.checked = desired;
+            if (syncing[prefix]) return;
+            syncing[prefix] = true;
+            try { cb.dispatchEvent(new Event('change', { bubbles: true })); }
+            finally { syncing[prefix] = false; }
+        }
+
+        function refresh(prefix) {
+            var sel = el(prefix, 'competitionLevel');
+            if (!sel || !hasProperty(prefix)) return;
+            if (syncing[prefix]) return;
+
+            var club = hasClub(prefix);
+            var locked = sel.dataset.confirmed === '1' || sel.dataset.touched === '1';
+            if (!locked) sel.value = suggest(prefix);
+
+            for (var i = 0; i < sel.options.length; i++) {
+                var o = level(sel.options[i].value);
+                sel.options[i].disabled = !!(o && o.requiresClub && !club && sel.options[i].value !== sel.value);
+            }
+
+            var cur = level(sel.value);
+            var explain = el(prefix, 'competitionLevelExplain');
+            if (explain) explain.textContent = cur ? cur.explanation : '';
+            var sugg = el(prefix, 'competitionLevelSuggested');
+            if (sugg) sugg.classList.toggle('d-none', locked);
+            var warn = el(prefix, 'competitionLevelWarning');
+            if (warn) {
+                var msg = (cur && cur.requiresClub && !club)
+                    ? 'Det här valet kräver att en klubb är arrangör. Välj en klubb ovan eller en annan nivå.'
+                    : '';
+                warn.textContent = msg;
+                warn.classList.toggle('d-none', !msg);
+            }
+            syncClubOnly(prefix, sel.value);
+        }
+
+        /** Fyller valet ur lagrat värde. Tomt = ej bekräftad, förslaget visas. */
+        function fill(prefix, stored) {
+            var sel = el(prefix, 'competitionLevel');
+            if (!sel || !hasProperty(prefix)) return;
+            var v = stored && level(stored) ? stored : '';
+            sel.dataset.touched = '';
+            sel.dataset.confirmed = v ? '1' : '';
+            if (v) sel.value = v;
+            refresh(prefix);
+        }
+
+        function init(block) {
+            var prefix = block.dataset.levelPrefix || '';
+            if (block.dataset.levelInit === '1') return;
+            block.dataset.levelInit = '1';
+            if (!hasProperty(prefix)) return;
+
+            // Rutan "endast för klubben" styrs nu av valet och döljs.
+            var cb = el(prefix, 'isClubOnly');
+            var cbWrap = cb ? cb.closest('.form-check') : null;
+            if (cbWrap) cbWrap.classList.add('d-none');
+
+            var sel = el(prefix, 'competitionLevel');
+            sel.addEventListener('change', function () {
+                sel.dataset.touched = '1';
+                refresh(prefix);
+            });
+            ['clubId', 'regionalFederation', 'competitionScope'].forEach(function (n) {
+                var e = el(prefix, n);
+                if (e) e.addEventListener('change', function () { refresh(prefix); });
+            });
+            if (cb) cb.addEventListener('change', function () { refresh(prefix); });
+
+            // Varje öppning börjar om; redigeringsdialogerna fyller sedan i lagrat värde.
+            var modal = block.closest('.modal');
+            if (modal) modal.addEventListener('show.bs.modal', function () { fill(prefix, ''); });
+            fill(prefix, '');
+        }
+
+        function initAll() {
+            document.querySelectorAll('.hpsk-level-block').forEach(init);
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initAll);
+        else initAll();
+
+        window.hpskLevelFill = function (prefix, stored) {
+            var b = el(prefix, 'competitionLevelBlock');
+            if (b) init(b);
+            fill(prefix, stored || '');
+        };
+        window.hpskLevelRefresh = function (prefix) {
+            var b = el(prefix, 'competitionLevelBlock');
+            if (b) init(b);
+            refresh(prefix);
+        };
+    })();
+    </script>
+}

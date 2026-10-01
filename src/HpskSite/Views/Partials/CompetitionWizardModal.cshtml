@@ -126,6 +126,8 @@
                             <small class="form-text text-muted d-block">Tävlingen visas bara för den valda klubbens medlemmar</small>
                         </div>
 
+                        @await Html.PartialAsync("_CompetitionLevelField", "wizard_")
+
                         <div class="alert alert-info py-2 mb-0" id="wizard_organizerHelpText">
                             <i class="bi bi-geo-alt me-1"></i><strong>Var hamnar tävlingen?</strong>
                             <span id="wizard_destinationText" class="d-block mt-1">Välj klubb eller krets ovan.</span>
@@ -1273,6 +1275,7 @@ function syncWizardClubOnlyAvailability() {
     } else {
         cb.disabled = false;
     }
+    if (window.hpskLevelRefresh) hpskLevelRefresh('wizard_');
 }
 
 // Handle region selection change
@@ -1311,6 +1314,7 @@ function onWizardIsClubOnlyChange() {
         hint.style.display = clubOnly ? '' : 'none';
     }
     updateWizardDestinationSummary();
+    if (window.hpskLevelRefresh) hpskLevelRefresh('wizard_');
 }
 
 function onWizardAllowStafettChange() {

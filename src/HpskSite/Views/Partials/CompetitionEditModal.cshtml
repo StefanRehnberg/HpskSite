@@ -621,6 +621,8 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 </div>
                             </div>
 
+                            @await Html.PartialAsync("_CompetitionLevelField", "edit_")
+
                             <div class="alert alert-warning py-2 d-none" id="edit_clubMismatchWarning">
                                 <i class="bi bi-exclamation-triangle me-1"></i>
                                 <span id="edit_clubMismatchText"></span>
@@ -1305,6 +1307,7 @@ function onEditIsClubOnlyChange() {
         hint.style.display = clubOnly ? '' : 'none';
     }
     updateEditDestinationSummary();
+    if (window.hpskLevelRefresh) hpskLevelRefresh('edit_');
 }
 
 function onEditAllowTeamsChange() {
@@ -1870,6 +1873,7 @@ function syncEditClubOnlyAvailability() {
     } else {
         cb.disabled = false;
     }
+    if (window.hpskLevelRefresh) hpskLevelRefresh('edit_');
 }
 
 // Show/hide mismatch warning based on club/region changes
@@ -1992,6 +1996,9 @@ window.populateEditModal = function(competition) {
 
         // Set regionalFederation as data attribute for later use
         document.getElementById('edit_regionalFederation').dataset.currentValue = competition.regionalFederation || '';
+
+        // Tävlingsnivån — EFTER isClubOnly och värden, eftersom förslaget läser dem.
+        if (window.hpskLevelFill) hpskLevelFill('edit_', competition.competitionLevel || '');
 
         // Store original values for mismatch warning
         editOriginalClubId = String(competition.clubId || '0');
