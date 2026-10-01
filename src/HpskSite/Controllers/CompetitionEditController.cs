@@ -387,16 +387,20 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                // Tävlingsnivån: ett okänt värde vägras, och nivån får inte säga emot "endast för
-                // klubben" eller kräva en klubb som inte finns. Bara när fältet skickas — en äldre
-                // klient som inte känner till nivån ska kunna spara som förut.
+                // Tävlingens kategori (CompetitionLevel): ett okänt värde vägras, och kategorin får
+                // inte säga emot "endast klubbens egna medlemmar", kräva en klubb som saknas eller
+                // vara föreningstävling med standardmedaljer. Bara när fältet skickas — en äldre
+                // klient som inte känner till kategorin ska kunna spara som förut.
                 if (request.Fields != null && request.Fields.ContainsKey(HpskSite.CompetitionTypes.Common.CompetitionLevel.PropertyAlias))
                 {
                     var levelRaw = ReadFieldOrContentAsString(request.Fields, HpskSite.CompetitionTypes.Common.CompetitionLevel.PropertyAlias, content);
                     if (!HpskSite.CompetitionTypes.Common.CompetitionLevel.IsValid(levelRaw))
                         return Ok(new { success = false, message = $"Okänd tävlingsnivå: \"{levelRaw}\"." });
                     var levelError = HpskSite.CompetitionTypes.Common.CompetitionLevel.ConsistencyError(
-                        levelRaw, ReadFieldOrContentAsBool(request.Fields, "isClubOnly", content), hostClubId > 0);
+                        levelRaw,
+                        ReadFieldOrContentAsBool(request.Fields, "isClubOnly", content),
+                        hostClubId > 0,
+                        ReadFieldOrContentAsBool(request.Fields, "isAwardingStandardMedals", content));
                     if (levelError != null)
                         return Ok(new { success = false, message = levelError });
                 }

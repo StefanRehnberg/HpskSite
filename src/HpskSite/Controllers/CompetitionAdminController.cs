@@ -1011,14 +1011,15 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Välj antingen ansvarig klubb, krets eller mästerskapstyp — annars går det inte att skapa en lättläst URL för tävlingen." });
                 }
 
-                // Tävlingsnivån — samma regel som redigeringen (CompetitionEditController.SaveCompetition).
+                // Tävlingens kategori — samma regel som redigeringen (CompetitionEditController.SaveCompetition).
                 var _level = ReadFieldAsString(request.Fields, HpskSite.CompetitionTypes.Common.CompetitionLevel.PropertyAlias);
                 if (!HpskSite.CompetitionTypes.Common.CompetitionLevel.IsValid(_level))
                 {
                     return Ok(new { success = false, message = $"Okänd tävlingsnivå: \"{_level}\"." });
                 }
                 var _levelError = HpskSite.CompetitionTypes.Common.CompetitionLevel.ConsistencyError(
-                    _level, ReadFieldAsBool(request.Fields, "isClubOnly"), _hostClubId > 0);
+                    _level, ReadFieldAsBool(request.Fields, "isClubOnly"), _hostClubId > 0,
+                    ReadFieldAsBool(request.Fields, "isAwardingStandardMedals"));
                 if (_levelError != null)
                 {
                     return Ok(new { success = false, message = _levelError });

@@ -67,31 +67,16 @@
 
                     <hr>
                     </section>
-                    <section class="hpsk-section" data-title="Omfattning & serie">
+                    <section class="hpsk-section" data-title="Tävlingsserie">
                     <div class="row">
                         <div class="col-12">
-                            <h6 class="mb-3 text-primary"><i class="bi bi-diagram-3 me-1"></i>Omfattning &amp; serie</h6>
+                            <h6 class="mb-3 text-primary"><i class="bi bi-collection me-1"></i>Tävlingsserie</h6>
                         </div>
                     </div>
 
-                    <div class="mb-3">
-                        <label for="springEdit_competitionScope" class="form-label">Omfattning</label>
-                        <select class="form-select" id="springEdit_competitionScope" name="competitionScope">
-                            <option value="">-- Välj omfattning --</option>
-                            @* Renderas ur CompetitionScopeHelper.All — aldrig handskrivet.
-                               Värdena här LÅG ISÄR från konstanterna ("Kretsmasterskap" utan diakriter),
-                               och jämförelserna i IsChampionshipScope och CompetitionUrlProvider är
-                               StringComparison.Ordinal — så en springskyttetävling satt till
-                               mästerskap via den här modalen räknades inte som mästerskap alls.
-                               Nuvarande val sätts av populateSpringEditModal, inte av servern. *@
-                            @foreach (var scopeOption in HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.All)
-                            {
-                                <option value="@scopeOption">@scopeOption</option>
-                            }
-                        </select>
-                        <small class="form-text text-muted">Avgör hur standardmedaljer beräknas</small>
-                    </div>
-
+                    @* Mästerskapet flyttat till "Tävlingens status" (2026-10-01). ⚠ Värdena renderas
+                       där ur CompetitionScopeHelper.All — de LÅG ISÄR här en gång ("Kretsmasterskap"
+                       utan diakriter) och jämförelserna är Ordinal. *@
                     <div class="mb-3">
                         <label for="springEdit_seriesId" class="form-label">Tävlingsserie (valfritt)</label>
                         <select class="form-select" id="springEdit_seriesId" name="seriesId">
@@ -359,22 +344,7 @@
                                     </label>
                                 </div>
                             </div>
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="springEdit_isAwardingStandardMedals" name="isAwardingStandardMedals">
-                                    <label class="form-check-label" for="springEdit_isAwardingStandardMedals">
-                                        Standardmedaljsgrundande
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="springEdit_isAwardingHonoraryAward" name="isAwardingHonoraryAward">
-                                    <label class="form-check-label" for="springEdit_isAwardingHonoraryAward">
-                                        Hederspriser utgår
-                                    </label>
-                                </div>
-                            </div>
+                            @* Standardmedaljsgrundande och Hederspriser flyttade till "Tävlingens status" (2026-10-01). *@
                         </div>
                     </div>
 
@@ -391,13 +361,7 @@
                                 Välj <strong>krets</strong> om tävlingen arrangeras av en krets.
                                 Lämna båda tomma för nationella tävlingar.
                             </p>
-                            <div class="form-check mb-3">
-                                <input class="form-check-input" type="checkbox" id="springEdit_isClubOnly" name="isClubOnly">
-                                <label class="form-check-label" for="springEdit_isClubOnly">
-                                    <i class="bi bi-shield-check me-1"></i>Endast för specifik klubb
-                                </label>
-                                <small class="form-text text-muted d-block mt-1">Begränsa denna tävling till medlemmar från en specifik klubb</small>
-                            </div>
+                            @* "Endast klubbens egna medlemmar" flyttad till "Tävlingens status" (2026-10-01). *@
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="mb-3">
@@ -418,13 +382,66 @@
                                     </div>
                                 </div>
                             </div>
-
-                            @await Html.PartialAsync("_CompetitionLevelField", "springEdit_")
                         </div>
                     </div>
 
                     <hr>
 
+                    </section>
+                    @* TÄVLINGENS STATUS — samma avsnitt och samma ordning som CompetitionEditModal. *@
+                    <section class="hpsk-section" data-title="Tävlingens status">
+                    <div class="row">
+                        <div class="col-12">
+                            <h6 class="mb-3 text-primary"><i class="bi bi-patch-check me-1"></i>Tävlingens status</h6>
+                        </div>
+                    </div>
+
+                    @await Html.PartialAsync("_CompetitionLevelField", "springEdit_")
+
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="springEdit_isClubOnly" name="isClubOnly">
+                        <label class="form-check-label" for="springEdit_isClubOnly">
+                            Endast klubbens egna medlemmar får anmäla sig
+                        </label>
+                        <small class="form-text text-muted d-block mt-1">Annars får alla anmäla sig. Tävlingen syns då bara för klubbens medlemmar.</small>
+                        <small class="form-text text-muted d-block d-none" id="springEdit_clubOnlyLevelNote">Bara en föreningstävling kan begränsas till klubbens egna medlemmar.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="springEdit_competitionScope" class="form-label">Mästerskap</label>
+                        <select class="form-select" id="springEdit_competitionScope" name="competitionScope">
+                            <option value="">Inget mästerskap</option>
+                            @* Renderas ur CompetitionScopeHelper.All — aldrig handskrivet (diakriterna
+                               har drivit isär förut). Nuvarande val sätts av populateSpringEditModal. *@
+                            @foreach (var scopeOption in HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.All)
+                            {
+                                <option value="@scopeOption">@scopeOption</option>
+                            }
+                        </select>
+                        <small class="form-text text-muted">Om en mästartitel avgörs. Ett mästerskap kan ingå i en tävling i vilken kategori som helst. Avgör hur standardmedaljer beräknas.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="springEdit_isAwardingStandardMedals" name="isAwardingStandardMedals">
+                            <label class="form-check-label" for="springEdit_isAwardingStandardMedals">
+                                Standardmedaljsgrundande
+                            </label>
+                            <small class="form-text text-muted d-block mt-1" id="springEdit_standardMedalsClubOnlyHint" style="display:none">
+                                Standardmedaljer delas bara ut vid kretstävling eller högre (SHB C.5.1.1).
+                            </small>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="springEdit_isAwardingHonoraryAward" name="isAwardingHonoraryAward">
+                            <label class="form-check-label" for="springEdit_isAwardingHonoraryAward">
+                                Hederspriser utgår
+                            </label>
+                        </div>
+                    </div>
+
+                    <hr>
                     </section>
                     <section class="hpsk-section" data-title="Tävlingsledning & Betalning">
                     <div class="row">
