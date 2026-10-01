@@ -187,6 +187,33 @@
        togs bort 2026-09-21 (Stefan). Den beskrev panelen för någon som redan står i den, och
        räknade dessutom upp tre av ett femtontal saker man kan göra här. *@
 
+    @* Kretsens uppdrag (kretsgranskning fas 1): varnar när ett uppdrag saknar innehavare. Då går
+       klubbarnas ärenden till kretsens kontaktadress och kretsadministratören, och det ska synas
+       här — annars upptäcks det först när ett ärende legat obesvarat. Fylls av KretsUppdrag/GetStatus. *@
+    <div id="kretsUppdragWarning" class="alert alert-warning d-none" role="status"></div>
+    @await Html.PartialAsync("_HtmlEscape")
+    <script>
+    (function () {
+        var box = document.getElementById('kretsUppdragWarning');
+        if (!box) return;
+        fetch('/umbraco/surface/KretsUppdrag/GetStatus?regionId=@regionContentId', { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || !d.success) return;
+                var missing = (d.data || []).filter(function (u) { return u.isMissing; });
+                if (!missing.length) return;
+                var names = missing.map(function (u) { return u.label; }).join(', ');
+                box.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>'
+                    + '<strong>Kretsen har ingen utsedd för: </strong>' + window.hpskEsc(names) + '. '
+                    + 'Klubbarnas ärenden för ' + (missing.length === 1 ? 'det uppdraget' : 'de uppdragen')
+                    + ' går då till kretsens kontaktadress och till kretsadministratören. '
+                    + '<a href="/styrelse?type=1&id=@regionContentId&tab=styrelse" class="alert-link">Utse någon i Styrelsearbete</a>.';
+                box.classList.remove('d-none');
+            })
+            .catch(function () { /* varningen är en hjälp, inte en grind */ });
+    })();
+    </script>
+
     <!-- Admin navigation — grouped vertical rail (≥lg) / grouped section picker (phones + tablets).
          Mirrors ClubAdminPanel: same four headings (the last one named for the krets instead of the
          club), same icons, same order within each group, so an admin who knows one page knows the

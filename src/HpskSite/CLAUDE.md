@@ -817,6 +817,45 @@ kräver kretsens tillstånd. Båda var fel enligt SHB. Modellen nu:
 Test: `CompetitionLevelTests` 40. Svit: `hpsk-verify/kretsgranskning-fas0-verify.mjs`.
 Adds C# → full ombyggnad. **En doctype-egenskap** (`competition.competitionLevel`, Textstring).
 
+### Kretsens uppdrag — vem granskar (2026-10-01, fas 1, branch `kretsgranskning`)
+
+Tre roller i styrelselistan som bara finns för en **krets**: **Resultatgranskare** (SHB
+C.4.3.1.10, C.4.2.1), **Bangranskare (fält)** (C.3.5.2.2) och **Tävlingsansvarig** (C.3.5.3.2,
+C.3.5.4). Nycklarna är konstanter i `BoardRoleDefinitions` (`RoleResultatgranskare` m.fl.,
+`KretsUppdragRoleKeys`); `AllRoles` bär nu en femte kolumn, `BoardRoleOwners` (Club/Region/Both).
+
+- **⚠️ `KretsUppdragService` är ENDA stället** som svarar på "har medlemmen uppdraget X i krets Y?"
+  och bygger mottagarlistan. Faserna 2–4 frågar där — fråga aldrig `BoardRoles` på nycklarna direkt.
+- **Behörigheten är HÄRLEDD ur den aktiva rollraden** (mjukradering ⇒ upphör direkt). Flera kan ha
+  samma uppdrag; alla aviseras och vem som helst beslutar.
+- **⚠️ Uppdragen är aldrig styrelseplatser.** `AssignBoardRole`/`UpdateBoardRole` tvingar
+  `IsBoardMember = false` för dem, oavsett vad klienten postar — annars räknas de i beslutsförheten.
+- **Servern vägrar** ett kretsuppdrag på en klubb och en okänd roll (`RoleRefusal`). En OFÖRÄNDRAD
+  okänd nyckel släpps igenom vid uppdatering, så en äldre rad förblir redigerbar.
+- **`GetAvailableRoles(ownerType)`** filtrerar väljaren; utan parametern listas allt (äldre anropare).
+- **Mottagarlistan faller aldrig tillbaka på ingenting:** utan innehavare går den till kretsens
+  `contactEmail` + medlemmarna i `RegionalAdmin_{kod}`, med `IsFallback = true` (länkläget, fas 2).
+- **`Authority(...)`** säger vilken väg ett beslut kom (uppdraget eller sajtadmin) för stämpeln.
+
+**Ytor:** `/styrelse` (krets) har kortet **Kretsens uppdrag** (`#svKretsUppdrag`) med de tomma
+namngivna; väljaren har en optgroup. `?tab=` öppnar en flik direkt. Kretsens adminpanel bär
+`#kretsUppdragWarning` (`KretsUppdrag/GetStatus`). **`/kretsen/kom-igang?krets=`** (routad
+`KretsenController`, öppen utan inloggning, inga namn för utloggade) visar tre steg; en inloggad
+medlem kan be om ett uppdrag (`KretsUppdrag/RequestUppdrag`) → mejl till kretsadmin + ordförande →
+**`/kretsen/uppdrag?t=`** där de bekräftar med ett klick (`ConfirmUppdrag`).
+
+- **⚠️ Förfrågan har ingen tabell** — den bärs av den signerade länken (`KretsLinkTokenService`,
+  30 dagar). Därför säger svaret hur många som nåddes; gick inget mejl fram får medlemmen veta det.
+  Sajtadmin får länken i svaret (supportväg, och så går flödet att verifiera utan SMTP).
+- **⚠️ Länken ger ingen rätt.** Bekräftaren loggar in och prövas (kretsadmin eller kretsens ordförande).
+- `KretsLinkTokenService` har också **ärendelänken** (60 dagar, bär kontrollsumma) för länkläget i
+  faserna 2–4. Purpose-strängarna är en del av signaturen — höj versionen i stället för att ändra.
+- **Ännu inte byggt (hör till fas 2, den första konsumenten):** "Be kretsen komma igång"-mejlet,
+  påminnelserna och räknarna per krets — de räknar ärenden som inte finns förrän granskningen finns.
+
+Test: `BoardRoleOwnerTests`. Svit: `hpsk-verify/kretsuppdrag-fas1-verify.mjs` 48/48 (A/B: båda
+serverreglerna borttagna → 4 röda). Adds C# → full ombyggnad. **Ingen SQL, ingen doctype-egenskap.**
+
 ### Competition Admin System ✅ COMPLETE
 **Location:** Admin Page → Competitions tab (default)
 

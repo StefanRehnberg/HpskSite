@@ -79,6 +79,9 @@ namespace HpskSite.Composers
 
             // Register BoardRoleService as scoped
             builder.Services.AddScoped<BoardRoleService>();
+            // Kretsens uppdrag (kretsgranskning fas 1) - enda svaret pa "har medlemmen uppdraget".
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.KretsUppdragService>();
+            builder.Services.AddSingleton<HpskSite.Services.Kretsgranskning.KretsLinkTokenService>();
             // Member-database expansion (see Documentation/MEMBER_DATABASE.md)
             builder.Services.AddScoped<ClubMembershipService>();
             builder.Services.AddScoped<MemberAccessKeyService>();

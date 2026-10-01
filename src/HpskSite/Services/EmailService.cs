@@ -1042,6 +1042,52 @@ namespace HpskSite.Services
         /// vapnet; fabrikat, kaliber och modell är krypterade och läses genom grinden med en
         /// loggrad. Ett mejl är en okontrollerad kopia och får aldrig bära dem.</para>
         /// </summary>
+        /// <summary>
+        /// Kretsgranskning fas 1: en medlem vill ha ett av kretsens uppdrag (Resultatgranskare,
+        /// Bangranskare, Tävlingsansvarig). Går till kretsadministratörerna och kretsens ordförande,
+        /// som bekräftar med ett klick på länken — då tilldelas uppdraget.
+        ///
+        /// <para>Svarsadressen är MEDLEMMEN: den som läser "Kalle vill bli resultatgranskare" vill
+        /// kunna svara Kalle.</para>
+        /// </summary>
+        public async Task<bool> SendKretsUppdragRequestAsync(
+            string toEmail, string toName, string regionName, string requesterName,
+            string roleLabel, string? message, string confirmUrl, MailReplyTo replyTo)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail)) return false;
+
+            var subject = $"{requesterName} vill bli {roleLabel.ToLowerInvariant()} i {regionName}";
+            var h = (Func<string?, string>)(s => System.Web.HttpUtility.HtmlEncode(s ?? ""));
+            var note = string.IsNullOrWhiteSpace(message)
+                ? ""
+                : $"<p>Meddelande:</p><blockquote style=\"border-left:3px solid #ccc;margin:0;padding-left:10px;\">{h(message).Replace("\n", "<br/>")}</blockquote>";
+
+            var body = $@"
+<html>
+<head>
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .btn {{ display:inline-block; background:#0d6efd; color:#fff !important; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold; }}
+        .notice {{ color: #666; font-size: 13px; margin-top: 10px; }}
+    </style>
+</head>
+<body>
+    <h2>Hej {h(toName)},</h2>
+    <p><strong>{h(requesterName)}</strong> vill bli <strong>{h(roleLabel.ToLowerInvariant())}</strong> i {h(regionName)} på pistol.nu.</p>
+    {note}
+    <p>Håller du med räcker det med ett klick. Du loggar in, ser förfrågan och bekräftar — då får
+       {h(requesterName)} uppdraget direkt, och klubbarnas ärenden går till hen i stället för via mejl.</p>
+    <p><a class=""btn"" href=""{confirmUrl}"">Visa förfrågan</a></p>
+    <p class=""notice"">Uppdraget syns sedan under Styrelsearbete → Styrelsen → Kretsens uppdrag, och tas
+       bort där. Länken gäller i 30 dagar. Du får det här mejlet för att du är kretsadministratör
+       eller kretsens ordförande.</p>
+    <p>Med vänliga hälsningar,<br/>Pistol.nu</p>
+</body>
+</html>";
+
+            return await SendEmailAsync(toEmail, subject, body, replyTo);
+        }
+
         public async Task<bool> SendForeningsintygRequestSubmittedAsync(
             string toEmail, string toName, string memberName, string kindLabel,
             string firearmLabel, string clubName, MailReplyTo replyTo)

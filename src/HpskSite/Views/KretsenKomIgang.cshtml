@@ -1,0 +1,156 @@
+@using HpskSite.Controllers
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var m = ViewData["KomIgang"] as KretsKomIgangModel ?? new KretsKomIgangModel();
+    ViewBag.Title = "Kom igång — " + m.RegionName;
+    var returnUrl = Uri.EscapeDataString($"/kretsen/kom-igang?krets={m.RegionId}");
+}
+
+@* Kretsgranskning fas 1. Dit länkmejlen pekar när en krets inte utsett någon i rollerna. Sidan ska
+   gå att förstå för den som aldrig loggat in: tre steg, vad uppdragen är, och var man gör det.
+   Kretsens egna uppdrag läses ur KretsUppdragService — aldrig en egen fråga här. *@
+
+<style>
+    .ki-page { font-size: 1.1rem; padding: 1.5rem 0 4rem; max-width: 820px; }
+    .ki-page h1 { font-size: 1.9rem; font-weight: 700; }
+    .ki-step { display: flex; gap: 1rem; padding: 1.1rem 1.2rem; border: 1px solid var(--bs-border-color);
+        border-radius: .9rem; margin-bottom: .9rem; background: var(--bs-body-bg); }
+    .ki-num { flex: none; width: 2.4rem; height: 2.4rem; border-radius: 50%; background: var(--bs-primary);
+        color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+    .ki-step.done .ki-num { background: var(--bs-success); }
+    .ki-uppdrag { border-top: 1px solid var(--bs-border-color); padding: .75rem 0; }
+    .ki-uppdrag:first-child { border-top: 0; }
+    .ki-help { color: var(--bs-secondary-color); font-size: .98rem; }
+</style>
+
+<div class="container ki-page">
+    @Html.AntiForgeryToken()
+    <h1 class="mb-1"><i class="bi bi-flag me-2"></i>Kom igång i @m.RegionName</h1>
+    <p class="ki-help mb-4">
+        Klubbarna kan skicka in resultatlistor, banor och tävlingsansökningar till kretsen på pistol.nu.
+        När kretsen har utsett vem som granskar hamnar ärendena direkt hos rätt person — i stället för
+        att gå som länkar till kretsens mejladress. Det tar tre steg.
+    </p>
+
+    <div class="ki-step @(m.IsLoggedIn ? "done" : "")" id="kiStep1">
+        <div class="ki-num">@(m.IsLoggedIn ? Html.Raw("<i class=\"bi bi-check-lg\"></i>") : Html.Raw("1"))</div>
+        <div class="flex-grow-1">
+            <div class="fw-semibold">Logga in</div>
+            @if (m.IsLoggedIn)
+            {
+                <div class="ki-help">Du är inloggad som @m.MemberName.</div>
+            }
+            else
+            {
+                <div class="ki-help mb-2">Den som ska granska behöver ett konto på pistol.nu. Alla medlemmar i en klubb har redan ett, eller kan skapa ett.</div>
+                <a class="btn btn-primary" href="/login-register/?tab=login&returnUrl=@returnUrl">Logga in eller skapa konto</a>
+            }
+        </div>
+    </div>
+
+    <div class="ki-step @(m.AllFilled ? "done" : "")" id="kiStep2">
+        <div class="ki-num">@(m.AllFilled ? Html.Raw("<i class=\"bi bi-check-lg\"></i>") : Html.Raw("2"))</div>
+        <div class="flex-grow-1">
+            <div class="fw-semibold">Välj vem som har vilket uppdrag</div>
+            <div class="ki-help mb-2">Uppdragen är inga styrelseplatser. Samma person kan ha flera, och flera kan ha samma — då kan vem som helst av dem besluta, så att inget fastnar när någon är bortrest.</div>
+
+            <div class="mb-2">
+            @foreach (var u in m.Uppdrag)
+            {
+                <div class="ki-uppdrag" data-uppdrag="@u.RoleKey">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                        <div>
+                            <div class="fw-semibold">@u.Label</div>
+                            <div class="ki-help">@u.Task</div>
+                        </div>
+                        @if (u.IsFilled)
+                        {
+                            <span class="badge bg-success-subtle text-success-emphasis flex-none" data-state="filled"><i class="bi bi-check-lg me-1"></i>Utsedd</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-warning-subtle text-warning-emphasis flex-none" data-state="missing">Ingen utsedd</span>
+                        }
+                    </div>
+                    @if (u.HolderNames.Count > 0)
+                    {
+                        <div class="ki-help mt-1">@string.Join(", ", u.HolderNames)</div>
+                    }
+                </div>
+            }
+            </div>
+
+            @if (m.CanManageRoles)
+            {
+                <a class="btn btn-primary" id="kiManageRoles" href="/styrelse?type=1&id=@m.RegionId&tab=styrelse">Utse i Styrelsearbete</a>
+            }
+            else if (m.IsLoggedIn)
+            {
+                <div class="ki-help mb-2">Kretsens administratör eller ordförande utser. Vill du själv ha ett uppdrag kan du be om det här — de får ett mejl och bekräftar med ett klick.</div>
+                <div class="row g-2 align-items-end" id="kiRequestForm" style="max-width:560px;">
+                    <div class="col-12">
+                        <label class="form-label mb-1" for="kiRole">Jag vill bli</label>
+                        <select class="form-select" id="kiRole">
+                            @foreach (var u in m.Uppdrag.Where(x => !x.IHaveIt))
+                            {
+                                <option value="@u.RoleKey">@u.Label.ToLowerInvariant()</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label mb-1" for="kiMessage">Meddelande (valfritt)</label>
+                        <textarea class="form-control" id="kiMessage" rows="2" maxlength="1000" placeholder="Till exempel varför, eller att ni redan pratat om det"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <button type="button" class="btn btn-outline-primary" id="kiRequestBtn"><i class="bi bi-send me-1"></i>Skicka förfrågan</button>
+                    </div>
+                </div>
+                <div id="kiRequestResult" class="mt-2" role="status"></div>
+            }
+        </div>
+    </div>
+
+    <div class="ki-step @(m.AllFilled ? "done" : "")">
+        <div class="ki-num">@(m.AllFilled ? Html.Raw("<i class=\"bi bi-check-lg\"></i>") : Html.Raw("3"))</div>
+        <div class="flex-grow-1">
+            <div class="fw-semibold">Klart</div>
+            <div class="ki-help">Nästa gång en klubb skickar in något får den som har uppdraget ett mejl med en knapp, och ärendet ligger i kretsens adminpanel. Arbetet är detsamma som via länken — bara utan mejlvägen.</div>
+        </div>
+    </div>
+
+    <p class="mt-4"><a href="@m.RegionUrl"><i class="bi bi-arrow-left me-1"></i>Till @m.RegionName</a></p>
+</div>
+
+@if (m.IsLoggedIn && !m.CanManageRoles)
+{
+@await Html.PartialAsync("_HtmlEscape")
+<script>
+(function () {
+    var btn = document.getElementById('kiRequestBtn');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+        var role = document.getElementById('kiRole').value;
+        var box = document.getElementById('kiRequestResult');
+        if (!role) return;
+        btn.disabled = true;
+        var body = new URLSearchParams({
+            regionId: '@m.RegionId', roleKey: role,
+            message: document.getElementById('kiMessage').value || ''
+        });
+        fetch('/umbraco/surface/KretsUppdrag/RequestUppdrag', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded',
+                       'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value },
+            body: body.toString()
+        }).then(function (r) { return r.json(); })
+          .then(function (d) {
+              box.className = 'mt-2 alert ' + (d.success ? 'alert-success' : 'alert-warning');
+              box.textContent = d.message || (d.success ? 'Skickat.' : 'Det gick inte.');
+              if (d.success) document.getElementById('kiRequestForm').classList.add('d-none');
+              else btn.disabled = false;
+          });
+    });
+})();
+</script>
+}

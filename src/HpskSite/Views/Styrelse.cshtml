@@ -130,6 +130,13 @@
     const VALB_ONLY = @(sel.ValberedningOnly ? "true" : "false");
     const IS_CLUB = OWNER_TYPE === 0;
     const VALB_KEYS = ['Valberedning', 'ValberedningSammankallande'];
+    // Kretsens uppdrag ur BoardRoleDefinitions — nyckel, etikett och uppgift har EN källa.
+    const KRETS_UPPDRAG = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+        BoardRoleDefinitions.KretsUppdragRoleKeys.Select(k => new {
+            key = k,
+            label = BoardRoleDefinitions.GetLabel(k),
+            task = BoardRoleDefinitions.KretsUppdragTask(k)
+        })));
     let svMeetings = [], svActions = [], svYear = null, svDocs = null;
     let svWheelYear = null, svNomYear = null, svWheelItems = [], svCatalog = [], svMeetingTypes = [];
     let svMallType = null, svMallItems = [];
@@ -1159,11 +1166,29 @@
     function renderStyrelse(c, roles, expiring) {
         // Board members vs other elected functionaries (revisor m.fl.). Valberedning lives on its own tab.
         const board = roles.filter(r => r.isBoardMember);
-        const ovriga = roles.filter(r => !r.isBoardMember && !VALB_KEYS.includes(r.roleKey));
+        // Kretsens uppdrag har en egen rubrik så de inte blandas med ledamot och revisor.
+        const uppdrag = roles.filter(r => KRETS_UPPDRAG.some(u => u.key === r.roleKey));
+        const ovriga = roles.filter(r => !r.isBoardMember && !VALB_KEYS.includes(r.roleKey)
+                                         && !KRETS_UPPDRAG.some(u => u.key === r.roleKey));
 
         let html = `<div class="sv-card"><h2><i class="bi bi-people me-2"></i>Styrelsen</h2>`;
         html += board.length ? board.map(personRow).join('') : `<p class="sv-help">Inga styrelseledamöter är tilldelade ännu.</p>`;
         html += `</div>`;
+
+        if (!IS_CLUB) {
+            html += `<div class="sv-card" id="svKretsUppdrag"><h2><i class="bi bi-clipboard-check me-2"></i>Kretsens uppdrag</h2>
+                <p class="sv-help">Granskar resultatlistor och banor och tar emot tävlingsansökningar. Uppdragen är inga styrelseplatser och räknas inte i beslutsförheten. Samma person kan ha flera uppdrag, och flera kan ha samma uppdrag.</p>`;
+            KRETS_UPPDRAG.forEach(u => {
+                const holders = uppdrag.filter(r => r.roleKey === u.key);
+                html += `<div class="mt-3"><div class="sv-label">${esc(u.label)}</div>
+                    <div class="sv-help mb-1">${esc(u.task)}</div>`;
+                html += holders.length
+                    ? holders.map(personRow).join('')
+                    : `<p class="text-warning-emphasis mb-1" data-uppdrag-missing="${u.key}"><i class="bi bi-exclamation-triangle me-1"></i>Ingen är utsedd. Ärendena går då till kretsens kontaktadress och kretsadministratören.</p>`;
+                html += `</div>`;
+            });
+            html += `</div>`;
+        }
 
         if (ovriga.length) {
             html += `<div class="sv-card"><h2><i class="bi bi-person-badge me-2"></i>Övriga förtroendevalda</h2>
@@ -1214,11 +1239,15 @@
     function initManage() {
         // roles dropdown — valberedning roles are managed on the Valberedning tab, so exclude them here.
         // data-board carries each role's default so the "Sitter i styrelsen" checkbox follows the role.
-        get('BoardRole', 'GetAvailableRoles', {}).then(r => {
+        // ⚠️ ownerType skickas så att en klubb aldrig erbjuds kretsens uppdrag. Servern vägrar ändå.
+        get('BoardRole', 'GetAvailableRoles', { ownerType: OWNER_TYPE }).then(r => {
             if (!r.success) return;
             const sel = $('addRole');
-            r.data.filter(x => !VALB_KEYS.includes(x.key))
-                .forEach(x => sel.innerHTML += `<option value="${x.key}" data-board="${x.isBoardMember}">${esc(x.label)}</option>`);
+            const opt = x => `<option value="${x.key}" data-board="${x.isBoardMember}">${esc(x.label)}</option>`;
+            r.data.filter(x => !VALB_KEYS.includes(x.key) && !x.isKretsUppdrag)
+                .forEach(x => sel.innerHTML += opt(x));
+            const krets = r.data.filter(x => x.isKretsUppdrag);
+            if (krets.length) sel.innerHTML += `<optgroup label="Kretsens uppdrag">${krets.map(opt).join('')}</optgroup>`;
             sel.innerHTML += '<option value="Custom" data-board="false">Annat…</option>';
         });
         if (IS_CLUB) {
@@ -1565,7 +1594,11 @@
     get('BoardMeetingTemplate', 'GetCatalog', {}).then(r => { if (r.success) { svCatalog = r.items || []; svMeetingTypes = r.types || []; } });
 
     // initial
-    svShow(VALB_ONLY ? 'valberedning' : 'moten');
+    // ?tab= lets other surfaces deep-link to a tab (the krets admin panel's warning links to
+    // Styrelsen). Unknown or not-allowed values fall back to the default.
+    const svStartTab = new URLSearchParams(location.search).get('tab');
+    svShow(VALB_ONLY ? 'valberedning'
+        : (['moten', 'styrelse', 'arshjul', 'valberedning'].includes(svStartTab) ? svStartTab : 'moten'));
 })();
 </script>
 }
