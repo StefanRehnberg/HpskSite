@@ -477,7 +477,7 @@ namespace HpskSite.Services.Ledger
         {
             LineId = l.LineId,
             EntryId = l.EntryId,
-            EntryNumber = $"{l.Prefix}{l.Number}",
+            EntryNumber = LedgerNumberAllocator.Format(l.Prefix ?? "", l.Number),
             AccountingDate = l.AccountingDate,
             Description = l.Description ?? "",
             Movement = LedgerBankMatching.SignedMovement(l.Debit, l.Credit)
