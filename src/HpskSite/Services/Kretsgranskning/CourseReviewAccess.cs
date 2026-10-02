@@ -198,7 +198,9 @@ namespace HpskSite.Services.Kretsgranskning
                 c.Offered = CourseReviewRules.Offered(type, comp.GetValue<bool>("isClubOnly"),
                     CompetitionTypes.Common.CompetitionLevel.IsKretsOrAbove(level) || isSmOrLdm, comp.GetValue<bool>("isAwardingStandardMedals"));
                 c.Route = CourseReviewRules.RouteFor(isSmOrLdm);
-                var cr = _calendar.CompetitionRegion(competitionId);
+                c.OfferBlockedByMissingLevel = !c.Offered && CourseReviewRules.IsFieldType(type)
+                    && !comp.GetValue<bool>("isClubOnly") && string.IsNullOrEmpty(level) && !isSmOrLdm;
+                var cr =_calendar.CompetitionRegion(competitionId);
                 if (cr != null) { c.RegionId = cr.Value.Region.Id; c.RegionName = cr.Value.Region.Name; }
                 c.Organiser = c.ClubId > 0 ? (_clubs.GetClubNameById(c.ClubId) ?? c.RegionName) : c.RegionName;
                 var s = c.RegionId > 0 ? Settings(c.RegionId) : null;
@@ -235,5 +237,10 @@ namespace HpskSite.Services.Kretsgranskning
         public DateTime? Deadline { get; set; }
         public string? StationConfig { get; set; }
         public bool HasStations { get; set; }
+        /// <summary>
+        /// En fälttävling som inte erbjuds granskning ENBART för att kategorin inte är angiven (och den
+        /// inte ger standardmedaljer). Kortet säger då vad som saknas i stället för att tiga.
+        /// </summary>
+        public bool OfferBlockedByMissingLevel { get; set; }
     }
 }

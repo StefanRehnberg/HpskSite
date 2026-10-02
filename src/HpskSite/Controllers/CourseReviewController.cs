@@ -81,6 +81,7 @@ namespace HpskSite.Controllers
             {
                 success = true,
                 offered = c.Offered,
+                missingLevel = c.OfferBlockedByMissingLevel,
                 route = c.Route,
                 required = c.Required,
                 requiredReason = c.Route == CourseReviewRoute.Forbundet
@@ -180,14 +181,15 @@ namespace HpskSite.Controllers
                     var info = _calendar.CompetitionRegion(id)?.Competition;
                     if (info?.Date == null || info.Date.Value.Date < DateTime.Today) continue;
                     var c = Context(id);
-                    if (c == null || !c.Offered || c.Route == CourseReviewRoute.Forbundet) continue;
+                    if (c == null || (!c.Offered && !c.OfferBlockedByMissingLevel) || c.Route == CourseReviewRoute.Forbundet) continue;
                     upcoming.Add(new
                     {
                         competitionId = id, name = c.Name, date = c.Date?.ToString("yyyy-MM-dd"), organiser = c.Organiser,
                         required = c.Required,
                         deadline = c.Required ? c.Deadline?.ToString("yyyy-MM-dd") : null,
                         late = c.Required && c.Deadline != null && DateTime.Today > c.Deadline.Value,
-                        hasStations = c.HasStations
+                        hasStations = c.HasStations,
+                        missingLevel = c.OfferBlockedByMissingLevel
                     });
                 }
 
