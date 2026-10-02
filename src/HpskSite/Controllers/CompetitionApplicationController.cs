@@ -338,6 +338,11 @@ namespace HpskSite.Controllers
             if (!auth.Allowed) return Json(new { success = false, message = "Åtkomst nekad" });
             var y = year ?? DateTime.Today.Year + 1;
             var list = SafeList(() => _apps.ForRegion(regionId, new DateTime(y, 1, 1), new DateTime(y, 12, 31)));
+            // ⚠️ En ansökan som väntar på kretsen visas ALLTID — årsväljaren får aldrig gömma arbete.
+            // (Samma fel som granskningsinkorgen hade: en inskickad ansökan för ett annat år syntes inte.)
+            var shown = list.Select(a => a.Id).ToHashSet();
+            list.AddRange(SafeList(() => _apps.ForRegion(regionId, new DateTime(2000, 1, 1), new DateTime(2100, 12, 31)))
+                .Where(a => a.Status == CompetitionApplicationStatus.Inskickad && !shown.Contains(a.Id)));
             var region = _calendar.Region(regionId);
             return Json(new
             {

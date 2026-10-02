@@ -16,7 +16,7 @@
 </style>
 
 <div class="container ka-page">
-    <h1 class="mb-1"><i class="bi bi-envelope-paper me-2"></i>Tävlingsansökningar — @m.RegionName</h1>
+    <p class="mb-3"><a href="@m.RegionUrl"><i class="bi bi-arrow-left me-1"></i>@m.RegionName</a></p>
 
     @if (!m.Allowed)
     {
@@ -29,7 +29,6 @@
     {
         @await Html.PartialAsync("_KretsApplicationsInbox", m)
     }
-    <p class="mt-3"><a href="@m.RegionUrl"><i class="bi bi-arrow-left me-1"></i>Till @m.RegionName</a></p>
 </div>
 
 @if (m.Allowed)
