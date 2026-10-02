@@ -989,10 +989,15 @@ faller även fas 4:s inställningar. Körd i dev 2026-10-02. Startkontrollen
 (`CompetitionApplicationSchemaGuardHostedService`) larmar Critical om något saknas. Adds C# → full
 ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod.
 
-Test: `ResultReviewRulesTests` 20. Svit: `hpsk-verify/resultatgranskning-fas2-verify.mjs` **62/62,
-två körningar i rad** (befintlig Halland-tävling med publicerad lista; medaljstatusen
-ögonblicksbildas och krävs identisk efteråt; kretsens egna resultatgranskare parkeras under
-körningen och aktiveras igen). **A/B:** kontrollsummevillkoret för "Granskad av" borttaget i vyn →
+Test: `ResultReviewRulesTests` 20. Svit: `hpsk-verify/resultatgranskning-fas2-verify.mjs` **68/68,
+två körningar i rad**. Två fixturer: en Halland-tävling (krets MED granskare — inloggat flöde,
+inkorg, grind) och en tävling i en krets UTAN granskare (länkläget; kretsen får en tillfällig falsk
+kontaktadress via GetRegion → SaveRegion och återställs exakt). ⚠️ **Sviten rör aldrig kretsarnas
+uppdrag** — en tidigare version parkerade Hallands granskare och gav en riktig men skapad varning på
+kretsens adminsida. Medaljstatusen ögonblicksbildas och krävs identisk efteråt.
+⚠️ **En resultatlista skriven av äldre kod ändrar kontrollsumma vid första Uppdatera** (nya fält som
+`MedalAwards` tillkommer) — en godkänd gammal lista går då tillbaka till kretsen en gång. Det är
+korrekt, men räkna med det efter deploy. **A/B:** kontrollsummevillkoret för "Granskad av" borttaget i vyn →
 exakt 1 röd. Sviten hittade två riktiga fel: inkorgen föll med 500 på en ren sträng i
 `competitionScope` (läses nu via `CompetitionScopeHelper.ReadScope`), och årsväljaren gömde
 väntande listor. ⚠️ sqlcmd kapar svaret vid 256 tecken — håll JSON-frågorna korta.
