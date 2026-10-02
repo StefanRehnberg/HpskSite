@@ -1,6 +1,11 @@
-﻿@{
+﻿@inject HpskSite.Services.Kretsgranskning.KretsCalendarService ClubPanelKretsCalendar
+@{
     var clubId = ViewBag.clubId as int? ?? 0;
     var clubName = ViewBag.clubName as string ?? "Club";
+    // Kretskalendern i planeringsläge (kretsgranskning fas 4) — klubben ansöker härifrån och ser
+    // krockar. Bara när klubbens krets går att avgöra.
+    var clubRegionId = 0;
+    try { clubRegionId = clubId > 0 ? ClubPanelKretsCalendar.RegionIdForClub(clubId) : 0; } catch { clubRegionId = 0; }
 }
 
 <!-- Flatpickr Date/Time Picker -->
@@ -80,6 +85,10 @@
                     <option value="#eventsTab" selected>Händelser</option>
                     <option value="#competitionsTab">Tävlingar</option>
                     <option value="#clubSeriesTab">Serier</option>
+                    @if (clubRegionId > 0)
+                    {
+                    <option value="#clubKretsCalendarTab">Kretskalender</option>
+                    }
                 </optgroup>
                 <optgroup label="Medlemmar">
                     <option value="#membersTab">Medlemmar</option>
@@ -118,6 +127,12 @@
                 <button class="nav-link" id="clubseries-tab" data-bs-toggle="tab" data-bs-target="#clubSeriesTab" type="button" role="tab" aria-controls="clubSeriesTab" aria-selected="false">
                     <i class="bi bi-collection me-2"></i>Serier
                 </button>
+                @if (clubRegionId > 0)
+                {
+                <button class="nav-link" id="clubKretsCalendar-tab" data-bs-toggle="tab" data-bs-target="#clubKretsCalendarTab" type="button" role="tab" aria-controls="clubKretsCalendarTab" aria-selected="false">
+                    <i class="bi bi-calendar3 me-2"></i>Kretskalender
+                </button>
+                }
 
                 <div class="admin-rail-group">Medlemmar</div>
                 <button class="nav-link" id="members-tab" data-bs-toggle="tab" data-bs-target="#membersTab" type="button" role="tab" aria-controls="membersTab" aria-selected="false">
@@ -335,6 +350,18 @@
         </div>
 
         <!-- Series Tab -->
+        @if (clubRegionId > 0)
+        {
+        <!-- Kretskalendern i planeringsläge: preliminära ansökningar, stomprogram, krockar och
+             "Ansök den här dagen". Samma partial som kretsens adminpanel. -->
+        <div class="tab-pane fade" id="clubKretsCalendarTab">
+            @await Html.PartialAsync("_KretsCalendar", clubRegionId, new ViewDataDictionary(ViewData)
+            {
+                { "KcMode", "planning" }, { "KcPrefix", "kcc" },
+                { "KcTabId", "clubKretsCalendar-tab" }, { "KcPaneId", "clubKretsCalendarTab" }
+            })
+        </div>
+        }
         <div class="tab-pane fade" id="clubSeriesTab">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h5>Klubbserier</h5>

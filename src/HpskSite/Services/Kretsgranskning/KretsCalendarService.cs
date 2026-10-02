@@ -137,7 +137,13 @@ namespace HpskSite.Services.Kretsgranskning
         /// </summary>
         /// <param name="withNeighbours">Lägg in grannkretsarnas tävlingar och ansökningar.</param>
         /// <param name="viewerIsAdmin">Inloggad klubb- eller kretsadministratör: ser grannarnas preliminära ansökningar.</param>
-        public List<KretsCalendarEntry> Build(int regionId, DateTime from, DateTime to, bool withNeighbours, bool viewerIsAdmin)
+        /// <param name="planning">
+        /// Planeringskalendern (adminpanelerna): preliminära ansökningar, Förbundets stomprogram och
+        /// krockvarningar. Den PUBLIKA kalendern (kretssidan) visar bara det kretsen publicerat —
+        /// tävlingar, godkända ansökningar och kretsens händelser — utan krockar: en skytt har ingen
+        /// nytta av "samma gren samma dag i grannkretsen", och en preliminär ansökan är inget löfte.
+        /// </param>
+        public List<KretsCalendarEntry> Build(int regionId, DateTime from, DateTime to, bool withNeighbours, bool viewerIsAdmin, bool planning = true)
         {
             var idx = GetIndex();
             var region = idx.Regions.GetValueOrDefault(regionId);
@@ -192,6 +198,7 @@ namespace HpskSite.Services.Kretsgranskning
                 var granted = a.Status == CompetitionApplicationStatus.Beviljad;
                 if (!prelim && !granted) continue;
                 var isNeighbour = a.RegionId != regionId;
+                if (prelim && !planning) continue;
                 if (isNeighbour && prelim && !viewerIsAdmin) continue;
 
                 var rinfo = idx.Regions.GetValueOrDefault(a.RegionId);
@@ -225,7 +232,7 @@ namespace HpskSite.Services.Kretsgranskning
 
             // Förbundets stomprogram — bakgrund och krockkälla, för alla kretsar.
             List<StomprogramItem> fixedDates;
-            try { fixedDates = _stomprogram.Range(from.Date, to.Date); }
+            try { fixedDates = planning ? _stomprogram.Range(from.Date, to.Date) : new(); }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Kretskalendern kunde inte läsa stomprogrammet.");
@@ -244,6 +251,7 @@ namespace HpskSite.Services.Kretsgranskning
             }
 
             KretsCalendarConflicts.Mark(list);
+            if (!planning) foreach (var e in list) e.Conflicts.Clear();
             return list.OrderBy(e => e.Date).ThenBy(e => e.IsNeighbour).ThenBy(e => e.Name).ToList();
         }
 
