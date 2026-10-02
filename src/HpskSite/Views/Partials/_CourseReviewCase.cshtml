@@ -1,0 +1,155 @@
+@* Kretsgranskning fas 3 — ETT bangranskningsärende, renderat av EN funktion som både kretsens
+   inkorg (/kretsen/bangranskning, inloggad) och länkläget (/kretsen/bana-arende, utan inloggning)
+   använder. Två renderare av samma ärende hade glidit isär (samma regel som _ResultReviewCase).
+
+   window.hpskRenderCourseCase(container, data, opts)
+     data = svaret från CourseReview/GetReview eller GetByLink
+     opts = { mode: 'inloggad' | 'lank', token: '<länk-token>', onDone: () => {} }
+
+   Checklistan är HÄRLEDD ur tävlingens egen stationConfig (CourseReviewChecklist + ShbFieldRules,
+   som speglar konfiguratorns JavaScript). Den säger vad den kunde mäta och vad den inte kunde:
+   ett saknat avstånd är "saknas", aldrig "godkänt".
+
+   ⚠️ Mål utanför SHB:s förteckning måste kryssas av ETT och ETT — servern vägrar annars. Det är
+   granskarens uttryckliga godkännande, inte en ruta som följer med av sig själv.
+   ⚠️ Knapparna och kryssrutorna bär bara index, aldrig användartext i attribut. *@
+@await Html.PartialAsync("_HtmlEscape")
+<script>
+if (!window.hpskRenderCourseCase) {
+    (function () {
+        const esc = s => window.hpskEsc(s == null ? '' : String(s));
+        const csrf = () => (document.querySelector('input[name="__RequestVerificationToken"]') || {}).value || '';
+        const secs = n => n == null ? '–' : n + ' s';
+
+        function checklist(c) {
+            if (!c) return '';
+            if (c.error) return '<div class="alert alert-warning">' + esc(c.error) + '</div>';
+            const rows = [];
+            const ok = (good, text) => rows.push('<li class="list-group-item d-flex gap-2"><i class="bi ' + (good ? 'bi-check-circle text-success' : 'bi-exclamation-triangle text-warning') + ' mt-1" aria-hidden="true"></i><div>' + text + '</div></li>');
+            (c.weaponClasses || []).forEach(w => ok(w.enoughStations, 'Vapengrupp <strong>' + esc(w.weaponClass) + '</strong>: ' + w.stations + ' stationer'
+                + (w.enoughStations ? '.' : ' — färre än sex (SHB D.6.1).')));
+            if (!(c.weaponClasses || []).length) ok(false, 'Banan har inga stationer.');
+            const below = (c.stations || []).filter(s => s.belowMinimum);
+            ok(below.length === 0, below.length
+                ? 'Skjuttid under SHB:s minimum på ' + below.map(s => esc(s.weaponClass) + ' station ' + s.station).join(', ') + '.'
+                : 'Ingen station har kortare skjuttid än SHB:s minimum.');
+            const far = (c.stations || []).filter(s => (s.tooFar || []).length);
+            ok(far.length === 0, far.length
+                ? 'Avstånd över SHB:s maxavstånd: ' + far.map(s => esc(s.weaponClass) + ' st ' + s.station + ' (' + s.tooFar.map(t => 'grupp ' + esc(t.group) + ' ' + t.distance + ' m, max ' + t.max + ' m').join('; ') + ')').join(', ') + '.'
+                : 'Inga avstånd över SHB:s maxavstånd.');
+            const noDist = (c.stations || []).filter(s => s.groupsWithoutDistance > 0);
+            if (noDist.length) ok(false, 'Avstånd saknas på ' + noDist.map(s => esc(s.weaponClass) + ' st ' + s.station).join(', ') + ' — kunde inte mätas.');
+            const noSize = (c.stations || []).filter(s => s.figuresWithoutSizeGroup > 0);
+            if (noSize.length) ok(false, 'Figurer utan storleksgrupp på ' + noSize.map(s => esc(s.weaponClass) + ' st ' + s.station).join(', ') + ' — avstånd och skjuttid kunde inte mätas för dem.');
+            const a = c.banlaggareApproval;
+            if (a) ok(a.status === 'Approved' && a.contentMatches,
+                'Banan kommer från den sparade konfigurationen <strong>' + esc(a.name) + '</strong>, '
+                + (a.status === 'Approved' ? 'godkänd av banläggaren ' + esc(a.approvedBy || '') + (a.approvedAt ? ' ' + esc(String(a.approvedAt).slice(0, 10)) : '') : 'inte godkänd av en banläggare')
+                + (a.contentMatches ? '.' : ' — men tävlingens bana har ändrats efter att den anslöts.'));
+            else ok(true, 'Banan är inte ansluten till en sparad konfiguration (inget banläggargodkännande att visa).');
+            if (c.morker) ok(true, 'Mörkerfältskjutning — avstånd och skjuttider bedöms ett steg strängare.');
+            return '<ul class="list-group list-group-flush mb-2" id="crChecklist">' + rows.join('') + '</ul>';
+        }
+
+        function stationTable(c) {
+            const st = (c && c.stations) || [];
+            if (!st.length) return '';
+            return '<details class="mx-3 mb-3"><summary class="small">Stationerna i siffror (' + st.length + ')</summary>'
+                + '<div class="table-responsive mt-2"><table class="table table-sm small align-middle mb-0" id="crStationTable"><thead><tr>'
+                + '<th>Grupp</th><th>Station</th><th>Skjuttid</th><th>SHB minimum</th><th>Svårighet</th><th>Målgrupper</th></tr></thead><tbody>'
+                + st.map(s => '<tr' + (s.belowMinimum || (s.tooFar || []).length ? ' class="table-warning"' : '') + '>'
+                    + '<td>' + esc(s.weaponClass) + '</td><td>' + s.station + (s.name ? ' — ' + esc(s.name) : '') + '</td>'
+                    + '<td>' + secs(s.shootingTimeSec) + '</td><td>' + secs(s.shbMinimumSec) + '</td>'
+                    + '<td>' + (s.difficultyPercent == null ? '–' : s.difficultyPercent + ' %') + '</td><td>' + s.targetGroups + '</td></tr>').join('')
+                + '</tbody></table></div><p class="small text-muted mt-1 mb-0">Svårighet = SHB:s minsta skjuttid i procent av vald skjuttid. Över 100 % är kortare än SHB tillåter.</p></details>';
+        }
+
+        function events(r) {
+            if (!(r.events || []).length) return '';
+            return '<details class="mt-2"><summary class="small">Händelser (' + r.events.length + ')</summary><ul class="small mt-1 mb-0">'
+                + r.events.map(e => '<li>' + esc(e.at) + ' — ' + esc(e.label) + (e.by ? ' (' + esc(e.by) + ')' : '') + (e.text ? ': ' + esc(e.text) : '') + '</li>').join('')
+                + '</ul></details>';
+        }
+
+        // Arrangörens kort visar samma checklista — EN renderare, så arrangören och granskaren ser
+        // samma sak om samma bana.
+        window.hpskCourseChecklistHtml = c => checklist(c) + stationTable(c);
+
+        window.hpskRenderCourseCase = function (box, d, opts) {
+            opts = opts || {};
+            const r = d.review, comp = d.competition || {}, c = d.checklist || {};
+            const isLink = opts.mode === 'lank';
+            const custom = c.customTargets || [];
+            let html = '<div class="card mb-3"><div class="card-body">'
+                + '<div class="d-flex justify-content-between flex-wrap gap-2"><div class="fw-semibold fs-5">' + esc(comp.name) + '</div>'
+                + '<span class="badge ' + (r.status === 'Godkand' ? 'bg-success' : r.status === 'Atersand' ? 'bg-secondary' : 'bg-warning text-dark') + '">' + esc(r.statusLabel) + '</span></div>'
+                + '<div class="text-muted small">' + esc(comp.date || '') + (comp.place ? ', ' + esc(comp.place) : '') + ' · ' + esc(comp.organiser || '') + (comp.level ? ' · ' + esc(comp.level) : '') + '</div>'
+                + '<div class="text-muted small">Inskickad ' + esc(r.submittedAt) + ' av ' + esc(r.submittedBy) + (r.required ? ' · granskningen krävs' : ' · frivilligt inskickad') + '</div>'
+                + (r.arrangerNote ? '<div class="mt-2"><strong>Meddelande från arrangören:</strong> ' + esc(r.arrangerNote) + '</div>' : '')
+                + (comp.stationsUrl ? '<a class="btn btn-outline-primary btn-sm mt-2" id="crStationsLink" href="' + esc(comp.stationsUrl) + '" target="_blank" rel="noopener"><i class="bi bi-signpost-split me-1"></i>Visa stationsbeskrivningarna</a>' : '')
+                + '</div>' + checklist(c) + stationTable(c) + '<div class="card-body pt-0">' + events(r) + '</div></div>';
+
+            if (d.viewerIsCompetitor) html += '<div class="alert alert-warning" id="crCompetitor"><i class="bi bi-exclamation-triangle me-1"></i>Du är själv anmäld i tävlingen. Stationerna är hemliga för skyttarna — låt helst en annan granskare gå igenom banan. Godkänner du ändå står det på beslutet.</div>';
+
+            if (d.changedSinceSubmit) {
+                html += '<div class="alert alert-warning" id="crChanged">Banan har ändrats sedan den skickades in. Arrangören behöver skicka in den igen.</div>';
+            } else if (!d.canAct) {
+                html += '<div class="alert ' + (r.status === 'Godkand' ? 'alert-success' : 'alert-secondary') + '" id="crDone">'
+                    + (r.status === 'Godkand' ? 'Godkänd ' + esc(r.decidedAt) + ' av ' + esc(r.decider) + (r.deciderRole ? ', ' + esc(r.deciderRole) : '') + '.'
+                        + (r.approvedCustomTargets ? ' Godkända mål utanför SHB:s förteckning: ' + esc(r.approvedCustomTargets) + '.' : '')
+                       : 'Återsänd till arrangören ' + esc(r.decidedAt) + (r.comment ? ': ' + esc(r.comment) : '.'))
+                    + '</div>';
+            } else if (d.viewerIsSubmitter) {
+                html += '<div class="alert alert-secondary" id="crSelf">Du skickade in banan själv, så en annan granskare i kretsen behöver gå igenom den.</div>';
+            } else {
+                html += '<div class="card"><div class="card-body">'
+                    + '<div class="mb-2" role="radiogroup">'
+                    + '<div class="form-check"><input class="form-check-input" type="radio" name="crAction" id="crApprove" value="approve" checked><label class="form-check-label" for="crApprove">Godkänn banan</label></div>'
+                    + '<div class="form-check"><input class="form-check-input" type="radio" name="crAction" id="crReturn" value="return"><label class="form-check-label" for="crReturn">Be arrangören ändra något</label></div></div>'
+                    + (custom.length ? '<div class="border rounded p-2 mb-2" id="crCustom"><div class="small fw-semibold mb-1">Mål utanför SHB:s förteckning — godkänn vart och ett</div>'
+                        + custom.map((t, i) => '<div class="form-check"><input class="form-check-input" type="checkbox" id="crCt' + i + '" data-ct="' + i + '"><label class="form-check-label" for="crCt' + i + '">' + esc(t) + '</label></div>').join('')
+                        + '<div class="small text-muted mt-1">Arrangören anger de godkända målen i inbjudan.</div></div>' : '')
+                    + '<label class="form-label" for="crComment">Kommentar till arrangören <span class="text-muted small">(krävs när du ber om en ändring)</span></label>'
+                    + '<textarea class="form-control mb-2" id="crComment" rows="3" maxlength="4000"></textarea>'
+                    + (isLink ? '<div class="row g-2"><div class="col-md-6"><label class="form-label" for="crName">Ditt namn</label><input class="form-control" id="crName" maxlength="200" autocomplete="name"></div>'
+                        + '<div class="col-md-6"><label class="form-label" for="crRole">Din roll i kretsen</label><input class="form-control" id="crRole" maxlength="200" placeholder="t.ex. bangranskare, ordförande"></div></div>'
+                        + '<p class="small text-muted mt-2 mb-2">Namnet och rollen står med på beslutet, tillsammans med adressen länken skickades till.</p>' : '')
+                    + '<button type="button" class="btn btn-primary" id="crSend">Skicka beslutet</button><div id="crResult" class="mt-2" role="status"></div>'
+                    + '</div></div>';
+            }
+            box.innerHTML = html;
+            const send = box.querySelector('#crSend');
+            if (send) send.addEventListener('click', () => {
+                const act = box.querySelector('input[name="crAction"]:checked').value;
+                const chosen = custom.filter((t, i) => { const cb = box.querySelector('[data-ct="' + i + '"]'); return cb && cb.checked; });
+                const body = { comment: box.querySelector('#crComment').value, customTargets: chosen.join('\n') };
+                let url;
+                if (isLink) {
+                    url = '/umbraco/surface/CourseReview/ActByLink';
+                    Object.assign(body, { t: opts.token, action: act, name: box.querySelector('#crName').value, role: box.querySelector('#crRole').value });
+                } else {
+                    url = '/umbraco/surface/CourseReview/' + (act === 'approve' ? 'Approve' : 'Return');
+                    body.id = r.id;
+                }
+                send.disabled = true;
+                fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': csrf() },
+                    body: new URLSearchParams(body).toString()
+                }).then(x => x.json()).then(x => {
+                    const res = box.querySelector('#crResult');
+                    res.className = 'mt-2 alert py-2 ' + (x.success ? 'alert-success' : 'alert-warning');
+                    res.textContent = x.message || '';
+                    if (x.success) { send.classList.add('d-none'); if (opts.onDone) opts.onDone(x); }
+                    else send.disabled = false;
+                }).catch(() => {
+                    const res = box.querySelector('#crResult');
+                    res.className = 'mt-2 alert alert-warning py-2';
+                    res.textContent = 'Beslutet kunde inte skickas. Försök igen om en stund.';
+                    send.disabled = false;
+                });
+            });
+        };
+    })();
+}
+</script>

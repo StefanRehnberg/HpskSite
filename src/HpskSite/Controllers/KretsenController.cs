@@ -192,6 +192,84 @@ namespace HpskSite.Controllers
             return View("KretsenResultatArende", root);
         }
 
+        /// <summary>
+        /// Kretsens bangranskning (fas 3). Egen sida av samma skäl som de andra inkorgarna:
+        /// bangranskaren eller kretsinstruktören är sällan kretsadministratör.
+        /// </summary>
+        [HttpGet("bangranskning")]
+        public async Task<IActionResult> Bangranskning(int? krets)
+        {
+            if (!TryRoot(out var root, out var ctx)) return StatusCode(500, "Umbraco-kontext saknas.");
+            var region = krets is > 0 ? ctx!.Content!.GetById(krets.Value) : null;
+            if (region == null || region.ContentType.Alias != "regionalPage") return NotFound("Kretsen hittades inte.");
+
+            var me = await CurrentMemberAsync();
+            if (me == null)
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/kretsen/bangranskning?krets={region.Id}")}");
+
+            var access = HttpContext.RequestServices.GetRequiredService<CourseReviewAccess>();
+            ViewData["KretsGranskning"] = new KretsAnsokningarModel
+            {
+                RegionId = region.Id,
+                RegionName = region.Value<string>("regionName") ?? region.Name ?? "",
+                RegionUrl = region.Url(),
+                Allowed = (await access.AuthorityAsync(region.Id, me.Id)).Allowed
+            };
+            return View("KretsenBangranskning", root);
+        }
+
+        /// <summary>Länkläget för bangranskningen — samma form som för resultatlistan.</summary>
+        [HttpGet("bana-arende")]
+        public IActionResult BanaArende(string? t)
+        {
+            if (!TryRoot(out var root, out _)) return StatusCode(500, "Umbraco-kontext saknas.");
+            ViewData["ArendeToken"] = t ?? "";
+            return View("KretsenBanaArende", root);
+        }
+
+        /// <summary>
+        /// Stationsbeskrivningarna som granskningsunderlag — samma kort som arrangören skriver ut,
+        /// utan QR-koder. ⚠️ Stationerna är HEMLIGA för skyttar, så sidan släpps bara till:
+        /// tävlingens funktionärer, kretsens granskare medan banan granskas eller är godkänd, eller en
+        /// giltig ärendelänk (som bär kontrollsumman och slutar gälla när banan ändras).
+        /// </summary>
+        [HttpGet("bana-stationer")]
+        public async Task<IActionResult> BanaStationer(int? c, string? t, int? print)
+        {
+            if (c is not > 0) return NotFound();
+            var content = HttpContext.RequestServices.GetRequiredService<IContentService>();
+            var comp = content.GetById(c.Value);
+            if (comp == null || comp.ContentType.Alias != "competition") return NotFound();
+            var type = comp.GetValue<string>("competitionType") ?? "";
+            if (type is not ("Faltskytte" or "MagnumFalt")) return NotFound();
+
+            var access = HttpContext.RequestServices.GetRequiredService<CourseReviewAccess>();
+            var reviews = HttpContext.RequestServices.GetRequiredService<CourseReviewService>();
+            var me = await CurrentMemberAsync();
+            bool allowed = await _auth.HasCompetitionStaffAccessAsync(c.Value)
+                           || (me != null && await access.ReviewerMayReadStations(c.Value, me.Id));
+            bool competitor = me != null && access.IsRegistered(c.Value, me.Id);
+            if (!allowed && !string.IsNullOrEmpty(t))
+            {
+                var link = access.ReadLink(t);
+                var r = link != null && reviews.TablesExist() ? reviews.Get(link.CaseId) : null;
+                allowed = r != null && r.CompetitionId == c.Value && r.Checksum == link!.Checksum
+                          && r.Checksum == HpskSite.Models.Kretsgranskning.CourseReviewRules.Checksum(comp.GetValue<string>("stationConfig"));
+            }
+            if (!allowed)
+            {
+                if (me == null && string.IsNullOrEmpty(t))
+                    return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString(Request.Path + Request.QueryString)}");
+                return StatusCode(403, "Stationsbeskrivningarna är hemliga för skyttarna och visas bara för tävlingens funktionärer och kretsens granskare.");
+            }
+
+            var model = FaltskyttePrintController.BuildModel(comp, c.Value, null, $"{Request.Scheme}://{Request.Host}", withQr: false);
+            model.AutoPrint = print == 1;
+            model.Notice = "Granskningsunderlag — hemligt för skyttarna. Dela inte stationsbeskrivningarna med någon som tävlar."
+                + (competitor ? " Du är själv anmäld i tävlingen." : "");
+            return View("~/Views/FaltskyttePrintStationCards.cshtml", model);
+        }
+
         /// <summary>Länkläget: ett ärende utan inloggning. Länken bär ärendet; sidan hämtar det.</summary>
         [HttpGet("arende")]
         public IActionResult Arende(string? t)

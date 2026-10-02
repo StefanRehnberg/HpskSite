@@ -202,6 +202,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Models
         public string CompetitionName { get; set; } = "";
         public string ScoringMode { get; set; } = "Normal";
         public List<StationPrintItem> Stations { get; set; } = new();
+        /// <summary>Skrivs ut överst — bangranskningens underlag (fas 3) säger att stationerna är hemliga.</summary>
+        public string? Notice { get; set; }
+        /// <summary>false = öppna utan att skriva ut direkt (granskaren läser på skärmen).</summary>
+        public bool AutoPrint { get; set; } = true;
     }
 
     public class StationPrintItem

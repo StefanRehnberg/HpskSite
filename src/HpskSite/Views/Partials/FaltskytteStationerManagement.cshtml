@@ -22,6 +22,9 @@
 
 @Html.AntiForgeryToken()
 
+@* Kretsens bangranskning (fas 3) — döljer sig själv när tävlingen inte erbjuds granskning. *@
+@await Html.PartialAsync("_CourseReviewCard", competitionId?.ToString() ?? "")
+
 <div class="row g-3" id="fseStnCards">
     <div class="col-12 text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
 </div>

@@ -58,6 +58,55 @@ namespace HpskSite.Services.Kretsgranskning
                 .ToList();
         }
 
+        // ── Bangranskningen (fas 3): bangranskaren ELLER kretsinstruktörerna ────────────────────
+        //
+        // En krets väljer vem som granskar banan (RegionCalendarSettings.CourseReviewer). Göteborg låter
+        // kretsinstruktören göra det. Kretsinstruktörerna är gruppen Kretsinstruktor_{kod}, som
+        // certifieringssystemet förvaltar — samma regel som annars: behörigheten följer gruppen.
+
+        /// <summary>Kretsens utsedda kretsinstruktörer (gruppen Kretsinstruktor_{kod}).</summary>
+        public List<KretsUppdragHolder> Kretsinstruktorer(int regionId)
+        {
+            var code = Region(regionId)?.GetValue<string>("regionCode") ?? "";
+            if (string.IsNullOrWhiteSpace(code)) return new();
+            return MembersInGroup($"Kretsinstruktor_{code}")
+                .Select(m => new KretsUppdragHolder(m.Id, DisplayName(m), m.Email))
+                .ToList();
+        }
+
+        /// <summary>Får medlemmen granska banan i kretsen, givet vem kretsen valt?</summary>
+        public bool IsCourseReviewer(int regionId, int memberId, string? reviewerKind)
+        {
+            if (regionId <= 0 || memberId <= 0) return false;
+            return HpskSite.Models.Kretsgranskning.CourseReviewerKind.Normalize(reviewerKind) == HpskSite.Models.Kretsgranskning.CourseReviewerKind.Kretsinstruktor
+                ? Kretsinstruktorer(regionId).Any(h => h.MemberId == memberId)
+                : HasUppdrag(regionId, memberId, BoardRoleDefinitions.RoleBangranskare);
+        }
+
+        /// <summary>Banans granskare, med namn — tom lista betyder länkläget.</summary>
+        public List<KretsUppdragHolder> CourseReviewers(int regionId, string? reviewerKind) =>
+            HpskSite.Models.Kretsgranskning.CourseReviewerKind.Normalize(reviewerKind) == HpskSite.Models.Kretsgranskning.CourseReviewerKind.Kretsinstruktor
+                ? Kretsinstruktorer(regionId)
+                : Holders(regionId, BoardRoleDefinitions.RoleBangranskare);
+
+        /// <summary>
+        /// Mottagarna för en bana att granska. Samma reservregel som <see cref="Recipients"/>: utan
+        /// granskare går ärendet till kretsens kontaktadress och kretsadministratörerna.
+        /// </summary>
+        public KretsRecipients CourseRecipients(int regionId, string? reviewerKind)
+        {
+            if (HpskSite.Models.Kretsgranskning.CourseReviewerKind.Normalize(reviewerKind) != HpskSite.Models.Kretsgranskning.CourseReviewerKind.Kretsinstruktor)
+                return Recipients(regionId, BoardRoleDefinitions.RoleBangranskare);
+            var region = Region(regionId);
+            var regionName = region?.GetValue<string>("regionName") ?? region?.Name ?? "";
+            var holders = Kretsinstruktorer(regionId);
+            var withEmail = holders.Where(h => !string.IsNullOrWhiteSpace(h.Email)).ToList();
+            var missing = holders.Where(h => string.IsNullOrWhiteSpace(h.Email)).Select(h => h.Name).ToList();
+            return withEmail.Count > 0
+                ? new KretsRecipients(regionName, withEmail.Select(h => new KretsRecipient(h.Email!, h.Name, h.MemberId)).ToList(), false, missing)
+                : Fallback(region, regionName, missing);
+        }
+
         /// <summary>
         /// Vilka av kretsens tre uppdrag saknar innehavare? Driver varningen i kretsens adminpanel
         /// och länkläget (en krets utan granskare får ärendet via länk).

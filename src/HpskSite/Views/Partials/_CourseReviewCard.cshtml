@@ -1,0 +1,161 @@
+@* Kretsgranskning fas 3 — kortet "Bangranskning" på Stationer-fliken (fält och magnumfält).
+   Modell = tävlingens id som sträng.
+
+   En STÄMPEL, som resultatgranskningen: frivillig för fälttävlingar på kretsnivå och högre, krävs vid
+   nationell fältskjutning och när kretsen själv kräver den. SM och landsdelsmästerskap går till
+   FÖRBUNDET minst 12 veckor före — där registrerar arrangören att underlaget skickats och vad
+   Förbundet svarade (pistol.nu skickar ingenting till Förbundet).
+
+   Kortet döljs helt för en tävling som inte erbjuds granskning. Checklistan renderas av samma
+   funktion som granskarens ärende (_CourseReviewCase), så de två ser samma sak om samma bana. *@
+@model string
+@{
+    var cid = Model ?? "";
+}
+<div class="card mb-3" id="courseReviewCard" style="display:none;" data-competition-id="@cid">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span class="fw-bold"><i class="bi bi-signpost-split me-2"></i>Bangranskning</span>
+        <span class="badge bg-secondary" id="crcState"></span>
+    </div>
+    <div class="card-body" id="crcBody"><div class="text-muted small">Hämtar…</div></div>
+</div>
+@await Html.PartialAsync("_CourseReviewCase")
+<script>
+(function () {
+    const card = document.getElementById('courseReviewCard');
+    if (!card || card.dataset.wired) return;
+    card.dataset.wired = '1';
+    const CID = card.getAttribute('data-competition-id');
+    const esc = s => window.hpskEsc(s == null ? '' : String(s));
+    const body = document.getElementById('crcBody'), state = document.getElementById('crcState');
+    const csrf = () => (document.querySelector('input[name="__RequestVerificationToken"]') || {}).value || '';
+    let last = null;
+
+    function setState(text, cls) { state.textContent = text; state.className = 'badge ' + cls; }
+
+    function submitForm(d, label) {
+        return '<label class="form-label small" for="crcNote">Meddelande ' + (d.route === 'Forbundet' ? '(för er egen anteckning)' : 'till kretsen') + ' <span class="text-muted">(valfritt)</span></label>'
+            + '<textarea class="form-control form-control-sm mb-2" id="crcNote" rows="2" maxlength="2000"></textarea>'
+            + '<button type="button" class="btn btn-primary btn-sm" id="crcSubmit">' + esc(label) + '</button>'
+            + '<div id="crcResult" class="mt-2" role="status"></div>';
+    }
+
+    function checklistBlock(d) {
+        if (!d.hasStations) return '';
+        return '<details class="mt-3"' + (d.review ? '' : ' open') + '><summary class="small fw-semibold">Automatisk kontroll av banan</summary>'
+            + '<div class="border rounded mt-2">' + window.hpskCourseChecklistHtml(d.checklist) + '</div>'
+            + '<p class="small text-muted mt-1 mb-0">Samma kontroll som granskaren ser. Den mäter mot SHB:s regler och säger vad den inte kunde mäta.</p></details>';
+    }
+
+    function render(d) {
+        last = d;
+        if (!d.success) { card.style.display = ''; setState('Fel', 'bg-warning text-dark'); body.innerHTML = '<div class="text-muted small">' + esc(d.message) + '</div>'; return; }
+        if (!d.offered) { card.style.display = 'none'; return; }
+        card.style.display = '';
+        const r = d.review, forb = d.route === 'Forbundet';
+        let html = '';
+        if (!d.region) {
+            setState('Krets saknas', 'bg-warning text-dark');
+            body.innerHTML = '<div class="alert alert-warning mb-0">Tävlingens krets går inte att avgöra. Kontrollera arrangör och krets på tävlingen.</div>';
+            return;
+        }
+        if (d.requiredReason) html += '<div class="alert alert-info py-2 small"><i class="bi bi-info-circle me-1"></i>' + esc(d.requiredReason) + '</div>';
+        if (!forb && !d.hasReviewers && (!r || r.status !== 'Godkand')) html += '<div class="alert alert-light border py-2 small" id="crcLinkMode"><i class="bi bi-envelope me-1"></i>'
+            + esc(d.region.name) + ' har ingen ' + esc((d.reviewerLabel || '').toLowerCase()) + ' på pistol.nu. Banan skickas som en länk till kretsens kontaktadress. '
+            + '<a href="' + esc(d.komIgangUrl) + '">Be kretsen komma igång</a></div>';
+        if (!d.hasStations) {
+            setState('Ingen bana än', 'bg-secondary');
+            body.innerHTML = html + '<p class="mb-0">När tävlingen har en stationsbeskrivning (Fältskytte-inställningar → anslut en konfiguration) kan banan skickas in'
+                + (forb ? ' till Förbundet.' : ' till ' + esc(d.region.name) + ' för granskning.') + '</p>';
+            return;
+        }
+        const printLink = '<a class="btn btn-outline-secondary btn-sm" id="crcPrint" href="' + esc(d.printUrl) + '" target="_blank" rel="noopener"><i class="bi bi-printer me-1"></i>Skriv ut stationsbeskrivningarna</a>';
+
+        if (forb) {
+            if (!r) {
+                setState('Inte skickad', 'bg-secondary');
+                html += '<p class="mb-2">Vid SM och landsdelsmästerskap granskar Förbundet målförutsättningarna och stationsbeskrivningarna. Skriv ut underlaget, skicka det till Förbundet och registrera här att det är gjort.</p>'
+                    + '<div class="mb-2">' + printLink + '</div>' + submitForm(d, 'Underlaget är skickat till Förbundet');
+            } else if (r.status === 'Inskickad') {
+                setState('Hos Förbundet', 'bg-warning text-dark');
+                html += '<p class="mb-2">Underlaget skickades till Förbundet ' + esc(r.sentToForbundetAt || r.submittedAt) + ' (registrerat av ' + esc(r.submittedBy) + '). Skriv in Förbundets svar när det kommer.</p>'
+                    + '<div class="mb-2">' + printLink + '</div>'
+                    + '<label class="form-label small" for="crcAnswerText">Förbundets svar</label>'
+                    + '<textarea class="form-control form-control-sm mb-2" id="crcAnswerText" rows="2" maxlength="4000"></textarea>'
+                    + '<div class="d-flex flex-wrap gap-2"><button type="button" class="btn btn-success btn-sm" data-crc-answer="1">Förbundet har godkänt</button>'
+                    + '<button type="button" class="btn btn-outline-secondary btn-sm" data-crc-answer="0">Förbundet begär ändringar</button></div>'
+                    + '<div id="crcResult" class="mt-2" role="status"></div>';
+            } else if (r.status === 'Atersand') {
+                setState('Ändra och skicka igen', 'bg-danger');
+                html += '<div class="alert alert-warning py-2"><strong>Förbundet begär ändringar:</strong><br>' + esc(r.comment || '') + '</div>'
+                    + '<div class="mb-2">' + printLink + '</div>' + submitForm(d, 'Det ändrade underlaget är skickat till Förbundet');
+            } else {
+                setState('Godkänd', 'bg-success');
+                html += '<p class="mb-0"><i class="bi bi-patch-check text-success me-1"></i>Förbundet har godkänt banan (registrerat ' + esc(r.decidedAt) + ').' + (r.comment ? ' ' + esc(r.comment) : '') + '</p>';
+                if (d.changedSinceSubmit) html += '<div class="alert alert-warning py-2 mt-2 mb-0">Banan har ändrats efter godkännandet. Skicka det ändrade underlaget till Förbundet.</div>' + submitForm(d, 'Det ändrade underlaget är skickat till Förbundet');
+            }
+        } else if (!r) {
+            setState('Inte inskickad', 'bg-secondary');
+            html += '<p class="mb-2">Skicka in banan — målförutsättningar och stationsbeskrivningar — till ' + esc(d.region.name) + '. En godkänd bana markeras som granskad av kretsen.</p>' + submitForm(d, 'Skicka till ' + d.region.name);
+        } else if (r.status === 'Inskickad') {
+            setState(d.changedSinceSubmit ? 'Ändrad efter inskicket' : 'Hos kretsen', d.changedSinceSubmit ? 'bg-danger' : 'bg-warning text-dark');
+            html += '<p class="mb-1">Inskickad ' + esc(r.submittedAt) + ' av ' + esc(r.submittedBy) + '. ' + esc(d.region.name) + ' går igenom banan.</p>';
+            if (d.changedSinceSubmit) html += '<div class="alert alert-warning py-2">Banan har ändrats sedan den skickades in, så kretsen kan inte godkänna den. Skicka in den igen.</div>' + submitForm(d, 'Skicka in igen');
+        } else if (r.status === 'Atersand') {
+            setState('Ändra och skicka igen', 'bg-danger');
+            html += '<div class="alert alert-warning py-2"><strong>' + esc(r.decider) + (r.deciderRole ? ' (' + esc(r.deciderRole) + ')' : '') + ' ber er ändra:</strong><br>' + esc(r.comment) + '</div>'
+                + submitForm(d, 'Skicka in igen');
+        } else {
+            setState(d.changedSinceSubmit ? 'Ändrad efter godkännandet' : 'Granskad', d.changedSinceSubmit ? 'bg-danger' : 'bg-success');
+            html += '<p class="mb-0"><i class="bi bi-patch-check text-success me-1"></i>Granskad av ' + esc(d.region.name) + ' — ' + esc(r.decider)
+                + (r.deciderRole ? ', ' + esc(r.deciderRole) : '') + ', ' + esc(r.decidedAt) + '.' + (r.comment ? ' ' + esc(r.comment) : '') + '</p>'
+                + (r.approvedCustomTargets ? '<p class="small mb-0 mt-1">Godkända mål utanför SHB:s förteckning: ' + esc(r.approvedCustomTargets) + ' — ange dem i inbjudan.</p>' : '');
+            if (d.changedSinceSubmit) html += '<div class="alert alert-warning py-2 mt-2">Banan har ändrats efter godkännandet, så stämpeln gäller inte längre. Skicka in den igen.</div>' + submitForm(d, 'Skicka in igen');
+        }
+        if (d.deadline && (!r || r.status === 'Atersand')) html += '<p class="small text-muted mt-2 mb-0">Skickas in senast ' + esc(d.deadline) + (d.late ? ' — <span class="text-danger-emphasis">tiden har gått ut, men banan kan fortfarande skickas in</span>' : '') + '.</p>';
+        html += checklistBlock(d);
+        body.innerHTML = html;
+    }
+
+    function post(url, data) {
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': csrf() },
+            body: new URLSearchParams(data).toString()
+        }).then(r => r.json());
+    }
+
+    function fail(msg) {
+        const res = document.getElementById('crcResult');
+        if (res) { res.className = 'mt-2 alert alert-warning py-2'; res.textContent = msg; }
+    }
+
+    body.addEventListener('click', e => {
+        const sub = e.target.closest('#crcSubmit');
+        if (sub) {
+            sub.disabled = true;
+            post('/umbraco/surface/CourseReview/Submit', { competitionId: CID, note: (document.getElementById('crcNote') || {}).value || '' })
+                .then(x => { if (x.success) load(x.message); else { fail(x.message || ''); sub.disabled = false; } })
+                .catch(() => { fail('Banan kunde inte skickas. Försök igen om en stund.'); sub.disabled = false; });
+            return;
+        }
+        const ans = e.target.closest('[data-crc-answer]');
+        if (ans) {
+            ans.disabled = true;
+            post('/umbraco/surface/CourseReview/RegisterForbundetAnswer', { competitionId: CID, approved: ans.dataset.crcAnswer, text: document.getElementById('crcAnswerText').value })
+                .then(x => { if (x.success) load(x.message); else { fail(x.message || ''); ans.disabled = false; } })
+                .catch(() => { fail('Svaret kunde inte sparas. Försök igen om en stund.'); ans.disabled = false; });
+        }
+    });
+
+    function load(notice) {
+        fetch('/umbraco/surface/CourseReview/GetForCompetition?competitionId=' + encodeURIComponent(CID)).then(r => r.json()).then(d => {
+            render(d);
+            if (notice) body.insertAdjacentHTML('afterbegin', '<div class="alert alert-success py-2" id="crcNotice">' + esc(notice) + '</div>');
+        }).catch(() => { /* kortet är inte kritiskt — stationerna fungerar utan det */ });
+    }
+
+    window.hpskLoadCourseReview = () => load();
+    load();
+})();
+</script>

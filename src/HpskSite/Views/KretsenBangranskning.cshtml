@@ -1,0 +1,36 @@
+@using HpskSite.Controllers
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var m = ViewData["KretsGranskning"] as KretsAnsokningarModel ?? new KretsAnsokningarModel();
+    ViewBag.Title = "Bangranskning — " + m.RegionName;
+}
+
+@* Kretsgranskning fas 3: kretsens bangranskning i fält. Egen sida, eftersom bangranskaren eller
+   kretsinstruktören sällan är kretsadministratör. Samma partial som kretsens adminpanel renderar.
+   Behörigheten prövas av varje endpoint. *@
+
+<style>
+    .kg-page { font-size: 1.05rem; padding: 1.5rem 0 4rem; }
+</style>
+
+<div class="container kg-page">
+    <p class="mb-3"><a href="@m.RegionUrl"><i class="bi bi-arrow-left me-1"></i>@m.RegionName</a></p>
+
+    @if (!m.Allowed)
+    {
+        <div class="alert alert-secondary mt-3" id="crNotAllowed">
+            Den här sidan är för kretsens bangranskare (eller kretsinstruktörer, om kretsen valt dem) och kretsadministratören.
+            Ska du ha uppdraget kan du be om det på <a href="/kretsen/kom-igang?krets=@m.RegionId">Kom igång</a>.
+        </div>
+    }
+    else
+    {
+        @await Html.PartialAsync("_KretsCourseReviewInbox", m)
+    }
+</div>
+
+@if (m.Allowed)
+{
+<script>window.hpskKretsCourseReviewInit();</script>
+}
