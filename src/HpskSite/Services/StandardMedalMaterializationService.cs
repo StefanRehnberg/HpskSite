@@ -19,11 +19,14 @@ namespace HpskSite.Services
     {
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly ILogger<StandardMedalMaterializationService> _logger;
+        private readonly HpskSite.Services.Kretsgranskning.ResultReviewGate _reviewGate;
 
         public StandardMedalMaterializationService(
+            HpskSite.Services.Kretsgranskning.ResultReviewGate reviewGate,
             IUmbracoDatabaseFactory databaseFactory,
             ILogger<StandardMedalMaterializationService> logger)
         {
+            _reviewGate = reviewGate;
             _databaseFactory = databaseFactory;
             _logger = logger;
         }
@@ -122,6 +125,11 @@ namespace HpskSite.Services
             _logger.LogInformation(
                 "Materialized standard medals for competition {CompetitionId} ({Discipline}): +{Inserted} ~{Updated} -{Removed}",
                 competitionId, discipline, inserted, updated, removed);
+
+            // Kretsgranskning fas 2: kretsens grind. Materialiseringen skriver Verified som alltid;
+            // grinden flyttar platsmedaljerna till Reported när kretsen kräver godkännande och listan
+            // inte är godkänd. Här, i den ENDA skrivvägen, så att ingen gren kan glömma den.
+            _reviewGate.ReconcileMedals(competitionId);
         }
 
         /// <summary>

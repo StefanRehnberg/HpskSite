@@ -897,8 +897,10 @@ avstyrker kretsen, och Förbundet beslutar (kretsen registrerar beslutet).
   som ren funktion i `KretsCalendarConflicts` — aldrig stopp. Klicka på en dag för att ansöka.
 - **Sista ansökningsdag** per år och nivå (`RegionApplicationDeadline`); en sen ansökan märks, stoppas inte.
 - **Sammanställningen till Förbundet** (`/kretsen/sammanstallning?krets=&year=`): blankettens kolumner,
-  utskriftsvänlig sida. **⚠️ Förbundets ifyllbara pdf fylls INTE** — det kräver ett pdf-bibliotek och är
-  ett eget beslut. Kretsmästerskapen förs inte in automatiskt ännu.
+  utskriftsvänlig sida som sparas som pdf ur webbläsaren, samma mönster som föreningsintyget.
+  **Ingen pdf-motor, med flit** (Stefans beslut 2026-10-02) — Förbundets ifyllbara pdf fylls inte.
+  **Kretsmästerskapen förs in** (`KretsCalendarService.Kretsmasterskap`, rubrikrad `#smKmHeading`,
+  rader `data-km-id` med tomma Tillstyrks/Avstyrks-rutor — de söks inte, men hör till blanketten).
 
 - **Påminnelser** (`CompetitionApplicationReminderHostedService`, var 12:e timme, claim-then-send
   med unikt index i `KretsgranskningReminder`): arrangören 8 veckor före om en godkänd ansökan
@@ -907,9 +909,9 @@ avstyrker kretsen, och Förbundet beslutar (kretsen registrerar beslutet).
   nationella ansökningar ligger obehandlade. Reglerna som ren funktion i
   `CompetitionApplicationReminders.Compute`. Sajtadmin kan köra varvet nu (`RunRemindersNow`).
 
-**Inte byggt ännu:** inläsning av en befintlig kalender, stomprogrammet, kretsens
-arrangörschecklista, `RegionCalendarSettings`-ytan (tabellen finns), räknarna per krets på
-sajtadmins statistik.
+**Inte byggt ännu:** stomprogrammet, kretsens arrangörschecklista, räknarna per krets på
+sajtadmins statistik. **Inläsning av en befintlig kalender byggs inte** (Stefans beslut 2026-10-02).
+`RegionCalendarSettings` har en yta sedan fas 2 (resultatgranskningens inställningar).
 
 **Operatörssteg:** `Migrations/create-competition-application-tables.sql` **FÖRE deployen**
 (körd i dev 2026-10-01). Startkontrollen `CompetitionApplicationSchemaGuardHostedService` larmar
@@ -919,6 +921,72 @@ Test: `CompetitionApplicationRulesTests`, `CompetitionApplicationRemindersTests`
 `hpsk-verify/tavlingsansokan-fas4-verify.mjs` 83/83, två körningar i rad (A/B: grannregeln borttagen
 → 1 röd; kontrollsumman borttagen → sviten avbryter vid "länken slutar gälla"). Skärmdumpar:
 `tavlingsansokan-fas4-shot.mjs`.
+
+### Kretsens granskning av resultatlistan (2026-10-02, fas 2, branch `kretsgranskning`)
+
+**⚠️⚠️ EN STÄMPEL, INTE EN GRIND** (Stefans beslut 2026-10-02, med tanke på att knappt några
+kretsar använder pistol.nu ännu). Standardmedaljerna verifieras vid publiceringen som i dag; en
+godkänd lista får markeringen **"Granskad av …krets"** på resultatsidan. Bara en krets som själv
+slår på **"Kräv kretsens godkännande"** håller inne platsmedaljerna tills listan är godkänd.
+
+- **Erbjuds** för tävlingar som ger standardmedaljer (`ResultReviewRules.Offered` =
+  `isAwardingStandardMedals && !isClubOnly`, alltså kretstävling eller högre). Bara huvudlistan,
+  inte deltävlingen. Redan publicerade tävlingar rörs inte.
+- **Tabeller:** `CompetitionResultReview` (unik på tävling+deltävling) + `…Event`; tre kolumner på
+  `RegionCalendarSettings` (`RequireResultApproval`, `RequireResultApprovalSince`,
+  `TwoReviewersAtChampionships`). Statusarna är text: Inskickad, Godkand, Atersand.
+- **⚠️⚠️ Kontrollsumman är det som gör stämpeln sann.** `ResultReviewRules.Checksum` hashar
+  `resultData` UTAN de flyktiga nycklarna (`UpdatedAt`, `EnteredAt`, `IsOfficial`,
+  `OfficialWeaponClasses` …) — annars hade varje Uppdatera sett ut som en ändring. Godkännandet
+  vägras om listan ändrats sedan inskicket, länken utan inloggning slutar gälla, och badgen på
+  resultatsidan visas bara när den lagrade summan matchar listan som visas.
+- **⚠️⚠️ `ResultReviewHooks.AfterResultDataWrittenAsync` måste anropas från VARJE skrivväg för
+  `resultData`.** Nu: precision `CreateResultsList`, `ToggleResultsOfficial`,
+  `RefreshResultArtifactAsync`; fält `FaltskytteResultArtifactService.RefreshAsync`; spring
+  `ComputeStoreSpringskytteResultsAsync`. En ändrad inskickad/godkänd lista går tillbaka till
+  Inskickad (händelse `ChangedAfterApproval`), medaljerna stäms av och granskarna mejlas. En
+  femte skrivväg utan kroken = en lista som ändras tyst och fortsätter bära "Granskad av".
+- **⚠️⚠️ Grinden sitter i den ENDA medaljskrivvägen.** `StandardMedalMaterializationService.
+  UpsertOnSiteMedalsAsync` skriver Verified som alltid och anropar sist
+  `ResultReviewGate.ReconcileMedals`, som flyttar tävlingens platsmedaljer till Reported när grinden
+  gäller och listan inte är godkänd (och tillbaka annars). Rör aldrig en medalj som en människa
+  verifierat (`VerifiedByMemberId`) eller som är låst i en guldansökan. Grinden gäller bara
+  tävlingar från `RequireResultApprovalSince`; fail-open om den inte kan avgöras. Att slå grinden
+  på/av kör `ReconcileRegion`. ⚠️ Platsmedaljer är annars aldrig Reported — därför betyder
+  "OnSite + Reported" alltid "väntar på kretsen", och Min sida (`onSiteMedal` från
+  `MemberController`) och klubbens medaljflik visar just det.
+- **Grinden kräver minst en resultatgranskare** (servern vägrar). Två granskare vid SM/LDM är
+  per krets, av som standard; samma granskare två gånger vägras (`SameReviewerTwice`, via länk
+  jämförs namnet).
+- **Den som skickade in kan inte godkänna** (utom sajtadmin som support).
+- **Arrangören:** kortet `_ResultReviewCard` (precision, fält och spring — en partial) på
+  Resultat-fliken. Kräver publicerad lista och en uttrycklig bekräftelse av vapenkontrollen
+  (`weaponCheck = "1"`; utelämnat = nej). Sista dag 14 dagar efter tävlingen — märks, stoppas inte.
+- **Kretsen:** egen sida **`/kretsen/granskning?krets=`** (resultatgranskaren är sällan
+  kretsadmin; rälslänk `#regionResultReview-link`). Inkorg, "väntar på arrangören", avgjorda och
+  kretsens inställningar. Ärendet renderas av **`_ResultReviewCase`**, samma funktion som
+  länksidan `/kretsen/resultat-arende?t=` — med en automatisk checklista ur listan (starter per
+  klass, sammanslagningar, mästerskapsmedaljörer och oavgjorda platser, standardmedaljer, plats och
+  datum, vapenkontrollen).
+- **Länkläget** som fas 4: utan resultatgranskare går mejlet till kretsens kontaktadress (länk,
+  `CaseKind = "Resultat"`, 60 dagar, bär kontrollsumman) och till kretsadministratörerna.
+  Sajtadmin får länkarna i svaret (`caseLinks`). `ResultReviewHooks.NotifyReviewersAsync` är enda
+  mottagarvägen.
+- **Påminnelser** (`ResultReviewReminderService`, i SAMMA svep och spärrtabell som fas 4):
+  arrangören 3 och 10 dagar efter tävlingen (bara senaste passerade steget, bara 30 dagar bakåt),
+  kretsen när en inskickad lista legat 5 dagar. Regeln: `ResultReviewReminders.Compute`.
+- Endpoints: `ResultReview/GetForCompetition`, `Submit`, `GetRegionReviews`, `GetReview`,
+  `Approve`, `Return`, `GetByLink`, `ActByLink`, `SaveSettings`.
+
+**Operatörssteg:** `Migrations/create-competition-result-review-tables.sql` **FÖRE deployen** —
+NPoco skriver de tre nya kolumnerna vid varje sparning av `RegionCalendarSettings`, så utan dem
+faller även fas 4:s inställningar. Körd i dev 2026-10-02. Startkontrollen
+(`CompetitionApplicationSchemaGuardHostedService`) larmar Critical om något saknas. Adds C# → full
+ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod.
+
+Test: `ResultReviewRulesTests` 20. Svit: `hpsk-verify/resultatgranskning-fas2-verify.mjs`
+(befintlig Halland-tävling med publicerad lista; medaljstatusen ögonblicksbildas och krävs identisk
+efteråt).
 
 ### Competition Admin System ✅ COMPLETE
 **Location:** Admin Page → Competitions tab (default)

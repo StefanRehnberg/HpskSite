@@ -2962,6 +2962,9 @@ namespace HpskSite.Controllers
 
                 _logger.LogInformation("Created/updated final results list for competition {CompetitionId}", request.CompetitionId);
 
+                if (!request.IsSubCompetition)
+                    await ResultReviewHookAsync(request.CompetitionId, resultPage.GetValue<string>("resultData"));
+
                 // If "Uppdatera" regenerates an ALREADY-OFFICIAL main list, reconcile the
                 // Standardmedalj ledger from the fresh results. This covers the case where
                 // Standardmedaljsgrundande was forgotten at first publish, then enabled later and
@@ -3263,6 +3266,7 @@ namespace HpskSite.Controllers
 
                         // Materialize the won Standard medals into the Standardmedalj ledger.
                         await MaterializeStandardMedalsAsync(competition, freshResults);
+                        await ResultReviewHookAsync(request.CompetitionId, resultDataJson);
                     }
                 }
                 else if (!newIsOfficial && !request.IsSubCompetition)
@@ -3522,6 +3526,14 @@ namespace HpskSite.Controllers
         /// Publicerar bara om noden fanns; <c>isOfficial</c> bevaras, så en preliminär lista
         /// förblir preliminär och en publicerad förblir publicerad.
         /// </summary>
+        /// <summary>Kretsgranskning fas 2: varje skrivning av resultData passerar granskningens krok.</summary>
+        private Task ResultReviewHookAsync(int competitionId, string? resultData)
+        {
+            var hooks = HttpContext?.RequestServices.GetService(typeof(HpskSite.Services.Kretsgranskning.ResultReviewHooks))
+                as HpskSite.Services.Kretsgranskning.ResultReviewHooks;
+            return hooks?.AfterResultDataWrittenAsync(competitionId, resultData) ?? Task.CompletedTask;
+        }
+
         private async Task<bool> RefreshResultArtifactAsync(int competitionId, string reason)
         {
             try
@@ -3561,6 +3573,7 @@ namespace HpskSite.Controllers
 
                 _logger.LogInformation("Resultatartefakten omräknad för tävling {CompetitionId} ({Reason})",
                     competitionId, reason);
+                await ResultReviewHookAsync(competitionId, resultPage.GetValue<string>("resultData"));
                 return true;
             }
             catch (Exception ex)

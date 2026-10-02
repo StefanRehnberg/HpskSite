@@ -1,0 +1,113 @@
+@* Kretsgranskning fas 2 — kortet "Kretsens granskning" på Resultat-fliken. EN partial för
+   precision, fält och spring (modell = tävlingens id som sträng).
+
+   Granskningen är en STÄMPEL: arrangören skickar in den publicerade listan, kretsen godkänner
+   eller ber om en rättelse, och en godkänd lista får "Granskad av …" på resultatsidan. Bara när
+   kretsen själv kräver sitt godkännande väntar standardmedaljerna — kortet säger det då.
+
+   Kortet döljs helt för en tävling som inte erbjuds granskning (inga standardmedaljer). Läser om
+   sig via window.hpskLoadResultReview(), som resultatlistans egen laddning anropar. *@
+@model string
+@{
+    var cid = Model ?? "";
+}
+<div class="card mt-3" id="resultReviewCard" style="display:none;" data-competition-id="@cid">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span class="fw-bold"><i class="bi bi-clipboard-check me-2"></i>Kretsens granskning</span>
+        <span class="badge bg-secondary" id="rrcState"></span>
+    </div>
+    <div class="card-body" id="rrcBody"><div class="text-muted small">Hämtar…</div></div>
+</div>
+@await Html.PartialAsync("_HtmlEscape")
+<script>
+(function () {
+    const card = document.getElementById('resultReviewCard');
+    if (!card || card.dataset.wired) return;
+    card.dataset.wired = '1';
+    const CID = card.getAttribute('data-competition-id');
+    const esc = s => window.hpskEsc(s == null ? '' : String(s));
+    const body = document.getElementById('rrcBody'), state = document.getElementById('rrcState');
+    const csrf = () => (document.querySelector('input[name="__RequestVerificationToken"]') || {}).value || '';
+
+    function setState(text, cls) { state.textContent = text; state.className = 'badge ' + cls; }
+
+    function form(d, resubmit) {
+        return '<div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="rrcWeapon">'
+            + '<label class="form-check-label" for="rrcWeapon">Vapenkontrollen är gjord enligt regelverket</label></div>'
+            + '<label class="form-label small" for="rrcNote">Meddelande till kretsen <span class="text-muted">(valfritt)</span></label>'
+            + '<textarea class="form-control form-control-sm mb-2" id="rrcNote" rows="2" maxlength="2000"></textarea>'
+            + '<button type="button" class="btn btn-primary btn-sm" id="rrcSubmit">' + (resubmit ? 'Skicka in igen' : 'Skicka till ' + esc(d.region.name)) + '</button>'
+            + '<div id="rrcResult" class="mt-2" role="status"></div>';
+    }
+
+    function render(d) {
+        if (!d.success) { card.style.display = ''; setState('Fel', 'bg-warning text-dark'); body.innerHTML = '<div class="text-muted small">' + esc(d.message) + '</div>'; return; }
+        if (!d.offered) { card.style.display = 'none'; return; }
+        card.style.display = '';
+        const r = d.review;
+        let html = '';
+        if (!d.region) {
+            setState('Krets saknas', 'bg-warning text-dark');
+            body.innerHTML = '<div class="alert alert-warning mb-0">Tävlingens krets går inte att avgöra. Kontrollera arrangör och krets på tävlingen.</div>';
+            return;
+        }
+        if (d.medalsPending) html += '<div class="alert alert-info py-2 small"><i class="bi bi-hourglass-split me-1"></i>' + esc(d.region.name)
+            + ' kräver sitt godkännande innan standardmedaljerna räknas. Skyttarnas medaljer visas som väntande tills listan är godkänd.</div>';
+        if (!d.hasReviewers && (!r || r.status !== 'Godkand')) html += '<div class="alert alert-light border py-2 small" id="rrcLinkMode"><i class="bi bi-envelope me-1"></i>'
+            + esc(d.region.name) + ' har inte utsett någon resultatgranskare på pistol.nu. Listan skickas som en länk till kretsens kontaktadress. '
+            + '<a href="' + esc(d.komIgangUrl) + '">Be kretsen komma igång</a></div>';
+
+        if (!r) {
+            setState('Inte inskickad', 'bg-secondary');
+            if (!d.resultPublished) {
+                html += '<p class="mb-1">När resultatlistan är publicerad skickar du in den till ' + esc(d.region.name) + ' för granskning.</p>';
+            } else {
+                html += '<p class="mb-2">Skicka in den publicerade resultatlistan till ' + esc(d.region.name) + '. En godkänd lista får markeringen "Granskad av ' + esc(d.region.name) + '".</p>' + form(d, false);
+            }
+            if (d.deadline) html += '<p class="small text-muted mt-2 mb-0">Skickas in senast ' + esc(d.deadline) + (d.late ? ' — <span class="text-danger-emphasis">tiden har gått ut, men listan kan fortfarande skickas in</span>' : '') + '.</p>';
+        } else if (r.status === 'Inskickad') {
+            setState('Hos kretsen', 'bg-warning text-dark');
+            html += '<p class="mb-1">Inskickad ' + esc(r.submittedAt) + ' av ' + esc(r.submittedBy) + '. ' + esc(d.region.name) + ' går igenom listan.</p>';
+            if (r.firstApprover) html += '<p class="small mb-1">' + esc(r.firstApprover) + ' har godkänt. Kretsen kräver en andra granskare.</p>';
+            if ((r.events || []).some(e => e.kind === 'ChangedAfterApproval')) html += '<p class="small text-muted mb-0">Listan har ändrats efter inskicket, så kretsen granskar den ändrade listan.</p>';
+        } else if (r.status === 'Atersand') {
+            setState('Rätta och skicka igen', 'bg-danger');
+            html += '<div class="alert alert-warning py-2"><strong>' + esc(r.decider) + (r.deciderRole ? ' (' + esc(r.deciderRole) + ')' : '') + ' ber er rätta:</strong><br>' + esc(r.comment) + '</div>'
+                + '<p class="small">Rätta, tryck <strong>Uppdatera</strong> på resultatlistan och skicka in den igen.</p>' + form(d, true);
+        } else {
+            setState('Granskad', 'bg-success');
+            html += '<p class="mb-0"><i class="bi bi-patch-check text-success me-1"></i>Granskad av ' + esc(d.region.name) + ' — ' + esc(r.decider)
+                + (r.deciderRole ? ', ' + esc(r.deciderRole) : '') + ', ' + esc(r.decidedAt) + '.' + (r.comment ? ' ' + esc(r.comment) : '') + '</p>';
+        }
+        body.innerHTML = html;
+        const btn = document.getElementById('rrcSubmit');
+        if (btn) btn.addEventListener('click', submit);
+    }
+
+    function submit() {
+        const btn = document.getElementById('rrcSubmit'), res = document.getElementById('rrcResult');
+        if (!document.getElementById('rrcWeapon').checked) {
+            res.className = 'mt-2 alert alert-warning py-2'; res.textContent = 'Bekräfta att vapenkontrollen är gjord innan listan skickas in.'; return;
+        }
+        btn.disabled = true;
+        fetch('/umbraco/surface/ResultReview/Submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': csrf() },
+            body: new URLSearchParams({ competitionId: CID, weaponCheck: '1', note: document.getElementById('rrcNote').value }).toString()
+        }).then(r => r.json()).then(x => {
+            if (x.success) { load(x.message); return; }
+            res.className = 'mt-2 alert alert-warning py-2'; res.textContent = x.message || ''; btn.disabled = false;
+        }).catch(() => { res.className = 'mt-2 alert alert-warning py-2'; res.textContent = 'Listan kunde inte skickas. Försök igen om en stund.'; btn.disabled = false; });
+    }
+
+    function load(notice) {
+        fetch('/umbraco/surface/ResultReview/GetForCompetition?competitionId=' + encodeURIComponent(CID)).then(r => r.json()).then(d => {
+            render(d);
+            if (notice) body.insertAdjacentHTML('afterbegin', '<div class="alert alert-success py-2" id="rrcNotice">' + esc(notice) + '</div>');
+        }).catch(() => { /* kortet är inte kritiskt — resultatlistan fungerar utan det */ });
+    }
+
+    window.hpskLoadResultReview = () => load();
+    load();
+})();
+</script>

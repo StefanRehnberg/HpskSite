@@ -8,6 +8,8 @@
 @inject IMemberService MemberService
 @inject HpskSite.Services.ClubService ClubService
 @inject HpskSite.Services.AdminAuthorizationService AuthService
+@inject HpskSite.Services.Kretsgranskning.ResultReviewService ResultReviews
+@inject HpskSite.Services.Kretsgranskning.KretsCalendarService KretsCalendar
 @{
     Layout = null;
     var competition = Model.Parent; // Competition -> Result (direct child)
@@ -93,6 +95,25 @@
 
             canDeleteResults = isSiteAdmin || isCompetitionManager || isClubAdmin || isSkjutledare || isRegionHost;
         }
+    }
+
+    // Kretsgranskning fas 2: "Granskad av …krets" — bara när kretsen godkänt EXAKT den lista som
+    // visas (kontrollsumman). Ändras listan efter godkännandet försvinner markeringen av sig själv.
+    var reviewedByRegion = "";
+    var reviewedAt = "";
+    if (!isSubCompetitionView && competition != null)
+    {
+        try
+        {
+            var rv = ResultReviews.TablesExist() ? ResultReviews.For(competition.Id, false) : null;
+            if (rv != null && rv.IsApproved
+                && !HpskSite.Models.Kretsgranskning.ResultReviewRules.Changed(rv, HpskSite.Models.Kretsgranskning.ResultReviewRules.Checksum(resultData)))
+            {
+                reviewedByRegion = KretsCalendar.Region(rv.RegionId)?.Name ?? "kretsen";
+                reviewedAt = rv.DecidedAt?.ToString("d MMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")) ?? "";
+            }
+        }
+        catch { /* markeringen är inte kritisk — resultatlistan visas ändå */ }
     }
 }
 
@@ -242,6 +263,13 @@
                                 @(isSubCompetitionView ? subCompetitionName : Model.Name)
                 </h1>
                 <p class="text-muted mb-0">@competition.Name</p>
+                @if (!string.IsNullOrEmpty(reviewedByRegion))
+                {
+                    <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle mt-2" id="reviewedByRegionBadge"
+                          title="Kretsen har granskat och godkänt resultatlistan@(string.IsNullOrEmpty(reviewedAt) ? "" : " " + reviewedAt)">
+                        <i class="bi bi-patch-check me-1"></i>Granskad av @reviewedByRegion
+                    </span>
+                }
                             </div>
                         <div>
                 <button class="btn btn-outline-secondary" onclick="window.print()">
@@ -253,6 +281,10 @@
         <!-- Print Header -->
         <div class="print-only mb-4">
             <h1>@(isSubCompetitionView ? subCompetitionName : Model.Name) @competition.Name</h1>
+            @if (!string.IsNullOrEmpty(reviewedByRegion))
+            {
+                <p class="mb-0">Granskad av @reviewedByRegion@(string.IsNullOrEmpty(reviewedAt) ? "" : " " + reviewedAt)</p>
+            }
             <hr>
         </div>
 

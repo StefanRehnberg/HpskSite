@@ -34,13 +34,20 @@ namespace HpskSite.Services.Kretsgranskning
                 using var scope = _scopeFactory.CreateScope();
                 var svc = scope.ServiceProvider.GetRequiredService<CompetitionApplicationService>();
                 if (svc.TablesExist())
-                {
                     _logger.LogInformation("Tävlingsansökan: tabellerna finns.");
-                    return;
-                }
-                _logger.LogCritical(
-                    "TÄVLINGSANSÖKAN ÄR TRASIG: CompetitionApplication-tabellerna saknas. Klubbarnas ansökningar, "
-                    + "kretsens beslut och kretskalendern faller. Kör Migrations/create-competition-application-tables.sql.");
+                else
+                    _logger.LogCritical(
+                        "TÄVLINGSANSÖKAN ÄR TRASIG: CompetitionApplication-tabellerna saknas. Klubbarnas ansökningar, "
+                        + "kretsens beslut och kretskalendern faller. Kör Migrations/create-competition-application-tables.sql.");
+
+                // Fas 2 — resultatgranskningen.
+                var problem = scope.ServiceProvider.GetRequiredService<ResultReviewService>().SchemaProblem();
+                if (problem == null)
+                    _logger.LogInformation("Resultatgranskningen: schemat finns.");
+                else
+                    _logger.LogCritical(
+                        "RESULTATGRANSKNINGEN ÄR TRASIG: {Missing} saknas. Inskick, kretsens beslut och kretsens inställningar faller. "
+                        + "Kör Migrations/create-competition-result-review-tables.sql.", problem);
             }
             catch (Exception ex)
             {

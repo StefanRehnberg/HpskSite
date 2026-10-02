@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -1063,6 +1063,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                     _contentService.Save(resultPage);
                     _contentService.Publish(resultPage, new[] { "*" });
+                    if (HttpContext?.RequestServices.GetService(typeof(HpskSite.Services.Kretsgranskning.ResultReviewHooks)) is HpskSite.Services.Kretsgranskning.ResultReviewHooks reviewHooks)
+                        await reviewHooks.AfterResultDataWrittenAsync(competitionId, resultPage.GetValue<string>("resultData"));
                     _logger.LogInformation("Stored Springskytte results for CompetitionId={CompetitionId}, {Count} shooters, official classes=[{Official}]",
                         competitionId, shooterResults.Count, string.Join(",", officialClasses));
 

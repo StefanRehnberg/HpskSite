@@ -153,6 +153,45 @@ namespace HpskSite.Controllers
             return View("KretsenAnsokningar", root);
         }
 
+        /// <summary>
+        /// Kretsens granskning av resultatlistor (fas 2). Egen sida av samma skäl som inkorgen för
+        /// ansökningar: resultatgranskaren är sällan kretsadministratör. Data och behörighet ligger i
+        /// ResultReview-endpointsen.
+        /// </summary>
+        [HttpGet("granskning")]
+        public async Task<IActionResult> Granskning(int? krets)
+        {
+            if (!TryRoot(out var root, out var ctx)) return StatusCode(500, "Umbraco-kontext saknas.");
+            var region = krets is > 0 ? ctx!.Content!.GetById(krets.Value) : null;
+            if (region == null || region.ContentType.Alias != "regionalPage") return NotFound("Kretsen hittades inte.");
+
+            var me = await CurrentMemberAsync();
+            if (me == null)
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/kretsen/granskning?krets={region.Id}")}");
+
+            var code = region.Value<string>("regionCode") ?? "";
+            var allowed = _uppdrag.HasUppdrag(region.Id, me.Id, BoardRoleDefinitions.RoleResultatgranskare)
+                          || await _auth.IsCurrentUserAdminAsync()
+                          || (!string.IsNullOrEmpty(code) && await _auth.IsRegionalAdminForRegion(code));
+            ViewData["KretsGranskning"] = new KretsAnsokningarModel
+            {
+                RegionId = region.Id,
+                RegionName = region.Value<string>("regionName") ?? region.Name ?? "",
+                RegionUrl = region.Url(),
+                Allowed = allowed
+            };
+            return View("KretsenGranskning", root);
+        }
+
+        /// <summary>Länkläget för resultatgranskningen — samma form som för ansökningar.</summary>
+        [HttpGet("resultat-arende")]
+        public IActionResult ResultatArende(string? t)
+        {
+            if (!TryRoot(out var root, out _)) return StatusCode(500, "Umbraco-kontext saknas.");
+            ViewData["ArendeToken"] = t ?? "";
+            return View("KretsenResultatArende", root);
+        }
+
         /// <summary>Länkläget: ett ärende utan inloggning. Länken bär ärendet; sidan hämtar det.</summary>
         [HttpGet("arende")]
         public IActionResult Arende(string? t)
@@ -197,6 +236,7 @@ namespace HpskSite.Controllers
                 RegionName = region.Value<string>("regionName") ?? region.Name ?? "",
                 Year = y,
                 Deadline = HpskSite.Models.Kretsgranskning.CompetitionApplicationRules.ForbundetDeadline(y),
+                Championships = cal.Kretsmasterskap(region.Id, y),
                 Rows = apps.Select(a => new KretsSammanstallningRow
                 {
                     Id = a.Id,
@@ -272,6 +312,8 @@ namespace HpskSite.Controllers
         public int Year { get; set; }
         public DateTime Deadline { get; set; }
         public List<KretsSammanstallningRow> Rows { get; set; } = new();
+        /// <summary>Kretsens kretsmästerskap — förs in på blanketten enligt Förbundets instruktion.</summary>
+        public List<KretsCalendarService.ChampionshipRow> Championships { get; set; } = new();
     }
 
     public class KretsSammanstallningRow

@@ -88,6 +88,11 @@ namespace HpskSite.Composers
             builder.Services.AddHostedService<HpskSite.Services.Kretsgranskning.CompetitionApplicationSchemaGuardHostedService>();
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.KretsCalendarService>();
             builder.Services.AddHostedService<HpskSite.Services.Kretsgranskning.CompetitionApplicationReminderHostedService>();
+            // Resultatgranskning (fas 2): stampel, och grind bara i kretsar som valt den.
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.ResultReviewService>();
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.ResultReviewGate>();
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.ResultReviewHooks>();
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.ResultReviewReminderService>();
             // Member-database expansion (see Documentation/MEMBER_DATABASE.md)
             builder.Services.AddScoped<ClubMembershipService>();
             builder.Services.AddScoped<MemberAccessKeyService>();

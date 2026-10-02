@@ -231,6 +231,7 @@
                     <option value="#regionAdminCompetitionsTab">Tävlingar</option>
                     <option value="#regionSeriesTab">Serier</option>
                     <option value="/kretsen/ansokningar?krets=@regionContentId">Ansökningar ↗</option>
+                    <option value="/kretsen/granskning?krets=@regionContentId">Resultatgranskning ↗</option>
                 </optgroup>
                 <optgroup label="Medlemmar">
                     <option value="#regionCertificationsTab">Certifieringar</option>
@@ -272,6 +273,11 @@
                 <a class="nav-link d-flex align-items-center" id="regionApplications-link" href="/kretsen/ansokningar?krets=@regionContentId">
                     <i class="bi bi-envelope-paper me-2"></i>Ansökningar
                     <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar kretsens ansökningar"></i>
+                </a>
+                @* Kretsgranskning fas 2: resultatgranskningen, egen sida av samma skäl. *@
+                <a class="nav-link d-flex align-items-center" id="regionResultReview-link" href="/kretsen/granskning?krets=@regionContentId">
+                    <i class="bi bi-clipboard-check me-2"></i>Resultatgranskning
+                    <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar kretsens resultatgranskning"></i>
                 </a>
 
                 <div class="admin-rail-group">Medlemmar</div>

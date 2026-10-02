@@ -97,6 +97,15 @@ namespace HpskSite.Models.Kretsgranskning
         public int? FieldPrereqWeeks { get; set; }
         public string? CourseReviewer { get; set; }
         public string? NeighbourOverrides { get; set; }
+        /// <summary>
+        /// Kretsens grind (fas 2): standardmedaljerna väntar på kretsens godkännande. Av som
+        /// standard — granskningen är annars en stämpel. Kräver minst en resultatgranskare.
+        /// </summary>
+        public bool RequireResultApproval { get; set; }
+        /// <summary>När grinden slogs på — gäller bara tävlingar från den dagen.</summary>
+        public DateTime? RequireResultApprovalSince { get; set; }
+        /// <summary>Två olika granskare vid SM och landsdelsmästerskap.</summary>
+        public bool TwoReviewersAtChampionships { get; set; }
         public DateTime UpdatedAt { get; set; }
         public int UpdatedByMemberId { get; set; }
     }

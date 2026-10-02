@@ -469,6 +469,8 @@
         </div>
     </div>
 
+    @await Html.PartialAsync("_ResultReviewCard", competitionId)
+
     @*
         Deltavlingens sarskjutning ligger FORE dess resultatlista, samma ordning som
         huvudkortet. Bar de tva halvorna motsatt ordning lar sidan ut tva olika
@@ -1108,6 +1110,7 @@ let currentResultsListData = null;
 let currentResultPageUrl = null;
 
 async function loadResultsList() {
+    if (window.hpskLoadResultReview) setTimeout(window.hpskLoadResultReview, 0);
     const competitionId = $('.competition-results-management').data('competition-id');
     if (!competitionId) {
         console.error('No competition ID');
