@@ -54,14 +54,17 @@
         // annars ser det ut som att funktionen saknas.
         if (!d.offered && d.missingLevel) {
             card.style.display = '';
-            setState('Tävlingsnivå saknas', 'bg-secondary');
+            setState('Tävlingsnivå inte sparad', 'bg-secondary');
             // Orden ska vara dialogens egna: fältet Tävlingsnivå i avsnittet Nivå och mästerskap.
+            // ⚠️ Säg "inte sparad", inte "saknas": dialogen FÖRESLÅR en nivå när den är tom, och då ser
+            // det ut som att nivån redan är satt.
             body.innerHTML = '<p class="mb-1">Bangranskning erbjuds för fälttävlingar med tävlingsnivå kretstävling eller högre. '
-                + 'Tävlingsnivån är inte angiven.</p>'
-                + '<p class="small text-muted mb-2">Öppna <strong>Redigera tävling</strong>, avsnittet <strong>Nivå och mästerskap</strong>, och välj '
-                + '<strong>Tävlingsnivå</strong> (till exempel Kretstävling). Är det en föreningstävling behövs ingen granskning.</p>'
+                + 'Tävlingsnivån är inte sparad.</p>'
+                + '<p class="small text-muted mb-2">Öppna <strong>Redigera tävling</strong>, avsnittet <strong>Nivå och mästerskap</strong>, kontrollera '
+                + '<strong>Tävlingsnivå</strong> och tryck <strong>Spara ändringar</strong>. Dialogen kan visa ett förslag, men det gäller först när det sparats. '
+                + 'Är det en föreningstävling behövs ingen granskning.</p>'
                 + (typeof window.openEditCompetitionModal === 'function'
-                    ? '<button type="button" class="btn btn-outline-primary btn-sm" id="crcOpenLevel"><i class="bi bi-pencil me-1"></i>Ange tävlingsnivå</button>' : '');
+                    ? '<button type="button" class="btn btn-outline-primary btn-sm" id="crcOpenLevel"><i class="bi bi-pencil me-1"></i>Ange och spara tävlingsnivå</button>' : '');
             const open = document.getElementById('crcOpenLevel');
             if (open) open.addEventListener('click', () => {
                 window.openEditCompetitionModal(+CID, false, 'Faltskytte');
