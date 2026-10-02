@@ -33,6 +33,12 @@ namespace HpskSite.Models.Kretsgranskning
         public string? ContactEmail { get; set; }
         public string? ContactPhone { get; set; }
         public string? Classes { get; set; }
+        /// <summary>Antal serier (precision m.fl.) eller stationer (fält). Null = ej angivet.</summary>
+        public int? NumberOfSeries { get; set; }
+        /// <summary>Mästerskapet som avgörs (CompetitionScopeHelper-konstant). Null = inget mästerskap.</summary>
+        public string? ChampionshipScope { get; set; }
+        /// <summary>Ges standardmedaljer? Null = ej angivet (äldre ansökan).</summary>
+        public bool? AwardsStandardMedals { get; set; }
         public string? Note { get; set; }
         public string Status { get; set; } = CompetitionApplicationStatus.Utkast;
         public string? KretsOpinion { get; set; }
@@ -228,8 +234,27 @@ namespace HpskSite.Models.Kretsgranskning
             if (a.EndDate.HasValue && a.EndDate.Value.Date < a.CompetitionDate.Date) return "Slutdatumet ligger före startdatumet.";
             if (a.ReserveDate.HasValue && a.ReserveDate.Value.Date < today.Date) return "Reservdatumet har redan passerat.";
             if (a.Name.Length > 200) return "Namnet är för långt.";
+            if (a.NumberOfSeries is < 1 or > 100) return $"Ange antal {SeriesWord(a.Discipline)} mellan 1 och 100.";
+            if (a.ChampionshipScope != null && !ChampionshipScopes.Contains(a.ChampionshipScope)) return "Okänt mästerskap.";
+            if (a.AwardsStandardMedals == true && !CompetitionLevel.AllowsStandardMedals(a.Level))
+                return "Standardmedaljer ges bara vid kretstävling eller högre.";
             return null;
         }
+
+        /// <summary>Mästerskapen en ansökan kan avse — samma konstanter som tävlingens competitionScope.</summary>
+        public static readonly string[] ChampionshipScopes =
+        {
+            HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.Klubbmasterskap,
+            HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.Kretsmasterskap,
+            HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.Landsdelsmasterskap,
+            HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.SvensktMasterskap
+        };
+
+        /// <summary>Fält räknar stationer, övriga grener serier. Springskytte har inget av dem.</summary>
+        public static string SeriesWord(string? discipline) =>
+            discipline is "Faltskytte" or "MagnumFalt" ? "stationer" : "serier";
+
+        public static bool HasSeriesCount(string? discipline) => discipline != "Springskytte";
 
         /// <summary>
         /// Förbundets gräns: 1 oktober året före tävlingsåret enligt SHB och handboken, men
@@ -248,6 +273,10 @@ namespace HpskSite.Models.Kretsgranskning
         {
             var s = string.Join("|", a.Level, a.Discipline, a.Name, a.CompetitionDate.ToString("yyyy-MM-dd"),
                 a.EndDate?.ToString("yyyy-MM-dd"), a.ReserveDate?.ToString("yyyy-MM-dd"), a.Place, a.Classes, a.Note, a.CompletionReply);
+            // De senare fälten läggs bara till när de är satta, så att en länk till en äldre ansökan
+            // inte slutar gälla av att fälten tillkom.
+            if (a.NumberOfSeries != null || a.ChampionshipScope != null || a.AwardsStandardMedals != null || a.RangeId != null)
+                s += $"|v2|{a.NumberOfSeries}|{a.ChampionshipScope}|{a.AwardsStandardMedals}|{a.RangeId}";
             return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(s)))[..16];
         }
     }

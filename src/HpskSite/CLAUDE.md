@@ -1979,6 +1979,24 @@ avstyrker kretsen, och Förbundet beslutar (kretsen registrerar beslutet).
   ovanför rutnätet i stället för i varje dagruta, i dagvyn under *Pågår också*. ⚠️ Stomprogrammet
   räknas aldrig som period — en SM-vecka ska varna. 5 och inte 4: ett SM kan pågå i 3–4 dagar.
 
+#### Ansökans omfattning, skjutbanan, dagklicket och helgdagarna (2026-10-02)
+
+- **Ansökan bär `NumberOfSeries`, `ChampionshipScope`, `AwardsStandardMedals`** (migrering
+  `add-format-fields-to-competition-application.sql`, FÖRE deploy). Förbundets blankett är inte
+  publik (kalendern visar bara Datum/Namn/Gren/Plats/Arrangör/Krets), så urvalet är ur SHB: omfattningen
+  avgör mästerskapskravet (C.3.6.1) och standardmedaljtabellen, och standardmedaljer kräver kretsnivå
+  (C.5.1.1). Fält säger "stationer" (`CompetitionApplicationRules.SeriesWord`), Springskytte inget antal.
+  ⚠️ **Kontrollsumman tar med de nya fälten bara när de är satta**, så en utskickad länk till en äldre
+  ansökan fortsätter gälla. Fälten följer med till guiden (`hpskWizardFromApplication`).
+- **Skjutbanan väljs med `_CompetitionRangePicker` (prefix `ca`)** — fältet för platsens namn heter
+  därför `cavenue` (väljaren fyller `prefix + "venue"`; utan det skriver den i en annan dialogs fält).
+  Dto:n är synkron, så banornas namn förladdas med `PrimeRangesAsync` före varje Dto-anrop.
+- **Dagklicket rullar fram dagvyn** och markerar dagen (`kc-selected`) — den står under rutnätet och
+  ett klick såg annars ut att inte göra någonting. Knappen får fokus.
+- **Visa helgdagar** (båda lägena, `localStorage`): räknas i webbläsaren (`holidaysFor`, påsken med den
+  gregorianska algoritmen, midsommar/alla helgons som "lördagen mellan"). Ingen ny hämtning vid växling.
+  Svit: `hpsk-verify/kalender-ansokan-verify.mjs`.
+
 **Operatörssteg:** `Migrations/create-kretsplanering-tables.sql` **FÖRE deployen** (tre tabeller).
 Körd i dev 2026-10-02. Startkontrollen larmar Critical om någon saknas. Adds C# → full ombyggnad.
 

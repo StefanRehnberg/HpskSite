@@ -45,6 +45,8 @@
             + '<div class="text-muted">' + esc(a.clubName) + ' ansöker om att arrangera en ' + esc(a.levelLabel.toLowerCase()) + ' i ' + esc(a.disciplineLabel.toLowerCase()) + '.</div>'
             + '<dl class="row mt-2 mb-0 small">'
             + dt('Datum', a.competitionDate + (a.endDate ? ' – ' + a.endDate : '')) + dt('Reservdatum', a.reserveDate) + dt('Plats', a.place)
+            + dt('Skjutbana', a.rangeName) + dt(a.seriesWord === 'stationer' ? 'Antal stationer' : 'Antal serier', a.numberOfSeries ? String(a.numberOfSeries) : '')
+            + dt('Mästerskap', a.championshipScope) + dt('Standardmedaljer', a.awardsStandardMedals == null ? '' : (a.awardsStandardMedals ? 'Ja' : 'Nej'))
             + dt('Klasser', a.classes) + dt('Kontakt', [a.contactName, a.contactEmail, a.contactPhone].filter(Boolean).join(', ')) + dt('Meddelande', a.note)
             + (a.completionReply ? dt('Klubbens komplettering', a.completionReply) : '')
             + '</dl></div></div>';

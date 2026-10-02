@@ -114,6 +114,7 @@ namespace HpskSite.Controllers
             var holders = regionId > 0 ? _uppdrag.Holders(regionId, BoardRoleDefinitions.RoleTavlingsansvarig) : new();
             var year = DateTime.Today.Year;
             var linksThisYear = list.Count(a => !string.IsNullOrEmpty(a.LinkSentTo) && a.CreatedAt.Year == year);
+            await PrimeRangesAsync(list);
 
             return Json(new
             {
@@ -147,6 +148,7 @@ namespace HpskSite.Controllers
             var club = await CanClubAsync(a.ClubId, a.RegionId);
             var krets = (await KretsAuthorityAsync(a.RegionId)).Allowed;
             if (!club && !krets) return Json(new { success = false, message = "Åtkomst nekad" });
+            await PrimeRangesAsync(new[] { a });
             return Json(new
             {
                 success = true,
@@ -175,6 +177,10 @@ namespace HpskSite.Controllers
             public string? ContactEmail { get; set; }
             public string? ContactPhone { get; set; }
             public string? Classes { get; set; }
+            public int? NumberOfSeries { get; set; }
+            public string? ChampionshipScope { get; set; }
+            /// <summary>"1" = ja, "0" = nej, tomt = ej angivet. Sträng av samma skäl som Submit.</summary>
+            public string? AwardsStandardMedals { get; set; }
             public string? Note { get; set; }
             /// <summary>"1" = skicka in direkt. Sträng, eftersom "1" inte binder till bool.</summary>
             public string? Submit { get; set; }
@@ -210,6 +216,9 @@ namespace HpskSite.Controllers
                 ContactEmail = Clip(req.ContactEmail, 200) ?? me.Email,
                 ContactPhone = Clip(req.ContactPhone, 50),
                 Classes = Clip(req.Classes, 400),
+                NumberOfSeries = CompetitionApplicationRules.HasSeriesCount(req.Discipline) && req.NumberOfSeries is > 0 ? req.NumberOfSeries : null,
+                ChampionshipScope = string.IsNullOrWhiteSpace(req.ChampionshipScope) ? null : req.ChampionshipScope.Trim(),
+                AwardsStandardMedals = req.AwardsStandardMedals == "1" ? true : req.AwardsStandardMedals == "0" ? false : null,
                 Note = Clip(req.Note, 4000)
             };
 
@@ -242,6 +251,7 @@ namespace HpskSite.Controllers
                 notified = await NotifyKretsAsync(saved, me, justSubmitted ? "Ny ansökan" : "Ändrad ansökan");
 
             _calendar.Invalidate();
+            await PrimeRangesAsync(new[] { saved });
             return Json(new
             {
                 success = true,
@@ -306,6 +316,7 @@ namespace HpskSite.Controllers
             if (!CompetitionApplicationRules.CanCreateCompetition(a!))
                 return Json(new { success = false, message = a!.CompetitionId is > 0 ? "Tävlingen är redan skapad." : "Kretsen har inte sagt ja ännu." });
             var region = _calendar.Region(a.RegionId);
+            await PrimeRangesAsync(new[] { a });
             return Json(new
             {
                 success = true,
@@ -320,7 +331,11 @@ namespace HpskSite.Controllers
                     clubId = a.ClubId,
                     regionCode = region?.Code ?? "",
                     rangeId = a.RangeId,
+                    rangeName = a.RangeId is int pr && _rangeLabels.TryGetValue(pr, out var prl) ? prl : null,
                     venue = a.Place ?? "",
+                    numberOfSeries = a.NumberOfSeries,
+                    championshipScope = a.ChampionshipScope,
+                    awardsStandardMedals = a.AwardsStandardMedals,
                     awaitingForbundet = a.Status == CompetitionApplicationStatus.HosForbundet
                 }
             });
@@ -344,6 +359,7 @@ namespace HpskSite.Controllers
             list.AddRange(SafeList(() => _apps.ForRegion(regionId, new DateTime(2000, 1, 1), new DateTime(2100, 12, 31)))
                 .Where(a => a.Status == CompetitionApplicationStatus.Inskickad && !shown.Contains(a.Id)));
             var region = _calendar.Region(regionId);
+            await PrimeRangesAsync(list);
             return Json(new
             {
                 success = true,
@@ -464,7 +480,7 @@ namespace HpskSite.Controllers
 
         /// <summary>Ett ärende via länk utan inloggning. Visar bara det som behövs för beslutet.</summary>
         [HttpGet]
-        public IActionResult GetCaseByLink(string t)
+        public async Task<IActionResult> GetCaseByLink(string t)
         {
             var (a, link, error) = ReadCaseLink(t);
             if (a == null) return Json(new { success = false, message = error });
@@ -472,6 +488,7 @@ namespace HpskSite.Controllers
             var viaLinkThisYear = SafeList(() => _apps.ForRegion(a.RegionId))
                 .Count(x => x.Channel == KretsChannel.Lank && x.DecidedAt.HasValue && x.DecidedAt.Value.Year == year
                             || x.Channel == KretsChannel.Lank && x.Status == CompetitionApplicationStatus.HosForbundet && x.UpdatedAt.Year == year);
+            await PrimeRangesAsync(new[] { a });
             return Json(new
             {
                 success = true,
@@ -1021,6 +1038,22 @@ namespace HpskSite.Controllers
         //  Internt
         // ════════════════════════════════════════════════════════════════════════════════
 
+        /// <summary>Skjutbanornas namn för Dto (som är synkron) — fylls av <see cref="PrimeRangesAsync"/>.</summary>
+        private readonly Dictionary<int, string> _rangeLabels = new();
+
+        private async Task PrimeRangesAsync(IEnumerable<CompetitionApplication?> apps)
+        {
+            var ids = apps.Where(a => a?.RangeId is > 0).Select(a => a!.RangeId!.Value).Distinct().Where(id => !_rangeLabels.ContainsKey(id)).ToList();
+            if (ids.Count == 0) return;
+            try
+            {
+                var svc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.ShootingRangeService>();
+                foreach (var r in await svc.GetByIdsAsync(ids))
+                    _rangeLabels[r.Id] = string.IsNullOrWhiteSpace(r.City) ? r.Name : $"{r.Name} · {r.City}";
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Skjutbanornas namn kunde inte läsas för ansökningarna."); }
+        }
+
         private object Dto(CompetitionApplication a, bool forClub) => new
         {
             a.Id, a.RegionId, a.ClubId,
@@ -1034,6 +1067,9 @@ namespace HpskSite.Controllers
             reserveDate = a.ReserveDate?.ToString("yyyy-MM-dd"),
             grantedDate = a.GrantedDate?.ToString("yyyy-MM-dd"),
             a.RangeId, a.Place, a.ContactName, a.ContactEmail, a.ContactPhone, a.Classes, a.Note,
+            rangeName = a.RangeId is int rid && _rangeLabels.TryGetValue(rid, out var rl) ? rl : null,
+            a.NumberOfSeries, seriesWord = CompetitionApplicationRules.SeriesWord(a.Discipline),
+            a.ChampionshipScope, a.AwardsStandardMedals,
             a.Status, statusLabel = CompetitionApplicationStatus.Label(a.Status),
             a.KretsOpinion, a.KretsOpinionText, a.CompletionRequest, a.CompletionReply, a.DecisionText,
             decidedAt = a.DecidedAt?.ToString("yyyy-MM-dd"),

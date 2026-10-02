@@ -2040,12 +2040,20 @@ window.hpskWizardFromApplication = function (p) {
     setVal('wizard_venue', p.venue);
     if (p.clubId > 0) setVal('wizard_clubId', String(p.clubId));
     else if (p.regionCode) setVal('wizard_regionalFederation', p.regionCode);
+    if (p.numberOfSeries) setVal('wizard_numberOfSeriesOrStations', String(p.numberOfSeries));
+    if (p.championshipScope) setVal('wizard_competitionScope', p.championshipScope);
+    if (p.rangeId && typeof window.compRangeSetRange === 'function') window.compRangeSetRange('wizard_', p.rangeId, p.rangeName || ('Skjutbana ' + p.rangeId), '');
 
     // En sökt tävling är aldrig klubbintern, och kategorin är den kretsen godkänt.
     const co = document.getElementById('wizard_isClubOnly');
     if (co && co.checked) { co.checked = false; co.dispatchEvent(new Event('change', { bubbles: true })); }
     const lvl = document.getElementById('wizard_competitionLevel');
     if (lvl && p.level) { lvl.value = p.level; lvl.dataset.touched = '1'; lvl.dispatchEvent(new Event('change', { bubbles: true })); }
+    // Standardmedaljerna efter tävlingsnivån — nivån styr om rutan alls får kryssas i.
+    const med = document.getElementById('wizard_isAwardingStandardMedals');
+    if (med && p.awardsStandardMedals != null && !med.disabled && med.checked !== !!p.awardsStandardMedals) {
+        med.checked = !!p.awardsStandardMedals; med.dispatchEvent(new Event('change', { bubbles: true }));
+    }
 
     window.hpskWizardApplication = p;
 
@@ -2055,7 +2063,7 @@ window.hpskWizardFromApplication = function (p) {
         b.id = 'wizard_applicationBanner';
         b.className = 'alert alert-success py-2';
         b.innerHTML = '<i class="bi bi-check2-circle me-1"></i><strong>Skapas ur kretsens godkända ansökan.</strong> '
-            + 'Namn, datum, gren, tävlingsnivå och arrangör är ifyllda. Gå igenom stegen och gör övriga inställningar som vanligt.'
+            + 'Namn, datum, gren, tävlingsnivå, arrangör och det ansökan angav om plats, omfattning och mästerskap är ifyllda. Gå igenom stegen och gör övriga inställningar som vanligt.'
             + (p.awaitingForbundet ? '<div class="small mt-1">Förbundet har inte beslutat ännu. Ansökan visar "Hos Förbundet" tills kretsen registrerar beslutet, och flyttar Förbundet datumet får ni veta det.</div>' : '');
         body.insertBefore(b, body.firstChild);
     }

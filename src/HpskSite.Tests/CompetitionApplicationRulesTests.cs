@@ -137,5 +137,55 @@ namespace HpskSite.Tests
             a.GrantedDate = new DateTime(2027, 5, 8);
             a.EffectiveDate.Should().Be(new DateTime(2027, 5, 8));
         }
+
+        // ── Omfattning, mästerskap och standardmedaljer (2026-10-02) ──
+
+        [Fact]
+        public void AntalSerier_MellanEttOchHundra()
+        {
+            var a = App(); a.NumberOfSeries = 0;
+            CompetitionApplicationRules.ValidateContent(a, Today).Should().Contain("serier");
+            a.Discipline = "Faltskytte"; a.NumberOfSeries = 101;
+            CompetitionApplicationRules.ValidateContent(a, Today).Should().Contain("stationer");
+            a.NumberOfSeries = 12;
+            CompetitionApplicationRules.ValidateContent(a, Today).Should().BeNull();
+        }
+
+        [Fact]
+        public void OkantMasterskap_Vagras()
+        {
+            var a = App(); a.ChampionshipScope = "Världsmästerskap";
+            CompetitionApplicationRules.ValidateContent(a, Today).Should().NotBeNull();
+            a.ChampionshipScope = "Kretsmästerskap";
+            CompetitionApplicationRules.ValidateContent(a, Today).Should().BeNull();
+        }
+
+        [Fact]
+        public void Standardmedaljer_KraverKretsnivaEllerHogre()
+        {
+            var a = App(CompetitionLevel.Krets); a.AwardsStandardMedals = true;
+            CompetitionApplicationRules.ValidateContent(a, Today).Should().BeNull();
+        }
+
+        [Fact]
+        public void Kontrollsumman_AndrasInteForEnAldreAnsokan_MenNarNyaFaltenSatts()
+        {
+            var a = App();
+            var before = CompetitionApplicationRules.Checksum(a);
+            // Samma uträkning som före fälten: en utskickad länk till en äldre ansökan fortsätter gälla.
+            var s = string.Join("|", a.Level, a.Discipline, a.Name, a.CompetitionDate.ToString("yyyy-MM-dd"), null, null, a.Place, a.Classes, a.Note, a.CompletionReply);
+            before.Should().Be(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(s)))[..16]);
+            a.NumberOfSeries = 7;
+            CompetitionApplicationRules.Checksum(a).Should().NotBe(before);
+        }
+
+        [Fact]
+        public void Seriesordet_FoljerGrenen()
+        {
+            CompetitionApplicationRules.SeriesWord("Faltskytte").Should().Be("stationer");
+            CompetitionApplicationRules.SeriesWord("MagnumFalt").Should().Be("stationer");
+            CompetitionApplicationRules.SeriesWord("Precision").Should().Be("serier");
+            CompetitionApplicationRules.HasSeriesCount("Springskytte").Should().BeFalse();
+        }
     }
 }

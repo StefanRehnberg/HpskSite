@@ -82,9 +82,36 @@
                         <label class="form-label" for="caReserveDate">Reservdatum</label>
                         <input type="text" class="form-control" id="caReserveDate" placeholder="valfritt" autocomplete="off">
                     </div>
+                    @* Skjutbanan ur Skjutbanedatabasen — samma väljare som tävlingsguiden (prefix "ca").
+                       Väljaren fyller i platsens namn när fältet är tomt (fältet heter därför cavenue). *@
                     <div class="col-12">
-                        <label class="form-label" for="caPlace">Plats / skjutbana</label>
-                        <input type="text" class="form-control" id="caPlace" maxlength="200" autocomplete="off">
+                        @await Html.PartialAsync("_CompetitionRangePicker", "ca")
+                        <label class="form-label" for="cavenue">Platsens namn <span class="text-muted small">(om banan saknas i Skjutbanedatabasen)</span></label>
+                        <input type="text" class="form-control" id="cavenue" maxlength="200" autocomplete="off">
+                    </div>
+                    @* Det kretsen behöver för att ta ställning: omfattningen, om ett mästerskap avgörs
+                       och om standardmedaljer ges (SHB C.3.6.1, C.5.1.1). *@
+                    <div class="col-md-4" id="caSeriesWrap">
+                        <label class="form-label" for="caSeries" id="caSeriesLabel">Antal serier</label>
+                        <input type="number" class="form-control" id="caSeries" min="1" max="100" step="1" autocomplete="off">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="caScope">Avgörs ett mästerskap?</label>
+                        <select class="form-select" id="caScope">
+                            <option value="">Nej</option>
+                            @foreach (var sc in HpskSite.Models.Kretsgranskning.CompetitionApplicationRules.ChampionshipScopes)
+                            {
+                                <option value="@sc">@sc</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="caMedals">Standardmedaljer</label>
+                        <select class="form-select" id="caMedals">
+                            <option value="">Ej angivet</option>
+                            <option value="1">Ja, standardmedaljer ges</option>
+                            <option value="0">Nej</option>
+                        </select>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label" for="caContactName">Kontaktperson</label>
@@ -147,6 +174,11 @@
     const esc = s => window.hpskEsc ? window.hpskEsc(s) : String(s ?? '');
     const token = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
     const base = '/umbraco/surface/CompetitionApplication/';
+
+    // ⚠️ Dialogerna renderas EN gång per sida, där partialen först inkluderas — på klubbsidan inne i
+    // fliken Tävlingar. Öppnas de från Kretskalendern ligger de då i en dold flik och visas aldrig
+    // (klassen .show sätts, men ingenting syns). Flytta dem till body så att de syns var de än öppnas.
+    ['caAppModal', 'caAskModal'].forEach(id => { const m = $(id); if (m && m.parentElement !== document.body) document.body.appendChild(m); });
     let state = { clubId: 0, data: null, apps: {} };
     let meta = { levels: [], disciplines: [] };
 
@@ -384,7 +416,15 @@
             setDate('caDate', a ? a.competitionDate : (opts.date || ''));
             setDate('caEndDate', a ? a.endDate : '');
             setDate('caReserveDate', a ? a.reserveDate : '');
-            $('caPlace').value = a ? (a.place || '') : '';
+            $('cavenue').value = a ? (a.place || '') : '';
+            $('caSeries').value = a && a.numberOfSeries ? a.numberOfSeries : '';
+            $('caScope').value = a ? (a.championshipScope || '') : '';
+            $('caMedals').value = a && a.awardsStandardMedals != null ? (a.awardsStandardMedals ? '1' : '0') : '';
+            if (typeof window.compRangeInit === 'function') {
+                window.compRangeInit('ca', { clubId: a ? a.clubId : formClubId() });
+                window.compRangeSetRange('ca', a && a.rangeId ? a.rangeId : 0, a && a.rangeName ? a.rangeName : (a && a.rangeId ? 'Skjutbana ' + a.rangeId : ''), '');
+            }
+            updateSeriesLabel();
             $('caContactName').value = a ? (a.contactName || '') : '';
             $('caContactEmail').value = a ? (a.contactEmail || '') : '';
             $('caContactPhone').value = a ? (a.contactPhone || '') : '';
@@ -398,7 +438,22 @@
     };
 
     function updateLevelHelp() { $('caLevelHelp').textContent = LEVEL_HELP[$('caLevel').value] || ''; }
-    document.addEventListener('change', e => { if (e.target && e.target.id === 'caLevel') updateLevelHelp(); });
+    // Fält räknar stationer, övriga grener serier; Springskytte har inget av dem.
+    function updateSeriesLabel() {
+        const d = $('caDiscipline').value;
+        $('caSeriesWrap').classList.toggle('d-none', d === 'Springskytte');
+        $('caSeriesLabel').textContent = d === 'Faltskytte' || d === 'MagnumFalt' ? 'Antal stationer' : 'Antal serier';
+    }
+    // Klubben som ansöker: vald i listan (ny ur kalendern) eller fliken man står på.
+    function formClubId() {
+        return state.pendingClubs && state.pendingClubs.length ? parseInt($('caClub').value || '0', 10) : (state.clubId || 0);
+    }
+    document.addEventListener('change', e => {
+        if (!e.target) return;
+        if (e.target.id === 'caLevel') updateLevelHelp();
+        if (e.target.id === 'caDiscipline') updateSeriesLabel();
+        if (e.target.id === 'caClub' && typeof window.compRangeLoadClubRanges === 'function') window.compRangeLoadClubRanges('ca', formClubId());
+    });
 
     function save(submit) {
         const id = parseInt($('caId').value || '0', 10);
@@ -410,11 +465,24 @@
             id: id, clubId: clubId, regionId: state.regionId || 0,
             level: $('caLevel').value, discipline: $('caDiscipline').value, name: $('caName').value,
             competitionDate: $('caDate').value, endDate: $('caEndDate').value, reserveDate: $('caReserveDate').value,
-            place: $('caPlace').value, contactName: $('caContactName').value, contactEmail: $('caContactEmail').value,
+            place: $('cavenue').value, rangeId: parseInt(($('carangeId') || {}).value || '0', 10) || null,
+            numberOfSeries: $('caSeries').value ? parseInt($('caSeries').value, 10) : null,
+            championshipScope: $('caScope').value, awardsStandardMedals: $('caMedals').value, contactName: $('caContactName').value, contactEmail: $('caContactEmail').value,
             contactPhone: $('caContactPhone').value, classes: $('caClasses').value, note: $('caNote').value,
             submit: submit ? '1' : '0'
         };
         const res = $('caFormResult');
+        // Ett ifyllt antal måste vara 1–100. En nolla får inte tyst bli "ej angivet".
+        const seriesRaw = $('caSeries').value.trim();
+        if (seriesRaw !== '' && !$('caSeriesWrap').classList.contains('d-none')) {
+            const n = Number(seriesRaw);
+            if (!Number.isInteger(n) || n < 1 || n > 100) {
+                res.className = 'mt-3 alert alert-warning py-2';
+                res.textContent = 'Ange antal ' + ($('caSeriesLabel').textContent.includes('stationer') ? 'stationer' : 'serier') + ' mellan 1 och 100, eller lämna fältet tomt.';
+                $('caSeries').focus();
+                return;
+            }
+        }
         res.className = 'mt-3 small text-muted'; res.textContent = 'Sparar…';
         $('caSubmit').disabled = $('caSaveDraft').disabled = true;
         fetch(base + 'SaveApplication', {

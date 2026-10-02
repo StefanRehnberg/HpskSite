@@ -145,6 +145,9 @@ namespace HpskSite.Services.Kretsgranskning
             a.ContactPhone = edit.ContactPhone;
             a.Classes = edit.Classes;
             a.Note = edit.Note;
+            a.NumberOfSeries = edit.NumberOfSeries;
+            a.ChampionshipScope = edit.ChampionshipScope;
+            a.AwardsStandardMedals = edit.AwardsStandardMedals;
 
             var err = CompetitionApplicationRules.ValidateContent(a, DateTime.Today);
             if (err != null) return (null, err);
