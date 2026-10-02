@@ -125,8 +125,10 @@ namespace HpskSite.Controllers
                 region = c.RegionId > 0 ? new { id = c.RegionId, name = c.RegionName } : null,
                 resultListExists = c.ResultNode != null,
                 resultPublished = c.ResultOfficial,
-                deadline = end?.AddDays(14).ToString("yyyy-MM-dd"),
-                late = end.HasValue && review == null && DateTime.Today > ResultReviewRules.SendDeadline(end.Value),
+                // Sista dag och "sen" bara när kretsen kräver sitt godkännande — annars är inskicket frivilligt.
+                required = gateApplies,
+                deadline = gateApplies ? end?.AddDays(14).ToString("yyyy-MM-dd") : null,
+                late = gateApplies && end.HasValue && review == null && DateTime.Today > ResultReviewRules.SendDeadline(end.Value),
                 gateApplies,
                 medalsPending = gateApplies && _gate.MedalsPending(competitionId),
                 hasReviewers = holders.Count > 0,
@@ -216,13 +218,21 @@ namespace HpskSite.Controllers
             var reviewed = reviews.Select(x => x.r.CompetitionId).ToHashSet();
 
             var awaiting = new List<object>();
+            var featureStart = _reviews.FeatureStart();
             foreach (var (id, info) in CompetitionsInRegion(regionId, y))
             {
                 if (reviewed.Contains(id)) continue;
                 var end = info.EndDate ?? info.Date;
                 if (end == null || end.Value.Date >= DateTime.Today) continue;
+                // REDAN GENOMFÖRDA TÄVLINGAR RÖRS INTE: bara tävlingar som avslutades efter att
+                // granskningen började gälla räknas som "inte inskickade".
+                if (featureStart == null || end.Value.Date < featureStart.Value) continue;
                 var c = Context(id);
                 if (c == null || !c.Offered) continue;
+                // Bara när kretsen KRÄVER sitt godkännande väntar något på arrangören — då hänger
+                // medaljerna på inskicket, och då finns en sista dag. Annars är granskningen ett
+                // frivilligt erbjudande: neutral status, ingen sista dag, ingen "sen".
+                var required = _gate.GateApplies(id);
                 awaiting.Add(new
                 {
                     competitionId = id,
@@ -230,9 +240,9 @@ namespace HpskSite.Controllers
                     date = c.Date?.ToString("yyyy-MM-dd"),
                     organiser = c.Organiser,
                     resultPublished = c.ResultOfficial,
-                    deadline = end.Value.AddDays(14).ToString("yyyy-MM-dd"),
-                    late = DateTime.Today > ResultReviewRules.SendDeadline(end.Value),
-                    gateApplies = _gate.GateApplies(id)
+                    required,
+                    deadline = required ? end.Value.AddDays(14).ToString("yyyy-MM-dd") : null,
+                    late = required && DateTime.Today > ResultReviewRules.SendDeadline(end.Value)
                 });
             }
 

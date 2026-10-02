@@ -18,6 +18,7 @@ namespace HpskSite.Services.Kretsgranskning
     {
         private readonly ResultReviewService _reviews;
         private readonly ResultReviewHooks _hooks;
+        private readonly ResultReviewGate _gate;
         private readonly CompetitionApplicationService _apps;
         private readonly KretsCalendarService _calendar;
         private readonly IContentService _contentService;
@@ -26,12 +27,13 @@ namespace HpskSite.Services.Kretsgranskning
         private readonly ClubService _clubs;
         private readonly ILogger<ResultReviewReminderService> _logger;
 
-        public ResultReviewReminderService(ResultReviewService reviews, ResultReviewHooks hooks, CompetitionApplicationService apps,
+        public ResultReviewReminderService(ResultReviewService reviews, ResultReviewHooks hooks, ResultReviewGate gate, CompetitionApplicationService apps,
             KretsCalendarService calendar, IContentService contentService, EmailService email, ReplyContactResolver replyTo,
             ClubService clubs, ILogger<ResultReviewReminderService> logger)
         {
             _reviews = reviews;
             _hooks = hooks;
+            _gate = gate;
             _apps = apps;
             _calendar = calendar;
             _contentService = contentService;
@@ -45,11 +47,16 @@ namespace HpskSite.Services.Kretsgranskning
         {
             if (!_reviews.TablesExist()) return 0;
             var submitted = _reviews.SubmittedCompetitionIds();
+            var featureStart = _reviews.FeatureStart();
             var candidates = new List<ResultReviewReminders.Candidate>();
             foreach (var c in _calendar.AllCompetitions())
             {
                 var end = c.EndDate ?? c.Date;
                 if (end == null || submitted.Contains(c.CompetitionId)) continue;
+                // Redan genomförda tävlingar rörs inte, och en FRIVILLIG granskning påminns inte:
+                // arrangören påminns bara när kretsen kräver sitt godkännande (då väntar medaljerna).
+                if (featureStart == null || end.Value.Date < featureStart.Value) continue;
+                if (!_gate.GateApplies(c.CompetitionId)) continue;
                 var days = (today.Date - end.Value.Date).TotalDays;
                 if (days < ResultReviewReminders.ArrangerFirstDays || days > ResultReviewReminders.ArrangerWindowDays) continue;
                 var node = _contentService.GetById(c.CompetitionId);

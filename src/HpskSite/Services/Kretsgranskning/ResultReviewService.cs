@@ -45,6 +45,32 @@ namespace HpskSite.Services.Kretsgranskning
             return missing.Count == 0 ? null : string.Join(" och ", missing);
         }
 
+        private static DateTime? _featureStart;
+
+        /// <summary>
+        /// Dagen granskningen började gälla i den här miljön = dagen granskningstabellen skapades
+        /// (migreringen körs strax före deployen). Tävlingar som avslutades FÖRE den dagen räknas
+        /// aldrig som "inte inskickade" och påminns inte — beslutet att redan genomförda tävlingar
+        /// inte rörs. Avsiktligt ingen inställning: en sådan glöms, och då påminns varje gammal
+        /// tävling dagen efter deployen. Null när tabellen saknas.
+        /// </summary>
+        public DateTime? FeatureStart()
+        {
+            if (_featureStart.HasValue) return _featureStart;
+            try
+            {
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                var d = scope.Database.ExecuteScalar<DateTime?>("SELECT create_date FROM sys.tables WHERE name = 'CompetitionResultReview'");
+                if (d.HasValue) _featureStart = d.Value.Date;
+                return _featureStart;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Resultatgranskningens startdag kunde inte läsas.");
+                return null;
+            }
+        }
+
         public CompetitionResultReview? Get(int id)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
