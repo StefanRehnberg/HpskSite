@@ -928,12 +928,33 @@ avstyrker kretsen, och Förbundet beslutar (kretsen registrerar beslutet).
   (`GetNeighbourSettings` / `SaveNeighbours`, `KretsAuthorityAsync`).
 - **Förbundets stomprogram** — `StomprogramItem` + `StomprogramService` (EGEN tjänst med bara
   databasen som beroende: kalendern läser den, och kretsplaneringen läser kalendern — annars ett
-  cirkelberoende). Sajtadmin för in på **`/kretsen/stomprogram`** (läsbar för alla) genom att klistra
-  in `datum; namn; gren` — `StomprogramPaste.Parse` är regeln; **en oläsbar rad stoppar hela
-  inklistringen** (en halvt inläst lista är svår att rätta). Grenen kan utelämnas = alla grener.
+  cirkelberoende). Sajtadmin för in på **`/admin-page` → fliken Stomprogram**
+  (`Views/Partials/StomprogramManagement.cshtml`, `?tab=stomprogram` öppnar den; planeringskalendern
+  länkar INTE dit — Stefan 2026-10-02, kretsens kalender ska inte peka in i sajtadmin). ⚠️ **`/kretsen/stomprogram` är BORTTAGEN** (Stefan 2026-10-02: det är
+  sajtadministration, inte en kretssida). `GetStomprogram` kräver inloggning. Tre vägar in, och allt
+  går att ändra efteråt (`SaveStomprogram`, id 0 = ny):
+  - **Läs in från Förbundets webbplats** (`FetchStomprogramFromForbundet`) — läser
+    pistolskytteforbundet.se:s stomprogramsida som UNDERLAG och sparar ingenting. Raderna visas
+    redigerbara med kryssrutor; `ImportStomprogram` lägger in de markerade och hoppar över dubbletter
+    (`StomprogramService.IsDuplicate`: startdag + namn + gren). ⚠️ **Bara https och bara Förbundets
+    värd**, omdirigeringar följs för hand och prövas steg för steg (klienten `Forbundet` har
+    `AllowAutoRedirect = false`) — en hämtning åt en användare till en godtycklig adress är en
+    öppning in i vårt eget nät.
+  - **`StomprogramHtmlImport.Parse`** (ren funktion, `StomprogramHtmlImportTests` 20) är tolkningen:
+    året ur sidans `<h1>` (⚠️ adressen `stomprogram-2025` visade "Stomprogram 2027"), "29-1 juli" =
+    29 juni–1 juli, "24-6 april-juni", bara en månad = inget datum + skäl, fotnotsraden ("*Som
+    orientering.") blir anteckning på raderna med asterisk. **En rad per gren** ur namnet — de
+    långa orden först (magnumprecision före precision, magnumfält före fält), stavfelet
+    "fätskjutning" fångas. Ingen gren = alla grener (null); en gren vi inte har (PPC) =
+    `StomprogramDisciplines.Other` ("Annan"), som visas men aldrig krockar.
+  - **Klistra in** `datum; namn; gren` — `StomprogramPaste.Parse`; **en oläsbar rad stoppar hela
+    inklistringen** (en halvt inläst lista är svår att rätta).
   Kalendern visar raderna som `kind = stomprogram` och `KretsCalendarConflicts.Mark` varnar
   kretsens EGNA poster i samma gren (eller alla grener) samma dag; stomprogrammet varnas aldrig
-  självt och grannarnas poster inte heller.
+  självt och grannarnas poster inte heller. **`StomprogramItem.IsPeriod`** (migrering
+  `add-isperiod-to-stomprogram.sql`, FÖRE deploy) markerar en period — rikstävling på hemortens
+  banor i sex veckor — som visas i periodbandet men inte varnar. ⚠️ Uttrycklig flagga, inte
+  längden: en SM-vecka på sex dagar ska varna. Inläsningen förmarkerar "hemortens banor"/Hemmabanan.
 - **Kretsens arrangörschecklista** — `RegionOrganiserChecklistItem` (kretsens punkter: text,
   förklaring, dagar före tävlingen, gäller *alla* / *kretstävling eller högre* / *kretsmästerskap*;
   `OrganiserChecklistScope.Applies`, klubbinterna aldrig) + `RegionChecklistApplied` (per tävling:
@@ -1899,12 +1920,33 @@ avstyrker kretsen, och Förbundet beslutar (kretsen registrerar beslutet).
   (`GetNeighbourSettings` / `SaveNeighbours`, `KretsAuthorityAsync`).
 - **Förbundets stomprogram** — `StomprogramItem` + `StomprogramService` (EGEN tjänst med bara
   databasen som beroende: kalendern läser den, och kretsplaneringen läser kalendern — annars ett
-  cirkelberoende). Sajtadmin för in på **`/kretsen/stomprogram`** (läsbar för alla) genom att klistra
-  in `datum; namn; gren` — `StomprogramPaste.Parse` är regeln; **en oläsbar rad stoppar hela
-  inklistringen** (en halvt inläst lista är svår att rätta). Grenen kan utelämnas = alla grener.
+  cirkelberoende). Sajtadmin för in på **`/admin-page` → fliken Stomprogram**
+  (`Views/Partials/StomprogramManagement.cshtml`, `?tab=stomprogram` öppnar den; planeringskalendern
+  länkar INTE dit — Stefan 2026-10-02, kretsens kalender ska inte peka in i sajtadmin). ⚠️ **`/kretsen/stomprogram` är BORTTAGEN** (Stefan 2026-10-02: det är
+  sajtadministration, inte en kretssida). `GetStomprogram` kräver inloggning. Tre vägar in, och allt
+  går att ändra efteråt (`SaveStomprogram`, id 0 = ny):
+  - **Läs in från Förbundets webbplats** (`FetchStomprogramFromForbundet`) — läser
+    pistolskytteforbundet.se:s stomprogramsida som UNDERLAG och sparar ingenting. Raderna visas
+    redigerbara med kryssrutor; `ImportStomprogram` lägger in de markerade och hoppar över dubbletter
+    (`StomprogramService.IsDuplicate`: startdag + namn + gren). ⚠️ **Bara https och bara Förbundets
+    värd**, omdirigeringar följs för hand och prövas steg för steg (klienten `Forbundet` har
+    `AllowAutoRedirect = false`) — en hämtning åt en användare till en godtycklig adress är en
+    öppning in i vårt eget nät.
+  - **`StomprogramHtmlImport.Parse`** (ren funktion, `StomprogramHtmlImportTests` 20) är tolkningen:
+    året ur sidans `<h1>` (⚠️ adressen `stomprogram-2025` visade "Stomprogram 2027"), "29-1 juli" =
+    29 juni–1 juli, "24-6 april-juni", bara en månad = inget datum + skäl, fotnotsraden ("*Som
+    orientering.") blir anteckning på raderna med asterisk. **En rad per gren** ur namnet — de
+    långa orden först (magnumprecision före precision, magnumfält före fält), stavfelet
+    "fätskjutning" fångas. Ingen gren = alla grener (null); en gren vi inte har (PPC) =
+    `StomprogramDisciplines.Other` ("Annan"), som visas men aldrig krockar.
+  - **Klistra in** `datum; namn; gren` — `StomprogramPaste.Parse`; **en oläsbar rad stoppar hela
+    inklistringen** (en halvt inläst lista är svår att rätta).
   Kalendern visar raderna som `kind = stomprogram` och `KretsCalendarConflicts.Mark` varnar
   kretsens EGNA poster i samma gren (eller alla grener) samma dag; stomprogrammet varnas aldrig
-  självt och grannarnas poster inte heller.
+  självt och grannarnas poster inte heller. **`StomprogramItem.IsPeriod`** (migrering
+  `add-isperiod-to-stomprogram.sql`, FÖRE deploy) markerar en period — rikstävling på hemortens
+  banor i sex veckor — som visas i periodbandet men inte varnar. ⚠️ Uttrycklig flagga, inte
+  längden: en SM-vecka på sex dagar ska varna. Inläsningen förmarkerar "hemortens banor"/Hemmabanan.
 - **Kretsens arrangörschecklista** — `RegionOrganiserChecklistItem` (kretsens punkter: text,
   förklaring, dagar före tävlingen, gäller *alla* / *kretstävling eller högre* / *kretsmästerskap*;
   `OrganiserChecklistScope.Applies`, klubbinterna aldrig) + `RegionChecklistApplied` (per tävling:

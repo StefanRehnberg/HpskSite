@@ -1,0 +1,329 @@
+@* Förbundets stomprogram — fliken Stomprogram på /admin-page (sajtadmin).
+   Årets fasta datum (SM, landsdelsmästerskap, rikstävlingar) som kretsarnas planeringskalendrar
+   visar och varnar för. Tre vägar in: läs in Förbundets egen sida som underlag, lägg till en rad,
+   eller klistra in rader. Allt går att ändra efteråt.
+
+   Läsningen av Förbundets sida sparar ingenting: den visar raderna, sajtadmin rättar och markerar,
+   och först "Lägg till markerade" skriver. Sidan skriver datum för människor ("29-1 juli",
+   "september" utan dag), så förhandsvisningen är redigerbar — en rad utan dag går att fylla i där.
+
+   Id-prefix sp*. Knappar bär id:n eller index, aldrig text, i sina attribut. *@
+@await Html.PartialAsync("_HtmlEscape")
+
+<style>
+    #spImportTable td { vertical-align: middle; }
+    #spImportTable input.form-control, #spImportTable select { min-width: 0; }
+    #spImportTable .sp-src { font-size: .8rem; color: var(--bs-secondary-color); }
+    #spImportTable tr.sp-exists { opacity: .6; }
+</style>
+
+<div id="spPanel">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <h5 class="mb-0 me-auto"><i class="bi bi-calendar-range me-2"></i>Förbundets stomprogram</h5>
+        <label class="form-label mb-0" for="spYear">År</label>
+        <select class="form-select w-auto" id="spYear"></select>
+        <div class="dropdown">
+            <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" id="spActions">
+                <i class="bi bi-sliders me-1"></i>Åtgärder
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" style="min-width:280px">
+                <li><h6 class="dropdown-header">Lägg in</h6></li>
+                <li><button type="button" class="dropdown-item" data-sp="import"><i class="bi bi-cloud-download me-2"></i>Läs in från Förbundets webbplats…</button></li>
+                <li><button type="button" class="dropdown-item" data-sp="new"><i class="bi bi-plus-lg me-2"></i>Lägg till en rad…</button></li>
+                <li><button type="button" class="dropdown-item" data-sp="paste"><i class="bi bi-clipboard me-2"></i>Klistra in rader…</button></li>
+            </ul>
+        </div>
+    </div>
+    <p class="text-muted small">Kretsarnas planeringskalendrar visar de här datumen och varnar när en tävling i samma gren läggs samma dag. En rad utan gren gäller alla grener. En period (t.ex. rikstävling på hemortens banor) visas men varnar inte.</p>
+    <div id="spList"><div class="text-muted">Öppna fliken för att hämta programmet.</div></div>
+</div>
+
+@* ── Ändra / lägg till en rad ── *@
+<div class="modal fade" id="spEditModal" tabindex="-1" aria-labelledby="spEditTitle" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="spEditTitle">Rad i stomprogrammet</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="spEditId" value="0">
+                <div class="row g-2 mb-2">
+                    <div class="col-6"><label class="form-label" for="spEditStart">Första dag</label><input type="text" class="form-control" id="spEditStart" autocomplete="off"></div>
+                    <div class="col-6"><label class="form-label" for="spEditEnd">Sista dag <span class="text-muted small">(om flera)</span></label><input type="text" class="form-control" id="spEditEnd" autocomplete="off"></div>
+                </div>
+                <div class="mb-2"><label class="form-label" for="spEditName">Namn</label><input type="text" class="form-control" id="spEditName" maxlength="200" autocomplete="off"></div>
+                <div class="mb-2"><label class="form-label" for="spEditDiscipline">Gren</label><select class="form-select" id="spEditDiscipline"></select></div>
+                <div class="mb-2"><label class="form-label" for="spEditNote">Plats eller anteckning</label><input type="text" class="form-control" id="spEditNote" maxlength="500" autocomplete="off"></div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="spEditPeriod">
+                    <label class="form-check-label" for="spEditPeriod">Period — kan skjutas när som helst under tiden (varnar inte)</label>
+                </div>
+                <div id="spEditResult" class="mt-2" role="status"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="spEditSave">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ── Klistra in ── *@
+<div class="modal fade" id="spPasteModal" tabindex="-1" aria-labelledby="spPasteTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="spPasteTitle">Klistra in rader</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2">En rad per datum: <code>datum; namn; gren</code>. Grenen kan utelämnas (= alla grener). Flera dagar skrivs <code>2027-06-12–2027-06-13</code>. Rader ur ett kalkylblad (tabbar) fungerar också.</p>
+                <textarea class="form-control font-monospace" id="spText" rows="8" placeholder="2027-06-12–2027-06-13; SM fältskytte; Fältskytte&#10;2027-08-21; SM precision; Precision&#10;2027-09-04; Förbundsmöte"></textarea>
+                <div id="spResult" class="mt-2" role="status"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+                <button type="button" class="btn btn-primary" id="spAdd">Lägg till</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ── Läs in från Förbundets webbplats ── *@
+<div class="modal fade" id="spImportModal" tabindex="-1" aria-labelledby="spImportTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="spImportTitle">Läs in från Förbundets webbplats</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2">Klistra in adressen till stomprogrammet på pistolskytteforbundet.se. Ingenting sparas förrän du trycker <strong>Lägg till markerade</strong> — rätta raderna här om något blivit fel.</p>
+                <div class="input-group mb-3">
+                    <input type="url" class="form-control" id="spImportUrl" autocomplete="off" value="https://www.pistolskytteforbundet.se/stomprogram/stomprogram-2025/">
+                    <button type="button" class="btn btn-primary" id="spImportFetch"><i class="bi bi-cloud-download me-1"></i>Läs in</button>
+                </div>
+                <div id="spImportStatus" role="status"></div>
+                <div id="spImportBody"></div>
+            </div>
+            <div class="modal-footer">
+                <span class="me-auto small text-muted" id="spImportCount"></span>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+                <button type="button" class="btn btn-primary" id="spImportSave" disabled>Lägg till markerade</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    if (window.__spInit) return;
+    window.__spInit = true;
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc(s == null ? '' : String(s));
+    const token = () => (document.querySelector('input[name="__RequestVerificationToken"]') || {}).value || '';
+    const base = '/umbraco/surface/CompetitionApplication/';
+    const now = new Date().getFullYear();
+    let year = new Date().getMonth() >= 8 ? now + 1 : now;
+    let items = [], disciplines = [], importRows = [], loaded = false;
+
+    const sel = $('spYear');
+    for (let y = now - 1; y <= now + 3; y++) sel.insertAdjacentHTML('beforeend', '<option value="' + y + '"' + (y === year ? ' selected' : '') + '>' + y + '</option>');
+    sel.addEventListener('change', () => { year = +sel.value; load(); });
+
+    function post(action, body) {
+        return fetch(base + action, {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() },
+            body: new URLSearchParams(body).toString()
+        }).then(r => r.json());
+    }
+
+    // Flatpickr laddas här om sidan inte redan har den.
+    function ensureFlatpickr() {
+        if (window.flatpickr) return Promise.resolve();
+        return new Promise(res => {
+            const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css'; document.head.appendChild(css);
+            const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/flatpickr';
+            s.onload = () => { const l = document.createElement('script'); l.src = 'https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js'; l.onload = res; l.onerror = res; document.head.appendChild(l); };
+            s.onerror = res; document.head.appendChild(s);
+        });
+    }
+    function datePicker(el) {
+        if (!window.flatpickr || el._flatpickr) return;
+        flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true });
+    }
+    function setDate(el, v) { if (el._flatpickr) { if (v) el._flatpickr.setDate(v, false); else el._flatpickr.clear(); } else el.value = v || ''; }
+
+    function discOptions(selected) {
+        return disciplines.map(d => '<option value="' + esc(d.id) + '"' + (d.id === (selected || '') ? ' selected' : '') + '>' + esc(d.name) + '</option>').join('');
+    }
+    const range = i => esc(i.start) + (i.end ? ' – ' + esc(i.end) : '');
+
+    function load() {
+        loaded = true;
+        $('spList').innerHTML = '<div class="text-muted">Hämtar…</div>';
+        return fetch(base + 'GetStomprogram?year=' + year, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            if (!d.success) { $('spList').innerHTML = '<div class="alert alert-warning">' + esc(d.message) + '</div>'; return; }
+            items = d.items || []; disciplines = d.disciplines || [];
+            if (!items.length) {
+                $('spList').innerHTML = '<div class="alert alert-light border" id="spEmpty">Inget stomprogram är infört för ' + year + '. Välj <strong>Åtgärder → Läs in från Förbundets webbplats</strong>.</div>';
+                return;
+            }
+            $('spList').innerHTML = '<div class="table-responsive"><table class="table align-middle" id="spTable"><thead><tr><th>Datum</th><th>Namn</th><th>Gren</th><th>Plats</th><th class="text-end">Åtgärder</th></tr></thead><tbody>'
+                + items.map(i => '<tr data-sp-row="' + i.id + '"><td class="text-nowrap">' + range(i) + '</td><td>' + esc(i.name)
+                    + (i.isPeriod ? ' <span class="badge text-bg-light border" title="Visas, men varnar inte">period</span>' : '') + '</td>'
+                    + '<td>' + esc(i.disciplineLabel) + '</td><td class="small">' + esc(i.note || '') + '</td>'
+                    + '<td class="text-end"><div class="dropdown"><button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\'><i class="bi bi-sliders"></i> Åtgärder</button>'
+                    + '<ul class="dropdown-menu dropdown-menu-end"><li><button type="button" class="dropdown-item" data-sp-edit="' + i.id + '">Ändra…</button></li><li><hr class="dropdown-divider"></li>'
+                    + '<li><button type="button" class="dropdown-item text-danger" data-sp-del="' + i.id + '">Ta bort</button></li></ul></div></td></tr>').join('')
+                + '</tbody></table></div>';
+        }).catch(() => { $('spList').innerHTML = '<div class="alert alert-warning">Stomprogrammet kunde inte hämtas.</div>'; });
+    }
+
+    // ── Ändra / ny rad ──
+    function openEdit(item) {
+        ensureFlatpickr().then(() => {
+            datePicker($('spEditStart')); datePicker($('spEditEnd'));
+            $('spEditId').value = item ? item.id : 0;
+            $('spEditTitle').textContent = item ? 'Ändra rad i stomprogrammet' : 'Ny rad i stomprogrammet';
+            setDate($('spEditStart'), item ? item.start : '');
+            setDate($('spEditEnd'), item ? item.end : '');
+            $('spEditName').value = item ? item.name : '';
+            $('spEditDiscipline').innerHTML = discOptions(item ? item.discipline : '');
+            $('spEditNote').value = item ? (item.note || '') : '';
+            $('spEditPeriod').checked = !!(item && item.isPeriod);
+            $('spEditResult').innerHTML = '';
+            bootstrap.Modal.getOrCreateInstance($('spEditModal')).show();
+        });
+    }
+    $('spEditSave').addEventListener('click', () => {
+        const res = $('spEditResult');
+        post('SaveStomprogram', {
+            id: $('spEditId').value, 'row.Start': $('spEditStart').value, 'row.End': $('spEditEnd').value,
+            'row.Name': $('spEditName').value, 'row.Discipline': $('spEditDiscipline').value,
+            'row.Note': $('spEditNote').value, 'row.IsPeriod': $('spEditPeriod').checked ? 'true' : 'false'
+        }).then(r => {
+            if (!r.success) { res.className = 'mt-2 alert alert-warning py-2'; res.textContent = r.message || 'Kunde inte sparas.'; return; }
+            bootstrap.Modal.getOrCreateInstance($('spEditModal')).hide();
+            const y = +String(r.item.start).slice(0, 4);
+            if (y !== year && y >= +sel.options[0].value && y <= +sel.options[sel.options.length - 1].value) { year = y; sel.value = String(y); }
+            load();
+        }).catch(() => { res.className = 'mt-2 alert alert-warning py-2'; res.textContent = 'Kunde inte sparas — försök igen.'; });
+    });
+
+    // ── Klistra in ──
+    $('spAdd').addEventListener('click', () => {
+        const res = $('spResult');
+        post('AddStomprogram', { text: $('spText').value }).then(r => {
+            res.className = 'mt-2 alert py-2 ' + (r.success ? 'alert-success' : 'alert-warning');
+            res.innerHTML = esc(r.message || '') + (r.errors && r.errors.length ? '<ul class="mb-0 mt-1">' + r.errors.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>' : '');
+            if (r.success) { $('spText').value = ''; load(); }
+        });
+    });
+
+    // ── Läs in från Förbundet ──
+    function openImport() {
+        $('spImportStatus').innerHTML = ''; $('spImportBody').innerHTML = ''; $('spImportCount').textContent = '';
+        $('spImportSave').disabled = true; importRows = [];
+        bootstrap.Modal.getOrCreateInstance($('spImportModal')).show();
+    }
+    $('spImportFetch').addEventListener('click', () => {
+        const btn = $('spImportFetch');
+        btn.disabled = true;
+        $('spImportStatus').innerHTML = '<div class="text-muted mb-2">Läser Förbundets sida…</div>';
+        $('spImportBody').innerHTML = '';
+        post('FetchStomprogramFromForbundet', { url: $('spImportUrl').value, year: year }).then(r => {
+            btn.disabled = false;
+            if (!r.success) { $('spImportStatus').innerHTML = '<div class="alert alert-warning">' + esc(r.message) + '</div>'; return; }
+            if (r.disciplines) disciplines = r.disciplines;
+            importRows = r.rows || [];
+            const warn = (r.warnings || []).map(w => '<div class="alert alert-warning py-2 mb-2">' + esc(w) + '</div>').join('');
+            const exist = importRows.filter(x => x.existsAs).length;
+            $('spImportStatus').innerHTML = warn + '<div class="mb-2"><strong>Stomprogram ' + esc(r.year || '?') + '</strong> — ' + importRows.length + ' rader'
+                + (exist ? ', varav ' + exist + ' redan finns' : '') + '. Rader utan fullständigt datum är inte markerade; fyll i datumet om du vill ha med dem.</div>';
+            renderImport();
+        }).catch(() => { btn.disabled = false; $('spImportStatus').innerHTML = '<div class="alert alert-warning">Förbundets sida gick inte att läsa — försök igen.</div>'; });
+    });
+
+    function renderImport() {
+        if (!importRows.length) { $('spImportBody').innerHTML = '<div class="alert alert-light border">Sidan hade inga rader att läsa in.</div>'; updateCount(); return; }
+        $('spImportBody').innerHTML = '<div class="table-responsive"><table class="table table-sm" id="spImportTable"><thead><tr>'
+            + '<th style="width:2rem"><input class="form-check-input" type="checkbox" id="spImportAll" aria-label="Markera alla"></th>'
+            + '<th style="width:9rem">Första dag</th><th style="width:9rem">Sista dag</th><th>Namn</th><th style="width:12rem">Gren</th><th style="width:10rem">Plats</th><th style="width:5rem">Period</th></tr></thead><tbody>'
+            + importRows.map((x, i) => {
+                const checked = !x.existsAs && !x.problem && x.start;
+                return '<tr data-sp-ix="' + i + '"' + (x.existsAs ? ' class="sp-exists"' : '') + '>'
+                    + '<td><input class="form-check-input" type="checkbox" data-f="pick"' + (checked ? ' checked' : '') + ' aria-label="Ta med raden"></td>'
+                    + '<td><input type="text" class="form-control form-control-sm" data-f="start" value="' + esc(x.start || '') + '" autocomplete="off"></td>'
+                    + '<td><input type="text" class="form-control form-control-sm" data-f="end" value="' + esc(x.end || '') + '" autocomplete="off"></td>'
+                    + '<td><input type="text" class="form-control form-control-sm" data-f="name" value="' + esc(x.name) + '" maxlength="200" autocomplete="off">'
+                    + '<div class="sp-src">' + esc(x.source) + (x.existsAs ? ' · <strong>finns redan</strong>' + (x.existsAs !== x.name ? ' som ”' + esc(x.existsAs) + '”' : '') : '') + (x.problem ? ' · <span class="text-danger">' + esc(x.problem) + '</span>' : '') + '</div></td>'
+                    + '<td><select class="form-select form-select-sm" data-f="discipline">' + discOptions(x.discipline) + '</select></td>'
+                    + '<td><input type="text" class="form-control form-control-sm" data-f="note" value="' + esc(x.note || '') + '" maxlength="500" autocomplete="off"></td>'
+                    + '<td class="text-center"><input class="form-check-input" type="checkbox" data-f="period"' + (x.isPeriod ? ' checked' : '') + ' aria-label="Period"></td></tr>';
+            }).join('') + '</tbody></table></div>';
+        ensureFlatpickr().then(() => $('spImportBody').querySelectorAll('input[data-f="start"],input[data-f="end"]').forEach(datePicker));
+        $('spImportAll').addEventListener('change', e => {
+            $('spImportBody').querySelectorAll('input[data-f="pick"]').forEach(c => { c.checked = e.target.checked; });
+            updateCount();
+        });
+        updateCount();
+    }
+    function updateCount() {
+        const n = $('spImportBody').querySelectorAll('input[data-f="pick"]:checked').length;
+        $('spImportCount').textContent = importRows.length ? n + ' av ' + importRows.length + ' markerade' : '';
+        $('spImportSave').disabled = n === 0;
+        $('spImportSave').textContent = n ? 'Lägg till markerade (' + n + ')' : 'Lägg till markerade';
+    }
+    $('spImportBody').addEventListener('change', e => { if (e.target.matches('input[data-f="pick"]')) updateCount(); });
+
+    $('spImportSave').addEventListener('click', () => {
+        const rows = [];
+        $('spImportBody').querySelectorAll('tr[data-sp-ix]').forEach(tr => {
+            const f = n => tr.querySelector('[data-f="' + n + '"]');
+            if (!f('pick').checked) return;
+            rows.push({ start: f('start').value, end: f('end').value, name: f('name').value, discipline: f('discipline').value, note: f('note').value, isPeriod: f('period').checked });
+        });
+        if (!rows.length) return;
+        const btn = $('spImportSave');
+        btn.disabled = true;
+        post('ImportStomprogram', { rowsJson: JSON.stringify(rows) }).then(r => {
+            btn.disabled = false;
+            const box = document.createElement('div');
+            box.className = 'alert py-2 ' + (r.success ? 'alert-success' : 'alert-warning');
+            box.innerHTML = esc(r.message || '') + (r.errors && r.errors.length ? '<ul class="mb-0 mt-1">' + r.errors.map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>' : '');
+            $('spImportStatus').prepend(box);
+            $('spImportModal').querySelector('.modal-body').scrollTop = 0;
+            if (r.success) {
+                // Det inlagda står nu som "finns redan", så att ett andra klick inte dubblerar.
+                $('spImportBody').querySelectorAll('input[data-f="pick"]:checked').forEach(c => { c.checked = false; c.closest('tr').classList.add('sp-exists'); });
+                updateCount();
+                load();
+            }
+        }).catch(() => { btn.disabled = false; });
+    });
+
+    // ── Klick ──
+    document.getElementById('spPanel').addEventListener('click', e => {
+        const a = e.target.closest('[data-sp]');
+        if (a) {
+            if (a.dataset.sp === 'import') openImport();
+            else if (a.dataset.sp === 'new') { if (!disciplines.length) load().then(() => openEdit(null)); else openEdit(null); }
+            else if (a.dataset.sp === 'paste') { $('spResult').innerHTML = ''; bootstrap.Modal.getOrCreateInstance($('spPasteModal')).show(); }
+            return;
+        }
+        const ed = e.target.closest('[data-sp-edit]');
+        if (ed) { const it = items.find(i => i.id === +ed.dataset.spEdit); if (it) openEdit(it); return; }
+        const del = e.target.closest('[data-sp-del]');
+        if (del) {
+            const it = items.find(i => i.id === +del.dataset.spDel);
+            if (!it || !confirm('Ta bort "' + it.name + '" (' + it.start + ') ur stomprogrammet?')) return;
+            post('DeleteStomprogram', { id: it.id }).then(r => { if (r.success) load(); });
+        }
+    });
+
+    window.hpskLoadStomprogram = () => { if (!loaded) load(); };
+})();
+</script>

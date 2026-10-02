@@ -84,12 +84,13 @@ namespace HpskSite.Models.Kretsgranskning
 
         public static void Mark(IReadOnlyList<KretsCalendarEntry> entries)
         {
-            foreach (var e in entries) e.IsPeriod = IsPeriod(e);
+            // Stomprogrammets period kommer från raden (sajtadmin markerar den) — en SM-vecka är ingen period.
+            foreach (var e in entries) if (e.Kind != "stomprogram") e.IsPeriod = IsPeriod(e);
             // ⚠️ En periodtävling krockar inte och tar inga krockar: den kan skjutas vilken dag som
             // helst under perioden, så "samma dag" säger ingenting. Annars varnas varje tävling i
             // kretsen under en hel månad för Hallandsseriens deltävling.
             var dated = entries.Where(e => e.Kind != "event" && e.Kind != "stomprogram" && !e.IsPeriod && !string.IsNullOrEmpty(e.Discipline)).ToList();
-            var fixedDates = entries.Where(e => e.Kind == "stomprogram").ToList();
+            var fixedDates = entries.Where(e => e.Kind == "stomprogram" && !e.IsPeriod).ToList();
             foreach (var e in dated)
             {
                 // Stomprogrammet: bara kretsens egna poster varnas — grannarnas är inte kretsens fråga.

@@ -19,6 +19,8 @@ namespace HpskSite.Models.Kretsgranskning
         /// <summary>Gren (CompetitionTypes-id). Null = alla grener — krockar med allt.</summary>
         public string? Discipline { get; set; }
         public string? Note { get; set; }
+        /// <summary>En period (t.ex. rikstävling på hemortens banor i sex veckor): visas, men ger inga krockvarningar.</summary>
+        public bool IsPeriod { get; set; }
         public DateTime CreatedAt { get; set; }
         public int CreatedByMemberId { get; set; }
     }

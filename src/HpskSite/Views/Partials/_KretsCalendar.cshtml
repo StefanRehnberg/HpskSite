@@ -91,7 +91,6 @@
     </div>
     @if (kcPlanning)
     {
-    <div id="@(P)StomLink" class="small mb-2 d-none"><a href="/kretsen/stomprogram"><i class="bi bi-calendar-range me-1"></i>Förbundets stomprogram — för in årets datum</a></div>
     <div id="@(P)ApplyHint" class="small text-muted mb-2 d-none"><i class="bi bi-hand-index me-1"></i>Klicka på en dag för att ansöka om en tävling.</div>
     }
     <div id="@(P)Body"><div class="text-muted small">Hämtar…</div></div>
@@ -164,7 +163,6 @@
                 }
                 // Tipset bara i månadsvyn — listan har inga dagar att klicka på.
                 if ($('kcApplyHint')) $('kcApplyHint').classList.toggle('d-none', view !== 'month' || !(d.applyClubs.length || d.canApplyAsRegion));
-                if ($('kcStomLink')) $('kcStomLink').classList.toggle('d-none', !d.canEditStomprogram);
                 view === 'list' ? renderList(f, t) : renderMonth(f, t);
             })
             .catch(() => { $('kcBody').innerHTML = '<div class="text-danger small">Kalendern kunde inte hämtas.</div>'; });
