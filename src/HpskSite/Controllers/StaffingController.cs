@@ -612,6 +612,58 @@ namespace HpskSite.Controllers
             return Json(new { success = true, added });
         }
 
+        /// <summary>
+        /// Kretsens arrangörschecklista (fas 4): punkterna som gäller tävlingen och som arrangören
+        /// ännu inte tagit ställning till. Läser bara — ingenting läggs in förrän arrangören väljer.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetKretsChecklist(int competitionId)
+        {
+            if (!await HasCompetitionAccessAsync(competitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var cl = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Kretsgranskning.KretsPlanningService>().ForCompetition(competitionId);
+            if (cl == null) return Json(new { success = true, has = false });
+            return Json(new
+            {
+                success = true,
+                has = true,
+                regionName = cl.RegionName,
+                added = cl.Added,
+                dismissed = cl.Dismissed,
+                pending = cl.Pending.Select(p => new
+                {
+                    p.Id, p.Title, p.Description, p.DaysBeforeComp,
+                    whenLabel = p.DaysBeforeComp == null ? "" : p.DaysBeforeComp == 0 ? "på tävlingsdagen"
+                        : p.DaysBeforeComp > 0 ? $"{p.DaysBeforeComp} dagar före" : $"{-p.DaysBeforeComp} dagar efter"
+                })
+            });
+        }
+
+        public class ApplyKretsChecklistRequest
+        {
+            public int CompetitionId { get; set; }
+            public List<int>? AddIds { get; set; }
+            /// <summary>Punkter som inte behövs för tävlingen — registreras som bortvalda och erbjuds inte igen.</summary>
+            public List<int>? DismissIds { get; set; }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApplyKretsChecklist([FromBody] ApplyKretsChecklistRequest request)
+        {
+            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
+            var viewer = await ResolveViewerAsync();
+            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
+            if (!await HasCompetitionAccessAsync(request.CompetitionId))
+                return Json(new { success = false, message = "Ingen behörighet" });
+            var (added, dismissed) = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Kretsgranskning.KretsPlanningService>()
+                .Apply(request.CompetitionId, request.AddIds ?? new List<int>(), request.DismissIds ?? new List<int>(), viewer.Id);
+            var parts = new List<string>();
+            if (added > 0) parts.Add($"{added} {(added == 1 ? "uppgift" : "uppgifter")} från kretsens checklista lades in");
+            if (dismissed > 0) parts.Add($"{dismissed} {(dismissed == 1 ? "punkt" : "punkter")} valdes bort och visas inte igen");
+            return Json(new { success = true, added, dismissed, message = parts.Count == 0 ? "Ingenting ändrades." : string.Join(", ", parts) + "." });
+        }
+
         /// <summary>Discipline-aware materiel-quantity estimate from participant/class/series counts.</summary>
         [HttpGet]
         public async Task<IActionResult> GetMaterielEstimate(int competitionId)

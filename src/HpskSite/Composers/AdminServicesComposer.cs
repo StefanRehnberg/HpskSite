@@ -98,6 +98,9 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.CourseReviewChecklist>();
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.CourseReviewAccess>();
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.CourseReviewReminderService>();
+            // Fas 4, resten: Forbundets stomprogram och kretsens arrangorschecklista.
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.StomprogramService>();
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.KretsPlanningService>();
             // Member-database expansion (see Documentation/MEMBER_DATABASE.md)
             builder.Services.AddScoped<ClubMembershipService>();
             builder.Services.AddScoped<MemberAccessKeyService>();

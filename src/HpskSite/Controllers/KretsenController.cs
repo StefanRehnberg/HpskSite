@@ -270,6 +270,18 @@ namespace HpskSite.Controllers
             return View("~/Views/FaltskyttePrintStationCards.cshtml", model);
         }
 
+        /// <summary>
+        /// Förbundets stomprogram (fas 4): årets fasta datum, som kretskalendrarna visar som bakgrund
+        /// och varnar för. Läsbar för alla; bara sajtadmin för in och tar bort (prövas av endpointsen).
+        /// </summary>
+        [HttpGet("stomprogram")]
+        public IActionResult Stomprogram(int? year)
+        {
+            if (!TryRoot(out var root, out _)) return StatusCode(500, "Umbraco-kontext saknas.");
+            ViewData["StomYear"] = year is >= 2000 and <= 2100 ? year.Value : DateTime.Today.Year + (DateTime.Today.Month >= 9 ? 1 : 0);
+            return View("KretsenStomprogram", root);
+        }
+
         /// <summary>Länkläget: ett ärende utan inloggning. Länken bär ärendet; sidan hämtar det.</summary>
         [HttpGet("arende")]
         public IActionResult Arende(string? t)

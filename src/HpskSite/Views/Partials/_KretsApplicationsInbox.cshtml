@@ -40,6 +40,8 @@
                 <li><hr class="dropdown-divider"></li>
                 <li><h6 class="dropdown-header">Inställningar</h6></li>
                 <li><button class="dropdown-item" type="button" data-ka="deadlines"><i class="bi bi-calendar-x me-2"></i>Kretsens sista ansökningsdagar…</button></li>
+                <li><button class="dropdown-item" type="button" data-ka="neighbours"><i class="bi bi-map me-2"></i>Kretsens grannkretsar…</button></li>
+                <li><button class="dropdown-item" type="button" data-ka="checklist"><i class="bi bi-list-check me-2"></i>Kretsens arrangörschecklista…</button></li>
             </ul>
         </div>
     </div>
@@ -278,6 +280,69 @@ window.hpskKretsApplicationsInit = function () {
         if (typeof flatpickr !== 'undefined') LEVELS.forEach(([v]) => flatpickr('#kaDl' + v, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true }));
     }
 
+    // ── Grannkretsar (fas 4) ───────────────────────────────────────────────────────────
+    // Standarden är gränsschemat; kretsen kan välja själv. Valet styr "Visa grannkretsar" i
+    // kalendern OCH krockvarningarna, så att en krets som delar banor med en krets längre bort
+    // kan se den som granne.
+    function neighbours() {
+        fetch(base + 'GetNeighbourSettings?regionId=' + REGION_ID, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            if (!d.success) { openModal('Kretsens grannkretsar', '<div class="alert alert-warning">' + esc(d.message) + '</div>'); return; }
+            openModal('Kretsens grannkretsar',
+                '<p class="small text-muted">Grannkretsarnas tävlingar visas i kretskalendern med växeln <strong>Visa grannkretsar</strong>, och kretsen varnas när en tävling i samma gren ligger samma dag hos en granne. '
+                + 'Förvalt är kretsarna som gränsar till er.' + (d.isDefault ? ' <strong>Ni använder förvalet.</strong>' : ' <strong>Ni har valt själva.</strong>') + '</p>'
+                + '<div class="row row-cols-1 row-cols-md-2 g-1" id="kaNbList">'
+                + d.regions.map((r, i) => '<div class="col"><div class="form-check"><input class="form-check-input" type="checkbox" id="kaNb' + i + '" data-code-index="' + i + '"' + (r.chosen ? ' checked' : '') + '>'
+                    + '<label class="form-check-label" for="kaNb' + i + '">' + esc(r.name) + (r.standard ? ' <span class="badge bg-light text-dark border">gränsar</span>' : '') + '</label></div></div>').join('')
+                + '</div><div class="d-flex flex-wrap gap-2 mt-3"><button type="button" class="btn btn-primary" data-ka="nbSave">Spara</button>'
+                + (d.isDefault ? '' : '<button type="button" class="btn btn-outline-secondary" data-ka="nbDefault">Återgå till förvalet</button>')
+                + '</div><div id="kaModalResult" class="mt-2" role="status"></div>');
+            window._kaNbCodes = d.regions.map(r => r.code);
+        });
+    }
+
+    // ── Arrangörschecklista (fas 4) ────────────────────────────────────────────────────
+    // Kretsens regler som uppgifter: arrangören lägger in dem i tävlingens förberedelser.
+    let clData = null, clEdit = 0;
+    function checklist() {
+        fetch(base + 'GetOrganiserChecklist?regionId=' + REGION_ID, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            if (!d.success) { openModal('Kretsens arrangörschecklista', '<div class="alert alert-warning">' + esc(d.message) + '</div>'); return; }
+            clData = d; renderChecklist();
+        });
+    }
+    function renderChecklist(msg, ok) {
+        const d = clData, items = d.items;
+        const cur = items.find(x => x.id === clEdit) || {};
+        openModal('Kretsens arrangörschecklista',
+            '<p class="small text-muted">Punkterna erbjuds arrangören i förberedelserna för varje tävling i kretsen som de gäller. Arrangören lägger in dem som uppgifter och bockar av dem. '
+            + 'Ändrar ni en punkt här rörs inte uppgifter som redan lagts in.</p>'
+            + (items.length ? '<ol class="list-group list-group-numbered mb-3" id="kaClList">' + items.map((x, i) =>
+                '<li class="list-group-item d-flex gap-2 align-items-start"><div class="ms-1 me-auto"><div class="fw-semibold">' + esc(x.title) + '</div>'
+                + '<div class="small text-muted">' + esc(x.appliesToLabel) + (x.whenLabel ? ' · ' + esc(x.whenLabel) : '') + '</div>'
+                + (x.description ? '<div class="small">' + esc(x.description) + '</div>' : '') + '</div>'
+                + '<div class="btn-group btn-group-sm flex-none">'
+                + '<button type="button" class="btn btn-outline-secondary" data-ka="clUp" data-id="' + x.id + '"' + (i === 0 ? ' disabled' : '') + ' aria-label="Flytta upp"><i class="bi bi-arrow-up"></i></button>'
+                + '<button type="button" class="btn btn-outline-secondary" data-ka="clDown" data-id="' + x.id + '"' + (i === items.length - 1 ? ' disabled' : '') + ' aria-label="Flytta ner"><i class="bi bi-arrow-down"></i></button>'
+                + '<button type="button" class="btn btn-outline-secondary" data-ka="clEdit" data-id="' + x.id + '">Ändra</button>'
+                + '<button type="button" class="btn btn-outline-danger" data-ka="clRemove" data-id="' + x.id + '">Ta bort</button></div></li>').join('') + '</ol>'
+              : '<div class="alert alert-light border small">Kretsen har inga punkter än. Exempel: <em>Skicka ett reportage till kretsens webbredaktör</em>, <em>Beställ KM-medaljer från kretsen</em>, <em>Betala lagavgiften till kretsens bankgiro</em>.</div>')
+            + '<div class="card"><div class="card-body"><h6 class="mb-2">' + (clEdit ? 'Ändra punkten' : 'Ny punkt') + '</h6>'
+            + '<label class="form-label small mb-1" for="kaClTitle">Vad ska arrangören göra?</label><input class="form-control mb-2" id="kaClTitle" maxlength="300" value="' + esc(cur.title || '') + '">'
+            + '<label class="form-label small mb-1" for="kaClDesc">Förklaring <span class="text-muted">(valfri)</span></label><textarea class="form-control mb-2" id="kaClDesc" rows="2" maxlength="2000">' + esc(cur.description || '') + '</textarea>'
+            + '<div class="row g-2"><div class="col-md-6"><label class="form-label small mb-1" for="kaClScope">Gäller</label><select class="form-select" id="kaClScope">'
+            + d.scopes.map(s => '<option value="' + esc(s.value) + '"' + ((cur.appliesTo || 'All') === s.value ? ' selected' : '') + '>' + esc(s.label) + '</option>').join('') + '</select></div>'
+            + '<div class="col-md-6"><label class="form-label small mb-1" for="kaClDays">Klar dagar före tävlingen <span class="text-muted">(valfritt)</span></label>'
+            + '<input type="number" class="form-control" id="kaClDays" min="-365" max="730" value="' + (cur.daysBeforeComp ?? '') + '">'
+            + '<div class="form-text">Negativt tal = efter tävlingen, till exempel −7 för ett reportage.</div></div></div>'
+            + '<div class="d-flex gap-2 mt-2"><button type="button" class="btn btn-primary" data-ka="clSave">' + (clEdit ? 'Spara ändringen' : 'Lägg till punkten') + '</button>'
+            + (clEdit ? '<button type="button" class="btn btn-outline-secondary" data-ka="clCancel">Avbryt</button>' : '') + '</div></div></div>'
+            + '<div id="kaModalResult" class="mt-2" role="status"></div>');
+        if (msg) resultBox(msg, ok);
+    }
+    function clReload(msg, ok) {
+        return fetch(base + 'GetOrganiserChecklist?regionId=' + REGION_ID, { credentials: 'same-origin' }).then(r => r.json())
+            .then(d => { if (d.success) clData = d; renderChecklist(msg, ok); });
+    }
+
     document.addEventListener('click', function (e) {
         const b = e.target.closest('[data-ka]');
         if (!b || !(root.contains(b) || modalEl.contains(b))) return;
@@ -287,6 +352,22 @@ window.hpskKretsApplicationsInit = function () {
             case 'forbundet': return forbundet(a);
             case 'history': return history(a);
             case 'deadlines': return data && deadlines();
+            case 'neighbours': return neighbours();
+            case 'nbSave': {
+                const codes = (window._kaNbCodes || []).filter((c, i) => $('kaNb' + i)?.checked);
+                return post('SaveNeighbours', { regionId: REGION_ID, codes: codes.join(',') }).then(r => { resultBox(r.message, r.success); });
+            }
+            case 'nbDefault': return post('SaveNeighbours', { regionId: REGION_ID, useDefault: '1' }).then(r => { if (r.success) neighbours(); });
+            case 'checklist': clEdit = 0; return checklist();
+            case 'clEdit': clEdit = id; return renderChecklist();
+            case 'clCancel': clEdit = 0; return renderChecklist();
+            case 'clSave': return post('SaveOrganiserChecklistItem', {
+                    regionId: REGION_ID, id: clEdit, title: $('kaClTitle').value, description: $('kaClDesc').value,
+                    daysBeforeComp: $('kaClDays').value, appliesTo: $('kaClScope').value
+                }).then(r => { if (r.success) { const was = clEdit; clEdit = 0; clReload(was ? 'Punkten är ändrad.' : 'Punkten är tillagd.', true); } else resultBox(r.message, false); });
+            case 'clRemove': return post('RemoveOrganiserChecklistItem', { regionId: REGION_ID, id }).then(r => { clEdit = 0; clReload(r.message, r.success); });
+            case 'clUp': return post('MoveOrganiserChecklistItem', { regionId: REGION_ID, id, direction: -1 }).then(() => clReload());
+            case 'clDown': return post('MoveOrganiserChecklistItem', { regionId: REGION_ID, id, direction: 1 }).then(() => clReload());
             case 'decideSend': {
                 const act = document.querySelector('input[name="kaAct"]:checked').value;
                 const call = act === 'approve' ? post('DecideApplication', { id, decision: 'approve', text: t() })
