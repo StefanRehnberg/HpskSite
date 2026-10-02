@@ -127,6 +127,69 @@ namespace HpskSite.Tests
             b.Conflicts.Should().BeEmpty();
         }
 
+        // ── Periodtävlingar (hemmabanetävlingar) ──────────────────────────────────────────
+
+        private static KretsCalendarEntry Span(string kind, int id, string disc, DateTime from, int days)
+        {
+            var e = E(kind, id, disc, from);
+            if (days > 1) e.EndDate = from.AddDays(days - 1);
+            return e;
+        }
+
+        [Fact]
+        public void Period_EnManadsDeltavling_KrockarInteMedNagot()
+        {
+            var serie = Span("competition", 1, "Precision", new DateTime(2026, 5, 1), 31);
+            var lordag = E("competition", 2, "Precision", new DateTime(2026, 5, 16));
+            KretsCalendarConflicts.Mark(new[] { serie, lordag });
+            serie.IsPeriod.Should().BeTrue();
+            serie.Conflicts.Should().BeEmpty();
+            lordag.Conflicts.Should().BeEmpty("en hemmabanetävling kan skjutas vilken dag som helst — samma dag säger ingenting");
+        }
+
+        [Fact]
+        public void Period_TvaPeriodtavlingar_KrockarInte()
+        {
+            var a = Span("competition", 1, "Precision", new DateTime(2026, 5, 1), 31);
+            var b = Span("application", 2, "Precision", new DateTime(2026, 5, 10), 20);
+            KretsCalendarConflicts.Mark(new[] { a, b });
+            a.Conflicts.Should().BeEmpty();
+            b.Conflicts.Should().BeEmpty();
+        }
+
+        [Fact]
+        public void Period_FyraDagar_ArIngenPeriod_OchKrockar()
+        {
+            var sm = Span("competition", 1, "Precision", D, 4);
+            var other = E("competition", 2, "Precision", D.AddDays(2));
+            KretsCalendarConflicts.Mark(new[] { sm, other });
+            sm.IsPeriod.Should().BeFalse();
+            other.Conflicts.Should().ContainSingle();
+        }
+
+        [Fact]
+        public void Period_FemDagar_ArPeriod() =>
+            KretsCalendarConflicts.IsPeriod(Span("competition", 1, "Precision", D, 5)).Should().BeTrue();
+
+        [Fact]
+        public void Period_StomprogrammetsVecka_VarnarFortfarande()
+        {
+            var smVecka = Span("stomprogram", 9, "Precision", D, 7);
+            var c = E("competition", 1, "Precision", D.AddDays(3));
+            KretsCalendarConflicts.Mark(new[] { smVecka, c });
+            smVecka.IsPeriod.Should().BeFalse();
+            c.Conflicts.Should().ContainSingle().Which.Should().Contain("stomprogram");
+        }
+
+        [Fact]
+        public void Period_TarIngenStomprogramvarning()
+        {
+            var serie = Span("competition", 1, "Precision", new DateTime(2027, 6, 1), 30);
+            var s = E("stomprogram", 9, "Precision", new DateTime(2027, 6, 12));
+            KretsCalendarConflicts.Mark(new[] { serie, s });
+            serie.Conflicts.Should().BeEmpty();
+        }
+
         // ── Vilka tävlingar en punkt i checklistan gäller ───────────────────────────────
 
         [Theory]

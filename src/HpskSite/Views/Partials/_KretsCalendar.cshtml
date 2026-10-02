@@ -2,6 +2,15 @@
 @*
     Kretskalendern (kretsgranskning fas 4) — modell = kretsnodens id.
 
+    ⚠️ TVÅ LÄGEN, samma partial (Stefans beslut 2026-10-02), styrda av ViewData["KcMode"]:
+      * "public"   (standard) — kretssidans flik Kalender: tävlingar, godkända ansökningar och
+                   kretsens händelser. Inga krockar, inget stomprogram, ingen ansökningsknapp.
+      * "planning" — kretsens och klubbens adminpanel: preliminära ansökningar, stomprogrammet,
+                   krockvarningar och "Ansök den här dagen". Servern prövar behörigheten.
+    ⚠️ Två exemplar kan stå på SAMMA sida (en kretsadmin ser både kretssidans flik och adminpanelens),
+    så varje id bär ett prefix: ViewData["KcPrefix"] (standard "kc"). ViewData["KcTabId"] /
+    ["KcPaneId"] = flikknappen och panelen som startar laddningen.
+
     Visar tävlingar, kretsens egna ansökningar (preliminära och godkända) och kretsens händelser,
     med växeln "Visa grannkretsar". Allt läses genom CompetitionApplication/GetCalendar, som avgör
     vad besökaren får se. En inloggad klubbadministratör i kretsen kan klicka på en dag och ansöka.
@@ -9,8 +18,17 @@
     ⚠️ Egna id:n och funktioner med prefixet kc — ClubCalendar har globala namn utan prefix och de
     får aldrig krocka om båda en dag hamnar på samma sida.
 *@
+@{
+    var kcPlanning = string.Equals(ViewData["KcMode"] as string, "planning", StringComparison.OrdinalIgnoreCase);
+    var P = ViewData["KcPrefix"] as string ?? (kcPlanning ? "kcp" : "kc");
+    var kcTab = ViewData["KcTabId"] as string ?? "regionCalendar-tab";
+    var kcPane = ViewData["KcPaneId"] as string ?? "regionCalendar";
+    var kcStyles = Context.Items["hpskKcStyles"] == null;
+    Context.Items["hpskKcStyles"] = true;
+}
 @await Html.PartialAsync("_HtmlEscape")
 
+@if (kcStyles) {
 <style>
     .kc-wrap { font-size: 1rem; }
     .kc-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem; }
@@ -35,53 +53,78 @@
     .kc-list-row { display: flex; gap: .75rem; padding: .45rem 0; border-top: 1px solid var(--bs-border-color); }
     .kc-list-date { flex: none; width: 6.5rem; font-variant-numeric: tabular-nums; }
     .kc-warn { color: var(--bs-warning-text-emphasis); font-size: .85rem; }
+    .kc-period { border: 1px dashed var(--bs-border-color); border-radius: .4rem; padding: .4rem .6rem; margin-bottom: .5rem; background: var(--bs-tertiary-bg); }
+    .kc-period .kc-chip { display: inline-block; max-width: 100%; margin: .15rem .35rem .15rem 0; }
     @@media (max-width: 767.98px) { .kc-day { min-height: 3.6rem; } .kc-chip { font-size: .68rem; } }
 </style>
+}
 
-<div class="kc-wrap" id="kcRoot" data-region-id="@Model">
+<div class="kc-wrap" id="@(P)Root" data-region-id="@Model" data-kc-mode="@(kcPlanning ? "planning" : "public")">
+    @if (kcPlanning)
+    {
+        <p class="small text-muted mb-2">Planeringskalendern: tävlingar, ansökningar (också preliminära), Förbundets stomprogram och krockvarningar. Skyttarna ser kretsens publicerade kalender på kretssidan — utan preliminära ansökningar och krockar.</p>
+    }
     <div class="kc-head">
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="kcPrev" aria-label="Föregående"><i class="bi bi-chevron-left"></i></button>
-        <h3 id="kcTitle" aria-live="polite"></h3>
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="kcNext" aria-label="Nästa"><i class="bi bi-chevron-right"></i></button>
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="kcToday">I dag</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="@(P)Prev" aria-label="Föregående"><i class="bi bi-chevron-left"></i></button>
+        <h3 id="@(P)Title" aria-live="polite"></h3>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="@(P)Next" aria-label="Nästa"><i class="bi bi-chevron-right"></i></button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="@(P)Today">I dag</button>
         <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Visning">
-            <button type="button" class="btn btn-outline-primary active" id="kcMonthBtn">Månad</button>
-            <button type="button" class="btn btn-outline-primary" id="kcListBtn">Lista</button>
+            <button type="button" class="btn btn-outline-primary active" id="@(P)MonthBtn">Månad</button>
+            <button type="button" class="btn btn-outline-primary" id="@(P)ListBtn">Lista</button>
         </div>
         <div class="form-check form-switch ms-2 mb-0">
-            <input class="form-check-input" type="checkbox" role="switch" id="kcNeighbours">
-            <label class="form-check-label small" for="kcNeighbours" id="kcNeighboursLabel">Visa grannkretsar</label>
+            <input class="form-check-input" type="checkbox" role="switch" id="@(P)Neighbours">
+            <label class="form-check-label small" for="@(P)Neighbours" id="@(P)NeighboursLabel">Visa grannkretsar</label>
         </div>
     </div>
     <div class="kc-legend mb-2">
         <span><i class="sw kc-s-tavling"></i>Tävling</span>
         <span><i class="sw kc-s-godkand"></i>Godkänd ansökan</span>
-        <span><i class="sw kc-s-preliminar"></i>Preliminär (sökt)</span>
         <span><i class="sw kc-s-handelse"></i>Kretsens händelse</span>
+        @if (kcPlanning)
+        {
+        <span><i class="sw kc-s-preliminar"></i>Preliminär (sökt)</span>
         <span><i class="sw kc-s-stomprogram"></i>Förbundets stomprogram</span>
         <span class="kc-warn"><i class="bi bi-exclamation-triangle"></i>Krock</span>
+        }
     </div>
-    <div id="kcStomLink" class="small mb-2 d-none"><a href="/kretsen/stomprogram"><i class="bi bi-calendar-range me-1"></i>Förbundets stomprogram — för in årets datum</a></div>
-    <div id="kcApplyHint" class="small text-muted mb-2 d-none"><i class="bi bi-hand-index me-1"></i>Klicka på en dag för att ansöka om en tävling.</div>
-    <div id="kcBody"><div class="text-muted small">Hämtar…</div></div>
-    <div id="kcDay" class="mt-3"></div>
+    @if (kcPlanning)
+    {
+    <div id="@(P)StomLink" class="small mb-2 d-none"><a href="/kretsen/stomprogram"><i class="bi bi-calendar-range me-1"></i>Förbundets stomprogram — för in årets datum</a></div>
+    <div id="@(P)ApplyHint" class="small text-muted mb-2 d-none"><i class="bi bi-hand-index me-1"></i>Klicka på en dag för att ansöka om en tävling.</div>
+    }
+    <div id="@(P)Body"><div class="text-muted small">Hämtar…</div></div>
+    <div id="@(P)Day" class="mt-3"></div>
 </div>
 
-@await Html.PartialAsync("_CompetitionApplications")
+@* Bara dialogen — ApplicationsClubId nollas, annars följer klubbpanelens värde med och kortet med ansökningslistan renderas en gång till. *@
+@* ⚠️ Indexering, inte en samlingsinitierare: den anropar Add och kastar när nyckeln redan finns (klubbpanelen sätter den). *@
+@if (kcPlanning)
+{
+    var kcAppsVd = new ViewDataDictionary(ViewData);
+    kcAppsVd["ApplicationsClubId"] = 0;
+    @await Html.PartialAsync("_CompetitionApplications", kcAppsVd)
+}
 
 <script>
 (function () {
-    const root = document.getElementById('kcRoot');
+    const P = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(P));
+    const MODE = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(kcPlanning ? "planning" : "public"));
+    const TAB = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(kcTab));
+    const PANE = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(kcPane));
+    const root = document.getElementById(P + 'Root');
     if (!root || root.dataset.kcInit) return;
     root.dataset.kcInit = '1';
     const REGION_ID = parseInt(root.dataset.regionId, 10);
-    const $ = id => document.getElementById(id);
+    // Id:n skrivs som 'kcXxx' i koden och översätts till exemplarets prefix.
+    const $ = id => document.getElementById(id.replace(/^kc/, P));
     const esc = s => window.hpskEsc(s);
     const MONTHS = ['januari', 'februari', 'mars', 'april', 'maj', 'juni', 'juli', 'augusti', 'september', 'oktober', 'november', 'december'];
     const DOW = ['Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör', 'Sön'];
 
-    const pref = (k, d) => { try { return localStorage.getItem('kc_' + k) ?? d; } catch (e) { return d; } };
-    const setPref = (k, v) => { try { localStorage.setItem('kc_' + k, v); } catch (e) { } };
+    const pref = (k, d) => { try { return localStorage.getItem('kc_' + MODE + '_' + k) ?? d; } catch (e) { return d; } };
+    const setPref = (k, v) => { try { localStorage.setItem('kc_' + MODE + '_' + k, v); } catch (e) { } };
 
     let view = pref('view', 'month');
     let cursor = new Date(); cursor.setDate(1);
@@ -109,7 +152,7 @@
         $('kcTitle').textContent = view === 'list'
             ? 'Från ' + MONTHS[cursor.getMonth()] + ' ' + cursor.getFullYear()
             : MONTHS[cursor.getMonth()].charAt(0).toUpperCase() + MONTHS[cursor.getMonth()].slice(1) + ' ' + cursor.getFullYear();
-        const qs = 'regionId=' + REGION_ID + '&from=' + key(f) + '&to=' + key(t) + '&neighbours=' + ($('kcNeighbours').checked ? 'true' : 'false');
+        const qs = 'regionId=' + REGION_ID + '&from=' + key(f) + '&to=' + key(t) + '&neighbours=' + ($('kcNeighbours').checked ? 'true' : 'false') + '&mode=' + MODE;
         return fetch('/umbraco/surface/CompetitionApplication/GetCalendar?' + qs, { credentials: 'same-origin' })
             .then(r => r.json()).then(d => {
                 if (!d.success) { $('kcBody').innerHTML = '<div class="text-danger small">' + esc(d.message) + '</div>'; return; }
@@ -120,16 +163,23 @@
                     $('kcNeighboursLabel').title = d.neighbours.join(', ');
                 }
                 // Tipset bara i månadsvyn — listan har inga dagar att klicka på.
-                $('kcApplyHint').classList.toggle('d-none', view !== 'month' || !(d.applyClubs.length || d.canApplyAsRegion));
-                $('kcStomLink').classList.toggle('d-none', !d.canEditStomprogram);
+                if ($('kcApplyHint')) $('kcApplyHint').classList.toggle('d-none', view !== 'month' || !(d.applyClubs.length || d.canApplyAsRegion));
+                if ($('kcStomLink')) $('kcStomLink').classList.toggle('d-none', !d.canEditStomprogram);
                 view === 'list' ? renderList(f, t) : renderMonth(f, t);
             })
             .catch(() => { $('kcBody').innerHTML = '<div class="text-danger small">Kalendern kunde inte hämtas.</div>'; });
     }
 
+    // ⚠️ Periodtävlingar (hemmabanetävlingar, minst fem dagar) ligger inte i dagrutorna — de hade
+    // fyllt varje ruta i en hel månad. De står i ett band ovanför rutnätet och under "Pågår också".
     function entriesOn(k) {
-        return data.entries.filter(e => e.date <= k && (e.endDate || e.date) >= k);
+        return data.entries.filter(e => !e.isPeriod && e.date <= k && (e.endDate || e.date) >= k);
     }
+    function periodsOn(k) {
+        return data.entries.filter(e => e.isPeriod && e.date <= k && (e.endDate || e.date) >= k);
+    }
+    const shortDate = s => { const [y, m, d] = s.split('-'); return parseInt(d, 10) + ' ' + MONTHS[parseInt(m, 10) - 1].slice(0, 3); };
+    const spanText = e => shortDate(e.date) + '–' + shortDate(e.endDate || e.date);
 
     function chip(e) {
         const cls = 'kc-chip kc-s-' + e.status + (e.isNeighbour ? ' kc-neighbour' : '');
@@ -139,7 +189,15 @@
     }
 
     function renderMonth(f, t) {
-        let html = '<div class="kc-grid" id="kcGrid">' + DOW.map(d => '<div class="kc-dow">' + d + '</div>').join('');
+        const mFirst = key(new Date(cursor.getFullYear(), cursor.getMonth(), 1));
+        const mLast = key(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0));
+        const periods = data.entries.filter(e => e.isPeriod && e.date <= mLast && (e.endDate || e.date) >= mFirst);
+        let html = periods.length
+            ? '<div class="kc-period" id="@(P)Periods"><div class="small fw-semibold mb-1"><i class="bi bi-calendar-range me-1"></i>Pågår under månaden — kan skjutas vilken dag som helst under perioden</div>'
+              + periods.map(e => '<span class="kc-chip kc-s-' + e.status + (e.isNeighbour ? ' kc-neighbour' : '') + '" title="' + esc(e.name + ' · ' + spanText(e)) + '">'
+                  + esc((e.isNeighbour && !e.isSm ? e.regionName + ': ' : '') + e.name) + ' · ' + esc(spanText(e)) + '</span>').join('') + '</div>'
+            : '';
+        html += '<div class="kc-grid" id="@(P)Grid">' + DOW.map(d => '<div class="kc-dow">' + d + '</div>').join('');
         const today = key(new Date());
         for (let d = new Date(f); d <= t; d.setDate(d.getDate() + 1)) {
             const k = key(d);
@@ -168,7 +226,7 @@
             }
             html += row(e);
         });
-        $('kcBody').innerHTML = '<div id="kcList">' + html + '</div>';
+        $('kcBody').innerHTML = '<div id="@(P)List">' + html + '</div>';
     }
 
     function row(e) {
@@ -186,9 +244,11 @@
         const [y, mo, d] = k.split('-');
         let html = '<div class="card"><div class="card-body"><h4 class="h6 mb-2">' + parseInt(d, 10) + ' ' + MONTHS[parseInt(mo, 10) - 1] + ' ' + y + '</h4>';
         html += items.length ? items.map(row).join('') : '<div class="text-muted small">Inget den dagen.</div>';
+        const ongoing = periodsOn(k);
+        if (ongoing.length) html += '<div class="small fw-semibold mt-3" id="@(P)DayPeriods">Pågår också (kan skjutas vilken dag som helst under perioden)</div>' + ongoing.map(row).join('');
         const clubs = data.applyClubs || [];
         if (clubs.length || data.canApplyAsRegion) {
-            html += '<div class="mt-3"><button type="button" class="btn btn-primary btn-sm" id="kcApply" data-date="' + k + '"><i class="bi bi-plus-lg me-1"></i>Ansök om en tävling den här dagen</button>'
+            html += '<div class="mt-3"><button type="button" class="btn btn-primary btn-sm" data-kc-apply="1" data-date="' + k + '"><i class="bi bi-plus-lg me-1"></i>Ansök om en tävling den här dagen</button>'
                 + (items.some(e => e.kind !== 'event') ? '<div class="small text-muted mt-1">Det finns redan något i kalendern den dagen — kretsen ser krockar, men de stoppar inte en ansökan.</div>' : '') + '</div>';
         }
         html += '</div></div>';
@@ -198,8 +258,8 @@
     document.addEventListener('click', function (e) {
         const day = e.target.closest('[data-kc-day]');
         if (day && root.contains(day)) { showDay(day.dataset.kcDay); return; }
-        const apply = e.target.closest('#kcApply');
-        if (apply) {
+        const apply = e.target.closest('[data-kc-apply]');
+        if (apply && root.contains(apply)) {
             const clubs = (data.applyClubs || []).slice();
             if (!clubs.length && data.canApplyAsRegion) clubs.push({ id: 0, name: data.region.name + ' (kretsen själv)' });
             window.hpskAppOpenForm({ clubs: clubs, date: apply.dataset.date, regionId: REGION_ID });
@@ -210,7 +270,7 @@
         if (day && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showDay(day.dataset.kcDay); }
     });
     // Efter en ansökan från kalendern: läs om, så att den preliminära posten syns direkt.
-    window.hpskAppSaved = function () { load(); $('kcDay').innerHTML = '<div class="alert alert-success py-2">Ansökan är skickad. Den syns i kalendern som preliminär tills kretsen beslutat.</div>'; };
+    if (MODE === 'planning') window.hpskAppSaved = function () { load(); $('kcDay').innerHTML = '<div class="alert alert-success py-2">Ansökan är skickad. Den syns i kalendern som preliminär tills kretsen beslutat.</div>'; };
 
     $('kcPrev').addEventListener('click', () => { cursor.setMonth(cursor.getMonth() - 1); load(); });
     $('kcNext').addEventListener('click', () => { cursor.setMonth(cursor.getMonth() + 1); load(); });
@@ -229,8 +289,8 @@
     // Ladda när fliken visas första gången (sidan har många flikar).
     let started = false;
     const start = () => { if (started) return; started = true; setView(view); };
-    const tab = document.getElementById('regionCalendar-tab');
+    const tab = document.getElementById(TAB);
     if (tab) { tab.addEventListener('shown.bs.tab', start); tab.addEventListener('click', start); }
-    if (document.getElementById('regionCalendar')?.classList.contains('active')) start();
+    if (document.getElementById(PANE)?.classList.contains('active')) start();
 })();
 </script>

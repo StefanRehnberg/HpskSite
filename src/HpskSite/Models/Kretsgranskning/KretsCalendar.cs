@@ -31,6 +31,11 @@ namespace HpskSite.Models.Kretsgranskning
         public bool IsNeighbour { get; set; }
         /// <summary>Är posten ett svenskt mästerskap (krockar med kretsens tävlingar i samma gren).</summary>
         public bool IsSm { get; set; }
+        /// <summary>
+        /// En PERIODTÄVLING — hemmabanetävlingar som kan skjutas vilken dag som helst under en längre
+        /// period (Hallandsseriens deltävlingar löper en månad). Sätts av <see cref="KretsCalendarConflicts.IsPeriod"/>.
+        /// </summary>
+        public bool IsPeriod { get; set; }
         /// <summary>Krockvarningar med skäl — aldrig stopp.</summary>
         public List<string> Conflicts { get; set; } = new();
     }
@@ -64,9 +69,26 @@ namespace HpskSite.Models.Kretsgranskning
     /// </summary>
     public static class KretsCalendarConflicts
     {
+        /// <summary>Minsta antal dagar (inklusive båda ändarna) för att en tävling ska räknas som periodtävling.</summary>
+        public const int PeriodMinDays = 5;
+
+        /// <summary>
+        /// Är posten en periodtävling? En tävling eller ansökan som löper minst <see cref="PeriodMinDays"/>
+        /// dagar. ⚠️ Stomprogrammet räknas aldrig hit — en SM-vecka på sju dagar ska fortfarande varna.
+        /// Fem dagar, inte fyra: ett SM eller ett landsdelsmästerskap kan pågå i tre–fyra dagar och är
+        /// inte något som kan skjutas när som helst.
+        /// </summary>
+        public static bool IsPeriod(KretsCalendarEntry e) =>
+            e.Kind is "competition" or "application" && e.EndDate != null
+            && (e.EndDate.Value.Date - e.Date.Date).TotalDays + 1 >= PeriodMinDays;
+
         public static void Mark(IReadOnlyList<KretsCalendarEntry> entries)
         {
-            var dated = entries.Where(e => e.Kind != "event" && e.Kind != "stomprogram" && !string.IsNullOrEmpty(e.Discipline)).ToList();
+            foreach (var e in entries) e.IsPeriod = IsPeriod(e);
+            // ⚠️ En periodtävling krockar inte och tar inga krockar: den kan skjutas vilken dag som
+            // helst under perioden, så "samma dag" säger ingenting. Annars varnas varje tävling i
+            // kretsen under en hel månad för Hallandsseriens deltävling.
+            var dated = entries.Where(e => e.Kind != "event" && e.Kind != "stomprogram" && !e.IsPeriod && !string.IsNullOrEmpty(e.Discipline)).ToList();
             var fixedDates = entries.Where(e => e.Kind == "stomprogram").ToList();
             foreach (var e in dated)
             {

@@ -592,26 +592,32 @@ namespace HpskSite.Controllers
         // ════════════════════════════════════════════════════════════════════════════════
 
         [HttpGet]
-        public async Task<IActionResult> GetCalendar(int regionId, string? from, string? to, bool neighbours = false)
+        public async Task<IActionResult> GetCalendar(int regionId, string? from, string? to, bool neighbours = false, string? mode = null)
         {
             var region = _calendar.Region(regionId);
             if (region == null) return Json(new { success = false, message = "Kretsen hittades inte." });
+            // Två lägen (Stefans beslut 2026-10-02): den PUBLIKA kalendern på kretssidan och
+            // PLANERINGSkalendern i krets- och klubbadmin. Planeringen visar preliminära ansökningar,
+            // stomprogrammet och krockar, och kräver att besökaren administrerar kretsen eller en klubb i den.
+            var planning = string.Equals(mode, "planning", StringComparison.OrdinalIgnoreCase);
+            if (planning && !await CanPlanAsync(regionId))
+                return Json(new { success = false, message = "Planeringskalendern är för kretsens och klubbarnas administratörer." });
             var f = ParseDate(from) ?? new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
             var tt = ParseDate(to) ?? f.AddMonths(1).AddDays(-1);
             if ((tt - f).TotalDays > 400) tt = f.AddDays(400);   // en sida ska inte kunna be om hela historiken
 
-            var viewerIsAdmin = await ViewerIsAdminAsync();
-            var entries = _calendar.Build(regionId, f, tt, neighbours, viewerIsAdmin);
+            var viewerIsAdmin = planning || await ViewerIsAdminAsync();
+            var entries = _calendar.Build(regionId, f, tt, neighbours, viewerIsAdmin, planning);
 
-            // Kan besökaren ansöka här? Klubbarna i kretsen där hen är admin, och kretsen själv.
+            // Kan besökaren ansöka här? Klubbarna i kretsen där hen är admin, och kretsen själv. Bara i planeringen.
             var applyClubs = new List<object>();
             var me = await CurrentMemberAsync();
-            if (me != null)
+            if (me != null && planning)
             {
                 foreach (var (cid, cname) in _calendar.ClubsInRegion(regionId).OrderBy(c => c.Value))
                     if (await ClubAdminDirectAsync(me.Id, cid)) applyClubs.Add(new { id = cid, name = cname });
             }
-            var canApplyAsRegion = me != null && await _auth.IsRegionalAdminForRegion(region.Code);
+            var canApplyAsRegion = planning && me != null && await _auth.IsRegionalAdminForRegion(region.Code);
 
             return Json(new
             {
@@ -627,11 +633,12 @@ namespace HpskSite.Controllers
                     endDate = e.EndDate?.ToString("yyyy-MM-dd"),
                     e.Discipline, e.DisciplineLabel,
                     levelLabel = string.IsNullOrEmpty(e.Level) ? "" : CompetitionLevel.Find(e.Level)?.ShortLabel ?? "",
-                    e.Organiser, e.Place, e.Url, e.Status, e.StatusLabel, e.RegionName, e.IsNeighbour, e.IsSm, e.Conflicts
+                    e.Organiser, e.Place, e.Url, e.Status, e.StatusLabel, e.RegionName, e.IsNeighbour, e.IsSm, e.IsPeriod, e.Conflicts
                 }),
                 applyClubs,
                 canApplyAsRegion,
-                canEditStomprogram = await _auth.IsCurrentUserAdminAsync()
+                planning,
+                canEditStomprogram = planning && await _auth.IsCurrentUserAdminAsync()
             });
         }
 
@@ -1019,6 +1026,20 @@ namespace HpskSite.Controllers
             if (await _auth.IsCurrentUserAdminAsync()) return (true, "Sajtadministratör (support)");
             if (await _auth.IsRegionalAdminForRegion(region.Code)) return (true, "Kretsadministratör");
             return (false, "");
+        }
+
+        /// <summary>
+        /// Får besökaren se planeringskalendern? Kretsens tävlingsansvarige, kretsadmin, sajtadmin —
+        /// eller administratör för en klubb i kretsen (de ansöker därifrån).
+        /// </summary>
+        private async Task<bool> CanPlanAsync(int regionId)
+        {
+            if ((await KretsAuthorityAsync(regionId)).Allowed) return true;
+            var me = await CurrentMemberAsync();
+            if (me == null) return false;
+            foreach (var cid in _calendar.ClubsInRegion(regionId).Keys)
+                if (await _auth.IsClubAdminForClub(cid)) return true;
+            return false;
         }
 
         /// <summary>Direkt klubbadmin (gruppen), utan att kretsadmin räknas — för vilka klubbar kalendern erbjuder.</summary>

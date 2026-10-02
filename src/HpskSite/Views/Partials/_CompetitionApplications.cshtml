@@ -34,6 +34,14 @@
 </div>
 }
 
+@{
+    // ⚠️ Dialogerna och skriptet EN gång per sida. Klubbens adminpanel renderar partialen för
+    // ansökningslistan, och planeringskalendern på samma sida renderar den igen för dialogen — två
+    // caAppModal hade gjort den andra död för getElementById.
+    if (Context.Items["hpskCompetitionApplicationsDialogs"] != null) { return; }
+    Context.Items["hpskCompetitionApplicationsDialogs"] = true;
+}
+
 <div class="modal fade" id="caAppModal" tabindex="-1" aria-labelledby="caAppModalTitle" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
