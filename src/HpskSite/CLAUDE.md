@@ -921,7 +921,10 @@ sajtadmins statistik. **Inläsning av en befintlig kalender byggs inte** (Stefan
 Critical om tabellerna saknas. Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod.
 
 Test: `CompetitionApplicationRulesTests`, `CompetitionApplicationRemindersTests`, `KretsCalendarConflictsTests`. Svit:
-`hpsk-verify/tavlingsansokan-fas4-verify.mjs` 83/83, två körningar i rad (A/B: grannregeln borttagen
+`hpsk-verify/tavlingsansokan-fas4-verify.mjs` 87/87, två körningar i rad (2026-10-02, efter
+inkorgsformen). ⚠️ Sviten rör inte kretsens uppdrag: Hallands startläge registreras, och länkläget
+prövas i Blekinge (klubb 2879) med en tillfällig falsk kontaktadress som återställs exakt.
+(Tidigare: 83/83; A/B: grannregeln borttagen
 → 1 röd; kontrollsumman borttagen → sviten avbryter vid "länken slutar gälla"). Skärmdumpar:
 `tavlingsansokan-fas4-shot.mjs`.
 
@@ -989,8 +992,14 @@ faller även fas 4:s inställningar. Körd i dev 2026-10-02. Startkontrollen
 (`CompetitionApplicationSchemaGuardHostedService`) larmar Critical om något saknas. Adds C# → full
 ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod.
 
-Test: `ResultReviewRulesTests` 20. Svit: `hpsk-verify/resultatgranskning-fas2-verify.mjs` **68/68,
-två körningar i rad**. Två fixturer: en Halland-tävling (krets MED granskare — inloggat flöde,
+**Inkorgsformen (2026-10-02, Stefans beslut):** båda kretsinkorgarna har samma form som "Väntande
+godkännanden" och föreningsintygets inkorg — siffra i rälsen (`ResultReview/GetPendingCounts`, vid
+sidladdning), ett gult kort med det som väntar på kretsen och EN knapp per rad (göms när tomt), en
+tabell med övriga och statusfilter med antal, ärenden och beslut i en dialog, inställningar bakom
+sidans blå Åtgärder. Väntande ärenden visas oavsett årsväljaren.
+
+Test: `ResultReviewRulesTests` 20. Svit: `hpsk-verify/resultatgranskning-fas2-verify.mjs` **74/74**
+efter inkorgsformen (68/68 före, två körningar i rad). Två fixturer: en Halland-tävling (krets MED granskare — inloggat flöde,
 inkorg, grind) och en tävling i en krets UTAN granskare (länkläget; kretsen får en tillfällig falsk
 kontaktadress via GetRegion → SaveRegion och återställs exakt). ⚠️ **Sviten rör aldrig kretsarnas
 uppdrag** — en tidigare version parkerade Hallands granskare och gav en riktig men skapad varning på
