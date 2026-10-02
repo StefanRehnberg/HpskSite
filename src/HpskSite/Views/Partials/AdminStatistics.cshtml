@@ -1048,6 +1048,48 @@
             </div>
         </div>
 
+        <!-- Section N: Kretsgranskning per krets. Laddas separat (GetKretsgranskningStats), som ekonomin.
+             En rad per krets, också de som inte börjat — en saknad rad läses som "finns inte". -->
+        <h5 class="mt-4 mb-2"><i class="bi bi-diagram-3 me-2"></i>Kretsarna — ansökan och granskning</h5>
+        <p class="text-muted small mb-3">
+            Vilka kretsar som kommit igång: uppdragen tillsatta (resultatgranskare, bangranskare, tävlingsansvarig),
+            inställningarna valda och ärenden i tävlingsansökan, resultatgranskningen och bangranskningen.
+            En krets räknas som igång när den har minst ett uppdrag eller ett ärende. Demokretsen Ankeland räknas inte.
+        </p>
+        <div id="kgStatError" class="alert alert-warning d-none small"></div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Kretsar igång</div><div class="fs-3 fw-bold" id="statKgStarted">–</div><div class="small text-muted" id="statKgStartedSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Tävlingsansökningar</div><div class="fs-3 fw-bold" id="statKgApps">–</div><div class="small text-muted" id="statKgAppsSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Resultatgranskningar</div><div class="fs-3 fw-bold" id="statKgResults">–</div><div class="small text-muted" id="statKgResultsSub"></div>
+            </div></div></div>
+            <div class="col-md-3 col-sm-6"><div class="card h-100"><div class="card-body">
+                <div class="small text-muted">Bangranskningar</div><div class="fs-3 fw-bold" id="statKgCourses">–</div><div class="small text-muted" id="statKgCoursesSub"></div>
+            </div></div></div>
+        </div>
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="card-title">Per krets</h6>
+            <div class="table-responsive" style="max-height:520px;overflow-y:auto">
+                <table class="table table-sm table-hover mb-0" id="kgStatTable">
+                    <thead><tr>
+                        <th>Krets</th>
+                        <th>Uppdrag</th>
+                        <th>Inställningar</th>
+                        <th class="text-end">Ansökningar</th>
+                        <th class="text-end">Resultat</th>
+                        <th class="text-end">Banor</th>
+                        <th class="text-end">Senast</th>
+                    </tr></thead>
+                    <tbody id="kgStatBody"><tr><td colspan="7" class="text-muted">Hämtar…</td></tr></tbody>
+                </table>
+            </div>
+            <div class="small text-muted mt-2">Ansökningar: totalt (väntar hos kretsen). Resultat och banor: totalt (väntar på kretsen). Utkast räknas inte — dem har kretsen inte sett.</div>
+        </div></div>
+
     </div>
 </div>
 
@@ -1196,6 +1238,7 @@
                 renderStatistics(resp.data);
                 loadVisitorStats(force);
                 loadEkonomiStats(force);
+                loadKretsgranskningStats(force);
             })
             .catch(err => {
                 loading.style.display = 'none';
@@ -2001,6 +2044,56 @@
     const EK_OWNERS_COLLAPSED = 10;
     let ekOwnersExpanded = false;
     let ekOwners = [];
+
+    // ── Section N: kretsgranskning per krets ──────────────────────────────────────────
+    function loadKretsgranskningStats(force) {
+        const err = document.getElementById('kgStatError');
+        if (!err) return;
+        const fail = m => { err.textContent = 'Kretsarnas statistik kunde inte läsas: ' + m; err.classList.remove('d-none'); };
+        fetch('/umbraco/surface/AdminStatistics/GetKretsgranskningStats?force=' + (force ? 'true' : 'false'))
+            .then(r => r.json())
+            .then(resp => {
+                if (!resp.success) { fail(resp.message || 'okänt fel'); return; }
+                const d = resp.data;
+                if (d.warnings && d.warnings.length) { err.textContent = d.warnings.join(' '); err.classList.remove('d-none'); } else err.classList.add('d-none');
+                renderKretsgranskning(d);
+            })
+            .catch(e => fail(e.message || 'nätverksfel'));
+    }
+
+    function renderKretsgranskning(d) {
+        const t = d.totals;
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+        set('statKgStarted', t.started + ' av ' + t.regions);
+        set('statKgStartedSub', t.withAnyUppdrag + ' med uppdrag · ' + t.withChecklist + ' med checklista · krav: ' + t.requireResult + ' resultat, ' + t.requireCourse + ' bana');
+        set('statKgApps', t.applications);
+        set('statKgAppsSub', t.applicationsAtKrets + ' väntar hos kretsarna');
+        set('statKgResults', t.resultReviews);
+        set('statKgResultsSub', t.resultPending + ' väntar på kretsarna');
+        set('statKgCourses', t.courseReviews);
+        set('statKgCoursesSub', t.coursePending + ' väntar på kretsarna');
+        const e = s => (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const tick = (on, label) => '<span class="badge ' + (on ? 'bg-success-subtle text-success-emphasis' : 'bg-light text-muted border') + ' me-1" title="' + label + (on ? ' tillsatt' : ' saknas') + '">' + label + '</span>';
+        const num = (total, waiting) => total ? total + (waiting ? ' <span class="text-warning-emphasis">(' + waiting + ')</span>' : '') : '<span class="text-muted">0</span>';
+        // Igång först, sedan namn — de som kommit längst syns överst, ingen göms.
+        const rows = d.regions.slice().sort((a, b) => (b.started - a.started) || a.name.localeCompare(b.name, 'sv'));
+        document.getElementById('kgStatBody').innerHTML = rows.map(r => {
+            const s = r.settings, settings = [];
+            if (s.requireResult) settings.push('kräver resultatgodkännande');
+            if (s.requireCourse) settings.push('kräver bangranskning');
+            if (s.deadlines) settings.push(s.deadlines + ' sista ansökningsdag' + (s.deadlines === 1 ? '' : 'ar'));
+            if (s.checklist) settings.push('checklista ' + s.checklist + ' punkter');
+            if (s.ownNeighbours) settings.push('egna grannkretsar');
+            return '<tr' + (r.started ? '' : ' class="text-muted"') + ' data-kg-region="' + r.regionId + '">'
+                + '<td>' + e(r.name) + (r.started ? '' : ' <span class="badge bg-light text-muted border">inte igång</span>') + '</td>'
+                + '<td class="text-nowrap">' + tick(r.uppdrag.resultatgranskare, 'Resultat') + tick(r.uppdrag.bangranskare, 'Bana') + tick(r.uppdrag.tavlingsansvarig, 'Tävling') + '</td>'
+                + '<td class="small">' + (settings.length ? e(settings.join(' · ')) : '<span class="text-muted">—</span>') + '</td>'
+                + '<td class="text-end">' + num(r.applications.total, r.applications.atKrets) + '</td>'
+                + '<td class="text-end">' + num(r.results.total, r.results.pending) + '</td>'
+                + '<td class="text-end">' + num(r.courses.total, r.courses.pending) + '</td>'
+                + '<td class="text-end small text-nowrap">' + e(r.lastActivity || '—') + '</td></tr>';
+        }).join('') || '<tr><td colspan="7" class="text-muted">Inga kretsar.</td></tr>';
+    }
 
     function loadEkonomiStats(force) {
         const err = document.getElementById('ekError');

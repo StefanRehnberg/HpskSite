@@ -57,6 +57,15 @@ namespace HpskSite.Services.Kretsgranskning
                     _logger.LogCritical(
                         "BANGRANSKNINGEN ÄR TRASIG: {Missing} saknas. Inskick, kretsens beslut och kretsens inställningar faller. "
                         + "Kör Migrations/create-competition-course-review-tables.sql.", courseProblem);
+
+                // Fas 4, resten — stomprogrammet och kretsens arrangörschecklista.
+                var planningProblem = scope.ServiceProvider.GetRequiredService<KretsPlanningService>().SchemaProblem();
+                if (planningProblem == null)
+                    _logger.LogInformation("Kretsplaneringen: schemat finns.");
+                else
+                    _logger.LogCritical(
+                        "KRETSPLANERINGEN ÄR TRASIG: {Missing} saknas. Förbundets stomprogram och kretsarnas arrangörschecklistor faller. "
+                        + "Kör Migrations/create-kretsplanering-tables.sql.", planningProblem);
             }
             catch (Exception ex)
             {

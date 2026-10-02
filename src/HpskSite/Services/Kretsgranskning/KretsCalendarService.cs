@@ -34,15 +34,17 @@ namespace HpskSite.Services.Kretsgranskning
         private readonly AppCaches _caches;
         private readonly CompetitionApplicationService _applications;
         private readonly ClubService _clubs;
+        private readonly StomprogramService _stomprogram;
         private readonly ILogger<KretsCalendarService> _logger;
 
         public KretsCalendarService(IUmbracoContextFactory contextFactory, AppCaches caches,
-            CompetitionApplicationService applications, ClubService clubs, ILogger<KretsCalendarService> logger)
+            CompetitionApplicationService applications, ClubService clubs, StomprogramService stomprogram, ILogger<KretsCalendarService> logger)
         {
             _contextFactory = contextFactory;
             _caches = caches;
             _applications = applications;
             _clubs = clubs;
+            _stomprogram = stomprogram;
             _logger = logger;
         }
 
@@ -79,6 +81,9 @@ namespace HpskSite.Services.Kretsgranskning
 
         public RegionInfo? Region(int regionId) => GetIndex().Regions.GetValueOrDefault(regionId);
 
+        /// <summary>Alla kretsar, i namnordning.</summary>
+        public List<RegionInfo> AllRegions() => GetIndex().Regions.Values.OrderBy(r => r.Name).ToList();
+
         /// <summary>Alla tävlingar i indexet med värdkrets och datum.</summary>
         public List<CompetitionRegionInfo> AllCompetitions() => GetIndex().CompetitionRegion.Values.ToList();
 
@@ -110,13 +115,19 @@ namespace HpskSite.Services.Kretsgranskning
                 .ToDictionary(kv => kv.Key, kv => idx.ClubName.GetValueOrDefault(kv.Key, ""));
         }
 
-        /// <summary>Kretsens grannar ur RegionAdjacency, som noder.</summary>
+        /// <summary>
+        /// Kretsens grannar, som noder: kretsens eget val om det finns
+        /// (<c>RegionCalendarSettings.NeighbourOverrides</c>), annars <see cref="RegionAdjacency"/>.
+        /// </summary>
         public List<RegionInfo> Neighbours(int regionId)
         {
             var idx = GetIndex();
             var r = idx.Regions.GetValueOrDefault(regionId);
             if (r == null) return new();
-            var codes = RegionAdjacency.NeighboursOf(r.Code);
+            string? overrides = null;
+            try { overrides = _applications.Settings(regionId)?.NeighbourOverrides; }
+            catch (Exception ex) { _logger.LogWarning(ex, "Kretsens grannkretsval kunde inte läsas för {Region}.", regionId); }
+            var codes = RegionNeighbourSetting.Resolve(r.Code, overrides);
             return idx.Regions.Values.Where(x => codes.Contains(x.Code, StringComparer.OrdinalIgnoreCase))
                 .OrderBy(x => x.Name).ToList();
         }
@@ -209,6 +220,26 @@ namespace HpskSite.Services.Kretsgranskning
                     Place = e.Venue, Url = e.Url, Organiser = region.Name,
                     Status = KretsCalendarStatus.Handelse, StatusLabel = KretsCalendarStatus.Label(KretsCalendarStatus.Handelse),
                     RegionCode = region.Code, RegionName = region.Name
+                });
+            }
+
+            // Förbundets stomprogram — bakgrund och krockkälla, för alla kretsar.
+            List<StomprogramItem> fixedDates;
+            try { fixedDates = _stomprogram.Range(from.Date, to.Date); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kretskalendern kunde inte läsa stomprogrammet.");
+                fixedDates = new();
+            }
+            foreach (var s in fixedDates)
+            {
+                list.Add(new KretsCalendarEntry
+                {
+                    Kind = "stomprogram", Id = s.Id, Name = s.Name, Date = s.StartDate, EndDate = s.EndDate,
+                    Discipline = s.Discipline ?? "", DisciplineLabel = string.IsNullOrEmpty(s.Discipline) ? "Alla grener" : ActivityDiscipline.Label(s.Discipline),
+                    Organiser = "Förbundet", Place = s.Note ?? "",
+                    Status = KretsCalendarStatus.Stomprogram, StatusLabel = KretsCalendarStatus.Label(KretsCalendarStatus.Stomprogram),
+                    RegionCode = "", RegionName = "Förbundet"
                 });
             }
 

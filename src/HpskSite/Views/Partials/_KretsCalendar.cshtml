@@ -27,6 +27,7 @@
     .kc-s-godkand { background: var(--bs-success-bg-subtle); border-left-color: var(--bs-success); }
     .kc-s-preliminar { background: var(--bs-warning-bg-subtle); border-left-color: var(--bs-warning); border-left-style: dashed; }
     .kc-s-handelse { background: var(--bs-secondary-bg-subtle); border-left-color: var(--bs-secondary); }
+    .kc-s-stomprogram { background: var(--bs-info-bg-subtle); border-left-color: var(--bs-info); font-style: italic; }
     .kc-neighbour { opacity: .6; }
     .kc-legend span { display: inline-flex; align-items: center; gap: .3rem; margin-right: .9rem; font-size: .85rem; }
     .kc-legend i.sw { width: .9rem; height: .9rem; border-radius: .2rem; display: inline-block; }
@@ -57,8 +58,10 @@
         <span><i class="sw kc-s-godkand"></i>Godkänd ansökan</span>
         <span><i class="sw kc-s-preliminar"></i>Preliminär (sökt)</span>
         <span><i class="sw kc-s-handelse"></i>Kretsens händelse</span>
+        <span><i class="sw kc-s-stomprogram"></i>Förbundets stomprogram</span>
         <span class="kc-warn"><i class="bi bi-exclamation-triangle"></i>Krock</span>
     </div>
+    <div id="kcStomLink" class="small mb-2 d-none"><a href="/kretsen/stomprogram"><i class="bi bi-calendar-range me-1"></i>Förbundets stomprogram — för in årets datum</a></div>
     <div id="kcApplyHint" class="small text-muted mb-2 d-none"><i class="bi bi-hand-index me-1"></i>Klicka på en dag för att ansöka om en tävling.</div>
     <div id="kcBody"><div class="text-muted small">Hämtar…</div></div>
     <div id="kcDay" class="mt-3"></div>
@@ -118,6 +121,7 @@
                 }
                 // Tipset bara i månadsvyn — listan har inga dagar att klicka på.
                 $('kcApplyHint').classList.toggle('d-none', view !== 'month' || !(d.applyClubs.length || d.canApplyAsRegion));
+                $('kcStomLink').classList.toggle('d-none', !d.canEditStomprogram);
                 view === 'list' ? renderList(f, t) : renderMonth(f, t);
             })
             .catch(() => { $('kcBody').innerHTML = '<div class="text-danger small">Kalendern kunde inte hämtas.</div>'; });

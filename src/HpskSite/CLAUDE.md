@@ -914,9 +914,53 @@ avstyrker kretsen, och Förbundet beslutar (kretsen registrerar beslutet).
   nationella ansökningar ligger obehandlade. Reglerna som ren funktion i
   `CompetitionApplicationReminders.Compute`. Sajtadmin kan köra varvet nu (`RunRemindersNow`).
 
-**Inte byggt ännu:** stomprogrammet, kretsens arrangörschecklista, räknarna per krets på
-sajtadmins statistik. **Inläsning av en befintlig kalender byggs inte** (Stefans beslut 2026-10-02).
+**Inläsning av en befintlig kalender byggs inte** (Stefans beslut 2026-10-02).
 `RegionCalendarSettings` har en yta sedan fas 2 (resultatgranskningens inställningar).
+
+#### Fas 4, resten: grannkretsar, stomprogram, arrangörschecklista, statistik (2026-10-02)
+
+- **Kretsens grannkretsar** — `RegionCalendarSettings.NeighbourOverrides` (fanns sedan tabellen
+  skapades, lästes av ingen). Regeln bor i `RegionNeighbourSetting`: **null = gränsschemat**
+  (`RegionAdjacency`), tom sträng = inga grannar, annars koder. ⚠️ Ett val som är exakt standarden
+  lagras som null, så att en rättelse av gränsschemat senare slår igenom för kretsar som inte valt
+  själva. `KretsCalendarService.Neighbours` läser valet, alltså styr det både *Visa grannkretsar*
+  och krockvarningarna. Yta: Ansökningar → Åtgärder → *Kretsens grannkretsar…*
+  (`GetNeighbourSettings` / `SaveNeighbours`, `KretsAuthorityAsync`).
+- **Förbundets stomprogram** — `StomprogramItem` + `StomprogramService` (EGEN tjänst med bara
+  databasen som beroende: kalendern läser den, och kretsplaneringen läser kalendern — annars ett
+  cirkelberoende). Sajtadmin för in på **`/kretsen/stomprogram`** (läsbar för alla) genom att klistra
+  in `datum; namn; gren` — `StomprogramPaste.Parse` är regeln; **en oläsbar rad stoppar hela
+  inklistringen** (en halvt inläst lista är svår att rätta). Grenen kan utelämnas = alla grener.
+  Kalendern visar raderna som `kind = stomprogram` och `KretsCalendarConflicts.Mark` varnar
+  kretsens EGNA poster i samma gren (eller alla grener) samma dag; stomprogrammet varnas aldrig
+  självt och grannarnas poster inte heller.
+- **Kretsens arrangörschecklista** — `RegionOrganiserChecklistItem` (kretsens punkter: text,
+  förklaring, dagar före tävlingen, gäller *alla* / *kretstävling eller högre* / *kretsmästerskap*;
+  `OrganiserChecklistScope.Applies`, klubbinterna aldrig) + `RegionChecklistApplied` (per tävling:
+  inlagd eller bortvald). `KretsPlanningService`. Yta för kretsen: Ansökningar → Åtgärder →
+  *Kretsens arrangörschecklista…*. Yta för arrangören: kortet i **Förberedelser**
+  (`_WorkBreakdown`, `#wbKcCard`, `Staffing/GetKretsChecklist` + `ApplyKretsChecklist`).
+  - ⚠️⚠️ **Ingenting skrivs när förberedelserna LÄSES.** Arrangören lägger in markerade punkter
+    eller väljer *Behövs inte*. Punkterna blir `WorkItem` med `ScopeType = "KretsChecklist"`,
+    `ScopeKey = punktens id`, under området *Kretsens checklista — {krets}*, med sista dag ur
+    tävlingsdatumet.
+  - ⚠️ **Spärrtabellen är vad som gör att en borttagen uppgift inte kommer tillbaka.** Utan den
+    erbjuds en punkt arrangören medvetet tagit bort igen vid nästa sidladdning.
+  - Ändrar kretsen en punkt rörs inte redan inlagda uppgifter (de är arrangörens). Att ta bort en
+    punkt är mjukt (`IsActive = 0`).
+  - Kortet laddas en gång och efter en åtgärd, **inte i pollningen** — annars nollställs en kryssruta
+    medan någon väljer.
+- **Statistik:** sektion N, *Kretsarna — ansökan och granskning* (`AdminStatisticsController.Kretsgranskning.cs`,
+  `GetKretsgranskningStats`, egen endpoint som ekonomin). En rad per krets, också de som inte börjat;
+  uppdrag, inställningar, och ärenden (väntande) i ansökan, resultat- och bangranskning. Utkast räknas
+  inte. Demokretsen exkluderas.
+
+**Operatörssteg:** `Migrations/create-kretsplanering-tables.sql` **FÖRE deployen** (tre tabeller).
+Körd i dev 2026-10-02. Startkontrollen larmar Critical om någon saknas. Adds C# → full ombyggnad.
+
+Test: `KretsPlanningTests` 25 (A/B: utan grenvillkoret och grannspärren i stomprogramkrocken faller 2).
+Svit: `hpsk-verify/kretsplanering-fas4-verify.mjs` **65/65**, två körningar i rad (A/B: kortets laddning
+avstängd → sviten avbryter vid kortet). Regression: tavlingsansokan-fas4 87/87, bangranskning-fas3 62/62.
 
 **Operatörssteg:** `Migrations/create-competition-application-tables.sql` **FÖRE deployen**
 (körd i dev 2026-10-01). Startkontrollen `CompetitionApplicationSchemaGuardHostedService` larmar

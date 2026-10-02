@@ -51,6 +51,11 @@
 
 <div id="wbCompDocs" class="mb-3"></div>
 
+@* Kretsens arrangörschecklista (kretsgranskning fas 4): punkterna kretsen vill att varje arrangör
+   gör. Läses separat och bara när sidan öppnas eller arrangören agerat — inte i pollningen, så att
+   en kryssruta inte nollställs medan någon väljer. Ingenting läggs in förrän arrangören väljer. *@
+<div id="wbKretsChecklist" class="mb-3"></div>
+
 <div id="wbAreas">
     <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Laddar…</div>
 </div>
@@ -1021,7 +1026,46 @@
     }
     initPickers();
 
+    // ── Kretsens arrangörschecklista ───────────────────────────────────────────────────
+    async function loadKretsChecklist(notice) {
+        var box = q('wbKretsChecklist');
+        try {
+            var r = await fetch('/umbraco/surface/Staffing/GetKretsChecklist?competitionId=' + compId, { headers: { 'Accept': 'application/json' } });
+            var d = await r.json();
+            if (!d.success || !d.has || (!d.pending.length && !notice)) { box.innerHTML = notice ? '<div class="alert alert-success py-2" id="wbKcNotice">' + esc(notice) + '</div>' : ''; return; }
+            var html = notice ? '<div class="alert alert-success py-2" id="wbKcNotice">' + esc(notice) + '</div>' : '';
+            if (d.pending.length) {
+                html += '<div class="card border-info" id="wbKcCard"><div class="card-header bg-info-subtle"><strong><i class="bi bi-list-check me-1"></i>'
+                    + esc(d.regionName) + ' vill att arrangören gör det här</strong> <span class="badge bg-info text-dark ms-1">' + d.pending.length + '</span></div>'
+                    + '<div class="card-body"><p class="small text-muted mb-2">Kretsens arrangörschecklista. Markerade punkter läggs in som uppgifter under området <em>Kretsens checklista</em>, där ni bockar av dem som vanligt.</p>'
+                    + '<ul class="list-unstyled mb-2">' + d.pending.map(function (p) {
+                        return '<li class="d-flex align-items-start gap-2 py-1 border-bottom"><input class="form-check-input mt-1" type="checkbox" checked id="wbKc' + p.id + '" data-kc-id="' + p.id + '">'
+                            + '<label class="flex-grow-1" for="wbKc' + p.id + '"><span class="fw-semibold">' + esc(p.title) + '</span>'
+                            + (p.whenLabel ? ' <span class="small text-muted">· ' + esc(p.whenLabel) + '</span>' : '')
+                            + (p.description ? '<div class="small text-muted">' + esc(p.description) + '</div>' : '') + '</label>'
+                            + '<button type="button" class="btn btn-link btn-sm text-secondary p-0 flex-none" data-kc-dismiss="' + p.id + '">Behövs inte</button></li>';
+                    }).join('') + '</ul>'
+                    + '<button type="button" class="btn btn-primary btn-sm" id="wbKcAdd"><i class="bi bi-plus-lg me-1"></i>Lägg in markerade som uppgifter</button>'
+                    + '<div class="small text-muted mt-1">Omarkerade punkter står kvar här tills ni lagt in dem eller valt "Behövs inte".</div>'
+                    + '<div id="wbKcResult" class="mt-2" role="status"></div></div></div>';
+            }
+            box.innerHTML = html;
+        } catch (e) { box.innerHTML = ''; }
+    }
+    document.addEventListener('click', async function (e) {
+        var add = e.target.closest('#wbKcAdd');
+        var dis = e.target.closest('[data-kc-dismiss]');
+        if (!add && !dis) return;
+        var ids = add ? Array.prototype.map.call(document.querySelectorAll('#wbKcCard [data-kc-id]:checked'), function (c) { return parseInt(c.dataset.kcId, 10); }) : [];
+        if (add && !ids.length) { q('wbKcResult').className = 'mt-2 alert alert-warning py-2'; q('wbKcResult').textContent = 'Markera minst en punkt.'; return; }
+        var d = await post('/umbraco/surface/Staffing/ApplyKretsChecklist', { competitionId: compId, addIds: ids, dismissIds: dis ? [parseInt(dis.dataset.kcDismiss, 10)] : [] });
+        if (!d.success) { q('wbKcResult').className = 'mt-2 alert alert-warning py-2'; q('wbKcResult').textContent = d.message || 'Det gick inte.'; return; }
+        await loadKretsChecklist(d.message);
+        await load();
+    });
+
     load();
+    loadKretsChecklist();
     loadTemplates();
     startTimer();
 })();

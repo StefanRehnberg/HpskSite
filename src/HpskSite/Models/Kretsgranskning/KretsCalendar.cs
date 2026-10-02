@@ -7,7 +7,7 @@ namespace HpskSite.Models.Kretsgranskning
     /// </summary>
     public class KretsCalendarEntry
     {
-        /// <summary>competition, application, event.</summary>
+        /// <summary>competition, application, event, stomprogram.</summary>
         public string Kind { get; set; } = "";
         public int Id { get; set; }
         public string Name { get; set; } = "";
@@ -42,6 +42,7 @@ namespace HpskSite.Models.Kretsgranskning
         public const string Installd = "installd";
         public const string Tavling = "tavling";
         public const string Handelse = "handelse";
+        public const string Stomprogram = "stomprogram";
 
         public static string Label(string s) => s switch
         {
@@ -50,22 +51,34 @@ namespace HpskSite.Models.Kretsgranskning
             Installd => "Inställd",
             Tavling => "Tävling",
             Handelse => "Händelse",
+            Stomprogram => "Förbundets stomprogram",
             _ => s
         };
     }
 
     /// <summary>
-    /// Krockvarningar som ren funktion. Två saker varnas för, med skäl och aldrig som stopp:
-    /// samma gren samma dag (i kretsen eller i en grannkrets), och ett SM i grenen samma dag
-    /// (SHB C.3.5.1.1 — ingen annan tävling i grenen bör ligga då).
+    /// Krockvarningar som ren funktion. Tre saker varnas för, med skäl och aldrig som stopp:
+    /// samma gren samma dag (i kretsen eller i en grannkrets), ett SM i grenen samma dag
+    /// (SHB C.3.5.1.1 — ingen annan tävling i grenen bör ligga då), och en post i Förbundets
+    /// stomprogram samma dag (i grenen, eller i alla grener när stomprogrammet inte anger gren).
     /// </summary>
     public static class KretsCalendarConflicts
     {
         public static void Mark(IReadOnlyList<KretsCalendarEntry> entries)
         {
-            var dated = entries.Where(e => e.Kind != "event" && !string.IsNullOrEmpty(e.Discipline)).ToList();
+            var dated = entries.Where(e => e.Kind != "event" && e.Kind != "stomprogram" && !string.IsNullOrEmpty(e.Discipline)).ToList();
+            var fixedDates = entries.Where(e => e.Kind == "stomprogram").ToList();
             foreach (var e in dated)
             {
+                // Stomprogrammet: bara kretsens egna poster varnas — grannarnas är inte kretsens fråga.
+                // En stomprogrampost utan gren gäller alla grener.
+                if (!e.IsNeighbour)
+                    foreach (var f in fixedDates)
+                    {
+                        if (!Overlaps(e, f) || (!string.IsNullOrEmpty(f.Discipline) && f.Discipline != e.Discipline)) continue;
+                        var why = $"Förbundets stomprogram samma dag: {f.Name}";
+                        if (!e.Conflicts.Contains(why)) e.Conflicts.Add(why);
+                    }
                 foreach (var o in dated)
                 {
                     if (ReferenceEquals(e, o) || o.Discipline != e.Discipline || !Overlaps(e, o)) continue;

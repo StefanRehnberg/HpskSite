@@ -630,8 +630,199 @@ namespace HpskSite.Controllers
                     e.Organiser, e.Place, e.Url, e.Status, e.StatusLabel, e.RegionName, e.IsNeighbour, e.IsSm, e.Conflicts
                 }),
                 applyClubs,
-                canApplyAsRegion
+                canApplyAsRegion,
+                canEditStomprogram = await _auth.IsCurrentUserAdminAsync()
             });
+        }
+
+        // ════════════════════════════════════════════════════════════════════════════════
+        //  Fas 4, resten: grannkretsar, arrangörschecklista, Förbundets stomprogram
+        // ════════════════════════════════════════════════════════════════════════════════
+
+        /// <summary>Kretsens grannkretsar: alla kretsar, vilka som är valda, och vilka som är standarden.</summary>
+        [HttpGet]
+        public async Task<IActionResult> GetNeighbourSettings(int regionId)
+        {
+            var auth = await KretsAuthorityAsync(regionId);
+            if (!auth.Allowed) return Json(new { success = false, message = "Åtkomst nekad" });
+            var region = _calendar.Region(regionId)!;
+            var overrides = SafeSettings(regionId)?.NeighbourOverrides;
+            var chosen = RegionNeighbourSetting.Resolve(region.Code, overrides).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var standard = HpskSite.Models.RegionAdjacency.NeighboursOf(region.Code);
+            return Json(new
+            {
+                success = true,
+                isDefault = overrides == null,
+                regions = _calendar.AllRegions().Where(r => r.Id != regionId).Select(r => new
+                {
+                    r.Code, r.Name,
+                    chosen = chosen.Contains(r.Code),
+                    standard = standard.Contains(r.Code)
+                })
+            });
+        }
+
+        /// <summary>Sparar kretsens val. <paramref name="useDefault"/> = "1" tar bort valet (standarden gäller).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveNeighbours(int regionId, string? codes, string? useDefault)
+        {
+            var auth = await KretsAuthorityAsync(regionId);
+            if (!auth.Allowed) return Json(new { success = false, message = "Åtkomst nekad" });
+            var region = _calendar.Region(regionId)!;
+            var known = _calendar.AllRegions().Select(r => r.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var list = (codes ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            var unknown = list.Where(c => !known.Contains(c)).ToList();
+            if (unknown.Count > 0) return Json(new { success = false, message = "Okänd krets: " + string.Join(", ", unknown) });
+            var me = await CurrentMemberAsync();
+            var s = SafeSettings(regionId) ?? new RegionCalendarSettings { RegionId = regionId };
+            s.NeighbourOverrides = useDefault == "1" ? null : RegionNeighbourSetting.ToStored(region.Code, list);
+            _apps.SaveSettings(s, me?.Id ?? 0);
+            var n = RegionNeighbourSetting.Resolve(region.Code, s.NeighbourOverrides).Count;
+            return Json(new
+            {
+                success = true,
+                message = s.NeighbourOverrides == null
+                    ? $"Sparat. Kretsen använder standardgrannarna ({n} kretsar)."
+                    : n == 0 ? "Sparat. Kretsen har inga grannkretsar i kalendern." : $"Sparat. {n} grannkretsar visas i kalendern och används för krockvarningar."
+            });
+        }
+
+        // ── Arrangörschecklistan ───────────────────────────────────────────────────────────
+
+        [HttpGet]
+        public async Task<IActionResult> GetOrganiserChecklist(int regionId)
+        {
+            var auth = await KretsAuthorityAsync(regionId);
+            if (!auth.Allowed) return Json(new { success = false, message = "Åtkomst nekad" });
+            var planning = HttpContext.RequestServices.GetRequiredService<KretsPlanningService>();
+            if (!planning.TablesExist()) return Json(new { success = false, message = "Checklistans tabeller saknas. Kör Migrations/create-kretsplanering-tables.sql." });
+            return Json(new
+            {
+                success = true,
+                scopes = OrganiserChecklistScope.Values.Select(v => new { value = v, label = OrganiserChecklistScope.Label(v) }),
+                items = planning.Checklist(regionId).Select(ChecklistDto)
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveOrganiserChecklistItem(int regionId, int id, string? title, string? description, string? daysBeforeComp, string? appliesTo)
+        {
+            var auth = await KretsAuthorityAsync(regionId);
+            if (!auth.Allowed) return Json(new { success = false, message = "Åtkomst nekad" });
+            int? days = null;
+            if (!string.IsNullOrWhiteSpace(daysBeforeComp))
+            {
+                if (!int.TryParse(daysBeforeComp.Trim(), out var d)) return Json(new { success = false, message = "Antalet dagar ska vara ett heltal." });
+                days = d;
+            }
+            var me = await CurrentMemberAsync();
+            var planning = HttpContext.RequestServices.GetRequiredService<KretsPlanningService>();
+            var (item, err) = planning.SaveChecklistItem(regionId, id, title, description, days, appliesTo, me?.Id ?? 0);
+            return Json(item == null ? new { success = false, message = err } : (object)new { success = true, item = ChecklistDto(item) });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveOrganiserChecklistItem(int regionId, int id)
+        {
+            var auth = await KretsAuthorityAsync(regionId);
+            if (!auth.Allowed) return Json(new { success = false, message = "Åtkomst nekad" });
+            var ok = HttpContext.RequestServices.GetRequiredService<KretsPlanningService>().RemoveChecklistItem(regionId, id);
+            return Json(new { success = ok, message = ok ? "Punkten är borttagen. Uppgifter som redan lagts in i tävlingarnas förberedelser står kvar." : "Punkten finns inte." });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> MoveOrganiserChecklistItem(int regionId, int id, int direction)
+        {
+            var auth = await KretsAuthorityAsync(regionId);
+            if (!auth.Allowed) return Json(new { success = false, message = "Åtkomst nekad" });
+            var ok = HttpContext.RequestServices.GetRequiredService<KretsPlanningService>().MoveChecklistItem(regionId, id, direction);
+            return Json(new { success = ok });
+        }
+
+        private static object ChecklistDto(RegionOrganiserChecklistItem i) => new
+        {
+            i.Id, i.Title, i.Description, i.DaysBeforeComp, appliesTo = OrganiserChecklistScope.Normalize(i.AppliesTo),
+            appliesToLabel = OrganiserChecklistScope.Label(i.AppliesTo),
+            whenLabel = i.DaysBeforeComp == null ? "" : i.DaysBeforeComp == 0 ? "på tävlingsdagen"
+                : i.DaysBeforeComp > 0 ? $"{i.DaysBeforeComp} dagar före" : $"{-i.DaysBeforeComp} dagar efter"
+        };
+
+        // ── Förbundets stomprogram (sajtadmin) ─────────────────────────────────────────────
+
+        [HttpGet]
+        public async Task<IActionResult> GetStomprogram(int year)
+        {
+            var stom = HttpContext.RequestServices.GetRequiredService<StomprogramService>();
+            if (!stom.TableExists()) return Json(new { success = false, message = "Stomprogrammets tabell saknas. Kör Migrations/create-kretsplanering-tables.sql." });
+            if (year < 2000 || year > 2100) year = DateTime.Today.Year;
+            return Json(new
+            {
+                success = true,
+                year,
+                canEdit = await _auth.IsCurrentUserAdminAsync(),
+                disciplines = HpskSite.Models.CompetitionTypes.All.Select(t => new { t.Id, t.Name }),
+                items = stom.Year(year).Select(s => new
+                {
+                    s.Id, s.Name, s.Note,
+                    start = s.StartDate.ToString("yyyy-MM-dd"), end = s.EndDate?.ToString("yyyy-MM-dd"),
+                    discipline = s.Discipline ?? "",
+                    disciplineLabel = string.IsNullOrEmpty(s.Discipline) ? "Alla grener" : ActivityDiscipline.Label(s.Discipline)
+                })
+            });
+        }
+
+        /// <summary>
+        /// Lägger till rader i stomprogrammet — inklistrade (<c>datum; namn; gren</c>). Ingenting sparas
+        /// om någon rad inte går att läsa: en halvt inläst lista är svår att rätta.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddStomprogram(string? text)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = "Bara sajtadministratören för in Förbundets stomprogram." });
+            var stom = HttpContext.RequestServices.GetRequiredService<StomprogramService>();
+            if (!stom.TableExists()) return Json(new { success = false, message = "Stomprogrammets tabell saknas. Kör Migrations/create-kretsplanering-tables.sql." });
+            var parsed = StomprogramPaste.Parse(text, ResolveDisciplineWord);
+            if (parsed.Errors.Count > 0) return Json(new { success = false, message = "Ingenting sparades.", errors = parsed.Errors });
+            if (parsed.Rows.Count == 0) return Json(new { success = false, message = "Inga rader att lägga till." });
+            var me = await CurrentMemberAsync();
+            foreach (var r in parsed.Rows) stom.Add(r.Start, r.End, r.Name, r.Discipline, null, me?.Id ?? 0);
+            _calendar.Invalidate();
+            return Json(new { success = true, added = parsed.Rows.Count, message = $"{parsed.Rows.Count} {(parsed.Rows.Count == 1 ? "rad" : "rader")} tillagda i stomprogrammet." });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteStomprogram(int id)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = "Åtkomst nekad" });
+            var ok = HttpContext.RequestServices.GetRequiredService<StomprogramService>().Delete(id);
+            return Json(new { success = ok, message = ok ? "Raden är borttagen." : "Raden finns inte." });
+        }
+
+        /// <summary>Grenens id ur ett ord i en inklistrad rad: id, visningsnamn eller ett vardagsord.</summary>
+        private static string? ResolveDisciplineWord(string word)
+        {
+            var c = ActivityDiscipline.Canonical(word);
+            if (c.Length > 0) return c;
+            return word.Trim().ToLowerInvariant() switch
+            {
+                "fält" or "falt" or "fältskytte" => "Faltskytte",
+                "magnumfält" or "magnum fält" => "MagnumFalt",
+                "spring" => "Springskytte",
+                "helmatch" or "nationell helmatch" => "NationellHelmatch",
+                _ => null
+            };
+        }
+
+        private RegionCalendarSettings? SafeSettings(int regionId)
+        {
+            try { return _apps.Settings(regionId); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Kretsens inställningar kunde inte läsas för {Region}.", regionId); return null; }
         }
 
         // ════════════════════════════════════════════════════════════════════════════════
