@@ -165,7 +165,7 @@ namespace HpskSite.CompetitionTypes.Common
             if (Find(v)!.RequiresClub && !hasClub)
                 return $"En {Find(v)!.Label.ToLowerInvariant()} kräver att en klubb är arrangör.";
             if (awardsStandardMedals && !IsKretsOrAbove(v))
-                return "Standardmedaljer delas bara ut vid kretstävling eller högre (SHB C.5.1.1). Välj en annan kategori eller ta bort Standardmedaljsgrundande.";
+                return "Standardmedaljer delas bara ut vid kretstävling eller högre (SHB C.5.1.1). Välj en annan tävlingsnivå eller ta bort Standardmedaljsgrundande.";
             return null;
         }
 

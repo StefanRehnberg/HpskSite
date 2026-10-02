@@ -2,10 +2,10 @@
 @using HpskSite.CompetitionTypes.Common
 @inject Umbraco.Cms.Core.Services.IContentTypeService LevelContentTypeService
 @*
-    TÄVLINGENS KATEGORI — "Vad är tävlingen godkänd som?" (SHB C.3.1), delad av
+    TÄVLINGSNIVÅ — vad tävlingen är godkänd som (SHB C.3.1), delad av
     tävlingsguiden, redigeringsmodalen och Springskyttemodalen. Modellen är dialogens
     id-prefix (wizard_ / edit_ / springEdit_). Renderas i avsnittet/steget
-    "Tävlingens status", tillsammans med isClubOnly, mästerskapet, standardmedaljer och
+    "Nivå och mästerskap", tillsammans med isClubOnly, mästerskapet, standardmedaljer och
     hederspriser — de fälten ägs av dialogen, den här partialen äger bara valet och reglerna.
 
     ⚠️⚠️ KATEGORIN ÄR INTE "VEM FÅR ANMÄLA SIG" — se CompetitionLevel. Vilka som får anmäla
@@ -42,7 +42,8 @@
 
 <div class="mb-3 hpsk-level-block" id="@(prefix)competitionLevelBlock"
      data-level-prefix="@prefix" data-level-property="@(levelPropertyExists ? "1" : "0")">
-    <label for="@selectId" class="form-label fw-semibold">Vad är tävlingen godkänd som?</label>
+    <label for="@selectId" class="form-label fw-semibold mb-0">Tävlingsnivå</label>
+    <div class="form-text mt-0 mb-1">Vad tävlingen är godkänd som (SHB C.3.1) — vem som gav sitt medgivande.</div>
     @if (levelPropertyExists)
     {
         <select class="form-select" id="@selectId" name="@CompetitionLevel.PropertyAlias">
@@ -153,7 +154,7 @@
                 var warn = el(prefix, 'competitionLevelWarning');
                 if (warn) {
                     var msg = (cur && cur.requiresClub && !club)
-                        ? 'En föreningstävling kräver att en klubb är arrangör. Välj en klubb eller en annan kategori.'
+                        ? 'En föreningstävling kräver att en klubb är arrangör. Välj en klubb eller en annan tävlingsnivå.'
                         : '';
                     warn.textContent = msg;
                     warn.classList.toggle('d-none', !msg);

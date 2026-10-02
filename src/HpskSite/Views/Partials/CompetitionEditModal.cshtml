@@ -213,7 +213,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                         </div>
                     </div>
 
-                    @* Mästerskapet flyttat till "Tävlingens status" (2026-10-01). *@
+                    @* Mästerskapet flyttat till "Nivå och mästerskap" (2026-10-01). *@
                     <div class="mb-3">
                         <label for="edit_seriesId" class="form-label">Tävlingsserie (valfritt)</label>
                         <select class="form-select" id="edit_seriesId" name="seriesId">
@@ -438,7 +438,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                     </label>
                                 </div>
                             </div>
-                            @* Standardmedaljsgrundande och Hederspriser flyttade till "Tävlingens status" (2026-10-01). *@
+                            @* Standardmedaljsgrundande och Hederspriser flyttade till "Nivå och mästerskap" (2026-10-01). *@
                             <div class="mb-3" id="edit_selfReportingGroup">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="edit_allowSelfReporting" name="allowSelfReporting" @(allowSelfReporting == true ? "checked" : "")>
@@ -541,7 +541,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 Välj <strong>krets</strong> om tävlingen arrangeras av en krets (t.ex. Hemmabana).
                                 Lämna båda tomma för nationella tävlingar som ska synas överallt.
                             </p>
-                            @* "Endast klubbens egna medlemmar" flyttad till "Tävlingens status" (2026-10-01). *@
+                            @* "Endast klubbens egna medlemmar" flyttad till "Nivå och mästerskap" (2026-10-01). *@
                             <div class="row">
                                 <div class="col-md-6" id="clubSelectorContainer">
                                     <div class="mb-3">
@@ -578,14 +578,14 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                     <hr>
 
                     </section>
-                    @* TÄVLINGENS STATUS (2026-10-01): kategori, vem som får anmäla sig, mästerskap,
+                    @* NIVÅ OCH MÄSTERSKAP (2026-10-01): kategori, vem som får anmäla sig, mästerskap,
                        standardmedaljer och hederspriser i ETT avsnitt, eftersom de hänger ihop —
                        kategorin avgör om standardmedaljer och "endast egna medlemmar" är möjliga.
                        Reglerna bor i _CompetitionLevelField; fälten och deras id:n är oförändrade. *@
-                    <section class="hpsk-section" data-title="Tävlingens status">
+                    <section class="hpsk-section" data-title="Nivå och mästerskap">
                     <div class="row">
                         <div class="col-12">
-                            <h6 class="mb-3 text-primary"><i class="bi bi-patch-check me-1"></i>Tävlingens status</h6>
+                            <h6 class="mb-3 text-primary"><i class="bi bi-patch-check me-1"></i>Nivå och mästerskap</h6>
                         </div>
                     </div>
 
@@ -616,7 +616,7 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 }
                             }
                         </select>
-                        <small class="form-text text-muted">Om en mästartitel avgörs. Ett mästerskap kan ingå i en tävling i vilken kategori som helst. Avgör hur standardmedaljer beräknas.</small>
+                        <small class="form-text text-muted">Om en mästartitel avgörs. Ett mästerskap kan ingå i en tävling på vilken tävlingsnivå som helst. Avgör hur standardmedaljer beräknas.</small>
                     </div>
 
                     <div class="mb-3">
