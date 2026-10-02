@@ -137,6 +137,11 @@
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="regions-tab" data-bs-toggle="tab" data-bs-target="#regions" type="button" role="tab">Kretsar</button>
             </li>
+            @* Förbundets stomprogram (2026-10-02): flyttat hit från /kretsen/stomprogram — det är
+               sajtadministration, inte en sida för kretsarna. Kalenderlänken pekar hit (?tab=stomprogram). *@
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="stomprogram-tab" data-bs-toggle="tab" data-bs-target="#stomprogram" type="button" role="tab">Stomprogram</button>
+            </li>
             @* Riksinstruktörer-tabben borttagen 2026-09-17 — panelen bor nu som en sektion
                under Utbildning, mellan kurserna och Granskare. *@
             <li class="nav-item" role="presentation">
@@ -223,6 +228,13 @@
                     </div>
                 </div>
             </div>
+            <div class="tab-pane fade" id="stomprogram" role="tabpanel">
+                <div class="card mt-3">
+                    <div class="card-body">
+                        @await Html.PartialAsync("StomprogramManagement")
+                    </div>
+                </div>
+            </div>
             @* Riksinstruktör-panelen renderas numera av UtbildningManagement (Utbildning-fliken). *@
             <div class="tab-pane fade" id="statistics" role="tabpanel">
                 <div class="card mt-3">
@@ -257,3 +269,14 @@
         }
     </div>
 </div>
+
+<script>
+    // ?tab=namn öppnar en flik direkt (kretskalenderns länk till stomprogrammet använder den).
+    document.addEventListener('DOMContentLoaded', function () {
+        const want = new URLSearchParams(location.search).get('tab');
+        const btn = want && /^[a-z0-9-]+$/i.test(want) ? document.getElementById(want + '-tab') : null;
+        const stom = document.getElementById('stomprogram-tab');
+        if (stom) stom.addEventListener('shown.bs.tab', () => { if (window.hpskLoadStomprogram) window.hpskLoadStomprogram(); });
+        if (btn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(btn).show();
+    });
+</script>

@@ -637,8 +637,7 @@ namespace HpskSite.Controllers
                 }),
                 applyClubs,
                 canApplyAsRegion,
-                planning,
-                canEditStomprogram = planning && await _auth.IsCurrentUserAdminAsync()
+                planning
             });
         }
 
@@ -763,6 +762,9 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetStomprogram(int year)
         {
+            // Läsbart för inloggade: kalendrarna visar programmet för kretsens och klubbarnas
+            // administratörer, och ytan där det förs in är sajtadministratörens.
+            if (await CurrentMemberAsync() == null) return Json(new { success = false, message = "Logga in för att se stomprogrammet." });
             var stom = HttpContext.RequestServices.GetRequiredService<StomprogramService>();
             if (!stom.TableExists()) return Json(new { success = false, message = "Stomprogrammets tabell saknas. Kör Migrations/create-kretsplanering-tables.sql." });
             if (year < 2000 || year > 2100) year = DateTime.Today.Year;
@@ -771,15 +773,197 @@ namespace HpskSite.Controllers
                 success = true,
                 year,
                 canEdit = await _auth.IsCurrentUserAdminAsync(),
-                disciplines = HpskSite.Models.CompetitionTypes.All.Select(t => new { t.Id, t.Name }),
-                items = stom.Year(year).Select(s => new
+                disciplines = StomprogramDisciplineOptions(),
+                items = stom.Year(year).Select(StomDto)
+            });
+        }
+
+        private static object StomDto(StomprogramItem s) => new
+        {
+            s.Id, s.Name, s.Note, s.IsPeriod,
+            start = s.StartDate.ToString("yyyy-MM-dd"), end = s.EndDate?.ToString("yyyy-MM-dd"),
+            discipline = s.Discipline ?? "",
+            disciplineLabel = StomprogramDisciplines.Label(s.Discipline)
+        };
+
+        private static IEnumerable<object> StomprogramDisciplineOptions() =>
+            new[] { new { id = "", name = "Alla grener" } }
+                .Concat(HpskSite.Models.CompetitionTypes.All.Select(t => new { id = t.Id, name = t.Name }))
+                .Append(new { id = StomprogramDisciplines.Other, name = "Annan gren (krockar inte)" });
+
+        /// <summary>Förbundets egen webbplats — den enda värd hämtningen får gå till.</summary>
+        private static bool IsForbundetUrl(Uri u) =>
+            u.Scheme == Uri.UriSchemeHttps
+            && (u.Host.Equals("www.pistolskytteforbundet.se", StringComparison.OrdinalIgnoreCase)
+                || u.Host.Equals("pistolskytteforbundet.se", StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>
+        /// Läser Förbundets stomprogramsida som UNDERLAG. Sparar ingenting: svaret är raderna, med
+        /// vilka som redan finns, och sajtadmin väljer vad som läggs in. ⚠️ Bara Förbundets värd —
+        /// en hämtning åt en användare till en godtycklig adress är en öppning in i vårt eget nät.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> FetchStomprogramFromForbundet(string? url, int? year)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = "Bara sajtadministratören för in Förbundets stomprogram." });
+            var stom = HttpContext.RequestServices.GetRequiredService<StomprogramService>();
+            if (!stom.TableExists()) return Json(new { success = false, message = "Stomprogrammets tabell saknas. Kör Migrations/create-kretsplanering-tables.sql." });
+            if (!Uri.TryCreate((url ?? "").Trim(), UriKind.Absolute, out var uri) || !IsForbundetUrl(uri))
+                return Json(new { success = false, message = "Ange en adress på https://www.pistolskytteforbundet.se/." });
+
+            string html;
+            try
+            {
+                var http = HttpContext.RequestServices.GetRequiredService<IHttpClientFactory>().CreateClient("Forbundet");
+                // Omdirigeringar följs för hand, så att varje steg prövas mot värden.
+                HttpResponseMessage? resp = null;
+                for (var hop = 0; hop < 4; hop++)
                 {
-                    s.Id, s.Name, s.Note,
-                    start = s.StartDate.ToString("yyyy-MM-dd"), end = s.EndDate?.ToString("yyyy-MM-dd"),
-                    discipline = s.Discipline ?? "",
-                    disciplineLabel = string.IsNullOrEmpty(s.Discipline) ? "Alla grener" : ActivityDiscipline.Label(s.Discipline)
+                    resp?.Dispose();
+                    resp = await http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead);
+                    if ((int)resp.StatusCode is >= 300 and < 400 && resp.Headers.Location != null)
+                    {
+                        var next = resp.Headers.Location.IsAbsoluteUri ? resp.Headers.Location : new Uri(uri, resp.Headers.Location);
+                        if (!IsForbundetUrl(next)) return Json(new { success = false, message = "Förbundets sida skickade vidare till en annan webbplats. Ingenting lästes in." });
+                        uri = next;
+                        continue;
+                    }
+                    break;
+                }
+                using (resp)
+                {
+                    if (resp == null || !resp.IsSuccessStatusCode)
+                        return Json(new { success = false, message = $"Förbundets sida svarade {(int?)resp?.StatusCode}. Kontrollera adressen." });
+                    if (resp.Content.Headers.ContentLength > 3_000_000)
+                        return Json(new { success = false, message = "Sidan är för stor för att vara ett stomprogram." });
+                    html = await resp.Content.ReadAsStringAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Stomprogrammet kunde inte hämtas från {Url}.", uri);
+                return Json(new { success = false, message = "Förbundets sida gick inte att nå. Försök igen, eller klistra in raderna för hand." });
+            }
+
+            var parsed = StomprogramHtmlImport.Parse(html, year);
+            var existing = parsed.Year is int y ? stom.Year(y) : new List<StomprogramItem>();
+            return Json(new
+            {
+                success = true,
+                year = parsed.Year,
+                source = uri.ToString(),
+                warnings = parsed.Warnings,
+                disciplines = StomprogramDisciplineOptions(),
+                rows = parsed.Rows.Select(r => new
+                {
+                    r.Number, r.Name, r.Note, r.IsPeriod, r.Problem, r.Source,
+                    start = r.Start?.ToString("yyyy-MM-dd"), end = r.End?.ToString("yyyy-MM-dd"),
+                    discipline = r.Discipline ?? "",
+                    disciplineLabel = StomprogramDisciplines.Label(r.Discipline),
+                    existsAs = r.Start is DateTime s ? StomprogramService.FindDuplicate(existing, s, r.End, r.Name, r.Discipline)?.Name : null
                 })
             });
+        }
+
+        public class StomprogramRowInput
+        {
+            public string? Start { get; set; }
+            public string? End { get; set; }
+            public string? Name { get; set; }
+            public string? Discipline { get; set; }
+            public string? Note { get; set; }
+            public bool IsPeriod { get; set; }
+        }
+
+        /// <summary>Prövar en rad; null = giltig, annars skälet.</summary>
+        private static string? ValidateStomRow(StomprogramRowInput r, out DateTime start, out DateTime? end)
+        {
+            end = null;
+            if (!DateTime.TryParseExact(r.Start ?? "", "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out start))
+                return "startdatumet saknas eller går inte att läsa";
+            if (!string.IsNullOrWhiteSpace(r.End))
+            {
+                if (!DateTime.TryParseExact(r.End, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var e))
+                    return "slutdatumet går inte att läsa";
+                if (e < start) return "slutdatumet ligger före startdatumet";
+                if (e > start) end = e;
+            }
+            var name = (r.Name ?? "").Trim();
+            if (name.Length == 0) return "namnet saknas";
+            if (name.Length > 200) return "namnet är längre än 200 tecken";
+            if (!StomprogramDisciplines.IsValid(r.Discipline)) return $"grenen \"{r.Discipline}\" finns inte";
+            if ((r.Note ?? "").Length > 500) return "anteckningen är längre än 500 tecken";
+            return null;
+        }
+
+        /// <summary>
+        /// Lägger in de rader sajtadmin markerat i förhandsvisningen. Rader som redan finns hoppas över
+        /// och räknas. En ogiltig rad stoppar inläsningen — samma regel som inklistringen.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ImportStomprogram(string? rowsJson)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = "Bara sajtadministratören för in Förbundets stomprogram." });
+            var stom = HttpContext.RequestServices.GetRequiredService<StomprogramService>();
+            if (!stom.TableExists()) return Json(new { success = false, message = "Stomprogrammets tabell saknas. Kör Migrations/create-kretsplanering-tables.sql." });
+            List<StomprogramRowInput>? rows;
+            try { rows = System.Text.Json.JsonSerializer.Deserialize<List<StomprogramRowInput>>(rowsJson ?? "[]", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+            catch { return Json(new { success = false, message = "Raderna gick inte att läsa." }); }
+            if (rows == null || rows.Count == 0) return Json(new { success = false, message = "Markera minst en rad." });
+            if (rows.Count > 300) return Json(new { success = false, message = "För många rader på en gång." });
+
+            var errors = new List<string>();
+            var ok = new List<(StomprogramRowInput Row, DateTime Start, DateTime? End)>();
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var why = ValidateStomRow(rows[i], out var s, out var e);
+                if (why != null) errors.Add($"Rad {i + 1} ({rows[i].Name}): {why}.");
+                else ok.Add((rows[i], s, e));
+            }
+            if (errors.Count > 0) return Json(new { success = false, message = "Ingenting lades in.", errors });
+
+            var me = await CurrentMemberAsync();
+            var existingByYear = new Dictionary<int, List<StomprogramItem>>();
+            int added = 0, skipped = 0;
+            foreach (var (r, s, e) in ok)
+            {
+                if (!existingByYear.TryGetValue(s.Year, out var existing)) existingByYear[s.Year] = existing = stom.Year(s.Year);
+                var disc = string.IsNullOrWhiteSpace(r.Discipline) ? null : r.Discipline;
+                if (StomprogramService.FindDuplicate(existing, s, e, r.Name!, disc) != null) { skipped++; continue; }
+                existing.Add(stom.Add(s, e, r.Name!, disc, r.Note, me?.Id ?? 0, r.IsPeriod));
+                added++;
+            }
+            _calendar.Invalidate();
+            var msg = $"{added} {(added == 1 ? "rad" : "rader")} inlagda i stomprogrammet."
+                + (skipped > 0 ? $" {skipped} fanns redan och hoppades över." : "");
+            return Json(new { success = true, added, skipped, message = msg });
+        }
+
+        /// <summary>Lägger till (id = 0) eller rättar en rad i stomprogrammet.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveStomprogram(int id, StomprogramRowInput row)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = "Bara sajtadministratören för in Förbundets stomprogram." });
+            var stom = HttpContext.RequestServices.GetRequiredService<StomprogramService>();
+            if (!stom.TableExists()) return Json(new { success = false, message = "Stomprogrammets tabell saknas. Kör Migrations/create-kretsplanering-tables.sql." });
+            var why = ValidateStomRow(row, out var s, out var e);
+            if (why != null) return Json(new { success = false, message = char.ToUpper(why[0]) + why[1..] + "." });
+            var disc = string.IsNullOrWhiteSpace(row.Discipline) ? null : row.Discipline;
+            if (id > 0)
+            {
+                if (stom.Get(id) == null) return Json(new { success = false, message = "Raden finns inte." });
+                stom.Update(id, s, e, row.Name!, disc, row.Note, row.IsPeriod);
+            }
+            else
+            {
+                var me = await CurrentMemberAsync();
+                id = stom.Add(s, e, row.Name!, disc, row.Note, me?.Id ?? 0, row.IsPeriod).Id;
+            }
+            _calendar.Invalidate();
+            return Json(new { success = true, item = StomDto(stom.Get(id)!), message = "Sparat." });
         }
 
         /// <summary>
@@ -808,6 +992,7 @@ namespace HpskSite.Controllers
         {
             if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = "Åtkomst nekad" });
             var ok = HttpContext.RequestServices.GetRequiredService<StomprogramService>().Delete(id);
+            if (ok) _calendar.Invalidate();
             return Json(new { success = ok, message = ok ? "Raden är borttagen." : "Raden finns inte." });
         }
 

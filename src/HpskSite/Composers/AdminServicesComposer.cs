@@ -292,6 +292,10 @@ namespace HpskSite.Composers
 
             // Register BrevoEmailService and named HttpClient
             builder.Services.AddHttpClient("Brevo");
+            // Förbundets webbplats (stomprogrammet). Omdirigeringar följs för hand i anroparen, så att
+            // varje steg kan prövas mot värden.
+            builder.Services.AddHttpClient("Forbundet", c => { c.Timeout = TimeSpan.FromSeconds(20); c.DefaultRequestHeaders.UserAgent.ParseAdd("pistol.nu/1.0 (+https://pistol.nu)"); })
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
             builder.Services.AddScoped<BrevoEmailService>();
 
             // Configure document archive options from appsettings.json

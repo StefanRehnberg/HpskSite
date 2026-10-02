@@ -243,7 +243,7 @@ namespace HpskSite.Services.Kretsgranskning
                 list.Add(new KretsCalendarEntry
                 {
                     Kind = "stomprogram", Id = s.Id, Name = s.Name, Date = s.StartDate, EndDate = s.EndDate,
-                    Discipline = s.Discipline ?? "", DisciplineLabel = string.IsNullOrEmpty(s.Discipline) ? "Alla grener" : ActivityDiscipline.Label(s.Discipline),
+                    Discipline = s.Discipline ?? "", DisciplineLabel = StomprogramDisciplines.Label(s.Discipline), IsPeriod = s.IsPeriod,
                     Organiser = "Förbundet", Place = s.Note ?? "",
                     Status = KretsCalendarStatus.Stomprogram, StatusLabel = KretsCalendarStatus.Label(KretsCalendarStatus.Stomprogram),
                     RegionCode = "", RegionName = "Förbundet"
