@@ -204,7 +204,7 @@ window.hpskKretsApplicationsInit = function () {
         const unsent = data.applications.filter(a => a.status === 'HosForbundet' && !a.sentToForbundetAt);
         $('kaMarkAllItem').classList.toggle('d-none', unsent.length === 0);
         if (!all.length) {
-            $('kaBody').innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-inbox display-6 d-block mb-2"></i><p class="mb-0 small">Inga andra ansökningar för ' + year + '.</p></div>';
+            $('kaBody').innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-inbox display-6 d-block mb-2"></i><p class="mb-0 small">' + (data.applications.some(a => a.status === 'Inskickad') ? 'Inga andra ansökningar för ' : 'Inga ansökningar för ') + year + '.</p></div>';
             return;
         }
         $('kaBody').innerHTML = '<p class="small text-muted">Visar ' + rows.length + ' av ' + all.length + '.</p>'
