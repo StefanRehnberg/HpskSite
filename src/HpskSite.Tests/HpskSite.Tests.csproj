@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
@@ -27,4 +27,9 @@
     <ProjectReference Include="..\HpskSite.Shared\HpskSite.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Konfiguratorns egna JavaScript-svar för SHB-skjuttiden, genererade av Fixtures/shb-parity-gen.mjs.
+         ShbFieldRulesParityTests kräver att C#-sidan räknar likadant. -->
+    <EmbeddedResource Include="Fixtures\shb-parity-cases.json" />
+  </ItemGroup>
 </Project>

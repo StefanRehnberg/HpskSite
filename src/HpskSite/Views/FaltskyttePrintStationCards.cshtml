@@ -88,6 +88,10 @@
 {
     <div class="alert alert-warning">Inga stationer att skriva ut.</div>
 }
+@if (!string.IsNullOrEmpty(Model.Notice))
+{
+    <div style="border:2px solid #b58105;background:#fff8e1;padding:10px 14px;border-radius:6px;margin-bottom:18px;">@Model.Notice</div>
+}
 @foreach (var item in Model.Stations)
 {
     var classKeys = item.StationsByWeaponClass.Keys.OrderBy(k => OrderKey(k)).ToList();
@@ -243,6 +247,10 @@
                 </div>
             }
 
+            // Bangranskarens underlag (fas 3) har inga QR-koder: det är ett granskningsunderlag,
+            // inte kort att sätta upp på banan.
+            if (!string.IsNullOrEmpty(item.Qr1Url))
+            {
             // QR-1 — Förutsättningar (token, public). On the card.
             <div class="qr-card">
                 <img src="@item.Qr1Url" alt="QR Förutsättningar" style="width:150px;height:150px" />
@@ -256,12 +264,14 @@
                 <div style="font-size:0.85em;color:#333;margin-top:4px">Klipp ut och placera vid målgrupperna</div>
                 <div style="font-size:0.8em;color:#666">Kräver inloggning</div>
             </div>
+            }
         }
     </div>
 }
 <script>
     // Print once all QR images have loaded.
     window.addEventListener('load', function () {
+        if (@(Model.AutoPrint ? "false" : "true")) return;
         var imgs = Array.prototype.slice.call(document.images);
         var pending = imgs.filter(function (im) { return !im.complete; }).length;
         if (pending === 0) { window.print(); return; }

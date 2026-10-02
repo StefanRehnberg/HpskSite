@@ -1,0 +1,268 @@
+@using HpskSite.Controllers
+@model KretsAnsokningarModel
+@*
+    Kretsgranskning fas 3 — kretsens bangranskning (fält). EN partial som både kretsens adminpanel
+    (fliken Bangranskning) och den fristående sidan /kretsen/bangranskning renderar. Den fristående
+    sidan finns för bangranskaren/kretsinstruktören som inte är kretsadmin — mejlen pekar dit.
+
+    ⚠️ Samma INKORGSFORM som resultatgranskningen och ansökningarna (Stefans beslut 2026-10-02):
+      1. Siffran i rälsen (CourseReview/GetPendingCount vid sidladdning).
+      2. Ett GULT KORT med det som väntar på kretsen, en knapp per rad — göms när tomt.
+      3. En tabell med övriga, med statusfilter.
+    Inställningarna ligger bakom Åtgärder, i en dialog.
+
+    ⚠️ SM och landsdelsmästerskap visas inte här: de granskas av Förbundet, inte av kretsen.
+    ⚠️ Inga användartexter i attribut — rader och knappar bär bara id:n.
+    Laddas lat: window.hpskKretsCourseReviewInit().
+*@
+@{ var m = Model; }
+<div class="cr-root" data-region-id="@m.RegionId">
+    @Html.AntiForgeryToken()
+
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+        <div>
+            <h5 class="mb-1">
+                <i class="bi bi-signpost-split text-primary me-2"></i>Bangranskning (fält)
+                <span class="badge bg-warning text-dark ms-1 d-none" id="crBadge">0</span>
+            </h5>
+            <div class="small text-muted" id="crReviewerLine"></div>
+        </div>
+        <div class="dropdown">
+            <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" id="crActions">
+                <i class="bi bi-sliders me-2"></i>Åtgärder
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" style="min-width:280px;">
+                <li><h6 class="dropdown-header">Inställningar</h6></li>
+                <li>
+                    <button class="dropdown-item" type="button" data-cr="settings">
+                        <i class="bi bi-gear me-2"></i>Kretsens inställningar för bangranskningen…
+                    </button>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="card mb-3 border-warning d-none" id="crPendingCard">
+        <div class="card-header bg-warning text-dark">
+            <h6 class="mb-0">
+                <i class="bi bi-inbox me-1"></i>Väntar på kretsen
+                <span class="badge bg-dark ms-2" id="crPendingCount">0</span>
+            </h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr><th>Inskickad</th><th>Tävling</th><th>Arrangör</th><th class="text-end"></th></tr></thead>
+                    <tbody id="crPendingRows"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <strong><i class="bi bi-list-check me-2"></i>Fälttävlingar</strong>
+            <div>
+                <label class="visually-hidden" for="crStatusFilter">Visa</label>
+                <select class="form-select form-select-sm w-auto" id="crStatusFilter"></select>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="crBody"><div class="text-muted small">Laddar…</div></div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="crCaseModal" tabindex="-1" aria-labelledby="crCaseTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="crCaseTitle"><i class="bi bi-signpost-split me-2"></i>Granska banan</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="crCaseBody"></div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="crSettingsModal" tabindex="-1" aria-labelledby="crSettingsTitle" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="crSettingsTitle"><i class="bi bi-gear me-2"></i>Kretsens inställningar för bangranskningen</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="crSettings"></div>
+        </div>
+    </div>
+</div>
+
+@await Html.PartialAsync("_CourseReviewCase")
+<script>
+if (!window.hpskKretsCourseReviewInit) {
+window.hpskKretsCourseReviewInit = function () {
+    if (window.hpskKretsCourseReviewInit.done) return;
+    window.hpskKretsCourseReviewInit.done = true;
+
+    const root = document.querySelector('.cr-root');
+    const REGION_ID = +root.getAttribute('data-region-id');
+    // ⚠️ Dialogerna flyttas till body: i adminpanelen ligger partialen i en flik, och en modal i en
+    // dold förälder får .show men blir aldrig synlig.
+    ['crCaseModal', 'crSettingsModal'].forEach(id => { const el = document.getElementById(id); if (el && el.parentNode !== document.body) document.body.appendChild(el); });
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc(s == null ? '' : String(s));
+    const token = () => root.querySelector('input[name="__RequestVerificationToken"]').value;
+    const statusBadge = s => s === 'Godkand' ? '<span class="badge bg-success">Godkänd</span>'
+        : s === 'Atersand' ? '<span class="badge bg-secondary">Återsänd till arrangören</span>'
+        : s === 'awaiting' ? '<span class="badge bg-warning-subtle text-warning-emphasis">Väntar på arrangören</span>'
+        : s === 'notSubmitted' ? '<span class="badge bg-light text-dark border">Inte inskickad</span>'
+        : '<span class="badge bg-warning text-dark">Väntar på kretsen</span>';
+    let data = null;
+    const filter = $('crStatusFilter');
+    filter.addEventListener('change', renderTable);
+
+    function setRailCount(n) {
+        const r = document.getElementById('regionCourseReviewRailCount');
+        if (r) { r.textContent = n; r.classList.toggle('d-none', n === 0); }
+    }
+
+    function load() {
+        return fetch('/umbraco/surface/CourseReview/GetRegionReviews?regionId=' + REGION_ID, { credentials: 'same-origin' })
+            .then(r => r.json()).then(d => {
+                if (!d.success) { $('crBody').innerHTML = '<div class="alert alert-warning mb-0">' + esc(d.message) + '</div>'; return; }
+                data = d;
+                const rev = d.reviewers || [];
+                $('crReviewerLine').innerHTML = rev.length
+                    ? esc(d.reviewerLabel) + ': ' + rev.map(esc).join(', ') + '.'
+                    : 'Kretsen har ingen ' + esc((d.reviewerLabel || '').toLowerCase()) + ' — banorna kommer som en länk till kretsens kontaktadress och till kretsadministratörerna.';
+                renderPending();
+                renderTable();
+            }).catch(() => { $('crBody').innerHTML = '<div class="alert alert-warning mb-0">Granskningarna kunde inte hämtas. Försök igen om en stund.</div>'; });
+    }
+
+    function renderPending() {
+        const open = data.reviews.filter(x => x.review.status === 'Inskickad' && !x.changed);
+        $('crPendingCard').classList.toggle('d-none', open.length === 0);
+        $('crPendingCount').textContent = open.length;
+        $('crBadge').textContent = open.length;
+        $('crBadge').classList.toggle('d-none', open.length === 0);
+        setRailCount(open.length);
+        $('crPendingRows').innerHTML = open.map(x => {
+            const r = x.review;
+            return '<tr>'
+                + '<td class="small text-nowrap">' + esc(r.submittedAt) + '</td>'
+                + '<td><strong>' + esc(x.name) + '</strong><div class="small text-muted">' + esc(x.date || '') + (r.required ? ' · krävs' : '') + '</div></td>'
+                + '<td class="small">' + esc(x.organiser) + '</td>'
+                + '<td class="text-end text-nowrap"><button type="button" class="btn btn-primary btn-sm" data-cr="open" data-id="' + r.id + '">Granska <i class="bi bi-arrow-right ms-1"></i></button></td>'
+                + '</tr>';
+        }).join('');
+    }
+
+    function tableRows() {
+        const rows = data.reviews.filter(x => !(x.review.status === 'Inskickad' && !x.changed)).map(x => ({
+            key: x.changed ? 'awaiting' : x.review.status, date: x.date || '', name: x.name, organiser: x.organiser, id: x.review.id,
+            note: x.changed ? 'Banan har ändrats sedan den skickades in — arrangören behöver skicka in den igen'
+                : x.review.status === 'Godkand' ? 'Godkänd ' + (x.review.decidedAt || '') + (x.review.decider ? ' av ' + x.review.decider : '')
+                : x.review.status === 'Atersand' ? (x.review.comment || '') : ''
+        }));
+        // Bara en tävling där granskningen KRÄVS väntar på arrangören (med sista dag). Annars är
+        // inskicket frivilligt och tävlingen står som neutral "Inte inskickad".
+        (data.upcoming || []).forEach(a => rows.push({
+            key: a.required ? 'awaiting' : 'notSubmitted', date: a.date || '', name: a.name, organiser: a.organiser, id: 0, late: a.late,
+            note: (a.hasStations ? 'Banan finns, men är inte inskickad' : 'Ingen stationsbeskrivning än')
+                + (a.required && a.deadline ? ' · skickas in senast ' + a.deadline : '')
+        }));
+        return rows.sort((p, q) => (p.date || '').localeCompare(q.date || ''));
+    }
+
+    function renderTable() {
+        const all = tableRows();
+        const counts = { all: all.length, awaiting: 0, notSubmitted: 0, Atersand: 0, Godkand: 0 };
+        all.forEach(r => counts[r.key]++);
+        const cur = filter.value || 'all';
+        const opts = [['all', 'Alla']]
+            .concat(counts.awaiting ? [['awaiting', 'Väntar på arrangören']] : [])
+            .concat([['notSubmitted', 'Inte inskickade'], ['Atersand', 'Återsända'], ['Godkand', 'Godkända']]);
+        filter.innerHTML = opts
+            .map(([v, l]) => '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + l + ' (' + counts[v] + ')</option>').join('');
+        const rows = cur === 'all' ? all : all.filter(r => r.key === cur);
+        if (!all.length) {
+            $('crBody').innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-inbox display-6 d-block mb-2"></i>'
+                + '<p class="mb-0 small">' + (data.reviews.some(x => x.review.status === 'Inskickad') ? 'Inga andra fälttävlingar att visa.' : 'Inga kommande fälttävlingar på kretsnivå eller högre.') + '</p></div>';
+            return;
+        }
+        $('crBody').innerHTML = '<p class="small text-muted">Visar ' + rows.length + ' av ' + all.length + '. SM och landsdelsmästerskap granskas av Förbundet och visas inte här.</p>'
+            + '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Datum</th><th>Tävling</th><th>Arrangör</th><th>Status</th><th class="text-end"></th></tr></thead><tbody>'
+            + rows.map(r => '<tr>'
+                + '<td class="small text-nowrap">' + esc(r.date) + '</td>'
+                + '<td>' + esc(r.name) + (r.note ? '<div class="small text-muted">' + esc(r.note) + '</div>' : '') + '</td>'
+                + '<td class="small">' + esc(r.organiser) + '</td>'
+                + '<td>' + statusBadge(r.key) + (r.late ? ' <span class="badge bg-danger-subtle text-danger-emphasis">sen</span>' : '') + '</td>'
+                + '<td class="text-end">' + (r.id ? '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr="open" data-id="' + r.id + '">Visa</button>' : '') + '</td>'
+                + '</tr>').join('')
+            + '</tbody></table></div>';
+    }
+
+    function openCase(id) {
+        const body = $('crCaseBody');
+        body.innerHTML = '<div class="text-muted">Hämtar…</div>';
+        bootstrap.Modal.getOrCreateInstance($('crCaseModal')).show();
+        fetch('/umbraco/surface/CourseReview/GetReview?id=' + id, { credentials: 'same-origin' }).then(r => r.json()).then(d => {
+            if (!d.success) { body.innerHTML = '<div class="alert alert-warning">' + esc(d.message) + '</div>'; return; }
+            window.hpskRenderCourseCase(body, d, { mode: 'inloggad', onDone: load });
+        });
+    }
+
+    function renderSettings() {
+        const s = data.settings;
+        const names = list => list.length ? list.map(esc).join(', ') : '<em>ingen</em>';
+        let html = '<p class="small text-muted mb-2">Bangranskare: ' + names(data.bangranskare || []) + '. Kretsinstruktörer: ' + names(data.kretsinstruktorer || []) + '. Uppdragen ändras i Styrelsearbete.</p>';
+        if (!data.canEditSettings) {
+            html += '<p class="mb-1">' + (s.requireCourseReview ? 'Kretsen kräver bangranskning för sina kretstävlingar i fält (sedan ' + esc(s.since) + ').' : 'Bangranskningen är frivillig för kretstävlingar. Den krävs alltid vid nationell fältskjutning.') + '</p>'
+                + '<p class="mb-1">Granskas av: ' + esc(data.reviewerLabel) + '.</p>'
+                + (s.weeks ? '<p class="mb-0">Skickas in senast ' + s.weeks + ' veckor före tävlingen.</p>' : '')
+                + '<p class="small text-muted mt-2 mb-0">Inställningarna ändras av kretsadministratören.</p>';
+            $('crSettings').innerHTML = html; return;
+        }
+        html += '<div class="mb-3"><div class="form-label mb-1">Vem granskar banorna?</div>'
+            + '<div class="form-check"><input class="form-check-input" type="radio" name="crKind" id="crKindB" value="Bangranskare"' + (s.reviewerKind !== 'Kretsinstruktor' ? ' checked' : '') + '><label class="form-check-label" for="crKindB">Kretsens bangranskare</label></div>'
+            + '<div class="form-check"><input class="form-check-input" type="radio" name="crKind" id="crKindK" value="Kretsinstruktor"' + (s.reviewerKind === 'Kretsinstruktor' ? ' checked' : '') + '><label class="form-check-label" for="crKindK">Kretsens kretsinstruktörer</label></div></div>'
+            + '<div class="form-check form-switch mb-1"><input class="form-check-input" type="checkbox" id="crRequire"' + (s.requireCourseReview ? ' checked' : '') + '>'
+            + '<label class="form-check-label" for="crRequire">Kräv bangranskning för kretsens kretstävlingar i fält</label></div>'
+            + '<p class="small text-muted ms-4">Av som standard. Vid nationell fältskjutning krävs granskningen alltid. Påslaget gäller tävlingar från dagen det slås på, och kräver att kretsen har någon som granskar.' + (s.since ? ' Påslaget sedan ' + esc(s.since) + '.' : '') + '</p>'
+            + '<label class="form-label" for="crWeeks">Skickas in senast (veckor före tävlingen)</label>'
+            + '<input type="number" min="1" max="52" class="form-control mb-1" id="crWeeks" style="max-width:8rem" value="' + (s.weeks || '') + '">'
+            + '<p class="small text-muted">Tomt = ingen sista dag. Gäller bara när granskningen krävs; SM och landsdelsmästerskap har alltid Förbundets 12 veckor.</p>'
+            + '<button type="button" class="btn btn-primary" id="crSaveSettings">Spara</button><div id="crSettingsResult" class="mt-2" role="status"></div>';
+        $('crSettings').innerHTML = html;
+        $('crSaveSettings').addEventListener('click', () => {
+            fetch('/umbraco/surface/CourseReview/SaveSettings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() },
+                body: new URLSearchParams({
+                    regionId: REGION_ID,
+                    requireCourseReview: $('crRequire').checked ? '1' : '0',
+                    reviewerKind: document.querySelector('input[name="crKind"]:checked').value,
+                    weeks: $('crWeeks').value
+                }).toString()
+            }).then(r => r.json()).then(r => {
+                const res = $('crSettingsResult');
+                res.className = 'mt-2 alert py-2 ' + (r.success ? 'alert-success' : 'alert-warning');
+                res.textContent = r.message || '';
+                if (r.success) load();
+            });
+        });
+    }
+
+    root.addEventListener('click', e => {
+        const b = e.target.closest('[data-cr]');
+        if (!b) return;
+        if (b.dataset.cr === 'open') openCase(+b.dataset.id);
+        if (b.dataset.cr === 'settings' && data) { renderSettings(); bootstrap.Modal.getOrCreateInstance($('crSettingsModal')).show(); }
+    });
+
+    const deep = new URLSearchParams(location.search).get('bana');
+    load().then(() => { if (deep) openCase(+deep); });
+};
+}
+</script>

@@ -48,6 +48,15 @@ namespace HpskSite.Services.Kretsgranskning
                     _logger.LogCritical(
                         "RESULTATGRANSKNINGEN ÄR TRASIG: {Missing} saknas. Inskick, kretsens beslut och kretsens inställningar faller. "
                         + "Kör Migrations/create-competition-result-review-tables.sql.", problem);
+
+                // Fas 3 — bangranskningen.
+                var courseProblem = scope.ServiceProvider.GetRequiredService<CourseReviewService>().SchemaProblem();
+                if (courseProblem == null)
+                    _logger.LogInformation("Bangranskningen: schemat finns.");
+                else
+                    _logger.LogCritical(
+                        "BANGRANSKNINGEN ÄR TRASIG: {Missing} saknas. Inskick, kretsens beslut och kretsens inställningar faller. "
+                        + "Kör Migrations/create-competition-course-review-tables.sql.", courseProblem);
             }
             catch (Exception ex)
             {

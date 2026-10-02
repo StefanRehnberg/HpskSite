@@ -94,8 +94,14 @@ namespace HpskSite.Models.Kretsgranskning
     public class RegionCalendarSettings
     {
         public int RegionId { get; set; }
+        /// <summary>Fas 3: hur många veckor före tävlingen banan ska vara inskickad (null = ingen gräns).</summary>
         public int? FieldPrereqWeeks { get; set; }
+        /// <summary>Fas 3: vem som granskar banan — <c>Bangranskare</c> (standard) eller <c>Kretsinstruktor</c>.</summary>
         public string? CourseReviewer { get; set; }
+        /// <summary>Fas 3: kretsen kräver bangranskning för sina kretstävlingar i fält. Av som standard.</summary>
+        public bool RequireCourseReview { get; set; }
+        /// <summary>När kravet slogs på — gäller bara tävlingar från den dagen.</summary>
+        public DateTime? RequireCourseReviewSince { get; set; }
         public string? NeighbourOverrides { get; set; }
         /// <summary>
         /// Kretsens grind (fas 2): standardmedaljerna väntar på kretsens godkännande. Av som

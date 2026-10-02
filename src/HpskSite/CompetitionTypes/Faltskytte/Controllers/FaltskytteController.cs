@@ -36,6 +36,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly StandardMedalMaterializationService _medalMaterialization;
         private readonly FaltskytteResultsBuilder _resultsBuilder;
         private readonly FaltskytteResultArtifactService _resultArtifact;
+        private readonly HpskSite.Services.Kretsgranskning.CourseReviewAccess _courseReviewAccess;
 
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -55,7 +56,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             IDataProtectionProvider dataProtectionProvider,
             StandardMedalMaterializationService medalMaterialization,
             FaltskytteResultsBuilder resultsBuilder,
-            FaltskytteResultArtifactService resultArtifact)
+            FaltskytteResultArtifactService resultArtifact,
+            HpskSite.Services.Kretsgranskning.CourseReviewAccess courseReviewAccess)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _contentService = contentService;
@@ -71,6 +73,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             _medalMaterialization = medalMaterialization;
             _resultsBuilder = resultsBuilder;
             _resultArtifact = resultArtifact;
+            _courseReviewAccess = courseReviewAccess;
         }
 
         // ── Authorization helpers ───────────────────────────────────
@@ -137,9 +140,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private async Task<bool> CanReadStationAsync(int competitionId)
         {
             if (await IsAuthorizedForCompetition(competitionId)) return true;
-            if (!IsSelfServiceEnabledFor(competitionId)) return false;
             var memberId = await GetCurrentMemberIdAsync();
             if (memberId == 0) return false;
+            // Kretsens bangranskare (fas 3) l�ser stationerna medan banan granskas eller �r godk�nd.
+            if (await _courseReviewAccess.ReviewerMayReadStations(competitionId, memberId)) return true;
+            if (!IsSelfServiceEnabledFor(competitionId)) return false;
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             var patrols = await FaltskytteSelfServiceQueries
                 .GetPatrolsForMemberAsync(db, competitionId, memberId);

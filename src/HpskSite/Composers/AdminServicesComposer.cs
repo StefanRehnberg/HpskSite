@@ -93,6 +93,11 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.ResultReviewGate>();
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.ResultReviewHooks>();
             builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.ResultReviewReminderService>();
+            // Bangranskning (fas 3): stampel, kravs vid nationell och nar kretsen kraver den.
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.CourseReviewService>();
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.CourseReviewChecklist>();
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.CourseReviewAccess>();
+            builder.Services.AddScoped<HpskSite.Services.Kretsgranskning.CourseReviewReminderService>();
             // Member-database expansion (see Documentation/MEMBER_DATABASE.md)
             builder.Services.AddScoped<ClubMembershipService>();
             builder.Services.AddScoped<MemberAccessKeyService>();

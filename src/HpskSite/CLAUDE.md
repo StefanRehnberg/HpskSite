@@ -1021,6 +1021,71 @@ exakt 1 röd. Sviten hittade två riktiga fel: inkorgen föll med 500 på en ren
 `competitionScope` (läses nu via `CompetitionScopeHelper.ReadScope`), och årsväljaren gömde
 väntande listor. ⚠️ sqlcmd kapar svaret vid 256 tecken — håll JSON-frågorna korta.
 
+### Kretsens granskning av banan i fältskytte (2026-10-02, fas 3, branch `kretsgranskning`)
+
+SHB C.3.5.2.2: kretsen granskar målförutsättningar och stationsbeskrivningar. **En STÄMPEL, som
+fas 2.** Erbjuds för fälttävlingar på kretsnivå och högre (`CourseReviewRules.Offered`); **krävs**
+vid nationell fältskjutning och när kretsen slår på *Kräv bangranskning* för sina kretstävlingar
+(gäller tävlingar från den dagen). Kretsen väljer vem som granskar: **bangranskaren** (uppdraget,
+fas 1) eller **kretsinstruktörerna** (gruppen `Kretsinstruktor_{kod}`). **SM och
+landsdelsmästerskap går till Förbundet** minst 12 veckor före (`CourseReviewRoute.Forbundet`):
+arrangören skriver ut underlaget, registrerar att det skickats och vad Förbundet svarade —
+pistol.nu skickar ingenting till Förbundet, och kretsens inkorg visar inte de tävlingarna.
+
+- **Tabeller:** `CompetitionCourseReview` (unik på tävling) + `…Event`; `RegionCalendarSettings`
+  fick `RequireCourseReview` + `RequireCourseReviewSince` (`CourseReviewer`, `FieldPrereqWeeks`
+  fanns). Statusarna är text: Inskickad, Godkand, Atersand.
+- **⚠️⚠️ Ändring avgörs VID LÄSNING, inga krokar.** `stationConfig` skrivs av guiden,
+  redigeringsdialogen, konfiguratorn (`SaveStationConfig`) och `PrecisionCompetitionEditService` —
+  en krok i varje är fyra chanser att glömma en. `CourseReviewRules.Checksum` hashar konfigurationen
+  utan `_attachedConfigId`/`_linkedFrom*` (men MED `_morker`/`_scoringMode`, som ändrar banan), och
+  `Changed` jämförs i varje läsväg: godkännandet vägras, länken slutar gälla, arrangörens kort och
+  inkorgen säger "ändrad".
+- **⚠️ SHB:s regler finns nu i C#: `ShbFieldRules`** (maxavstånd per storleksgrupp, stödhand/mörker,
+  magnumtaket 180 m, minsta skjuttid i Normal och Poäng). Den är en SPEGEL av konfiguratorns
+  JavaScript — `ShbFieldRulesParityTests` läser 400 fall genererade ur JS:en
+  (`Fixtures/shb-parity-gen.mjs`) och faller om de glider isär. Ändras en regel i konfiguratorn:
+  ändra här, generera om fixturen.
+- **Checklistan** (`CourseReviewChecklist`, rå JObject — modellklassen saknar målgruppens avstånd):
+  stationer per vapengrupp (minst 6), skjuttid mot SHB-minimum, avstånd mot maxavstånd, saknade
+  avstånd/storleksgrupper (sägs, aldrig "godkänt"), mål utanför SHB:s förteckning, banläggarens
+  godkännande av den anslutna konfigurationen + om innehållet fortfarande stämmer. **EN renderare**
+  (`_CourseReviewCase`, `hpskCourseChecklistHtml`) för både arrangörens kort och granskarens ärende.
+- **⚠️ Mål utanför förteckningen godkänns ETT OCH ETT** — servern vägrar ett godkännande som inte
+  nämner alla. Skickas med radbrytning som skiljetecken (ett målnamn kan ha ett komma).
+- **⚠️⚠️ Stationerna är hemliga — tre ändringar i läsvägarna:**
+  `FaltskytteController.CanReadStationAsync` släpper in kretsens granskare
+  (`CourseReviewAccess.ReviewerMayReadStations`: bara kretsens väg, bara Inskickad/Godkand);
+  `FaltskyttePrintController.IsStaffForCompetition` delegerar nu till
+  `HasCompetitionStaffAccessAsync` — **den släppte förut in VARJE kretsadministratör i landet**
+  (`GetManagedRegions().Any()`); och granskarens sida **`/kretsen/bana-stationer?c=`** (samma kort
+  som utskriften via `FaltskyttePrintController.BuildModel`, utan QR, `AutoPrint` av) kräver
+  funktionär, granskare eller en giltig ärendelänk vars kontrollsumma matchar banan.
+- **Tävlande granskare:** `CourseReviewAccess.IsRegistered` — ärendet varnar, och ett godkännande
+  stämplas `DeciderIsCompetitor`.
+- **Sammanhanget räknas på ETT ställe:** `CourseReviewAccess.Resolve` (erbjuds, väg, krävs, sista
+  dag). Kontrollern och påminnelsesvepet anropar samma; kontrollern skickar bara med omfattningen ur
+  den publicerade cachen.
+- **Ytor:** kortet `_CourseReviewCard` på Stationer-fliken · fliken **Bangranskning** i kretsens
+  adminpanel (`#regionCourseReviewTab`, räkneverk `regionCourseReviewRailCount` via
+  `CourseReview/GetPendingCount`) och **`/kretsen/bangranskning?krets=`**, båda ur
+  `_KretsCourseReviewInbox` (inkorgsformen; inställningarna bakom Åtgärder) · länkläget
+  **`/kretsen/bana-arende?t=`** (`CaseKind = "Bana"`).
+- **Påminnelser** (`CourseReviewReminderService`, samma svep och spärrtabell): arrangören två veckor
+  före och på sista dagen — **bara när granskningen krävs** och sista dagen ligger efter
+  funktionens start — och granskarna när en inskickad bana legat 5 dagar.
+- Endpoints: `CourseReview/GetForCompetition`, `Submit`, `RegisterForbundetAnswer`,
+  `GetRegionReviews`, `GetPendingCount`, `GetReview`, `Approve`, `Return`, `GetByLink`, `ActByLink`,
+  `SaveSettings`.
+
+**Operatörssteg:** `Migrations/create-competition-course-review-tables.sql` **FÖRE deployen**
+(NPoco skriver de nya kolumnerna i `RegionCalendarSettings`). Körd i dev 2026-10-02. Startkontrollen
+larmar Critical om något saknas. Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod.
+
+Test: `CourseReviewRulesTests` 21, `ShbFieldRulesTests` 16, `ShbFieldRulesParityTests` (400 fall).
+Svit: `hpsk-verify/bangranskning-fas3-verify.mjs` (rör inte kretsens uppdrag; stationConfig
+ögonblicksbildas rått och krävs byte-identisk efteråt).
+
 ### Competition Admin System ✅ COMPLETE
 **Location:** Admin Page → Competitions tab (default)
 

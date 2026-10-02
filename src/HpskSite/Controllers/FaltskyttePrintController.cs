@@ -37,58 +37,61 @@ namespace HpskSite.Controllers
             var compType = competition.GetValue<string>("competitionType") ?? "";
             if (compType is not ("Faltskytte" or "MagnumFalt")) return NotFound();
 
-            var config = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig") ?? "");
-            var firstWc = config.WeaponConfigs.Values.FirstOrDefault();
-            var stationNumbers = (firstWc?.Stations ?? new List<FaltskytteStationConfig>())
-                .Where(s => !s.IsShootOffOnly)
-                .Select(s => s.Station)
-                .Distinct().OrderBy(n => n)
-                .Where(n => station == null || n == station.Value)
-                .ToList();
-
-            var baseUrl = $"{Request.Scheme}://{Request.Host}";
-            var model = new FaltskyttePrintStationCardsModel
-            {
-                CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
-                // Config wins over the competition's mirrored property — see
-                // FaltskytteScoringMode. Keeps this card and the QR Förutsättningar
-                // page (StationPage's ?t= branch) in agreement about Max träff/fig.
-                ScoringMode = FaltskytteScoringMode.Resolve(config, competition.GetValue<string>("scoringMode")),
-                Stations = stationNumbers.Select(n =>
-                {
-                    var byWc = new Dictionary<string, FaltskytteStationConfig>();
-                    foreach (var kv in config.WeaponConfigs)
-                    {
-                        var st = kv.Value.Stations.FirstOrDefault(s => s.Station == n);
-                        if (st != null) byWc[kv.Key] = st;
-                    }
-                    var entryUrl = $"{baseUrl}/station?c={competitionId}&s={n}";
-                    return new StationPrintItem
-                    {
-                        Station = n,
-                        StationsByWeaponClass = byWc,
-                        // QR-1 mints its token + renders server-side; relative img src is fine.
-                        Qr1Url = $"/umbraco/surface/Faltskytte/GetStationInfoQr?competitionId={competitionId}&stationNumber={n}",
-                        // QR-2 encodes the absolute entry URL.
-                        Qr2Url = $"/umbraco/surface/Faltskytte/GenerateQrCode?url={Uri.EscapeDataString(entryUrl)}"
-                    };
-                }).ToList()
-            };
+            var model = BuildModel(competition, competitionId, station, $"{Request.Scheme}://{Request.Host}", withQr: true);
 
             return View("~/Views/FaltskyttePrintStationCards.cshtml", model);
         }
 
-        // Mirrors FaltskytteController.IsAuthorizedForCompetition (staff four-tier + regional).
-        private async Task<bool> IsStaffForCompetition(int competitionId)
+        /// <summary>
+        /// Stationskortens modell ur tävlingens stationConfig. Delas med kretsens bangranskning
+        /// (KretsenController, utan QR-koder), så granskaren ser samma kort som arrangören skriver ut.
+        /// </summary>
+        internal static FaltskyttePrintStationCardsModel BuildModel(Umbraco.Cms.Core.Models.IContent competition, int competitionId, int? station, string baseUrl, bool withQr)
         {
-            if (await _auth.IsCurrentUserAdminAsync()) return true;
-            if (await _auth.IsCompetitionManager(competitionId)) return true;
-            if ((await _auth.GetManagedRegions()).Any()) return true;
-            var comp = _contentService.GetById(competitionId);
-            var clubId = comp?.GetValue<int>("clubId") ?? 0;
-            if (clubId > 0 && (await _auth.IsClubAdminForClub(clubId) || await _auth.IsSkjutledareForClub(clubId)))
-                return true;
-            return false;
+                var config = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig") ?? "");
+                var firstWc = config.WeaponConfigs.Values.FirstOrDefault();
+                var stationNumbers = (firstWc?.Stations ?? new List<FaltskytteStationConfig>())
+                    .Where(s => !s.IsShootOffOnly)
+                    .Select(s => s.Station)
+                    .Distinct().OrderBy(n => n)
+                    .Where(n => station == null || n == station.Value)
+                    .ToList();
+    
+                var model = new FaltskyttePrintStationCardsModel
+                {
+                    CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
+                    // Config wins over the competition's mirrored property — see
+                    // FaltskytteScoringMode. Keeps this card and the QR Förutsättningar
+                    // page (StationPage's ?t= branch) in agreement about Max träff/fig.
+                    ScoringMode = FaltskytteScoringMode.Resolve(config, competition.GetValue<string>("scoringMode")),
+                    Stations = stationNumbers.Select(n =>
+                    {
+                        var byWc = new Dictionary<string, FaltskytteStationConfig>();
+                        foreach (var kv in config.WeaponConfigs)
+                        {
+                            var st = kv.Value.Stations.FirstOrDefault(s => s.Station == n);
+                            if (st != null) byWc[kv.Key] = st;
+                        }
+                        var entryUrl = $"{baseUrl}/station?c={competitionId}&s={n}";
+                        return new StationPrintItem
+                        {
+                            Station = n,
+                            StationsByWeaponClass = byWc,
+                            // QR-1 mints its token + renders server-side; relative img src is fine.
+                            Qr1Url = !withQr ? "" : $"/umbraco/surface/Faltskytte/GetStationInfoQr?competitionId={competitionId}&stationNumber={n}",
+                            // QR-2 encodes the absolute entry URL.
+                            Qr2Url = !withQr ? "" : $"/umbraco/surface/Faltskytte/GenerateQrCode?url={Uri.EscapeDataString(entryUrl)}"
+                        };
+                    }).ToList()
+                };
+    
+                return model;
         }
+
+        // Samma svar som FaltskytteController.IsAuthorizedForCompetition, och båda värdformerna.
+        // ⚠️ Den gamla kopian släppte in VARJE kretsadministratör (GetManagedRegions().Any()),
+        // alltså varje fälttävlings hemliga stationer för en kretsadmin var som helst i landet.
+        private Task<bool> IsStaffForCompetition(int competitionId)
+            => _auth.HasCompetitionStaffAccessAsync(competitionId);
     }
 }

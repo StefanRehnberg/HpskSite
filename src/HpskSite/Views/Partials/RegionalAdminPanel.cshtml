@@ -232,6 +232,7 @@
                     <option value="#regionSeriesTab">Serier</option>
                     <option value="#regionApplicationsTab">Ansökningar</option>
                     <option value="#regionResultReviewTab">Resultatgranskning</option>
+                    <option value="#regionCourseReviewTab">Bangranskning</option>
                 </optgroup>
                 <optgroup label="Medlemmar">
                     <option value="#regionCertificationsTab">Certifieringar</option>
@@ -280,6 +281,10 @@
                 <button class="nav-link d-flex align-items-center" id="regionResultReview-tab" data-bs-toggle="tab" data-bs-target="#regionResultReviewTab" type="button" role="tab" aria-controls="regionResultReviewTab" aria-selected="false">
                     <i class="bi bi-clipboard-check me-2"></i>Resultatgranskning
                     <span class="badge bg-warning text-dark ms-auto d-none" id="regionResultReviewRailCount" title="Resultatlistor som väntar på kretsen">0</span>
+                </button>
+                <button class="nav-link d-flex align-items-center" id="regionCourseReview-tab" data-bs-toggle="tab" data-bs-target="#regionCourseReviewTab" type="button" role="tab" aria-controls="regionCourseReviewTab" aria-selected="false">
+                    <i class="bi bi-signpost-split me-2"></i>Bangranskning
+                    <span class="badge bg-warning text-dark ms-auto d-none" id="regionCourseReviewRailCount" title="Banor som väntar på kretsen">0</span>
                 </button>
 
                 <div class="admin-rail-group">Medlemmar</div>
@@ -430,6 +435,9 @@
         <div class="tab-pane fade" id="regionResultReviewTab">
             @await Html.PartialAsync("_KretsResultReviewInbox", new HpskSite.Controllers.KretsAnsokningarModel { RegionId = regionContentId, RegionName = regionName, Allowed = true })
         </div>
+        <div class="tab-pane fade" id="regionCourseReviewTab">
+            @await Html.PartialAsync("_KretsCourseReviewInbox", new HpskSite.Controllers.KretsAnsokningarModel { RegionId = regionContentId, RegionName = regionName, Allowed = true })
+        </div>
         <script>
         (function () {
             const wire = (btnId, init) => {
@@ -448,6 +456,15 @@
                     const opt = (v, label, n) => { const o = document.querySelector('#regionAdminTabMobileSelect option[value="' + v + '"]'); if (o) o.textContent = label + (n ? ' (' + n + ')' : ''); };
                     opt('#regionApplicationsTab', 'Ansökningar', d.applications);
                     opt('#regionResultReviewTab', 'Resultatgranskning', d.reviews);
+                }).catch(() => { /* siffran är en hjälp, inte en förutsättning */ });
+            wire('regionCourseReview-tab', 'hpskKretsCourseReviewInit');
+            fetch('/umbraco/surface/CourseReview/GetPendingCount?regionId=@regionContentId', { credentials: 'same-origin' })
+                .then(r => r.json()).then(d => {
+                    if (!d.success) return;
+                    const el = document.getElementById('regionCourseReviewRailCount');
+                    if (el) { el.textContent = d.count; el.classList.toggle('d-none', !d.count); }
+                    const o = document.querySelector('#regionAdminTabMobileSelect option[value="#regionCourseReviewTab"]');
+                    if (o) o.textContent = 'Bangranskning' + (d.count ? ' (' + d.count + ')' : '');
                 }).catch(() => { /* siffran är en hjälp, inte en förutsättning */ });
         })();
         </script>
