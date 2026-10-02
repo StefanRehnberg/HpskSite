@@ -3427,11 +3427,14 @@ function openUnverifiedMedalsModal() {
                 const badge = m.medalType === 'S'
                     ? '<span class="badge" style="background-color:#9ca3af;" title="Silver">S</span>'
                     : '<span class="badge" style="background-color:#cd7f32;" title="Brons">B</span>';
-                const proof = m.hasProof
+                const proof = m.source === 'OnSite'
+                    ? '<span class="text-info"><i class="bi bi-hourglass-split"></i> Väntar på kretsens granskning</span>'
+                    : m.hasProof
                     ? '<span class="text-success"><i class="bi bi-paperclip"></i> Bevis finns</span>'
                     : '<span class="text-warning"><i class="bi bi-exclamation-triangle-fill"></i> Saknar bevis</span>';
                 const srcNote = m.source === 'SelfReported' ? 'Självrapporterad'
-                    : (m.source === 'AdminEntered' ? 'Inlagd av admin' : m.source);
+                    : m.source === 'AdminEntered' ? 'Inlagd av admin'
+                    : m.source === 'OnSite' ? 'pistol.nu-tävling' : m.source;
                 return `
                     <tr>
                         <td>${badge} <span class="ms-1">${escapeHtml(m.medalName)}</span> <small class="text-muted">(${m.points} p)</small></td>
@@ -4424,6 +4427,9 @@ function renderStmCell(r) {
         cue = ' <i class="bi bi-patch-check-fill text-success" title="Godkänd av klubben"></i>';
     } else if (r.verifyStatus === 'Rejected') {
         cue = ' <i class="bi bi-x-circle-fill text-danger" title="Avvisad av klubben – öppna resultatet för mer info"></i>';
+    } else if (r.onSiteMedal) {
+        // Kretsgranskning fas 2: kretsen kräver sitt godkännande av resultatlistan först.
+        cue = ' <i class="bi bi-hourglass-split text-info" title="Väntar på kretsens granskning av resultatlistan"></i>';
     } else if (r.proofStatus === 'missing') {
         // Reported but no proof file — the actionable state: upload proof so the club can approve.
         cue = ' <i class="bi bi-exclamation-triangle-fill text-warning" title="Ej godkänd än – saknar bevis. Öppna resultatet och ladda upp."></i>';

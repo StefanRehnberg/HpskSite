@@ -1,4 +1,4 @@
-@*
+﻿@*
  * Fältskytte Results Management
  * Admin overview: station entry + result list generation.
  *@
@@ -96,6 +96,8 @@
             </div>
         </div>
     </div>
+
+    @await Html.PartialAsync("_ResultReviewCard", competitionId)
 
     @if (!string.IsNullOrEmpty(subCompetitionName))
     {

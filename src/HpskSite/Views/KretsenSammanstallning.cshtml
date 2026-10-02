@@ -35,9 +35,9 @@
     <h1>Sammanställning av nationella tävlingar och landsdelstävlingar inom krets</h1>
     <div class="meta">@m.RegionName · tävlingsår @m.Year · Förbundets sista dag @m.Deadline.ToString("d MMMM yyyy", sv) · utskriven @DateTime.Today.ToString("yyyy-MM-dd")</div>
 
-    @if (m.Rows.Count == 0)
+    @if (m.Rows.Count == 0 && m.Championships.Count == 0)
     {
-        <p id="smEmpty">Inga nationella tävlingar eller landsdelstävlingar har yttrande ännu för @m.Year.</p>
+        <p id="smEmpty">Inga nationella tävlingar eller landsdelstävlingar har yttrande ännu för @m.Year, och kretsen har inga kretsmästerskap inlagda.</p>
     }
     else
     {
@@ -60,6 +60,24 @@
                 @if (!string.IsNullOrWhiteSpace(r.Motivering))
                 {
                     <tr><td></td><td colspan="6" class="note">Kretsens motivering: @r.Motivering</td></tr>
+                }
+            }
+            @if (m.Championships.Count > 0)
+            {
+                @* Förbundets instruktion: kretsen för in kretsmästerskapen på samma blankett. De
+                   beslutas av kretsen själv, så kolumnerna Tillstyrks/Avstyrks lämnas tomma. *@
+                <tr><th colspan="7" id="smKmHeading">Kretsmästerskap</th></tr>
+                foreach (var k in m.Championships)
+                {
+                    <tr data-km-id="@k.Id">
+                        <td>@k.Date.ToString("yyyy-MM-dd")</td>
+                        <td>@k.Name<div class="note">Kretsmästerskap</div></td>
+                        <td>@k.DisciplineLabel</td>
+                        <td>@k.Venue</td>
+                        <td>@k.Organiser</td>
+                        <td></td>
+                        <td></td>
+                    </tr>
                 }
             }
             </tbody>

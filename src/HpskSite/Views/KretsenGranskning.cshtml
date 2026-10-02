@@ -1,0 +1,146 @@
+@using HpskSite.Controllers
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var m = ViewData["KretsGranskning"] as KretsAnsokningarModel ?? new KretsAnsokningarModel();
+    ViewBag.Title = "Resultatgranskning — " + m.RegionName;
+}
+
+@* Kretsgranskning fas 2: kretsens granskning av resultatlistor. Egen sida, eftersom
+   resultatgranskaren sällan är kretsadministratör. Granskningen är en STÄMPEL; bara en krets som
+   slagit på "Kräv kretsens godkännande" håller inne standardmedaljerna. Behörigheten prövas av
+   varje endpoint. *@
+
+<style>
+    .kg-page { font-size: 1.05rem; padding: 1.5rem 0 4rem; }
+    .kg-page h1 { font-size: 1.8rem; font-weight: 700; }
+    .kg-card { border: 1px solid var(--bs-border-color); border-radius: .8rem; padding: 1rem 1.15rem; margin-bottom: 1rem; background: var(--bs-body-bg); }
+    .kg-row { border-top: 1px solid var(--bs-border-color); padding: .7rem 0; }
+    .kg-row:first-of-type { border-top: 0; }
+    .kg-meta { color: var(--bs-secondary-color); font-size: .95rem; }
+</style>
+
+<div class="container kg-page">
+    @Html.AntiForgeryToken()
+    <h1 class="mb-1"><i class="bi bi-clipboard-check me-2"></i>Resultatgranskning — @m.RegionName</h1>
+
+    @if (!m.Allowed)
+    {
+        <div class="alert alert-secondary mt-3" id="kgNotAllowed">
+            Den här sidan är för kretsens resultatgranskare och kretsadministratören.
+            Ska du ha uppdraget kan du be om det på <a href="/kretsen/kom-igang?krets=@m.RegionId">Kom igång</a>.
+        </div>
+    }
+    else
+    {
+        <p class="kg-meta mb-3">Arrangörerna skickar in resultatlistan för tävlingar som ger standardmedaljer. En godkänd lista får markeringen "Granskad av @m.RegionName" på resultatsidan.</p>
+
+        <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+            <label for="kgYear" class="form-label mb-0">Tävlingsår</label>
+            <select id="kgYear" class="form-select w-auto"></select>
+        </div>
+
+        <div id="kgCase" class="mb-3"></div>
+
+        <div class="kg-card" id="kgInbox"><h2 class="h5">Att granska</h2><div class="kg-meta">Hämtar…</div></div>
+        <div class="kg-card" id="kgAwaiting"><h2 class="h5">Väntar på arrangören</h2></div>
+        <details class="kg-card" id="kgDoneWrap"><summary class="h5 mb-0">Avgjorda <span class="badge bg-secondary" id="kgDoneCount">0</span></summary><div id="kgDone" class="mt-2"></div></details>
+        <details class="kg-card" id="kgSettingsWrap"><summary class="h5 mb-0">Kretsens inställningar</summary><div id="kgSettings" class="mt-2"></div></details>
+    }
+    <p class="mt-3"><a href="@m.RegionUrl"><i class="bi bi-arrow-left me-1"></i>Till @m.RegionName</a></p>
+</div>
+
+@if (m.Allowed)
+{
+@await Html.PartialAsync("_ResultReviewCase")
+<script>
+(function () {
+    const REGION_ID = @m.RegionId;
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc(s == null ? '' : String(s));
+    const token = () => document.querySelector('input[name="__RequestVerificationToken"]').value;
+    let year = new Date().getFullYear();
+
+    const yearSel = $('kgYear');
+    for (let y = year + 1; y >= year - 3; y--) yearSel.insertAdjacentHTML('beforeend', '<option value="' + y + '"' + (y === year ? ' selected' : '') + '>' + y + '</option>');
+    yearSel.addEventListener('change', () => { year = +yearSel.value; load(); });
+
+    function row(x) {
+        const r = x.review;
+        return '<div class="kg-row d-flex justify-content-between align-items-start gap-2 flex-wrap">'
+            + '<div><div class="fw-semibold">' + esc(x.name) + '</div><div class="kg-meta">' + esc(x.date || '') + ' · ' + esc(x.organiser)
+            + ' · inskickad ' + esc(r.submittedAt) + (r.gated ? ' · <span class="text-warning-emphasis">medaljerna väntar</span>' : '') + '</div></div>'
+            + '<div class="d-flex gap-2 align-items-center"><span class="badge ' + (r.status === 'Godkand' ? 'bg-success' : r.status === 'Atersand' ? 'bg-secondary' : 'bg-warning text-dark') + '">' + esc(r.statusLabel) + '</span>'
+            + '<button type="button" class="btn btn-sm ' + (r.status === 'Inskickad' ? 'btn-primary' : 'btn-outline-secondary') + '" data-kg-open="' + r.id + '">' + (r.status === 'Inskickad' ? 'Granska' : 'Visa') + '</button></div></div>';
+    }
+
+    function load() {
+        fetch('/umbraco/surface/ResultReview/GetRegionReviews?regionId=' + REGION_ID + '&year=' + year).then(r => r.json()).then(d => {
+            if (!d.success) { $('kgInbox').innerHTML = '<div class="alert alert-warning mb-0">' + esc(d.message) + '</div>'; return; }
+            const open = d.reviews.filter(x => x.review.status === 'Inskickad');
+            const done = d.reviews.filter(x => x.review.status !== 'Inskickad');
+            $('kgInbox').innerHTML = '<h2 class="h5">Att granska <span class="badge bg-warning text-dark">' + open.length + '</span></h2>'
+                + (open.length ? open.map(row).join('') : '<div class="kg-meta">Inga listor väntar på kretsen.</div>');
+            $('kgDoneCount').textContent = done.length;
+            $('kgDone').innerHTML = done.length ? done.map(row).join('') : '<div class="kg-meta">Inga avgjorda listor ' + year + '.</div>';
+            $('kgAwaiting').innerHTML = '<h2 class="h5">Väntar på arrangören <span class="badge bg-secondary">' + d.awaiting.length + '</span></h2>'
+                + '<p class="kg-meta">Genomförda tävlingar som ger standardmedaljer men vars resultatlista inte har skickats in. Arrangören ska skicka in den inom 14 dagar.</p>'
+                + (d.awaiting.length ? d.awaiting.map(a => '<div class="kg-row"><div class="fw-semibold">' + esc(a.name) + '</div><div class="kg-meta">' + esc(a.date) + ' · ' + esc(a.organiser)
+                    + ' · ' + (a.resultPublished ? 'resultatlistan är publicerad' : 'resultatlistan är inte publicerad') + ' · senast ' + esc(a.deadline)
+                    + (a.late ? ' <span class="badge bg-danger-subtle text-danger-emphasis">sen</span>' : '') + '</div></div>').join('') : '<div class="kg-meta">Ingen.</div>');
+            renderSettings(d);
+        }).catch(() => { $('kgInbox').innerHTML = '<div class="alert alert-warning mb-0">Granskningarna kunde inte hämtas. Försök igen om en stund.</div>'; });
+    }
+
+    function renderSettings(d) {
+        const s = d.settings, rev = d.reviewers || [];
+        let html = '<p class="kg-meta">Resultatgranskare: ' + (rev.length ? rev.map(esc).join(', ') : '<strong>ingen utsedd</strong> — listorna kommer som en länk till kretsens kontaktadress och till kretsadministratörerna.') + '</p>';
+        if (!d.canEditSettings) {
+            html += '<p class="mb-1">' + (s.requireApproval ? 'Kretsen kräver sitt godkännande innan standardmedaljerna räknas (sedan ' + esc(s.since) + ').' : 'Granskningen är en stämpel. Standardmedaljerna räknas när resultatlistan publiceras.') + '</p>'
+                + '<p class="mb-0">' + (s.twoReviewers ? 'Två granskare krävs vid SM och landsdelsmästerskap.' : 'En granskare räcker.') + '</p>';
+            $('kgSettings').innerHTML = html; return;
+        }
+        html += '<div class="form-check form-switch mb-1"><input class="form-check-input" type="checkbox" id="kgRequire"' + (s.requireApproval ? ' checked' : '') + (rev.length ? '' : (s.requireApproval ? '' : ' disabled')) + '>'
+            + '<label class="form-check-label" for="kgRequire">Kräv kretsens godkännande innan standardmedaljerna räknas</label></div>'
+            + '<p class="kg-meta ms-4">' + (rev.length ? 'Av som standard. Påslaget väntar skyttarnas standardmedaljer tills kretsen godkänt listan. Gäller bara tävlingar från dagen det slås på.' : 'Utse minst en resultatgranskare först (Styrelsearbete → Kretsens uppdrag).') + (s.since ? ' Påslaget sedan ' + esc(s.since) + '.' : '') + '</p>'
+            + '<div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" id="kgTwo"' + (s.twoReviewers ? ' checked' : '') + '>'
+            + '<label class="form-check-label" for="kgTwo">Två olika granskare vid SM och landsdelsmästerskap</label></div>'
+            + '<button type="button" class="btn btn-primary btn-sm" id="kgSaveSettings">Spara inställningarna</button><div id="kgSettingsResult" class="mt-2" role="status"></div>';
+        $('kgSettings').innerHTML = html;
+        $('kgSaveSettings').addEventListener('click', () => {
+            fetch('/umbraco/surface/ResultReview/SaveSettings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() },
+                body: new URLSearchParams({ regionId: REGION_ID, requireApproval: $('kgRequire').checked ? '1' : '0', twoReviewers: $('kgTwo').checked ? '1' : '0' }).toString()
+            }).then(r => r.json()).then(r => {
+                const res = $('kgSettingsResult');
+                res.className = 'mt-2 alert py-2 ' + (r.success ? 'alert-success' : 'alert-warning');
+                res.textContent = r.message || '';
+                if (r.success) load();
+            });
+        });
+    }
+
+    function openCase(id) {
+        const box = $('kgCase');
+        box.innerHTML = '<div class="text-muted">Hämtar…</div>';
+        fetch('/umbraco/surface/ResultReview/GetReview?id=' + id).then(r => r.json()).then(d => {
+            if (!d.success) { box.innerHTML = '<div class="alert alert-warning">' + esc(d.message) + '</div>'; return; }
+            box.innerHTML = '<div class="d-flex justify-content-end mb-1"><button type="button" class="btn btn-link btn-sm" id="kgCloseCase">Stäng</button></div><div id="kgCaseBody"></div>';
+            $('kgCloseCase').addEventListener('click', () => { box.innerHTML = ''; });
+            window.hpskRenderReviewCase($('kgCaseBody'), d, { mode: 'inloggad', onDone: load });
+            box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    }
+
+    document.addEventListener('click', e => {
+        const b = e.target.closest('[data-kg-open]');
+        if (b) openCase(+b.getAttribute('data-kg-open'));
+    });
+
+    const deep = new URLSearchParams(location.search).get('granskning');
+    load();
+    if (deep) openCase(+deep);
+})();
+</script>
+}

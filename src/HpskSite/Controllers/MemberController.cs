@@ -977,7 +977,10 @@ namespace HpskSite.Controllers
                             stdMedal = onSiteMedalLookup.GetValueOrDefault(medalKey),
                             // pistol.nu-medaljer är belagda av tävlingens egen resultatlista.
                             proofStatus = onSiteMedalLookup.ContainsKey(medalKey) ? "has" : (string)null,
-                            verifyStatus = onSiteStatusLookup.GetValueOrDefault(medalKey)
+                            verifyStatus = onSiteStatusLookup.GetValueOrDefault(medalKey),
+                            // Kretsgranskning fas 2: en platsmedalj som är Reported hålls inne av kretsens
+                            // grind (bara grinden sätter det läget på en platsmedalj).
+                            onSiteMedal = onSiteMedalLookup.ContainsKey(medalKey)
                         });
                     }
 

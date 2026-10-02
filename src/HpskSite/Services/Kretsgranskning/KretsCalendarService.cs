@@ -60,9 +60,33 @@ namespace HpskSite.Services.Kretsgranskning
             public Dictionary<int, string> ClubName { get; } = new();
             public List<CompRow> Competitions { get; } = new();
             public List<EventRow> Events { get; } = new();
+            public Dictionary<int, CompetitionRegionInfo> CompetitionRegion { get; } = new();
+        }
+
+        public record CompetitionRegionInfo(int CompetitionId, string RegionCode, DateTime? Date, DateTime? EndDate, string Name);
+
+        /// <summary>
+        /// The hosting krets of a competition (its own regionalFederation, else the club's krets,
+        /// else the parent series'), with its node id. Null when no krets can be resolved.
+        /// </summary>
+        public (RegionInfo Region, CompetitionRegionInfo Competition)? CompetitionRegion(int competitionId)
+        {
+            var idx = GetIndex();
+            if (!idx.CompetitionRegion.TryGetValue(competitionId, out var c)) return null;
+            var r = idx.Regions.Values.FirstOrDefault(x => x.Code.Equals(c.RegionCode, StringComparison.OrdinalIgnoreCase));
+            return r == null ? null : (r, c);
         }
 
         public RegionInfo? Region(int regionId) => GetIndex().Regions.GetValueOrDefault(regionId);
+
+        /// <summary>Alla tävlingar i indexet med värdkrets och datum.</summary>
+        public List<CompetitionRegionInfo> AllCompetitions() => GetIndex().CompetitionRegion.Values.ToList();
+
+        /// <summary>Alla tävlingar (även inaktiva och odaterade) vars värdkrets är <paramref name="regionCode"/>.</summary>
+        public List<int> CompetitionIdsInRegion(string regionCode) =>
+            GetIndex().CompetitionRegion.Values
+                .Where(c => c.RegionCode.Equals(regionCode ?? "", StringComparison.OrdinalIgnoreCase))
+                .Select(c => c.CompetitionId).ToList();
 
         public RegionInfo? RegionByCode(string code) =>
             GetIndex().Regions.Values.FirstOrDefault(r => r.Code.Equals(code ?? "", StringComparison.OrdinalIgnoreCase));
@@ -192,6 +216,26 @@ namespace HpskSite.Services.Kretsgranskning
             return list.OrderBy(e => e.Date).ThenBy(e => e.IsNeighbour).ThenBy(e => e.Name).ToList();
         }
 
+        public record ChampionshipRow(int Id, string Name, DateTime Date, string DisciplineLabel, string Venue, string Organiser);
+
+        /// <summary>
+        /// Kretsens kretsmästerskap ett år — Förbundets instruktion säger att kretsen för in dem på
+        /// sammanställningen, så att Förbundet kan undvika krockar i rikskalendern.
+        /// </summary>
+        public List<ChampionshipRow> Kretsmasterskap(int regionId, int year)
+        {
+            var idx = GetIndex();
+            var r = idx.Regions.GetValueOrDefault(regionId);
+            if (r == null) return new();
+            return idx.Competitions
+                .Where(c => c.Scope == CompetitionScopeHelper.Kretsmasterskap && c.Date.Year == year
+                            && c.RegionCode.Equals(r.Code, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(c => c.Date)
+                .Select(c => new ChampionshipRow(c.Id, c.Name, c.Date, ActivityDiscipline.Label(c.Discipline), c.Venue,
+                    c.ClubId > 0 ? idx.ClubName.GetValueOrDefault(c.ClubId, "") : r.Name))
+                .ToList();
+        }
+
         /// <summary>Töm indexet — efter att en tävling skapats ur en ansökan ska kalendern visa den genast.</summary>
         public void Invalidate() => _caches.RuntimeCache.Clear(CacheKey);
 
@@ -243,9 +287,6 @@ namespace HpskSite.Services.Kretsgranskning
                 foreach (var c in root.Descendants().Where(d => d.ContentType.Alias == "competition"))
                 {
                     var date = c.Value<DateTime?>("competitionDate");
-                    if (date is null || date.Value == DateTime.MinValue) continue;
-                    if (!c.Value<bool>("isActive")) continue;
-
                     var clubId = c.Value<int>("clubId");
                     var regionCode = c.Value<string>("regionalFederation") ?? "";
                     if (string.IsNullOrEmpty(regionCode) && clubId > 0) idx.ClubRegion.TryGetValue(clubId, out regionCode);
@@ -255,6 +296,15 @@ namespace HpskSite.Services.Kretsgranskning
                     if (string.IsNullOrEmpty(regionCode)) continue;
 
                     var endRaw = c.Value<DateTime?>("competitionEndDate");
+                    var realDate = date is { } dd && dd != DateTime.MinValue ? dd : (DateTime?)null;
+                    var realEnd = endRaw is { } ee && ee != DateTime.MinValue ? ee : (DateTime?)null;
+                    // Every competition, active or not, for CompetitionRegion (the review gate).
+                    idx.CompetitionRegion[c.Id] = new CompetitionRegionInfo(c.Id, regionCode ?? "", realDate, realEnd,
+                        c.Value<string>("competitionName") ?? c.Name ?? "");
+
+                    if (realDate is null) continue;
+                    if (!c.Value<bool>("isActive")) continue;
+                    date = realDate;
                     idx.Competitions.Add(new CompRow(
                         c.Id,
                         c.Value<string>("competitionName") ?? c.Name ?? "",

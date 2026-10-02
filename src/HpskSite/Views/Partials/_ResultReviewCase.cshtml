@@ -1,0 +1,128 @@
+@* Kretsgranskning fas 2 — ETT ärende i resultatgranskningen, renderat av EN funktion som både
+   kretsens inkorg (/kretsen/granskning, inloggad) och länkläget (/kretsen/resultat-arende, utan
+   inloggning) använder. Två renderare av samma ärende hade glidit isär.
+
+   window.hpskRenderReviewCase(container, data, opts)
+     data = svaret från ResultReview/GetReview eller GetByLink
+     opts = { mode: 'inloggad' | 'lank', token: '<länk-token>', onDone: () => {} }
+
+   ⚠️ Knapparna bär inga användartexter i attribut — bara id:n. *@
+@await Html.PartialAsync("_HtmlEscape")
+<script>
+if (!window.hpskRenderReviewCase) {
+    (function () {
+        const esc = s => window.hpskEsc(s == null ? '' : String(s));
+        const dt = (k, v) => v ? '<dt class="col-sm-4">' + esc(k) + '</dt><dd class="col-sm-8">' + esc(v) + '</dd>' : '';
+        const csrf = () => (document.querySelector('input[name="__RequestVerificationToken"]') || {}).value || '';
+
+        function checklist(d) {
+            const c = d.checklist || {}, comp = d.competition || {}, r = d.review || {};
+            const rows = [];
+            const ok = (good, text) => rows.push('<li class="list-group-item d-flex gap-2"><i class="bi ' + (good ? 'bi-check-circle text-success' : 'bi-exclamation-triangle text-warning') + ' mt-1" aria-hidden="true"></i><div>' + text + '</div></li>');
+            ok(!!comp.place && !!comp.date, 'Tävlingen: <strong>' + esc(comp.name) + '</strong>, ' + esc(comp.date || 'datum saknas') + (comp.endDate && comp.endDate !== comp.date ? ' – ' + esc(comp.endDate) : '')
+                + ', ' + esc(comp.place || 'plats saknas') + '. Arrangör: ' + esc(comp.organiser) + '.');
+            ok(true, 'Kategori: ' + esc(comp.level || 'ej angiven') + (comp.scope && comp.scope !== 'Ingen' ? ' · Mästerskap: ' + esc(comp.scope) : '') + (comp.discipline ? ' · ' + esc(comp.discipline) : '') + '.');
+            ok(!!r.weaponCheckAttested, r.weaponCheckAttested ? 'Arrangören har bekräftat att vapenkontrollen är gjord.' : 'Arrangören har inte bekräftat vapenkontrollen.');
+            const small = (c.classes || []).filter(x => x.underFive);
+            ok(small.length === 0 || (c.merged || []).length > 0,
+                esc(c.starters || 0) + ' starter i ' + (c.classes || []).length + ' klasser.'
+                + (small.length ? ' Under fem deltagare: ' + small.map(x => esc(x.name) + ' (' + x.starters + ')').join(', ') + '.' : '')
+                + ((c.merged || []).length ? ' Sammanslagna: ' + c.merged.map(esc).join(', ') + '.' : ''));
+            if (c.isChampionship) {
+                ok((c.unresolved || []).length === 0, (c.medalists || []).length
+                    ? 'Mästerskapsmedaljer: ' + c.medalists.map(m => esc(m.medal) + ' ' + esc(m.category) + ' — ' + esc(m.name) + (m.club ? ' (' + esc(m.club) + ')' : '')).join('; ') + '.'
+                    : 'Inga mästerskapsmedaljer är uträknade i listan.');
+                (c.unresolved || []).forEach(u => ok(false, 'Oavgjord: ' + esc(u)));
+            }
+            const medals = d.medals || [];
+            if (medals.length) {
+                const byType = {};
+                medals.forEach(m => { byType[m.medal] = (byType[m.medal] || 0) + m.count; });
+                const pending = medals.filter(m => m.status === 'Reported').reduce((a, m) => a + m.count, 0);
+                ok(true, 'Standardmedaljer: ' + Object.keys(byType).map(k => byType[k] + ' ' + esc(k.toLowerCase())).join(', ')
+                    + (pending ? ' — ' + pending + ' väntar på kretsens godkännande.' : '.'));
+            } else {
+                ok(true, 'Inga standardmedaljer är registrerade för tävlingen.');
+            }
+            return '<ul class="list-group list-group-flush mb-2" id="rrChecklist">' + rows.join('') + '</ul>';
+        }
+
+        function events(r) {
+            if (!(r.events || []).length) return '';
+            return '<details class="mt-2"><summary class="small">Händelser (' + r.events.length + ')</summary><ul class="small mt-1 mb-0">'
+                + r.events.map(e => '<li>' + esc(e.at) + ' — ' + esc(e.label) + (e.by ? ' (' + esc(e.by) + ')' : '') + (e.text ? ': ' + esc(e.text) : '') + '</li>').join('')
+                + '</ul></details>';
+        }
+
+        window.hpskRenderReviewCase = function (box, d, opts) {
+            opts = opts || {};
+            const r = d.review, comp = d.competition || {};
+            const isLink = opts.mode === 'lank';
+            let html = '<div class="card mb-3"><div class="card-body">'
+                + '<div class="d-flex justify-content-between flex-wrap gap-2"><div class="fw-semibold fs-5">' + esc(comp.name) + '</div>'
+                + '<span class="badge ' + (r.status === 'Godkand' ? 'bg-success' : r.status === 'Atersand' ? 'bg-secondary' : 'bg-warning text-dark') + '">' + esc(r.statusLabel) + '</span></div>'
+                + '<div class="text-muted small">Inskickad ' + esc(r.submittedAt) + ' av ' + esc(r.submittedBy) + '</div>'
+                + (r.arrangerNote ? '<div class="mt-2"><strong>Meddelande från arrangören:</strong> ' + esc(r.arrangerNote) + '</div>' : '')
+                + (comp.resultUrl ? '<a class="btn btn-outline-primary btn-sm mt-2" href="' + esc(comp.resultUrl) + '" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Öppna resultatlistan</a>' : '')
+                + '</div>' + checklist(d) + '<div class="card-body pt-0">' + events(r) + '</div></div>';
+
+            if (d.changedSinceSubmit) {
+                html += '<div class="alert alert-warning" id="rrChanged">Resultatlistan har ändrats sedan den skickades in. Arrangören behöver skicka in den igen.</div>';
+            } else if (!d.canAct) {
+                html += '<div class="alert ' + (r.status === 'Godkand' ? 'alert-success' : 'alert-secondary') + '" id="rrDone">'
+                    + (r.status === 'Godkand' ? 'Godkänd ' + esc(r.decidedAt) + ' av ' + esc(r.decider) + (r.deciderRole ? ', ' + esc(r.deciderRole) : '') + '.'
+                       : 'Återsänd till arrangören ' + esc(r.decidedAt) + (r.comment ? ': ' + esc(r.comment) : '.'))
+                    + '</div>';
+            } else if (d.viewerIsSubmitter) {
+                html += '<div class="alert alert-secondary" id="rrSelf">Du skickade in listan själv, så en annan granskare i kretsen behöver gå igenom den.</div>';
+            } else {
+                html += '<div class="card"><div class="card-body">'
+                    + (r.requiresTwo ? '<p class="small mb-2"><i class="bi bi-people me-1"></i>Kretsen kräver två olika granskare vid SM och landsdelsmästerskap.'
+                        + (r.firstApprover ? ' ' + esc(r.firstApprover) + ' har redan godkänt.' : '') + '</p>' : '')
+                    + (d.viewerApprovedFirst ? '<div class="alert alert-info py-2">Du har redan godkänt. En annan granskare behöver göra det andra godkännandet.</div>' : '')
+                    + '<div class="mb-2" role="radiogroup">'
+                    + '<div class="form-check"><input class="form-check-input" type="radio" name="rrAction" id="rrApprove" value="approve" checked><label class="form-check-label" for="rrApprove">Godkänn resultatlistan</label></div>'
+                    + '<div class="form-check"><input class="form-check-input" type="radio" name="rrAction" id="rrReturn" value="return"><label class="form-check-label" for="rrReturn">Be arrangören rätta något</label></div></div>'
+                    + '<label class="form-label" for="rrComment">Kommentar till arrangören <span class="text-muted small">(krävs när du ber om en rättelse)</span></label>'
+                    + '<textarea class="form-control mb-2" id="rrComment" rows="3" maxlength="4000"></textarea>'
+                    + (isLink ? '<div class="row g-2"><div class="col-md-6"><label class="form-label" for="rrName">Ditt namn</label><input class="form-control" id="rrName" maxlength="200" autocomplete="name"></div>'
+                        + '<div class="col-md-6"><label class="form-label" for="rrRole">Din roll i kretsen</label><input class="form-control" id="rrRole" maxlength="200" placeholder="t.ex. ordförande, sekreterare"></div></div>'
+                        + '<p class="small text-muted mt-2 mb-2">Namnet och rollen står med på beslutet, tillsammans med adressen länken skickades till.</p>' : '')
+                    + '<button type="button" class="btn btn-primary" id="rrSend">Skicka beslutet</button><div id="rrResult" class="mt-2" role="status"></div>'
+                    + '</div></div>';
+            }
+            box.innerHTML = html;
+            const send = box.querySelector('#rrSend');
+            if (send) send.addEventListener('click', () => {
+                const act = box.querySelector('input[name="rrAction"]:checked').value;
+                const body = { comment: box.querySelector('#rrComment').value };
+                let url;
+                if (isLink) {
+                    url = '/umbraco/surface/ResultReview/ActByLink';
+                    Object.assign(body, { t: opts.token, action: act, name: box.querySelector('#rrName').value, role: box.querySelector('#rrRole').value });
+                } else {
+                    url = '/umbraco/surface/ResultReview/' + (act === 'approve' ? 'Approve' : 'Return');
+                    body.id = r.id;
+                }
+                send.disabled = true;
+                fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': csrf() },
+                    body: new URLSearchParams(body).toString()
+                }).then(x => x.json()).then(x => {
+                    const res = box.querySelector('#rrResult');
+                    res.className = 'mt-2 alert py-2 ' + (x.success ? 'alert-success' : 'alert-warning');
+                    res.textContent = x.message || '';
+                    if (x.success) { send.classList.add('d-none'); if (opts.onDone) opts.onDone(x); }
+                    else send.disabled = false;
+                }).catch(() => {
+                    const res = box.querySelector('#rrResult');
+                    res.className = 'mt-2 alert alert-warning py-2';
+                    res.textContent = 'Beslutet kunde inte skickas. Försök igen om en stund.';
+                    send.disabled = false;
+                });
+            });
+        };
+    })();
+}
+</script>

@@ -1,4 +1,4 @@
-using HpskSite.CompetitionTypes.Common;
+﻿using HpskSite.CompetitionTypes.Common;
 using HpskSite.CompetitionTypes.Faltskytte.Models;
 using HpskSite.CompetitionTypes.Precision.Models;
 using Microsoft.Extensions.Logging;
@@ -35,15 +35,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly IContentService _contentService;
         private readonly FaltskytteResultsBuilder _builder;
         private readonly ILogger<FaltskytteResultArtifactService> _logger;
+        private readonly IServiceProvider _services;
 
         public FaltskytteResultArtifactService(
             IContentService contentService,
             FaltskytteResultsBuilder builder,
-            ILogger<FaltskytteResultArtifactService> logger)
+            ILogger<FaltskytteResultArtifactService> logger,
+            IServiceProvider services)
         {
             _contentService = contentService;
             _builder = builder;
             _logger = logger;
+            _services = services;
         }
 
         /// <summary>
@@ -94,6 +97,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
                 _logger.LogInformation("Resultatartefakten omräknad för fältskyttetävling {CompetitionId} ({Reason})",
                     competitionId, reason);
+                // Kretsgranskning fas 2: en ändrad lista efter inskick/godkännande.
+                if (_services.GetService(typeof(HpskSite.Services.Kretsgranskning.ResultReviewHooks)) is HpskSite.Services.Kretsgranskning.ResultReviewHooks hooks)
+                    await hooks.AfterResultDataWrittenAsync(competitionId, resultPage.GetValue<string>("resultData"));
                 return true;
             }
             catch (Exception ex)

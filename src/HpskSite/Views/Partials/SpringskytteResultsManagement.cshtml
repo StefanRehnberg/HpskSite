@@ -1,4 +1,4 @@
-@*
+﻿@*
  * Springskytte Results Management Partial View
  * Completely isolated from standard competition results entry.
  * Handles time-based results with stop-by-stop shot recording.
@@ -265,6 +265,8 @@
             </div>
         </div>
     </div>
+
+    @await Html.PartialAsync("_ResultReviewCard", competitionId)
 
     @if (!string.IsNullOrEmpty(subCompetitionName))
     {

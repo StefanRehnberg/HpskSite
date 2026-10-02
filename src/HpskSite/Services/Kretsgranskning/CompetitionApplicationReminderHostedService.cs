@@ -74,6 +74,10 @@ namespace HpskSite.Services.Kretsgranskning
                 apps.SetReminderRecipients(d.Key, n);
                 if (n > 0) sentReminders++;
             }
+
+            // Resultatgranskningen (fas 2) i samma svep och samma spärrtabell.
+            try { sentReminders += await sp.GetRequiredService<ResultReviewReminderService>().RunOnceAsync(today); }
+            catch (Exception ex) { _logger.LogError(ex, "Resultatgranskningens påminnelser kunde inte köras."); }
             return sentReminders;
         }
 
