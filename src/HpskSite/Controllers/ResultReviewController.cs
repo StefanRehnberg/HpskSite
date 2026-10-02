@@ -209,7 +209,9 @@ namespace HpskSite.Controllers
 
             var reviews = SafeList(() => _reviews.ForRegion(regionId))
                 .Select(r => new { r, c = Context(r.CompetitionId) })
-                .Where(x => x.c?.Date == null || x.c.Date.Value.Year == y)
+                // ⚠️ En lista som väntar på kretsen visas ALLTID — årsväljaren får aldrig gömma arbete.
+                // Bara avgjorda listor följer året.
+                .Where(x => x.r.Status == ResultReviewStatus.Inskickad || x.c?.Date == null || x.c.Date.Value.Year == y)
                 .ToList();
             var reviewed = reviews.Select(x => x.r.CompetitionId).ToHashSet();
 
@@ -549,7 +551,21 @@ namespace HpskSite.Controllers
             public string? ResultUrl; public string? Url;
         }
 
+        /// <summary>
+        /// Tävlingens sammanhang. Ett fel i EN tävlings egenskaper får inte fälla kretsens hela inkorg
+        /// (mätt: en ren sträng i competitionScope fick FlexibleDropdown-konverteraren att kasta).
+        /// </summary>
         private CompCtx? Context(int competitionId)
+        {
+            try { return ContextCore(competitionId); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Resultatgranskning: tävling {Id} kunde inte läsas.", competitionId);
+                return null;
+            }
+        }
+
+        private CompCtx? ContextCore(int competitionId)
         {
             var comp = UmbracoContext.Content?.GetById(competitionId);
             if (comp == null || comp.ContentType.Alias != "competition") return null;
@@ -562,7 +578,7 @@ namespace HpskSite.Controllers
                 ClubId = comp.Value<int>("clubId"),
                 Venue = comp.Value<string>("venue") ?? "",
                 Level = comp.Value<string>("competitionLevel") ?? "",
-                Scope = ChampionshipCategory.NormalizeScope(comp.Value("competitionScope")?.ToString()),
+                Scope = ChampionshipCategory.NormalizeScope(CompetitionScopeHelper.ReadScope(comp)),
                 IsClubOnly = comp.Value<bool>("isClubOnly"),
                 Url = comp.Url()
             };

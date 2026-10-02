@@ -188,7 +188,7 @@
                 </button>
 
                 <div class="admin-rail-group">Klubben</div>
-                <a class="nav-link d-flex align-items-center" href="/styrelse?type=0&id=@clubId">
+                <a class="nav-link d-flex align-items-center" href="/styrelse?type=0&id=@clubId" target="_blank" rel="noopener">
                     <i class="bi bi-clipboard-check me-2"></i>Styrelsearbete
                     <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar styrelsesidan"></i>
                 </a>
@@ -6672,9 +6672,12 @@ function showDpaStatusModal() {
 (function () {
     var sel = document.getElementById('adminTabMobileSelect');
     if (!sel) return;
+    var lastPane = sel.value;
     sel.addEventListener('change', function () {
-        // A URL-valued option (e.g. Styrelsearbete) navigates away instead of switching a pane.
-        if (sel.value && sel.value.charAt(0) !== '#') { window.location.href = sel.value; return; }
+        // A URL-valued option (Styrelsearbete, Ekonomi) opens its own page in a new tab, like the
+        // rail links, and the picker goes back to the section the user is on.
+        if (sel.value && sel.value.charAt(0) !== '#') { window.open(sel.value, '_blank', 'noopener'); sel.value = lastPane; return; }
+        lastPane = sel.value;
         var btn = document.querySelector('#adminTabs [data-bs-target="' + sel.value + '"]');
         if (btn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(btn).show();
     });
@@ -6690,6 +6693,7 @@ function showDpaStatusModal() {
             if (!target || sel.value === target) return;
             if (!sel.querySelector('option[value="' + target + '"]')) return;
             sel.value = target;
+            lastPane = target;
         });
     });
 })();
