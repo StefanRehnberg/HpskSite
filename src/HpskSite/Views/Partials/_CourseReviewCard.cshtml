@@ -54,14 +54,14 @@
         // annars ser det ut som att funktionen saknas.
         if (!d.offered && d.missingLevel) {
             card.style.display = '';
-            setState('Tävlingens status saknas', 'bg-secondary');
-            // Orden ska vara dialogens egna — fältet heter "Vad är tävlingen godkänd som?".
-            body.innerHTML = '<p class="mb-1">Bangranskning erbjuds för fälttävlingar som är godkända som kretstävling eller högre. '
-                + 'Det är inte angivet vad den här tävlingen är godkänd som.</p>'
-                + '<p class="small text-muted mb-2">Öppna <strong>Redigera tävling</strong>, avsnittet <strong>Tävlingens status</strong>, och välj under '
-                + '<strong>Vad är tävlingen godkänd som?</strong> (till exempel Kretstävling). Är det en föreningstävling behövs ingen granskning.</p>'
+            setState('Tävlingsnivå saknas', 'bg-secondary');
+            // Orden ska vara dialogens egna: fältet Tävlingsnivå i avsnittet Nivå och mästerskap.
+            body.innerHTML = '<p class="mb-1">Bangranskning erbjuds för fälttävlingar med tävlingsnivå kretstävling eller högre. '
+                + 'Tävlingsnivån är inte angiven.</p>'
+                + '<p class="small text-muted mb-2">Öppna <strong>Redigera tävling</strong>, avsnittet <strong>Nivå och mästerskap</strong>, och välj '
+                + '<strong>Tävlingsnivå</strong> (till exempel Kretstävling). Är det en föreningstävling behövs ingen granskning.</p>'
                 + (typeof window.openEditCompetitionModal === 'function'
-                    ? '<button type="button" class="btn btn-outline-primary btn-sm" id="crcOpenLevel"><i class="bi bi-pencil me-1"></i>Ange vad tävlingen är godkänd som</button>' : '');
+                    ? '<button type="button" class="btn btn-outline-primary btn-sm" id="crcOpenLevel"><i class="bi bi-pencil me-1"></i>Ange tävlingsnivå</button>' : '');
             const open = document.getElementById('crcOpenLevel');
             if (open) open.addEventListener('click', () => {
                 window.openEditCompetitionModal(+CID, false, 'Faltskytte');

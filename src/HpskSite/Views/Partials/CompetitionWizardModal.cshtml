@@ -112,7 +112,7 @@
                             </div>
                         </div>
                         <div class="form-text text-muted small mb-3" style="margin-top:-0.5rem">
-                            Välj minst ett av: klubb, krets eller mästerskap (nästa steg, Tävlingens status). Behövs för att tävlingen ska få en lättläst URL.
+                            Välj minst ett av: klubb, krets eller mästerskap (nästa steg, Nivå och mästerskap). Behövs för att tävlingen ska få en lättläst URL.
                         </div>
 
                         <div class="alert alert-warning py-2 d-none" id="wizard_clubMismatchWarning">
@@ -120,7 +120,7 @@
                             <span id="wizard_clubMismatchText"></span>
                         </div>
 
-                        @* "Endast klubbens egna medlemmar" flyttad till steget Tävlingens status (2026-10-01). *@
+                        @* "Endast klubbens egna medlemmar" flyttad till steget Nivå och mästerskap (2026-10-01). *@
 
                         <div class="alert alert-info py-2 mb-0" id="wizard_organizerHelpText">
                             <i class="bi bi-geo-alt me-1"></i><strong>Var hamnar tävlingen?</strong>
@@ -128,14 +128,14 @@
                         </div>
                     </div>
 
-                    <!-- Step 2: Tävlingens status (2026-10-01) -->
+                    <!-- Step 2: Nivå och mästerskap (2026-10-01) -->
                     @* Kategori, vem som får anmäla sig, mästerskap, standardmedaljer och hederspriser
                        i ETT steg, eftersom de hänger ihop: kategorin avgör om standardmedaljer och
                        "endast egna medlemmar" är möjliga. Reglerna bor i _CompetitionLevelField.
-                       Samma fält, samma id:n och samma ordning som "Tävlingens status" i
+                       Samma fält, samma id:n och samma ordning som "Nivå och mästerskap" i
                        redigeringsmodalerna. *@
                     <div class="wizard-step d-none" data-step="2">
-                        <h6 class="mb-3 text-primary"><i class="bi bi-patch-check me-1"></i>Tävlingens status</h6>
+                        <h6 class="mb-3 text-primary"><i class="bi bi-patch-check me-1"></i>Nivå och mästerskap</h6>
 
                         @await Html.PartialAsync("_CompetitionLevelField", "wizard_")
 
@@ -157,7 +157,7 @@
                                     <option value="@scopeOption">@scopeOption</option>
                                 }
                             </select>
-                            <small class="form-text text-muted">Om en mästartitel avgörs. Ett mästerskap kan ingå i en tävling i vilken kategori som helst. Avgör hur standardmedaljer beräknas.</small>
+                            <small class="form-text text-muted">Om en mästartitel avgörs. Ett mästerskap kan ingå i en tävling på vilken tävlingsnivå som helst. Avgör hur standardmedaljer beräknas.</small>
                         </div>
 
                         <div class="mb-3 form-check">
@@ -854,7 +854,7 @@
 // Wizard State
 let wizardCurrentStep = 0;
 // Stegens index, namngivna. ⚠ Fram till 2026-10-01 var de magiska tal utspridda i filen
-// (3 = klasser, 4 = serier, 6 = sista); ett nytt steg ("Tävlingens status") hade annars
+// (3 = klasser, 4 = serier, 6 = sista); ett nytt steg ("Nivå och mästerskap") hade annars
 // tyst flyttat klassvalideringen till fel steg. Ordningen = data-step i markupen.
 const WIZARD_STEP = { type: 0, organizer: 1, status: 2, registration: 3, classes: 4, series: 5, payments: 6, advanced: 7 };
 const WIZARD_LAST_STEP = WIZARD_STEP.advanced;
@@ -1517,7 +1517,7 @@ function updateWizardUI() {
     const stepNames = [
         'Tävlingstyp',
         'Arrangör',
-        'Tävlingens status',
+        'Nivå och mästerskap',
         'Anmälan',
         document.getElementById('wizard_competitionType').value === 'Springskytte'
             ? 'Vapengrupper & Åldersklasser'
@@ -1528,7 +1528,7 @@ function updateWizardUI() {
     ];
     document.getElementById('wizardStepLabel').textContent =
         `Steg ${wizardCurrentStep + 1} av ${stepNames.length}: ${stepNames[wizardCurrentStep]}`;
-    // Tävlingens status läser värden och mästerskap — förslaget måste vara aktuellt när steget visas.
+    // Nivå och mästerskap läser värden och mästerskap — förslaget måste vara aktuellt när steget visas.
     if (wizardCurrentStep === WIZARD_STEP.status && window.hpskLevelRefresh) hpskLevelRefresh('wizard_');
 
     // Update buttons
@@ -1774,7 +1774,7 @@ function submitWizard() {
         // Jump back to Step 1 where the Klubb/Krets fields live, then alert.
         wizardCurrentStep = WIZARD_STEP.organizer;
         updateWizardUI();
-        alert('Välj antingen ansvarig klubb, krets eller mästerskap (steget Tävlingens status) — annars går det inte att skapa en lättläst URL för tävlingen.');
+        alert('Välj antingen ansvarig klubb, krets eller mästerskap (steget Nivå och mästerskap) — annars går det inte att skapa en lättläst URL för tävlingen.');
         return;
     }
 
@@ -2055,7 +2055,7 @@ window.hpskWizardFromApplication = function (p) {
         b.id = 'wizard_applicationBanner';
         b.className = 'alert alert-success py-2';
         b.innerHTML = '<i class="bi bi-check2-circle me-1"></i><strong>Skapas ur kretsens godkända ansökan.</strong> '
-            + 'Namn, datum, gren, kategori och arrangör är ifyllda. Gå igenom stegen och gör övriga inställningar som vanligt.'
+            + 'Namn, datum, gren, tävlingsnivå och arrangör är ifyllda. Gå igenom stegen och gör övriga inställningar som vanligt.'
             + (p.awaitingForbundet ? '<div class="small mt-1">Förbundet har inte beslutat ännu. Ansökan visar "Hos Förbundet" tills kretsen registrerar beslutet, och flyttar Förbundet datumet får ni veta det.</div>' : '');
         body.insertBefore(b, body.firstChild);
     }

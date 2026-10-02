@@ -42,7 +42,7 @@ namespace HpskSite.CompetitionTypes.Common
             "Egenbokning",
             "Fältskytte-inställningar",
             "Arrangör / Synlighet",
-            "Tävlingens status",
+            "Nivå och mästerskap",
             "Tävlingsledning & Betalning"
         };
 
@@ -142,26 +142,26 @@ namespace HpskSite.CompetitionTypes.Common
                       "CompetitionUrlProvider inte bilda någon URL."),
             new("regionalFederation", "Krets (endast om ingen klubb)", FieldControl.Select, "Arrangör / Synlighet", 2),
 
-            // ── Tävlingens status (2026-10-01) ──────────────────────────────────
+            // ── Nivå och mästerskap (2026-10-01) ──────────────────────────────────
             // Kategori, vem som får anmäla sig, mästerskap, standardmedaljer och hederspriser
             // i ETT avsnitt: kategorin avgör om standardmedaljer och "endast egna medlemmar" är
             // möjliga (CompetitionLevel.ConsistencyError).
             // ⚠ Namnet skrivs som LITERAL (= CompetitionLevel.PropertyAlias): kontraktssviterna
             // läser katalogen ur källan och känner bara igen new("namn", ...).
-            new("competitionLevel", "Vad är tävlingen godkänd som?", FieldControl.Slot, "Tävlingens status", 1,
+            new("competitionLevel", "Tävlingsnivå", FieldControl.Slot, "Nivå och mästerskap", 1,
                 slot: "competition-level",
                 note: "_CompetitionLevelField. Kategorin enligt SHB C.3.1 (vem som godkänt tävlingen), INTE vem som får anmäla sig. " +
                       "Tomt = ej bekräftad, dialogen föreslår en kategori (CompetitionLevel.Suggest)."),
-            new("isClubOnly", "Endast klubbens egna medlemmar får anmäla sig", FieldControl.Checkbox, "Tävlingens status", 2,
+            new("isClubOnly", "Endast klubbens egna medlemmar får anmäla sig", FieldControl.Checkbox, "Nivå och mästerskap", 2,
                 help: "Kryssar du i rutan syns tävlingen bara för klubbens medlemmar. Annars får alla anmäla sig."),
-            new("competitionScope", "Mästerskap", FieldControl.Select, "Tävlingens status", 3,
-                help: "Om en mästartitel avgörs. Ett mästerskap kan ingå i en tävling i vilken kategori som helst. Avgör hur standardmedaljer beräknas."),
-            new("isAwardingStandardMedals", "Standardmedaljsgrundande", FieldControl.Checkbox, "Tävlingens status", 4,
+            new("competitionScope", "Mästerskap", FieldControl.Select, "Nivå och mästerskap", 3,
+                help: "Om en mästartitel avgörs. Ett mästerskap kan ingå i en tävling på vilken tävlingsnivå som helst. Avgör hur standardmedaljer beräknas."),
+            new("isAwardingStandardMedals", "Standardmedaljsgrundande", FieldControl.Checkbox, "Nivå och mästerskap", 4,
                 help: "Standardmedaljer delas bara ut vid kretstävling eller högre (SHB C.5.1.1)."),
             // Hederspriser (SHB C.3.4.2): arrangören avgör om de utgår, och om de gör det
             // skall de tillfalla minst en fjärdedel av deltagarna. Styr hedersprissektionen
             // på prisutdelningssidan.
-            new("isAwardingHonoraryAward", "Hederspriser utgår", FieldControl.Checkbox, "Tävlingens status", 5,
+            new("isAwardingHonoraryAward", "Hederspriser utgår", FieldControl.Checkbox, "Nivå och mästerskap", 5,
                 help: "Hederspriser skall tillfalla minst en fjärdedel av deltagarna (SHB C.3.4.2). "
                     + "Utgår de inte skall det anges på tävlingsinbjudan."),
 

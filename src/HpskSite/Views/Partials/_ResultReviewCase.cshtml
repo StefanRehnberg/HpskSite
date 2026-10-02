@@ -21,7 +21,7 @@ if (!window.hpskRenderReviewCase) {
             const ok = (good, text) => rows.push('<li class="list-group-item d-flex gap-2"><i class="bi ' + (good ? 'bi-check-circle text-success' : 'bi-exclamation-triangle text-warning') + ' mt-1" aria-hidden="true"></i><div>' + text + '</div></li>');
             ok(!!comp.place && !!comp.date, 'Tävlingen: <strong>' + esc(comp.name) + '</strong>, ' + esc(comp.date || 'datum saknas') + (comp.endDate && comp.endDate !== comp.date ? ' – ' + esc(comp.endDate) : '')
                 + ', ' + esc(comp.place || 'plats saknas') + '. Arrangör: ' + esc(comp.organiser) + '.');
-            ok(true, 'Kategori: ' + esc(comp.level || 'ej angiven') + (comp.scope && comp.scope !== 'Ingen' ? ' · Mästerskap: ' + esc(comp.scope) : '') + (comp.discipline ? ' · ' + esc(comp.discipline) : '') + '.');
+            ok(true, 'Tävlingsnivå: ' + esc(comp.level || 'ej angiven') + (comp.scope && comp.scope !== 'Ingen' ? ' · Mästerskap: ' + esc(comp.scope) : '') + (comp.discipline ? ' · ' + esc(comp.discipline) : '') + '.');
             ok(!!r.weaponCheckAttested, r.weaponCheckAttested ? 'Arrangören har bekräftat att vapenkontrollen är gjord.' : 'Arrangören har inte bekräftat vapenkontrollen.');
             const small = (c.classes || []).filter(x => x.underFive);
             ok(small.length === 0 || (c.merged || []).length > 0,

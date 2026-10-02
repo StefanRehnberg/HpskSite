@@ -169,7 +169,7 @@ window.hpskKretsCourseReviewInit = function () {
         // inskicket frivilligt och tävlingen står som neutral "Inte inskickad".
         (data.upcoming || []).forEach(a => rows.push({
             key: a.required ? 'awaiting' : 'notSubmitted', date: a.date || '', name: a.name, organiser: a.organiser, id: 0, late: a.late,
-            note: (a.missingLevel ? 'Det är inte angivet vad tävlingen är godkänd som (Tävlingens status) — arrangören behöver ange det innan banan kan skickas in. '
+            note: (a.missingLevel ? 'Tävlingsnivån är inte angiven — arrangören behöver ange den (Redigera tävling → Nivå och mästerskap) innan banan kan skickas in. '
                     : '')
                 + (a.hasStations ? 'Banan finns, men är inte inskickad' : 'Ingen stationsbeskrivning än')
                 + (a.required && a.deadline ? ' · skickas in senast ' + a.deadline : '')
