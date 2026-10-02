@@ -980,9 +980,19 @@ slår på **"Kräv kretsens godkännande"** håller inne platsmedaljerna tills l
   `CaseKind = "Resultat"`, 60 dagar, bär kontrollsumman) och till kretsadministratörerna.
   Sajtadmin får länkarna i svaret (`caseLinks`). `ResultReviewHooks.NotifyReviewersAsync` är enda
   mottagarvägen.
+- **⚠️⚠️ "Väntar på arrangören" FINNS BARA NÄR KRETSEN KRÄVER GODKÄNNANDE** (Stefan 2026-10-02).
+  Annars är inskicket frivilligt: tävlingen står som neutral **"Inte inskickad"**, utan sista dag,
+  utan "sen", och arrangören påminns inte. Med kravet hänger medaljerna på inskicket, och då gäller
+  14-dagarsgränsen och påminnelserna.
+- **⚠️ Redan genomförda tävlingar rörs inte:** bara tävlingar som avslutats efter
+  `ResultReviewService.FeatureStart()` räknas eller påminns. Startdagen är **granskningstabellens
+  skapandedag** (`sys.tables.create_date`) — migreringen körs strax före deployen. Avsiktligt ingen
+  inställning: en glömd inställning hade påmint varje gammal tävling dagen efter deployen (mätt i
+  dev: svepet registrerade påminnelser för två tävlingar från före funktionen).
 - **Påminnelser** (`ResultReviewReminderService`, i SAMMA svep och spärrtabell som fas 4):
-  arrangören 3 och 10 dagar efter tävlingen (bara senaste passerade steget, bara 30 dagar bakåt),
-  kretsen när en inskickad lista legat 5 dagar. Regeln: `ResultReviewReminders.Compute`.
+  arrangören 3 och 10 dagar efter tävlingen — bara när kretsen kräver godkännande och tävlingen
+  avslutats efter startdagen (bara senaste passerade steget, bara 30 dagar bakåt) — och kretsen när
+  en inskickad lista legat 5 dagar. Regeln: `ResultReviewReminders.Compute`.
 - Endpoints: `ResultReview/GetForCompetition`, `Submit`, `GetRegionReviews`, `GetReview`,
   `Approve`, `Return`, `GetByLink`, `ActByLink`, `SaveSettings`.
 

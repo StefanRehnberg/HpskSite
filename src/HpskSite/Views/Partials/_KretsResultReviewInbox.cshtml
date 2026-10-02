@@ -122,7 +122,8 @@ window.hpskKretsResultReviewInit = function () {
     const token = () => document.querySelector('input[name="__RequestVerificationToken"]').value;
     const statusBadge = s => s === 'Godkand' ? '<span class="badge bg-success">Godkänd</span>'
         : s === 'Atersand' ? '<span class="badge bg-secondary">Återsänd till arrangören</span>'
-        : s === 'awaiting' ? '<span class="badge bg-light text-dark border">Väntar på arrangören</span>'
+        : s === 'awaiting' ? '<span class="badge bg-warning-subtle text-warning-emphasis">Väntar på arrangören</span>'
+        : s === 'notSubmitted' ? '<span class="badge bg-light text-dark border">Inte inskickad</span>'
         : '<span class="badge bg-warning text-dark">Väntar på kretsen</span>';
     let year = new Date().getFullYear(), data = null;
 
@@ -178,19 +179,26 @@ window.hpskKretsResultReviewInit = function () {
             note: x.review.status === 'Godkand' ? 'Godkänd ' + (x.review.decidedAt || '') + (x.review.decider ? ' av ' + x.review.decider : '')
                 : x.review.status === 'Atersand' ? (x.review.comment || '') : ''
         }));
+        // Bara när kretsen KRÄVER sitt godkännande väntar något på arrangören (medaljerna hänger på
+        // inskicket, och det finns en sista dag). Annars är inskicket frivilligt: neutral status.
         (data.awaiting || []).forEach(a => rows.push({
-            key: 'awaiting', date: a.date || '', name: a.name, organiser: a.organiser, id: 0, late: a.late,
-            note: (a.resultPublished ? 'Resultatlistan är publicerad' : 'Resultatlistan är inte publicerad') + ' · skickas in senast ' + a.deadline
+            key: a.required ? 'awaiting' : 'notSubmitted', date: a.date || '', name: a.name, organiser: a.organiser, id: 0, late: a.late,
+            note: (a.resultPublished ? 'Resultatlistan är publicerad, men inte inskickad till kretsen' : 'Resultatlistan är inte publicerad')
+                + (a.required && a.deadline ? ' · skickas in senast ' + a.deadline : '')
         }));
         return rows.sort((p, q) => (q.date || '').localeCompare(p.date || ''));
     }
 
     function renderTable() {
         const all = tableRows();
-        const counts = { all: all.length, awaiting: 0, Atersand: 0, Godkand: 0 };
+        const counts = { all: all.length, awaiting: 0, notSubmitted: 0, Atersand: 0, Godkand: 0 };
         all.forEach(r => counts[r.key]++);
         const cur = filter.value || 'all';
-        filter.innerHTML = [['all', 'Alla'], ['awaiting', 'Väntar på arrangören'], ['Atersand', 'Återsända'], ['Godkand', 'Godkända']]
+        // "Väntar på arrangören" erbjuds bara när kretsen kräver godkännande — annars finns inget sådant läge.
+        const opts = [['all', 'Alla']]
+            .concat(data.settings && data.settings.requireApproval ? [['awaiting', 'Väntar på arrangören']] : [])
+            .concat([['notSubmitted', 'Inte inskickade'], ['Atersand', 'Återsända'], ['Godkand', 'Godkända']]);
+        filter.innerHTML = opts
             .map(([v, l]) => '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + l + ' (' + counts[v] + ')</option>').join('');
         const rows = cur === 'all' ? all : all.filter(r => r.key === cur);
         if (!all.length) {
