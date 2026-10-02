@@ -263,6 +263,32 @@ namespace HpskSite.Controllers
             });
         }
 
+        /// <summary>
+        /// Siffrorna i kretsens räls — hur många resultatlistor och ansökningar som väntar på
+        /// kretsen. Lätt med flit: rälsen läser den vid sidladdning, så att siffran är sann innan
+        /// någon öppnat fliken (samma regel som föreningsintygets siffra i klubbens räls).
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetPendingCounts(int regionId)
+        {
+            var auth = await KretsAuthorityAsync(regionId);
+            var appAuth = auth.Allowed || await ApplicationAuthorityAsync(regionId);
+            if (!auth.Allowed && !appAuth) return Json(new { success = false, message = "Åtkomst nekad" });
+            var reviews = auth.Allowed && _reviews.TablesExist()
+                ? SafeList(() => _reviews.ForRegion(regionId)).Count(r => r.Status == ResultReviewStatus.Inskickad) : 0;
+            var apps = SafeList(() => _apps.ForRegion(regionId, new DateTime(2000, 1, 1), new DateTime(2100, 12, 31)))
+                .Count(a => a.Status == CompetitionApplicationStatus.Inskickad);
+            return Json(new { success = true, reviews, applications = apps });
+        }
+
+        private async Task<bool> ApplicationAuthorityAsync(int regionId)
+        {
+            var region = _calendar.Region(regionId);
+            var me = await CurrentMemberAsync();
+            return region != null && me != null && (_uppdrag.HasUppdrag(regionId, me.Id, BoardRoleDefinitions.RoleTavlingsansvarig)
+                || await _auth.IsRegionalAdminForRegion(region.Code));
+        }
+
         /// <summary>Ett ärende med granskarens automatiska checklista.</summary>
         [HttpGet]
         public async Task<IActionResult> GetReview(int id)

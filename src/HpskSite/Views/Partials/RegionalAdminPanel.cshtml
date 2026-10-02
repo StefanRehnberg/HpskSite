@@ -271,11 +271,15 @@
                 @* Kretsgranskning: inkorgarna är vanliga flikar här (Stefans beslut 2026-10-02). Samma
                    partial renderas av /kretsen/ansokningar och /kretsen/granskning, som finns kvar
                    för den tävlingsansvarige och resultatgranskaren som inte är kretsadmin. *@
-                <button class="nav-link" id="regionApplications-tab" data-bs-toggle="tab" data-bs-target="#regionApplicationsTab" type="button" role="tab" aria-controls="regionApplicationsTab" aria-selected="false">
+                @* Siffrorna räknas DIREKT vid sidladdning (GetPendingCounts), inte när fliken öppnas — samma
+                   regel som föreningsintygets siffra i klubbens räls: den ska vara sann innan någon klickat. *@
+                <button class="nav-link d-flex align-items-center" id="regionApplications-tab" data-bs-toggle="tab" data-bs-target="#regionApplicationsTab" type="button" role="tab" aria-controls="regionApplicationsTab" aria-selected="false">
                     <i class="bi bi-envelope-paper me-2"></i>Ansökningar
+                    <span class="badge bg-warning text-dark ms-auto d-none" id="regionApplicationsRailCount" title="Ansökningar som väntar på kretsen">0</span>
                 </button>
-                <button class="nav-link" id="regionResultReview-tab" data-bs-toggle="tab" data-bs-target="#regionResultReviewTab" type="button" role="tab" aria-controls="regionResultReviewTab" aria-selected="false">
+                <button class="nav-link d-flex align-items-center" id="regionResultReview-tab" data-bs-toggle="tab" data-bs-target="#regionResultReviewTab" type="button" role="tab" aria-controls="regionResultReviewTab" aria-selected="false">
                     <i class="bi bi-clipboard-check me-2"></i>Resultatgranskning
+                    <span class="badge bg-warning text-dark ms-auto d-none" id="regionResultReviewRailCount" title="Resultatlistor som väntar på kretsen">0</span>
                 </button>
 
                 <div class="admin-rail-group">Medlemmar</div>
@@ -434,6 +438,17 @@
             };
             wire('regionApplications-tab', 'hpskKretsApplicationsInit');
             wire('regionResultReview-tab', 'hpskKretsResultReviewInit');
+            // Siffrorna i rälsen och mobilväljaren — vid sidladdning.
+            fetch('/umbraco/surface/ResultReview/GetPendingCounts?regionId=@regionContentId', { credentials: 'same-origin' })
+                .then(r => r.json()).then(d => {
+                    if (!d.success) return;
+                    const set = (id, n) => { const el = document.getElementById(id); if (el) { el.textContent = n; el.classList.toggle('d-none', !n); } };
+                    set('regionApplicationsRailCount', d.applications);
+                    set('regionResultReviewRailCount', d.reviews);
+                    const opt = (v, label, n) => { const o = document.querySelector('#regionAdminTabMobileSelect option[value="' + v + '"]'); if (o) o.textContent = label + (n ? ' (' + n + ')' : ''); };
+                    opt('#regionApplicationsTab', 'Ansökningar', d.applications);
+                    opt('#regionResultReviewTab', 'Resultatgranskning', d.reviews);
+                }).catch(() => { /* siffran är en hjälp, inte en förutsättning */ });
         })();
         </script>
 
