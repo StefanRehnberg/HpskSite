@@ -203,7 +203,8 @@ window.hpskKretsResultReviewInit = function () {
         const rows = cur === 'all' ? all : all.filter(r => r.key === cur);
         if (!all.length) {
             $('kgBody').innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-inbox display-6 d-block mb-2"></i>'
-                + '<p class="mb-0 small">Inga andra resultatlistor ' + year + '.</p></div>';
+                // "andra" bara när det gula kortet ovanför syns — annars läser det som att något saknas.
+                + '<p class="mb-0 small">' + (data.reviews.some(x => x.review.status === 'Inskickad') ? 'Inga andra resultatlistor ' : 'Inga resultatlistor att visa för ') + year + '.</p></div>';
             return;
         }
         $('kgBody').innerHTML = '<p class="small text-muted">Visar ' + rows.length + ' av ' + all.length + '.</p>'
