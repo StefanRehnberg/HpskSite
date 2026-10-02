@@ -53,8 +53,11 @@
             }
         </select>
         <div class="form-text" id="@(prefix)competitionLevelExplain"></div>
-        <div class="small text-warning-emphasis mt-1 d-none" id="@(prefix)competitionLevelSuggested">
-            <i class="bi bi-lightbulb me-1"></i>Förslag utifrån arrangör, mästerskap och standardmedaljer — kontrollera att det stämmer innan du sparar.
+        @* ⚠️ Ett FÖRSLAG ser annars ut som ett sparat värde — bangranskningen säger då "saknas" om en
+           tävling vars dialog visar Kretstävling. Rutan säger rakt ut att inget är sparat. *@
+        <div class="alert alert-warning py-2 px-3 small mt-2 mb-0 d-none" id="@(prefix)competitionLevelSuggested">
+            <i class="bi bi-exclamation-circle me-1"></i><strong>Inte sparad än.</strong> Tävlingsnivån är ett förslag utifrån arrangör, mästerskap och
+            standardmedaljer. Kontrollera att det stämmer och tryck <strong>Spara</strong> — först då är tävlingsnivån satt.
         </div>
         <div class="small text-danger mt-1 d-none" id="@(prefix)competitionLevelWarning"></div>
     }
