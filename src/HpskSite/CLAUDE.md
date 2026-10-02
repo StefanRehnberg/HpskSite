@@ -880,8 +880,11 @@ avstyrker kretsen, och Förbundet beslutar (kretsen registrerar beslutet).
 - **Behörighet:** klubbsidan = klubbadmin (kretsadmin för kretsens egna); kretssidan =
   **Tävlingsansvarig** (uppdraget, fas 1), kretsadmin eller sajtadmin. Beslutet stämplas med rollen
   vägen kom genom (`DeciderRole`) och kanalen (`Channel`: Inloggad / Lank).
-- **⚠️ Kretsens inkorg är en EGEN SIDA, `/kretsen/ansokningar?krets=`** — den tävlingsansvarige är
-  ofta inte kretsadmin och når inte adminpanelen. Rälsen har en länk dit.
+- **Kretsens inkorg är en FLIK i kretsens adminpanel** (`#regionApplicationsTab`, Stefans beslut
+  2026-10-02) och renderas av partialen **`_KretsApplicationsInbox`** (lat: `hpskKretsApplicationsInit`).
+  ⚠️ **Samma partial renderas av `/kretsen/ansokningar?krets=`**, som finns kvar för den
+  tävlingsansvarige som inte är kretsadmin och inte når panelen — mejlen pekar dit. Skriv aldrig en
+  andra kopia av inkorgen. Bara Styrelsearbete och Ekonomi öppnar egna sidor ur rälsen (i ny flik).
 - **Länkläget:** utan tävlingsansvarig går aviseringen via `KretsUppdragService.Recipients` till
   kretsens kontaktadress (en länk utan inloggning, `/kretsen/arende?t=`, 60 dagar) och till
   kretsadministratörerna (inkorgen). Länken bär en **kontrollsumma** av ansökans innehåll och slutar
@@ -962,8 +965,10 @@ slår på **"Kräv kretsens godkännande"** håller inne platsmedaljerna tills l
 - **Arrangören:** kortet `_ResultReviewCard` (precision, fält och spring — en partial) på
   Resultat-fliken. Kräver publicerad lista och en uttrycklig bekräftelse av vapenkontrollen
   (`weaponCheck = "1"`; utelämnat = nej). Sista dag 14 dagar efter tävlingen — märks, stoppas inte.
-- **Kretsen:** egen sida **`/kretsen/granskning?krets=`** (resultatgranskaren är sällan
-  kretsadmin; rälslänk `#regionResultReview-link`). Inkorg, "väntar på arrangören", avgjorda och
+- **Kretsen:** fliken **Resultatgranskning** i kretsens adminpanel (`#regionResultReviewTab`),
+  renderad av **`_KretsResultReviewInbox`** (lat: `hpskKretsResultReviewInit`). Samma partial
+  renderas av **`/kretsen/granskning?krets=`**, som finns kvar för resultatgranskaren som inte är
+  kretsadmin (mejlen pekar dit). ⚠️ En väntande lista visas oavsett årsväljaren. Inkorg, "väntar på arrangören", avgjorda och
   kretsens inställningar. Ärendet renderas av **`_ResultReviewCase`**, samma funktion som
   länksidan `/kretsen/resultat-arende?t=` — med en automatisk checklista ur listan (starter per
   klass, sammanslagningar, mästerskapsmedaljörer och oavgjorda platser, standardmedaljer, plats och

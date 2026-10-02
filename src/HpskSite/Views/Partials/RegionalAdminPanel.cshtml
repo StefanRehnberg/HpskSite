@@ -230,8 +230,8 @@
                     <option value="#regionEventsTab">Händelser</option>
                     <option value="#regionAdminCompetitionsTab">Tävlingar</option>
                     <option value="#regionSeriesTab">Serier</option>
-                    <option value="/kretsen/ansokningar?krets=@regionContentId">Ansökningar ↗</option>
-                    <option value="/kretsen/granskning?krets=@regionContentId">Resultatgranskning ↗</option>
+                    <option value="#regionApplicationsTab">Ansökningar</option>
+                    <option value="#regionResultReviewTab">Resultatgranskning</option>
                 </optgroup>
                 <optgroup label="Medlemmar">
                     <option value="#regionCertificationsTab">Certifieringar</option>
@@ -268,17 +268,15 @@
                         data-region-code="@(ViewBag.regionCode as string ?? "")">
                     <i class="bi bi-collection me-2"></i>Serier
                 </button>
-                @* Kretsgranskning fas 4: EGEN SIDA — den tävlingsansvarige är ofta inte kretsadmin
-                   och når inte den här panelen, så inkorgen kan inte vara en flik här. *@
-                <a class="nav-link d-flex align-items-center" id="regionApplications-link" href="/kretsen/ansokningar?krets=@regionContentId">
+                @* Kretsgranskning: inkorgarna är vanliga flikar här (Stefans beslut 2026-10-02). Samma
+                   partial renderas av /kretsen/ansokningar och /kretsen/granskning, som finns kvar
+                   för den tävlingsansvarige och resultatgranskaren som inte är kretsadmin. *@
+                <button class="nav-link" id="regionApplications-tab" data-bs-toggle="tab" data-bs-target="#regionApplicationsTab" type="button" role="tab" aria-controls="regionApplicationsTab" aria-selected="false">
                     <i class="bi bi-envelope-paper me-2"></i>Ansökningar
-                    <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar kretsens ansökningar"></i>
-                </a>
-                @* Kretsgranskning fas 2: resultatgranskningen, egen sida av samma skäl. *@
-                <a class="nav-link d-flex align-items-center" id="regionResultReview-link" href="/kretsen/granskning?krets=@regionContentId">
+                </button>
+                <button class="nav-link" id="regionResultReview-tab" data-bs-toggle="tab" data-bs-target="#regionResultReviewTab" type="button" role="tab" aria-controls="regionResultReviewTab" aria-selected="false">
                     <i class="bi bi-clipboard-check me-2"></i>Resultatgranskning
-                    <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar kretsens resultatgranskning"></i>
-                </a>
+                </button>
 
                 <div class="admin-rail-group">Medlemmar</div>
                 <button class="nav-link" id="regionCertifications-tab" data-bs-toggle="tab" data-bs-target="#regionCertificationsTab" type="button" role="tab" aria-controls="regionCertificationsTab" aria-selected="false">
@@ -294,7 +292,7 @@
                 </button>
 
                 <div class="admin-rail-group">Kretsen</div>
-                <a class="nav-link d-flex align-items-center" href="/styrelse?type=1&id=@regionContentId">
+                <a class="nav-link d-flex align-items-center" href="/styrelse?type=1&id=@regionContentId" target="_blank" rel="noopener">
                     <i class="bi bi-clipboard-check me-2"></i>Styrelsearbete
                     <i class="bi bi-box-arrow-up-right ms-auto small opacity-75" title="Öppnar styrelsesidan"></i>
                 </a>
@@ -420,6 +418,24 @@
                 </div>
             </div>
         </div>
+
+        <!-- Kretsgranskning: tävlingsansökningar och resultatgranskning (laddas när fliken visas) -->
+        <div class="tab-pane fade" id="regionApplicationsTab">
+            @await Html.PartialAsync("_KretsApplicationsInbox", new HpskSite.Controllers.KretsAnsokningarModel { RegionId = regionContentId, RegionName = regionName, Allowed = true })
+        </div>
+        <div class="tab-pane fade" id="regionResultReviewTab">
+            @await Html.PartialAsync("_KretsResultReviewInbox", new HpskSite.Controllers.KretsAnsokningarModel { RegionId = regionContentId, RegionName = regionName, Allowed = true })
+        </div>
+        <script>
+        (function () {
+            const wire = (btnId, init) => {
+                const b = document.getElementById(btnId);
+                if (b) b.addEventListener('shown.bs.tab', () => { if (window[init]) window[init](); });
+            };
+            wire('regionApplications-tab', 'hpskKretsApplicationsInit');
+            wire('regionResultReview-tab', 'hpskKretsResultReviewInit');
+        })();
+        </script>
 
         <!-- Series Sub-Tab -->
         <div class="tab-pane fade" id="regionSeriesTab">
@@ -1684,8 +1700,9 @@
             if (action === 'email' && typeof showRegionEmailModal === 'function') showRegionEmailModal();
             return;
         }
-        // A URL-valued option (Styrelsearbete) navigates away instead of switching a pane.
-        if (sel.value && sel.value.charAt(0) !== '#') { window.location.href = sel.value; return; }
+        // A URL-valued option (Styrelsearbete, Ekonomi) opens its own page in a new tab, like the
+        // rail links, and the picker goes back to the section the user is on.
+        if (sel.value && sel.value.charAt(0) !== '#') { window.open(sel.value, '_blank', 'noopener'); sel.value = lastPane; return; }
         lastPane = sel.value;
         var btn = document.querySelector('#regionAdminTabs [data-bs-target="' + sel.value + '"]');
         if (!btn) return;
