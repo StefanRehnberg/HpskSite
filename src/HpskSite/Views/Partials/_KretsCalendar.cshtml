@@ -45,6 +45,10 @@
     .kc-s-godkand { background: var(--bs-success-bg-subtle); border-left-color: var(--bs-success); }
     .kc-s-preliminar { background: var(--bs-warning-bg-subtle); border-left-color: var(--bs-warning); border-left-style: dashed; }
     .kc-s-handelse { background: var(--bs-secondary-bg-subtle); border-left-color: var(--bs-secondary); }
+    .kc-day.kc-selected { outline: 2px solid var(--bs-primary); outline-offset: -2px; }
+    .kc-hol { display: block; font-size: .68rem; line-height: 1.1; color: var(--bs-danger-text-emphasis); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .kc-day.kc-holiday .kc-num { color: var(--bs-danger-text-emphasis); font-weight: 700; }
+    .kc-list-row.kc-holiday-row { color: var(--bs-danger-text-emphasis); }
     .kc-s-stomprogram { background: var(--bs-info-bg-subtle); border-left-color: var(--bs-info); font-style: italic; }
     .kc-neighbour { opacity: .6; }
     .kc-legend span { display: inline-flex; align-items: center; gap: .3rem; margin-right: .9rem; font-size: .85rem; }
@@ -76,6 +80,10 @@
         <div class="form-check form-switch ms-2 mb-0">
             <input class="form-check-input" type="checkbox" role="switch" id="@(P)Neighbours">
             <label class="form-check-label small" for="@(P)Neighbours" id="@(P)NeighboursLabel">Visa grannkretsar</label>
+        </div>
+        <div class="form-check form-switch ms-2 mb-0">
+            <input class="form-check-input" type="checkbox" role="switch" id="@(P)Holidays">
+            <label class="form-check-label small" for="@(P)Holidays">Visa helgdagar</label>
         </div>
     </div>
     <div class="kc-legend mb-2">
@@ -129,6 +137,39 @@
     let cursor = new Date(); cursor.setDate(1);
     let data = null;
     $('kcNeighbours').checked = pref('neighbours', '0') === '1';
+    $('kcHolidays').checked = pref('holidays', '0') === '1';
+    let selectedDay = null;
+
+    // Svenska helgdagar (och aftnarna, som i praktiken planeras som helgdagar). Räknas i webbläsaren:
+    // påsken med den gregorianska algoritmen, midsommar och alla helgons dag som "lördagen mellan".
+    const holidayCache = {};
+    function holidaysFor(year) {
+        if (holidayCache[year]) return holidayCache[year];
+        const a = year % 19, b = Math.floor(year / 100), c = year % 100, d = Math.floor(b / 4), e = b % 4;
+        const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+        const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+        const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+        const easter = new Date(year, month - 1, day);
+        const rel = n => { const x = new Date(easter); x.setDate(x.getDate() + n); return x; };
+        const sat = (mo, from) => { const x = new Date(year, mo, from); x.setDate(from + ((6 - x.getDay() + 7) % 7)); return x; };
+        const midsommardagen = sat(5, 20);
+        const midsommarafton = new Date(midsommardagen); midsommarafton.setDate(midsommarafton.getDate() - 1);
+        const list = [
+            [new Date(year, 0, 1), 'Nyårsdagen'], [new Date(year, 0, 6), 'Trettondedag jul'],
+            [rel(-2), 'Långfredagen'], [rel(-1), 'Påskafton'], [easter, 'Påskdagen'], [rel(1), 'Annandag påsk'],
+            [new Date(year, 4, 1), 'Första maj'], [rel(39), 'Kristi himmelsfärdsdag'],
+            [rel(48), 'Pingstafton'], [rel(49), 'Pingstdagen'], [new Date(year, 5, 6), 'Sveriges nationaldag'],
+            [midsommarafton, 'Midsommarafton'], [midsommardagen, 'Midsommardagen'],
+            [sat(9, 31), 'Alla helgons dag'],
+            [new Date(year, 11, 24), 'Julafton'], [new Date(year, 11, 25), 'Juldagen'], [new Date(year, 11, 26), 'Annandag jul'],
+            [new Date(year, 11, 31), 'Nyårsafton']
+        ];
+        const map = {};
+        list.forEach(([dt, name]) => { const kk = key(dt); map[kk] = map[kk] ? map[kk] + ' · ' + name : name; });
+        return (holidayCache[year] = map);
+    }
+    const holidayOn = k => $('kcHolidays').checked ? (holidaysFor(parseInt(k.slice(0, 4), 10))[k] || '') : '';
+    window.hpskSwedishHolidays = holidaysFor;   // för verifieringen
 
     const pad = n => String(n).padStart(2, '0');
     const key = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -201,8 +242,10 @@
             const k = key(d);
             const items = entriesOn(k);
             const other = d.getMonth() !== cursor.getMonth();
-            html += '<div class="kc-day' + (other ? ' kc-other' : '') + (k === today ? ' kc-today' : '') + '" tabindex="0" role="button" data-kc-day="' + k + '" aria-label="' + d.getDate() + ' ' + MONTHS[d.getMonth()] + (items.length ? ', ' + items.length + ' poster' : '') + '">'
+            const hol = holidayOn(k);
+            html += '<div class="kc-day' + (other ? ' kc-other' : '') + (k === today ? ' kc-today' : '') + (hol ? ' kc-holiday' : '') + (k === selectedDay ? ' kc-selected' : '') + '" tabindex="0" role="button" data-kc-day="' + k + '" aria-label="' + d.getDate() + ' ' + MONTHS[d.getMonth()] + (hol ? ', ' + hol : '') + (items.length ? ', ' + items.length + ' poster' : '') + '">'
                 + '<span class="kc-num">' + d.getDate() + '</span>'
+                + (hol ? '<span class="kc-hol" title="' + esc(hol) + '">' + esc(hol) + '</span>' : '')
                 + items.slice(0, 3).map(chip).join('')
                 + (items.length > 3 ? '<span class="kc-chip">+' + (items.length - 3) + ' till</span>' : '')
                 + '</div>';
@@ -212,7 +255,14 @@
     }
 
     function renderList(f, t) {
-        const items = data.entries.slice().sort((a, b) => a.date.localeCompare(b.date));
+        const items = data.entries.slice();
+        if ($('kcHolidays').checked) {
+            for (let y = f.getFullYear(); y <= t.getFullYear(); y++)
+                Object.entries(holidaysFor(y)).forEach(([k, name]) => {
+                    if (k >= key(f) && k <= key(t)) items.push({ kind: 'holiday', id: k, name: name, date: k, status: 'holiday' });
+                });
+        }
+        items.sort((a, b) => a.date.localeCompare(b.date));
         if (!items.length) { $('kcBody').innerHTML = '<div class="text-muted">Inget i kalendern de kommande tolv månaderna.</div>'; return; }
         let html = '', lastMonth = '';
         items.forEach(e => {
@@ -228,6 +278,8 @@
     }
 
     function row(e) {
+        if (e.kind === 'holiday')
+            return '<div class="kc-list-row kc-holiday-row" data-kc-entry="holiday-' + esc(e.id) + '"><div class="kc-list-date">' + esc(e.date) + '</div><div class="flex-grow-1"><i class="bi bi-flag me-1"></i>' + esc(e.name) + '</div></div>';
         const name = e.url ? '<a href="' + esc(e.url) + '">' + esc(e.name) + '</a>' : esc(e.name);
         return '<div class="kc-list-row' + (e.isNeighbour ? ' kc-neighbour' : '') + '" data-kc-entry="' + esc(e.kind + '-' + e.id) + '">'
             + '<div class="kc-list-date">' + esc(e.date) + (e.endDate && e.endDate !== e.date ? '<div class="small text-muted">– ' + esc(e.endDate) + '</div>' : '') + '</div>'
@@ -240,7 +292,9 @@
     function showDay(k) {
         const items = entriesOn(k);
         const [y, mo, d] = k.split('-');
-        let html = '<div class="card"><div class="card-body"><h4 class="h6 mb-2">' + parseInt(d, 10) + ' ' + MONTHS[parseInt(mo, 10) - 1] + ' ' + y + '</h4>';
+        const hol = holidayOn(k);
+        let html = '<div class="card border-primary"><div class="card-body"><h4 class="h6 mb-2">' + parseInt(d, 10) + ' ' + MONTHS[parseInt(mo, 10) - 1] + ' ' + y
+            + (hol ? ' <span class="small fw-normal kc-hol d-inline">— ' + esc(hol) + '</span>' : '') + '</h4>';
         html += items.length ? items.map(row).join('') : '<div class="text-muted small">Inget den dagen.</div>';
         const ongoing = periodsOn(k);
         if (ongoing.length) html += '<div class="small fw-semibold mt-3" id="@(P)DayPeriods">Pågår också (kan skjutas vilken dag som helst under perioden)</div>' + ongoing.map(row).join('');
@@ -251,6 +305,19 @@
         }
         html += '</div></div>';
         $('kcDay').innerHTML = html;
+        // ⚠️ Dagvyn står under rutnätet, ofta långt nedanför skärmkanten — utan rullningen ser ett
+        // klick på en dag ut att inte göra någonting.
+        selectedDay = k;
+        root.querySelectorAll('.kc-day.kc-selected').forEach(x => x.classList.remove('kc-selected'));
+        const cell = root.querySelector('[data-kc-day="' + k + '"]');
+        if (cell) cell.classList.add('kc-selected');
+        const card = $('kcDay').firstElementChild;
+        if (card) {
+            const r = card.getBoundingClientRect();
+            if (r.top < 0 || r.bottom > window.innerHeight) card.scrollIntoView({ behavior: 'smooth', block: r.height > window.innerHeight ? 'start' : 'nearest' });
+            const btn = card.querySelector('[data-kc-apply]');
+            if (btn) btn.focus({ preventScroll: true });
+        }
     }
 
     document.addEventListener('click', function (e) {
@@ -278,11 +345,20 @@
         $('kcMonthBtn').classList.toggle('active', v === 'month');
         $('kcListBtn').classList.toggle('active', v === 'list');
         $('kcDay').innerHTML = '';
+        selectedDay = null;
         load();
     }
     $('kcMonthBtn').addEventListener('click', () => setView('month'));
     $('kcListBtn').addEventListener('click', () => setView('list'));
     $('kcNeighbours').addEventListener('change', () => { setPref('neighbours', $('kcNeighbours').checked ? '1' : '0'); load(); });
+    // Helgdagarna räknas i webbläsaren — ingen ny hämtning behövs, bara en ny ritning.
+    $('kcHolidays').addEventListener('change', () => {
+        setPref('holidays', $('kcHolidays').checked ? '1' : '0');
+        if (!data) return;
+        const [f, t] = range();
+        view === 'list' ? renderList(f, t) : renderMonth(f, t);
+        if (selectedDay && $('kcDay').innerHTML) showDay(selectedDay);
+    });
 
     // Ladda när fliken visas första gången (sidan har många flikar).
     let started = false;

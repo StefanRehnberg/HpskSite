@@ -232,7 +232,9 @@ window.hpskKretsApplicationsInit = function () {
         return '<dl class="row small mb-3">'
             + dt('Tävling', a.name) + dt('Klubb', a.clubName) + dt('Nivå och gren', a.levelLabel + ' · ' + a.disciplineLabel)
             + dt('Datum', a.competitionDate + (a.endDate ? ' – ' + a.endDate : '') + (a.reserveDate ? ' (reserv ' + a.reserveDate + ')' : ''))
-            + dt('Plats', a.place) + dt('Klasser', a.classes)
+            + dt('Plats', a.place) + dt('Skjutbana', a.rangeName) + dt(a.seriesWord === 'stationer' ? 'Antal stationer' : 'Antal serier', a.numberOfSeries ? String(a.numberOfSeries) : '')
+            + dt('Mästerskap', a.championshipScope) + dt('Standardmedaljer', a.awardsStandardMedals == null ? '' : (a.awardsStandardMedals ? 'Ja' : 'Nej'))
+            + dt('Klasser', a.classes)
             + dt('Kontakt', [a.contactName, a.contactEmail, a.contactPhone].filter(Boolean).join(', '))
             + dt('Meddelande', a.note) + dt('Klubbens komplettering', a.completionReply) + dt('Sen ansökan', a.lateNote)
             + '</dl>';
