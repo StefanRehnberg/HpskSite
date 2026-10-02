@@ -989,9 +989,13 @@ faller även fas 4:s inställningar. Körd i dev 2026-10-02. Startkontrollen
 (`CompetitionApplicationSchemaGuardHostedService`) larmar Critical om något saknas. Adds C# → full
 ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod.
 
-Test: `ResultReviewRulesTests` 20. Svit: `hpsk-verify/resultatgranskning-fas2-verify.mjs`
-(befintlig Halland-tävling med publicerad lista; medaljstatusen ögonblicksbildas och krävs identisk
-efteråt).
+Test: `ResultReviewRulesTests` 20. Svit: `hpsk-verify/resultatgranskning-fas2-verify.mjs` **62/62,
+två körningar i rad** (befintlig Halland-tävling med publicerad lista; medaljstatusen
+ögonblicksbildas och krävs identisk efteråt; kretsens egna resultatgranskare parkeras under
+körningen och aktiveras igen). **A/B:** kontrollsummevillkoret för "Granskad av" borttaget i vyn →
+exakt 1 röd. Sviten hittade två riktiga fel: inkorgen föll med 500 på en ren sträng i
+`competitionScope` (läses nu via `CompetitionScopeHelper.ReadScope`), och årsväljaren gömde
+väntande listor. ⚠️ sqlcmd kapar svaret vid 256 tecken — håll JSON-frågorna korta.
 
 ### Competition Admin System ✅ COMPLETE
 **Location:** Admin Page → Competitions tab (default)
