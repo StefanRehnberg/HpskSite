@@ -288,7 +288,9 @@ namespace HpskSite.Controllers
                 hasSkjutledareView = CompetitionSurfaces.HasSkjutledareView(typeId),
                 groups = groupRows,
                 ties,
-                resultsOfficial
+                resultsOfficial,
+                // Prisutdelningssidan gäller mästerskapsmedaljer — utan mästerskap säger den bara "0 medaljer".
+                isChampionship = ChampionshipCategory.IsChampionship(SafeString(comp, "competitionScope"))
             };
         }
 

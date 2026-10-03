@@ -54,6 +54,13 @@
         #configTable td::before { content: attr(data-label); font-size: .8rem; color: var(--bs-secondary-color); text-align: left; }
         #configTable td[colspan]::before { content: none; }
         #finalsWizardRoot .table-responsive { overflow-x: visible; }
+        /* Finalkortets klasstabell likadant — den var bredare än telefonen, så klassnamnet
+           rullades ut ur bild medan knapparna blev höga staplar (Sune-genomgång 3). */
+        .fn-class-table thead { display: none; }
+        .fn-class-table tr { display: block; border: 1px solid var(--bs-border-color); border-radius: .375rem; margin-bottom: .75rem; padding: .5rem .75rem; }
+        .fn-class-table td { display: flex; justify-content: space-between; align-items: center; gap: .5rem; border: 0; padding: .25rem 0; text-align: right; }
+        .fn-class-table td::before { content: attr(data-label); font-size: .8rem; color: var(--bs-secondary-color); text-align: left; }
+        .table-responsive:has(> .fn-class-table) { overflow-x: visible; }
     }
     .fn-group-card { border-left: 3px solid var(--bs-warning); }
     .fn-group-card.fn-missing { border-left-color: var(--bs-border-color); }
@@ -709,17 +716,17 @@
                 : '<span class="text-muted">Inte låst</span>';
 
             return `<tr>
-                <td><strong>${esc(name)}</strong></td>
-                <td>${c.totalShooters || 0}</td>
-                <td class="small">${lockInfo}</td>
-                <td class="small">${state}</td>
-                <td class="text-end">${action}</td>
+                <td data-label=""><strong>${esc(name)}</strong></td>
+                <td data-label="Skyttar">${c.totalShooters || 0}</td>
+                <td data-label="Kvalresultat" class="small">${lockInfo}</td>
+                <td data-label="Final" class="small">${state}</td>
+                <td data-label="" class="text-end">${action}</td>
             </tr>`;
         }).join('');
 
         return `
             <div class="table-responsive mb-3">
-                <table class="table table-sm align-middle mb-0">
+                <table class="table table-sm align-middle mb-0 fn-class-table">
                     <thead>
                         <tr>
                             <th>Mästerskapsklass</th>
@@ -824,6 +831,14 @@
     // "Lägg till i finalen" = lås klassens kvalresultat, nolla ett eventuellt hoppa-över,
     // och generera om GRUPPENS lista. ⚠️ Genereringen bygger listan ur de låsta klasserna,
     // så manuella ändringar i just den gruppens skjutlag skrivs över — det sägs innan.
+    // Bekräftelser från finalkortet går genom den delade dialogen (_PublishStartListDialog) i
+    // stället för confirm() — en webbläsardialog på telefonen (Sune-genomgångarna 2026-10-03).
+    async function askDlg(title, body, label) {
+        if (typeof window.hpskAskPublishStartList !== 'function') return window.confirm(title + '\n\n' + body);
+        const r = await window.hpskAskPublishStartList({ title, body, confirmLabel: label, askClose: false });
+        return !!r.proceed;
+    }
+
     async function addClassToFinal(group, className, isRelock) {
         if (!className) return;
         const L = listForGroup(group);
@@ -865,7 +880,8 @@
     // att tappa den vid en ändring av vem som är med hade gjort en återgång svårare.
     async function removeClassFromFinal(group, className) {
         if (!className) return;
-        if (!confirm(`Ta bort ${className} ur finalen för vapengrupp ${group}?\n\nKlassens skyttar tas ur finalstartlistan. Deras kvalresultat och låsning ligger kvar.`)) return;
+        if (!(await askDlg(`Ta bort ${className} ur finalen (vapengrupp ${group})`,
+            'Klassens skyttar tas ur finalstartlistan. Deras kvalresultat och låsning ligger kvar.', 'Ta bort'))) return;
 
         const cfgResp = await jget(`/umbraco/surface/PrecisionStartList/GetFinalsConfig?competitionId=${competitionId}&weaponGroup=${encodeURIComponent(group)}`);
         const cfg = (cfgResp && cfgResp.config) || {};
@@ -896,7 +912,8 @@
     async function generateSimple(group, mode) {
         const label = mode === 'clone' ? 'samma ordning som kvalet' : 'omplacering efter kvalresultat';
         const L = listForGroup(group);
-        if (L && !confirm(`Vapengrupp ${group} har redan en finalstartlista. Bygg om den med ${label}?\n\nManuella ändringar skrivs över. Andra vapengrupper påverkas inte.`)) return;
+        if (L && !(await askDlg(`Bygg om finalen i vapengrupp ${group}`,
+            `Finalstartlistan byggs om med ${label}. Manuella ändringar skrivs över. Andra vapengrupper påverkas inte.`, 'Bygg om'))) return;
         const d = await jpost('/umbraco/surface/PrecisionStartList/GenerateSimpleFinalsStartList', {
             CompetitionId: competitionId,
             WeaponGroup: group,
@@ -916,7 +933,9 @@
         if (!L) return;
         const id = L.finalsStartListId || L.FinalsStartListId;
         const verb = makeOfficial ? 'Publicera' : 'Avpublicera';
-        if (!confirm(`${verb} finalstartlistan för vapengrupp ${group || '—'}?`)) return;
+        if (!(await askDlg(`${verb} finalstartlistan (vapengrupp ${group || '—'})`,
+            makeOfficial ? 'När finalstartlistan är publicerad ser skyttarna den på tävlingssidan.'
+                         : 'Finalstartlistan blir preliminär och syns inte längre för skyttarna.', verb))) return;
         const d = await jpost('/umbraco/surface/PrecisionStartList/PublishFinalsStartList',
             { FinalsStartListId: id, IsPublished: makeOfficial });
         if (!(d.success ?? d.Success)) { alert(msg(d) || 'Kunde inte ändra status.'); return; }
@@ -1093,7 +1112,8 @@
         const cls = s.groupName || s.championshipClass;
 
         if (action === 'unlock') {
-            if (!confirm(`Lås upp klassen ${cls}?`)) return;
+            // Ingen confirm(): upplåsningen går att ångra med Lås, och en dialog ovanpå guiden
+            // fungerar dåligt på telefon (Sune-genomgång 3).
             const d = await jpost('/umbraco/surface/PrecisionStartList/UnfreezeClassResults',
                 { CompetitionId: competitionId, ChampionshipClass: cls });
             if (!(d.success ?? d.Success) && msg(d)) alert(msg(d));
@@ -1118,11 +1138,27 @@
             return;
         }
         tbody.innerHTML = '';
-        let autoSkjutlag = 1;
+        // Förval: klasser utan inställning fyller det sista skjutlaget som har plats, annars ett
+        // nytt — samma regel som servern (PrecisionFinalsStartListBuilder.DefaultSkjutlag). Varje
+        // klass fick tidigare ett eget skjutlag, så tre små klasser blev tre ensamskyttar.
+        const maxPer = parseInt(document.getElementById('finalsMaxShootersPerTeam').value, 10) || 20;
+        const load = {};
+        frozen.forEach(s => {
+            const c = perClassConfig[s.groupName || s.championshipClass];
+            if (c && c.skjutlagNumber && !c.skip) load[c.skjutlagNumber] = (load[c.skjutlagNumber] || 0)
+                + (c.includeAllShooters ? s.frozenShooterCount : (c.finalistCountOverride || (s.shbFinalists != null ? s.shbFinalists : s.frozenShooterCount)));
+        });
+        const fillSkjutlag = (n) => {
+            const nums = Object.keys(load).map(Number);
+            const last = nums.length ? Math.max(...nums) : 1;
+            const target = (load[last] || 0) === 0 || (load[last] || 0) + n <= maxPer ? last : last + 1;
+            load[target] = (load[target] || 0) + n;
+            return target;
+        };
         frozen.forEach((s, i) => {
             const groupName = s.groupName || s.championshipClass;
             const cfg = perClassConfig[groupName] || {};
-            const defaultSkjutlag = cfg.skjutlagNumber || autoSkjutlag++;
+            const defaultSkjutlag = cfg.skjutlagNumber || fillSkjutlag(s.shbFinalists != null ? s.shbFinalists : s.frozenShooterCount);
             const tr = document.createElement('tr');
             tr.dataset.clsIndex = String(i);
             // "Auto" säger talet: samma regel som byggaren (sjättedel, minst 10, lika poäng följer med).
@@ -1188,8 +1224,8 @@
             alert('Inga klasser är låsta. Gå tillbaka till steg 1 och lås minst en klass.');
             return;
         }
-        if (listForGroup(wizardGroup) &&
-            !confirm(`Vapengrupp ${wizardGroup} har redan en finalstartlista. Bygg om den?\n\nManuella ändringar skrivs över. Andra vapengrupper påverkas inte.`)) return;
+        // Ingen confirm() här: steg 3 visar redan varningen om ombyggnad (#generateOverwriteWarning),
+        // och en webbläsardialog ovanpå guiden var den Sune fastnade på (genomgång 3).
 
         const saveResp = await jpost('/umbraco/surface/PrecisionStartList/SaveFinalsConfig',
             { CompetitionId: competitionId, WeaponGroup: wizardGroup, Config: perClassConfig });
