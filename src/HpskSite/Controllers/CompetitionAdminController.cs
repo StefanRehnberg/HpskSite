@@ -1039,6 +1039,14 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = $"Competition type '{competitionTypeId}' not found" });
                 }
 
+                // Finalomgång finns bara i precisionsskjutning (SHB C.3.6.1.1) — se CompetitionFinals.
+                var _finalsRefusal = HpskSite.CompetitionTypes.Common.CompetitionFinals.Refusal(
+                    competitionType.Id, ReadFieldAsInt(request.Fields, "numberOfFinalSeries"));
+                if (_finalsRefusal != null)
+                {
+                    return Ok(new { success = false, message = _finalsRefusal });
+                }
+
                 // Extract competition date to determine year folder
                 DateTime competitionDate = DateTime.Now;
                 if (request.Fields.TryGetValue("competitionDate", out var dateObj) && dateObj != null)

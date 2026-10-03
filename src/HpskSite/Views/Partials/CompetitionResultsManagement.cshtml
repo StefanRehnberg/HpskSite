@@ -152,7 +152,11 @@
         // teams (Teams[].TeamNumber/Label/StartTime). The URL appends &phase=finals so the
         // entry partial loads the finals shooter ordering instead of the qualifying one.
         function escapeHtmlInline(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-        fetch('/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=' + cid)
+        // ⚠️ Läses om när Resultat-fliken visas. Lästes förr EN gång vid sidladdning, så en
+        // finalstartlista som skapades efter att sidan öppnats (det vanliga — sidan står öppen
+        // hela tävlingsdagen) gav aldrig några finalknappar här utan omladdning.
+        function loadFinalsLinks() {
+        return fetch('/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=' + cid, { cache: 'no-store' })
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 var ok = data.Success || data.success;
@@ -206,6 +210,10 @@
                 wrapper.style.display = '';
             })
             .catch(function() { /* finals are optional — fail silently */ });
+        }
+        loadFinalsLinks();
+        var resultsTabBtn = document.getElementById('results-tab');
+        if (resultsTabBtn) resultsTabBtn.addEventListener('shown.bs.tab', loadFinalsLinks);
     })();
     </script>
     }

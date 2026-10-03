@@ -405,6 +405,15 @@ namespace HpskSite.Controllers
                         return Ok(new { success = false, message = levelError });
                 }
 
+                // Finalomgång finns bara i precisionsskjutning (SHB C.3.6.1.1). Prövas mot det
+                // SPARADE värdet när fältet inte skickas, så en tävling som redan bär felaktiga
+                // finalserier inte kan sparas vidare utan att rättas.
+                var finalsRefusal = HpskSite.CompetitionTypes.Common.CompetitionFinals.Refusal(
+                    content.GetValue<string>("competitionType"),
+                    ReadFieldOrContentAsInt(request.Fields, "numberOfFinalSeries", content));
+                if (finalsRefusal != null)
+                    return Ok(new { success = false, message = finalsRefusal });
+
                 // Persist the shooting-range link here (type-agnostic): the per-type save
                 // services map only their own fields and would drop "rangeId". Only act when
                 // the field is actually present so a partial-update client can't clear it by
@@ -812,6 +821,14 @@ namespace HpskSite.Controllers
                     return Json(new { success = true, message = "Grenen var redan " + known.Name + ".", changed = false });
 
                 competition.SetValue("competitionType", known.Id);
+
+                // Den nya grenen har kanske ingen finalomgång (SHB C.3.6.1.1). Nollställ då
+                // finalserierna i samma handling — kvar hade de gjort tävlingen osparbar.
+                if (!HpskSite.CompetitionTypes.Common.CompetitionFinals.Supports(known.Id)
+                    && competition.GetValue<int>("numberOfFinalSeries") > 0)
+                {
+                    competition.SetValue("numberOfFinalSeries", 0);
+                }
 
                 // ⚠ Klasserna tillhor grenen. Springskytte anvander vapen- och
                 // aldersklasser, precisionsfamiljen sina egna — att lamna kvar den

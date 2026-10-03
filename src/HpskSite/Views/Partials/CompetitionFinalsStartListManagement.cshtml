@@ -111,13 +111,27 @@
 
                 <div id="fnGroups" class="d-flex flex-column gap-3"></div>
 
-                <div id="fnNoGroups" class="alert alert-warning small d-none mb-0">
-                    <i class="bi bi-exclamation-triangle me-1"></i>
-                    <strong>Inga klasser med resultat hittades än.</strong>
-                    Finalisterna räknas fram ur grundomgångens resultat, så mata in resultat på
-                    fliken <strong>Resultat</strong> först. Har du redan gjort det: klicka
-                    <strong>Uppdatera</strong> där, så att resultatlistan (med eventuella
-                    klassammanslagningar) finns att räkna på.
+                @* ⚠️ Texten pekade förr på Resultat-flikens Uppdatera. Det var fel: finalen räknas
+                   direkt ur de inmatade serierna och behöver ingen resultatlista. Kortet läser nu
+                   om sig själv, så det enda användaren behöver veta är att det kommer. *@
+                <div id="fnNoGroups" class="alert alert-info small d-none mb-0">
+                    <i class="bi bi-hourglass-split me-1"></i>
+                    <strong>Inga resultat från grundomgången än.</strong>
+                    Här skapar du finalen så snart grundomgångens resultat börjar matas in — du behöver
+                    inte göra något annat först. Sidan kollar av sig själv.
+                    <span class="d-block mt-1 text-muted" id="fnCheckedAt"></span>
+                </div>
+
+                <div id="fnLoadError" class="alert alert-danger small d-none mb-0" role="alert">
+                    <i class="bi bi-exclamation-octagon me-1"></i>
+                    <strong>Finalens underlag kunde inte läsas.</strong>
+                    Det är ett fel hos oss, inte något du har gjort fel — resultaten är kvar.
+                    <span id="fnLoadErrorDetail"></span>
+                    <div class="mt-2">
+                        <button type="button" class="btn btn-sm btn-danger" id="fnRetryBtn">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Försök igen
+                        </button>
+                    </div>
                 </div>
 
             </div>
@@ -157,8 +171,8 @@
                         </p>
                         <div id="noResultListMsg" class="alert alert-warning small d-none">
                             <i class="bi bi-exclamation-triangle me-1"></i>
-                            <strong>Resultatlistan måste genereras först.</strong> Gå till fliken
-                            "Resultat", klicka "Uppdatera", och kom sedan tillbaka hit.
+                            <strong>Inga resultat från grundomgången än.</strong> Klasserna visas här
+                            så snart grundomgångens serier är inmatade.
                         </div>
                         <div class="table-responsive">
                             <table class="table table-sm align-middle">
@@ -293,11 +307,14 @@
             return { success: false, message: err.message };
         });
     }
+    // ⚠️ `failed` skiljer "servern svarade inte" från "servern svarade nej". Utan den visade kortet
+    // "Inga klasser med resultat … klicka Uppdatera" även när anropet kraschade eller tog för lång
+    // tid — ett serverfel klätt som en instruktion, som ingen knapp kunde åtgärda (KM 3468, 2026-10-03).
     function jget(url) {
-        return fetch(url).then(async r => {
-            if (!r.ok) { console.error('[finals] GET failed', url, r.status); return { success: false }; }
-            try { return await r.json(); } catch (e) { console.error('[finals] GET not JSON', url, e); return { success: false }; }
-        }).catch(err => { console.error('[finals] GET network error', url, err); return { success: false }; });
+        return fetch(url, { cache: 'no-store' }).then(async r => {
+            if (!r.ok) { console.error('[finals] GET failed', url, r.status); return { success: false, failed: true, status: r.status }; }
+            try { return await r.json(); } catch (e) { console.error('[finals] GET not JSON', url, e); return { success: false, failed: true, status: r.status }; }
+        }).catch(err => { console.error('[finals] GET network error', url, err); return { success: false, failed: true, status: 0 }; });
     }
     function ok(d) { return d && (d.Success ?? d.success); }
     function msg(d) { return (d && (d.Message ?? d.message)) || ''; }
@@ -355,20 +372,70 @@
     }
 
     // ---- ladda allt ----
+    // ⚠️ Kortet lästes förr in EN gång, när sidan öppnades. En arrangör öppnar sidan på morgonen
+    // och har den uppe hela dagen, så efter grundomgången stod kortet kvar på "inga resultat" —
+    // oavsett vad som klickades — tills hela sidan laddades om. Det var exakt vad som hände på
+    // kretsmästerskapet 3468. Nu läses kortet om när fliken visas, när fönstret får fokus igen,
+    // och var 30:e sekund så länge det väntar på resultat.
+    let refreshing = null;
+    let lastLoadedAt = 0;
     async function refreshAll() {
-        document.getElementById('fnLoading').classList.remove('d-none');
-        const [finals, readiness] = await Promise.all([
-            jget(`/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=${competitionId}`),
-            jget(`/umbraco/surface/PrecisionStartList/GetQualifyingSnapshot?competitionId=${competitionId}`)
-        ]);
+        if (refreshing) return refreshing;          // ett anrop i taget
+        refreshing = (async () => {
+            const firstLoad = lastLoadedAt === 0;
+            if (firstLoad) document.getElementById('fnLoading').classList.remove('d-none');
+            const [finals, readiness] = await Promise.all([
+                jget(`/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=${competitionId}`),
+                jget(`/umbraco/surface/PrecisionStartList/GetQualifyingSnapshot?competitionId=${competitionId}`)
+            ]);
+            document.getElementById('fnLoading').classList.add('d-none');
 
-        hasResultList = !!(readiness && readiness.hasResultList);
-        perClassState = (readiness && readiness.perClass) || [];
-        finalsLists = (finals && (finals.Lists || finals.lists)) || [];
+            // "Ingen finalstartlista" är ett vanligt svar (success:false utan failed), inte ett fel.
+            const failed = (readiness && readiness.failed) || (finals && finals.failed) || !(readiness && readiness.success);
+            const errBox = document.getElementById('fnLoadError');
+            if (failed) {
+                const st = (readiness && readiness.failed ? readiness.status : finals && finals.status) || 0;
+                document.getElementById('fnLoadErrorDetail').textContent = st
+                    ? `(Servern svarade med fel ${st}.)`
+                    : '(Ingen kontakt med servern — kontrollera uppkopplingen.)';
+                errBox.classList.remove('d-none');
+                document.getElementById('fnNoGroups').classList.add('d-none');
+                // Behåll det som redan visas — ett nätverksglapp ska inte tömma kortet.
+                if (!lastLoadedAt) { document.getElementById('fnGroups').innerHTML = ''; }
+                return;
+            }
+            errBox.classList.add('d-none');
 
-        document.getElementById('fnLoading').classList.add('d-none');
-        renderGroups();
+            hasResultList = !!readiness.hasResultList;
+            perClassState = readiness.perClass || [];
+            finalsLists = (finals && (finals.Lists || finals.lists)) || [];
+            lastLoadedAt = Date.now();
+
+            const checked = document.getElementById('fnCheckedAt');
+            if (checked) checked.textContent = 'Senast kontrollerat ' + new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) + '.';
+
+            // Rita inte om under händerna på någon som har en meny öppen.
+            if (root.querySelector('#fnGroups .dropdown-menu.show')) return;
+            renderGroups();
+        })();
+        try { await refreshing; } finally { refreshing = null; }
     }
+
+    function sectionIsVisible() {
+        return document.visibilityState === 'visible' && root.offsetParent !== null;
+    }
+    // Väntar kortet på resultat (eller kunde inte läsas) kollar det av sig själv.
+    setInterval(() => {
+        const waiting = !document.getElementById('fnNoGroups').classList.contains('d-none')
+                     || !document.getElementById('fnLoadError').classList.contains('d-none');
+        if (waiting && sectionIsVisible()) refreshAll();
+    }, 30000);
+    document.addEventListener('visibilitychange', () => { if (sectionIsVisible()) refreshAll(); });
+    document.addEventListener('shown.bs.tab', e => {
+        const target = e.target && e.target.getAttribute('data-bs-target');
+        if (target && document.querySelector(target)?.contains(root)) refreshAll();
+    });
+    document.getElementById('fnRetryBtn').addEventListener('click', () => refreshAll());
     // Bakåtkompatibelt namn — redigerarens stängningskrok anropar det.
     async function loadFinalsStartList() { await refreshAll(); }
 
@@ -859,7 +926,7 @@
         noResultListMsg.classList.toggle('d-none', !(!hasResultList && classes.length === 0));
 
         if (!classes.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">Inga klasser i den här vapengruppen — generera resultatlistan först.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">Inga klasser med grundomgångsresultat i den här vapengruppen än.</td></tr>';
             return;
         }
         tbody.innerHTML = classes.map((s, i) => {

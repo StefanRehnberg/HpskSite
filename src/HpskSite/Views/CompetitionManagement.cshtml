@@ -44,8 +44,11 @@
 
         // Pass competition properties to ViewData for partial views
         ViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
-        ViewData["NumberOfFinalSeries"] = competition.Value<int>("numberOfFinalSeries");
         ViewData["CompetitionType"] = competition.Value<string>("competitionType") ?? "Precision";
+        // EFFEKTIVA finalserier: 0 för en gren utan finalomgång (CompetitionFinals, SHB C.3.6.1.1),
+        // så en äldre tävling med felaktigt satta finalserier inte visar en final som inte finns.
+        ViewData["NumberOfFinalSeries"] = HpskSite.CompetitionTypes.Common.CompetitionFinals.Effective(
+            ViewData["CompetitionType"]?.ToString(), competition.Value<int>("numberOfFinalSeries"));
 
         // Nuvarande val för "stäng självanmälan när startlistan publiceras". Publiceringsdialogen
         // förkryssar rutan ur detta vid en OMpublicering, så en liten redigering + Publicera aldrig
@@ -657,6 +660,7 @@
                     // The card itself further gates on snapshot existence, etc.
                     var numFinalSeries = 0;
                     try { numFinalSeries = competition?.HasProperty("numberOfFinalSeries") == true ? competition.Value<int>("numberOfFinalSeries") : 0; } catch { }
+                    numFinalSeries = HpskSite.CompetitionTypes.Common.CompetitionFinals.Effective(ViewData["CompetitionType"]?.ToString(), numFinalSeries);
                     if (numFinalSeries > 0)
                     {
                         @await Html.PartialAsync("CompetitionFinalsStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })

@@ -3098,6 +3098,21 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             if (competitionId <= 0)
                 return Json(new { success = false });
 
+            // ⚠️ Saknade try/catch: ett fel här blev ett tomt 500 som finalkortet visade som
+            // "inga resultat". Nu loggas det och kortet säger att underlaget inte kunde läsas.
+            try
+            {
+                return await BuildQualifyingSnapshotResponse(competitionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetQualifyingSnapshot failed for competition {CompetitionId}", competitionId);
+                return Json(new { success = false, failed = true, message = "Grundomgångens resultat kunde inte läsas." });
+            }
+        }
+
+        private async Task<IActionResult> BuildQualifyingSnapshotResponse(int competitionId)
+        {
             var snapshot = _qualifyingResultsService.GetSnapshot(competitionId);
             var availableRankings = await _qualifyingResultsService.GetAvailableClassRankingsAsync(competitionId);
             var staleness = await _qualifyingResultsService.ComputeStalenessAsync(competitionId, snapshot);
@@ -3742,20 +3757,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         private async Task<List<PrecisionResultEntry>> GetQualificationResults(int competitionId)
         {
             var competition = _contentService.GetById(competitionId);
-            var numberOfFinalSeries = competition?.GetValue<int>("numberOfFinalSeries") ?? 0;
-            var numberOfSeries = competition?.GetValue<int>("numberOfSeriesOrStations") ?? 0;
-            var qualSeriesCount = numberOfFinalSeries > 0 ? (numberOfSeries - numberOfFinalSeries) : numberOfSeries;
-
-            using (var db = _databaseFactory.CreateDatabase())
-            {
-                var results = await db.FetchAsync<PrecisionResultEntry>(
-                    @"SELECT * FROM PrecisionResultEntry
-                      WHERE CompetitionId = @0 AND SeriesNumber <= @1
-                      ORDER BY MemberId, SeriesNumber",
-                    competitionId, qualSeriesCount);
-
-                return results;
-            }
+            if (competition == null) return new List<PrecisionResultEntry>();
+            return await _qualifyingResultsService.GetQualifyingResultsAsync(competition);
         }
 
         private async Task<Dictionary<int, (string Name, string Club)>> GetShooterInfoDictionary(int competitionId)
