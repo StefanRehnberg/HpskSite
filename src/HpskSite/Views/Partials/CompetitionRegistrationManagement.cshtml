@@ -4,6 +4,7 @@
  * Focused on managing registrations for a single competition
 *@
 @inject HpskSite.Services.CompetitionFees.CompetitionPaymentModelService PaymentModels
+@inject Umbraco.Cms.Core.Services.IContentService FeeContent
 
 @{
     var competitionId = ViewData["CompetitionId"]?.ToString() ?? "";
@@ -12,6 +13,18 @@
     // nedan (samlingsfaktura, påminnelser, bokföringsunderlag, saknade fakturor) finns inte.
     var feeModel = int.TryParse(competitionId, out var feeCompId) ? PaymentModels.Get(feeCompId) : "legacy";
     var isLedgerFees = feeModel == HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Ledger;
+    // Tar tävlingen avgift? Utan avgift heter diskens dialog "Anmäl på plats" och lovar ingen
+    // betalningshantering (Sune-genomgång 3, 2026-10-03). Samma fält som RegistrationFeeCalculator läser.
+    // ⚠️ IContentService och inte Umbraco.Content: i den här vyn är "Umbraco" ett namnrum,
+    // inte UmbracoHelper — det gav ett kompileringsfel som tog ner hela tävlingssidan.
+    var feeNode = int.TryParse(competitionId, out var feeNodeId) ? FeeContent.GetById(feeNodeId) : null;
+    bool FeeSet(string alias)
+    {
+        var raw = feeNode != null && feeNode.HasProperty(alias) ? feeNode.GetValue(alias)?.ToString() : null;
+        return decimal.TryParse((raw ?? "").Replace(',', '.'), System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0;
+    }
+    var walkInHasFee = feeNode == null || FeeSet("registrationFee") || FeeSet("juniorRegistrationFee") || FeeSet("subCompetitionFee");
     var availableShootingClasses = ViewData["AvailableShootingClasses"] ?? new List<object>();
     var availableShootingClassesJson = System.Text.Json.JsonSerializer.Serialize(availableShootingClasses);
 
@@ -876,7 +889,8 @@
             <div class="modal-body">
                 <p class="text-muted small mb-3">
                     Anmäl en skytt som inte hunnit anmäla sig i tid.
-                    Efter anmälan öppnas betalningshanteringen direkt.
+                    @if (walkInHasFee) { <text>Efter anmälan öppnas betalningshanteringen direkt.</text> }
+                    else { <text>Tävlingen har ingen avgift.</text> }
                 </p>
 
                 <div class="mb-3">

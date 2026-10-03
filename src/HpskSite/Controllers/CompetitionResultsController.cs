@@ -2628,6 +2628,12 @@ namespace HpskSite.Controllers
                     results = results.Where(r => subIds.Contains(r.MemberId)).ToList();
                 }
 
+                // ⚠️ Klassens två skrivsätt ("C_Vet_Y" / "C Vet Y") viks ihop före räkningen —
+                // annars räknades samma skytt två gånger ("C Vet Y 2" med en skytt) när rader i
+                // båda formerna fanns kvar (Sune-genomgång 3). Samma regel som CalculateFinalResults.
+                // Raderna skrivs aldrig tillbaka härifrån; det här är bara analysens kopia.
+                foreach (var r in results) r.ShootingClass = ShootingClasses.ToCanonicalName(r.ShootingClass);
+
                 // ⚠️ DEN SPARADE KONFIGURATIONEN returneras vid sidan av förslagen.
                 //
                 // Analysen svarar på "vad KAN slås samman" (klasser med färre än fem deltagare
