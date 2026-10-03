@@ -563,6 +563,28 @@
             </div>`;
     }
 
+    // ⚠️ Varje val säger FÖLJDEN för just de här skyttarna (Sune-genomgången 2026-10-03).
+    // "Gallring till de bästa, per mästerskapsklass" sa inte hur många som går vidare — med
+    // 8 skyttar går alla vidare även enligt SHB, och det gick inte att se innan man valt.
+    // Talen kommer från servern (GetQualifyingSnapshot), samma regel som guiden bygger med.
+    // ENDA stället texterna byggs — "Nästa steg"-kortet läser dem via hpskFinalsChoiceInfo.
+    function choiceInfo(group) {
+        const withResults = classesForGroup(group).filter(c => c.hasResults);
+        const shooters = withResults.reduce((n, c) => n + (c.totalShooters || 0), 0);
+        const shb = withResults.reduce((n, c) => n + (c.shbFinalists != null ? c.shbFinalists : (c.totalShooters || 0)), 0);
+        const lead = withResults.slice().sort((a, b) => (b.leaderScore || 0) - (a.leaderScore || 0))[0] || {};
+        const leaderTxt = lead.leaderName && lead.leaderName !== 'Unknown'
+            ? `${esc(lead.leaderName)} (${lead.leaderScore}) först.`
+            : 'Den som leder står först.';
+        const shbTxt = shb >= shooters
+            ? `Bästa sjättedelen, minst 10, går vidare — med ${shooters} skyttar betyder det <strong>alla ${shooters}</strong>.`
+            : `Bästa sjättedelen, minst 10, går vidare — <strong>${shb} av ${shooters}</strong>.`;
+        const shbNote = isChampionship
+            ? '<span class="badge bg-warning-subtle text-warning-emphasis border mt-1">Så står det i SHB för mästerskap</span>'
+            : '';
+        return { ready: withResults.length > 0, shooters, leaderTxt, shbTxt, shbNote };
+    }
+
     // Ingen lista än — visa de tre metoderna, scopade till gruppen.
     function renderCreateBlock(group, classes) {
         const withResults = classes.filter(c => c.hasResults);
@@ -578,22 +600,7 @@
                 grundomgångens serier är inmatade.</p>`;
         }
 
-        // ⚠️ Varje val säger FÖLJDEN för just de här skyttarna (Sune-genomgången 2026-10-03).
-        // "Gallring till de bästa, per mästerskapsklass" sa inte hur många som går vidare — med
-        // 8 skyttar går alla vidare även enligt SHB, och det gick inte att se innan man valt.
-        // Talen kommer från servern (GetQualifyingSnapshot), samma regel som guiden bygger med.
-        const shooters = withResults.reduce((n, c) => n + (c.totalShooters || 0), 0);
-        const shb = withResults.reduce((n, c) => n + (c.shbFinalists != null ? c.shbFinalists : (c.totalShooters || 0)), 0);
-        const lead = withResults.slice().sort((a, b) => (b.leaderScore || 0) - (a.leaderScore || 0))[0] || {};
-        const leaderTxt = lead.leaderName && lead.leaderName !== 'Unknown'
-            ? `${esc(lead.leaderName)} (${lead.leaderScore}) först.`
-            : 'Den som leder står först.';
-        const shbTxt = shb >= shooters
-            ? `Bästa sjättedelen, minst 10, går vidare — med ${shooters} skyttar betyder det <strong>alla ${shooters}</strong>.`
-            : `Bästa sjättedelen, minst 10, går vidare — <strong>${shb} av ${shooters}</strong>.`;
-        const shbNote = isChampionship
-            ? '<span class="badge bg-warning-subtle text-warning-emphasis border mt-1">Så står det i SHB för mästerskap</span>'
-            : '';
+        const { shooters, leaderTxt, shbTxt, shbNote } = choiceInfo(group);
 
         return `
             <p class="small mb-3">
@@ -793,6 +800,8 @@
                 await removeClassFromFinal(group, clsName);
                 break;
         }
+        // "Nästa steg"-kortet läser om sig efter varje ändring av finalen.
+        document.dispatchEvent(new CustomEvent('hpsk:competition-state-changed'));
     }
 
     // "Lägg till i finalen" = lås klassens kvalresultat, nolla ett eventuellt hoppa-över,
@@ -1174,6 +1183,13 @@
     // scope (Annex B:s hoisting gäller inte i block, och inte alls för async), och
     // kvalstartlistans "Till finalen"-knapp behöver kunna fälla ut sektionen.
     window.hpskRefreshFinalsSection = refreshAll;
+
+    // "Nästa steg"-kortet (_CompetitionNextStep) erbjuder samma tre val och anropar SAMMA
+    // handling som knapparna här — ingen kopia av genereringen. Ett fel visas av handlingen själv.
+    window.hpskFinalsChoiceInfo = choiceInfo;
+    window.hpskFinalsAction = function (action, group) {
+        return onGroupAction({ currentTarget: { dataset: { fnAction: action, fnGroup: group || '' } } });
+    };
 
     // Fäller UT finalsektionen och rullar dit. Att bara rulla hade landat på en ihopfälld
     // rubrik, vilket läser som att sektionen är tom.

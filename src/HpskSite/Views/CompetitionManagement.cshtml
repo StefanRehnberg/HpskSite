@@ -515,6 +515,14 @@
         var hasFunktionarerTab = CompetitionSurfaces.HasFunktionarerHub(compTypeForTabs);
         var hasStationerTab = CompetitionSurfaces.HasStationerTab(compTypeForTabs);
     }
+    @* "Nästa steg" — var tävlingen står och EN knapp för nästa sak att göra (Skjutledarens dag,
+       omgång 3). Precisionsfamiljen först; fält och spring har andra faser. Kortet gömmer sig
+       själv för den som inte får se tävlingens läge. *@
+    @if (hasFunktionarerTab && !string.Equals(compTypeForTabs, "Springskytte", StringComparison.OrdinalIgnoreCase))
+    {
+        @await Html.PartialAsync("_CompetitionNextStep", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+    }
+
     <!-- Navigation tabs -->
     <ul class="nav nav-tabs" id="managementTabs" role="tablist">
         <li class="nav-item" role="presentation">

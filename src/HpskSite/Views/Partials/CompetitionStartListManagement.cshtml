@@ -1250,6 +1250,8 @@ function loadStartLists() {
             .then(data => {
                 console.log('GetOfficialStartList response data:', data);
                 if (loadingEl) loadingEl.style.display = 'none';
+                // "Nästa steg"-kortet läser om sig när startlistan ändrats (skapad, publicerad, redigerad).
+                document.dispatchEvent(new CustomEvent('hpsk:competition-state-changed'));
 
                 const success = data.success || data.Success;
                 const startList = data.startList || data.StartList;
