@@ -149,12 +149,26 @@ namespace HpskSite.CompetitionTypes.Precision.Services
 
             int rawCutoff = cfg.FinalistCountOverride
                 ?? _qualificationService.CalculateQualificationCutoff(all.Count);
-            if (rawCutoff < 1) rawCutoff = 1;
-            if (rawCutoff >= all.Count) return all.ToList();
+            // ⚠️ Samma regel som finalkortet räknar med när det säger "X av N går vidare" —
+            // FinalistsWithTies är enda stället. Listan är sorterad poäng fallande, så de som
+            // står lika med den siste uttagne ligger direkt efter och Take räcker.
+            return all.Take(FinalistsWithTies(all.Select(s => s.QualificationScore).ToList(), rawCutoff)).ToList();
+        }
 
-            // Tie-extension: include everyone tied at the cutoff score.
-            var cutoffScore = all[rawCutoff - 1].QualificationScore;
-            return all.Where((s, idx) => idx < rawCutoff || s.QualificationScore == cutoffScore).ToList();
+        /// <summary>
+        /// Hur många som går till final ur en lista sorterad poäng fallande: de <paramref name="rawCutoff"/>
+        /// första, plus ALLA som står lika med den siste uttagne (SHB C.3.6.1.1). ENDA stället regeln
+        /// bor — finalkortets "X av N går vidare" och den byggda listan får inte kunna säga olika saker.
+        /// </summary>
+        public static int FinalistsWithTies(IReadOnlyList<int> scoresDescending, int rawCutoff)
+        {
+            if (scoresDescending.Count == 0) return 0;
+            if (rawCutoff < 1) rawCutoff = 1;
+            if (rawCutoff >= scoresDescending.Count) return scoresDescending.Count;
+            var cutoffScore = scoresDescending[rawCutoff - 1];
+            var n = rawCutoff;
+            while (n < scoresDescending.Count && scoresDescending[n] == cutoffScore) n++;
+            return n;
         }
 
         private StartListTeam BuildTeam(int teamNumber, string startTime, string interval, SkjutlagBucket bucket)

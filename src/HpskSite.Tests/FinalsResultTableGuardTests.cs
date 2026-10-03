@@ -176,6 +176,20 @@ namespace HpskSite.Tests
             Assert.Equal(expected, CompetitionFinals.Effective(type, stored));
         }
 
+        // ── Hur många går till final (SHB C.3.6.1.1) — samma tal på kortet som i guiden ────────
+
+        [Theory]
+        [InlineData(new[] { 350, 340, 330 }, 3, 3)]                 // färre än gränsen: alla
+        [InlineData(new[] { 350, 340, 330, 320 }, 2, 2)]            // ren gräns
+        [InlineData(new[] { 350, 340, 340, 340, 320 }, 2, 4)]       // lika med den siste följer med
+        [InlineData(new[] { 350, 340 }, 0, 1)]                      // aldrig under 1
+        [InlineData(new int[0], 10, 0)]
+        public void Finalister_med_lika_poäng(int[] scoresDesc, int rawCutoff, int expected)
+        {
+            Assert.Equal(expected, HpskSite.CompetitionTypes.Precision.Services.PrecisionFinalsStartListBuilder
+                .FinalistsWithTies(scoresDesc, rawCutoff));
+        }
+
         private static string SiteRoot([CallerFilePath] string thisFile = "")
         {
             var src = Path.GetDirectoryName(Path.GetDirectoryName(thisFile))!;

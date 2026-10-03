@@ -3141,10 +3141,23 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     var weaponGroup = ChampionshipCategory.WeaponGroupForClasses(
                         groupShooters.Select(sh => sh.ShootingClass));
 
+                    // Vad finalvalen betyder för JUST den här klassen, så kortet kan säga följden i
+                    // klartext ("alla 8 går vidare", "Hej Hopp (347) först") i stället för abstrakta
+                    // ord som "gallring". Samma regel som guiden bygger med (FinalistsWithTies).
+                    var ranked = (ranking?.QualifiedShooters ?? new List<QualifiedShooter>())
+                        .OrderByDescending(sh => sh.QualificationScore).ThenByDescending(sh => sh.XCount).ToList();
+                    var leader = ranked.FirstOrDefault();
+                    var shbFinalists = PrecisionFinalsStartListBuilder.FinalistsWithTies(
+                        ranked.Select(sh => sh.QualificationScore).ToList(),
+                        _finalsQualificationService.CalculateQualificationCutoff(ranked.Count));
+
                     return new
                     {
                         groupName = group,
                         weaponGroup,
+                        leaderName = leader?.Name ?? "",
+                        leaderScore = leader?.QualificationScore ?? 0,
+                        shbFinalists,
                         // championshipClass kept for client-side backward compat
                         championshipClass = group,
                         totalShooters = ranking?.TotalShooters ?? 0,
@@ -3162,6 +3175,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             {
                 success = true,
                 hasResultList = availableRankings.Count > 0,
+                // Vid ett mästerskap märks SHB-valet ut på finalkortet (C.3.6.1.1). Inget förval —
+                // kretsstyrelsen kan ge andra regler (C.3.6.4), och klubbarna gör olika.
+                isChampionship = ChampionshipCategory.IsChampionship(
+                    _contentService.GetById(competitionId)?.GetValue<string>("competitionScope")),
                 perClass = perGroup
             });
         }
