@@ -2908,6 +2908,20 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (qualConfig.Teams.Count == 0) return empty;
             }
 
+            // ⚠️ Skjutlaget skjuter sin final EFTER sin egen grundomgång. Tiderna kopierades
+            // tidigare rakt av, så finalen fick samma starttid som serie 1 (Sune-genomgången
+            // 2026-10-03). Ordningen och platserna är löftet — inte klockslaget.
+            var comp = _contentService.GetById(competitionId);
+            int qualSeries = PrecisionFamilyResultReader.QualifyingSeriesCount(
+                comp?.GetValue<int>("numberOfSeriesOrStations") ?? 0, comp?.GetValue<int>("numberOfFinalSeries") ?? 0);
+            int finalSeries = comp?.GetValue<int>("numberOfFinalSeries") ?? 0;
+            foreach (var team in qualConfig.Teams)
+            {
+                team.StartTime = SkjutlagTiming.ShiftAfterOwnQualification(team.StartTime, qualSeries);
+                var start = SkjutlagTiming.ParseClock(team.StartTime);
+                if (start.HasValue) team.EndTime = SkjutlagTiming.FormatClock(start.Value + SkjutlagTiming.DurationMinutes(finalSeries));
+            }
+
             qualConfig.Settings ??= new StartListSettings();
             qualConfig.Settings.Format = "Final";
             qualConfig.Settings.MaxShootersPerTeam = maxPerTeam;
@@ -3171,9 +3185,30 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 })
                 .ToList();
 
+            // Förslag på finalens tider, ur grundomgångens startlista (SkjutlagTiming): första start
+            // när grundomgångens sista skjutlag är klart, intervall ur finalseriernas antal.
+            var compNode = _contentService.GetById(competitionId);
+            int nsQual = PrecisionFamilyResultReader.QualifyingSeriesCount(
+                compNode?.GetValue<int>("numberOfSeriesOrStations") ?? 0, compNode?.GetValue<int>("numberOfFinalSeries") ?? 0);
+            int nsFinal = compNode?.GetValue<int>("numberOfFinalSeries") ?? 0;
+            string? suggestedStart = null;
+            try
+            {
+                var qualNode = _repository.GetStartListsForCompetition(competitionId)
+                    .Where(sl => sl.ContentType.Alias == "precisionStartList")
+                    .OrderByDescending(sl => sl.GetValue<bool>("isOfficialStartList")).FirstOrDefault();
+                var qualCfg = string.IsNullOrWhiteSpace(qualNode?.GetValue<string>("configurationData")) ? null
+                    : JsonConvert.DeserializeObject<StartListConfiguration>(qualNode!.GetValue<string>("configurationData")!);
+                suggestedStart = SkjutlagTiming.FinalsStartAfter((qualCfg?.Teams ?? new List<StartListTeam>()).Select(t => t.StartTime), nsQual);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Finalens tidsförslag kunde inte räknas för {Id}", competitionId); }
+
             return Json(new
             {
                 success = true,
+                suggestedFinalsStart = suggestedStart ?? "10:00",
+                suggestedFinalsInterval = SkjutlagTiming.FormatInterval(SkjutlagTiming.DurationMinutes(nsFinal)),
+                competitionDate = compNode?.GetValue<DateTime?>("competitionDate") is DateTime cd && cd.Year > 1 ? cd.ToString("yyyy-MM-dd") : "",
                 hasResultList = availableRankings.Count > 0,
                 // Vid ett mästerskap märks SHB-valet ut på finalkortet (C.3.6.1.1). Inget förval —
                 // kretsstyrelsen kan ge andra regler (C.3.6.4), och klubbarna gör olika.

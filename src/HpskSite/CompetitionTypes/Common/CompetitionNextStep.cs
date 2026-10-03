@@ -43,6 +43,15 @@ namespace HpskSite.CompetitionTypes.Common
             public int QualExpected { get; set; }
             public int QualEntered { get; set; }
             public bool HasFinalsList { get; set; }
+
+            /// <summary>
+            /// Mästerskapsklasser med resultat i grundomgången som INTE har en enda finalist.
+            /// ⚠️ Guiden lät en arrangör generera finalen med bara en av fem klasser låst, och
+            /// kortet gick vidare som om allt var klart (Sune-genomgång 2, 2026-10-03). En
+            /// gallring tar bort SKYTTAR, aldrig en hel klass — så en klass utan finalister är
+            /// alltid ett ogjort steg.
+            /// </summary>
+            public int MissingFinalCategories { get; set; }
             public int FinalsExpected { get; set; }
             public int FinalsEntered { get; set; }
         }
@@ -69,7 +78,7 @@ namespace HpskSite.CompetitionTypes.Common
             if (g.QualEntered < g.QualExpected) return Phase.EnterQualification;
             if (finalSeries > 0)
             {
-                if (!g.HasFinalsList) return Phase.CreateFinals;
+                if (!g.HasFinalsList || g.MissingFinalCategories > 0) return Phase.CreateFinals;
                 if (g.FinalsEntered < g.FinalsExpected) return Phase.EnterFinals;
             }
             return Phase.PublishResults;

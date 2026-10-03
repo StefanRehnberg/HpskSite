@@ -508,7 +508,7 @@
             </div>
             <div class="modal-body">
                 <div class="mb-3">
-                    <label for="teamFormat" class="form-label">Lagformat:</label>
+                    <label for="teamFormat" class="form-label">Hur skjutlagen fylls:</label>
                     <select class="form-select" id="teamFormat">
                         <option value="Mixade Skjutlag">Mixade vapengrupper per skjutlag</option>
                         <option value="En vapengrupp per Skjutlag">En vapengrupp per skjutlag</option>
@@ -545,7 +545,8 @@
                     // Var tidigare en fast 105 som ingen kunde förklara (Sune-genomgången 2026-10-03).
                     var slTotalSeries = ViewData["NumberOfSeriesOrStations"] as int? ?? 0;
                     var slQualSeries = Math.Max(1, slTotalSeries - (ViewData["NumberOfFinalSeries"] as int? ?? 0));
-                    var slInterval = Math.Clamp((int)Math.Ceiling((slQualSeries * 10 + 15) / 15.0) * 15, 60, 180);
+                    // Samma regel som finalens förslag — HpskSite.CompetitionTypes.Common.SkjutlagTiming.
+                    var slInterval = Math.Clamp(HpskSite.CompetitionTypes.Common.SkjutlagTiming.DurationMinutes(slQualSeries), 60, 180);
                 }
                 <div class="mb-3">
                     <label for="startInterval" class="form-label">Tid mellan skjutlagen (minuter):</label>
@@ -1451,6 +1452,12 @@ function updatePublishedStartListUI(isPublished) {
 }
 
 function formatDate(dateString) {
+    // ⚠️ Visa klockslaget som det LAGRADES. generatedDate sparas med DateTime.Now (svensk tid)
+    // men kommer tillbaka märkt som UTC, så new Date() lade på två timmar: "Genererad 21:16"
+    // när klockan var 19:16 (Sune-genomgång 2, 2026-10-03).
+    if (typeof dateString === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(dateString)) {
+        return dateString.slice(0, 10) + ' ' + dateString.slice(11, 16);
+    }
     const date = new Date(dateString);
     return date.toLocaleDateString('sv-SE', {
         year: 'numeric',

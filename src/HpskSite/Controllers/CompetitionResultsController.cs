@@ -1889,7 +1889,10 @@ namespace HpskSite.Controllers
                     ? tcfg!.ShooterCount
                     : (tcfg?.Shooters?.Count ?? trows.Select(r => r.MemberId).Distinct().Count());
                 int seriesExpected = shootersExpected * qualSeries;
-                int seriesEntered = trows.Count;
+                // ⚠️ Bara grundomgångens serier — finalserierna räknades med och gav "80/56"
+                // efter finalen (Sune-genomgång 2, 2026-10-03). Förväntat är grundomgången.
+                int seriesEntered = Math.Min(seriesExpected > 0 ? seriesExpected : int.MaxValue,
+                    trows.Count(r => r.SeriesNumber <= qualSeries));
                 DateTime? lastSaveAt = trows.Count > 0 ? trows.Max(r => r.LastModified) : (DateTime?)null;
                 int lastMins = lastSaveAt.HasValue ? (int)Math.Max(0, (now - lastSaveAt.Value).TotalMinutes) : -1;
                 bool isDone = seriesExpected > 0 && seriesEntered >= seriesExpected;
@@ -2650,7 +2653,10 @@ namespace HpskSite.Controllers
                 // Arrangörens val: en uppsättning medaljer per vapengrupp, eller delade
                 // mästerskapsklasser? Se MedalGrouping — nivåspärren ligger där.
                 var perWeaponGroup = MedalGrouping.PerWeaponGroup(competition);
-                var medalGroups = BuildMedalGroups(results, scopeForMedals, perWeaponGroup);
+                var hasFinalsForMedals = CompetitionFinals.Effective(
+                    competition?.GetValue<string>("competitionType"), competition?.GetValue<int>("numberOfFinalSeries") ?? 0) > 0;
+                var medalGroups = BuildMedalGroups(results, scopeForMedals, perWeaponGroup,
+                    hasFinalsForMedals ? GetFinalistStarts(competitionId) : null);
                 var isChampionship = ChampionshipCategory.IsChampionship(scopeForMedals);
 
                 // Tillståndet ytan behöver för att kunna VISA och ÄNDRA indelningen.
@@ -2759,7 +2765,8 @@ namespace HpskSite.Controllers
         /// påstå något om medaljer.
         /// </summary>
         private List<object> BuildMedalGroups(
-            List<PrecisionResultEntry> results, string? competitionScope, bool medalsPerWeaponGroup)
+            List<PrecisionResultEntry> results, string? competitionScope, bool medalsPerWeaponGroup,
+            HashSet<string>? finalistStarts = null)
         {
             var groups = new List<object>();
             if (!ChampionshipCategory.IsChampionship(competitionScope)) return groups;
@@ -2776,13 +2783,23 @@ namespace HpskSite.Controllers
                 var count = g.Select(r => r.MemberId).Distinct().Count();
                 var isJun = g.Key.Contains("Jun", StringComparison.OrdinalIgnoreCase);
                 var (medals, text) = ChampionshipMedals(count, isJun);
+
+                // ⚠️ Med en finalrunda tas medaljörerna BARA bland finalisterna (CalculateFinalResults).
+                // Har kategorin ingen finalist ger prisutdelningen inga medaljer — och tabellen här
+                // lovade ändå "Medaljer till alla 1 deltagande" för C Jun (Sune-genomgång 2,
+                // 2026-10-03). Säg det i stället, så de två ytorna inte säger emot varandra.
+                bool noFinalists = finalistStarts != null && finalistStarts.Count > 0
+                    && !g.Any(r => IsFinalistStart(finalistStarts, r.MemberId, r.ShootingClass));
+                if (noFinalists) (medals, text) = (0, "Ingen i finalen — inga medaljer");
+
                 groups.Add(new
                 {
                     category = g.Key,
                     participants = count,
                     medals,
                     text,
-                    reduced = medals < 3
+                    reduced = medals < 3,
+                    noFinalists
                 });
             }
             return groups;

@@ -190,8 +190,14 @@
                         </div>
                         <div class="alert alert-info small py-2 d-none" id="wizardLockFirstMsg">
                             <i class="bi bi-lock me-1"></i>
-                            Tryck <strong>Lås</strong> på klassen nedan för att gå vidare.
+                            Lås varje klass som ska ha final. En klass som inte är låst får ingen final.
                         </div>
+                        @* ⚠️ Ett lås räckte för att komma vidare, och Sune låste bara C — C Dam, Vet och
+                           Jun fick ingen final utan att något sa ifrån (Sune-genomgång 2, 2026-10-03).
+                           "Lås alla" är det vanliga fallet; varningen i steg 3 säger vilka som saknas. *@
+                        <button type="button" class="btn btn-primary btn-sm mb-2 d-none" id="wizardLockAllBtn">
+                            <i class="bi bi-lock-fill me-1"></i>Lås alla klasser
+                        </button>
                         <div class="table-responsive">
                             <table class="table table-sm align-middle">
                                 <thead>
@@ -250,6 +256,7 @@
                             En klass — finalisterna väljs enligt SHB och ledaren står först.
                             Vill du ändra antal eller skjutlag: tryck <strong>Tillbaka</strong>.
                         </p>
+                        <div class="alert alert-danger small d-none" id="wizardUnlockedWarn"></div>
                         <div class="alert alert-warning small d-none" id="wizardGateMsg">
                             <i class="bi bi-lock me-1"></i>
                             Lås minst en klass i <strong>steg 1</strong> innan du kan generera.
@@ -258,7 +265,7 @@
                             <div class="col-auto">
                                 <label class="form-label small mb-0">Finaldag</label>
                                 <input type="text" class="form-control form-control-sm" id="finalsDate"
-                                       placeholder="åååå-mm-dd" style="max-width:140px">
+                                       placeholder="tävlingsdagen" style="max-width:140px">
                                 <div class="form-text">Tom = tävlingens datum</div>
                             </div>
                             <div class="col-auto">
@@ -357,6 +364,7 @@
 
     // ---- state ----
     let finalsLists = [];        // GetFinalsStartList → Lists
+    let finalsTiming = { start: '10:00', interval: '1:45', date: '' }; // GetQualifyingSnapshot
     let perClassState = [];      // GetQualifyingSnapshot → perClass (bär weaponGroup)
     let hasResultList = false;
     let isChampionship = false;
@@ -435,6 +443,12 @@
             hasResultList = !!readiness.hasResultList;
             isChampionship = !!readiness.isChampionship;
             perClassState = readiness.perClass || [];
+            // Förslag ur grundomgångens startlista (SkjutlagTiming på servern).
+            finalsTiming = {
+                start: readiness.suggestedFinalsStart || '10:00',
+                interval: readiness.suggestedFinalsInterval || '1:45',
+                date: readiness.competitionDate || ''
+            };
             finalsLists = (finals && (finals.Lists || finals.lists)) || [];
             lastLoadedAt = Date.now();
             // Grundomgångens kort fälls ihop först när en finalstartlista finns — korten laddas
@@ -815,10 +829,18 @@
         const L = listForGroup(group);
         const verb = isRelock ? 'Uppdatera' : 'Lägg till';
         let warn = isRelock
-            ? `Uppdatera ${className} i finalen för vapengrupp ${group}?\n\nKvalresultatet låses om med de aktuella resultaten.`
-            : `Lägg till ${className} i finalen för vapengrupp ${group}?\n\nKlassens kvalresultat låses och finalstartlistan byggs om.`;
-        if (L) warn += '\n\nManuella ändringar i den här gruppens skjutlag skrivs över. Andra vapengrupper påverkas inte.';
-        if (!confirm(warn)) return;
+            ? 'Kvalresultatet låses om med de aktuella resultaten.'
+            : 'Klassens kvalresultat låses och finalstartlistan byggs om.';
+        if (L) warn += ' Manuella ändringar i den här gruppens skjutlag skrivs över. Andra vapengrupper påverkas inte.';
+        // Den delade dialogen i stället för confirm() — "Nästa steg"-kortet leder hit, och en
+        // webbläsardialog på telefonen var det Sune fastnade på (2026-10-03).
+        const ask = await window.hpskAskPublishStartList({
+            title: `${verb} ${className} i finalen (vapengrupp ${group})`,
+            body: warn,
+            confirmLabel: verb,
+            askClose: false
+        });
+        if (!ask.proceed) return;
 
         const fz = await jpost('/umbraco/surface/PrecisionStartList/FreezeClassResults',
             { CompetitionId: competitionId, ChampionshipClass: className });
@@ -861,8 +883,8 @@
             CompetitionId: competitionId,
             WeaponGroup: group,
             FinalsDate: L ? (L.finalsDate || L.FinalsDate || '') : '',
-            FirstStartTime: (L && (L.firstStartTime || L.FirstStartTime)) || '10:00',
-            StartInterval: '1:45',
+            FirstStartTime: (L && (L.firstStartTime || L.FirstStartTime)) || finalsTiming.start,
+            StartInterval: finalsTiming.interval,
             MaxShootersPerTeam: 20
         };
         const d = await jpost('/umbraco/surface/PrecisionStartList/GenerateFinalsStartList', body);
@@ -880,8 +902,8 @@
             WeaponGroup: group,
             Mode: mode,
             FinalsDate: L ? (L.finalsDate || L.FinalsDate || '') : '',
-            FirstStartTime: '10:00',
-            StartInterval: '1:45',
+            FirstStartTime: finalsTiming.start,
+            StartInterval: finalsTiming.interval,
             MaxShootersPerTeam: 20
         });
         if (!ok(d)) { alert(msg(d) || 'Kunde inte skapa finalen.'); await refreshAll(); return; }
@@ -939,6 +961,11 @@
         document.getElementById('wizardGroupLabel').textContent = group ? `vapengrupp ${group}` : 'hela tävlingen';
         showStep(1);
         await Promise.all([loadFreezeState(), loadFinalsConfig(group)]);
+        // Tiderna föreslås ur grundomgången (SkjutlagTiming) — en befintlig lista behåller sina.
+        const L = listForGroup(group);
+        document.getElementById('finalsFirstStartTime').value = (L && (L.firstStartTime || L.FirstStartTime)) || finalsTiming.start;
+        document.getElementById('finalsStartInterval').value = finalsTiming.interval;
+        document.getElementById('finalsDate').value = (L && (L.finalsDate || L.FinalsDate)) || finalsTiming.date;
         const m = bootstrap.Modal.getOrCreateInstance(document.getElementById('generateFinalsStartListModal'));
         m.show();
         updateGenerateWarning();
@@ -963,6 +990,15 @@
             const frozenCount = classesForGroup(wizardGroup).filter(s => s.frozen).length;
             genBtn.disabled = frozenCount === 0;
             document.getElementById('wizardGateMsg').classList.toggle('d-none', frozenCount > 0);
+            // Klasser med resultat som INTE är låsta får ingen final — säg vilka, före Generera.
+            const unlocked = classesForGroup(wizardGroup).filter(s => s.hasResults && !s.frozen);
+            const warn = document.getElementById('wizardUnlockedWarn');
+            warn.classList.toggle('d-none', !unlocked.length || frozenCount === 0);
+            warn.innerHTML = unlocked.length
+                ? `<i class="bi bi-exclamation-triangle me-1"></i><strong>${unlocked.length === 1 ? 'En klass är' : unlocked.length + ' klasser är'} inte låst${unlocked.length === 1 ? '' : 'a'} och får ingen final:</strong> `
+                  + unlocked.map(s => esc(s.groupName || s.championshipClass)).join(', ')
+                  + '. Tryck <strong>Tillbaka</strong> och lås dem, eller generera ändå om de inte ska ha final.'
+                : '';
         } else {
             nextBtn.classList.remove('d-none');
             genBtn.classList.add('d-none');
@@ -979,8 +1015,27 @@
         const locked = classesForGroup(wizardGroup).some(s => s.frozen);
         const gate = currentStep === 1 && !locked;
         nextBtn.disabled = gate;
-        if (msg) msg.classList.toggle('d-none', !gate || classesForGroup(wizardGroup).length === 0);
+        const unlocked = classesForGroup(wizardGroup).filter(s => s.hasResults && !s.frozen);
+        if (msg) msg.classList.toggle('d-none', currentStep !== 1 || !unlocked.length);
+        const all = document.getElementById('wizardLockAllBtn');
+        if (all) all.classList.toggle('d-none', currentStep !== 1 || unlocked.length < 2);
     }
+
+    // Lås alla klasser med resultat, en i taget mot samma endpoint som Lås-knapparna.
+    document.getElementById('wizardLockAllBtn')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+            for (const s of classesForGroup(wizardGroup).filter(x => x.hasResults && !x.frozen)) {
+                const d = await jpost('/umbraco/surface/PrecisionStartList/FreezeClassResults',
+                    { CompetitionId: competitionId, ChampionshipClass: s.groupName || s.championshipClass });
+                if (!(d.success ?? d.Success) && msg(d)) { alert(msg(d)); break; }
+            }
+        } finally {
+            btn.disabled = false;
+            await loadFreezeState();
+        }
+    });
 
     async function loadFreezeState() {
         const d = await jget(`/umbraco/surface/PrecisionStartList/GetQualifyingSnapshot?competitionId=${competitionId}`);
@@ -1154,6 +1209,8 @@
         if (modalInst) modalInst.hide();
         await refreshAll();
         notice(msg(genResp));
+        // "Nästa steg"-kortet stod kvar på "Skapa finalen" efter guiden (Sune-genomgång 2).
+        document.dispatchEvent(new CustomEvent('hpsk:competition-state-changed'));
     }
 
     // ---- wiring ----
@@ -1165,7 +1222,9 @@
             // ⚠️ En enda låst klass har inget att ordna i steg 2 — standardvalen gäller, och steget
             // var den del av guiden som inte gick att läsa på telefonen. Hoppa direkt till steg 3.
             // Konfigurationen är redan inläst ur tabellen och sparas av doGenerate; Tillbaka når steg 2.
-            const single = classesForGroup(wizardGroup).filter(s => s.frozen).length === 1;
+            // "En klass" bara när gruppen HAR en klass — inte när en av flera är låst.
+            const single = classesForGroup(wizardGroup).filter(s => s.frozen).length === 1
+                && classesForGroup(wizardGroup).filter(s => s.hasResults).length === 1;
             document.getElementById('wizardSkippedConfigNote')?.classList.toggle('d-none', !single);
             if (single) { showStep(3); updateGenerateWarning(); }
         } else if (currentStep === 2) {
