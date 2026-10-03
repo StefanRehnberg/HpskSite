@@ -332,9 +332,23 @@
          space at the desk. Search matches name, club, and Swish reference (invoice
          number) so a treasurer can paste the reference from a Swish notification
          and jump straight to the right row. -->
-    <div class="card mb-3">
+    @* På telefon står bara sökrutan framme — fem filter till tog en hel skärm innan listan
+       (Sune-genomgången 2026-10-03). "Fler filter" visar resten; ett aktivt filter syns på knappen. *@
+    <style>
+        @@media (max-width: 767.98px) {
+            #regFilterCard:not(.reg-show-more) .reg-more-filter { display: none; }
+        }
+    </style>
+    <div class="card mb-3" id="regFilterCard">
         <div class="card-body">
             <div class="row g-2">
+                <div class="col-12 d-md-none order-last">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="regMoreFiltersBtn"
+                            onclick="document.getElementById('regFilterCard').classList.toggle('reg-show-more'); this.setAttribute('aria-expanded', document.getElementById('regFilterCard').classList.contains('reg-show-more'))"
+                            aria-expanded="false">
+                        <i class="bi bi-funnel me-1"></i>Fler filter<span id="regActiveFilterCount"></span>
+                    </button>
+                </div>
                 <div class="col-xl-2 col-lg-4 col-md-6">
                     <label for="competitionRegistrationSearch" class="form-label">
                         <i class="bi bi-search me-1"></i>Sök
@@ -344,7 +358,7 @@
                            title="Sök på namn, klubb eller betalningsreferens. Klistra in referensen från banken — även en samlingsfaktura (…-club-…), då visas alla anmälningar som betalningen täcker."
                            oninput="filterCompetitionRegistrations()" autocomplete="off">
                 </div>
-                <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="col-xl-2 col-lg-4 col-md-6 reg-more-filter">
                     <label for="competitionClassFilterBtn" class="form-label">Klass</label>
                     <!-- Multi-select class filter. Rendered as a Bootstrap dropdown of checkboxes
                          (senior-friendly, no ctrl-click) rather than a native multi-select. Options
@@ -363,13 +377,13 @@
                         </div>
                     </div>
                 </div>
-                <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="col-xl-2 col-lg-4 col-md-6 reg-more-filter">
                     <label for="competitionClubFilter" class="form-label">Klubb</label>
                     <select class="form-select" id="competitionClubFilter" onchange="filterCompetitionRegistrations()">
                         <option value="">Alla klubbar</option>
                     </select>
                 </div>
-                <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="col-xl-2 col-lg-4 col-md-6 reg-more-filter">
                     <label for="competitionPreferenceFilter" class="form-label">Startpreferens</label>
                     <select class="form-select" id="competitionPreferenceFilter" onchange="filterCompetitionRegistrations()">
                         <option value="">Alla preferenser</option>
@@ -378,7 +392,7 @@
                         <option value="Sen Start">Sen start</option>
                     </select>
                 </div>
-                <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="col-xl-2 col-lg-4 col-md-6 reg-more-filter">
                     <label for="competitionPaymentFilter" class="form-label">Betalstatus</label>
                     <select class="form-select" id="competitionPaymentFilter" onchange="filterCompetitionRegistrations()">
                         <option value="">Alla betalstatus</option>
@@ -391,7 +405,7 @@
                         <option value="No Fee">Ingen avgift</option>
                     </select>
                 </div>
-                <div class="col-xl-2 col-lg-4 col-md-6">
+                <div class="col-xl-2 col-lg-4 col-md-6 reg-more-filter">
                     <label for="competitionCheckedInFilter" class="form-label">Närvaro</label>
                     <select class="form-select" id="competitionCheckedInFilter" onchange="filterCompetitionRegistrations()">
                         <option value="">Alla</option>
@@ -402,6 +416,22 @@
             </div>
         </div>
     </div>
+
+    <script>
+    (function () {
+        // Ett dolt filter som är aktivt får aldrig vara osynligt — knappen säger hur många.
+        const card = document.getElementById('regFilterCard');
+        const out = document.getElementById('regActiveFilterCount');
+        if (!card || !out) return;
+        const update = () => {
+            let n = ['competitionClubFilter', 'competitionPreferenceFilter', 'competitionPaymentFilter', 'competitionCheckedInFilter']
+                .filter(id => (document.getElementById(id) || {}).value).length;
+            if (card.querySelector('#competitionClassFilterMenu input:checked')) n++;
+            out.textContent = n ? ' (' + n + ' aktiva)' : '';
+        };
+        card.addEventListener('change', update);
+    })();
+    </script>
 
     <!-- Registrations Table -->
     <div class="card">

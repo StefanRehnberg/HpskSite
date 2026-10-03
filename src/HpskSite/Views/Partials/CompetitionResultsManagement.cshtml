@@ -333,12 +333,16 @@
                     </button>
                     <button class="btn btn-sm btn-outline-secondary" type="button"
                             data-bs-toggle="collapse" data-bs-target="#mergeStateBody"
-                            aria-expanded="true" aria-controls="mergeStateBody">
+                            aria-expanded="false" aria-controls="mergeStateBody">
                         <i class="bi bi-chevron-expand me-1"></i>Visa/dölj
                     </button>
                 </div>
             </div>
-            <div class="collapse show" id="mergeStateBody">
+            @* ⚠️ HOPFÄLLD som standard (Sune-genomgången 2026-10-03: 315 ord före Publicera).
+               Rubrikraden bär sammanfattningen, och kroppen fälls ut av sig själv EN gång när
+               något kräver ett beslut — en klass under fem med förslag, eller en reducerad
+               medaljgrupp. Se loadMergeState. *@
+            <div class="collapse" id="mergeStateBody">
                 <div class="card-body py-2">
                     <div id="mergeStateContent">
                         <div class="text-muted small py-2">
@@ -454,12 +458,8 @@
             </div>
             <div class="card-body py-2 border-bottom">
                 <div class="small text-muted mb-0" id="publishHint">
-                    <strong>Uppdatera</strong> räknar om listan ur de inmatade resultaten med
-                    klasserna ovan — den frågar ingenting och ändrar ingen sammanslagning.
-                    <strong>Publicera</strong> gör listan synlig för skyttarna.
-                    Under <strong>Åtgärder</strong> finns <strong>Prisutdelningslistan</strong>,
-                    som visar vem som ska ha vilken medalj — den bygger på den här listan, så
-                    uppdatera den först.
+                    <strong>Uppdatera</strong> räknar om listan ur resultaten.
+                    <strong>Publicera</strong> gör den synlig för skyttarna.
                 </div>
             </div>
             <div class="collapse show" id="resultsListBody">
@@ -1565,6 +1565,12 @@ async function loadMergeState() {
         if (belowCount > 0) {
             parts.push(`<span class="badge bg-warning-subtle text-warning-emphasis">${belowCount} under 5 deltagare</span>`);
         }
+        // Medaljerna på en rad, så sektionen kan stå hopfälld: "Medaljer: B – guld, silver, brons".
+        if (data.isChampionship && (data.medalGroups || []).length) {
+            const short = t => String(t || '').replace('Guld, Silver, Brons', 'guld, silver, brons');
+            parts.push('<span class="small text-muted">Medaljer: ' + (data.medalGroups || [])
+                .map(g => escapeHtml(g.category) + ' – ' + escapeHtml(short(g.text))).join(' · ') + '</span>');
+        }
         summary.innerHTML = parts.join(' ');
     }
 
@@ -1674,11 +1680,8 @@ async function loadMergeState() {
     const isChampionship = !!data.isChampionship;
     let medalBlock;
     if (!isChampionship) {
-        medalBlock = `<div class="alert alert-secondary small py-2 mb-0">
-            <i class="bi bi-info-circle me-1"></i>
+        medalBlock = `<div class="text-muted small">
             Tävlingen är inte ett mästerskap, så inga mästerskapsmedaljer delas ut.
-            Klassindelningen styr placeringarna i resultatlistan, och en klass med färre än fem
-            deltagare kan slås samman med närmaste klass inom vapengruppen (SHB F.2.3).
         </div>`;
     } else if (!medalGroups.length) {
         medalBlock = `<div class="text-muted small">Inga resultat än, så medaljgrupperna kan inte räknas.</div>`;
@@ -1690,7 +1693,7 @@ async function loadMergeState() {
             return `<tr>
                 <td><strong>${escapeHtml(g.category)}</strong></td>
                 <td class="text-center">${g.participants}</td>
-                <td><span class="badge ${badge} small">${escapeHtml(g.text)}</span></td>
+                <td><span class="badge ${badge} small text-wrap text-start">${escapeHtml(g.text)}</span></td>
             </tr>`;
         }).join('');
         const reducedCount = medalGroups.filter(g => g.reduced).length;
@@ -1707,7 +1710,7 @@ async function loadMergeState() {
                     <tbody>${medalRows}</tbody>
                 </table>
             </div>
-            <div class="form-text mb-0">
+            <details class="form-text mb-0"><summary>Så fungerar medaljerna</summary>
                 ${grouping.perWeaponGroup
                     ? 'Medaljerna delas ut <strong>per vapengrupp</strong> — A, B och C var för '
                       + 'sig. Dam, veteran och junior tävlar om samma medaljer som den öppna '
@@ -1720,12 +1723,12 @@ async function loadMergeState() {
                 (SHB C.3.4.1): fyra ger guld och silver, tre ger bara guld, två eller en ger ingen.
                 Juniorklassen är undantagen — där delas medaljer alltid ut till de tre bästa,
                 eller till alla om de är färre.
-                ${reducedCount > 0
-                    ? '<span class="d-block mt-1"><i class="bi bi-exclamation-triangle text-warning me-1"></i>'
-                      + 'Reducering måste vara känd för de startande innan den tillämpas, och den som berörs '
-                      + 'ska erbjudas att byta till en start hen är kvalificerad till.</span>'
-                    : ''}
-            </div>`;
+            </details>
+            ${reducedCount > 0
+                ? '<div class="form-text mb-0 mt-1"><i class="bi bi-exclamation-triangle text-warning me-1"></i>'
+                  + 'Reducering måste vara känd för de startande innan den tillämpas, och den som berörs '
+                  + 'ska erbjudas att byta till en start hen är kvalificerad till.</div>'
+                : ''}`;
     }
 
     host.innerHTML = `
@@ -1744,7 +1747,7 @@ async function loadMergeState() {
                         <tbody>${rows}</tbody>
                     </table>
                 </div>
-                <div class="form-text mb-0">
+                <details class="form-text mb-0"><summary>Så fungerar sammanslagningen</summary>
                     Klasserna styr hur resultatlistan <strong>grupperas</strong> — de påverkar inte
                     medaljerna. En klass med färre än fem deltagare får slås samman med närmaste
                     klass inom vapengruppen (SHB F.2.3): damklassen är nivåindelad som de övriga,
@@ -1752,7 +1755,7 @@ async function loadMergeState() {
                     aldrig samman med en annan nivå. Tabellen visar det som är
                     <strong>sparat</strong> — <strong>Uppdatera</strong> räknar om listan med
                     precis den här uppställningen.
-                </div>
+                </details>
             </div>
             <div class="col-lg-5">
                 <div class="fw-semibold small mb-1">Medaljer</div>
@@ -1760,6 +1763,16 @@ async function loadMergeState() {
                 ${medalBlock}
             </div>
         </div>`;
+
+    // Fäll ut av sig själv EN gång per sidladdning, och bara när något kräver ett beslut:
+    // en klass under fem som FÅR slås samman men inte är det, eller en reducerad medaljgrupp.
+    // Fälls inte ihop igen av sig själv — den som fällt ut sektionen ska inte få den stängd.
+    const needsDecision = classes.some(c => c.belowThreshold && !appliedMap[c.className] && suggestionMap[c.className])
+        || (data.medalGroups || []).some(g => g.reduced);
+    if (needsDecision && !window._mergeStateAutoOpened && typeof bootstrap !== 'undefined') {
+        window._mergeStateAutoOpened = true;
+        bootstrap.Collapse.getOrCreateInstance(document.getElementById('mergeStateBody'), { toggle: false }).show();
+    }
 }
 
 // Spara arrangörens medaljindelning. Servern skriver egenskapen OCH räknar om
