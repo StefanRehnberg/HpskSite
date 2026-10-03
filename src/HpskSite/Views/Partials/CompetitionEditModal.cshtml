@@ -416,9 +416,14 @@ console.log('CompetitionEditModal.cshtml is being loaded and executed');
                                 <label for="edit_numberOfSeriesOrStations" class="form-label">Antal serier/stationer <span class="text-danger">*</span></label>
                                 <input type="number" class="form-control" id="edit_numberOfSeriesOrStations" name="numberOfSeriesOrStations" value="@numSeries" min="1" required>
                             </div>
-                            <div class="mb-3">
+                            @* Finalomgång finns bara i precisionsskjutning (SHB C.3.6.1.1) — regeln är
+                               CompetitionFinals. För andra grenar göms fältet och värdet sätts till 0,
+                               så en äldre tävling med felaktiga finalserier rättas vid nästa sparning
+                               (servern vägrar annars sparningen). *@
+                            <div class="mb-3" id="edit_finalsGroup">
                                 <label for="edit_numberOfFinalSeries" class="form-label">Varav finalserier</label>
                                 <input type="number" class="form-control" id="edit_numberOfFinalSeries" name="numberOfFinalSeries" value="@numberOfFinalSeries" min="0">
+                                <div class="form-text">Bara precision har final (SHB C.3.6.1.1). Mästerskap: 10 serier varav 3 final.</div>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -1140,6 +1145,13 @@ window.populateEditModal = function(competition) {
     // Checkboxes
     onEditAllowTeamsChange();
     onEditAllowStafettChange();
+
+    // Finalserier bara för grenar med finalomgång (CompetitionFinals, SHB C.3.6.1.1).
+    const finalsTypes = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(HpskSite.CompetitionTypes.Common.CompetitionFinals.SupportedTypes));
+    const finalsAllowed = !competition.competitionType || finalsTypes.includes(competition.competitionType);
+    const finalsGroupEl = document.getElementById('edit_finalsGroup');
+    if (finalsGroupEl) finalsGroupEl.style.display = finalsAllowed ? '' : 'none';
+    if (!finalsAllowed) setFieldValue('edit_numberOfFinalSeries', 0);
 
     // Show/hide stafett row based on competition type
     const isSpringskytte = (competition.competitionType === 'Springskytte');
