@@ -1,0 +1,307 @@
+@*
+    "Nästa steg" — kortet överst på tävlingssidan (precisionsfamiljen). Visar var tävlingen står och
+    EN knapp för det som ska göras härnäst. Byggt efter KM 3468 (2026-10-03), där skjutledaren med
+    telefonen i handen inte hittade finalen. Skiss godkänd av Stefan 2026-10-03.
+
+    Fasen räknas på servern (CompetitionResults/GetNextStep → CompetitionNextStep). Varje knapp
+    öppnar något som redan finns: startlistans generering, publiceringsdialogen, /station,
+    skjutledarvyn, finalkortets tre val, särskjutningskortet, resultatlistan. Kortet äger ingen
+    egen logik för något av det.
+
+    ⚠️ Kortet LÄSER OM SIG SJÄLVT — vid sidladdning, flikbyte, när sidan får fokus igen och med
+    jämna mellanrum. Ett fel visas som ett fel, aldrig som ett tomt eller gammalt läge.
+    ViewData: CompetitionId (int).
+*@
+@{
+    var nsCompId = ViewData["CompetitionId"] is int i ? i : 0;
+}
+@await Html.PartialAsync("_HtmlEscape")
+<style>
+    .ns-card { border: 1px solid var(--bs-border-color); border-radius: .75rem; padding: .9rem 1rem; margin-bottom: 1rem; background: var(--bs-body-bg); }
+    .ns-card.ns-warn { border-color: var(--bs-warning-border-subtle); background: var(--bs-warning-bg-subtle); }
+    .ns-card.ns-bad { border-color: var(--bs-danger-border-subtle); background: var(--bs-danger-bg-subtle); }
+    .ns-card.ns-done { border-color: var(--bs-success-border-subtle); background: var(--bs-success-bg-subtle); padding: .55rem 1rem; }
+    .ns-top { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+    .ns-label { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--bs-secondary-color); font-weight: 600; }
+    .ns-steps { display: flex; gap: 4px; }
+    .ns-steps i { width: 18px; height: 5px; border-radius: 3px; background: var(--bs-border-color); display: block; }
+    .ns-steps i.ns-s-done { background: var(--bs-success); }
+    .ns-steps i.ns-s-now { background: var(--bs-primary); }
+    .ns-title { font-weight: 700; font-size: 1.1rem; margin: .3rem 0 .15rem; }
+    .ns-warn .ns-title { color: var(--bs-warning-text-emphasis); }
+    .ns-bad .ns-title { color: var(--bs-danger-text-emphasis); }
+    .ns-fact { color: var(--bs-secondary-color); margin: 0; font-variant-numeric: tabular-nums; }
+    .ns-fact b { color: var(--bs-body-color); }
+    .ns-bar { height: 6px; border-radius: 3px; background: var(--bs-border-color); margin: .5rem 0 .1rem; overflow: hidden; max-width: 420px; }
+    .ns-bar span { display: block; height: 100%; background: var(--bs-success); }
+    .ns-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .7rem; }
+    .ns-actions .btn-primary { min-width: 220px; }
+    .ns-groups { margin: .6rem 0 0; padding: 0; list-style: none; font-size: .9rem; }
+    .ns-groups li { display: flex; gap: .5rem; flex-wrap: wrap; padding: .15rem 0; }
+    .ns-groups .ns-g { font-weight: 600; min-width: 6.5rem; }
+    .ns-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .5rem; margin-top: .6rem; }
+    .ns-choices .btn { text-align: start; height: 100%; }
+    .ns-choices .btn span { display: block; font-size: .85rem; font-weight: 400; }
+    .ns-done-row { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; }
+    .ns-done-row .ns-title { margin: 0; font-size: 1rem; color: var(--bs-success-text-emphasis); }
+    .ns-note { font-size: .85rem; color: var(--bs-secondary-color); margin-top: .5rem; }
+    @@media (max-width: 575.98px) { .ns-actions .btn { width: 100%; } }
+</style>
+
+<div id="nsCard" class="ns-card" data-competition-id="@nsCompId" aria-live="polite">
+    <div class="ns-top"><span class="ns-label">Nästa steg</span></div>
+    <div class="ns-fact mt-1"><span class="spinner-border spinner-border-sm me-2"></span>Läser tävlingens läge…</div>
+</div>
+
+<script>
+(function () {
+    const card = document.getElementById('nsCard');
+    if (!card) return;
+    const compId = parseInt(card.dataset.competitionId, 10) || 0;
+    const esc = window.hpskEsc;
+    let state = null, timer = null, busy = false;
+
+    const PHASE_TITLE = {
+        CreateStartList: 'Skapa startlistan',
+        PublishStartList: 'Publicera startlistan',
+        EnterQualification: 'Mata in resultat',
+        CreateFinals: 'Skapa finalen',
+        EnterFinals: 'Mata in finalresultat',
+        ShootOff: 'Särskjutning krävs',
+        PublishResults: 'Publicera resultatlistan',
+        Done: 'Resultatlistan är publicerad'
+    };
+    const GROUP_PHASE = {
+        EnterQualification: g => `Grundomgång ${g.qualEntered} av ${g.qualExpected} serier`,
+        CreateFinals: () => 'Final ej skapad',
+        EnterFinals: g => `Final ${g.finalsEntered} av ${g.finalsExpected} serier`,
+        PublishResults: () => 'Allt inmatat'
+    };
+
+    function steps(n) {
+        let h = '<span class="ns-steps" aria-label="Steg ' + (n + 1) + ' av 5">';
+        for (let i = 0; i < 5; i++) h += '<i class="' + (i < n ? 'ns-s-done' : i === n ? 'ns-s-now' : '') + '"></i>';
+        return h + '</span>';
+    }
+    function bar(done, total) {
+        const pct = total > 0 ? Math.min(100, Math.round(100 * done / total)) : 0;
+        return '<div class="ns-bar" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100"><span style="width:' + pct + '%"></span></div>';
+    }
+    function fmtDate(iso) {
+        if (!iso) return '';
+        const d = new Date(iso + 'T00:00:00');
+        return isNaN(d) ? iso : d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+    }
+    function groupLabel(g) { return g ? 'Vapengrupp ' + g : 'Övriga'; }
+    function groupLabelLower(g) { return g ? 'vapengrupp ' + g : 'övriga'; }
+    let finalsInfoRetried = false;
+
+    // De grupper som ligger i samma fas som kortet visar (den som ligger längst bak).
+    function groupsIn(phase) { return (state.groups || []).filter(g => g.phase === phase); }
+
+    function groupList() {
+        const gs = state.groups || [];
+        // När alla grupper är klara säger raderna inget som rubriken inte redan säger.
+        if (gs.length < 2 || gs.every(g => g.phase === 'PublishResults')) return '';
+        return '<ul class="ns-groups">' + gs.map(g =>
+            '<li><span class="ns-g">' + esc(groupLabel(g.group)) + '</span><span class="text-muted">'
+            + esc((GROUP_PHASE[g.phase] || (() => ''))(g)) + '</span></li>').join('') + '</ul>';
+    }
+
+    function render() {
+        const s = state, p = s.phase;
+        card.className = 'ns-card' + (p === 'ShootOff' ? ' ns-warn' : p === 'Done' ? ' ns-done' : '');
+
+        if (p === 'Done') {
+            card.innerHTML = '<div class="ns-done-row"><span class="ns-title"><i class="bi bi-check-circle-fill me-2"></i>'
+                + esc(PHASE_TITLE.Done) + '</span><span class="d-flex gap-2 flex-wrap">'
+                + '<a class="btn btn-sm btn-outline-success" href="/prisutdelning/' + compId + '" target="_blank" rel="noopener"><i class="bi bi-award me-1"></i>Prisutdelning</a>'
+                + '<button type="button" class="btn btn-sm btn-outline-secondary" data-ns="goto-results">Visa resultatlistan</button>'
+                + '</span></div>';
+            return;
+        }
+
+        let fact = '', actions = '', extra = '';
+        if (p === 'CreateStartList') {
+            fact = '<b>' + s.registrations + ' anmälda</b>'
+                + (s.registrationCloses ? ' · anmälan ' + (s.registrationOpen ? 'stänger ' : 'stängde ') + esc(fmtDate(s.registrationCloses)) : '');
+            actions = '<button type="button" class="btn btn-primary" data-ns="create-startlist"><i class="bi bi-list-ol me-1"></i>Skapa startlistan</button>';
+            if (s.registrationOpen) extra = '<div class="ns-note">Du kan skapa den nu och göra om den efter sista anmälningsdag.</div>';
+        } else if (p === 'PublishStartList') {
+            fact = '<b>' + s.teamCount + ' skjutlag</b>, ' + s.startCount + ' starter'
+                + (s.firstStartTime ? ', första start ' + esc(s.firstStartTime) : '') + '. Skyttarna ser inte listan än.';
+            actions = '<button type="button" class="btn btn-primary" data-ns="publish-startlist"><i class="bi bi-eye me-1"></i>Granska och publicera</button>'
+                + '<button type="button" class="btn btn-outline-primary" data-ns="goto-startlists">Ändra i startlistan</button>';
+        } else if (p === 'EnterQualification') {
+            const gs = groupsIn(p);
+            const exp = gs.reduce((n, g) => n + g.qualExpected, 0), ent = gs.reduce((n, g) => n + g.qualEntered, 0);
+            const last = Math.max(0, ...gs.map(g => g.qualLastSeries));
+            const team = (gs.find(g => g.qualGapTeam > 0) || {}).qualGapTeam || 0;
+            fact = exp > 0
+                ? 'Serie <b>' + Math.max(1, last) + ' av ' + s.qualSeries + '</b> · <b>' + ent + ' av ' + exp + '</b> serier inmatade'
+                : 'Startlistan har inga skyttar än.';
+            if (exp > 0) fact += bar(ent, exp);
+            if (team > 0) {
+                actions = '<a class="btn btn-primary" href="/station?c=' + compId + '&s=' + team + '" target="_blank" rel="noopener"><i class="bi bi-pencil-square me-1"></i>Mata in resultat</a>';
+                if (s.hasSkjutledareView)
+                    actions += '<a class="btn btn-outline-secondary" href="/skjutledare?c=' + compId + '&l=' + team + '" target="_blank" rel="noopener"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>';
+                if (s.teamCount > 1) extra = '<div class="ns-note">Öppnar skjutlag ' + team + ', det första med serier kvar. Andra skjutlag finns under Funktionärer.</div>';
+            } else {
+                actions = '<button type="button" class="btn btn-primary" data-ns="goto-funktionarer">Öppna Funktionärer</button>';
+            }
+        } else if (p === 'CreateFinals') {
+            const gs = groupsIn(p);
+            const info = window.hpskFinalsChoiceInfo;
+            const g = gs[0] ? gs[0].group : '';
+            const ci = typeof info === 'function' ? info(g) : null;
+            // Med flera vapengrupper gäller valen EN grupp i taget — säg vilken innan valen visas.
+            fact = (state.groups || []).length > 1
+                ? 'Hur ska finalen i <b>' + esc(groupLabelLower(g)) + '</b> ställas upp?'
+                  + (gs.length > 1 ? ' Övriga vapengrupper väljer du därefter.' : '')
+                : 'Grundomgången är inmatad. Hur ska finalen ställas upp?';
+            if (ci && ci.ready) {
+                actions = '<div class="ns-choices w-100">'
+                    + '<button type="button" class="btn btn-outline-success" data-ns="finals" data-action="clone" data-group="' + esc(g) + '"><strong>Fortsätt i samma ordning</strong><span>Alla går vidare och står kvar på sina platser från grundomgången.</span></button>'
+                    + '<button type="button" class="btn btn-outline-primary" data-ns="finals" data-action="rerank" data-group="' + esc(g) + '"><strong>Placera om efter resultat</strong><span>Alla ' + ci.shooters + ' går vidare, i poängordning. ' + ci.leaderTxt + '</span></button>'
+                    + '<button type="button" class="btn btn-outline-warning" data-ns="finals" data-action="wizard" data-group="' + esc(g) + '"><strong>Mästerskapsfinal (SHB)</strong><span>' + ci.shbTxt + '</span>' + ci.shbNote + '</button>'
+                    + '</div>';
+            } else {
+                actions = '<button type="button" class="btn btn-primary" data-ns="goto-finals"><i class="bi bi-trophy me-1"></i>Skapa finalen</button>';
+                // Finalkortet läser sitt underlag vid sidladdning — rita om en gång när det hunnit.
+                if (!finalsInfoRetried) { finalsInfoRetried = true; setTimeout(() => { if (state && state.phase === 'CreateFinals') render(); }, 2500); }
+            }
+        } else if (p === 'EnterFinals') {
+            const gs = groupsIn(p);
+            const exp = gs.reduce((n, g) => n + g.finalsExpected, 0), ent = gs.reduce((n, g) => n + g.finalsEntered, 0);
+            const last = Math.max(0, ...gs.map(g => g.finalsLastSeries));
+            const g = gs.find(x => x.finalsGapTeam > 0) || gs[0] || {};
+            fact = 'Finalserie <b>F' + Math.max(1, last) + ' av ' + s.finalSeries + '</b> · <b>' + ent + ' av ' + exp + '</b> serier inmatade' + bar(ent, exp);
+            // ⚠️ En finalstartlista per vapengrupp, och länken bär listans id (fsl) — skjutlagsnumren
+            // är unika bara inom en lista. Med flera grupper i finalen får varje grupp sin knapp.
+            const finalLink = x => '/station?c=' + compId + '&s=' + (x.finalsGapTeam || 1) + '&phase=finals&fsl=' + (x.finalsListId || 0);
+            const open = gs.filter(x => x.finalsEntered < x.finalsExpected);
+            actions = open.length > 1
+                ? open.map(x => '<a class="btn btn-primary" href="' + finalLink(x) + '" target="_blank" rel="noopener"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat, ' + esc(groupLabelLower(x.group)) + '</a>').join('')
+                : '<a class="btn btn-primary" href="' + finalLink(g) + '" target="_blank" rel="noopener"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat</a>';
+            if (gs.some(x => !x.finalsPublished))
+                extra = '<div class="ns-note"><i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad, så skyttarna ser den inte. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ns="goto-finals">Publicera den</button></div>';
+        } else if (p === 'ShootOff') {
+            const t = s.ties || [];
+            // En strid: rubriken säger redan medalj och grupp. Flera: varje rad säger sin.
+            fact = t.map(x => (t.length > 1 ? esc(x.medal) + ' i ' + esc(x.category) + ': ' : '')
+                    + esc((x.names || []).join(' och ')) + ' står lika på <b>' + x.score + '</b>.').join('<br>')
+                + '<br>Särskjutningen avgörs innan listan publiceras.';
+            actions = '<button type="button" class="btn btn-primary" data-ns="goto-shootoff">Mata in särskjutning</button>';
+        } else if (p === 'PublishResults') {
+            fact = 'Alla serier är inmatade. Resultatlistan är preliminär och syns inte för skyttarna.';
+            actions = '<button type="button" class="btn btn-primary" data-ns="goto-publish"><i class="bi bi-eye me-1"></i>Granska och publicera</button>'
+                + '<a class="btn btn-outline-secondary" href="/prisutdelning/' + compId + '" target="_blank" rel="noopener">Prisutdelningslistan</a>';
+        }
+
+        card.innerHTML = '<div class="ns-top"><span class="ns-label">Nästa steg</span>' + steps(s.step) + '</div>'
+            + '<div class="ns-title">' + esc(p === 'ShootOff' && (s.ties || []).length === 1
+                ? 'Särskjutning om ' + s.ties[0].medal.toLowerCase() + ' i ' + s.ties[0].category
+                : PHASE_TITLE[p] || '') + '</div>'
+            + '<p class="ns-fact">' + fact + '</p>'
+            + groupList()
+            + '<div class="ns-actions">' + actions + '</div>' + extra;
+    }
+
+    function renderError(msg) {
+        card.className = 'ns-card ns-bad';
+        const at = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+        card.innerHTML = '<div class="ns-label">Nästa steg</div>'
+            + '<div class="ns-title">Kunde inte läsa tävlingens läge</div>'
+            + '<p class="ns-fact">' + esc(msg || 'Servern svarade inte') + ' (kl ' + at + '). Flikarna nedan fungerar som vanligt.</p>'
+            + '<div class="ns-actions"><button type="button" class="btn btn-primary" data-ns="retry">Försök igen</button></div>';
+    }
+
+    // ⚠️ En ändring som sker MEDAN en läsning pågår får inte tappas — då skulle kortet visa
+    // läget före ändringen. Läs om en gång till efteråt.
+    let pending = false;
+    async function load() {
+        if (busy) { pending = true; return; }
+        busy = true;
+        try {
+            const r = await fetch('/umbraco/surface/CompetitionResults/GetNextStep?competitionId=' + compId, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('Servern svarade ' + r.status);
+            const j = await r.json();
+            if (j.denied || j.supported === false) { card.remove(); stop(); return; }
+            if (!j.success) throw new Error(j.message || 'Okänt fel');
+            state = j;
+            render();
+            schedule();
+        } catch (e) {
+            renderError(e && e.message);
+            schedule();
+        } finally {
+            busy = false;
+            if (pending) { pending = false; load(); }
+        }
+    }
+
+    // Tätare under tävlingsdagen, glesare veckorna före och efteråt.
+    function schedule() {
+        stop();
+        const p = state ? state.phase : '';
+        const ms = (p === 'EnterQualification' || p === 'EnterFinals' || p === 'CreateFinals' || p === 'ShootOff') ? 30000 : 120000;
+        timer = setTimeout(() => { if (document.visibilityState === 'visible') load(); else schedule(); }, ms);
+    }
+    function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+
+    function showTab(id) {
+        const btn = document.getElementById(id);
+        if (btn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(btn).show();
+    }
+    function scrollTo(id) {
+        const el = document.getElementById(id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    card.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-ns]');
+        if (!btn) return;
+        const a = btn.dataset.ns;
+        if (a === 'retry') { load(); return; }
+        if (a === 'create-startlist') {
+            showTab('startlists-tab');
+            if (typeof window.openGenerateStartListModal === 'function') window.openGenerateStartListModal();
+        } else if (a === 'publish-startlist') {
+            showTab('startlists-tab');
+            // Startlistan läses in när fliken visas — vänta in den innan dialogen öppnas,
+            // annars publicerar dialogen ingenting.
+            btn.disabled = true;
+            const t0 = Date.now();
+            while (!window.currentStartListId && Date.now() - t0 < 10000) await new Promise(r => setTimeout(r, 200));
+            btn.disabled = false;
+            if (window.currentStartListId && typeof window.publishStartList === 'function') window.publishStartList();
+        } else if (a === 'goto-startlists') {
+            showTab('startlists-tab');
+        } else if (a === 'goto-funktionarer') {
+            showTab('funktionarer-tab');
+        } else if (a === 'goto-finals') {
+            showTab('startlists-tab');
+            setTimeout(() => window.hpskGoToFinalsSection && window.hpskGoToFinalsSection(), 150);
+        } else if (a === 'finals') {
+            if (typeof window.hpskFinalsAction !== 'function') return;
+            btn.disabled = true;
+            try { await window.hpskFinalsAction(btn.dataset.action, btn.dataset.group || ''); }
+            finally { btn.disabled = false; load(); }
+        } else if (a === 'goto-shootoff') {
+            showTab('results-tab');
+            setTimeout(() => scrollTo('shootOffSection'), 150);
+        } else if (a === 'goto-publish' || a === 'goto-results') {
+            showTab('results-tab');
+            setTimeout(() => scrollTo('resultsListActions'), 150);
+        }
+    });
+
+    // Läs om vid flikbyte och när sidan får fokus igen — en arrangör har sidan öppen hela dagen.
+    document.getElementById('managementTabs')?.addEventListener('shown.bs.tab', () => load());
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });
+    // Andra ytor kan säga till direkt efter en ändring.
+    document.addEventListener('hpsk:competition-state-changed', () => load());
+
+    load();
+})();
+</script>
