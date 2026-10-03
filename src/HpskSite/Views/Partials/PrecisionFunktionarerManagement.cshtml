@@ -203,7 +203,7 @@
         var d;
         try {
             var r = await fetch('/umbraco/surface/PrecisionStartList/GetFinalsStartList?competitionId=' + compId,
-                { headers: { 'Accept': 'application/json' } });
+                { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
             d = await r.json();
         } catch (e) {
             host.innerHTML = '<div class="col-12 text-muted">Kunde inte läsa finalstartlistan.</div>';
@@ -216,8 +216,9 @@
                 + '<i class="bi bi-info-circle me-1"></i>'
                 + '<strong>Ingen finalstartlista är skapad än.</strong>'
                 + '<div class="small mt-1">Finalresultaten matas in mot finalstartlistan, så den måste skapas '
-                + 'först. Gå till fliken <strong>Startlistor</strong> och välj hur finalen ska ställas upp. '
-                + 'Så länge den saknas kan bara grundomgångens serier matas in.</div>'
+                + 'först. Så länge den saknas kan bara grundomgångens serier matas in.</div>'
+                + '<button type="button" class="btn btn-sm btn-primary mt-2" onclick="pfnGoToFinals()">'
+                + '<i class="bi bi-trophy me-1"></i>Skapa finalstartlistan</button>'
                 + '</div></div>';
             return;
         }
@@ -330,10 +331,22 @@
         });
     }
 
+    // Till finalsektionen på Startlistor-fliken, utfälld (samma knapp som grundomgångens "Till finalen").
+    window.pfnGoToFinals = function () {
+        var tab = document.getElementById('startlists-tab');
+        if (tab) tab.click();
+        setTimeout(function () { if (window.hpskGoToFinalsSection) window.hpskGoToFinalsSection(); }, 300);
+    };
+
     refresh();
     // Not on the 15 s poll — a finals start list is created once, not continuously. Re-read it when
     // the operator comes back to the tab, which is when they'd return after creating it.
+    // ⚠️ "Fliken" = Funktionärer-fliken på sidan, inte bara webbläsarens flik. Förut lyssnade
+    // koden bara på visibilitychange, så en finalstartlista skapad på Startlistor-fliken gav
+    // aldrig någon länk här utan omladdning — exakt där skjutledaren skulle mata in finalen.
     loadFinals();
+    var funkTab = document.getElementById('funktionarer-tab');
+    if (funkTab) funkTab.addEventListener('shown.bs.tab', function () { refresh(); loadFinals(); });
     timer = setInterval(refresh, REFRESH);
     document.addEventListener('visibilitychange', function () {
         if (document.hidden) { if (timer) { clearInterval(timer); timer = null; } }

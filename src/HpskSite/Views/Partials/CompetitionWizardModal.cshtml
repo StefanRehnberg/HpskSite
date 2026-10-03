@@ -334,6 +334,7 @@
 
                             <div class="mb-3" id="wizard_finalsGroup">
                                 <label for="wizard_numberOfFinalSeries" class="form-label">Varav finalserier</label>
+                                <div class="form-text mt-0 mb-1">Bara precision har final (SHB C.3.6.1.1). Mästerskap: 10 serier varav 3 final.</div>
                                 <div class="btn-group mb-2" role="group">
                                     <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(0)">0</button>
                                     <button type="button" class="btn btn-outline-secondary" onclick="setFinalSeries(3)">3</button>
@@ -851,6 +852,8 @@
 </style>
 
 <script>
+// Grenar med finalomgång — renderas ur CompetitionFinals.SupportedTypes, aldrig en egen lista.
+window.HPSK_FINALS_TYPES = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(HpskSite.CompetitionTypes.Common.CompetitionFinals.SupportedTypes));
 // Wizard State
 let wizardCurrentStep = 0;
 // Stegens index, namngivna. ⚠ Fram till 2026-10-01 var de magiska tal utspridda i filen
@@ -1009,6 +1012,12 @@ function applySeriesDefaults() {
         finalsGroup.querySelectorAll('button').forEach(b => b.disabled = false);
         milsnabbNote.classList.add('d-none');
     }
+
+    // Finalomgång finns bara i precisionsskjutning (SHB C.3.6.1.1) — regeln är
+    // CompetitionFinals; servern vägrar finalserier för andra grenar.
+    const finalsAllowed = (window.HPSK_FINALS_TYPES || ['Precision']).includes(typeId);
+    finalsGroup.style.display = finalsAllowed ? '' : 'none';
+    if (!finalsAllowed) finalsInput.value = 0;
 }
 
 function springSeriesChanged() {

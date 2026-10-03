@@ -1832,30 +1832,11 @@ namespace HpskSite.Controllers
         /// PrecisionResultEntry oavsett vilken gren den kom från. Därför en typad gren per gren och
         /// inte en `SELECT * FROM [tabellnamn]` — den senare hade varit kortare och tyst fel.
         ///
-        /// Kedjan låg i två kopior (här och i inmatningsvyns uppslag). En ny gren är nu en gren här.
+        /// Grenkedjan bor i <see cref="PrecisionFamilyResultReader"/> — finalkedjan läser samma.
         /// </summary>
-        private static async Task<List<PrecisionResultEntry>> FetchFamilyResultsAsync(
+        private static Task<List<PrecisionResultEntry>> FetchFamilyResultsAsync(
             Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, string compTypeId, string where, int competitionId)
-        {
-            switch ((compTypeId ?? "").Trim())
-            {
-                case "Milsnabb":
-                    return (await db.FetchAsync<MilsnabbResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
-                case "Duell":
-                    return (await db.FetchAsync<DuellResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
-                case "NationellHelmatch":
-                    return (await db.FetchAsync<NationellHelmatchResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
-                case "MagnumPrecision":
-                    return (await db.FetchAsync<MagnumPrecisionResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
-                case "Standardpistol":
-                    return (await db.FetchAsync<HpskSite.CompetitionTypes.Standardpistol.Models.StandardpistolResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
-                case "Sportpistol":
-                    return (await db.FetchAsync<HpskSite.CompetitionTypes.Sportpistol.Models.SportpistolResultEntry>(where, competitionId)).Cast<PrecisionResultEntry>().ToList();
-                default:
-                    // Tom/okänd typ = Precision. Äldre noder bär ingen competitionType.
-                    return await db.FetchAsync<PrecisionResultEntry>(where, competitionId);
-            }
-        }
+            => PrecisionFamilyResultReader.FetchAsync(db, compTypeId, where, competitionId);
 
         private async Task<List<PrecisionResultEntry>> GetCompetitionResultsInternal(int competitionId)
         {

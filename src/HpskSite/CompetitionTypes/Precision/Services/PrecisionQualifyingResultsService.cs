@@ -193,11 +193,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
 
         private async Task<List<ChampionshipClassQualification>> BuildFullRankingsAsync(int competitionId, IContent competition)
         {
-            var numberOfFinalSeries = competition.GetValue<int>("numberOfFinalSeries");
-            var numberOfSeries = competition.GetValue<int>("numberOfSeriesOrStations");
-            var qualSeriesCount = numberOfFinalSeries > 0 ? (numberOfSeries - numberOfFinalSeries) : numberOfSeries;
-
-            var results = await GetQualifyingResultsAsync(competitionId, qualSeriesCount);
+            var results = await GetQualifyingResultsAsync(competition);
             var shooterInfo = GetShooterInfoFromStartList(competitionId);
 
             // ⚠️ Vid ett MÄSTERSKAP grupperas finalisterna per mästerskapskategori, inte per
@@ -223,14 +219,21 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             return _qualificationService.BuildFullClassRankings(results, shooterInfo, lookup);
         }
 
-        private async Task<List<PrecisionResultEntry>> GetQualifyingResultsAsync(int competitionId, int qualSeriesCount)
+        /// <summary>
+        /// Grundomgångens resultatrader ur GRENENS tabell. ⚠️ Läste hårdkodat PrecisionResultEntry
+        /// fram till 2026-10-03, vilket gjorde finalen omöjlig för alla andra grenar i familjen.
+        /// </summary>
+        public async Task<List<PrecisionResultEntry>> GetQualifyingResultsAsync(IContent competition)
         {
+            var qualSeriesCount = PrecisionFamilyResultReader.QualifyingSeriesCount(
+                competition.GetValue<int>("numberOfSeriesOrStations"),
+                competition.GetValue<int>("numberOfFinalSeries"));
+
             using var db = _databaseFactory.CreateDatabase();
-            return await db.FetchAsync<PrecisionResultEntry>(
-                @"SELECT * FROM PrecisionResultEntry
-                  WHERE CompetitionId = @0 AND SeriesNumber <= @1
-                  ORDER BY MemberId, SeriesNumber",
-                competitionId, qualSeriesCount);
+            return await PrecisionFamilyResultReader.FetchAsync(db,
+                competition.GetValue<string>("competitionType"),
+                "WHERE CompetitionId = @0 AND SeriesNumber <= @1 ORDER BY MemberId, SeriesNumber",
+                competition.Id, qualSeriesCount);
         }
 
         private async Task<string> ComputeGroupChecksumAsync(int competitionId, ChampionshipClassQualification ranking)
@@ -238,16 +241,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             var competition = _contentService.GetById(competitionId);
             if (competition == null) return "";
 
-            var numberOfFinalSeries = competition.GetValue<int>("numberOfFinalSeries");
-            var numberOfSeries = competition.GetValue<int>("numberOfSeriesOrStations");
-            var qualSeriesCount = numberOfFinalSeries > 0 ? (numberOfSeries - numberOfFinalSeries) : numberOfSeries;
-
-            using var db = _databaseFactory.CreateDatabase();
-            var results = await db.FetchAsync<PrecisionResultEntry>(
-                @"SELECT * FROM PrecisionResultEntry
-                  WHERE CompetitionId = @0 AND SeriesNumber <= @1
-                  ORDER BY MemberId, SeriesNumber",
-                competitionId, qualSeriesCount);
+            var results = await GetQualifyingResultsAsync(competition);
 
             // Scope checksum to the shooters actually in this result-list group.
             var memberIds = ranking.QualifiedShooters.Select(s => s.MemberId).ToHashSet();
