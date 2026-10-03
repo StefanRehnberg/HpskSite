@@ -46,6 +46,15 @@
     }
     #finalsWizardRoot .step-pane { display: none; }
     #finalsWizardRoot .step-pane.active { display: block; }
+    /* Steg 2 på telefon: varje klass ett kort med etiketter i stället för en tabell som klipps. */
+    @@media (max-width: 575.98px) {
+        #configTable thead { display: none; }
+        #configTable tr { display: block; border: 1px solid var(--bs-border-color); border-radius: .375rem; margin-bottom: .75rem; padding: .5rem .75rem; }
+        #configTable td { display: flex; justify-content: space-between; align-items: center; gap: .5rem; border: 0; padding: .25rem 0; text-align: right; }
+        #configTable td::before { content: attr(data-label); font-size: .8rem; color: var(--bs-secondary-color); text-align: left; }
+        #configTable td[colspan]::before { content: none; }
+        #finalsWizardRoot .table-responsive { overflow-x: visible; }
+    }
     .fn-group-card { border-left: 3px solid var(--bs-warning); }
     .fn-group-card.fn-missing { border-left-color: var(--bs-border-color); }
     .fn-group-card.fn-published { border-left-color: var(--bs-success); }
@@ -78,20 +87,25 @@
         <div class="collapse show" id="fnSectionBody">
             <div class="card-body">
 
-                <div class="alert alert-secondary d-flex align-items-start gap-2 mb-3">
-                    <i class="bi bi-info-circle mt-1"></i>
-                    <div class="small mb-0">
-                        <strong>En finalstartlista per vapengrupp.</strong>
-                        Den bestämmer i vilken ordning skyttarna står när finalens resultat matas in
-                        (serie F1 och framåt), och den publiceras för sig — så C:s final kan vara
-                        publicerad på lördagen medan A:s ännu är ett utkast.
-                        <span class="d-block mt-1">
-                            Inuti en vapengrupp har varje mästerskapsklass sina egna finalister:
-                            Dam C, Veteran C och Junior C tävlar om egna medaljer, medan klasserna
-                            1, 2 och 3 är skicklighetsklasser som delar medalj.
+                @* ⚠️ Var en grå ruta på 79 ord ÖVERST i kortet, om C:s final på lördagen och Dam/Vet/Jun
+                   C — även på ett kretsmästerskap i vapengrupp B där inget av det gäller (Sune-
+                   genomgången 2026-10-03). Nu hopfälld, och styckena visas bara när de gäller
+                   (fler än en vapengrupp / vapengrupp C finns) — styrs av renderGroups(). *@
+                <details class="small mb-3" id="fnHowItWorks">
+                    <summary class="text-muted"><i class="bi bi-info-circle me-1"></i>Hur fungerar finalen?</summary>
+                    <div class="mt-2">
+                        Finalstartlistan bestämmer i vilken ordning skyttarna står när finalserierna
+                        (F1 och framåt) matas in. Den syns för skyttarna först när du publicerar den.
+                        <span class="d-block mt-1 d-none" id="fnHowManyGroups">
+                            Varje vapengrupp får en egen lista som publiceras för sig — C:s final kan
+                            vara publicerad medan A:s ännu är ett utkast.
+                        </span>
+                        <span class="d-block mt-1 d-none" id="fnHowGroupC">
+                            I vapengrupp C har varje mästerskapsklass egna finalister: Dam C, Veteran C
+                            och Junior C tävlar om egna medaljer. Klasserna 1, 2 och 3 delar medalj.
                         </span>
                     </div>
-                </div>
+                </details>
 
                 @* Kvitto på senaste åtgärden. ⚠️ INTE en alert(): en modal dialogruta
                    blockerar hela sidan (och varje automatiserad kontroll) tills någon
@@ -197,24 +211,26 @@
 
                     <!-- STEG 2 — konfigurera skjutlag -->
                     <div class="step-pane" data-step="2">
+                        @* ⚠️ Tabellen var 512 px bred i en 358 px yta på telefonen, så kolumnen som
+                           visar följden ("8 av 8") var bortklippt och "Auto" sa inte vad Auto blev.
+                           Följden står nu först, Auto bär talet, och under 576 px blir varje klass
+                           ett kort (CSS ovan). Exemplet nämnde C öppen/C Vet Y även på en B-tävling. *@
                         <p class="text-muted small mb-3">
-                            För varje låst klass: vilket skjutlag den ska ligga i, och om flera
-                            klasser delar skjutlag — i vilken ordning. <strong>Den som leder en
-                            klass hamnar alltid först i sitt block.</strong> Exempel: C öppen
-                            (skjutlag 1, ordning 0) får platserna 1–10, C Vet Y (skjutlag 1,
-                            ordning 1) får 11–17.
+                            Standardvalen räcker oftast — tryck <strong>Nästa</strong>. Den som leder
+                            en klass står alltid först. Delar flera klasser skjutlag bestämmer
+                            <em>Ordning</em> vilken klass som kommer först.
                         </p>
                         <div class="table-responsive">
                             <table class="table table-sm align-middle" id="configTable">
                                 <thead>
                                     <tr>
                                         <th>Klass</th>
-                                        <th>Skjutlag #</th>
-                                        <th>Ordning i skjutlag</th>
+                                        <th>Går vidare</th>
+                                        <th>Skjutlag</th>
                                         <th>Antal finalister</th>
+                                        <th>Ordning</th>
                                         <th>Alla skjuter</th>
                                         <th>Hoppa över</th>
-                                        <th>Förhandsvisning</th>
                                     </tr>
                                 </thead>
                                 <tbody id="configTableBody">
@@ -228,6 +244,11 @@
                     <div class="step-pane" data-step="3">
                         <p class="text-muted small mb-3">
                             Generera finalstartlistan för den här vapengruppen ur de låsta klasserna.
+                        </p>
+                        <p class="small mb-3 d-none" id="wizardSkippedConfigNote">
+                            <i class="bi bi-check2-circle text-success me-1"></i>
+                            En klass — finalisterna väljs enligt SHB och ledaren står först.
+                            Vill du ändra antal eller skjutlag: tryck <strong>Tillbaka</strong>.
                         </p>
                         <div class="alert alert-warning small d-none" id="wizardGateMsg">
                             <i class="bi bi-lock me-1"></i>
@@ -338,6 +359,7 @@
     let finalsLists = [];        // GetFinalsStartList → Lists
     let perClassState = [];      // GetQualifyingSnapshot → perClass (bär weaponGroup)
     let hasResultList = false;
+    let isChampionship = false;
     let editorOpenForFinalsId = null;
 
     // Guidens tillstånd är scopat till EN vapengrupp åt gången.
@@ -411,6 +433,7 @@
             errBox.classList.add('d-none');
 
             hasResultList = !!readiness.hasResultList;
+            isChampionship = !!readiness.isChampionship;
             perClassState = readiness.perClass || [];
             finalsLists = (finals && (finals.Lists || finals.lists)) || [];
             lastLoadedAt = Date.now();
@@ -485,6 +508,9 @@
         renderHeaderSummary(groups);
 
         document.getElementById('fnNoGroups').classList.toggle('d-none', groups.length > 0);
+        // "Hur fungerar finalen?" — styckena om flera vapengrupper och om C-klasserna bara när de gäller.
+        document.getElementById('fnHowManyGroups')?.classList.toggle('d-none', groups.filter(g => g).length < 2);
+        document.getElementById('fnHowGroupC')?.classList.toggle('d-none', !groups.includes('C'));
         if (!groups.length) { host.innerHTML = ''; return; }
 
         host.innerHTML = groups.map(renderGroupCard).join('');
@@ -548,36 +574,53 @@
         }
         if (!withResults.length) {
             return `<p class="text-muted small mb-0">
-                Inga resultat i vapengrupp ${esc(group)} än. Finalisterna räknas ur
-                grundomgångens resultat, så mata in dem på fliken Resultat först.</p>`;
+                Inga resultat i vapengrupp ${esc(group)} än. Valen för finalen visas här så snart
+                grundomgångens serier är inmatade.</p>`;
         }
+
+        // ⚠️ Varje val säger FÖLJDEN för just de här skyttarna (Sune-genomgången 2026-10-03).
+        // "Gallring till de bästa, per mästerskapsklass" sa inte hur många som går vidare — med
+        // 8 skyttar går alla vidare även enligt SHB, och det gick inte att se innan man valt.
+        // Talen kommer från servern (GetQualifyingSnapshot), samma regel som guiden bygger med.
         const shooters = withResults.reduce((n, c) => n + (c.totalShooters || 0), 0);
+        const shb = withResults.reduce((n, c) => n + (c.shbFinalists != null ? c.shbFinalists : (c.totalShooters || 0)), 0);
+        const lead = withResults.slice().sort((a, b) => (b.leaderScore || 0) - (a.leaderScore || 0))[0] || {};
+        const leaderTxt = lead.leaderName && lead.leaderName !== 'Unknown'
+            ? `${esc(lead.leaderName)} (${lead.leaderScore}) först.`
+            : 'Den som leder står först.';
+        const shbTxt = shb >= shooters
+            ? `Bästa sjättedelen, minst 10, går vidare — med ${shooters} skyttar betyder det <strong>alla ${shooters}</strong>.`
+            : `Bästa sjättedelen, minst 10, går vidare — <strong>${shb} av ${shooters}</strong>.`;
+        const shbNote = isChampionship
+            ? '<span class="badge bg-warning-subtle text-warning-emphasis border mt-1">Så står det i SHB för mästerskap</span>'
+            : '';
+
         return `
             <p class="small mb-3">
-                <strong>Ingen finalstartlista för vapengrupp ${esc(group)} än.</strong>
-                ${withResults.length} ${withResults.length === 1 ? 'klass' : 'klasser'} med
-                resultat, ${shooters} skyttar. Välj hur finalen ska ställas upp:
+                <strong>Grundomgången i vapengrupp ${esc(group)} är inmatad — ${shooters} skyttar.</strong>
+                Hur ska finalen ställas upp?
             </p>
             <div class="row g-2">
                 <div class="col-md-4">
                     <button class="btn btn-outline-success btn-sm w-100 h-100 text-start"
                             data-fn-action="clone" data-fn-group="${esc(group)}">
                         <i class="bi bi-arrow-right-circle me-1"></i><strong>Fortsätt i samma ordning</strong>
-                        <span class="d-block small text-muted">Samma skjutlag och platser som i grundomgången.</span>
+                        <span class="d-block small">Alla går vidare och står kvar på sina platser från grundomgången.</span>
                     </button>
                 </div>
                 <div class="col-md-4">
                     <button class="btn btn-outline-primary btn-sm w-100 h-100 text-start"
                             data-fn-action="rerank" data-fn-group="${esc(group)}">
                         <i class="bi bi-sort-numeric-down me-1"></i><strong>Placera om efter resultat</strong>
-                        <span class="d-block small text-muted">Alla med resultat, bäst först. Ingen gallring.</span>
+                        <span class="d-block small">Alla ${shooters} går vidare, i poängordning. ${leaderTxt}</span>
                     </button>
                 </div>
                 <div class="col-md-4">
                     <button class="btn btn-outline-warning btn-sm w-100 h-100 text-start"
                             data-fn-action="wizard" data-fn-group="${esc(group)}">
-                        <i class="bi bi-trophy me-1"></i><strong>Mästerskapsfinal</strong>
-                        <span class="d-block small text-muted">Gallring till de bästa, per mästerskapsklass.</span>
+                        <i class="bi bi-trophy me-1"></i><strong>Mästerskapsfinal (SHB)</strong>
+                        <span class="d-block small">${shbTxt} Lika poäng med den siste går också vidare.</span>
+                        ${shbNote}
                     </button>
                 </div>
             </div>`;
@@ -1015,14 +1058,16 @@
             const defaultSkjutlag = cfg.skjutlagNumber || autoSkjutlag++;
             const tr = document.createElement('tr');
             tr.dataset.clsIndex = String(i);
+            // "Auto" säger talet: samma regel som byggaren (sjättedel, minst 10, lika poäng följer med).
+            const autoN = s.shbFinalists != null ? s.shbFinalists : s.frozenShooterCount;
             tr.innerHTML = `
-                <td><strong>${esc(groupName)}</strong><br><small class="text-muted">${s.frozenShooterCount} skyttar</small></td>
-                <td><input type="number" min="1" max="20" class="form-control form-control-sm cfg-skjutlag" value="${defaultSkjutlag}" style="max-width:80px"></td>
-                <td><input type="number" min="0" max="20" class="form-control form-control-sm cfg-order" value="${cfg.orderInSkjutlag || 0}" style="max-width:80px"></td>
-                <td><input type="number" min="1" class="form-control form-control-sm cfg-count" placeholder="Auto" value="${cfg.finalistCountOverride != null ? cfg.finalistCountOverride : ''}" style="max-width:90px"></td>
-                <td class="text-center"><input type="checkbox" class="form-check-input cfg-all" ${cfg.includeAllShooters ? 'checked' : ''}></td>
-                <td class="text-center"><input type="checkbox" class="form-check-input cfg-skip" ${cfg.skip ? 'checked' : ''}></td>
-                <td class="preview-cell text-muted">-</td>`;
+                <td data-label="Klass"><span><strong>${esc(groupName)}</strong> <small class="text-muted">${s.frozenShooterCount} ${s.frozenShooterCount === 1 ? 'skytt' : 'skyttar'}</small></span></td>
+                <td data-label="Går vidare" class="preview-cell fw-semibold">-</td>
+                <td data-label="Skjutlag"><input type="number" min="1" max="20" class="form-control form-control-sm cfg-skjutlag" value="${defaultSkjutlag}" style="max-width:80px"></td>
+                <td data-label="Antal finalister"><input type="number" min="1" class="form-control form-control-sm cfg-count" placeholder="Auto (${autoN})" value="${cfg.finalistCountOverride != null ? cfg.finalistCountOverride : ''}" style="max-width:110px"></td>
+                <td data-label="Ordning"><input type="number" min="0" max="20" class="form-control form-control-sm cfg-order" value="${cfg.orderInSkjutlag || 0}" style="max-width:80px"></td>
+                <td data-label="Alla skjuter" class="text-center"><input type="checkbox" class="form-check-input cfg-all" ${cfg.includeAllShooters ? 'checked' : ''}></td>
+                <td data-label="Hoppa över" class="text-center"><input type="checkbox" class="form-check-input cfg-skip" ${cfg.skip ? 'checked' : ''}></td>`;
             tbody.appendChild(tr);
         });
         tbody.querySelectorAll('input').forEach(el => el.addEventListener('change', onConfigChange));
@@ -1062,7 +1107,7 @@
             const info = group ? d.perClass[group] : null;
             if (!info) { cell.textContent = '-'; return; }
             if (info.skjutlag == null) { cell.innerHTML = '<span class="badge bg-secondary">Hoppas över</span>'; return; }
-            cell.innerHTML = `<span class="badge bg-info">Skjutlag ${info.skjutlag}</span> <span class="text-muted small">${info.finalistCount} av ${info.totalInClass}</span>`;
+            cell.innerHTML = `<span>${info.finalistCount} av ${info.totalInClass} <span class="text-muted small fw-normal">· skjutlag ${info.skjutlag}</span></span>`;
         });
     }
 
@@ -1105,7 +1150,14 @@
         if (currentStep === 1) {
             showStep(2);
             renderConfigTable();
+            // ⚠️ En enda låst klass har inget att ordna i steg 2 — standardvalen gäller, och steget
+            // var den del av guiden som inte gick att läsa på telefonen. Hoppa direkt till steg 3.
+            // Konfigurationen är redan inläst ur tabellen och sparas av doGenerate; Tillbaka når steg 2.
+            const single = classesForGroup(wizardGroup).filter(s => s.frozen).length === 1;
+            document.getElementById('wizardSkippedConfigNote')?.classList.toggle('d-none', !single);
+            if (single) { showStep(3); updateGenerateWarning(); }
         } else if (currentStep === 2) {
+            document.getElementById('wizardSkippedConfigNote')?.classList.add('d-none');
             const saveResp = await jpost('/umbraco/surface/PrecisionStartList/SaveFinalsConfig',
                 { CompetitionId: competitionId, WeaponGroup: wizardGroup, Config: perClassConfig });
             if (!(saveResp.success ?? saveResp.Success)) { alert(msg(saveResp) || 'Kunde inte spara.'); return; }

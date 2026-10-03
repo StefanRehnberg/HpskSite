@@ -116,7 +116,12 @@ namespace HpskSite.Services
             // ⚠️ INDELNINGEN BESKRIVER ARTEFAKTEN, inte tävlingens nuvarande inställning. Samma
             // regel som enheterna nedan: talen står still medan konfigurationen kan ändras, och
             // en etikett ur nuläget över en lista ur artefakten är en tyst lögn.
-            if (model.IsChampionship)
+            // ⚠️ Indelningen gäller bara vapengrupp C (de enda som delas i Dam/Vet/Jun). På ett
+            // mästerskap utan C — t.ex. KM i vapengrupp B — beskrev texten "vapengrupp C delas i
+            // öppen, Dam, Vet Y…", alltså något som inte finns på tävlingen (Sune 2026-10-03).
+            var hasGroupC = artifact.MedalAwards == null || artifact.MedalAwards.Count == 0
+                || artifact.MedalAwards.Any(a => string.Equals(a.WeaponGroup, "C", StringComparison.OrdinalIgnoreCase));
+            if (model.IsChampionship && hasGroupC)
             {
                 model.MedalGroupingText = MedalGrouping.Describe(artifact.MedalsPerWeaponGroup);
                 var current = MedalGrouping.PerWeaponGroup(competition);
