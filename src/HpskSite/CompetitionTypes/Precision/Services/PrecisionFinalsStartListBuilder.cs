@@ -40,11 +40,11 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             // Resolve which result-list groups actually participate. A group participates
             // iff it's frozen in the snapshot AND not marked Skip in the config.
             var participating = new List<ClassPlacement>();
-            int autoSkjutlag = 1;
+            var defaults = DefaultSkjutlag(snapshot, perClassConfig, settings.MaxShootersPerTeam);
             foreach (var (group, classSnap) in snapshot.ClassSnapshots)
             {
                 if (!perClassConfig.TryGetValue(group, out var cfg))
-                    cfg = new FinalsClassConfig { SkjutlagNumber = autoSkjutlag++ };
+                    cfg = new FinalsClassConfig { SkjutlagNumber = defaults[group] };
                 if (cfg.Skip) continue;
 
                 var shooters = ApplyCut(classSnap.QualifiedShooters, cfg);
@@ -121,11 +121,11 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             Dictionary<string, FinalsClassConfig> perClassConfig)
         {
             var result = new PreviewResult();
-            int autoSkjutlag = 1;
+            var defaults = DefaultSkjutlag(snapshot, perClassConfig, 20);
             foreach (var (group, classSnap) in snapshot.ClassSnapshots)
             {
                 if (!perClassConfig.TryGetValue(group, out var cfg))
-                    cfg = new FinalsClassConfig { SkjutlagNumber = autoSkjutlag++ };
+                    cfg = new FinalsClassConfig { SkjutlagNumber = defaults[group] };
                 if (cfg.Skip)
                 {
                     result.PerClass[group] = new PreviewLine { Skjutlag = null, FinalistCount = 0 };
@@ -138,6 +138,39 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                     FinalistCount = shooters.Count,
                     TotalInClass = classSnap.QualifiedShooters.Count
                 };
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Skjutlaget för en klass UTAN sparad inställning: det sista skjutlaget som har plats,
+        /// annars ett nytt. ⚠️ Varje sådan klass fick tidigare ett eget skjutlag, så tre små
+        /// klasser gav tre ensamskyttar i var sitt skjutlag medan skjutlag 1 hade plats för
+        /// fler (Sune-genomgång 3, 2026-10-03). Klasser med inställning behåller sitt nummer.
+        /// Platserna räknas på antalet finalister efter gallringen.
+        /// </summary>
+        public Dictionary<string, int> DefaultSkjutlag(
+            QualifyingResultsSnapshot snapshot, Dictionary<string, FinalsClassConfig> perClassConfig, int maxPerTeam)
+        {
+            if (maxPerTeam < 1) maxPerTeam = 20;
+            var load = new Dictionary<int, int>();
+            foreach (var (group, classSnap) in snapshot.ClassSnapshots)
+            {
+                if (!perClassConfig.TryGetValue(group, out var cfg) || cfg.Skip) continue;
+                var n = cfg.SkjutlagNumber > 0 ? cfg.SkjutlagNumber : 1;
+                load[n] = load.GetValueOrDefault(n) + ApplyCut(classSnap.QualifiedShooters, cfg).Count;
+            }
+
+            var result = new Dictionary<string, int>();
+            foreach (var (group, classSnap) in snapshot.ClassSnapshots.OrderBy(k => k.Key, StringComparer.CurrentCulture))
+            {
+                if (perClassConfig.ContainsKey(group)) continue;
+                var count = ApplyCut(classSnap.QualifiedShooters, new FinalsClassConfig()).Count;
+                int last = load.Count == 0 ? 1 : load.Keys.Max();
+                int target = load.GetValueOrDefault(last) + count <= maxPerTeam || load.GetValueOrDefault(last) == 0
+                    ? last : last + 1;
+                load[target] = load.GetValueOrDefault(target) + count;
+                result[group] = target;
             }
             return result;
         }

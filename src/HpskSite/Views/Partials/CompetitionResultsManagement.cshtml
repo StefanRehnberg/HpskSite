@@ -671,7 +671,7 @@
                     <button type="button" class="sp-key sp-k-w6 sp-k-ghost" id="soModalBackspace" style="min-height:44px;font-size:.9375rem;"><i class="bi bi-backspace me-1"></i>Ångra skott</button>
                 </div>
 
-                <div class="text-muted small mt-2 text-center">Tangentbord: 0–9 · + för 10 · X eller * · Backspace för att ångra · Enter för Spara · Esc för Avbryt</div>
+                <div class="text-muted small mt-2 text-center d-none d-md-block">Tangentbord: 0–9 · + för 10 · X eller * · Backspace för att ångra · Enter för Spara · Esc för Avbryt</div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
@@ -1649,7 +1649,13 @@ async function loadMergeState() {
     // samma handling — se SetMedalGrouping för varför.
     const grouping = data.medalGrouping || {};
     let groupingBlock = '';
-    if (data.isChampionship) {
+    // Valet gäller bara vapengrupp C (Dam/Vet/Jun) — på ett KM i bara B talade det om C-klasser
+    // som inte finns (Sune-genomgång 3). Vapengruppen läses ur klassnamnen via registret.
+    const hasGroupC = classes.some(c => {
+        const code = typeof window.getWeaponClassCode === 'function' ? window.getWeaponClassCode(c.className) : '';
+        return code ? code === 'C' : /^C(\d|\s|$)/.test(c.className || '');
+    });
+    if (data.isChampionship && hasGroupC) {
         const per = !!grouping.perWeaponGroup;
         const blocked = !grouping.propertyExists
             ? 'Egenskapen <code>medalsPerWeaponGroup</code> saknas på dokumenttypen '
@@ -2971,7 +2977,27 @@ async function loadExistingResults(competitionId, seriesId, teamNumber, position
             // Det här anropet hämtar redan HELA tävlingen — spara det så
             // serieremsan, lagvyn och totalsumman slipper egna anrop.
             spResultsCache = results;
-            
+
+            // ⚠️ Finalinmatningen landade på tavla 1 F1 även när den redan var inmatad — med
+            // avstängda tangenter (Sune-genomgång 3). EN gång när sidan öppnas: gå till första
+            // skytten i skjutlaget med en saknad finalserie. Bara i finalen; grundomgångens
+            // start på serie 1 är Stefans beslut (2026-10-03).
+            if (!window._spFinalsLanded && competitionData.currentPhase === 'finals' && shootersData.length) {
+                window._spFinalsLanded = true;
+                const open = shootersData.findIndex(sh => spFirstUnenteredSeries(sh) != null);
+                if (open >= 0) {
+                    const ser = spFirstUnenteredSeries(shootersData[open]);
+                    if (open !== currentShooterIndex || ser !== currentSeries) {
+                        currentShooterIndex = open;
+                        currentSeries = ser;
+                        updateShooterDisplay();
+                        if (typeof updateSeriesDisplay === 'function') updateSeriesDisplay();
+                        loadCurrentShooterByIndex();
+                        return;
+                    }
+                }
+            }
+
             // Find existing result for this specific shooter/series/class combination
             // Must include shootingClass to distinguish multi-class shooters
             const targetSeries = parseInt(seriesId);
