@@ -98,6 +98,10 @@
         window.hpskAskPublishStartList = function (opts) {
             opts = opts || {};
             var el = document.getElementById('hpskPublishStartListModal');
+            // ⚠️ Dialogen renderas inuti den flik som inkluderade den (oftast Startlistor). Öppnas
+            // den från en annan flik — Resultat, "Nästa steg"-kortet — ligger den i en dold panel
+            // och får höjd 0: en grå skärm utan dialog. Flytta den till body innan den visas.
+            if (el && el.parentElement !== document.body) document.body.appendChild(el);
             if (!el || !window.bootstrap) {
                 // Ingen dialog tillgänglig: fall tillbaka på ett rakt confirm och rör INTE
                 // inställningen. Att gissa "stäng" här vore att fatta arrangörens beslut åt hen.

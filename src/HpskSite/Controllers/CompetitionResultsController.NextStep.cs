@@ -40,7 +40,7 @@ namespace HpskSite.Controllers
             }
         }
 
-        private sealed record NsStart(int MemberId, string ClassKey, string Group, int TeamNumber);
+        private sealed record NsStart(int MemberId, string ClassKey, string Group, int TeamNumber, string RawClass = "");
 
         private async Task<object> BuildNextStepAsync(int competitionId)
         {
@@ -89,7 +89,7 @@ namespace HpskSite.Controllers
                 .SelectMany(t => (t.Shooters ?? new List<StartListShooter>())
                     .Where(s => s.MemberId > 0)
                     .Select(s => new NsStart(s.MemberId, ShootingClasses.NormalizeKey(s.WeaponClass),
-                        ChampionshipCategory.WeaponGroupFor(s.WeaponClass), t.TeamNumber)))
+                        ChampionshipCategory.WeaponGroupFor(s.WeaponClass), t.TeamNumber, s.WeaponClass ?? "")))
                 .GroupBy(s => s.MemberId + "|" + s.ClassKey).Select(g => g.First())
                 .ToList();
             int teamCount = qualCfg?.Teams?.Count(t => (t.Shooters?.Count ?? 0) > 0) ?? 0;
@@ -134,10 +134,13 @@ namespace HpskSite.Controllers
                         .SelectMany(t => (t.Shooters ?? new List<StartListShooter>())
                             .Where(s => s.MemberId > 0)
                             .Select(s => new NsStart(s.MemberId, ShootingClasses.NormalizeKey(s.WeaponClass),
-                                ChampionshipCategory.WeaponGroupFor(s.WeaponClass), t.TeamNumber)))
+                                ChampionshipCategory.WeaponGroupFor(s.WeaponClass), t.TeamNumber, s.WeaponClass ?? "")))
                         .ToList()
                 };
             }).ToList();
+
+            // Mästerskapsklassernas indelning (C delas i Dam/Vet/Jun eller inte) — samma regel som medaljerna.
+            bool splitC = ChampionshipCategory.SplitsGroupC(SafeString(comp, "competitionScope"), MedalGrouping.PerWeaponGroup(comp));
 
             // ── Per vapengrupp ─────────────────────────────────────────────────────────
             var groupNames = qualStarts.Select(s => s.Group).Distinct()
@@ -184,10 +187,23 @@ namespace HpskSite.Controllers
                     }
                 }
 
+                // Mästerskapsklasser med resultat som saknar finalister — se GroupInput.MissingFinalCategories.
+                var missingCats = new List<string>();
+                if (fl != null && finalSeries > 0)
+                {
+                    var withResults = starts.Where(s => Enumerable.Range(1, qual).Any(n => Has(s, n)))
+                        .Select(s => ChampionshipCategory.For(s.RawClass, splitC)).Where(c => c.Length > 0);
+                    var inFinal = new HashSet<string>(fl.Starts.Where(s => s.Group == g)
+                        .Select(s => ChampionshipCategory.For(s.RawClass, splitC)), StringComparer.OrdinalIgnoreCase);
+                    missingCats = withResults.Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Where(c => !inFinal.Contains(c)).OrderBy(c => c).ToList();
+                }
+
                 var gi = new CompetitionNextStep.GroupInput
                 {
                     Group = g, Starts = starts.Count, QualExpected = qExp, QualEntered = qEnt,
-                    HasFinalsList = fl != null, FinalsExpected = fExp, FinalsEntered = fEnt
+                    HasFinalsList = fl != null, FinalsExpected = fExp, FinalsEntered = fEnt,
+                    MissingFinalCategories = missingCats.Count
                 };
                 groupInputs.Add(gi);
                 var gPhase = CompetitionNextStep.ForGroup(gi, finalSeries);
@@ -198,6 +214,7 @@ namespace HpskSite.Controllers
                     phase = gPhase.ToString(),
                     qualExpected = qExp, qualEntered = qEnt, qualLastSeries = lastSeries, qualGapTeam = gapTeam,
                     hasFinalsList = fl != null,
+                    missingFinalCategories = missingCats,
                     finalsListId = fl?.Node.Id ?? 0,
                     finalsPublished = fl?.Published ?? false,
                     finalsExpected = fExp, finalsEntered = fEnt, finalsLastSeries = fLast, finalsGapTeam = fGapTeam
