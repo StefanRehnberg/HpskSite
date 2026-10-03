@@ -215,6 +215,15 @@
             .results-table .milsnabb-series { display: none; }
         }
 
+        /* Telefon i STÅENDE läge: listan byggs inte om för det (Stefans beslut 2026-10-03) — i
+           liggande läge går den att läsa, mätt utan klippta celler ner till 667 px. Den som
+           håller telefonen stående får veta att den ska vridas, i stället för en ihopklämd
+           tabell utan förklaring. */
+        .cr-rotate-hint { display: none; }
+        @@media screen and (orientation: portrait) and (max-width: 767.98px) {
+            .cr-rotate-hint { display: block; }
+        }
+
         @@media print {
             .no-print { display: none !important; }
             .print-only { display: block !important; }
@@ -326,6 +335,9 @@
             <div class="tab-content">
                 <div class="tab-pane fade show active" id="individualResults" role="tabpanel">
                     <div class="print-only print-section-heading" style="display:none">Individuella resultat</div>
+                    <div class="cr-rotate-hint alert alert-info py-2 small no-print">
+                        <i class="bi bi-phone-landscape me-1"></i>Vrid telefonen för att se hela resultatlistan.
+                    </div>
                     <div id="resultsContent">
                         <div class="text-center py-4">
                             <div class="spinner-border text-primary" role="status">
