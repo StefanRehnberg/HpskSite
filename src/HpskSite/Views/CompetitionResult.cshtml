@@ -91,7 +91,11 @@
             var isRegionHost = await AuthService.IsRegionHostAdminAsync(
                 competitionClubId, competition.Value<string>("regionalFederation"));
 
-            canDeleteResults = isSiteAdmin || isCompetitionManager || isClubAdmin || isSkjutledare || isRegionHost;
+            // ⚠️ Bara i hanteringsvyns inbäddning (?edit=1). På den PUBLIKA sidan såg en inloggad
+            // admin 16 röda papperskorgar, och ett feltryck raderade en skytts resultat
+            // (Sune-genomgång 2, 2026-10-03; Stefans beslut). Servern kräver fortfarande behörighet.
+            canDeleteResults = (isSiteAdmin || isCompetitionManager || isClubAdmin || isSkjutledare || isRegionHost)
+                && Context.Request.Query["edit"] == "1";
         }
     }
 }

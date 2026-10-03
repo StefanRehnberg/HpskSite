@@ -29,6 +29,13 @@ namespace HpskSite.Tests
         [Fact] public void Grundomgang_klar_utan_finallista_ger_skapa_finalen() =>
             Assert.Equal(P.CreateFinals, R(3, groups: G("B", 56, 56)));
 
+        [Fact] public void Final_med_en_klass_utan_finalister_star_kvar_pa_skapa_finalen()
+        {
+            var g = G("C", 70, 70, true, 15, 0);
+            g.MissingFinalCategories = 4;
+            Assert.Equal(P.CreateFinals, R(3, groups: g));
+        }
+
         [Fact] public void Final_pagar() => Assert.Equal(P.EnterFinals, R(3, groups: G("B", 56, 56, true, 24, 10)));
 
         [Fact] public void Utan_final_gar_grundomgangen_direkt_till_publicera() =>
