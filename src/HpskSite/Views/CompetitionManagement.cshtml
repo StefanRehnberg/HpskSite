@@ -45,6 +45,11 @@
         // Pass competition properties to ViewData for partial views
         ViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
         ViewData["CompetitionType"] = competition.Value<string>("competitionType") ?? "Precision";
+        // Live-tavlan (/live) visar bara något när live-resultat är påslaget — samma villkor som
+        // ResultBoard.cshtml. Funktionärer-flikarna läser det för att inte länka till en död sida.
+        bool showLiveForStaff = false;
+        try { showLiveForStaff = competition.Value<bool>("showLiveResults") && !competition.Value<bool>("isExternal"); } catch { }
+        ViewData["ShowLiveResults"] = showLiveForStaff;
         // EFFEKTIVA finalserier: 0 för en gren utan finalomgång (CompetitionFinals, SHB C.3.6.1.1),
         // så en äldre tävling med felaktigt satta finalserier inte visar en final som inte finns.
         ViewData["NumberOfFinalSeries"] = HpskSite.CompetitionTypes.Common.CompetitionFinals.Effective(

@@ -3228,6 +3228,18 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 {
                     finalsNode = _contentService.Create(FinalsNodeName(configGroup), competition.Id, "finalsStartList");
                     finalsNode.SetValue("competitionId", request.CompetitionId);
+                    // ⚠️ Stämpla gruppen direkt. Utan den var noden "grupplös" tills genereringen,
+                    // så genereringen rapporterade att "den tidigare finalstartlistan täckte hela
+                    // tävlingen" — om en lista som aldrig funnits — och avbröts guiden efter steg 2
+                    // stod ett kort "Hela tävlingen (äldre lista)" kvar. (Sune-genomgången 2026-10-03.)
+                    if (configGroup.Length > 0)
+                    {
+                        finalsNode.SetValue("configurationData", JsonConvert.SerializeObject(new StartListConfiguration
+                        {
+                            Settings = new StartListSettings { WeaponGroup = configGroup, Format = "Championship Finals" },
+                            Teams = new List<StartListTeam>()
+                        }));
+                    }
                 }
 
                 finalsNode.SetValue("perClassConfigData", JsonConvert.SerializeObject(request.Config));
@@ -3426,19 +3438,37 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             legacyWholeCompetition = null;
             var nodes = GetFinalsNodes(competitionId);
             IContent? match = null;
+            IContent? ungeneratedDraft = null;
 
             foreach (var node in nodes)
             {
                 var group = WeaponGroupOfFinalsNode(node);
                 if (group.Length == 0)
                 {
+                    // ⚠️ En grupplös nod UTAN skyttar är inte en äldre heltävlingslista utan ett
+                    // utkast som bara bär en sparad konfiguration (skapades av guiden före
+                    // 2026-10-03). Den återanvänds tyst — att kalla den "den tidigare
+                    // finalstartlistan" påstod något som aldrig funnits.
+                    if (!IsGeneratedFinalsNode(node)) { ungeneratedDraft ??= node; continue; }
                     legacyWholeCompetition ??= node;
                     continue;
                 }
                 if (string.Equals(group, weaponGroup, StringComparison.OrdinalIgnoreCase))
                     match ??= node;
             }
-            return match;
+            return match ?? ungeneratedDraft;
+        }
+
+        /// <summary>
+        /// Har noden någonsin genererats, dvs. bär den skjutlag? En nod som guiden skapat för att
+        /// spara en konfiguration har inga — den är inte en lista och ska aldrig visas som en.
+        /// </summary>
+        private static bool IsGeneratedFinalsNode(IContent node)
+        {
+            var json = node.GetValue<string>("configurationData");
+            if (string.IsNullOrWhiteSpace(json)) return false;
+            try { return (JsonConvert.DeserializeObject<StartListConfiguration>(json)?.Teams?.Count ?? 0) > 0; }
+            catch { return true; }   // trasig men ifylld — behandla som en riktig lista, dölj den inte
         }
 
         /// <summary>
@@ -3667,7 +3697,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 // ⚠️ Returnerar ALLA finalstartlistor — en per vapengrupp. En tävling över
                 // flera dagar har C:s final på lördagen och A:s på söndagen, med egna datum,
                 // egna starttider och egen publicering.
-                var finalsNodes = GetFinalsNodes(competition.Id);
+                // Bara GENERERADE listor. En nod som guiden skapat för att spara sin konfiguration
+                // har inga skjutlag och ska inte visas som en lista (avbruten guide gav annars ett
+                // kort "Hela tävlingen (äldre lista)").
+                var finalsNodes = GetFinalsNodes(competition.Id).Where(IsGeneratedFinalsNode).ToList();
                 if (finalsNodes.Count == 0)
                 {
                     return Json(new { Success = false, Message = "Ingen finalstartlista hittades.", Exists = false, Lists = Array.Empty<object>() });

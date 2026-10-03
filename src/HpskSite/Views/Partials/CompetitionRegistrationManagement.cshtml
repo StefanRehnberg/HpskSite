@@ -6301,6 +6301,12 @@ async function submitWalkInRegistration() {
                         reg.pendingAmount = (Number(reg.pendingAmount) || 0) + (Number(invoiceInfo.paymentAmount) || 0);
                     }
                 }
+                // ⚠️ Ingen avgift = ingen betalningsdialog. Den öppnades förr ändå och visade
+                // "Ingen avgift" bredvid en grön "Ta emot betalning". Samma regel som laget redan har.
+                if ((reg.paymentStatus || '') === 'No Fee') {
+                    showDeskSaveNotice(`${reg.memberName || 'Skytten'} är anmäld. Tävlingen har ingen avgift, så det finns inget att betala.`, 'success');
+                    return;
+                }
                 showPaymentOptionsForRegistration(newRegistrationId);
             }
         }, 200);
