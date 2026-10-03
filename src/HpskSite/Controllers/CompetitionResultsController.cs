@@ -41,7 +41,7 @@ using System.Data;
 
 namespace HpskSite.Controllers
 {
-    public class CompetitionResultsController : SurfaceController
+    public partial class CompetitionResultsController : SurfaceController
     {
         private readonly IContentService _contentService;
         private readonly IMemberService _memberService;
