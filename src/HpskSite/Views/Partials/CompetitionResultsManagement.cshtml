@@ -1116,6 +1116,8 @@ let currentResultsListData = null;
 let currentResultPageUrl = null;
 
 async function loadResultsList() {
+    // "Nästa steg"-kortet läser om sig — listan körs om efter Uppdatera, Publicera och särskjutning.
+    document.dispatchEvent(new CustomEvent('hpsk:competition-state-changed'));
     const competitionId = $('.competition-results-management').data('competition-id');
     if (!competitionId) {
         console.error('No competition ID');
