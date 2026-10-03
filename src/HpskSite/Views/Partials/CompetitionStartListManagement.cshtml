@@ -306,25 +306,16 @@
        Id:t generateStartListBtn är oförändrat — JS återställer sin egen etikett på det. *@
 
     <!-- Published Start List Warning -->
-    <div id="publishedStartListWarning" class="alert alert-warning d-none" role="alert">
-        <h6 class="alert-heading">
-            <i class="bi bi-lock-fill me-2"></i>Startlistan är publicerad
-        </h6>
-        <p class="mb-2">
-            En startlista har publicerats för denna tävling. Att generera en ny startlista <strong>rekommenderas inte</strong>
-            eftersom skyttar redan kan ha planerat utifrån de publicerade tiderna.
-        </p>
-        <hr>
-        @* Pekade tidigare på knappen "Lägg till efteranmäld" här på fliken. Den knappen skapade bara
-           en RAD i startlistan — ingen anmälan, ingen avgift — så texten skickade funktionären till
-           den ena vägen som gav en gratisskytt. Den pekar nu på registreringsbordet, som gör båda
-           delarna. *@
-        <p class="mb-0 small">
-            <strong>För att lägga till en efteranmäld:</strong> gå till fliken <em>Anmälningar</em> →
-            <em>Åtgärder</em> → <em>Anmäl och betala</em>. Skytten får en anmälan och en faktura, och placeras
-            sist i det skjutlag du väljer — <strong>ingen annan får nytt startnummer</strong>.
-        </p>
-    </div>
+    @* ⚠️ Var en gul ruta på 61 ord (Sune-genomgången 2026-10-03). Nu EN rad: den säger det enda
+       funktionären behöver veta när listan väl är publicerad — vägen för en efteranmäld.
+       Pekade tidigare på knappen "Lägg till efteranmäld" här på fliken. Den knappen skapade bara
+       en RAD i startlistan — ingen anmälan, ingen avgift — så texten skickade funktionären till
+       den ena vägen som gav en gratisskytt. Den pekar nu på registreringsbordet, som gör båda
+       delarna. "Gör om startlistan" ligger i kortets Åtgärder-meny, sist och i rött. *@
+    <p id="publishedStartListWarning" class="small text-muted d-none mb-2">
+        <i class="bi bi-lock-fill me-1"></i>Startlistan är publicerad. En efteranmäld läggs till under
+        <em>Anmälningar → Åtgärder → Anmäl och betala</em> — då får ingen annan nytt startnummer.
+    </p>
     }
 
     <!-- Start List Display (shared by both Traditional and Egenbokning) -->
@@ -385,6 +376,24 @@
                         <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
                     </button>
 
+                    @* Åtgärder: det som inte är steget man står på. "Gör om startlistan" sist och i
+                       rött — den gav en gul knapp "Regenerera (ej rekommenderat)" mitt i raden när
+                       listan var publicerad, och den läste som nästa steg. *@
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
+                                data-bs-toggle="dropdown" aria-expanded="false" id="qualActionsToggle">
+                            <i class="bi bi-sliders me-1"></i>Åtgärder
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><button class="dropdown-item" type="button" onclick="openStartListEditor(window.currentStartListId)">
+                                <i class="bi bi-pencil-square me-2"></i>Redigera startlistan</button></li>
+                            <li><button class="dropdown-item" type="button" onclick="openStartListInNewTab()">
+                                <i class="bi bi-box-arrow-up-right me-2"></i>Öppna i ny flik</button></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><button class="dropdown-item text-danger" type="button" id="regenerateStartListItem" onclick="openGenerateStartListModal()">
+                                <i class="bi bi-arrow-repeat me-2"></i>Gör om startlistan…</button></li>
+                        </ul>
+                    </div>
                     @* ⚠️ VISA/DOLJ SIST, likadant som pa Resultatfliken. Den lag tidigare mitt
                        i raden har och i en meny dar — samma kontroll i tva former pa tva
                        flikar. Rapporterat 2026-09-08. *@
@@ -435,11 +444,10 @@
 
                    Endpointen AddShooterToStartList är KVAR och används av redigeraren nedan, där den
                    är rätt verktyg: att placera en REDAN anmäld skytt som saknar plats. *@
-                <button class="btn btn-outline-info" onclick="openStartListEditor(window.currentStartListId)">
+                @* Redigera och Öppna i ny flik ligger i rubrikradens Åtgärder-meny (2026-10-03) —
+                   samma två knappar på två ställen i samma kort var en fråga, inte en hjälp. *@
+                <button class="btn btn-outline-info btn-sm" onclick="openStartListEditor(window.currentStartListId)">
                     <i class="bi bi-pencil-square me-1"></i>Redigera
-                </button>
-                <button class="btn btn-outline-primary" onclick="openStartListInNewTab()">
-                    <i class="bi bi-box-arrow-up-right me-1"></i>Öppna i ny flik
                 </button>
             </div>
 
@@ -532,14 +540,34 @@
                     <label for="firstStartTime" class="form-label">Första starttid:</label>
                     <input type="text" class="form-control" id="firstStartTime" value="09:00">
                 </div>
+                @{
+                    // Förslaget räknas på grundomgångens serier: ca 10 min per serie + 15 min byte.
+                    // Var tidigare en fast 105 som ingen kunde förklara (Sune-genomgången 2026-10-03).
+                    var slTotalSeries = ViewData["NumberOfSeriesOrStations"] as int? ?? 0;
+                    var slQualSeries = Math.Max(1, slTotalSeries - (ViewData["NumberOfFinalSeries"] as int? ?? 0));
+                    var slInterval = Math.Clamp((int)Math.Ceiling((slQualSeries * 10 + 15) / 15.0) * 15, 60, 180);
+                }
                 <div class="mb-3">
-                    <label for="startInterval" class="form-label">Startintervall (minuter):</label>
-                    <input type="number" class="form-control" id="startInterval" value="105" min="60" max="180" step="15">
+                    <label for="startInterval" class="form-label">Tid mellan skjutlagen (minuter):</label>
+                    <input type="number" class="form-control" id="startInterval" value="@slInterval" min="60" max="180" step="15">
+                    <div class="form-text">
+                        Gäller bara när det blir fler än ett skjutlag. Förslaget: @slQualSeries serier × ca 10 min + 15 min byte.
+                    </div>
+                </div>
+
+                @* Varningen står I dialogen, med en ruta att kryssa — tidigare två och tre webbläsardialoger
+                   i rad (confirm), varav en upprepade inställningarna med interna namn ("Mixade Skjutlag"). *@
+                <div id="generateRiskBox" class="alert alert-warning small d-none mb-0">
+                    <div id="generateRiskText"></div>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="generateRiskAck">
+                        <label class="form-check-label" for="generateRiskAck">Jag förstår — gör om startlistan ändå</label>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-success" onclick="generateNewStartList()">
+                <button type="button" class="btn btn-success" id="generateStartListSubmit" onclick="generateNewStartList()">
                     <i class="bi bi-check-circle me-1"></i>Skapa startlista
                 </button>
             </div>
@@ -976,6 +1004,23 @@ function openGenerateStartListModal() {
     // Check initial state
     handleTeamFormatChange();
 
+    // Varningen i dialogen: publicerad lista och/eller inmatade resultat. Rutan nollställs vid
+    // varje öppning, annars bär nästa omgenerering förra gångens "jag förstår".
+    const risks = [];
+    if (window.hasPublishedStartList) risks.push('Startlistan är <strong>publicerad</strong>. Skyttarna kan redan ha planerat efter tiderna, och alla får nya platser och tider. För en efteranmäld: använd <em>Anmälningar → Åtgärder → Anmäl och betala</em> i stället.');
+    if (_slHasResults) risks.push('Det finns redan <strong>inmatade resultat</strong>. Resultaten följer skyttarna, men skjutlag och platser ändras mitt i tävlingen.');
+    const riskBox = document.getElementById('generateRiskBox');
+    document.getElementById('generateRiskText').innerHTML = risks.map(r => '<p class="mb-1">' + r + '</p>').join('');
+    riskBox.classList.toggle('d-none', risks.length === 0);
+    const ack = document.getElementById('generateRiskAck');
+    const submit = document.getElementById('generateStartListSubmit');
+    ack.checked = false;
+    submit.disabled = risks.length > 0;
+    ack.onchange = () => { submit.disabled = !ack.checked; };
+    document.getElementById('generateStartListModalLabel').innerHTML = risks.length && window.hasPublishedStartList
+        ? '<i class="bi bi-arrow-repeat me-2"></i>Gör om startlistan'
+        : '<i class="bi bi-plus-circle me-2"></i>Skapa ny startlista';
+
     var modal = new bootstrap.Modal(document.getElementById('generateStartListModal'));
     modal.show();
 }
@@ -1047,24 +1092,10 @@ function loadWeaponClassOptions() {
 }
 
 function generateNewStartList() {
-    if (!confirmIfResultsExist('Generera ny startlista')) return;
-    // CRITICAL: Check if published start list exists
-    if (hasPublishedStartList) {
-        const confirmMessage = `⚠️ VARNING: En publicerad startlista finns redan!\n\n` +
-            `Skyttar kan redan ha planerat utifrån de publicerade tiderna.\n` +
-            `Att generera en ny lista kommer att avpublicera den befintliga och kan orsaka förvirring.\n\n` +
-            `Är du HELT SÄKER på att du vill fortsätta?\n\n` +
-            `Rekommendation: Använd "Redigera" för att manuellt lägga till efteranmälda skyttar istället.`;
-
-        if (!confirm(confirmMessage)) {
-            return;
-        }
-
-        // Double confirmation for safety
-        if (!confirm('Detta är din sista varning. Fortsätt med att generera ny startlista?')) {
-            return;
-        }
-    }
+    // ⚠️ Varningen för publicerad lista och inmatade resultat står I DIALOGEN, med en ruta som
+    // måste kryssas (openGenerateStartListModal). Tidigare kom två–tre confirm() i rad.
+    const riskBox = document.getElementById('generateRiskBox');
+    if (riskBox && !riskBox.classList.contains('d-none') && !document.getElementById('generateRiskAck').checked) return;
 
     // Close the modal if open
     const modalEl = document.getElementById('generateStartListModal');
@@ -1105,21 +1136,8 @@ function generateNewStartList() {
         return;
     }
 
-    // Show confirmation
-    let confirmMessage = `Generera startlista med följande inställningar?\n\n` +
-        `• Format: ${settings.teamFormat}\n` +
-        `• Antal skyttar per lag: ${settings.maxShootersPerTeam}\n` +
-        `• Första starttid: ${settings.firstStartTime}\n` +
-        `• Startintervall: ${settings.startInterval} minuter`;
-
-    // Add class order to confirmation if applicable
-    if (settings.classStartOrder) {
-        confirmMessage += `\n• Vapengruppernas ordning: ${settings.classStartOrder.replace(/,/g, ', ')}`;
-    }
-
-    if (!confirm(confirmMessage)) {
-        return;
-    }
+    // Ingen extra bekräftelse: dialogen visar redan inställningarna. Den gamla confirm() upprepade
+    // dem med interna namn ("Mixade Skjutlag") och var en webbläsardialog på telefonen.
 
     // Show loading state
     const generateBtn = document.querySelector('button[onclick="generateNewStartList()"]');
@@ -1341,13 +1359,18 @@ function displayOfficialStartList(startList) {
 // igen nästa gång, vilket är rätt. Och "en gång" är inte kosmetik — loadStartLists() körs
 // om efter varje redigering, så utan spärren skulle kortet fällas ihop under händerna på den
 // som just fällt ut det.
-let qualCollapseApplied = false;
+// ⚠️ Fäll bara ihop när en FINALSTARTLISTA faktiskt finns (Sune-genomgången 2026-10-03). Att
+// fälla ihop redan vid publiceringen gömde grundomgångens lista under hela grundomgången, när
+// den är det funktionären tittar på. Finalkortet anropar hpskMaybeCollapseQualifying när det läst
+// sina listor, eftersom de två korten laddas i valfri ordning.
+let qualCollapseApplied = false, qualLastStartList = null;
 function maybeCollapseQualifyingOnce(startList) {
+    if (startList) qualLastStartList = startList;
+    startList = qualLastStartList;
     if (qualCollapseApplied) return;
     const body = document.getElementById('qualStartListBody');
     if (!body || typeof bootstrap === 'undefined') return;
-    const hasFinals = !!document.querySelector('.competition-finals-start-list-management');
-    if (!hasFinals) return;
+    if (!(typeof window.hpskFinalsListCount === 'function' && window.hpskFinalsListCount() > 0)) return;
 
     const isOfficial = !!(startList && (startList.isOfficial || startList.IsOfficial
         || startList.status === 'Official'));
@@ -1420,17 +1443,11 @@ function updatePublishedStartListUI(isPublished) {
     const warningDiv = document.getElementById('publishedStartListWarning');
     if (!generateBtn || !warningDiv) return;
 
-    if (isPublished) {
-        warningDiv.classList.remove('d-none');
-        generateBtn.classList.remove('btn-success');
-        generateBtn.classList.add('btn-warning');
-        generateBtn.innerHTML = '<i class="bi bi-exclamation-triangle me-1"></i>Regenerera (ej rekommenderat)';
-    } else {
-        warningDiv.classList.add('d-none');
-        generateBtn.classList.remove('btn-warning');
-        generateBtn.classList.add('btn-success');
-        generateBtn.innerHTML = '<i class="bi bi-plus me-1"></i>Skapa ny startlista';
-    }
+    // Publicerad: knappen i rubrikraden försvinner — att göra om listan är inte nästa steg, och
+    // finns kvar sist i Åtgärder-menyn med en varning i dialogen.
+    warningDiv.classList.toggle('d-none', !isPublished);
+    generateBtn.classList.toggle('d-none', !!isPublished);
+    generateBtn.innerHTML = '<i class="bi bi-plus me-1"></i>Skapa ny startlista';
 }
 
 function formatDate(dateString) {
