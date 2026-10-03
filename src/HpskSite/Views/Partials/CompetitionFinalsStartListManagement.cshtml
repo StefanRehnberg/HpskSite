@@ -437,6 +437,9 @@
             perClassState = readiness.perClass || [];
             finalsLists = (finals && (finals.Lists || finals.lists)) || [];
             lastLoadedAt = Date.now();
+            // Grundomgångens kort fälls ihop först när en finalstartlista finns — korten laddas
+            // i valfri ordning, så det här kortet säger till när det vet.
+            if (typeof window.maybeCollapseQualifyingOnce === 'function') window.maybeCollapseQualifyingOnce();
 
             const checked = document.getElementById('fnCheckedAt');
             if (checked) checked.textContent = 'Senast kontrollerat ' + new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) + '.';
@@ -1187,6 +1190,7 @@
     // "Nästa steg"-kortet (_CompetitionNextStep) erbjuder samma tre val och anropar SAMMA
     // handling som knapparna här — ingen kopia av genereringen. Ett fel visas av handlingen själv.
     window.hpskFinalsChoiceInfo = choiceInfo;
+    window.hpskFinalsListCount = () => (finalsLists || []).length;
     window.hpskFinalsAction = function (action, group) {
         return onGroupAction({ currentTarget: { dataset: { fnAction: action, fnGroup: group || '' } } });
     };

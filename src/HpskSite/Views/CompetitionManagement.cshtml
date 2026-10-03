@@ -523,8 +523,17 @@
         @await Html.PartialAsync("_CompetitionNextStep", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
     }
 
+    @* ⚠️ Flikraden är bredare än en telefon — "Resultat" syntes inte alls (Sune-genomgången
+       2026-10-03). Under md ersätts den av en väljare, samma mönster som klubbens adminpanel.
+       Alternativen BYGGS ur flikknapparna nedan, så listan finns på ett ställe, och båda hålls i
+       takt åt båda hållen. Flikknapparna finns kvar i DOM:en — allt som binder på dem fungerar. *@
+    <div class="d-md-none mb-2">
+        <label for="managementTabSelect" class="visually-hidden">Välj del av tävlingen</label>
+        <select class="form-select" id="managementTabSelect"></select>
+    </div>
+
     <!-- Navigation tabs -->
-    <ul class="nav nav-tabs" id="managementTabs" role="tablist">
+    <ul class="nav nav-tabs d-none d-md-flex" id="managementTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="registrations-tab" data-bs-toggle="tab" data-bs-target="#registrations" type="button" role="tab">
                 <i class="bi bi-people me-1"></i>Anmälningar
@@ -562,6 +571,25 @@
             </button>
         </li>
     </ul>
+    <script>
+    (function () {
+        const sel = document.getElementById('managementTabSelect');
+        const tabs = [...document.querySelectorAll('#managementTabs [data-bs-toggle="tab"]')];
+        if (!sel || !tabs.length) return;
+        // textContent, aldrig innerHTML — flikens text sätts som text.
+        tabs.forEach(t => {
+            const o = document.createElement('option');
+            o.value = t.id;
+            o.textContent = t.textContent.trim();
+            sel.appendChild(o);
+        });
+        const sync = () => { const a = tabs.find(t => t.classList.contains('active')); if (a) sel.value = a.id; };
+        sync();
+        // .click(), inte Tab.show(): vissa flikar laddar på click och inte på shown.bs.tab.
+        sel.addEventListener('change', () => document.getElementById(sel.value)?.click());
+        document.getElementById('managementTabs').addEventListener('shown.bs.tab', sync);
+    })();
+    </script>
 
     <!-- Tab content -->
     <div class="tab-content" id="managementTabContent">
