@@ -73,7 +73,9 @@
     };
     const GROUP_PHASE = {
         EnterQualification: g => `Grundomgång ${g.qualEntered} av ${g.qualExpected} serier`,
-        CreateFinals: () => 'Final ej skapad',
+        CreateFinals: g => (g.missingFinalCategories || []).length && g.hasFinalsList
+            ? 'Final saknas för ' + g.missingFinalCategories.join(', ')
+            : 'Final ej skapad',
         EnterFinals: g => `Final ${g.finalsEntered} av ${g.finalsExpected} serier`,
         PublishResults: () => 'Allt inmatat'
     };
@@ -142,15 +144,29 @@
                 : 'Startlistan har inga skyttar än.';
             if (exp > 0) fact += bar(ent, exp);
             if (team > 0) {
-                actions = '<a class="btn btn-primary" href="/station?c=' + compId + '&s=' + team + '" target="_blank" rel="noopener"><i class="bi bi-pencil-square me-1"></i>Mata in resultat</a>';
+                actions = '<a class="btn btn-primary" href="/station?c=' + compId + '&s=' + team + '"><i class="bi bi-pencil-square me-1"></i>Mata in resultat</a>';
                 if (s.hasSkjutledareView)
-                    actions += '<a class="btn btn-outline-secondary" href="/skjutledare?c=' + compId + '&l=' + team + '" target="_blank" rel="noopener"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>';
+                    actions += '<a class="btn btn-outline-secondary" href="/skjutledare?c=' + compId + '&l=' + team + '"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>';
                 if (s.teamCount > 1) extra = '<div class="ns-note">Öppnar skjutlag ' + team + ', det första med serier kvar. Andra skjutlag finns under Funktionärer.</div>';
             } else {
                 actions = '<button type="button" class="btn btn-primary" data-ns="goto-funktionarer">Öppna Funktionärer</button>';
             }
         } else if (p === 'CreateFinals') {
             const gs = groupsIn(p);
+            // En lista finns men klasser saknas i den: de tre valen hade byggt om hela gruppen.
+            // Finalkortet har "Lägg till i finalen" per klass — dit leder knappen.
+            const partial = gs.find(x => x.hasFinalsList && (x.missingFinalCategories || []).length);
+            if (partial) {
+                const n = partial.missingFinalCategories.length;
+                card.className = 'ns-card ns-warn';
+                card.innerHTML = '<div class="ns-top"><span class="ns-label">Nästa steg</span>' + steps(s.step) + '</div>'
+                    + '<div class="ns-title">' + (n === 1 ? 'En klass saknar final' : n + ' klasser saknar final') + '</div>'
+                    + '<p class="ns-fact">Finalen i ' + esc(groupLabelLower(partial.group)) + ' har inga skyttar från <b>'
+                    + partial.missingFinalCategories.map(esc).join(', ') + '</b>. De klasserna var inte låsta när finalen skapades.</p>'
+                    + groupList()
+                    + '<div class="ns-actions"><button type="button" class="btn btn-primary" data-ns="goto-finals"><i class="bi bi-trophy me-1"></i>Lägg till i finalen</button></div>';
+                return;
+            }
             const info = window.hpskFinalsChoiceInfo;
             const g = gs[0] ? gs[0].group : '';
             const ci = typeof info === 'function' ? info(g) : null;
@@ -181,8 +197,8 @@
             const finalLink = x => '/station?c=' + compId + '&s=' + (x.finalsGapTeam || 1) + '&phase=finals&fsl=' + (x.finalsListId || 0);
             const open = gs.filter(x => x.finalsEntered < x.finalsExpected);
             actions = open.length > 1
-                ? open.map(x => '<a class="btn btn-primary" href="' + finalLink(x) + '" target="_blank" rel="noopener"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat, ' + esc(groupLabelLower(x.group)) + '</a>').join('')
-                : '<a class="btn btn-primary" href="' + finalLink(g) + '" target="_blank" rel="noopener"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat</a>';
+                ? open.map(x => '<a class="btn btn-primary" href="' + finalLink(x) + '"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat, ' + esc(groupLabelLower(x.group)) + '</a>').join('')
+                : '<a class="btn btn-primary" href="' + finalLink(g) + '"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat</a>';
             if (gs.some(x => !x.finalsPublished))
                 extra = '<div class="ns-note"><i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad, så skyttarna ser den inte. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ns="goto-finals">Publicera den</button></div>';
         } else if (p === 'ShootOff') {
@@ -194,6 +210,9 @@
             actions = '<button type="button" class="btn btn-primary" data-ns="goto-shootoff">Mata in särskjutning</button>';
         } else if (p === 'PublishResults') {
             fact = 'Alla serier är inmatade. Resultatlistan är preliminär och syns inte för skyttarna.';
+            // Påminnelsen om en opublicerad finalstartlista försvann när finalen var inmatad.
+            if ((s.groups || []).some(x => x.hasFinalsList && !x.finalsPublished))
+                extra = '<div class="ns-note"><i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad, så skyttarna ser den inte. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ns="goto-finals">Publicera den</button></div>';
             actions = '<button type="button" class="btn btn-primary" data-ns="goto-publish"><i class="bi bi-eye me-1"></i>Granska och publicera</button>'
                 + '<a class="btn btn-outline-secondary" href="/prisutdelning/' + compId + '" target="_blank" rel="noopener">Prisutdelningslistan</a>';
         }
@@ -249,13 +268,38 @@
     }
     function stop() { if (timer) { clearTimeout(timer); timer = null; } }
 
+    // Byter flik och väntar tills panelen faktiskt syns. ⚠️ En dialog som öppnas i en dold flik
+    // får höjd 0 — "Mästerskapsfinal" från kortet gav bara en grå skärm (Sune-genomgång 2).
     function showTab(id) {
         const btn = document.getElementById(id);
-        if (btn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(btn).show();
+        if (!btn || !window.bootstrap) return Promise.resolve();
+        if (btn.classList.contains('active')) return Promise.resolve();
+        return new Promise(resolve => {
+            btn.addEventListener('shown.bs.tab', () => resolve(), { once: true });
+            bootstrap.Tab.getOrCreateInstance(btn).show();
+            setTimeout(resolve, 1500); // reserv om händelsen uteblir
+        });
     }
-    function scrollTo(id) {
-        const el = document.getElementById(id);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Rullar till elementet när fliken har laddat klart. Resultat-flikens sektioner fylls efter
+    // hand, så en rullning direkt hamnar för högt — vänta tills läget står still (högst 6 s).
+    // ⚠️ Sektionerna ovanför fylls och fälls ut efter hand, så målet flyttar sig efter en första
+    // rullning. Rulla om varje gång det flyttat sig, tills det stått still 1,5 s (högst 8 s).
+    async function scrollWhenSettled(ids) {
+        const find = () => ids.map(x => document.getElementById(x)).find(x => x && x.offsetParent !== null)
+            || ids.map(x => document.getElementById(x)).find(Boolean);
+        let scrolledAt = -1, stableSince = 0;
+        const t0 = Date.now();
+        while (Date.now() - t0 < 8000) {
+            const el = find();
+            if (el) {
+                const y = Math.round(el.getBoundingClientRect().top + window.scrollY);
+                if (y !== scrolledAt) {
+                    el.scrollIntoView({ behavior: 'auto', block: 'center' });
+                    scrolledAt = y; stableSince = Date.now();
+                } else if (Date.now() - stableSince > 1500) return;
+            }
+            await new Promise(r => setTimeout(r, 250));
+        }
     }
 
     card.addEventListener('click', async e => {
@@ -264,10 +308,10 @@
         const a = btn.dataset.ns;
         if (a === 'retry') { load(); return; }
         if (a === 'create-startlist') {
-            showTab('startlists-tab');
+            await showTab('startlists-tab');
             if (typeof window.openGenerateStartListModal === 'function') window.openGenerateStartListModal();
         } else if (a === 'publish-startlist') {
-            showTab('startlists-tab');
+            await showTab('startlists-tab');
             // Startlistan läses in när fliken visas — vänta in den innan dialogen öppnas,
             // annars publicerar dialogen ingenting.
             btn.disabled = true;
@@ -276,23 +320,24 @@
             btn.disabled = false;
             if (window.currentStartListId && typeof window.publishStartList === 'function') window.publishStartList();
         } else if (a === 'goto-startlists') {
-            showTab('startlists-tab');
+            await showTab('startlists-tab');
         } else if (a === 'goto-funktionarer') {
-            showTab('funktionarer-tab');
+            await showTab('funktionarer-tab');
         } else if (a === 'goto-finals') {
-            showTab('startlists-tab');
-            setTimeout(() => window.hpskGoToFinalsSection && window.hpskGoToFinalsSection(), 150);
+            await showTab('startlists-tab');
+            if (window.hpskGoToFinalsSection) window.hpskGoToFinalsSection();
         } else if (a === 'finals') {
             if (typeof window.hpskFinalsAction !== 'function') return;
             btn.disabled = true;
-            try { await window.hpskFinalsAction(btn.dataset.action, btn.dataset.group || ''); }
+            // Guiden är en dialog i Startlistor-fliken — fliken måste synas först.
+            try { await showTab('startlists-tab'); await window.hpskFinalsAction(btn.dataset.action, btn.dataset.group || ''); }
             finally { btn.disabled = false; load(); }
         } else if (a === 'goto-shootoff') {
-            showTab('results-tab');
-            setTimeout(() => scrollTo('shootOffSection'), 150);
+            await showTab('results-tab');
+            await scrollWhenSettled(['shootOffSection']);
         } else if (a === 'goto-publish' || a === 'goto-results') {
-            showTab('results-tab');
-            setTimeout(() => scrollTo('resultsListActions'), 150);
+            await showTab('results-tab');
+            await scrollWhenSettled(a === 'goto-publish' ? ['btnMarkOfficial', 'btnCreateResultsList'] : ['resultsArtifactSection']);
         }
     });
 

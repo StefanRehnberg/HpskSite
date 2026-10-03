@@ -1,5 +1,7 @@
 ﻿@using HpskSite.CompetitionTypes.Common
 @await Html.PartialAsync("_ShootingClassesBootstrap")
+@* Publicera/Avpublicera resultatlistan använder startlistans dialog (spärrad mot dubbelinkludering). *@
+@await Html.PartialAsync("_PublishStartListDialog")
 @*
  * Competition Results Management Partial View
  * Handles results entry and management for a specific competition
@@ -620,7 +622,7 @@
                    identisk ut oavsett om man matar in nytt eller skriver over ett
                    befintligt resultat ar det som gor en overskrivning till en
                    olycka. *@
-                <div id="soModalEditNotice" class="alert alert-warning py-2 small d-flex flex-wrap align-items-center gap-2" style="display:none">
+                <div id="soModalEditNotice" class="alert alert-warning py-2 small flex-wrap align-items-center gap-2 d-none">
                     <span class="flex-grow-1">
                         <i class="bi bi-pencil-square me-1"></i>
                         Du ändrar ett redan inmatat resultat
@@ -1192,7 +1194,7 @@ async function loadResultsList() {
             // som tittar på samma lista har en Uppdatera-knapp.
             if (data.resultPageUrl) {
                 const wanted = data.resultPageUrl
-                    + (data.resultPageUrl.includes('?') ? '&' : '?') + 'noRefresh=1';
+                    + (data.resultPageUrl.includes('?') ? '&' : '?') + 'noRefresh=1&edit=1';
                 currentResultPageUrl = data.resultPageUrl;
                 // ⚠️ Tom strang, inte 'inline-block': knappen ar en .dropdown-item och ska
                 // da vara block. Tom strang aterstaller elementets eget lage och ar riktig
@@ -1277,9 +1279,15 @@ function updateResultsListStatus(isOfficial) {
 async function markResultsOfficial(event) {
     if (event) event.stopPropagation();
     
-    if (!confirm('Vill du markera resultatlistan som officiell?\n\nDetta kommer att göra resultaten synliga för alla.')) {
-        return;
-    }
+    // Samma dialog som startlistans publicering (Stefans beslut 2026-10-03) — var en confirm()
+    // som sa "officiell" i stället för "publicera". Ingen kryssruta: den gäller självanmälan.
+    const ask = await window.hpskAskPublishStartList({
+        title: 'Publicera resultatlistan',
+        body: 'När resultatlistan är publicerad syns den för skyttarna på tävlingssidan. Du kan avpublicera den igen.',
+        confirmLabel: 'Publicera',
+        askClose: false
+    });
+    if (!ask.proceed) return;
 
     const competitionId = $('.competition-results-management').data('competition-id');
     const button = event?.target?.closest('button');
@@ -1317,9 +1325,13 @@ async function markResultsOfficial(event) {
 async function markResultsPreliminary(event) {
     if (event) event.stopPropagation();
     
-    if (!confirm('Vill du återställa resultatlistan till preliminär status?')) {
-        return;
-    }
+    const ask = await window.hpskAskPublishStartList({
+        title: 'Avpublicera resultatlistan',
+        body: 'Resultatlistan blir preliminär igen och syns inte längre för skyttarna.',
+        confirmLabel: 'Avpublicera',
+        askClose: false
+    });
+    if (!ask.proceed) return;
 
     const competitionId = $('.competition-results-management').data('competition-id');
     const button = event?.target?.closest('button');
@@ -1493,7 +1505,7 @@ async function loadSubResultsList() {
 
             if (data.resultPageUrl) {
                 const iframe = document.getElementById('subResultsManagementIframe');
-                if (iframe) iframe.src = data.resultPageUrl + (data.resultPageUrl.indexOf('?') >= 0 ? '&' : '?') + 'sub=true';
+                if (iframe) iframe.src = data.resultPageUrl + (data.resultPageUrl.indexOf('?') >= 0 ? '&' : '?') + 'sub=true&edit=1';
             }
 
             // Refresh sub-comp Särskjutning card whenever the sub list changes.
@@ -1560,7 +1572,7 @@ async function loadMergeState() {
     if (summary) {
         const parts = [`<span class="badge bg-secondary-subtle text-secondary-emphasis">${classes.length} klasser</span>`];
         parts.push(mergedCount > 0
-            ? `<span class="badge bg-info-subtle text-info-emphasis">${mergedCount} sammanslagen${mergedCount === 1 ? '' : 'a'}</span>`
+            ? `<span class="badge bg-info-subtle text-info-emphasis">${mergedCount} ${mergedCount === 1 ? 'sammanslagen' : 'sammanslagna'}</span>`
             : '<span class="badge bg-secondary-subtle text-secondary-emphasis">ingen sammanslagning</span>');
         if (belowCount > 0) {
             parts.push(`<span class="badge bg-warning-subtle text-warning-emphasis">${belowCount} under 5 deltagare</span>`);
@@ -2077,7 +2089,9 @@ function openShootOffEntryModal(ctx) {
     document.getElementById('soModalIsEdit').value = isEdit ? '1' : '0';
     const notice = document.getElementById('soModalEditNotice');
     if (notice) {
-        notice.style.display = isEdit ? '' : 'none';
+        // d-none/d-flex, inte style.display: Bootstraps d-flex har !important och slog over display:none.
+        notice.classList.toggle('d-none', !isEdit);
+        notice.classList.toggle('d-flex', isEdit);
         const prev = document.getElementById('soModalEditPrev');
         if (prev) prev.textContent = ctx.prevSummary || '';
     }

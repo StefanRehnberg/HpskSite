@@ -7,6 +7,9 @@
     let panel, messagesContainer, textarea, sendBtn, errorEl;
 
     function init() {
+        // Inte på inmatningsskärmarna: bubblan täckte "Tavla 2 >" på telefonen
+        // (Sune-genomgång 2, 2026-10-03), och där frågar ingen assistenten mitt i en serie.
+        if (/^\/(station|skjutledare)(\/|$)/i.test(location.pathname)) return;
         fetch('/umbraco/surface/AiChat/GetStatus')
             .then(r => r.json())
             .then(data => {

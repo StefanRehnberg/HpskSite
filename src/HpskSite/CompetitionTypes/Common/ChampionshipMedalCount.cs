@@ -55,9 +55,16 @@
             if (isJuniorCategory)
             {
                 var n = System.Math.Min(3, System.Math.Max(0, participants));
-                return (n, participants >= 3
-                    ? "Guld, Silver, Brons"
-                    : $"Medaljer till alla {n} {unitPlural}");
+                // Samma form som de andra raderna. "Medaljer till alla 1 deltagande" var svårt att
+                // läsa (Sune-genomgång 2, 2026-10-03) — att juniorer aldrig reduceras står i
+                // förklaringen på Resultat-fliken.
+                return (n, n switch
+                {
+                    >= 3 => "Guld, Silver, Brons",
+                    2 => "Guld + Silver",
+                    1 => "Guld",
+                    _ => "Inga medaljer"
+                });
             }
             return participants switch
             {
