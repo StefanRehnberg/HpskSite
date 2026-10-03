@@ -31,9 +31,20 @@
     <span class="fw-bold fs-5"><i class="bi bi-person-badge me-1"></i>Funktionärer</span>
     <div class="d-flex align-items-center gap-2 flex-wrap">
         <span class="text-muted small" id="pfnUpdated"></span>
-        <a class="btn btn-outline-success btn-sm" href="/live?c=@competitionId" target="_blank" rel="noopener">
-            <i class="bi bi-tv me-1"></i>Live-resultattavla
-        </a>
+        @* Bara när live-resultat är påslaget — annars ledde knappen till "Live-resultat är inte
+           tillgängligt". Saknas värdet (äldre värdvy) visas knappen som förut. *@
+        @if (ViewData["ShowLiveResults"] is not bool liveOn || liveOn)
+        {
+            <a class="btn btn-outline-success btn-sm" href="/live?c=@competitionId" target="_blank" rel="noopener">
+                <i class="bi bi-tv me-1"></i>Live-resultattavla
+            </a>
+        }
+        else
+        {
+            <span class="text-muted small" title="Slå på &quot;Visa live-resultat&quot; under Redigera tävling.">
+                <i class="bi bi-tv me-1"></i>Live-tavlan är avstängd
+            </span>
+        }
     </div>
 </div>
 
