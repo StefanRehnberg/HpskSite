@@ -174,6 +174,10 @@
                             <strong>Inga resultat från grundomgången än.</strong> Klasserna visas här
                             så snart grundomgångens serier är inmatade.
                         </div>
+                        <div class="alert alert-info small py-2 d-none" id="wizardLockFirstMsg">
+                            <i class="bi bi-lock me-1"></i>
+                            Tryck <strong>Lås</strong> på klassen nedan för att gå vidare.
+                        </div>
                         <div class="table-responsive">
                             <table class="table table-sm align-middle">
                                 <thead>
@@ -909,6 +913,18 @@
             genBtn.classList.add('d-none');
             genBtn.disabled = false;
         }
+        updateStep1Gate();
+    }
+
+    // ⚠️ Nästa i steg 1 gick att trycka utan att något var låst, och steg 2 sa då bara "Lås minst
+    // en klass i steg 1 först" — en återvändsgränd. Knappen står nu stilla tills en klass är låst.
+    function updateStep1Gate() {
+        const nextBtn = document.getElementById('wizardNextBtn');
+        const msg = document.getElementById('wizardLockFirstMsg');
+        const locked = classesForGroup(wizardGroup).some(s => s.frozen);
+        const gate = currentStep === 1 && !locked;
+        nextBtn.disabled = gate;
+        if (msg) msg.classList.toggle('d-none', !gate || classesForGroup(wizardGroup).length === 0);
     }
 
     async function loadFreezeState() {
@@ -954,6 +970,7 @@
                     </tr>`;
         }).join('');
         tbody.querySelectorAll('button[data-action]').forEach(b => b.addEventListener('click', onFreezeAction));
+        updateStep1Gate();
     }
 
     async function onFreezeAction(e) {

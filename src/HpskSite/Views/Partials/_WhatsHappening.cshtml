@@ -74,9 +74,12 @@
         <h5 class="mb-0"><i class="bi bi-calendar-week me-2 text-primary"></i>Det här händer <span class="text-primary" id="whScope">@scopeWord</span></h5>
         @if (!isLocked)
         {
-            <div class="d-flex align-items-center gap-2">
+            @* flex-wrap: på en telefon fick kretsväljaren och "Gå till Hallands Pistolskyttekrets →"
+               (text-nowrap) inte plats bredvid varandra, och hela startsidan blev 527 px bred i ett
+               390 px fönster — alltså sidledsrullning. Länken bryter nu till egen rad. *@
+            <div class="d-flex align-items-center gap-2 flex-wrap mw-100">
                 <label for="whRegion" class="visually-hidden">Filtrera på krets</label>
-                <select id="whRegion" class="form-select form-select-sm w-auto">
+                <select id="whRegion" class="form-select form-select-sm w-auto mw-100">
                     <option value="hela">Hela Sverige</option>
                     @foreach (var r in data.Regions)
                     {
