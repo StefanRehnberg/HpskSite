@@ -163,6 +163,7 @@ namespace HpskSite.Composers
             // Anmälan + närvaro på klubbens och kretsens evenemang (samma clubSimpleEvent-doctype
             // för båda scopen; ägaren är evenemangets föräldranod).
             builder.Services.AddScoped<ClubEventParticipationService>();
+            builder.Services.AddScoped<HpskSite.Services.Training.TrainingMigrationService>();
             // Aktivitetssammanställning per medlem och år — mellanlagret mellan närvarologgningen
             // och Föreningsintyget. Helt härledd ur träningslogg + tävlingsdeltagande +
             // evenemangsnärvaro; ETT svar som både Min sida och intygsgenereringen läser.
