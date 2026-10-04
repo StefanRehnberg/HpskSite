@@ -187,5 +187,36 @@ namespace HpskSite.Tests.Services
             Assert.Equal(new DateTime(2025, 12, 31),
                 LedgerFiscalYearPicker.Clamp(new DateTime(2025, 12, 31), Year(2025)));
         }
+
+        // ── CorrectionDate (felrapport 2026-10-04: rättelsen daterades i dag) ─────────────
+
+        private static readonly DateTime Oct4 = new(2026, 10, 4);
+
+        [Fact]
+        public void Rattelse_i_passerat_oppet_ar_hamnar_i_arets_sista_dag()
+            => Assert.Equal(new DateTime(2025, 12, 31),
+                LedgerFiscalYearPicker.CorrectionDate(new[] { Year(2025) }, new DateTime(2025, 3, 10), Oct4));
+
+        [Fact]
+        public void Rattelse_stannar_i_originalets_oppna_ar_aven_nar_nasta_ar_finns()
+            => Assert.Equal(new DateTime(2025, 12, 31),
+                LedgerFiscalYearPicker.CorrectionDate(new[] { Year(2025), Year(2026) }, new DateTime(2025, 3, 10), Oct4));
+
+        [Fact]
+        public void Rattelse_i_innevarande_ar_ar_i_dag()
+            => Assert.Equal(Oct4,
+                LedgerFiscalYearPicker.CorrectionDate(new[] { Year(2025), Year(2026) }, new DateTime(2026, 2, 1), Oct4));
+
+        [Fact]
+        public void Rattelse_av_post_i_fastställt_ar_hamnar_i_oppet_ar()
+            => Assert.Equal(Oct4,
+                LedgerFiscalYearPicker.CorrectionDate(
+                    new[] { Year(2025, LedgerFiscalYearStatus.Established), Year(2026) },
+                    new DateTime(2025, 3, 10), Oct4));
+
+        [Fact]
+        public void Utan_oppet_ar_finns_inget_forval()
+            => Assert.Null(LedgerFiscalYearPicker.CorrectionDate(
+                new[] { Year(2025, LedgerFiscalYearStatus.Established) }, new DateTime(2025, 3, 10), Oct4));
     }
 }

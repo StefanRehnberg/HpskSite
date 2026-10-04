@@ -2710,6 +2710,12 @@
                         <input type="text" class="form-control d-none" id="@(uid)_askInput" autocomplete="off">
                         <div class="form-text" id="@(uid)_askHelp"></div>
                     </div>
+                    @* Valfritt datumfält — rättelsen visar här vilket datum den bokförs på. *@
+                    <div id="@(uid)_askDateWrap" class="d-none mt-3">
+                        <label class="form-label" for="@(uid)_askDate" id="@(uid)_askDateLabel"></label>
+                        <input type="text" class="form-control ek-date" placeholder="åååå-mm-dd" id="@(uid)_askDate" autocomplete="off">
+                        <div class="form-text" id="@(uid)_askDateHelp"></div>
+                    </div>
                     <div class="alert alert-danger d-none mt-3 mb-0" id="@(uid)_askError"></div>
                 </div>
                 <div class="modal-footer">
@@ -3187,7 +3193,7 @@
     //    payload nedanfor ar oforandrad. Lagg till ett nytt datumfalt HAR, aldrig som type=date.
     var EK_DATE_FIELDS = ['start', 'end', 'bDate', 'repFrom', 'repTo', 'budDate',
                           'fordrFrom', 'fordrTo', 'verFrom', 'verTo', 'aDate',
-                          'uDate', 'uDue', 'utPayDate', 'pStart', 'pEnd', 'aDisposeDate'];
+                          'uDate', 'uDue', 'utPayDate', 'pStart', 'pEnd', 'aDisposeDate', 'askDate'];
     if (window.flatpickr) {
         EK_DATE_FIELDS.forEach(function (n) {
             var f = el(n);
@@ -3326,6 +3332,14 @@
         el('askLabel').textContent = o.label || '';
         el('askLabel').setAttribute('for', field.id);
         el('askHelp').textContent = o.help || '';
+        // o.date = { label, value, help } → löftet ger { text, date } i stället för en sträng.
+        var hasDate = !!o.date;
+        show(el('askDateWrap'), hasDate);
+        if (hasDate) {
+            el('askDateLabel').textContent = o.date.label || 'Datum';
+            el('askDateHelp').textContent = o.date.help || '';
+            setDateField('askDate', o.date.value || '');
+        }
         show(el('askError'), false);
         var okBtn = el('askOk');
         okBtn.textContent = o.ok || 'OK';
@@ -3346,6 +3360,15 @@
             el('askError').textContent = 'Fyll i ' + (el('askLabel').textContent || 'fältet').toLowerCase() + ' först.';
             show(el('askError'), true);
             return;
+        }
+        if (!el('askDateWrap').classList.contains('d-none')) {
+            var dv = el('askDate').value.trim();
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(dv)) {
+                el('askError').textContent = 'Skriv datumet som åååå-mm-dd.';
+                show(el('askError'), true);
+                return;
+            }
+            v = { text: v, date: dv };
         }
         // ⚠️ Svaret lämnas först när dialogen är HELT stängd. Följer ett besked direkt på en fråga
         //    (ask → tell) öppnades annars samma dialog medan den fortfarande stängdes, och den
@@ -3886,24 +3909,38 @@
         show(el('verDetail'), true);
         el('verDetail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-        if (canWrite) wireEntryActions(d.head.entryId, v);
+        if (canWrite) wireEntryActions(d.head.entryId, v, d);
     }
 
-    function wireEntryActions(entryId, row) {
+    function wireEntryActions(entryId, row, d) {
         var cb = el('verCorrect');
         if (cb) cb.addEventListener('click', function () {
+            // ⚠️ Datumet förifylls ur SERVERNS regel (originalets år om det är öppet) och står
+            //    skrivet. Tidigare skickades inget datum, rättelsen daterades i dag, och en förening
+            //    som arbetar i ett passerat år fick "inget räkenskapsår omfattar <i dag>"
+            //    (felrapport 2026-10-04).
+            var cd = d && d.correctionDate;
             ask({
                 title: 'Rätta posten',
-                text: 'Posten tas ut med en rättelse som bokförs i dag. Den gamla står kvar — så ska '
-                    + 'det vara, och det är inget du gjort fel. Efteråt bokför du den rätta posten under Bokför.',
+                text: 'Posten tas ut med en rättelse — en ny verifikation med samma rader omvända. Den gamla '
+                    + 'står kvar och syns som rättad. Så ska det vara, och det är inget du gjort fel. '
+                    + 'Efteråt bokför du den rätta posten under Bokför (en dubblett behöver ingen ny post).',
                 label: 'Vad var fel?',
-                help: 'Till exempel "fel belopp, ska vara 340 kr" eller "fel konto".',
+                help: 'Till exempel "dubbelregistrerad", "fel belopp, ska vara 340 kr" eller "fel konto".',
                 multiline: true, required: true,
+                date: {
+                    label: 'Rättelsen bokförs',
+                    value: cd || '',
+                    help: cd
+                        ? 'I räkenskapsåret ' + d.correctionYear + '. Datumet går att ändra, men måste ligga i ett öppet räkenskapsår.'
+                        : 'Föreningen har inget öppet räkenskapsår. Lägg upp året under Inställningar först.'
+                },
                 ok: 'Rätta posten'
-            }).then(function (reason) {
-                if (reason === null) return;
+            }).then(function (ans) {
+                if (ans === null) return;
                 postJson('/umbraco/surface/EkonomiAdmin/CorrectEntry', {
-                    issuerType: issuerType, issuerId: issuerId, entryId: entryId, reason: reason
+                    issuerType: issuerType, issuerId: issuerId, entryId: entryId,
+                    reason: ans.text, date: ans.date
                 }).then(function (j) {
                     if (!j.success) { tell('Posten rättades inte', j.message); return; }
                     loadJournal(true).then(function () { openEntry(row); });
