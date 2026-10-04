@@ -259,7 +259,7 @@
             <label class="sv-label" for="svNewDate">Datum och tid</label>
             <input type="text" id="svNewDate" class="form-control mb-3" style="max-width:420px;" placeholder="Välj datum och tid">
             <div class="d-flex gap-2 flex-wrap">
-                <button class="btn btn-success btn-xl" onclick="createMeeting()"><i class="bi bi-plus-lg me-2"></i>Skapa möte</button>
+                <button class="btn btn-success btn-xl" id="svCreateBtn" onclick="createMeeting()"><i class="bi bi-plus-lg me-2"></i>Skapa möte</button>
                 ${CAN_MANAGE ? `<button class="btn btn-outline-secondary btn-xl" onclick="openMallar()"><i class="bi bi-sliders me-2"></i>Anpassa mötesmallar</button>` : ''}
             </div>
         </div>`;
@@ -327,13 +327,38 @@
 
     window.svChangeYear = function () { svYear = $('svYear').value; renderMeetingList(); };
 
-    window.createMeeting = function () {
+    // ⚠️ "Skapa möte" is the only way a meeting is created. Without the busy guard a second press while the
+    // first request was still seeding agenda + attendees made a full copy; without the same-day check, so
+    // did using this card to "change the date" of a meeting that already existed.
+    let svCreating = false;
+    window.createMeeting = function (createDuplicate) {
+        if (svCreating) return;
         const type = $('svNewType').value;
         // Read the date the user picked in the create card; fall back to today 18:30 if left blank.
         const def = new Date().toISOString().slice(0, 10) + ' 18:30';
         const date = ($('svNewDate') && $('svNewDate').value.trim()) ? $('svNewDate').value.trim() : def;
-        post('BoardMeeting', 'CreateMeeting', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingType: type, title: '', meetingDate: date, location: '' })
-            .then(r => { if (r.success) openMeeting(r.data.id, true); else alert(r.message || 'Kunde inte skapa mötet'); });
+        const btn = $('svCreateBtn');
+        svCreating = true;
+        if (btn) btn.disabled = true;
+        return post('BoardMeeting', 'CreateMeeting', {
+            ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingType: type, title: '', meetingDate: date, location: '',
+            createDuplicate: createDuplicate ? '1' : '0'
+        })
+            .then(r => {
+                if (r.success) { openMeeting(r.data.id, true); return; }
+                if (r.duplicate) {
+                    const d = r.duplicate;
+                    if (confirm(`Det finns redan ett möte av den typen samma dag:\n\n${d.title} (${d.meetingDate})\n\nVill du öppna det i stället?`)) {
+                        openMeeting(d.id, true);
+                    } else if (confirm('Skapa ett nytt möte ändå? Då finns det två möten samma dag.')) {
+                        svCreating = false;
+                        return createMeeting(true);
+                    }
+                    return;
+                }
+                alert(r.message || 'Kunde inte skapa mötet');
+            })
+            .finally(() => { svCreating = false; if (btn) btn.disabled = false; });
     };
 
     // =====================================================================
@@ -460,7 +485,7 @@
         html += `</div>`;
 
         // Justering — digital sign-off by ordförande + sekreterare + justerare (chosen in the agenda).
-        html += justeringCard(m, j);
+        html += justeringCard(m, j, d.agenda || []);
         html += `<div class="mt-3 d-flex gap-2 flex-wrap sv-noprint">
             <a class="btn btn-outline-secondary btn-xl" href="/styrelse/dagordning/${m.id}" target="_blank"><i class="bi bi-card-list me-2"></i>Skriv ut dagordning</a>
             <a class="btn btn-outline-secondary btn-xl" href="/styrelse/protokoll/${m.id}" target="_blank"><i class="bi bi-printer me-2"></i>Skriv ut protokoll</a>
@@ -939,7 +964,7 @@
     window.removeLink = function (id) {
         post('BoardMeeting', 'RemoveAgendaLink', { linkId: id }).then(r => { if (r.success) openMeeting(window._mId); });
     };
-    function justeringCard(m, j) {
+    function justeringCard(m, j, agenda) {
         const signers = j.signers || [];
         const signerList = signers.map(s =>
             `<div class="sv-person"><span><strong>${esc(s.memberName || '-')}</strong> <span class="sv-help">${esc(s.role)}</span></span>
@@ -968,13 +993,29 @@
                 <button class="btn btn-outline-secondary btn-xl mt-3" onclick="reopenJustering(${m.id})"><i class="bi bi-arrow-counterclockwise me-2"></i>Återöppna för redigering</button>
             </div>`;
         }
-        // editable → ready to send for justering
-        const just = signers.map(s => esc(s.memberName || '')).filter(Boolean);
+        // editable → ready to send for justering.
+        // ⚠️ Ordförande and sekreterare are pre-filled from the board roster when the meeting is created;
+        // justerare never are. Listing all signers as one comma-separated "Justeras av" made the board's
+        // ordförande + sekreterare read as two justerare that nobody had chosen. Say each role, and say
+        // plainly when the agenda's "Val av justerare" has not been filled in.
+        const byRole = r => signers.filter(s => s.role === r).map(s => esc(s.memberName || '')).filter(Boolean);
+        const chair = byRole('Ordförande'), secr = byRole('Sekreterare'), adj = byRole('Justerare');
+        const hasAdjusterItem = agenda.some(a => a.itemType === 'election' && a.electionRole === 'adjuster');
+        const missingAdjuster = hasAdjusterItem && !adj.length;
+        const line = (label, names, missing) => `<div class="sv-person"><span class="sv-help">${label}</span>
+            <span>${names.length ? '<strong>' + names.join(', ') + '</strong>' : `<span class="text-warning">${missing}</span>`}</span></div>`;
+        const canSend = (chair.length || secr.length || adj.length) && !missingAdjuster;
         return `<div class="sv-card sv-noprint">
             <h2><i class="bi bi-lock me-2"></i>Klar med protokollet?</h2>
-            <p class="sv-help">När protokollet är klart skickas det för justering. Då låses det och justerarna godkänner det digitalt – på plats via QR-kod eller via e-post.</p>
-            <p class="mb-3">Justeras av: ${just.length ? '<strong>' + just.join(', ') + '</strong>' : '<span class="text-warning">ingen vald ännu – välj ordförande, sekreterare och justerare i dagordningen.</span>'}</p>
-            <button class="btn btn-success btn-xl" onclick="sendForJustering(${m.id})" ${just.length ? '' : 'disabled'}><i class="bi bi-send me-2"></i>Skicka för justering</button>
+            <p class="sv-help">När protokollet är klart skickas det för justering. Då låses det och de som skriver under godkänner det digitalt – på plats via QR-kod eller via e-post.</p>
+            <p class="mb-1">Protokollet skrivs under av:</p>
+            <div class="mb-3">
+                ${line('Ordförande', chair, 'ingen vald')}
+                ${line('Sekreterare', secr, 'ingen vald')}
+                ${hasAdjusterItem || adj.length ? line('Justerare', adj, 'ingen vald ännu – välj under punkten "Val av justerare" i dagordningen') : ''}
+            </div>
+            <button class="btn btn-success btn-xl" onclick="sendForJustering(${m.id})" ${canSend ? '' : 'disabled'}><i class="bi bi-send me-2"></i>Skicka för justering</button>
+            ${missingAdjuster ? '<p class="sv-help mt-2 mb-0">Välj justerare först.</p>' : ''}
         </div>`;
     }
     window.sendForJustering = function (mid) {

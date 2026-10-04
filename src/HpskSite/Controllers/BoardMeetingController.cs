@@ -165,7 +165,7 @@ namespace HpskSite.Controllers
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> CreateMeeting(int ownerType, int ownerId, string meetingType,
-            string? title, string meetingDate, string? location)
+            string? title, string meetingDate, string? location, string? createDuplicate)
         {
             try
             {
@@ -175,6 +175,23 @@ namespace HpskSite.Controllers
                 var date = ParseDateTime(meetingDate);
                 if (date == null)
                     return Json(new { success = false, message = "Ogiltigt datum" });
+
+                // A string, not a bool: "1" does not bind to bool in ASP.NET Core and would silently be false.
+                if (createDuplicate != "1")
+                {
+                    var existing = _meetingService.FindSameDay(ownerType, ownerId, meetingType, date.Value);
+                    if (existing != null)
+                        return Json(new
+                        {
+                            success = false,
+                            duplicate = new
+                            {
+                                existing.Id,
+                                existing.Title,
+                                meetingDate = existing.MeetingDate.ToString("yyyy-MM-dd HH:mm")
+                            }
+                        });
+                }
 
                 var meId = await GetCurrentMemberId();
                 var meeting = _meetingService.CreateMeeting(ownerType, ownerId, meetingType,
