@@ -736,7 +736,7 @@
             <div class="modal-body">
                 <p class="text-muted small mb-2">
                     Klasser med färre än 5 deltagare kan slås samman med närmaste klass inom
-                    vapengruppen. Avmarkera för att behålla klassen separat.
+                    vapengruppen. Kryssa i de klasser som ska slås samman.
                 </p>
                 @* ⚠️ Fylls av renderMergeModal vid mästerskap. Kolumnen "Om ej sammanslagen"
                    visade tidigare en MEDALJFÖRLUST per klass ("Enbart Guld"), vilket är fel axel:
@@ -902,12 +902,12 @@ function renderMergeModal(classes, suggestions, applied) {
             const reduced = (an.medalGroups || []).filter(g => g.reduced);
             let html = '<i class="bi bi-info-circle me-1"></i>'
                 + 'Sammanslagningen styr <strong>hur resultatlistan grupperas</strong> — inte medaljerna. '
-                + 'Medaljerna delas ut per mästerskapsklass, och klasserna 1, 2 och 3 delar medalj.';
+                + 'Klasserna 1, 2 och 3 tävlar om samma medaljer.';
             html += reduced.length
-                ? ' <span class="d-block mt-1">Färre än fem deltagare i en mästerskapsklass reducerar medaljerna: '
+                ? ' <span class="d-block mt-1">Färre än fem deltagare i en medaljgrupp ger färre medaljer: '
                   + reduced.map(g => `<strong>${escapeHtml(g.category)}</strong> ${escapeHtml(g.text.toLowerCase())}`).join(', ')
                   + '.</span>'
-                : ' <span class="d-block mt-1">Alla mästerskapsklasser har minst fem deltagare, så fulla medaljer delas ut.</span>';
+                : ' <span class="d-block mt-1">Alla medaljgrupper har minst fem deltagare, så alla medaljer delas ut.</span>';
             note.innerHTML = html;
             note.classList.remove('d-none');
         } else {
@@ -949,9 +949,10 @@ function renderMergeModal(classes, suggestions, applied) {
         const tdMerge = document.createElement('td');
         if (suggestion) {
             const checkId = `merge_${cls.className.replace(/\s/g, '_')}`;
-            // Finns en sparad konfiguration styr DEN kryssrutan; annars förslaget.
+            // ⚠️ Bara det SPARADE är ikryssat (Stefan 2026-10-04, Sune 4). Förut var varje förslag
+            // förkryssat när inget var sparat, så ett Spara slog samman klasser ingen valt.
             const isApplied = Object.prototype.hasOwnProperty.call(appliedMap, cls.className);
-            const checkedAttr = (hasApplied ? isApplied : true) ? 'checked' : '';
+            const checkedAttr = isApplied ? 'checked' : '';
             let mergeHtml = `<div class="form-check d-inline-block">`;
             mergeHtml += `<input class="form-check-input merge-checkbox" type="checkbox" id="${checkId}" ${checkedAttr} `;
             mergeHtml += `data-source="${escapeAttr(cls.className)}" `;
@@ -981,7 +982,11 @@ function renderMergeModal(classes, suggestions, applied) {
             // tillåtna målklassen inte finns i tävlingen) är ett svar arrangören kan agera på.
             tdMerge.innerHTML = `<span class="text-muted small">${escapeHtml(cls.mergeBlockReason)}</span>`;
         } else {
-            tdMerge.innerHTML = '<span class="text-muted">—</span>';
+            // En målklass säger vilka den tar emot — ett tankstreck där läste som att inget hänt.
+            const incoming = Object.keys(appliedMap).filter(src => appliedMap[src] === cls.className);
+            tdMerge.innerHTML = incoming.length
+                ? `<span class="text-muted small">Tar emot ${escapeHtml(incoming.join(', '))}</span>`
+                : '<span class="text-muted">—</span>';
         }
         row.appendChild(tdMerge);
 
@@ -1020,13 +1025,22 @@ function collectMergeConfig() {
 // "Spara och räkna om listan" i dialogen Klasser och sammanslagning. Inga ikryssade = ett
 // UTTRYCKLIGT "ingen sammanslagning", som rensar en tidigare sparad (samma som den gamla knappen
 // "Skapa utan sammanslagning"). Beskedet står i resultatkortet och listan ritas om direkt.
-function applyMergesAndCreateResults() {
+// ⚠️ Medaljindelningen sparas HÄR, med samma knapp (Sune 4). Radioknapparna sparade förut direkt
+// medan klasserna väntade på knappen — då gick det inte att veta vad Avbryt ångrade.
+async function applyMergesAndCreateResults() {
     const competitionId = $('.competition-results-management').data('competition-id');
     const merges = collectMergeConfig();
+    const groupingChoice = pendingMedalGrouping();
     bootstrap.Modal.getInstance(document.getElementById('classMergeModal')).hide();
-    const msg = merges.length
-        ? 'Sparat: ' + merges.map(m => m.sourceClass + ' slås samman med ' + m.targetClass).join(', ') + '. Listan är omräknad.'
-        : 'Sparat: ingen sammanslagning. Listan är omräknad.';
+    let msg = merges.length
+        ? 'Sparat: ' + merges.map(m => m.sourceClass + ' slås samman med ' + m.targetClass).join(', ') + '.'
+        : 'Sparat: ingen sammanslagning.';
+    if (groupingChoice !== null) {
+        const err = await saveMedalGrouping(competitionId, groupingChoice);
+        if (err) { alert(err); return; }
+        msg += groupingChoice ? ' Medaljerna: en uppsättning per vapengrupp.' : ' Medaljerna: dam, veteran och junior får egna medaljer.';
+    }
+    msg += ' Listan är omräknad.';
     submitCreateResultsList(competitionId, merges.length > 0 ? merges : null, false, msg);
     document.getElementById('resultsArtifactSection')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -1762,29 +1776,27 @@ async function loadMergeState() {
                 : '');
         const dis = blocked ? 'disabled' : '';
         groupingBlock = `
-            <div class="border rounded p-2 mb-2">
+            <div class="border rounded p-2 mb-2" data-initial="${per}">
                 <div class="fw-semibold small mb-1">Så räknas medaljerna</div>
                 <div class="form-check">
                     <input class="form-check-input" type="radio" name="medalGroupingMode"
-                           id="medalGroupingSplit" ${per ? '' : 'checked'} ${dis}
-                           onchange="setMedalGrouping(false)">
+                           id="medalGroupingSplit" ${per ? '' : 'checked'} ${dis}>
                     <label class="form-check-label small" for="medalGroupingSplit">
-                        Per mästerskapsklass
-                        <span class="text-muted d-block">C, C Dam, C Vet Y, C Vet Ä, C Jun var för sig</span>
+                        Dam, veteran och junior får egna medaljer
+                        <span class="text-muted d-block">C, C Dam, C Vet Y, C Vet Ä och C Jun var för sig</span>
                     </label>
                 </div>
                 <div class="form-check">
                     <input class="form-check-input" type="radio" name="medalGroupingMode"
-                           id="medalGroupingWeapon" ${per ? 'checked' : ''} ${dis}
-                           onchange="setMedalGrouping(true)">
+                           id="medalGroupingWeapon" ${per ? 'checked' : ''} ${dis}>
                     <label class="form-check-label small" for="medalGroupingWeapon">
-                        En uppsättning per vapengrupp
+                        En uppsättning medaljer per vapengrupp
                         <span class="text-muted d-block">Bäste skytt i vapengruppen får guld</span>
                     </label>
                 </div>
                 ${blocked
                     ? `<div class="form-text text-danger mb-0 mt-1">${blocked}</div>`
-                    : '<div class="form-text mb-0 mt-1">Ändringen räknar om resultatlistan direkt.</div>'}
+                    : '<div class="form-text mb-0 mt-1">Sparas med knappen Spara och räkna om listan.</div>'}
             </div>`;
     }
 
@@ -1815,7 +1827,7 @@ async function loadMergeState() {
                 <table class="table table-sm align-middle mb-2">
                     <thead>
                         <tr>
-                            <th>Mästerskapsklass</th>
+                            <th>Medaljgrupp</th>
                             <th class="text-center">Deltagare</th>
                             <th>Medaljer</th>
                         </tr>
@@ -1829,11 +1841,11 @@ async function loadMergeState() {
                       + 'sig. Dam, veteran och junior tävlar om samma medaljer som den öppna '
                       + 'klassen, och klasserna 1, 2 och 3 är kompetensnivåer som redan delar '
                       + 'medalj.'
-                    : 'Medaljerna delas ut per mästerskapsklass — vapengrupp A, B och C samt Dam C, '
-                      + 'Veteran C och Junior C. <strong>Klasserna 1, 2 och 3 är kompetensnivåer '
-                      + 'och delar medalj.</strong>'}
-                Är deltagarna färre än fem reduceras antalet medaljer
-                (SHB C.3.4.1): fyra ger guld och silver, tre ger bara guld, två eller en ger ingen.
+                    : 'Medaljerna delas ut i vapengrupp A, B och C, och dessutom för Dam C, '
+                      + 'Veteran C och Junior C. <strong>Klasserna 1, 2 och 3 tävlar om samma '
+                      + 'medaljer.</strong>'}
+                Är deltagarna färre än fem blir det färre medaljer: fyra ger guld och silver,
+                tre ger bara guld, två eller en ger ingen.
                 Juniorklassen är undantagen — där delas medaljer alltid ut till de tre bästa,
                 eller till alla om de är färre.
             </details>
@@ -1872,14 +1884,17 @@ async function loadMergeState() {
 // Spara arrangörens medaljindelning. Servern skriver egenskapen OCH räknar om
 // resultatartefakten i samma handling — medaljörerna ligger i den, och prisutdelningen läser
 // den, så en sparning utan omräkning hade lämnat de två oense.
-async function setMedalGrouping(perWeaponGroup) {
-    const competitionId = $('.competition-results-management').data('competition-id');
-    if (!competitionId) { alert('Ingen tävling vald.'); return; }
+// Valet i dialogen, eller null när det inte ändrats (data-initial = det sparade läget).
+function pendingMedalGrouping() {
+    const picked = document.querySelector('#mergeStateContent input[name="medalGroupingMode"]:checked');
+    if (!picked || picked.disabled) return null;
+    const per = picked.id === 'medalGroupingWeapon';
+    return String(per) === picked.closest('[data-initial]')?.dataset.initial ? null : per;
+}
 
-    const host = document.getElementById('mergeStateContent');
-    const inputs = host ? host.querySelectorAll('input[name="medalGroupingMode"]') : [];
-    inputs.forEach(i => i.disabled = true);
-
+// Sparar indelningen. Returnerar ett felmeddelande, eller null. Omräkningen som följer
+// (submitCreateResultsList) räknar listan i den nya indelningen.
+async function saveMedalGrouping(competitionId, perWeaponGroup) {
     try {
         const res = await fetch('/umbraco/surface/CompetitionResults/SetMedalGrouping', {
             method: 'POST',
@@ -1889,22 +1904,12 @@ async function setMedalGrouping(perWeaponGroup) {
             },
             body: JSON.stringify({ competitionId: competitionId, perWeaponGroup: perWeaponGroup })
         });
+        if (!res.ok) return 'Medaljindelningen kunde inte sparas (' + res.status + '). Inget är ändrat.';
         const data = await res.json();
-        if (!data.success) {
-            alert(data.message || 'Indelningen kunde inte sparas.');
-            await loadMergeState();   // återställ radioknapparna till det som faktiskt gäller
-            return;
-        }
-        // En misslyckad omräkning är inte en misslyckad sparning, och får inte tystas:
-        // listan är då fortfarande räknad i den gamla indelningen.
-        if (data.resultsRefreshed === false && data.message) alert(data.message);
-
-        await loadMergeState();
-        if (typeof loadResultsList === 'function') loadResultsList();
+        return data.success ? null : (data.message || 'Medaljindelningen kunde inte sparas. Inget är ändrat.');
     } catch (e) {
-        console.error('setMedalGrouping', e);
-        alert('Ingen kontakt med servern — indelningen sparades inte.');
-        await loadMergeState();
+        console.error('saveMedalGrouping', e);
+        return 'Ingen kontakt med servern — inget är sparat.';
     }
 }
 
