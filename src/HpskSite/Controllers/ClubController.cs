@@ -198,6 +198,12 @@ namespace HpskSite.Controllers
             }
         }
 
+        // Kalenderns fyra filter (fas C, beslut 2026-10-03). Klienten speglar strängarna i ClubCalendar.
+        private const string CalendarScopeTraining = "training";
+        private const string CalendarScopeCompetition = "competition";
+        private const string CalendarScopeClub = "club";
+        private const string CalendarScopeOutside = "outside";
+
         /// <summary>
         /// Get upcoming events for a club (competitions and simple events from club hierarchy)
         /// </summary>
@@ -251,6 +257,10 @@ namespace HpskSite.Controllers
                         var eventDate = evt.Value<DateTime?>("eventDate");
                         var eventName = evt.Value<string>("eventName") ?? evt.Name;
                         var eventType = evt.Value<string>("eventType") ?? "Träning";
+                        // Kalenderns filter (fas C): träning är en egen kategori, allt annat klubben
+                        // ordnar (städdag, möte, socialt) är "övrigt i klubben".
+                        var scope = eventType.Contains("Träning", StringComparison.OrdinalIgnoreCase)
+                            ? CalendarScopeTraining : CalendarScopeClub;
 
                         if (eventDate.HasValue &&
                             eventDate.Value.Date >= startDate.Date &&
@@ -262,6 +272,7 @@ namespace HpskSite.Controllers
                                 name = eventName,
                                 date = eventDate.Value,
                                 type = eventType,
+                                scope,
                                 description = evt.Value<string>("description") ?? "",
                                 venue = evt.Value<string>("venue") ?? "",
                                 contactPerson = evt.Value<string>("contactPerson") ?? "",
@@ -357,12 +368,49 @@ namespace HpskSite.Controllers
                                     name = name,
                                     date = compDate.Value,
                                     type = "Tävling",
+                                    // Klubbens egna tävlingar är "Tävlingar"; kretsens och andra
+                                    // klubbars öppna tävlingar ligger "utanför klubben".
+                                    scope = compClubId == clubId ? CalendarScopeCompetition : CalendarScopeOutside,
                                     url = publishedComp.CompetitionUrl(),
                                     description = publishedComp.Value<string>("description") ?? "",
                                     venue = publishedComp.Value<string>("venue") ?? ""
                                 });
                             }
                         }
+                    }
+                }
+
+                // Kretsens egna händelser (fas C, "utanför klubben"). Kretsen slås upp i TRÄDET —
+                // regionalPage > clubsPage > club — inte ur regionalFederation, som kan vara tom eller
+                // stavad annorlunda. Kretsar har aldrig träning, men eventType filtreras inte här:
+                // allt kretsen ordnar är "utanför klubben" ur klubbens synvinkel.
+                if (UmbracoContext.Content?.GetById(clubId) is IPublishedContent clubForRegion
+                    && clubForRegion.Parent?.Parent is IPublishedContent regionNode
+                    && regionNode.ContentType.Alias == "regionalPage")
+                {
+                    foreach (var evt in regionNode.Children.Where(c => c.ContentType.Alias == "clubSimpleEvent"))
+                    {
+                        var eventDate = evt.Value<DateTime?>("eventDate");
+                        if (!eventDate.HasValue || eventDate.Value.Date < startDate.Date || eventDate.Value.Date > endDate.Date)
+                            continue;
+                        events.Add(new
+                        {
+                            id = evt.Id,
+                            name = evt.Value<string>("eventName") ?? evt.Name,
+                            date = eventDate.Value,
+                            type = evt.Value<string>("eventType") ?? "Annat",
+                            scope = CalendarScopeOutside,
+                            owner = regionNode.Name,
+                            description = evt.Value<string>("description") ?? "",
+                            venue = evt.Value<string>("venue") ?? "",
+                            contactPerson = evt.Value<string>("contactPerson") ?? "",
+                            url = evt.Url(),
+                            isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
+                            registrationRequired = evt.Value<bool>("registrationRequired"),
+                            registrationDeadline = HpskSite.Models.ClubEvents.RealDate(
+                                    evt.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty))
+                                ?.ToString("yyyy-MM-dd") ?? ""
+                        });
                     }
                 }
 

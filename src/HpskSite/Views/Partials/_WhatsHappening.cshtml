@@ -66,10 +66,20 @@
     // renderades bara aldrig, vilket är hela ursprungsbuggen: användarna trycker på en
     // tävling i flödet och rapporterar att sidan är trasig när ingenting händer.
     bool CanLink(FeedItem i) => whAccess.CanLink(i);
+
+    // ── Omfånget (fas C, beslut 2026-10-03) ──
+    // Inloggad: "Mina klubbar" = alla medlemmens klubbar i ett val, förvalt. Träningar i ANDRA klubbar
+    // visas inte under krets/hela Sverige (klientfiltret nedan), och för en utloggad är varje klubb en
+    // annan klubb — därför renderas de raderna inte alls för hen, så inget attribut kan läcka typen.
+    var myClubsCsv = string.Join(",", whAccess.ClubIds);
+    var hasMyClubs = isLoggedIn && whAccess.ClubIds.Count > 0;
+    bool IsTraining(FeedItem i) => i.Source == FeedSource.ClubEvent
+                                   && i.TypeLabel.Contains("Träning", StringComparison.OrdinalIgnoreCase);
 }
 
 <div class="card mb-4 wh-feed" id="whFeed" data-anon="@(isLoggedIn ? "0" : "1")" data-locked="@(lockedCode ?? "")"
-     data-default="@defaultTab" data-default-region="@(Model?.DefaultRegionCode ?? "")" data-counts='@countsJson' data-regions='@regionsJson'>
+     data-default="@defaultTab" data-default-region="@(Model?.DefaultRegionCode ?? "")" data-counts='@countsJson' data-regions='@regionsJson'
+     data-my-clubs="@myClubsCsv">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h5 class="mb-0"><i class="bi bi-calendar-week me-2 text-primary"></i>Det här händer <span class="text-primary" id="whScope">@scopeWord</span></h5>
         @if (!isLocked)
@@ -80,6 +90,10 @@
             <div class="d-flex align-items-center gap-2 flex-wrap mw-100">
                 <label for="whRegion" class="visually-hidden">Filtrera på krets</label>
                 <select id="whRegion" class="form-select form-select-sm w-auto mw-100">
+                    @if (hasMyClubs)
+                    {
+                        <option value="mine">Mina klubbar</option>
+                    }
                     <option value="hela">Hela Sverige</option>
                     @foreach (var r in data.Regions)
                     {
@@ -122,7 +136,7 @@
                 {
                     foreach (var item in ongoing)
                     {
-                        <div class="wh-ev @EdgeClass(item.Source) @(CanLink(item) ? "wh-link" : "")" data-region="@item.RegionCode">
+                        <div class="wh-ev @EdgeClass(item.Source) @(CanLink(item) ? "wh-link" : "")" data-region="@item.RegionCode" data-club="@item.ClubId" data-training="@(IsTraining(item) ? "1" : "0")">
                             @if (CanLink(item))
                             {
                                 <a class="stretched-link" href="@item.Url" aria-label="@item.Title"></a>
@@ -149,11 +163,12 @@
                 @foreach (var item in upcoming)
                 {
                     if (!isLoggedIn && item.Source == FeedSource.TrainingMatch) { continue; }
+                    if (!isLoggedIn && IsTraining(item)) { continue; }
                     var full = isLoggedIn || !item.Masked;
                     var daysAhead = (item.Start.Date - today).Days;
                     var label = RowLabel(item, full);
                     var whenClass = daysAhead == 0 ? "wh-today" : daysAhead == 1 ? "wh-tomorrow" : "";
-                    <div class="wh-ev @EdgeClass(item.Source) @whenClass @(CanLink(item) ? "wh-link" : "")" data-region="@item.RegionCode" data-days="@daysAhead" data-date="@item.Start.ToString("yyyy-MM-dd")" data-label="@label">
+                    <div class="wh-ev @EdgeClass(item.Source) @whenClass @(CanLink(item) ? "wh-link" : "")" data-region="@item.RegionCode" data-club="@item.ClubId" data-training="@(IsTraining(item) ? "1" : "0")" data-days="@daysAhead" data-date="@item.Start.ToString("yyyy-MM-dd")" data-label="@label">
                         @if (CanLink(item))
                         {
                             <a class="stretched-link" href="@item.Url" aria-label="@label"></a>
@@ -242,8 +257,17 @@
         var m = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
         return parseInt(p[2], 10) + ' ' + m[parseInt(p[1], 10) - 1];
     }
+    var myClubs = {};
+    (root.dataset.myClubs || '').split(',').forEach(function (c) { if (c) myClubs[c] = true; });
     function activeRegion() { return locked ? locked : (sel ? sel.value : 'hela'); }
-    function regionOk(row, region) { return region === 'hela' || (row.dataset.region || '') === region; }
+    // "mine" = medlemmens klubbar. Annars krets/hela Sverige — men en träning i en ANNAN klubb
+    // visas aldrig där (beslut 2026-10-03): den hör till klubbens egna medlemmar.
+    function regionOk(row, region) {
+        var club = row.dataset.club || '0';
+        if (region === 'mine') return !!myClubs[club];
+        if (row.dataset.training === '1' && !myClubs[club]) return false;
+        return region === 'hela' || (row.dataset.region || '') === region;
+    }
 
     function ongoingCount(region) {
         if (anon) {
@@ -309,11 +333,28 @@
             if (visibleUpcoming === 0 && !(isToday && nowN > 0)) {
                 var within30 = 0;
                 upRows.forEach(function (r) { if (regionOk(r, region) && parseInt(r.dataset.days || '0', 10) <= 30) within30++; });
-                var what = isToday ? 'Inget planerat idag.' : 'Inget planerat de närmaste ' + horizon + ' dagarna.';
+                var where = region === 'mine' ? ' i dina klubbar' : '';
+                var what = isToday ? 'Inget planerat' + where + ' idag.' : 'Inget planerat' + where + ' de närmaste ' + horizon + ' dagarna.';
                 if (within30 > 0) {
                     emptyUp.innerHTML = what + ' <strong>' + within30 + '</strong> händelser inom 30 dagar — vidga vyn ovan.';
                 } else {
-                    emptyUp.textContent = 'Inget planerat de närmaste 30 dagarna.';
+                    emptyUp.textContent = 'Inget planerat' + where + ' de närmaste 30 dagarna.';
+                }
+                // Tomt i de egna klubbarna: peka på kretsen i stället för att lämna en tom ruta.
+                var defReg = root.dataset.defaultRegion || '';
+                if (region === 'mine' && sel) {
+                    var target = defReg && regions[defReg] ? defReg : 'hela';
+                    var targetName = target === 'hela' ? 'hela Sverige' : regions[target].name;
+                    var b = document.createElement('button');
+                    b.type = 'button'; b.className = 'btn btn-link btn-sm p-0 ms-1 align-baseline';
+                    b.textContent = 'Se vad som händer i ' + targetName + ' →';
+                    b.addEventListener('click', function () {
+                        sel.value = target;
+                        try { localStorage.setItem(STORE, target); } catch (e) {}
+                        update();
+                    });
+                    emptyUp.appendChild(document.createTextNode(' '));
+                    emptyUp.appendChild(b);
                 }
                 emptyUp.style.display = '';
             } else emptyUp.style.display = 'none';
@@ -322,7 +363,7 @@
         // contextual krets link + scope word
         var link = root.querySelector('#whKretsLink'), scope = root.querySelector('#whScope');
         if (link) {
-            if (region === 'hela') link.style.display = 'none';
+            if (region === 'hela' || region === 'mine') link.style.display = 'none';
             else {
                 var r = regions[region];
                 link.style.display = '';
@@ -330,7 +371,9 @@
                 if (r && r.url) link.href = r.url;
             }
         }
-        if (scope && !locked) scope.textContent = region === 'hela' ? 'i hela Sverige' : ('i ' + (regions[region] ? regions[region].name : region));
+        if (scope && !locked) scope.textContent = region === 'hela' ? 'i hela Sverige'
+            : region === 'mine' ? 'i dina klubbar'
+            : ('i ' + (regions[region] ? regions[region].name : region));
     }
 
     function setBadge(key, n) { var b = root.querySelector('[data-ct="' + key + '"]'); if (b) b.textContent = n; }
@@ -351,7 +394,9 @@
         var saved = null;
         try { saved = localStorage.getItem(STORE); } catch (e) {}
         var defReg = root.dataset.defaultRegion || '';
-        if (saved && (saved === 'hela' || regions[saved])) sel.value = saved;
+        var hasMine = !!sel.querySelector('option[value="mine"]');
+        if (saved && (saved === 'hela' || regions[saved] || (saved === 'mine' && hasMine))) sel.value = saved;
+        else if (hasMine) sel.value = 'mine';          // förval för inloggad med klubb (fas C)
         else if (defReg && regions[defReg]) sel.value = defReg;
         sel.addEventListener('change', function () {
             try { localStorage.setItem(STORE, sel.value); } catch (e) {}
