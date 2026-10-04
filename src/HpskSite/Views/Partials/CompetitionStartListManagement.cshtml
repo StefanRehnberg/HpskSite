@@ -9,6 +9,8 @@
    needs it and cannot be forgotten when the partial is added to a new surface. *@
 @await Html.PartialAsync("_HtmlEscape")
 @await Html.PartialAsync("_ShootingClassesBootstrap")
+@* EN listritare för grundomgången och finalen (2026-10-04). *@
+@await Html.PartialAsync("_StartListTable")
 @* Publiceringstillstandet: EN form och ETT ordpar over Resultat, Startlistor och
    Finalstartlistor. *@
 @await Html.PartialAsync("_PublishState")
@@ -330,16 +332,14 @@
 
     <!-- Official Start List Card (ONE list) -->
     <div class="card" id="officialStartListSection" style="display: none;">
-        <div class="card-header">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>@qualCardTitle</h5>
+        @* Samma rubrikform som finalens kort (2026-10-04): namn · antal till vänster, tillstånd,
+           knapp och Åtgärder till höger. Antalet starter skrivs bara ut när det skiljer sig från
+           antalet skyttar (någon skjuter i flera klasser). *@
+        <div class="card-header py-2">
+            <div class="d-flex align-items-center flex-wrap gap-2">
+                <h6 class="mb-0 me-auto" style="font-size:1rem">@qualCardTitle
+                    <span class="text-muted fw-normal small">· <span id="startListShooterCount">0</span> skyttar<span id="startListStartsWrap"> · <span id="startListStartCount">0</span> starter</span></span></h6>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                    @* Antal fore tillstand: lasordningen ar "vad det ar -> hur mycket ->
-                       vilket lage -> vad jag kan gora -> visa/dolj", samma pa bada flikarna. *@
-                    <span class="text-muted">
-                        <small><i class="bi bi-people me-1"></i><span id="startListShooterCount">0</span> skyttar</small>
-                        <small class="ms-2"><i class="bi bi-flag me-1"></i><span id="startListStartCount">0</span> starter</small>
-                    </span>
 
                     @* Skapa/generera om ligger i kortet — se kommentaren ovanför. *@
                     <button id="generateStartListBtn" class="btn btn-success btn-sm" onclick="openGenerateStartListModal()">
@@ -389,7 +389,7 @@
            knapparna ligger i rubrikraden och står kvar — en ihopfälld sektion får aldrig
            läsas som en borttagen sektion. *@
         <div class="collapse show" id="qualStartListBody">
-        <div class="card-body">
+        <div class="card-body p-0">
             @* Infoytan (format, antal skjutlag, genererad) och den extra Redigera-knappen är dolda
                (2026-10-04): listan nedan visar skjutlagen, och Redigera finns i Åtgärder. Elementen
                ligger kvar eftersom JS skriver i dem. *@
@@ -433,8 +433,12 @@
                 </button>
             </div>
 
-            <!-- Start List Display (iframe) -->
-            <iframe id="startListIframe" src="" class="border rounded" style="width: 100%; height: 800px; display: none;"></iframe>
+            @* Listan ritas i kortet av den delade ritaren (_StartListTable), samma som finalen —
+               förut var det den publika sidan i en iframe med egen rubrik och typografi, så
+               grundomgången och finalen såg olika ut (Stefan 2026-10-04). Iframen finns kvar som
+               reserv för direktplacering, vars lista har en egen form. *@
+            <div id="qualStartListTable"></div>
+            <iframe id="startListIframe" src="" class="border rounded" style="width: calc(100% - 2rem); margin: 1rem; height: 800px; display: none;"></iframe>
         </div>
         </div>
     </div>
@@ -1311,6 +1315,7 @@ function displayOfficialStartList(startList) {
     // Update UI elements
     document.getElementById('startListShooterCount').textContent = uniqueShooters;
     document.getElementById('startListStartCount').textContent = totalStarts;
+    document.getElementById('startListStartsWrap')?.classList.toggle('d-none', totalStarts === uniqueShooters);
     document.getElementById('startListFormat').textContent = teamFormat;
     document.getElementById('startListTeamCount').textContent = teamCount;
     document.getElementById('startListGeneratedDate').textContent = formatDate(generatedDate);
@@ -1321,12 +1326,9 @@ function displayOfficialStartList(startList) {
     // Update Phase 1 warning (regeneration protection)
     updatePublishedStartListUI(isOfficial);
 
-    // Load start list into iframe
-    const iframe = document.getElementById('startListIframe');
-    if (url) {
-        iframe.src = url;
-        iframe.style.display = 'block';
-    }
+    // Ritas i kortet (samma ritare som finalen); iframen bara när listan saknar skjutlagsform.
+    window.hpskQualListUrl = url;
+    renderQualStartListTable(id);
 
     // Show the section
     document.getElementById('officialStartListSection').style.display = 'block';
@@ -1575,10 +1577,36 @@ function openStartListEditor(startListId) {
     loadStartListForEditing(startListId);
 }
 
-// Refresh the start list iframe display
-function refreshStartListDisplay() {
+// Grundomgångens lista i kortet, ur redigerarens konfiguration (Teams[].Shooters[]). Faller
+// tillbaka på iframen när listan inte har den formen (direktplacering) eller inte kan läsas.
+let qualTableSeq = 0;
+async function renderQualStartListTable(startListId) {
+    const host = document.getElementById('qualStartListTable');
     const iframe = document.getElementById('startListIframe');
-    if (iframe && iframe.src) {
+    if (!host || !iframe || !startListId) return;
+    const seq = ++qualTableSeq;
+    let html = null;
+    try {
+        const r = await fetch(`/umbraco/surface/PrecisionStartList/GetStartListForEditing?startListId=${startListId}&_=${Date.now()}`, { cache: 'no-store' });
+        const d = await r.json();
+        if (d && d.success && typeof window.hpskRenderStartListTable === 'function')
+            html = window.hpskRenderStartListTable(d.configuration);
+    } catch (e) { console.warn('Startlistan kunde inte ritas i kortet:', e); }
+    if (seq !== qualTableSeq) return;   // ett senare anrop har redan ritat
+    if (html) {
+        host.innerHTML = html;
+        iframe.style.display = 'none';
+    } else {
+        host.innerHTML = '';
+        if (window.hpskQualListUrl) { iframe.src = window.hpskQualListUrl; iframe.style.display = 'block'; }
+    }
+}
+
+// Refresh the start list display (kortet och, för direktplacering, iframen)
+function refreshStartListDisplay() {
+    if (window.currentStartListId) renderQualStartListTable(window.currentStartListId);
+    const iframe = document.getElementById('startListIframe');
+    if (iframe && iframe.src && iframe.style.display !== 'none') {
         // Add cache-busting parameter to force reload
         const url = new URL(iframe.src, window.location.origin);
         url.searchParams.set('_refresh', new Date().getTime());
