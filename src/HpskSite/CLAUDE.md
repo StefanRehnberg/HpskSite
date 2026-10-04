@@ -326,6 +326,12 @@ The same tiers apply to `GetMemberProgress` when viewing another member's progre
 functionary-approved.** `TrainingDefinitions.SelfServiceMinLevel` / `IsSelfServiceLevel` is the ONE
 place that boundary is expressed — don't re-test `levelId >= 4` inline.
 
+**⚠️ ÄNDRAT 2026-10-04 (fas A3): trappan skriver INTE längre in märken.** `SyncTrappaBadgesAsync`
+och båda anropen är borttagna. Brons/silver uppfylls av validerade serier (se *Märken: alla valörer*);
+guld förblir manuellt. Märken trappan redan skrivit in står kvar (`Source = Skyttetrappan`).
+Nivågränsen 1–3 står kvar — skälet är nu att nybörjarkursen godkänns av instruktören. Svit:
+`hpsk-verify/trappa-no-mint-verify.mjs`. Texten nedan beskriver det tidigare beteendet.
+
 **⚠️ The reason is the märke, not the shooter's rank.** Finishing level 1, 2 or 3 calls
 `MarkenLedgerService.SyncTrappaBadgesAsync`, which mints the official Pistolskyttemärke (brons /
 silver / guld) into the märkesledger stamped with the approving functionary. Nobody signs off their
@@ -1317,6 +1323,12 @@ The same tiers apply to `GetMemberProgress` when viewing another member's progre
 **A shooter may tick their OWN steps from level 4 (Guldmärkesskytt 1) and up. Levels 1-3 stay
 functionary-approved.** `TrainingDefinitions.SelfServiceMinLevel` / `IsSelfServiceLevel` is the ONE
 place that boundary is expressed — don't re-test `levelId >= 4` inline.
+
+**⚠️ ÄNDRAT 2026-10-04 (fas A3): trappan skriver INTE längre in märken.** `SyncTrappaBadgesAsync`
+och båda anropen är borttagna. Brons/silver uppfylls av validerade serier (se *Märken: alla valörer*);
+guld förblir manuellt. Märken trappan redan skrivit in står kvar (`Source = Skyttetrappan`).
+Nivågränsen 1–3 står kvar — skälet är nu att nybörjarkursen godkänns av instruktören. Svit:
+`hpsk-verify/trappa-no-mint-verify.mjs`. Texten nedan beskriver det tidigare beteendet.
 
 **⚠️ The reason is the märke, not the shooter's rank.** Finishing level 1, 2 or 3 calls
 `MarkenLedgerService.SyncTrappaBadgesAsync`, which mints the official Pistolskyttemärke (brons /
@@ -4585,6 +4597,43 @@ Bespoke (not MarkenFamilies patterns). Springskytte still deferred.
 - **Unified queue/QR extended to `kind="stormastar"`**: `GetPendingSeries`/`GetClubPendingSeries` concat `MarkenStormastarService.GetPendingAsync`; `VerifyEvidence`/`RejectEvidence` switch on kind; QR token `"stormastar:id"` in `GetSerieForVerify`; `markenEvidenceDesc`/`markenEvidenceDescAdmin` + queue photo (`GetStormastarPhoto`) handle it; live-update via `GetMyStormastarStatus`.
 - **UI**: two new sections on the Min sida "Medaljer & Märken" tab (`renderMastar` → `#markenMastarContent`, `renderStormastar` → `#markenStormastarContent`, fed by extra `mastar`/`stormastar` keys on `GetMyMarken`). Badge images expected at `/images/marken/Mastar.png` + `Stormastar.png` (graceful onerror-hide via `markenBadgeImg`).
 - **Deploy (Phase 3):** full rebuild + run `Migrations/create-marken-stormastar-table.sql` in SSMS. Compiles green; **not yet load-tested** (Razor views runtime-compiled — load the tab once after deploy).
+
+### Märken: alla valörer, brons och silver ur serier, utdelat ur lager (fas A, 2026-10-04)
+
+Fas A i `notes/traningsmodell-plan-2026-10-03.md`. Beslut (Stefan 2026-10-02/03) i minnet
+`traningsgrupp-kursyta-plan`.
+
+- **Gränser för alla valörer (A1).** `Marken.BaseThreshold/AgeConcession/ThresholdFor/ValorFor`:
+  brons 32/33/34, silver 38/39/40, guld 43/45/46 (A/B/C; R och okänt läses som C). Eftergiften
+  (året efter fyllda 55: −1, 65: −2) gäller **alla** valörer. `PrecisionThreshold` = guldomslag,
+  oförändrat. JS-spegel: `mqsThresholdFor`/`mqsValorFor` i `_MarkenSerieQuickSubmit`.
+- **⚠️⚠️ `ClaimedLevel` på en precisionsserie = valören totalen NÅR (A2)** (Guld/Silver/Brons, tomt
+  under brons). **`Threshold` och `Qualifies` betyder fortfarande guldkravet** — guldfodringen, ligan
+  och Elit räknar exakt som förut, och `Qualifies = 1` ⇔ `ClaimedLevel = Guld`. Varje precisionsläsare
+  som räknar guld filtrerar på `Qualifies`; filtren på `ClaimedLevel = Guld` utan `Qualifies` gäller
+  tillämpningsserier. Bryt inte den uppdelningen.
+- **Tävlingsserier materialiseras även från bronsgränsen** för den som inte höll valören **före seriens
+  år** (`MarkenCompetitionSeriesSync.PrecisionWorthRecording`). ⚠️ "Före året", aldrig "nu" — synken
+  reconcilierar, och jämförd mot dagens innehav raderas bronsserierna när märket de bevisar delas ut.
+  Mätt i dev: ~780 brons/silverrader tillkom (nästan ingen har sina märken registrerade).
+- **Trappan skriver inte in märken längre (A3)** — se Skyttetrappan-avsnittet.
+- **Brons/silver ur serier (A4).** `MarkenBaseValor.Derive` (ren funktion) + `MarkenBaseValorService`:
+  3 precisionsserier av valören + 3 tillämpningsserier av valören eller en standardmedalj i fält, ett
+  märke per år i turordning, tak silver (guld manuellt), start efter högsta verifierade märkets år.
+  `Source = "Serier"`. Körs vid läsning, efter varje seriegranskning och för hela klubben innan
+  beställningslistan byggs. **En funktionärs borttagning (`DeleteBadge`) AVVISAR raden** så att den inte
+  räknas fram igen, och ett avvisat brons stoppar silver.
+  **⚠️ Spärr (Claude 2026-10-04, att bekräfta med Stefan):** inget härleds det år medlemmen uppfyller
+  guldfodringen eller senare — annars får varje veteran utan registrerat guldmärke brons och silver på
+  klubbens beställningslista.
+- **Utdelat ur lager (A5).** `MemberBadge.HandedOutFromStockAt/HandedOutByMemberId`,
+  `Marken/SetBadgeHandedOutFromStock` (flaggan som sträng), knapp i Märken-detaljen. Beställningsraden
+  hoppar över märket, utdelningsraden visar "Utdelat {datum} ur klubbens lager". Listan förblir härledd.
+  **Operatörssteg:** `Migrations/add-stock-handout-to-member-badge.sql` **FÖRE deploy** (körd i dev, EJ i prod).
+
+Test: `MarkenValorThresholdTests`, `MarkenPrecisionWorthRecordingTests`, `MarkenBaseValorTests`.
+Sviter: `marken-bassvalor-verify` 19/19, `marken-stock-ui-verify` 5/5, `trappa-no-mint-verify` 9/9,
+`marken-compseries-sync` 64/64, `marken-alderseftergift` 39/39, `marken-orderlist` 71/71.
 
 ### Märken backlog entry — historical Guldserier/Snabbserier from a paper ledger (2026-06-04)
 Club admins migrate a hand-written ledger of past series in bulk on the club **Märken** tab. Functionary-only card **"Historiska serier från klubbliggare"** (gated on `CanSignOffForClubAsync` — board / Skjutledare-if-enabled / site admin; hidden for plain club admins, wired off `loadClubMarkenQueue`'s `canValidate`). An add-rows grid: per row member (from `ClubAdmin/GetClubMembers`, defaults to the previous row's member), type (Guldserie=`Precision` / Snabbserie=`Speed`), date, weapon group, and score (precision/snabbpistol) or target+valör (tillämpning). "Spara alla" → `POST Marken/AddBacklogSeries` (`AddBacklogSeriesRequest { ClubId, Entries[] }`).
