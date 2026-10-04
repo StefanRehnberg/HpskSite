@@ -1,0 +1,81 @@
+@*
+    EN ritare för startlistan i tävlingshanteringen — grundomgången OCH finalen (2026-10-04).
+    Grundomgången visades som den publika sidan i en iframe (egen rubrik, egen Skriv ut-knapp, annan
+    typografi) medan finalen ritades i kortet, så samma sak såg olika ut beroende på växeln. Båda går
+    nu genom window.hpskRenderStartListTable(konfiguration, alternativ).
+
+    Konfigurationen är StartListConfiguration (Teams[].Shooters[]), så som GetStartListForEditing och
+    GetFinalsStartList levererar den. Direktplacering skriver en egen form — anroparen behåller då
+    iframen (funktionen returnerar null när den inte hittar några skjutlag).
+
+    Inkluderas av partialerna själva (samma husregel som _HtmlEscape); guardad mot dubbel inkludering.
+*@
+@{
+    // Dubbelinkluderingsguard: grundomgångens och finalens partialer inkluderar båda den här.
+    if (ViewContext.HttpContext.Items.ContainsKey("hpskStartListTableRendered")) { return; }
+    ViewContext.HttpContext.Items["hpskStartListTableRendered"] = true;
+}
+@await Html.PartialAsync("_HtmlEscape")
+@await Html.PartialAsync("_ShootingClassesBootstrap")
+<style>
+    .hpsk-sl-team-h { font-weight: 600; font-size: .9rem; padding: .6rem .75rem .25rem; }
+    .hpsk-sl-list th { font-size: .75rem; color: var(--bs-secondary-color); font-weight: 600; }
+    .hpsk-sl-list td, .hpsk-sl-list th { padding-left: .75rem; padding-right: .75rem; }
+    .hpsk-sl-list td { font-variant-numeric: tabular-nums; }
+    .hpsk-sl-list td.sl-pos { width: 3.5rem; color: var(--bs-secondary-color); }
+    /* Telefon: varje skytt två rader — namn + klass, klubb + kvalresultat. */
+    @@media (max-width: 575.98px) {
+        .hpsk-sl-list thead { display: none; }
+        .hpsk-sl-list tr { display: grid; grid-template-columns: 2rem 1fr auto; gap: 0 .5rem; padding: .4rem .75rem; border-bottom: 1px solid var(--bs-border-color); }
+        .hpsk-sl-list td { border: 0; padding: 0; }
+        .hpsk-sl-list td.sl-pos { grid-row: 1 / 3; width: auto; }
+        .hpsk-sl-list td.sl-club { grid-column: 2; color: var(--bs-secondary-color); font-size: .85rem; }
+        .hpsk-sl-list td.sl-cls { grid-column: 3; grid-row: 1; text-align: right; }
+        .hpsk-sl-list td.sl-kval { grid-column: 3; grid-row: 2; color: var(--bs-secondary-color); font-size: .85rem; }
+    }
+</style>
+<script>
+if (!window.hpskRenderStartListTable) {
+    // opts.hideLabel: skjutlagsetikett som inte ska skrivas ut (t.ex. vapengruppen, som redan står i rubriken).
+    window.hpskRenderStartListTable = function (cfg, opts) {
+        opts = opts || {};
+        const esc = window.hpskEsc || (s => String(s == null ? '' : s));
+        const teams = ((cfg && (cfg.Teams || cfg.teams)) || []).slice()
+            .sort((a, b) => (a.TeamNumber || a.teamNumber || 0) - (b.TeamNumber || b.teamNumber || 0));
+        if (!teams.length) return null;
+        const className = c => (typeof window.getShootingClassName === 'function' ? window.getShootingClassName(c || '') : (c || ''));
+        // Kvalresultat bara när någon skytt bär ett (finalen); grundomgången har inga.
+        const showKval = teams.some(t => (t.Shooters || t.shooters || []).some(s => (s.QualificationScore ?? s.qualificationScore) != null));
+        const hide = String(opts.hideLabel || '').trim();
+
+        return teams.map(t => {
+            const num = t.TeamNumber || t.teamNumber || 0;
+            const date = t.Date || t.date || '';
+            const time = t.StartTime || t.startTime || '';
+            let label = (t.Label || t.label || '').trim();
+            if (hide && label === hide) label = '';
+            const shooters = (t.Shooters || t.shooters || []).slice()
+                .sort((a, b) => (a.Position || a.position || 0) - (b.Position || b.position || 0));
+            const rows = shooters.map(s => {
+                const score = s.QualificationScore ?? s.qualificationScore;
+                return `<tr>
+                    <td class="sl-pos">${s.Position || s.position || ''}</td>
+                    <td class="sl-name">${esc(s.Name || s.name || '')}</td>
+                    <td class="sl-club">${esc(s.Club || s.club || '')}</td>
+                    <td class="sl-cls">${esc(className(s.WeaponClass || s.weaponClass))}</td>
+                    ${showKval ? `<td class="sl-kval text-end">${score != null ? score : ''}</td>` : ''}
+                </tr>`;
+            }).join('');
+            const meta = [date, time].filter(Boolean).join(' · ') + (label ? ' · ' + label : '');
+            return `
+                <div class="hpsk-sl-team">
+                    <div class="hpsk-sl-team-h">Skjutlag ${num} <span class="text-muted fw-normal">${esc(meta)}</span></div>
+                    <table class="table table-sm mb-0 hpsk-sl-list">
+                        <thead><tr><th>Plats</th><th>Namn</th><th>Klubb</th><th>Klass</th>${showKval ? '<th class="text-end">Kvalresultat</th>' : ''}</tr></thead>
+                        <tbody>${rows || `<tr><td colspan="5" class="text-muted small">Inga skyttar</td></tr>`}</tbody>
+                    </table>
+                </div>`;
+        }).join('');
+    };
+}
+</script>
