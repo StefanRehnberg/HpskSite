@@ -35,6 +35,9 @@ namespace HpskSite.Services
             _regionCodes = regionCodes;
         }
 
+        /// <summary>The viewer's own clubs (primary + additional) — drives the feed's "Mina klubbar" scope.</summary>
+        public IReadOnlyCollection<int> ClubIds => _clubIds;
+
         /// <summary>En utloggad besökare — ser bara omaskerade rader och kan bara öppna dem.</summary>
         public static WhatsHappeningAccess Anonymous() =>
             new WhatsHappeningAccess(false, false, new HashSet<int>(), new HashSet<string>(StringComparer.OrdinalIgnoreCase));

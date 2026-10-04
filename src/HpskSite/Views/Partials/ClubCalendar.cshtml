@@ -20,6 +20,16 @@
             </div>
         </div>
         <div class="card-body">
+            <!-- Vad kalendern visar (fas C). Valet sparas i webbläsaren; förval = allt i egna klubben. -->
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="calScopeBar" role="group" aria-label="Visa i kalendern">
+                <small class="text-muted me-1">Visa:</small>
+                <button type="button" class="btn btn-sm btn-outline-success" data-cal-scope="training" aria-pressed="false"><i class="bi bi-bullseye me-1"></i>Träningar</button>
+                <button type="button" class="btn btn-sm btn-outline-primary" data-cal-scope="competition" aria-pressed="false"><i class="bi bi-flag-fill me-1"></i>Tävlingar</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-cal-scope="club" aria-pressed="false"><i class="bi bi-people me-1"></i>Övrigt i klubben</button>
+                <button type="button" class="btn btn-sm btn-outline-dark" data-cal-scope="outside" aria-pressed="false" title="Kretsens händelser och andra klubbars öppna tävlingar"><i class="bi bi-globe2 me-1"></i>Utanför klubben</button>
+                <small class="text-muted ms-auto" id="calHiddenNote"></small>
+            </div>
+
             <!-- Calendar Navigation -->
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <button id="prevMonth" class="btn btn-sm btn-outline-secondary">
@@ -718,7 +728,55 @@ function updateMonthDisplay() {
                        'Juli', 'Augusti', 'September', 'Oktober', 'November', 'December'];
     const displayText = `${monthNames[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
     document.getElementById('monthDisplay').textContent = displayText;
+    updateCalHiddenNote();
 }
+
+// ── Filtret (fas C) ─────────────────────────────────────────────────────────
+// ⚠️ EN plats filtrerar: window.calendarEvents är den filtrerade mängden som månadsrutnätet,
+// listvyn och dagvyn redan läser; window.allCalendarEvents är allt servern skickade.
+// Strängarna speglar CalendarScope* i ClubController.
+const CAL_SCOPE_KEY = 'hpsk_cal_scopes';
+const CAL_SCOPE_DEFAULT = ['training', 'competition', 'club'];
+function readCalScopes() {
+    try {
+        const v = JSON.parse(localStorage.getItem(CAL_SCOPE_KEY));
+        if (Array.isArray(v)) return new Set(v);
+    } catch (e) { }
+    return new Set(CAL_SCOPE_DEFAULT);
+}
+function eventScope(e) {
+    return e.scope || (e.type === 'Tävling' ? 'competition' : 'club');
+}
+function applyCalScopes() {
+    const scopes = readCalScopes();
+    document.querySelectorAll('#calScopeBar [data-cal-scope]').forEach(b => {
+        const on = scopes.has(b.dataset.calScope);
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    window.calendarEvents = (window.allCalendarEvents || []).filter(e => scopes.has(eventScope(e)));
+    updateCalHiddenNote();
+}
+// Ett filter som tyst gömmer saker läses som "min tävling är borta" — säg hur många som döljs.
+function updateCalHiddenNote() {
+    const note = document.getElementById('calHiddenNote');
+    if (!note || !window.allCalendarEvents) return;
+    const prefix = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-`;
+    const all = window.allCalendarEvents.filter(e => eventDateKey(e).startsWith(prefix)).length;
+    const shown = (window.calendarEvents || []).filter(e => eventDateKey(e).startsWith(prefix)).length;
+    note.textContent = all > shown ? `${all - shown} händelse${all - shown === 1 ? '' : 'r'} dold${all - shown === 1 ? '' : 'a'} av filtret` : '';
+}
+document.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('#calScopeBar [data-cal-scope]');
+    if (!btn) return;
+    const scopes = readCalScopes();
+    const s = btn.dataset.calScope;
+    if (scopes.has(s)) scopes.delete(s); else scopes.add(s);
+    try { localStorage.setItem(CAL_SCOPE_KEY, JSON.stringify([...scopes])); } catch (e) { }
+    applyCalScopes();
+    if (currentView === 'list') renderListView(); else renderCalendar();
+    document.getElementById('selectedDayEvents').style.display = 'none';
+});
 
 function loadCalendarData() {
     // GetUpcomingEvents with allYears=true returns events from current year + next year
@@ -727,11 +785,17 @@ function loadCalendarData() {
         .then(data => {
             if (data.success && data.data) {
                 // Map to use 'type' from API (which has correct values)
-                window.calendarEvents = data.data.map(e => ({
+                window.allCalendarEvents = data.data.map(e => ({
                     ...e,
+                    // Kretsens händelser bär sin ägare i namnet, annars ser de ut som klubbens egna.
+                    name: e.owner ? `${e.name || e.type} (${e.owner})` : e.name,
                     eventType: e.type,  // Use 'type' from API response
                     category: e.type === 'Tävling' ? 'competition' : 'event'
                 }));
+                applyCalScopes();
+                // Listvyn satte aldrig månadsrubriken — den stod kvar på platshållaren
+                // "Januari 2025" över en lista med innevarande månads händelser.
+                updateMonthDisplay();
 
                 // Re-render the CURRENT view, not just calendar view
                 if (currentView === 'list') {
