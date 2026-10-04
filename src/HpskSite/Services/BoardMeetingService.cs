@@ -26,6 +26,21 @@ namespace HpskSite.Services
 
         // ---- Meetings -------------------------------------------------------
 
+        /// <summary>
+        /// An active meeting of the same type on the same day, if any. "Skapa möte" is the ONLY way a
+        /// meeting is created, so a second press (slow response, or someone who used the create card to
+        /// "change the date" of a meeting that already exists) silently produced a full copy with its own
+        /// agenda and attendees. The caller asks before creating a second one.
+        /// </summary>
+        public BoardMeeting? FindSameDay(int ownerType, int ownerId, string meetingType, DateTime meetingDate)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.FirstOrDefault<BoardMeeting>(
+                "SELECT * FROM BoardMeetings WHERE OwnerType = @0 AND OwnerId = @1 AND MeetingType = @2 " +
+                "AND IsActive = 1 AND CAST(MeetingDate AS date) = @3 ORDER BY Id",
+                ownerType, ownerId, meetingType, meetingDate.Date);
+        }
+
         /// <summary>Create a meeting, seeding agenda from the type template and attendees from the board roster.</summary>
         public BoardMeeting CreateMeeting(int ownerType, int ownerId, string meetingType, string title,
             DateTime meetingDate, string? location, int createdByMemberId)
