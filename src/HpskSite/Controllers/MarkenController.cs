@@ -1709,6 +1709,37 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// Mark a badge as handed out from the club's OWN stock (fas A5) — or undo it. The badge stays
+        /// valid; it only leaves the order list to the förbund. Same authority as awarding a badge.
+        /// POST /umbraco/surface/Marken/SetBadgeHandedOutFromStock { id, handedOut: "1" | "0" }
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetBadgeHandedOutFromStock([FromBody] StockHandoutRequest request)
+        {
+            var badge = await _ledger.GetBadgeAsync(request?.Id ?? 0);
+            if (badge == null) return Json(new { success = false, message = "Märket hittades inte." });
+            if (!await CanSignOffForMemberAsync(badge.MemberId))
+                return Json(new { success = false, message = "Åtkomst nekad." });
+            if (badge.Status == Marken.StatusRejected)
+                return Json(new { success = false, message = "Märket är borttaget och kan inte delas ut." });
+
+            bool handOut = request!.HandedOut is "1" or "true" or "on";
+            badge.HandedOutFromStockAt = handOut ? DateTime.Now : null;
+            badge.HandedOutByMemberId = handOut ? await GetCurrentMemberIdAsync() : null;
+            badge.UpdatedAt = DateTime.Now;
+            await _ledger.UpdateBadgeAsync(badge);
+            return Json(new
+            {
+                success = true,
+                handedOutFromStockAt = badge.HandedOutFromStockAt,
+                message = handOut
+                    ? "Markerat som utdelat ur klubbens lager. Märket beställs inte från förbundet."
+                    : "Markeringen borttagen. Märket kommer med på beställningslistan igen."
+            });
+        }
+
+        /// <summary>
         /// Remove ALL of a member's badges + årtalsmärke qualifications for one family — for clearing
         /// an erroneously/leniently auto-awarded family märke (e.g. Elit). Note: derived families
         /// (competition / series-proof) re-materialize on next read if the underlying evidence still
@@ -2096,7 +2127,8 @@ namespace HpskSite.Controllers
                     statusDisplay = Marken.StatusDisplay(b.Status),
                     source = b.Source,
                     sourceDisplay = Marken.SourceDisplay(b.Source),
-                    isGuld = b.Level == Marken.LevelGuld
+                    isGuld = b.Level == Marken.LevelGuld,
+                    handedOutFromStockAt = b.HandedOutFromStockAt
                 }),
                 artalsmarke = new
                 {
@@ -3297,6 +3329,8 @@ namespace HpskSite.Controllers
         // ── Request DTOs ──────────────────────────────────────────────
         public class YearRequest { public int Year { get; set; } }
         public class IdRequest { public int Id { get; set; } }
+        // HandedOut is a STRING: ASP.NET Core's bool binding rejects "1"/"0" and silently falls back to false.
+        public class StockHandoutRequest { public int Id { get; set; } public string? HandedOut { get; set; } }
         public class AwardBadgeRequest { public int MemberId { get; set; } public string Level { get; set; } = ""; public int Year { get; set; } public string? UniqueNumber { get; set; } public string? Note { get; set; } }
         public class AwardFamilyBadgeRequest { public int MemberId { get; set; } public string Family { get; set; } = ""; public string Level { get; set; } = ""; public int Year { get; set; } public string? Note { get; set; } }
         public class UniqueNumberRequest { public int BadgeId { get; set; } public string? UniqueNumber { get; set; } public int? Year { get; set; } }

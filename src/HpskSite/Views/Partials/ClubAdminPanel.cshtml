@@ -2661,6 +2661,7 @@ function openMarkenMemberPicker() {
 function renderMemberMarkenDetail(data) {
     const body = document.getElementById('memberMarkenDetailBody');
     const d = data.detail || {};
+    window._markenDetailName = d.memberName || '';
     const canSign = !!data.canSignOff;
     const memberId = d.memberId;
     const name = d.memberName || '';
@@ -2679,7 +2680,13 @@ function renderMemberMarkenDetail(data) {
         let right;
         if (held) {
             const yr = held.achievedYear ? ` <span class="text-muted small">(${held.achievedYear})</span>` : '';
-            const src = held.source === 'Skyttetrappan' ? ' <span class="badge bg-info-subtle text-info border border-info-subtle">Skyttetrappan</span>' : '';
+            const src = held.source === 'Skyttetrappan' ? ' <span class="badge bg-info-subtle text-info border border-info-subtle">Skyttetrappan</span>'
+                      : held.source === 'Serier' ? ' <span class="badge bg-info-subtle text-info border border-info-subtle" title="Räknat fram ur godkända serier">Ur serier</span>' : '';
+            // Utdelat ur klubbens eget lager (fas A5): giltigt, men inget att beställa från förbundet.
+            const stock = level === 'Guld' ? '' : held.handedOutFromStockAt
+                ? ` <span class="badge bg-secondary-subtle text-secondary-emphasis border">Utdelat ${String(held.handedOutFromStockAt).substring(0, 10)} ur lager</span>`
+                  + (canSign ? ` <button class="btn btn-link btn-sm p-0 ms-1" onclick="setMarkenStockHandout(${held.id}, ${memberId}, 0)">Ångra</button>` : '')
+                : (canSign ? ` <button class="btn btn-sm btn-outline-secondary ms-1" title="Märket lämnades ut ur klubbens eget lager — det tas bort från beställningslistan men är fortfarande giltigt" onclick="setMarkenStockHandout(${held.id}, ${memberId}, 1)">Utdelat ur lager</button>` : '');
             if (level === 'Guld') {
                 const num = held.uniqueNumber ? escapeMedalAttr(held.uniqueNumber) : '';
                 right = `<span class="text-success me-2"><i class="bi bi-check-circle-fill"></i> Tilldelat${src}</span>
@@ -2697,9 +2704,9 @@ function renderMemberMarkenDetail(data) {
                       <span class="input-group-text">År</span>
                       <input type="number" class="form-control" id="badgeYear_${held.id}" value="${held.achievedYear || ''}" style="width:88px;" placeholder="ÅÅÅÅ" title="Året märket erövrades">
                       <button class="btn btn-outline-secondary" onclick="setMarkenBadgeYear(${held.id}, ${memberId}, '${escapeMedalAttr(name)}')">Spara</button>
-                    </span>`;
+                    </span>${stock}`;
             } else {
-                right = `<span class="text-success"><i class="bi bi-check-circle-fill"></i> Tilldelat${yr}${src}</span>`;
+                right = `<span class="text-success"><i class="bi bi-check-circle-fill"></i> Tilldelat${yr}${src}</span>${stock}`;
             }
         } else if (canSign) {
             right = `<button class="btn btn-sm btn-outline-warning" onclick="awardMarkenBadge(${memberId}, '${level}', '${escapeMedalAttr(name)}')">Tilldela ${level.toLowerCase()}</button>`;
@@ -3045,6 +3052,22 @@ function setMarkenBadgeYear(badgeId, memberId, name) {
         loadClubMarken();
     })
     .catch(() => alert('Kunde inte spara året.'));
+}
+
+// Utdelat ur klubbens lager (fas A5). Bara id:n i onclick — namnet läses ur detaljvyn.
+function setMarkenStockHandout(badgeId, memberId, handedOut) {
+    fetch('/umbraco/surface/Marken/SetBadgeHandedOutFromStock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': getAntiForgeryToken() },
+        body: JSON.stringify({ id: badgeId, handedOut: handedOut ? '1' : '0' })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (!res.success) { alert('Fel: ' + (res.message || 'Kunde inte spara.')); return; }
+        openMemberMarkenDetail(memberId, window._markenDetailName || '');
+        loadClubMarken();
+    })
+    .catch(() => alert('Kunde inte spara.'));
 }
 
 function setMastarYear(memberId, year, qualified) {
