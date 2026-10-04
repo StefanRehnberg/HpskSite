@@ -152,9 +152,13 @@
                 : 'Startlistan har inga skyttar än.';
             if (exp > 0) fact += bar(ent, exp);
             if (team > 0) {
-                actions = '<a class="btn btn-primary" href="/station?c=' + compId + '&s=' + team + '"><i class="bi bi-pencil-square me-1"></i>Mata in resultat</a>';
+                // ⚠️ Ny flik, som varje annan ingång till inmatningen på sajten (Funktionärer,
+                // Resultat, Fältskytte, Springskytte). Inmatningen har ingen väg tillbaka — den är
+                // byggd för att öppnas i en egen flik. Omgång 5 öppnade här i samma flik på en egen
+                // tolkning; Stefan 2026-10-04: ny flik som allt annat.
+                actions = '<a class="btn btn-primary" href="/station?c=' + compId + '&s=' + team + '" target="_blank" rel="noopener"><i class="bi bi-pencil-square me-1"></i>Mata in resultat</a>';
                 if (s.hasSkjutledareView)
-                    actions += '<a class="btn btn-outline-secondary" href="/skjutledare?c=' + compId + '&l=' + team + '"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>';
+                    actions += '<a class="btn btn-outline-secondary" href="/skjutledare?c=' + compId + '&l=' + team + '" target="_blank" rel="noopener"><i class="bi bi-megaphone me-1"></i>Skjutledarvy</a>';
                 if (s.teamCount > 1) extra = '<div class="ns-note">Öppnar skjutlag ' + team + ', det första med serier kvar. Andra skjutlag finns under Funktionärer.</div>';
             } else {
                 actions = '<button type="button" class="btn btn-primary" data-ns="goto-funktionarer">Öppna Funktionärer</button>';
@@ -225,8 +229,8 @@
                 return;
             }
             actions = open.length > 1
-                ? open.map(x => '<a class="btn btn-primary" href="' + finalLink(x) + '"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat, ' + esc(groupLabelLower(x.group)) + '</a>').join('')
-                : '<a class="btn btn-primary" href="' + finalLink(g) + '"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat</a>';
+                ? open.map(x => '<a class="btn btn-primary" href="' + finalLink(x) + '" target="_blank" rel="noopener"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat, ' + esc(groupLabelLower(x.group)) + '</a>').join('')
+                : '<a class="btn btn-primary" href="' + finalLink(g) + '" target="_blank" rel="noopener"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat</a>';
             if (gs.some(x => !x.finalsPublished))
                 extra = '<div class="ns-note"><i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad, så skyttarna ser den inte. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ns="publish-finals" data-groups="' + unpubFinalGroups() + '">Publicera den</button></div>';
         } else if (p === 'ShootOff') {
