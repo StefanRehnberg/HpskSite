@@ -62,65 +62,42 @@
         .fn-class-table td::before { content: attr(data-label); font-size: .8rem; color: var(--bs-secondary-color); text-align: left; }
         .table-responsive:has(> .fn-class-table) { overflow-x: visible; }
     }
-    .fn-group-card { border-left: 3px solid var(--bs-warning); }
-    .fn-group-card.fn-missing { border-left-color: var(--bs-border-color); }
-    .fn-group-card.fn-published { border-left-color: var(--bs-success); }
+    /* Själva finalstartlistan (2026-10-04). */
+    .fn-team-h { font-weight: 600; font-size: .9rem; padding: .6rem .75rem .25rem; }
+    .fn-list th { font-size: .75rem; color: var(--bs-secondary-color); font-weight: 600; }
+    .fn-list td, .fn-list th { padding-left: .75rem; padding-right: .75rem; }
+    .fn-list td { font-variant-numeric: tabular-nums; }
+    .fn-list td.fn-pos { width: 3.5rem; color: var(--bs-secondary-color); }
+    .fn-group-card .card-header h6 { font-size: 1rem; }
+    /* Telefon: varje skytt två rader — namn + klass, klubb + kvalresultat. */
+    @@media (max-width: 575.98px) {
+        .fn-list thead { display: none; }
+        .fn-list tr { display: grid; grid-template-columns: 2rem 1fr auto; gap: 0 .5rem; padding: .4rem .75rem; border-bottom: 1px solid var(--bs-border-color); }
+        .fn-list td { border: 0; padding: 0; }
+        .fn-list td.fn-pos { grid-row: 1 / 3; width: auto; }
+        .fn-list td.fn-club { grid-column: 2; color: var(--bs-secondary-color); font-size: .85rem; }
+        .fn-list td.fn-cls { grid-column: 3; grid-row: 1; text-align: right; }
+        .fn-list td.fn-kval { grid-column: 3; grid-row: 2; color: var(--bs-secondary-color); font-size: .85rem; }
+    }
 </style>
 
-<div class="competition-finals-start-list-management mt-4" data-competition-id="@competitionId">
-
-    <div class="card">
+<div class="competition-finals-start-list-management" data-competition-id="@competitionId">
         @*
-            ⚠️ Rubriken står ALLTID kvar, även ihopfälld. En datorovan arrangör ska aldrig få
-            något att försvinna — sortera, göm inte. Ihopfällt visas en sammanfattning per
-            vapengrupp i rubrikraden, så det går att se läget utan att fälla ut.
+            ⚠️ OMGJORD 2026-10-04 (Stefan, efter Sune-genomgången på KM 10352). Sidan beskrev
+            finalen — 8 finalister, 1 skjutlag, en klasstabell, fem infotexter, nio kontroller i
+            fem stilar — men visade aldrig själva startlistan. Nu är LISTAN innehållet: skjutlag,
+            tid, plats, namn, klubb, klass och kvalresultat. Per vapengrupp EN rubrikrad med
+            tillståndet, EN färgad knapp (Publicera, försvinner när listan är publicerad) och allt
+            annat i Åtgärder. Klasstabellen bor i dialogen "Klasser i finalen…", hjälptexten i
+            "Hur fungerar finalen?". Grundomgången och finalen visas en i taget (växeln i
+            CompetitionManagement), så två publiceringsbrickor står aldrig intill varandra.
+            Skiss: https://claude.ai/artifact/RyQoFwTNzAyae2WAvkEpF2
         *@
-        <div class="card-header">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <h5 class="mb-0">
-                    <i class="bi bi-trophy me-2 text-warning"></i>Startlistor – final
-                </h5>
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <span id="fnHeaderSummary" class="small"></span>
-                    <button class="btn btn-sm btn-outline-secondary" type="button"
-                            data-bs-toggle="collapse" data-bs-target="#fnSectionBody"
-                            aria-expanded="true" aria-controls="fnSectionBody">
-                        <i class="bi bi-chevron-expand me-1"></i>Visa/dölj
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <div class="collapse show" id="fnSectionBody">
-            <div class="card-body">
-
-                @* ⚠️ Var en grå ruta på 79 ord ÖVERST i kortet, om C:s final på lördagen och Dam/Vet/Jun
-                   C — även på ett kretsmästerskap i vapengrupp B där inget av det gäller (Sune-
-                   genomgången 2026-10-03). Nu hopfälld, och styckena visas bara när de gäller
-                   (fler än en vapengrupp / vapengrupp C finns) — styrs av renderGroups(). *@
-                <details class="small mb-3" id="fnHowItWorks">
-                    <summary class="text-muted"><i class="bi bi-info-circle me-1"></i>Hur fungerar finalen?</summary>
-                    <div class="mt-2">
-                        Finalstartlistan bestämmer i vilken ordning skyttarna står när finalserierna
-                        (F1 och framåt) matas in. Den syns för skyttarna först när du publicerar den.
-                        <span class="d-block mt-1 d-none" id="fnHowManyGroups">
-                            Varje vapengrupp får en egen lista som publiceras för sig — C:s final kan
-                            vara publicerad medan A:s ännu är ett utkast.
-                        </span>
-                        <span class="d-block mt-1 d-none" id="fnHowGroupC">
-                            I vapengrupp C har varje mästerskapsklass egna finalister: Dam C, Veteran C
-                            och Junior C tävlar om egna medaljer. Klasserna 1, 2 och 3 delar medalj.
-                        </span>
-                    </div>
-                </details>
-
-                @* Kvitto på senaste åtgärden. ⚠️ INTE en alert(): en modal dialogruta
-                   blockerar hela sidan (och varje automatiserad kontroll) tills någon
-                   klickar OK, och den försvinner utan spår. Notisen står kvar tills nästa
-                   åtgärd, så texten "listan var publicerad och uppdaterades direkt på den
-                   publika sidan" går att läsa i efterhand. Fel visas fortfarande som
-                   alert — ett fel MÅSTE bekräftas. *@
-                <div id="fnNotice" class="alert alert-success alert-dismissible fade show d-none" role="status">
+        <div>
+                @* Kvitto bara när det säger något man annars inte ser: att en PUBLICERAD lista
+                   ändrades direkt på den publika sidan. Ett "klart!" efter varje åtgärd var brus —
+                   den ombyggda listan syns ju. *@
+                <div id="fnNotice" class="alert alert-warning alert-dismissible fade show d-none" role="status">
                     <span id="fnNoticeText"></span>
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Stäng"></button>
                 </div>
@@ -154,7 +131,44 @@
                         </button>
                     </div>
                 </div>
+        </div>
 
+    <!-- Klasser i finalen — klasstabellen, flyttad ur kortet (2026-10-04). Den behövs bara när
+         en klass ska läggas till eller tas bort ur finalen. -->
+    <div class="modal fade" id="fnClassesModal" tabindex="-1" aria-labelledby="fnClassesTitle" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="fnClassesTitle">Klasser i finalen</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body" id="fnClassesBody"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="fnHelpModal" tabindex="-1" aria-labelledby="fnHelpTitle" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="fnHelpTitle">Hur fungerar finalen?</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Finalstartlistan bestämmer i vilken ordning skyttarna står när finalserierna
+                    (F1 och framåt) matas in. Skyttarna ser den först när du publicerar den.</p>
+                    <p class="d-none" id="fnHowManyGroups">Varje vapengrupp får en egen lista som publiceras
+                    för sig. C:s final kan vara publicerad medan A:s ännu är preliminär.</p>
+                    <p class="d-none mb-0" id="fnHowGroupC">I vapengrupp C har varje mästerskapsklass egna
+                    finalister: Dam C, Veteran C och Junior C tävlar om egna medaljer. Klasserna 1, 2 och 3
+                    delar medalj.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+                </div>
             </div>
         </div>
     </div>
@@ -360,12 +374,16 @@
 
     // Kvitto på skärmen i stället för en blockerande alert(). Anropas efter refreshAll(),
     // eftersom omritningen inte rör notisen.
+    // Visar BARA serverns tillägg om en publicerad eller övertagen lista (FinalsPersistNote) —
+    // det är det enda i svaret man inte ser på den ombyggda listan.
     function notice(text) {
-        if (!text) return;
         const box = document.getElementById('fnNotice');
         const span = document.getElementById('fnNoticeText');
         if (!box || !span) return;
-        span.textContent = text;
+        const parts = String(text || '').split(/(?<=\.)\s+/)
+            .filter(s => /publicerad och uppdaterades|tidigare finalstartlistan/.test(s));
+        if (!parts.length) { box.classList.add('d-none'); return; }
+        span.textContent = parts.join(' ');
         box.classList.remove('d-none');
     }
 
@@ -458,9 +476,9 @@
             };
             finalsLists = (finals && (finals.Lists || finals.lists)) || [];
             lastLoadedAt = Date.now();
-            // Grundomgångens kort fälls ihop först när en finalstartlista finns — korten laddas
-            // i valfri ordning, så det här kortet säger till när det vet.
-            if (typeof window.maybeCollapseQualifyingOnce === 'function') window.maybeCollapseQualifyingOnce();
+            // Växeln Grundomgång | Final står på Final så snart en finallista finns.
+            if (typeof window.hpskStartListPaneDefault === 'function')
+                window.hpskStartListPaneDefault(finalsLists.length > 0 ? 'final' : 'qual');
 
             const checked = document.getElementById('fnCheckedAt');
             if (checked) checked.textContent = 'Senast kontrollerat ' + new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) + '.';
@@ -468,6 +486,9 @@
             // Rita inte om under händerna på någon som har en meny öppen.
             if (root.querySelector('#fnGroups .dropdown-menu.show')) return;
             renderGroups();
+            // Klassdialogen står öppen medan en klass läggs till eller tas bort — rita om den också.
+            if (classesDialogGroup != null && document.getElementById('fnClassesModal')?.classList.contains('show'))
+                renderClassesDialog(classesDialogGroup);
         })();
         try { await refreshing; } finally { refreshing = null; }
     }
@@ -513,23 +534,9 @@
         return hpskStatePill(!!isOfficial, 'Finalstartlistan');
     }
 
-    function renderHeaderSummary(groups) {
-        const parts = groups.map(g => {
-            const L = listForGroup(g);
-            const label = g || 'hela tävlingen';
-            if (!L) return `<span class="badge bg-secondary-subtle text-secondary-emphasis">${esc(label)}: ingen lista</span>`;
-            const isOfficial = L.isOfficial || L.IsOfficial;
-            const cls = isOfficial ? 'bg-success-subtle text-success-emphasis' : 'bg-warning-subtle text-warning-emphasis';
-            const word = isOfficial ? 'publicerad' : 'preliminär';
-            return `<span class="badge ${cls}">${esc(label)}: ${word}</span>`;
-        });
-        document.getElementById('fnHeaderSummary').innerHTML = parts.join(' ');
-    }
-
     function renderGroups() {
         const host = document.getElementById('fnGroups');
         const groups = groupOrder();
-        renderHeaderSummary(groups);
 
         document.getElementById('fnNoGroups').classList.toggle('d-none', groups.length > 0);
         // "Hur fungerar finalen?" — styckena om flera vapengrupper och om C-klasserna bara när de gäller.
@@ -550,41 +557,83 @@
     function renderGroupCard(group) {
         const L = listForGroup(group);
         const classes = classesForGroup(group);
-        const label = group ? `Vapengrupp ${group}` : 'Hela tävlingen (äldre lista)';
-        const cardCls = !L ? 'fn-missing' : ((L.isOfficial || L.IsOfficial) ? 'fn-published' : '');
+        const label = group ? `Final – vapengrupp ${group}` : 'Final – hela tävlingen (äldre lista)';
 
-        const finalists = L ? (L.totalFinalists || L.TotalFinalists || 0) : 0;
-        const teamCount = L ? (L.teamCount || L.TeamCount || 0) : 0;
-        const finalsDate = L ? (L.finalsDate || L.FinalsDate || '') : '';
-        const firstStart = L ? (L.firstStartTime || L.FirstStartTime || '') : '';
-        const fmt = L ? (L.teamFormat || L.TeamFormat || '') : '';
-        const fmtLabel = fmt === 'Final' ? 'samma ordning som kvalet' : 'rangordnad efter kvalresultat';
-        const inList = L ? classesInList(L) : new Set();
-
-        let body;
         if (!L) {
-            body = renderCreateBlock(group, classes);
-        } else {
-            body = `
-                <div class="d-flex flex-wrap gap-3 small text-muted mb-3">
-                    <span><i class="bi bi-people me-1"></i>${finalists} finalister</span>
-                    <span><i class="bi bi-grid me-1"></i>${teamCount} skjutlag</span>
-                    ${finalsDate ? `<span><i class="bi bi-calendar-event me-1"></i>${esc(finalsDate)}</span>` : ''}
-                    ${firstStart ? `<span><i class="bi bi-clock me-1"></i>första start ${esc(firstStart)}</span>` : ''}
-                    <span><i class="bi bi-sort-numeric-down me-1"></i>${esc(fmtLabel)}</span>
-                </div>
-                ${renderClassTable(group, classes, inList)}
-                ${renderGroupActions(group, L)}`;
+            return `
+                <div class="card fn-group-card">
+                    <div class="card-header d-flex align-items-center flex-wrap gap-2 py-2">
+                        <h6 class="mb-0 me-auto">${esc(label)}</h6>
+                        ${statusBadge(L)}
+                    </div>
+                    <div class="card-body">${renderCreateBlock(group, classes)}</div>
+                </div>`;
         }
 
+        const finalists = L.totalFinalists || L.TotalFinalists || 0;
+        // Resultaten ändrades efter att en klass låstes — det enda i klasstabellen som kräver
+        // handling medan listan står. Allt annat om klasserna finns i "Klasser i finalen…".
+        const stale = classes.filter(c => c.stale).map(c => c.groupName || c.championshipClass || '');
+        const staleWarn = stale.length
+            ? `<div class="alert alert-warning small py-2 m-2 d-flex flex-wrap gap-2 align-items-center justify-content-between">
+                   <span><i class="bi bi-exclamation-triangle me-1"></i>Kvalresultatet har ändrats efter att
+                   ${esc(stale.join(', '))} låstes. Finalstartlistan bygger på de gamla resultaten.</span>
+                   <button type="button" class="btn btn-link btn-sm p-0" data-fn-action="classes" data-fn-group="${esc(group)}">Klasser i finalen…</button>
+               </div>`
+            : '';
+
         return `
-            <div class="card fn-group-card ${cardCls}">
-                <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
-                    <span class="fw-bold"><i class="bi bi-trophy me-2 text-warning"></i>${esc(label)}</span>
-                    ${statusBadge(L)}
+            <div class="card fn-group-card">
+                <div class="card-header d-flex align-items-center flex-wrap gap-2 py-2">
+                    <h6 class="mb-0 me-auto">${esc(label)} <span class="text-muted fw-normal small">· ${finalists} ${finalists === 1 ? 'skytt' : 'skyttar'}</span></h6>
+                    ${renderGroupActions(group, L)}
                 </div>
-                <div class="card-body">${body}</div>
+                ${staleWarn}
+                ${renderListTable(L)}
             </div>`;
+    }
+
+    // SJÄLVA STARTLISTAN — det enda Sune behöver se (2026-10-04). Ritas ur listans skjutlag,
+    // samma data som den publika sidan läser. Kvalresultat-kolumnen bara när någon skytt bär ett
+    // (en kopierad kvalordning gör det inte).
+    function renderListTable(L) {
+        const sl = L && (L.startList || L.StartList);
+        const teams = ((sl && (sl.Teams || sl.teams)) || []).slice()
+            .sort((a, b) => (a.TeamNumber || a.teamNumber || 0) - (b.TeamNumber || b.teamNumber || 0));
+        if (!teams.length) return '<p class="text-muted small m-3">Listan har inga skjutlag.</p>';
+        const showKval = teams.some(t => (t.Shooters || t.shooters || []).some(s => (s.QualificationScore ?? s.qualificationScore) != null));
+        const className = c => (typeof window.getShootingClassName === 'function' ? window.getShootingClassName(c || '') : (c || ''));
+
+        return teams.map(t => {
+            const num = t.TeamNumber || t.teamNumber || 0;
+            const date = t.Date || t.date || '';
+            const time = t.StartTime || t.startTime || '';
+            // Etiketten skrivs bara ut när den säger något nytt — en finallista märker ofta
+            // skjutlaget med vapengruppen, som redan står i rubriken.
+            let tlabel = t.Label || t.label || '';
+            if (L && tlabel.trim() === String(L.weaponGroup || L.WeaponGroup || '').trim()) tlabel = '';
+            const shooters = (t.Shooters || t.shooters || []).slice()
+                .sort((a, b) => (a.Position || a.position || 0) - (b.Position || b.position || 0));
+            const rows = shooters.map(s => {
+                const score = s.QualificationScore ?? s.qualificationScore;
+                return `<tr>
+                    <td class="fn-pos">${s.Position || s.position || ''}</td>
+                    <td class="fn-name">${esc(s.Name || s.name || '')}</td>
+                    <td class="fn-club">${esc(s.Club || s.club || '')}</td>
+                    <td class="fn-cls">${esc(className(s.WeaponClass || s.weaponClass))}</td>
+                    ${showKval ? `<td class="fn-kval text-end">${score != null ? score : ''}</td>` : ''}
+                </tr>`;
+            }).join('');
+            return `
+                <div class="fn-team">
+                    <div class="fn-team-h">Skjutlag ${num}
+                        <span class="text-muted fw-normal">${esc([date, time].filter(Boolean).join(' · '))}${tlabel ? ' · ' + esc(tlabel) : ''}</span></div>
+                    <table class="table table-sm mb-0 fn-list">
+                        <thead><tr><th>Plats</th><th>Namn</th><th>Klubb</th><th>Klass</th>${showKval ? '<th class="text-end">Kvalresultat</th>' : ''}</tr></thead>
+                        <tbody>${rows || `<tr><td colspan="5" class="text-muted small">Inga skyttar</td></tr>`}</tbody>
+                    </table>
+                </div>`;
+        }).join('');
     }
 
     // ⚠️ Varje val säger FÖLJDEN för just de här skyttarna (Sune-genomgången 2026-10-03).
@@ -633,7 +682,7 @@
             </p>
             <div class="row g-2">
                 <div class="col-md-4">
-                    <button class="btn btn-outline-success btn-sm w-100 h-100 text-start"
+                    <button class="btn btn-outline-primary btn-sm w-100 h-100 text-start"
                             data-fn-action="clone" data-fn-group="${esc(group)}">
                         <i class="bi bi-arrow-right-circle me-1"></i><strong>Fortsätt i samma ordning</strong>
                         <span class="d-block small">Alla går vidare och står kvar på sina platser från grundomgången.</span>
@@ -647,7 +696,7 @@
                     </button>
                 </div>
                 <div class="col-md-4">
-                    <button class="btn btn-outline-warning btn-sm w-100 h-100 text-start"
+                    <button class="btn btn-outline-primary btn-sm w-100 h-100 text-start"
                             data-fn-action="wizard" data-fn-group="${esc(group)}">
                         <i class="bi bi-trophy me-1"></i><strong>Mästerskapsfinal (SHB)</strong>
                         <span class="d-block small">${shbTxt} Lika poäng med den siste går också vidare.</span>
@@ -674,7 +723,7 @@
                     ${withRes.length} ${withRes.length === 1 ? 'klass' : 'klasser'} i vapengruppen
                     ingår</strong> — ingen gallring är gjord.
                     Vill du gallra till de bästa per mästerskapsklass: välj
-                    <strong>Mästerskapsfinal</strong> i Åtgärder nedan.
+                    <strong>Mästerskapsfinal</strong> under Bygg om listan i Åtgärder.
                 </div>
                 <div class="table-responsive mb-3">
                     <table class="table table-sm align-middle mb-0">
@@ -741,47 +790,72 @@
             </div>`;
     }
 
+    // ⚠️ EN färgad knapp — Publicera — och den försvinner när listan är publicerad. Allt annat i
+    // Åtgärder: synligt = steget du står på, menyn = allt annat. Avpublicera sist och i rött.
     function renderGroupActions(group, L) {
-        const id = L.finalsStartListId || L.FinalsStartListId;
         const isOfficial = L.isOfficial || L.IsOfficial;
+        const g = esc(group);
         return `
-            <div class="d-flex justify-content-end flex-wrap gap-2">
-                ${isOfficial
-                    ? `<button class="btn btn-outline-secondary btn-sm" data-fn-action="unpublish" data-fn-group="${esc(group)}">
-                         <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera</button>`
-                    : `<button class="btn btn-success btn-sm" data-fn-action="publish" data-fn-group="${esc(group)}">
-                         <i class="bi bi-check-circle me-1"></i>Publicera</button>`}
-                @* ⚠️ BARA PUBLICERINGSVERBET STÅR SYNLIGT — samma regel som på Resultatfliken:
-                   synlig = steget du står på, menyn = allt annat. På en finalstartlista är
-                   steget att publicera; Redigera är en tillfällig rättelse och Öppna en
-                   förhandsvisning. Fyra knappar i fyra färgvarianter (success, outline-info,
-                   outline-primary, outline-secondary) på samma rad var dessutom en del av
-                   "olika design överallt". Rapporterat 2026-09-08. *@
+            <div class="d-flex align-items-center flex-wrap gap-2">
+                ${statusBadge(L)}
+                ${isOfficial ? '' : `<button type="button" class="btn btn-primary btn-sm" data-fn-action="publish" data-fn-group="${g}">Publicera</button>`}
                 <div class="dropdown">
                     <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
                             data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false">
                         <i class="bi bi-sliders me-1"></i>Åtgärder
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end">
-                        <li><button class="dropdown-item" data-fn-action="edit" data-fn-group="${esc(group)}">
+                        <li><h6 class="dropdown-header">Listan</h6></li>
+                        <li><button class="dropdown-item" type="button" data-fn-action="edit" data-fn-group="${g}">
                             <i class="bi bi-pencil-square me-2"></i>Redigera listan</button></li>
-                        <li><button class="dropdown-item" data-fn-action="open" data-fn-group="${esc(group)}">
-                            <i class="bi bi-box-arrow-up-right me-2"></i>Öppna listan</button></li>
+                        <li><button class="dropdown-item" type="button" data-fn-action="open" data-fn-group="${g}">
+                            <i class="bi bi-box-arrow-up-right me-2"></i>Öppna och skriv ut</button></li>
+                        <li><button class="dropdown-item" type="button" data-fn-action="classes" data-fn-group="${g}">
+                            <i class="bi bi-list-check me-2"></i>Klasser i finalen…</button></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><h6 class="dropdown-header">Bygg om listan</h6></li>
-                        <li><button class="dropdown-item" data-fn-action="wizard" data-fn-group="${esc(group)}">
-                            <i class="bi bi-trophy me-2"></i>Mästerskapsfinal (gallring per klass)</button></li>
-                        <li><button class="dropdown-item" data-fn-action="clone" data-fn-group="${esc(group)}">
-                            <i class="bi bi-arrow-right-circle me-2"></i>Fortsätt i samma ordning</button></li>
-                        <li><button class="dropdown-item" data-fn-action="rerank" data-fn-group="${esc(group)}">
-                            <i class="bi bi-sort-numeric-down me-2"></i>Placera om efter resultat</button></li>
+                        <li><button class="dropdown-item" type="button" data-fn-action="rerank" data-fn-group="${g}">
+                            <i class="bi bi-sort-numeric-down me-2"></i>Placera om efter kvalresultat</button></li>
+                        <li><button class="dropdown-item" type="button" data-fn-action="clone" data-fn-group="${g}">
+                            <i class="bi bi-arrow-right-circle me-2"></i>Samma ordning som grundomgången</button></li>
+                        <li><button class="dropdown-item" type="button" data-fn-action="wizard" data-fn-group="${g}">
+                            <i class="bi bi-trophy me-2"></i>Mästerskapsfinal (välj klasser och gräns)</button></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><button class="dropdown-item" type="button" data-fn-action="help" data-fn-group="${g}">
+                            <i class="bi bi-question-circle me-2"></i>Hur fungerar finalen?</button></li>
+                        ${isOfficial ? `<li><hr class="dropdown-divider"></li>
+                        <li><button class="dropdown-item text-danger" type="button" data-fn-action="unpublish" data-fn-group="${g}">
+                            <i class="bi bi-arrow-counterclockwise me-2"></i>Avpublicera</button></li>` : ''}
                     </ul>
                 </div>
-            </div>
-            <div class="form-text mt-2">
-                Listans id: ${id}. Publiceringen gäller bara vapengrupp ${esc(group || '—')}; andra
-                gruppers listor påverkas inte.
             </div>`;
+    }
+
+    // Klasser i finalen — samma tabell som förut, i en dialog.
+    let classesDialogGroup = null;
+    function renderClassesDialog(group) {
+        const L = listForGroup(group);
+        const body = document.getElementById('fnClassesBody');
+        document.getElementById('fnClassesTitle').textContent = `Klasser i finalen – vapengrupp ${group || '—'}`;
+        body.innerHTML = `<p class="small text-muted">Lägger du till eller tar bort en klass byggs
+            finalstartlistan för vapengrupp ${esc(group || '—')} om. Andra vapengrupper påverkas inte.</p>`
+            + renderClassTable(group, classesForGroup(group), L ? classesInList(L) : new Set());
+        body.querySelectorAll('[data-fn-action]').forEach(b => b.addEventListener('click', onGroupAction));
+    }
+    // Stänger klassdialogen och väntar tills den är borta. Svarar om den stod öppen.
+    function hideClassesDialog() {
+        const el = document.getElementById('fnClassesModal');
+        if (!el || !el.classList.contains('show')) return Promise.resolve(false);
+        return new Promise(resolve => {
+            el.addEventListener('hidden.bs.modal', () => resolve(true), { once: true });
+            bootstrap.Modal.getOrCreateInstance(el).hide();
+            setTimeout(() => resolve(true), 1000); // reserv om händelsen uteblir
+        });
+    }
+    function openClassesDialog(group) {
+        classesDialogGroup = group;
+        renderClassesDialog(group);
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('fnClassesModal')).show();
     }
 
     // ---- åtgärder ----
@@ -795,6 +869,12 @@
         const clsName = cls ? (cls.groupName || cls.championshipClass || '') : '';
 
         switch (action) {
+            case 'classes':
+                openClassesDialog(group);
+                return;
+            case 'help':
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('fnHelpModal')).show();
+                return;
             case 'clone':
             case 'rerank':
                 await generateSimple(group, action);
@@ -815,14 +895,17 @@
                 openInNewTab(group);
                 break;
             case 'add':
-                await addClassToFinal(group, clsName);
-                break;
             case 'relock':
-                await addClassToFinal(group, clsName, true);
+            case 'remove': {
+                // ⚠️ Klassdialogen stängs medan bekräftelsen visas — två Bootstrap-dialoger på
+                // varandra lägger frågan BAKOM klassdialogen, där den inte går att klicka.
+                // Dialogen öppnas igen efteråt, med den ombyggda listans läge.
+                const reopen = await hideClassesDialog();
+                if (action === 'remove') await removeClassFromFinal(group, clsName);
+                else await addClassToFinal(group, clsName, action === 'relock');
+                if (reopen) openClassesDialog(group);
                 break;
-            case 'remove':
-                await removeClassFromFinal(group, clsName);
-                break;
+            }
         }
         // "Nästa steg"-kortet läser om sig efter varje ändring av finalen.
         document.dispatchEvent(new CustomEvent('hpsk:competition-state-changed'));
@@ -1287,16 +1370,37 @@
     window.hpskFinalsChoiceInfo = choiceInfo;
     window.hpskFinalsListCount = () => (finalsLists || []).length;
     window.hpskFinalsAction = function (action, group) {
+        if (typeof window.hpskShowStartListPane === 'function') window.hpskShowStartListPane('final');
         return onGroupAction({ currentTarget: { dataset: { fnAction: action, fnGroup: group || '' } } });
     };
 
-    // Fäller UT finalsektionen och rullar dit. Att bara rulla hade landat på en ihopfälld
-    // rubrik, vilket läser som att sektionen är tom.
-    window.hpskGoToFinalsSection = function () {
-        const body = document.getElementById('fnSectionBody');
-        if (body && typeof bootstrap !== 'undefined') {
-            bootstrap.Collapse.getOrCreateInstance(body, { toggle: false }).show();
+    // "Nästa steg"-kortets Publicera / Publicera alla (N). ⚠️ Publiceringen gäller EN vapengrupps
+    // lista; med flera opublicerade frågar vi EN gång och publicerar var och en. Ett fel stoppar
+    // inte de andra men sägs.
+    window.hpskFinalsPublish = async function (groups) {
+        if (typeof window.hpskShowStartListPane === 'function') window.hpskShowStartListPane('final');
+        const targets = (groups || []).map(g => ({ g, L: listForGroup(g) }))
+            .filter(x => x.L && !(x.L.isOfficial || x.L.IsOfficial));
+        if (!targets.length) return;
+        const names = targets.map(x => x.g ? `vapengrupp ${x.g}` : 'hela tävlingen');
+        const many = targets.length > 1;
+        if (!(await askDlg(many ? `Publicera ${targets.length} finalstartlistor` : `Publicera finalstartlistan (${names[0]})`,
+            (many ? `Listorna för ${names.join(', ')} publiceras. ` : '') + 'När finalstartlistan är publicerad ser skyttarna den på tävlingssidan.',
+            many ? `Publicera alla (${targets.length})` : 'Publicera'))) return;
+        const failed = [];
+        for (const x of targets) {
+            const d = await jpost('/umbraco/surface/PrecisionStartList/PublishFinalsStartList',
+                { FinalsStartListId: x.L.finalsStartListId || x.L.FinalsStartListId, IsPublished: true });
+            if (!(d.success ?? d.Success)) failed.push(`${x.g || '—'}: ${msg(d) || 'okänt fel'}`);
         }
+        await refreshAll();
+        document.dispatchEvent(new CustomEvent('hpsk:competition-state-changed'));
+        if (failed.length) alert('Kunde inte publicera:\n' + failed.join('\n'));
+    };
+
+    // Växlar till Final och rullar dit.
+    window.hpskGoToFinalsSection = function () {
+        if (typeof window.hpskShowStartListPane === 'function') window.hpskShowStartListPane('final');
         root.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 

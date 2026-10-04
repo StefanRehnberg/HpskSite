@@ -56,6 +56,10 @@ if (!window.hpskLoadStartListCoverage) {
 
         const allPlaced = missing === 0;
         const orphanCount = (cov.onListWithoutRegistration || []).length;
+        // ⚠️ Allt i ordning = ingen panel (Stefan 2026-10-04). Den gröna rutan "Alla anmälda har en
+        // starttid" stod överst på varje besök och krävde ingen handling; en ruta som alltid lyser
+        // slutar läsas, även den gång den är röd.
+        if (allPlaced && orphanCount === 0) { panel.classList.add('d-none'); return; }
         // Before the first list exists everyone is unplaced, which is simply where a new
         // competition starts — a red alarm there would train the organiser to ignore this panel.
         const noListYet = cov.hasAnyStartList === false;

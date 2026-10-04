@@ -294,7 +294,7 @@
         // måste rubriken säga vilken av dem det här kortet är. Utan finalserier vore
         // "grundomgång" ett ord som inte betyder något för arrangören.
         var hasFinalsSeries = (ViewData["NumberOfFinalSeries"] as int? ?? 0) > 0;
-        var qualCardTitle = hasFinalsSeries ? "Startlistor – grundomgång" : "Startlista";
+        var qualCardTitle = hasFinalsSeries ? "Grundomgång" : "Startlista";
     }
 
     @if (!isDirektplacering)
@@ -305,17 +305,11 @@
        grundomgångskortets rubrikrad, där den hör, och i det tomma läget där kortet inte finns.
        Id:t generateStartListBtn är oförändrat — JS återställer sin egen etikett på det. *@
 
-    <!-- Published Start List Warning -->
-    @* ⚠️ Var en gul ruta på 61 ord (Sune-genomgången 2026-10-03). Nu EN rad: den säger det enda
-       funktionären behöver veta när listan väl är publicerad — vägen för en efteranmäld.
-       Pekade tidigare på knappen "Lägg till efteranmäld" här på fliken. Den knappen skapade bara
-       en RAD i startlistan — ingen anmälan, ingen avgift — så texten skickade funktionären till
-       den ena vägen som gav en gratisskytt. Den pekar nu på registreringsbordet, som gör båda
-       delarna. "Gör om startlistan" ligger i kortets Åtgärder-meny, sist och i rött. *@
-    <p id="publishedStartListWarning" class="small text-muted d-none mb-2">
-        <i class="bi bi-lock-fill me-1"></i>Startlistan är publicerad. En efteranmäld läggs till under
-        <em>Anmälningar → Åtgärder → Anmäl och betala</em> — då får ingen annan nytt startnummer.
-    </p>
+    @* Låsraden ("Startlistan är publicerad. En efteranmäld läggs till under …") är borttagen
+       (Stefan 2026-10-04): en infotext som inte kräver någon handling. Vägen för en efteranmäld
+       står i dialogen "Gör om startlistan…" och i Anmälningar-flikens Åtgärder. Elementet finns kvar
+       dolt eftersom JS slår upp det. *@
+    <p id="publishedStartListWarning" class="d-none"></p>
     }
 
     <!-- Start List Display (shared by both Traditional and Egenbokning) -->
@@ -351,16 +345,7 @@
                     <button id="generateStartListBtn" class="btn btn-success btn-sm" onclick="openGenerateStartListModal()">
                         <i class="bi bi-plus me-1"></i>Skapa ny startlista
                     </button>
-                    @if (hasFinalsSeries)
-                    {
-                        @* Vägen till finalen, härifrån. Grundomgångens kort är högt — iframen
-                           är 800 px — så finalsektionen hamnar under skärmkanten även ihopfälld
-                           på en laptop. En länk som också FÄLLER UT finalsektionen är skillnaden
-                           mellan "finns inte" och "finns därnere". *@
-                        <button class="btn btn-outline-warning btn-sm" type="button" onclick="hpskGoToFinalsSection()">
-                            <i class="bi bi-trophy me-1"></i>Till finalen
-                        </button>
-                    }
+                    @* "Till finalen" är borttagen: växeln Grundomgång | Final ovanför tar över (2026-10-04). *@
                     @* ⚠️ TILLSTAND, INTE KNAPP — se .hpsk-state i theme.css. Satt aldrig
                        tillbaka `badge bg-warning fs-6 px-3 py-2`: det ger exakt en knapps
                        matt, och brickan stod mitt bland Publicera/Avpublicera. *@
@@ -368,12 +353,8 @@
                         <span class="hpsk-state-dot"></span>Preliminär
                     </span>
 
-                    <button class="btn btn-success btn-sm" id="btnPublishStartList" onclick="publishStartList()">
+                    <button class="btn btn-primary btn-sm" id="btnPublishStartList" onclick="publishStartList()">
                         <i class="bi bi-check-circle me-1"></i>Publicera
-                    </button>
-                    @* Ett steg tillbaka, inte en varning. *@
-                    <button class="btn btn-outline-secondary btn-sm" id="btnUnpublishStartList" onclick="unpublishStartList()" style="display: none;">
-                        <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
                     </button>
 
                     @* Åtgärder: det som inte är steget man står på. "Gör om startlistan" sist och i
@@ -388,20 +369,19 @@
                             <li><button class="dropdown-item" type="button" onclick="openStartListEditor(window.currentStartListId)">
                                 <i class="bi bi-pencil-square me-2"></i>Redigera startlistan</button></li>
                             <li><button class="dropdown-item" type="button" onclick="openStartListInNewTab()">
-                                <i class="bi bi-box-arrow-up-right me-2"></i>Öppna i ny flik</button></li>
+                                <i class="bi bi-box-arrow-up-right me-2"></i>Öppna och skriv ut</button></li>
+                            @* Avpublicera låg som knapp i raden; ett steg tillbaka hör i menyn (2026-10-04).
+                               Id:t är oförändrat — updateStartListStatus visar/döljer det. *@
+                            <li id="btnUnpublishStartList" style="display: none;"><button class="dropdown-item" type="button" onclick="unpublishStartList()">
+                                <i class="bi bi-arrow-counterclockwise me-2"></i>Avpublicera</button></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><button class="dropdown-item text-danger" type="button" id="regenerateStartListItem" onclick="openGenerateStartListModal()">
                                 <i class="bi bi-arrow-repeat me-2"></i>Gör om startlistan…</button></li>
                         </ul>
                     </div>
-                    @* ⚠️ VISA/DOLJ SIST, likadant som pa Resultatfliken. Den lag tidigare mitt
-                       i raden har och i en meny dar — samma kontroll i tva former pa tva
-                       flikar. Rapporterat 2026-09-08. *@
-                    <button class="btn btn-sm btn-outline-secondary" type="button"
-                            data-bs-toggle="collapse" data-bs-target="#qualStartListBody"
-                            aria-expanded="true" aria-controls="qualStartListBody">
-                        <i class="bi bi-chevron-expand me-1"></i>Visa/dölj
-                    </button>
+                    @* Visa/dölj är borttagen (2026-10-04): med växeln Grundomgång | Final visas en
+                       lista i taget, och en lista som går att fälla ihop till ingenting är en fråga
+                       till Sune i stället för ett svar. *@
                 </div>
             </div>
         </div>
@@ -410,8 +390,10 @@
            läsas som en borttagen sektion. *@
         <div class="collapse show" id="qualStartListBody">
         <div class="card-body">
-            <!-- Info Section -->
-            <div class="alert alert-info mb-3">
+            @* Infoytan (format, antal skjutlag, genererad) och den extra Redigera-knappen är dolda
+               (2026-10-04): listan nedan visar skjutlagen, och Redigera finns i Åtgärder. Elementen
+               ligger kvar eftersom JS skriver i dem. *@
+            <div class="d-none">
                 <div class="row">
                     <div class="col-md-6">
                         <small class="text-muted">Format:</small>
@@ -429,7 +411,7 @@
             </div>
 
             <!-- Action Buttons -->
-            <div class="d-flex justify-content-end mb-3 flex-wrap gap-2">
+            <div class="d-none">
                 @* ⚠️ HÄR SATT "Lägg till efteranmäld", och den är BORTTAGEN 2026-08-31 — den var en
                    fälla, inte en genväg. Den anropade AddShooterToStartList, som bara skriver en RAD
                    I STARTLISTAN: ingen anmälan skapades, ingen avgift fakturerades. Skytten stod på
@@ -1351,35 +1333,10 @@ function displayOfficialStartList(startList) {
     maybeCollapseQualifyingOnce(startList);
 }
 
-// ⚠️ FÄLL IHOP GRUNDOMGÅNGEN NÄR DEN ÄR KLAR — men bara EN gång per sidladdning, och
-// bara på en tävling med finalserier. Grundomgångskortet bär en 800 px iframe, så med den
-// utfälld ligger finalsektionen under skärmkanten på varje laptop. Är listan publicerad är
-// det arbetet gjort och det som återstår är finalen.
-//
-// HÄRLETT tillstånd, ingen sparad preferens: är listan inte publicerad står kortet utfällt
-// igen nästa gång, vilket är rätt. Och "en gång" är inte kosmetik — loadStartLists() körs
-// om efter varje redigering, så utan spärren skulle kortet fällas ihop under händerna på den
-// som just fällt ut det.
-// ⚠️ Fäll bara ihop när en FINALSTARTLISTA faktiskt finns (Sune-genomgången 2026-10-03). Att
-// fälla ihop redan vid publiceringen gömde grundomgångens lista under hela grundomgången, när
-// den är det funktionären tittar på. Finalkortet anropar hpskMaybeCollapseQualifying när det läst
-// sina listor, eftersom de två korten laddas i valfri ordning.
-let qualCollapseApplied = false, qualLastStartList = null;
-function maybeCollapseQualifyingOnce(startList) {
-    if (startList) qualLastStartList = startList;
-    startList = qualLastStartList;
-    if (qualCollapseApplied) return;
-    const body = document.getElementById('qualStartListBody');
-    if (!body || typeof bootstrap === 'undefined') return;
-    if (!(typeof window.hpskFinalsListCount === 'function' && window.hpskFinalsListCount() > 0)) return;
-
-    const isOfficial = !!(startList && (startList.isOfficial || startList.IsOfficial
-        || startList.status === 'Official'));
-    if (!isOfficial) return;
-
-    qualCollapseApplied = true;
-    bootstrap.Collapse.getOrCreateInstance(body, { toggle: false }).hide();
-}
+// ⚠️ Grundomgången fälls inte längre ihop (2026-10-04): växeln Grundomgång | Final i
+// CompetitionManagement visar en lista i taget. Funktionen finns kvar som no-op eftersom den
+// anropas härifrån och från finalkortet.
+function maybeCollapseQualifyingOnce() { }
 
 // Update status badge and publish/unpublish buttons
 function updateStartListStatus(isOfficial) {
@@ -1399,7 +1356,7 @@ function updateStartListStatus(isOfficial) {
         const published = isEgenbokning || !!isOfficial;
         hpskSetPublishState(badge, published, 'Startlistan');
         btnPublish.style.display = published ? 'none' : 'inline-block';
-        btnUnpublish.style.display = (!isEgenbokning && isOfficial) ? 'inline-block' : 'none';
+        btnUnpublish.style.display = (!isEgenbokning && isOfficial) ? '' : 'none';
     }
 }
 
