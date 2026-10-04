@@ -83,6 +83,7 @@
             <select class="form-select" id="adminTabMobileSelect" aria-label="Välj adminsektion">
                 <optgroup label="Kalender &amp; tävlingar">
                     <option value="#eventsTab" selected>Händelser</option>
+                    <option value="#clubTrainingsTab">Träningar</option>
                     <option value="#competitionsTab">Tävlingar</option>
                     <option value="#clubSeriesTab">Serier</option>
                     @if (clubRegionId > 0)
@@ -120,6 +121,9 @@
                 <div class="admin-rail-group">Kalender &amp; tävlingar</div>
                 <button class="nav-link active" id="events-tab" data-bs-toggle="tab" data-bs-target="#eventsTab" type="button" role="tab" aria-controls="eventsTab" aria-selected="true">
                     <i class="bi bi-calendar-event me-2"></i>Händelser
+                </button>
+                <button class="nav-link" id="clubTrainings-tab" data-bs-toggle="tab" data-bs-target="#clubTrainingsTab" type="button" role="tab" aria-controls="clubTrainingsTab" aria-selected="false">
+                    <i class="bi bi-bullseye me-2"></i>Träningar
                 </button>
                 <button class="nav-link" id="competitions-tab" data-bs-toggle="tab" data-bs-target="#competitionsTab" type="button" role="tab" aria-controls="competitionsTab" aria-selected="false">
                     <i class="bi bi-trophy me-2"></i>Tävlingar
@@ -501,6 +505,9 @@
             @{ ViewBag.DocumentOwnerType = 0; ViewBag.DocumentOwnerId = clubId; }
             @await Html.PartialAsync("ClubDocumentAdmin")
         </div>
+
+        @* Fas B4: klubbens träningar. Partialen skriver ut sin egen tab-pane (#clubTrainingsTab). *@
+        @await Html.PartialAsync("ClubAdminTrainings")
 
         <!-- Aktivitet Tab -->
         @* ⚠️ Ren LÄSYTA. Utfärdandeblanketten (`ClubAdminActivityIntyg`) monteras i

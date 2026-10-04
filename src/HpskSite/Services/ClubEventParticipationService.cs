@@ -363,6 +363,11 @@ namespace HpskSite.Services
         {
             if (await _auth.IsCurrentUserAdminAsync()) return true;
 
+            // Fas B4: den som är utsedd skjutledare för just den här träningen håller i kvällen,
+            // även utan klubbens skjutledargrupp — med ett roterande schema är det ofta en vanlig
+            // medlem som har passet. Gäller bara det egna tillfället.
+            if (ctx.IsTraining && actingMemberId > 0 && ctx.SkjutledareMemberId == actingMemberId) return true;
+
             if (ctx.IsClubOwned)
             {
                 if (await _auth.IsClubAdminForClub(ctx.OwnerId)) return true;

@@ -139,6 +139,8 @@ namespace HpskSite.Controllers
             model.EventName = ctx.EventName;
             model.EventDate = ctx.EventDate;
             model.OwnerName = ctx.OwnerName;
+            if (ctx.IsTraining && ctx.SkjutledareMemberId is > 0)
+                model.SkjutledareName = _memberService.GetById(ctx.SkjutledareMemberId.Value)?.Name ?? "";
             model.CanManage = true;
             return Render();
         }
@@ -152,6 +154,8 @@ namespace HpskSite.Controllers
         public string EventName { get; set; } = "";
         public DateTime? EventDate { get; set; }
         public string OwnerName { get; set; } = "";
+        /// <summary>En träning: vem som har passet (fas B4). Tomt för en händelse.</summary>
+        public string SkjutledareName { get; set; } = "";
         public bool CanManage { get; set; }
         public bool RequiresLogin { get; set; }
         public string LoginUrl { get; set; } = "";
