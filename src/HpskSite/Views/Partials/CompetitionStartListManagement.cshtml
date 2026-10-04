@@ -370,13 +370,14 @@
                                 <i class="bi bi-pencil-square me-2"></i>Redigera startlistan</button></li>
                             <li><button class="dropdown-item" type="button" onclick="openStartListInNewTab()">
                                 <i class="bi bi-box-arrow-up-right me-2"></i>Öppna och skriv ut</button></li>
-                            @* Avpublicera låg som knapp i raden; ett steg tillbaka hör i menyn (2026-10-04).
-                               Id:t är oförändrat — updateStartListStatus visar/döljer det. *@
-                            <li id="btnUnpublishStartList" style="display: none;"><button class="dropdown-item" type="button" onclick="unpublishStartList()">
-                                <i class="bi bi-arrow-counterclockwise me-2"></i>Avpublicera</button></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><button class="dropdown-item text-danger" type="button" id="regenerateStartListItem" onclick="openGenerateStartListModal()">
                                 <i class="bi bi-arrow-repeat me-2"></i>Gör om startlistan…</button></li>
+                            @* Avpublicera låg som knapp i raden; ett steg tillbaka hör i menyn (2026-10-04).
+                               Sist och i rött, samma plats som i finalens meny (Sune 4). Id:t är
+                               oförändrat — updateStartListStatus visar/döljer det. *@
+                            <li id="btnUnpublishStartList" style="display: none;"><button class="dropdown-item text-danger" type="button" onclick="unpublishStartList()">
+                                <i class="bi bi-arrow-counterclockwise me-2"></i>Avpublicera</button></li>
                         </ul>
                     </div>
                     @* Visa/dölj är borttagen (2026-10-04): med växeln Grundomgång | Final visas en
