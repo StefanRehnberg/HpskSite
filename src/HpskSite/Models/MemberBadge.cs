@@ -49,6 +49,14 @@ namespace HpskSite.Models
 
         public string? Notes { get; set; }
 
+        /// <summary>
+        /// Set when the club handed the physical badge out from its OWN stock (fas A5). The badge is
+        /// still valid; it is only left off the order list to the förbund. Null = not handed out from
+        /// stock. ⚠️ Column added by add-stock-handout-to-member-badge.sql — run it BEFORE deploy.
+        /// </summary>
+        public DateTime? HandedOutFromStockAt { get; set; }
+        public int? HandedOutByMemberId { get; set; }
+
         public int EnteredByMemberId { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.Now;
         public DateTime UpdatedAt { get; set; } = DateTime.Now;

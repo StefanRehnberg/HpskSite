@@ -119,11 +119,19 @@ namespace HpskSite.Services
                     if (needsNumber && !string.IsNullOrWhiteSpace(b.UniqueNumber))
                         detail = $"Guldnr {b.UniqueNumber}";
 
+                    // Utdelat ur klubbens eget lager (fas A5): giltigt, men inget att beställa. Står
+                    // kvar i utdelningslistan med datumet, så det syns att det redan är överlämnat.
+                    bool fromStock = b.HandedOutFromStockAt.HasValue;
+                    if (fromStock)
+                        detail = (detail + (detail.Length > 0 ? " · " : "")
+                                  + $"Utdelat {b.HandedOutFromStockAt!.Value:yyyy-MM-dd} ur klubbens lager");
+
                     entry.Items.Add(new MarkenHandoutItem
                     {
                         Group = family,
                         Item = b.Level,
                         Detail = detail,
+                        Orderable = !fromStock,
                         Unverified = b.Status == Marken.StatusReported
                     });
                 }
