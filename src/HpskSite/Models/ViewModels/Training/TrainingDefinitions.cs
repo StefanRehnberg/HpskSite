@@ -48,10 +48,12 @@ namespace HpskSite.Models.ViewModels.Training
 
         /// <summary>
         /// First level a shooter may tick off themselves.
-        /// Levels 1-3 (Nybörjartrappa Brons/Silver/Guld) mint the official Pistolskyttemärke via
-        /// MarkenLedgerService.SyncTrappaBadgesAsync when the level is finished, so those steps must
-        /// stay functionary-approved - nobody signs off their own märke. Levels 4 and up carry no
-        /// official consequence and are the shooter's own bookkeeping.
+        /// Levels 1-3 (Nybörjartrappa Brons/Silver/Guld) are the beginners' course: the instructor
+        /// approves them, because a beginner cannot yet judge their own technique, line hits or
+        /// safety. Levels 4 and up are for experienced shooters and are their own bookkeeping.
+        /// (Until 2026-10-04 the reason given here was that finishing levels 1-3 minted the
+        /// Pistolskyttemärke. It no longer does — the märke is fulfilled by validated series — but
+        /// the boundary stays where it is.)
         /// </summary>
         public const int SelfServiceMinLevel = 4;
 
