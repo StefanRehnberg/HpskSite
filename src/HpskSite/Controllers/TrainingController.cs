@@ -24,7 +24,6 @@ namespace HpskSite.Controllers
         private readonly TrainingGroupService _trainingGroupService;
         private readonly EmailService _emailService;
         private readonly ReplyContactResolver _replyContacts;
-        private readonly MarkenLedgerService _markenLedger;
         private readonly TrainingBadgeCreditService _badgeCredit;
         private readonly ILogger<TrainingController> _logger;
         private const string ClubMemberTypeAlias = "hpskClub";
@@ -43,7 +42,6 @@ namespace HpskSite.Controllers
             TrainingGroupService trainingGroupService,
             EmailService emailService,
             ReplyContactResolver replyContacts,
-            MarkenLedgerService markenLedger,
             TrainingBadgeCreditService badgeCredit,
             ILogger<TrainingController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
@@ -55,7 +53,6 @@ namespace HpskSite.Controllers
             _trainingGroupService = trainingGroupService;
             _emailService = emailService;
             _replyContacts = replyContacts;
-            _markenLedger = markenLedger;
             _badgeCredit = badgeCredit;
             _logger = logger;
         }
@@ -370,23 +367,10 @@ namespace HpskSite.Controllers
                 progress.SaveToMember(member);
                 _memberService.Save(member);
 
-                // Skyttetrappan → Pistolskyttemärket link: completing all steps of levels 1/2/3
-                // (Nybörjartrappa Brons/Silver/Guld) awards the matching base valör, stamped with
-                // the approving functionary. Idempotent; best-effort so it never breaks step approval.
-                // Belt and braces: self-service can never reach levels 1-3, but if that ever changes
-                // the badge must NOT be minted from a self-reported step.
-                if (!isSelfService && levelId is 1 or 2 or 3)
-                {
-                    try
-                    {
-                        var actingMember = _memberService.GetByEmail(instructor?.Email ?? string.Empty);
-                        await _markenLedger.SyncTrappaBadgesAsync(memberId, progress.CompletedSteps, actingMember?.Id);
-                    }
-                    catch (Exception markenEx)
-                    {
-                        _logger.LogWarning(markenEx, "Failed to sync Skyttetrappan märke for member {MemberId}", memberId);
-                    }
-                }
+                // ⚠️ Finishing Nybörjartrappa Brons/Silver/Guld NO LONGER awards the Pistolskyttemärke
+                // (beslut 2026-10-02/03). The märke is fulfilled by validated series — 3 precision + 3
+                // tillämpning of the valör, or a standardmedalj i fält — exactly as for guld. Badges the
+                // trappa minted before that stay in the ledger.
 
                 // Send notification email (non-blocking). Skipped for self-reported steps - there is
                 // no point mailing the shooter about something they just ticked themselves.

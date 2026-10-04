@@ -14,11 +14,10 @@ namespace HpskSite.Services
     /// makulerad, rejected or corrected takes its credit with it, instead of leaving a beginner ladder
     /// standing on nothing. It also means no read has to write.</para>
     ///
-    /// <para>This is the exact inverse of <see cref="MarkenLedgerService.SyncTrappaBadgesAsync"/>
-    /// (trappa → märke). The two cannot ping-pong: that one refuses to mint a valör for a level whose
-    /// steps came from here (<see cref="StepCompletion.FromBadge"/>) — a märke must never be derived
-    /// from steps that were themselves derived from a märke, or a member holding only Guld would have
-    /// Brons and Silver manufactured for them with no functionary behind either.</para>
+    /// <para>The opposite direction (trappa → märke) was removed 2026-10-04: finishing a level no
+    /// longer awards a valör. ⚠️ Do not reintroduce it without the old guard — a märke must never be
+    /// derived from steps that were themselves credited from a märke (<see cref="StepCompletion.FromBadge"/>),
+    /// or a member holding only Guld gets Brons and Silver manufactured with no functionary behind either.</para>
     ///
     /// <para>⚠️ Only a <b>Verified</b> valör counts. Crediting an unvalidated self-reported claim would
     /// turn the functionary gate on levels 1-3 into self-service by the back door.</para>

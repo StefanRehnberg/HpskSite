@@ -2029,11 +2029,6 @@ namespace HpskSite.Controllers
         {
             var member = _memberService.GetById(memberId);
 
-            // Lazy Skyttetrappan → valör materialization: members who completed Nybörjartrappa
-            // Brons/Silver/Guld before this link existed get their base badges on first view, with
-            // the real completion date + approver name carried from completedTrainingSteps. Idempotent.
-            await SyncTrappaForMemberAsync(member);
-
             // Keep the year's Guldfodring in sync with current validated evidence (covers hosted-comp
             // results / fält medals that change outside a series validation). Lazy, no validator.
             await RecomputeYearlyQualificationAsync(memberId, year, null);
@@ -2187,21 +2182,6 @@ namespace HpskSite.Controllers
                     }
                 }
             };
-        }
-
-        /// <summary>
-        /// Idempotently materialize Pistolskyttemärket base valörer from the member's completed
-        /// Skyttetrappan levels (1/2/3). Best-effort — a sync failure must never break a read.
-        /// </summary>
-        private async Task SyncTrappaForMemberAsync(Umbraco.Cms.Core.Models.IMember? member)
-        {
-            if (member == null) return;
-            try
-            {
-                var progress = MemberProgress.FromMember(member);
-                await _ledger.SyncTrappaBadgesAsync(member.Id, progress.CompletedSteps, null);
-            }
-            catch { /* best-effort */ }
         }
 
         /// <summary>
