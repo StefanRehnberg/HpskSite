@@ -140,7 +140,7 @@ namespace HpskSite.Services
             {
                 foreach (var row in await _events.GetForMemberAsync(memberId))
                 {
-                    var ctx = _events.GetEventContext(row.EventId);
+                    var ctx = _events.GetContext(row.EventId, row.OccasionKind);
                     if (ctx?.EventDate != null) years.Add(ctx.EventDate.Value.Year);
                 }
             }
@@ -256,14 +256,15 @@ namespace HpskSite.Services
 
                 // 3) Evenemangsnärvaro. Datumet är EVENEMANGETS, inte radens tidsstämplar.
                 var eventRows = db.Fetch<MemberEventRow>(
-                    $@"SELECT MemberId, EventId, AttendanceStatus FROM ClubEventParticipant
+                    $@"SELECT MemberId, EventId, OccasionKind, AttendanceStatus FROM ClubEventParticipant
                        WHERE CancelledAt IS NULL AND MemberId IN ({inList})", args);
 
                 foreach (var row in eventRows)
                 {
                     if (!MemberActivitySummary.EventCounts(row.AttendanceStatus)) continue;
                     if (!days.TryGetValue(row.MemberId, out var set)) continue;
-                    var ctx = _events.GetEventContext(row.EventId);
+                    // ⚠️ Sorten avgör uppslaget: en träningsrads id är ingen nod (fas B2).
+                    var ctx = _events.GetContext(row.EventId, row.OccasionKind);
                     if (ctx?.EventDate == null || ctx.EventDate.Value.Year != year) continue;
                     set.Add(ctx.EventDate.Value.Date);
                 }
@@ -303,6 +304,7 @@ namespace HpskSite.Services
         {
             public int MemberId { get; set; }
             public int EventId { get; set; }
+            public string? OccasionKind { get; set; }
             public string? AttendanceStatus { get; set; }
         }
 
@@ -769,7 +771,7 @@ namespace HpskSite.Services
             {
                 if (row.CancelledAt != null) continue;
 
-                var ctx = _events.GetEventContext(row.EventId);
+                var ctx = _events.GetContext(row.EventId, row.OccasionKind);
                 if (ctx?.EventDate == null) continue;
 
                 bool present = row.AttendanceStatus == ClubEvents.AttendancePresent;
@@ -800,7 +802,7 @@ namespace HpskSite.Services
                     Title = string.IsNullOrWhiteSpace(ctx.EventName) ? $"Evenemang #{ctx.EventId}" : ctx.EventName,
                     Detail = detail.Count > 0 ? string.Join(" · ", detail) : null,
                     SourceId = ctx.EventId,
-                    SourceKind = MemberActivityEntry.SourceKindEvent,
+                    SourceKind = ctx.IsTraining ? MemberActivityEntry.SourceKindClubTraining : MemberActivityEntry.SourceKindEvent,
                     IsMandatoryEvent = ctx.IsMandatory,
                     CountsAsActivity = MemberActivitySummary.EventCounts(row.AttendanceStatus),
                     NotCountedReason = notCounted

@@ -173,6 +173,9 @@ namespace HpskSite.Models
         public const string SourceKindCompetition = "comp";
         public const string SourceKindTraining = "training";
         public const string SourceKindEvent = "event";
+        /// <summary>Närvaro på en klubbträning (ClubTraining, fas B2). Egen nyckel: träningens id och
+        /// händelsens nod-id är oberoende serier, så samma heltal kan betyda två olika tillfällen.</summary>
+        public const string SourceKindClubTraining = "clubtraining";
         public const string SourceKindRangeCheckIn = "checkin";
 
         /// <summary>Sant för evenemang som klubben märkt som obligatoriska — styrelsens

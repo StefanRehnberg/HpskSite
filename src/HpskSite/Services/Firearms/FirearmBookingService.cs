@@ -69,7 +69,11 @@ namespace HpskSite.Services.Firearms
         /// </summary>
         public const string Externt = "Externt";
 
-        public static readonly string[] All = { Fritt, Event, Competition, Externt };
+        /// <summary>En klubbträning (ClubTraining, fas B2). <c>OccasionId</c> = träningens id, en egen
+        /// serie — därför ett eget slag, aldrig Event med ett id som råkar vara lika.</summary>
+        public const string Training = "Training";
+
+        public static readonly string[] All = { Fritt, Event, Competition, Externt, Training };
 
         public static bool IsValid(string? v) => All.Contains((v ?? "").Trim(), StringComparer.Ordinal);
 

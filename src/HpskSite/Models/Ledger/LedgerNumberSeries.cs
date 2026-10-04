@@ -87,6 +87,9 @@ namespace HpskSite.Models.Ledger
         public const string CompetitionRegistration = "competition-registration";
         public const string TeamFee = "team-fee";
         public const string Event = "event";
+        /// <summary>En klubbträning (ClubTraining, fas B2). <c>SourceId</c> = träningens id — en egen
+        /// serie, därför en egen källtyp: samma heltal som en händelsenod är ett annat tillfälle.</summary>
+        public const string Training = "training";
         public const string MembershipFee = "membership-fee";
         public const string RegionFee = "region-fee";
 

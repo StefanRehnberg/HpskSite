@@ -32,8 +32,15 @@ namespace HpskSite.Models
     {
         public int Id { get; set; }
 
-        /// <summary>The <c>clubSimpleEvent</c> node id. Clubs AND regions use that same doctype.</summary>
+        /// <summary>
+        /// The OCCASION id: a <c>clubSimpleEvent</c> node id when <see cref="OccasionKind"/> is
+        /// Event, a <c>ClubTraining</c> row id when it is Training. The column keeps its old name.
+        /// </summary>
         public int EventId { get; set; }
+
+        /// <summary><see cref="ClubEvents.OccasionEvent"/> or <see cref="ClubEvents.OccasionTraining"/>.
+        /// ⚠️ Column added by add-occasionkind-to-club-event-participant.sql — run it BEFORE deploy.</summary>
+        public string OccasionKind { get; set; } = ClubEvents.OccasionEvent;
 
         /// <summary>
         /// Medlemmens id, eller <see cref="ClubEvents.GuestMemberId"/> (0) för en gäst utan konto.
@@ -192,6 +199,19 @@ namespace HpskSite.Models
             AttendanceExcused => "Giltig frånvaro",
             _ => "Ej registrerad"
         };
+
+        // ── Occasion kind (fas B2) ──
+        /// <summary>
+        /// What <see cref="ClubEventParticipant.EventId"/> points at. <b>The two id series are
+        /// independent</b> — node 7086 and ClubTraining 7086 are different things — so every query
+        /// by EventId must also ask the kind, and the unique index carries it first.
+        /// </summary>
+        public const string OccasionEvent = "Event";
+        public const string OccasionTraining = "Training";
+
+        /// <summary>Normalises a kind from a request: anything but "training" (any case) is an event.</summary>
+        public static string NormaliseOccasionKind(string? kind) =>
+            string.Equals(kind, OccasionTraining, StringComparison.OrdinalIgnoreCase) ? OccasionTraining : OccasionEvent;
 
         // ── Owner ──
         /// <summary>Doctype aliases an event can hang under. Clubs and regions share the event doctype.</summary>

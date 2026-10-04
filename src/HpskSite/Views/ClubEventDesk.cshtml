@@ -98,7 +98,7 @@ else
        [ValidateAntiForgeryToken], så token MÅSTE finnas; den kommer från layouten. Var det här
        någonsin en chromeless sida igen behövs raden tillbaka. *@
 
-    <div class="container-fluid py-3" id="deskApp" data-event-id="@desk.EventId">
+    <div class="container-fluid py-3" id="deskApp" data-event-id="@desk.EventId" data-kind="@desk.Kind">
 
         @* Summeringskorten — samma form som Anmälningars, i en rad som bryter rent. *@
         <div class="row g-2 mb-3" id="deskCards">
@@ -259,6 +259,9 @@ else
     if (!document.getElementById('deskApp')) return;
 
     const EVENT_ID = +document.getElementById('deskApp').dataset.eventId;
+    // Fas B2: "Training" för en klubbträning. Följer med i VARJE anrop — en träning och en händelse
+    // kan ha samma id, och utan sorten slår servern upp fel tillfälle.
+    const KIND = document.getElementById('deskApp').dataset.kind || 'Event';
     let state = null;
 
     const esc = s => String(s ?? '').replace(/[&<>"']/g,
@@ -275,7 +278,7 @@ else
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
-            body: JSON.stringify(body || {}),
+            body: JSON.stringify(Object.assign({ kind: KIND }, body || {})),
         });
         const t = await r.text();
         try { return JSON.parse(t); }
@@ -284,7 +287,7 @@ else
 
     // ── Läsning ─────────────────────────────────────────────────────────────────────────
     window.deskLoad = async function () {
-        const r = await fetch(`/umbraco/surface/ClubEvent/GetRoster?eventId=${EVENT_ID}`,
+        const r = await fetch(`/umbraco/surface/ClubEvent/GetRoster?eventId=${EVENT_ID}&kind=${KIND}`,
                               { credentials: 'same-origin' });
         const d = await r.json().catch(() => null);
         if (!d || !d.success) {
@@ -525,7 +528,7 @@ else
             const q = document.getElementById('deskMemberQ').value.trim();
             if (q.length < 2) { document.getElementById('deskMemberHits').innerHTML = ''; return; }
             const r = await fetch(
-                `/umbraco/surface/ClubEvent/SearchAddableMembers?eventId=${EVENT_ID}&q=${encodeURIComponent(q)}`,
+                `/umbraco/surface/ClubEvent/SearchAddableMembers?eventId=${EVENT_ID}&kind=${KIND}&q=${encodeURIComponent(q)}`,
                 { credentials: 'same-origin' });
             const d = await r.json().catch(() => null);
             const hits = (d && d.success && d.members) ? d.members : [];

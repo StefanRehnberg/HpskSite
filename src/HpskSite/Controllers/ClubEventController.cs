@@ -101,7 +101,7 @@ namespace HpskSite.Controllers
             List<HpskSite.Models.Ledger.LedgerPayment>? payments = null;
             try
             {
-                payments = _payments.ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, eventId);
+                payments = _payments.ForSource(roster.Context.LedgerSource, eventId);
             }
             catch (Exception ex)
             {
@@ -124,9 +124,9 @@ namespace HpskSite.Controllers
         /// GET /umbraco/surface/ClubEvent/GetSignupState?eventId=1234
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetSignupState(int eventId)
+        public async Task<IActionResult> GetSignupState(int eventId, string? kind = null)
         {
-            var ctx = _participation.GetEventContext(eventId);
+            var ctx = _participation.GetContext(eventId, kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             int me = await CurrentMemberIdAsync();
@@ -300,7 +300,7 @@ namespace HpskSite.Controllers
             var clubId = ctx.OwnerId;
             if (clubId <= 0) return null;
 
-            var (offered, propertyExists) = _loanRules.EventOffersLoanWeapons(ctx.EventId);
+            var (offered, propertyExists) = (ctx.IsTraining ? (ctx.LoanWeaponsOffered, true) : _loanRules.EventOffersLoanWeapons(ctx.EventId));
             var loanable = _firearms.CountLoanable(clubId);
 
             // Erbjuds de inte, eller har klubben inga vapen, finns inget att visa. En kryssruta
@@ -315,7 +315,7 @@ namespace HpskSite.Controllers
             // Lånen som hör till DEN HÄR händelsen. En läsning, två svar: skyttens eget lån och
             // vapenansvarigs plocklista.
             var forEvent = _bookings
-                .GetForOccasion(clubId, HpskSite.Services.Firearms.FirearmOccasionKind.Event, ctx.EventId)
+                .GetForOccasion(clubId, ctx.FirearmOccasion, ctx.EventId)
                 .Where(b => b.IsActive)
                 .ToList();
 
@@ -367,7 +367,7 @@ namespace HpskSite.Controllers
             int me = await CurrentMemberIdAsync();
             if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad för att anmäla dig." });
 
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
             if (!ctx.RegistrationRequired) return Json(new { success = false, message = "Det här evenemanget har ingen anmälan." });
             if (!ClubEventParticipationService.IsSignupOpen(ctx)) return Json(new { success = false, message = "Anmälan är stängd." });
@@ -398,7 +398,7 @@ namespace HpskSite.Controllers
                     MemberId = me,
                     ClubId = ctx.OwnerId,
                     FirearmId = request.LoanFirearmId > 0 ? request.LoanFirearmId : null,
-                    OccasionKind = HpskSite.Services.Firearms.FirearmOccasionKind.Event,
+                    OccasionKind = ctx.FirearmOccasion,
                     OccasionId = ctx.EventId,
                     From = day,
                     To = day.AddDays(1).AddSeconds(-1),
@@ -434,7 +434,7 @@ namespace HpskSite.Controllers
             int me = await CurrentMemberIdAsync();
             if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
 
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             // A member may withdraw themselves; a functionary may withdraw anyone on their event.
@@ -443,7 +443,7 @@ namespace HpskSite.Controllers
             if (target != me && !canManage)
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
-            var (ok, msg, guestsCancelled) = await _participation.CancelAsync(ctx.EventId, target, me);
+            var (ok, msg, guestsCancelled) = await _participation.CancelAsync(ctx.EventId, target, me, ctx.OccasionKind);
             if (!ok) return Json(new { success = false, message = msg });
 
             // ⚠️ AVBOKNINGEN MÅSTE SLÄPPA VAPNET. Anmälan och lånet gjordes som EN handling, och
@@ -481,7 +481,7 @@ namespace HpskSite.Controllers
             int me = await CurrentMemberIdAsync();
             if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad för att anmäla en gäst." });
 
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
             if (!ctx.RegistrationRequired) return Json(new { success = false, message = "Det här evenemanget har ingen anmälan." });
             if (!ClubEventParticipationService.IsSignupOpen(ctx)) return Json(new { success = false, message = "Anmälan är stängd." });
@@ -536,7 +536,7 @@ namespace HpskSite.Controllers
             int me = await CurrentMemberIdAsync();
             if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
 
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             var (ok, msg) = await _participation.CancelGuestAsync(ctx, request?.ParticipantId ?? 0, me);
@@ -557,7 +557,7 @@ namespace HpskSite.Controllers
             if (ctx.IsRegionOwned || ctx.OwnerId <= 0) return null;
 
             var mine = _bookings
-                .GetForOccasion(ctx.OwnerId, HpskSite.Services.Firearms.FirearmOccasionKind.Event, ctx.EventId)
+                .GetForOccasion(ctx.OwnerId, ctx.FirearmOccasion, ctx.EventId)
                 .FirstOrDefault(b => b.MemberId == memberId && b.IsActive);
             if (mine == null) return null;
 
@@ -585,7 +585,7 @@ namespace HpskSite.Controllers
             int me = await CurrentMemberIdAsync();
             if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
 
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
             if (ctx.IsRegionOwned || ctx.OwnerId <= 0)
                 return Json(new { success = false, message = "Lånevapen hör till en klubb, inte till kretsens evenemang." });
@@ -604,7 +604,7 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Anmäl dig först, så kan du boka lånevapen." });
 
             var existing = _bookings
-                .GetForOccasion(ctx.OwnerId, HpskSite.Services.Firearms.FirearmOccasionKind.Event, ctx.EventId)
+                .GetForOccasion(ctx.OwnerId, ctx.FirearmOccasion, ctx.EventId)
                 .FirstOrDefault(b => b.MemberId == me && b.IsActive);
 
             if (request?.LoanWeapon != true)
@@ -628,7 +628,7 @@ namespace HpskSite.Controllers
                 MemberId = me,
                 ClubId = ctx.OwnerId,
                 FirearmId = request.LoanFirearmId > 0 ? request.LoanFirearmId : null,
-                OccasionKind = HpskSite.Services.Firearms.FirearmOccasionKind.Event,
+                OccasionKind = ctx.FirearmOccasion,
                 OccasionId = ctx.EventId,
                 From = day,
                 To = day.AddDays(1).AddSeconds(-1),
@@ -652,9 +652,9 @@ namespace HpskSite.Controllers
         /// GET /umbraco/surface/ClubEvent/GetRoster?eventId=1234
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetRoster(int eventId)
+        public async Task<IActionResult> GetRoster(int eventId, string? kind = null)
         {
-            var ctx = _participation.GetEventContext(eventId);
+            var ctx = _participation.GetContext(eventId, kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             int me = await CurrentMemberIdAsync();
@@ -673,9 +673,9 @@ namespace HpskSite.Controllers
             var paymentsReadable = true;
             try
             {
-                allPayments = _payments.ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId);
+                allPayments = _payments.ForSource(ctx.LedgerSource, ctx.EventId);
                 (expected, settled, outstanding) =
-                    _payments.Completeness(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId);
+                    _payments.Completeness(ctx.LedgerSource, ctx.EventId);
             }
             catch (Exception ex)
             {
@@ -823,7 +823,7 @@ namespace HpskSite.Controllers
             if (request == null || request.EventId <= 0 || (request.MemberId <= 0 && request.ParticipantId <= 0))
                 return Json(new { success = false, message = "Ogiltig begäran — evenemang och deltagare måste anges." });
 
-            var ctx = _participation.GetEventContext(request.EventId);
+            var ctx = _participation.GetContext(request.EventId, request.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             int me = await CurrentMemberIdAsync();
@@ -837,11 +837,11 @@ namespace HpskSite.Controllers
             // avprickningen är på väg att bli underlag till ett Föreningsintyg.
             var (ok, msg) = request.ParticipantId > 0
                 ? await _participation.SetAttendanceForRowAsync(
-                    request.EventId, request.ParticipantId, status, request.Note, me)
+                    request.EventId, request.ParticipantId, status, request.Note, me, ctx.OccasionKind)
                 : await _participation.SetAttendanceAsync(
                     // ⚠️ Priset foljer med: utan det fods walk-in-raden utan FeeAmount och
                     // personen ar GRATIS for alltid.
-                    request.EventId, request.MemberId, status, request.Note, me, request.PriceId);
+                    request.EventId, request.MemberId, status, request.Note, me, request.PriceId, ctx.OccasionKind);
 
             return Json(new { success = ok, message = msg, label = ClubEvents.AttendanceDisplay(status) });
         }
@@ -852,16 +852,16 @@ namespace HpskSite.Controllers
         /// GET /umbraco/surface/ClubEvent/SearchAddableMembers?eventId=1234&amp;q=and
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> SearchAddableMembers(int eventId, string? q)
+        public async Task<IActionResult> SearchAddableMembers(int eventId, string? q, string? kind = null)
         {
-            var ctx = _participation.GetEventContext(eventId);
+            var ctx = _participation.GetContext(eventId, kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             int me = await CurrentMemberIdAsync();
             if (!await _participation.CanManageAsync(ctx, me))
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
-            var already = (await _participation.GetParticipantsAsync(eventId)).Select(p => p.MemberId).ToHashSet();
+            var already = (await _participation.GetParticipantsAsync(ctx.EventId, ctx.OccasionKind)).Select(p => p.MemberId).ToHashSet();
             var term = (q ?? "").Trim();
 
             // Resolve the eligible clubs ONCE — the per-member overload would re-read the krets's
@@ -948,7 +948,8 @@ namespace HpskSite.Controllers
 
         private string BuildCheckInUrl(int eventId, ClubEventContext ctx)
         {
-            var token = _attendanceProtector.Protect(eventId.ToString(), AttendanceTokenLifetime(ctx));
+            var payload = ctx.IsTraining ? $"training:{ctx.EventId}" : eventId.ToString();
+            var token = _attendanceProtector.Protect(payload, AttendanceTokenLifetime(ctx));
             return $"{Request.Scheme}://{Request.Host}/evenemang/narvaro?t={Uri.EscapeDataString(token)}";
         }
 
@@ -958,9 +959,9 @@ namespace HpskSite.Controllers
         /// GET /umbraco/surface/ClubEvent/PrintAttendanceQr?eventId=1234
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> PrintAttendanceQr(int eventId)
+        public async Task<IActionResult> PrintAttendanceQr(int eventId, string? kind = null)
         {
-            var ctx = _participation.GetEventContext(eventId);
+            var ctx = _participation.GetContext(eventId, kind);
             if (ctx == null) return Content("Evenemanget hittades inte.");
 
             int me = await CurrentMemberIdAsync();
@@ -1025,7 +1026,7 @@ namespace HpskSite.Controllers
 
             int me = await CurrentMemberIdAsync();
             var member = me > 0 ? _memberService.GetById(me) : null;
-            var existing = me > 0 ? await _participation.GetParticipantAsync(ctx.EventId, me) : null;
+            var existing = me > 0 ? await _participation.GetParticipantAsync(ctx.EventId, me, ctx.OccasionKind) : null;
 
             return Json(new
             {
@@ -1080,7 +1081,7 @@ namespace HpskSite.Controllers
                 });
 
             var (ok, msg) = await _participation.SetAttendanceAsync(
-                ctx.EventId, me, ClubEvents.AttendancePresent, null, me);
+                ctx.EventId, me, ClubEvents.AttendancePresent, null, me, null, ctx.OccasionKind);
 
             return Json(new { success = ok, message = ok ? "Din närvaro är registrerad." : msg });
         }
@@ -1113,7 +1114,7 @@ namespace HpskSite.Controllers
             int me = await CurrentMemberIdAsync();
             if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
 
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
             if (!ctx.CanTakeSwish)
                 return Json(new { success = false, message = "Evenemanget kan inte ta betalt — kontakta arrangören." });
@@ -1155,7 +1156,7 @@ namespace HpskSite.Controllers
             if (party.RemainingToRequest <= 0)
                 return Json(new { success = false, message = "Det finns inget kvar att betala." });
 
-            var issuer = _issuers.ResolveForEvent(ctx.EventId);
+            var issuer = (ctx.IsTraining ? _issuers.ResolveForOwner(ctx.OwnerId) : _issuers.ResolveForEvent(ctx.EventId));
             if (issuer == null)
                 return Json(new { success = false, message = "Arrangören går inte att avgöra — kontakta klubben." });
 
@@ -1172,7 +1173,7 @@ namespace HpskSite.Controllers
 
             // Mina öppna begäranden: varken påstådda, bekräftade eller makulerade.
             var open = _payments
-                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .ForSource(ctx.LedgerSource, ctx.EventId)
                 .Where(p => p.PayerMemberId == payer
                             && p.VoidedUtc is null && p.ConfirmedUtc is null && p.ClaimedUtc is null)
                 .ToList();
@@ -1198,7 +1199,7 @@ namespace HpskSite.Controllers
                 {
                     IssuerType = issuer.Value.Type,
                     IssuerId = issuer.Value.Id,
-                    SourceType = HpskSite.Models.Ledger.LedgerSourceType.Event,
+                    SourceType = ctx.LedgerSource,
                     SourceId = ctx.EventId,
                     PayerMemberId = payer,
                     PayerName = member?.Name ?? $"Medlem {payer}",
@@ -1242,16 +1243,16 @@ namespace HpskSite.Controllers
         /// annanstans utan att något sa ifrån.</para>
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetPaymentQr(int eventId, int paymentId)
+        public async Task<IActionResult> GetPaymentQr(int eventId, int paymentId, string? kind = null)
         {
             int me = await CurrentMemberIdAsync();
             if (me <= 0) return NotFound();
 
-            var ctx = _participation.GetEventContext(eventId);
+            var ctx = _participation.GetContext(eventId, kind);
             if (ctx == null || !ctx.CanTakeSwish) return NotFound();
 
             var row = _payments
-                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, eventId)
+                .ForSource(ctx.LedgerSource, ctx.EventId)
                 .FirstOrDefault(p => p.Id == paymentId);
             if (row == null) return NotFound();
 
@@ -1289,13 +1290,13 @@ namespace HpskSite.Controllers
             int me = await CurrentMemberIdAsync();
             if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
 
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             // ⚠️ Betalningen måste tillhöra DET HÄR evenemanget OCH den inloggade. Utan båda
             // kontrollerna kunde ett postat id kvittera någon annans betalning.
             var mine = _payments
-                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .ForSource(ctx.LedgerSource, ctx.EventId)
                 .FirstOrDefault(p => p.Id == (request?.PaymentId ?? 0) && p.PayerMemberId == me);
             if (mine == null) return Json(new { success = false, message = "Betalningen hittades inte." });
 
@@ -1323,7 +1324,7 @@ namespace HpskSite.Controllers
             int me = await CurrentMemberIdAsync();
             if (me <= 0) return Json(new { success = false, message = "Du måste vara inloggad." });
 
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
             if (!await _participation.CanManageAsync(ctx, me))
                 return Json(new { success = false, message = "Åtkomst nekad." });
@@ -1331,7 +1332,7 @@ namespace HpskSite.Controllers
             // ⚠️ Betalningen måste tillhöra DET HÄR evenemanget — annars kunde ett postat id
             // bekräfta en betalning i en annan klubbs liggare.
             var row = _payments
-                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .ForSource(ctx.LedgerSource, ctx.EventId)
                 .FirstOrDefault(p => p.Id == (request?.PaymentId ?? 0));
             if (row == null) return Json(new { success = false, message = "Betalningen hittades inte." });
 
@@ -1377,18 +1378,18 @@ namespace HpskSite.Controllers
         /// som faktiskt betalat, och listan är inte längre en kontroll.</para>
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetPayments(int eventId)
+        public async Task<IActionResult> GetPayments(int eventId, string? kind = null)
         {
-            var ctx = _participation.GetEventContext(eventId);
+            var ctx = _participation.GetContext(eventId, kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             int me = await CurrentMemberIdAsync();
             if (!await _participation.CanManageAsync(ctx, me))
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
-            var rows = _payments.ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, eventId);
+            var rows = _payments.ForSource(ctx.LedgerSource, ctx.EventId);
             var (expected, settled, outstanding) =
-                _payments.Completeness(HpskSite.Models.Ledger.LedgerSourceType.Event, eventId);
+                _payments.Completeness(ctx.LedgerSource, ctx.EventId);
 
             return Json(new
             {
@@ -1421,7 +1422,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SetParticipantPrice([FromBody] GuestRequest request)
         {
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             int me = await CurrentMemberIdAsync();
@@ -1447,14 +1448,14 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> EmailPaymentCode([FromBody] PaymentRequest request)
         {
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
             if (!ctx.CanTakeSwish)
                 return Json(new { success = false, message = "Evenemanget tar inte emot Swish-betalningar." });
 
             int me = await CurrentMemberIdAsync();
             var row = _payments
-                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .ForSource(ctx.LedgerSource, ctx.EventId)
                 .FirstOrDefault(p => p.Id == (request?.PaymentId ?? 0));
             if (row == null) return Json(new { success = false, message = "Betalningen hittades inte." });
 
@@ -1516,9 +1517,9 @@ namespace HpskSite.Controllers
         /// besked, precis som värdväljaren var.</para>
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetPayerPayments(int eventId, int payerMemberId)
+        public async Task<IActionResult> GetPayerPayments(int eventId, int payerMemberId, string? kind = null)
         {
-            var ctx = _participation.GetEventContext(eventId);
+            var ctx = _participation.GetContext(eventId, kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             int me = await CurrentMemberIdAsync();
@@ -1530,7 +1531,7 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
             var rows = _payments
-                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .ForSource(ctx.LedgerSource, ctx.EventId)
                 .Where(p => p.PayerMemberId == payerMemberId)
                 .OrderByDescending(p => p.Id)
                 .Select(p => new
@@ -1572,7 +1573,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> ReversePayment([FromBody] PaymentRequest request)
         {
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             int me = await CurrentMemberIdAsync();
@@ -1582,7 +1583,7 @@ namespace HpskSite.Controllers
             // ⚠️ Raden måste tillhöra DET HÄR evenemanget. Utan kontrollen kunde ett postat
             // betalnings-id från en annan tävling eller ett annat evenemang ångras härifrån.
             var row = _payments
-                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .ForSource(ctx.LedgerSource, ctx.EventId)
                 .FirstOrDefault(p => p.Id == (request?.PaymentId ?? 0));
 
             if (row == null)
@@ -1622,7 +1623,7 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> RegisterPayment([FromBody] PaymentRequest request)
         {
-            var ctx = _participation.GetEventContext(request?.EventId ?? 0);
+            var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
 
             int me = await CurrentMemberIdAsync();
@@ -1643,7 +1644,7 @@ namespace HpskSite.Controllers
             if (!HpskSite.Models.Ledger.LedgerPaymentMethod.All.Contains(method))
                 return Json(new { success = false, message = "Välj hur betalningen kom in." });
 
-            var issuer = _issuers.ResolveForEvent(ctx.EventId);
+            var issuer = (ctx.IsTraining ? _issuers.ResolveForOwner(ctx.OwnerId) : _issuers.ResolveForEvent(ctx.EventId));
             if (issuer == null)
                 return Json(new { success = false, message = "Arrangören går inte att avgöra — kontakta klubben." });
 
@@ -1654,7 +1655,7 @@ namespace HpskSite.Controllers
 
             // Återanvänd en öppen rad; skapa bara när ingen finns.
             var open = _payments
-                .ForSource(HpskSite.Models.Ledger.LedgerSourceType.Event, ctx.EventId)
+                .ForSource(ctx.LedgerSource, ctx.EventId)
                 .Where(p => p.PayerMemberId == payer && p.ConfirmedUtc is null && p.VoidedUtc is null)
                 .OrderBy(p => p.Id)
                 .FirstOrDefault();
@@ -1671,7 +1672,7 @@ namespace HpskSite.Controllers
                 {
                     IssuerType = issuer.Value.Type,
                     IssuerId = issuer.Value.Id,
-                    SourceType = HpskSite.Models.Ledger.LedgerSourceType.Event,
+                    SourceType = ctx.LedgerSource,
                     SourceId = ctx.EventId,
                     PayerMemberId = payer,
                     PayerName = payerMember?.Name ?? $"Medlem {payer}",
@@ -1737,9 +1738,18 @@ namespace HpskSite.Controllers
                 return null;
             }
 
-            if (!int.TryParse(payload, out var eventId)) { message = "Ogiltig kod."; return null; }
+            // "training:123" = en klubbträning (fas B2); ett rent tal = en händelse, precis som
+            // innan — redan utskrivna affischer fungerar oförändrat.
+            var occasionKind = ClubEvents.OccasionEvent;
+            const string trainingPrefix = "training:";
+            if (payload.StartsWith(trainingPrefix, StringComparison.Ordinal))
+            {
+                occasionKind = ClubEvents.OccasionTraining;
+                payload = payload.Substring(trainingPrefix.Length);
+            }
+            if (!int.TryParse(payload, out var occasionId)) { message = "Ogiltig kod."; return null; }
 
-            var ctx = _participation.GetEventContext(eventId);
+            var ctx = _participation.GetContext(occasionId, occasionKind);
             if (ctx == null) { message = "Evenemanget hittades inte."; return null; }
             return ctx;
         }
@@ -1753,6 +1763,8 @@ namespace HpskSite.Controllers
         public class SignUpRequest
         {
             public int EventId { get; set; }
+            /// <summary>"Training" för en klubbträning (fas B2); allt annat = händelse.</summary>
+            public string? Kind { get; set; }
 
             /// <summary>Kryssade medlemmen "jag behöver låna klubbvapen"?</summary>
             public bool LoanWeapon { get; set; }
@@ -1775,6 +1787,8 @@ namespace HpskSite.Controllers
         public class GuestRequest
         {
             public int EventId { get; set; }
+            /// <summary>"Training" för en klubbträning (fas B2); allt annat = händelse.</summary>
+            public string? Kind { get; set; }
 
             /// <summary>Gästens namn. Det enda vi lagrar om personen — den ansvariga medlemmen är
             /// kontaktvägen.</summary>
@@ -1803,6 +1817,8 @@ namespace HpskSite.Controllers
         public class PaymentRequest
         {
             public int EventId { get; set; }
+            /// <summary>"Training" för en klubbträning (fas B2); allt annat = händelse.</summary>
+            public string? Kind { get; set; }
             public int PaymentId { get; set; }
 
             /// <summary>Arrangörens bekräftelse: vad som faktiskt kom in, när det skiljer sig.
@@ -1831,6 +1847,8 @@ namespace HpskSite.Controllers
         public class AttendanceRequest
         {
             public int EventId { get; set; }
+            /// <summary>"Training" för en klubbträning (fas B2); allt annat = händelse.</summary>
+            public string? Kind { get; set; }
             public int MemberId { get; set; }
 
             /// <summary>
