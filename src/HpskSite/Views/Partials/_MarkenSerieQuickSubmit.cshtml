@@ -157,17 +157,37 @@ function mqsOpen(o) {
     bootstrap.Modal.getOrCreateInstance(document.getElementById('mqsModal')).show();
 }
 
-// Gold (precision) threshold per weapon group, age-adjusted — mirrors Marken.PrecisionThreshold
-// (Guld A43/B45/C46/R46; 55+ → −1 p/serie; 65+ → −2 p/serie). birthYear 0 = no concession.
-function mqsGuldThreshold(group, birthYear) {
-    const guld = { A: 43, B: 45, C: 46, R: 46 };
-    const g = guld[group] != null ? guld[group] : 46;
-    if (birthYear && birthYear > 0) {
-        const age = new Date().getFullYear() - birthYear;
-        if (age >= 66) return g - 2;  // 65+ → −2/serie
-        if (age >= 56) return g - 1;  // 55+ → −1/serie
+// Per-series requirement per valör, age-adjusted — mirrors Marken.ThresholdFor / ValorFor.
+// Brons 32/33/34, Silver 38/39/40, Guld 43/45/46 (A/B/C; R and unknown read as C).
+// The age concession applies to EVERY valör: turned 55 the previous year → −1, turned 65 → −2.
+// birthYear 0 = no concession. Keep in step with Marken.cs.
+const MQS_VALOR_BASE = {
+    Brons:  { A: 32, B: 33, C: 34 },
+    Silver: { A: 38, B: 39, C: 40 },
+    Guld:   { A: 43, B: 45, C: 46 }
+};
+function mqsAgeConcession(birthYear) {
+    if (!birthYear || birthYear <= 0) return 0;
+    const age = new Date().getFullYear() - birthYear;
+    if (age >= 66) return 2;
+    if (age >= 56) return 1;
+    return 0;
+}
+function mqsThresholdFor(level, group, birthYear) {
+    const row = MQS_VALOR_BASE[level];
+    if (!row) return 0;
+    const g = (group === 'A' || group === 'B') ? group : 'C';
+    return row[g] - mqsAgeConcession(birthYear);
+}
+// Highest valör a series total reaches, or null.
+function mqsValorFor(total, group, birthYear) {
+    for (const level of ['Guld', 'Silver', 'Brons']) {
+        if (total >= mqsThresholdFor(level, group, birthYear)) return level;
     }
-    return g;
+    return null;
+}
+function mqsGuldThreshold(group, birthYear) {
+    return mqsThresholdFor('Guld', group, birthYear);
 }
 
 // Lightweight personnummer → birth year (mirrors Marken.BirthYearFromPersonNumber) so the threshold
