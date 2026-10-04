@@ -280,7 +280,10 @@ namespace HpskSite.Controllers
                 int total = shots.Sum(ShotValue);
                 int threshold = Marken.PrecisionThreshold(group, year, birthYear);
                 series.SeriesType = Marken.SeriesTypePrecision;
-                series.ClaimedLevel = Marken.LevelGuld;
+                // The valör the total REACHES (age concession on every level). Threshold and Qualifies
+                // keep meaning "the guldkrav" — the Guldfodring, the liga and Elit read those, and they
+                // must not start counting a silver series as a guldserie.
+                series.ClaimedLevel = Marken.ValorFor(total, group, year, birthYear) ?? "";
                 series.Shots = System.Text.Json.JsonSerializer.Serialize(shots);
                 series.Total = total;
                 series.Threshold = threshold;
@@ -1199,7 +1202,7 @@ namespace HpskSite.Controllers
                     if (total <= 0 || total > 50) { errors.Add($"{row}: ange seriens poäng (0–50)."); skipped++; continue; }
                     int threshold = Marken.PrecisionThreshold(group, year, birthYear);
                     series.SeriesType = Marken.SeriesTypePrecision;
-                    series.ClaimedLevel = Marken.LevelGuld;
+                    series.ClaimedLevel = Marken.ValorFor(total, group, year, birthYear) ?? ""; // see SubmitSeries
                     series.Shots = "[]"; // backlog records the total only, not shot-by-shot
                     series.Total = total;
                     series.Threshold = threshold;

@@ -97,7 +97,7 @@
                 body = `<p class="text-center mb-1"><span class="fs-5 fw-bold">Precisionsserie</span></p>
                     <div class="text-center mb-2">${shots}</div>
                     <p class="text-center mb-1"><span class="fs-4 fw-bold">${s.total} p</span>
-                       <span class="text-muted">(vapengrupp ${esc(s.weaponGroup)})</span></p>
+                       <span class="text-muted">(vapengrupp ${esc(s.weaponGroup)} · ${s.claimedLevel ? 'når ' + esc(s.claimedLevel.toLowerCase()) : 'under brons'})</span></p>
                     <p class="text-center text-muted small">Räknas mot Pistolskyttemärket (guld ≥ ${s.threshold}) och Elitmärket.</p>`;
             } else if (s.discipline === 'Air') {
                 body = `<p class="text-center mb-1"><span class="fs-5 fw-bold">Luftpistolserie</span></p>
