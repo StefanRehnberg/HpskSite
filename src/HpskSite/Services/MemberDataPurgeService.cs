@@ -104,6 +104,18 @@ namespace HpskSite.Services
             // ── Shooting-range activity (subject = the member who shot) ──
             ("RangeActivitySession",         "MemberId"),
 
+            // ── Anmälan och närvaro på händelser och träningar (fas B5) ──
+            // GuestOfMemberId är BETALAREN för en gästrad (medlemmen som tog med sin fru), alltså ett
+            // subjekt och inte en aktör — vid en sammanslagning ska ansvaret följa med till kontot som
+            // blir kvar. SignedUpByMemberId/RecordedByMemberId är aktörer och räknas medvetet inte.
+            // ⚠️ ClubTraining.SkjutledareMemberId står INTE här: kartan RADERAR vid gallring, och en
+            // träning får inte försvinna för att skjutledarens uppgifter gallras.
+            ("ClubEventParticipant",         "MemberId"),
+            ("ClubEventParticipant",         "GuestOfMemberId"),
+
+            // ── Lånevapenbokningar (subject = medlemmen som lånar) ──
+            ("FirearmBooking",               "MemberId"),
+
             // ── Auth / devices / push ──
             ("RefreshTokens",                "MemberId"),
             ("DeviceRegistrations",          "MemberId"),

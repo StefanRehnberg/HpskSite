@@ -590,10 +590,27 @@ namespace HpskSite.Models
         public static bool CompetitionCounts(bool hasResult, bool hasDns) => hasResult || !hasDns;
 
         /// <summary>
-        /// Räknas en evenemangsrad som aktivitet? Bara vid registrerad närvaro. Ett upprop som aldrig
+        /// Räknas en deltagarrad som aktivitet? Bara vid registrerad närvaro. Ett upprop som aldrig
         /// togs är frånvaron av en uppgift, inte frånvaro — och giltig frånvaro är inte verksamhet.
+        ///
+        /// <para><b>⚠️ Och bara på ett SKYTTETILLFÄLLE, eller en händelse där närvaron är obligatorisk</b>
+        /// (Stefans beslut 2026-10-03). En städdag eller ett julbord är inte skytteaktivitet, och
+        /// sammanställningen är underlag för ett föreningsintyg till Polismyndigheten — men en
+        /// obligatorisk städdag är ett krav klubben ställer, och då hör närvaron dit.</para>
         /// </summary>
-        public static bool EventCounts(string? attendanceStatus) =>
-            attendanceStatus == ClubEvents.AttendancePresent;
+        public static bool EventCounts(string? attendanceStatus, bool isShootingOccasion, bool isMandatory) =>
+            attendanceStatus == ClubEvents.AttendancePresent && (isShootingOccasion || isMandatory);
+
+        /// <summary>Skälet när en närvaro inte räknas för att händelsen varken är skytte eller obligatorisk.</summary>
+        public const string NotShootingReason = "Händelse utan skytte och utan obligatorisk närvaro — räknas inte som skytteaktivitet";
+
+        /// <summary>
+        /// Är tillfället skytte? En träning alltid. En gammal händelse av typen Träning (eller ett
+        /// grennamn) också — annars tappade varje medlem sin träningsaktivitet under tiden mellan att
+        /// den här regeln deployas och att migreringen (fas B3) körts. Samma klassificering som
+        /// migreringen använder, så de två kan inte vara oense.
+        /// </summary>
+        public static bool IsShootingOccasion(bool isTraining, string? eventType) =>
+            isTraining || HpskSite.Models.Training.TrainingMigrationRules.Classify(eventType).Migrate;
     }
 }

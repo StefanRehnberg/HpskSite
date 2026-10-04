@@ -19,6 +19,7 @@ namespace HpskSite.Services
     {
         private readonly IUmbracoContextFactory _umbracoContextFactory;
         private readonly IScopeProvider _scopeProvider;
+        private readonly ILogger<WhatsHappeningService> _logger;
         private readonly AppCaches _appCaches;
 
         private const string CacheKey = "WhatsHappening:Data:v1";
@@ -28,11 +29,13 @@ namespace HpskSite.Services
         public WhatsHappeningService(
             IUmbracoContextFactory umbracoContextFactory,
             IScopeProvider scopeProvider,
-            AppCaches appCaches)
+            AppCaches appCaches,
+            ILogger<WhatsHappeningService> logger)
         {
             _umbracoContextFactory = umbracoContextFactory;
             _scopeProvider = scopeProvider;
             _appCaches = appCaches;
+            _logger = logger;
         }
 
         public WhatsHappeningData GetData()
@@ -179,6 +182,54 @@ namespace HpskSite.Services
                         Venue = node.Value<string>("venue") ?? "",
                         Url = node.Url()
                     });
+                }
+
+                // ── Fas B5: klubbarnas träningar (ClubTraining) ───────────────────────────────
+                // Läggs in som klubbhändelser med typen Träning, så att flödets regler från fas C
+                // gäller oförändrat: träningar i ANDRA klubbar visas inte under krets/hela Sverige,
+                // och en utloggad ser inga träningar alls. url "#training-{id}" öppnar
+                // träningspanelen (_TrainingPanelModal) i stället för en sida — träningar har ingen.
+                // Inställda träningar tas inte med: flödet är "vad händer", och det gör inte de.
+                try
+                {
+                    List<HpskSite.Models.Training.ClubTraining> trainings;
+                    using (var tscope = _scopeProvider.CreateScope(autoComplete: true))
+                    {
+                        trainings = tscope.Database.Fetch<HpskSite.Models.Training.ClubTraining>(
+                            "WHERE [Date] >= @0 AND [Date] <= @1 AND IsCancelled = 0", today, horizon);
+                    }
+                    foreach (var t in trainings)
+                    {
+                        var start = t.Date;
+                        if (!string.IsNullOrEmpty(t.StartTime)
+                            && TimeSpan.TryParse(t.StartTime, CultureInfo.InvariantCulture, out var ts))
+                            start = t.Date.Add(ts);
+                        var regionCode = "";
+                        var clubName = "";
+                        if (clubInfo.TryGetValue(t.ClubId, out var ci)) { regionCode = ci.Region; clubName = ci.Name; }
+                        data.Items.Add(new FeedItem
+                        {
+                            Source = FeedSource.ClubEvent,
+                            Start = start,
+                            Window = WindowFor(start, today),
+                            ShowTime = !string.IsNullOrEmpty(t.StartTime),
+                            RegionCode = regionCode,
+                            RegionName = RegionName(regionCode),
+                            Masked = true,
+                            ClubId = t.ClubId,
+                            SourceLabel = "Klubbhändelse",
+                            TypeLabel = "Träning",
+                            MaskedTypeLabel = NeutralEventLabel("Träning"),
+                            Title = t.Name,
+                            ClubName = clubName,
+                            Venue = t.Venue ?? "",
+                            Url = $"#training-{t.Id}"
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Flödet: klubbarnas träningar kunde inte läsas");
                 }
 
                 data.Regions = regionByCode.Values

@@ -188,7 +188,8 @@
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
-                body: JSON.stringify(body || {}),
+                // Fas B5: sorten följer med i varje anrop — en träning och en händelse kan ha samma id.
+                body: JSON.stringify(Object.assign({ kind: (cfg && cfg.kind) || 'Event' }, body || {})),
             });
             const t = await r.text();
             try { return JSON.parse(t); } catch { return { success: false, message: `Oväntat svar (${r.status}).` }; }
@@ -258,7 +259,7 @@
             let rows = [];
             try {
                 const r = await fetch('/umbraco/surface/ClubEvent/GetPayerPayments'
-                                    + `?eventId=${cfg.eventId}&payerMemberId=${cfg.payerMemberId}`,
+                                    + `?eventId=${cfg.eventId}&kind=${cfg.kind || 'Event'}&payerMemberId=${cfg.payerMemberId}`,
                                     { credentials: 'same-origin' });
                 const d = await r.json();
                 rows = (d && d.success && d.payments) || [];
@@ -355,7 +356,7 @@
             if (!d.success) { say(d.message || 'Kunde inte ta fram koden.'); return; }
 
             paymentId = d.paymentId;
-            el('hepQrImg').src = `/umbraco/surface/ClubEvent/GetPaymentQr?eventId=${cfg.eventId}&paymentId=${d.paymentId}&t=${Date.now()}`;
+            el('hepQrImg').src = `/umbraco/surface/ClubEvent/GetPaymentQr?eventId=${cfg.eventId}&kind=${cfg.kind || 'Event'}&paymentId=${d.paymentId}&t=${Date.now()}`;
             el('hepSwishNumber').textContent = d.swishNumber || '';
             el('hepQrAmount').textContent = kr(d.amount);
             el('hepQrRef').textContent = d.reference || '';
