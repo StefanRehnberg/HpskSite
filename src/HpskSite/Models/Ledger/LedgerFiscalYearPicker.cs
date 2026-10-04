@@ -75,6 +75,50 @@ namespace HpskSite.Models.Ledger
         }
 
         /// <summary>
+        /// Räkenskapsåret en RÄTTELSE ska bokföras i, om ingen valt något annat.
+        ///
+        /// <para><b>⚠️⚠️ INTE "I DAG" RAKT AV.</b> Rättelsen daterades tidigare med
+        /// <c>DateTime.Today</c>, och en sandlåda för Hallands krets som arbetade i ett passerat år
+        /// fick <i>"Det finns inget räkenskapsår som omfattar 2026-10-04"</i> när kassören ville ta
+        /// bort en dubbelregistrerad verifikation (Lis Erevall, 2026-10-04). Samma felfamilj som
+        /// <see cref="Working"/> rättade för Bokför 2026-09-22.</para>
+        ///
+        /// <list type="number">
+        /// <item>Originalets år, om det är ÖPPET. Ett fel i ett år som fortfarande är öppet rättas
+        /// i samma år — annars hamnar posten i ett års resultat och dess motsats i nästa, och
+        /// BÅDA årens siffror blir fel.</item>
+        /// <item>Annars ett öppet år som omfattar i dag.</item>
+        /// <item>Annars det senaste öppna året.</item>
+        /// <item>Inget öppet år: <c>null</c>. Då ska spärren få säga varför.</item>
+        /// </list>
+        /// </summary>
+        public static LedgerFiscalYear? CorrectionYear(
+            IEnumerable<LedgerFiscalYear>? years, DateTime originalDate, DateTime today)
+        {
+            if (years is null) return null;
+            var open = years.Where(y => y.Status == LedgerFiscalYearStatus.Open).ToList();
+            if (open.Count == 0) return null;
+
+            return open.FirstOrDefault(y => Covers(y, originalDate))
+                ?? open.FirstOrDefault(y => Covers(y, today))
+                ?? open.OrderByDescending(y => y.Year).First();
+        }
+
+        /// <summary>
+        /// Förvalt datum för en rättelse: i dag när i dag ryms i <see cref="CorrectionYear"/>,
+        /// annars närmaste kant. <c>null</c> när det inte finns något öppet år.
+        /// </summary>
+        public static DateTime? CorrectionDate(
+            IEnumerable<LedgerFiscalYear>? years, DateTime originalDate, DateTime today)
+        {
+            var year = CorrectionYear(years, originalDate, today);
+            return year is null ? null : Clamp(today, year);
+        }
+
+        private static bool Covers(LedgerFiscalYear y, DateTime date)
+            => y.StartDate.Date <= date.Date && y.EndDate.Date >= date.Date;
+
+        /// <summary>
         /// Upplysningen när i dag ligger utanför arbetsåret. <b>Inte en spärr</b> — bokföringen
         /// fungerar, det är bara datumet som måste ligga i året.
         /// </summary>

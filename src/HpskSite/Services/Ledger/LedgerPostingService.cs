@@ -77,8 +77,7 @@ namespace HpskSite.Services.Ledger
                 // Skapas INTE automatiskt: ett år har start- och slutdatum som bara föreningen
                 // känner (brutet räkenskapsår), och ett gissat år är fel i tysthet.
                 return LedgerPostingResult.Failed(
-                    $"Det finns inget räkenskapsår som omfattar {request.AccountingDate:yyyy-MM-dd}. "
-                    + "Lägg upp året i ekonomiinställningarna först.");
+                    NoFiscalYearMessage(db, request.IssuerType, request.IssuerId, request.AccountingDate));
             }
 
             if (fiscalYear.Status == LedgerFiscalYearStatus.Established)
@@ -273,9 +272,15 @@ namespace HpskSite.Services.Ledger
             {
                 IssuerType = original.IssuerType,
                 IssuerId = original.IssuerId,
-                // Rättelsen bokförs I DAG som förval, inte på originalets datum: perioden då felet
-                // upptäcktes är den som är sann, och originalets period kan vara stängd.
-                AccountingDate = (accountingDate ?? DateTime.Today).Date,
+                // Förval: i dag, inom originalets år om det är öppet — annars ett öppet år.
+                // ⚠️ Inte DateTime.Today rakt av: en förening som arbetar i ett passerat år fick
+                // "inget räkenskapsår omfattar <i dag>" (felrapport 2026-10-04). Regeln bor i
+                // LedgerFiscalYearPicker.CorrectionDate och är samma som dialogen förifyller.
+                AccountingDate = (accountingDate
+                                  ?? LedgerFiscalYearPicker.CorrectionDate(
+                                         LoadFiscalYears(db, original.IssuerType, original.IssuerId),
+                                         original.AccountingDate, DateTime.Today)
+                                  ?? DateTime.Today).Date,
                 EventDate = original.EventDate,
                 Description = string.IsNullOrWhiteSpace(reason)
                     ? $"Rättelse av verifikation {original.Number}"
@@ -563,8 +568,7 @@ namespace HpskSite.Services.Ledger
                     issuerType, issuerId, accountingDate.Date);
 
                 if (year is null)
-                    return $"Det finns inget räkenskapsår som omfattar {accountingDate:yyyy-MM-dd}. "
-                         + "Lägg upp året i ekonomiinställningarna först.";
+                    return NoFiscalYearMessage(db, issuerType, issuerId, accountingDate);
 
                 if (year.Status == LedgerFiscalYearStatus.Established)
                     return $"Räkenskapsåret {year.Year} är fastställt av årsmötet och tar inte emot fler poster.";
@@ -578,6 +582,57 @@ namespace HpskSite.Services.Ledger
                     issuerType, issuerId);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// "Inget räkenskapsår omfattar datumet" — med de år föreningen FAKTISKT har.
+        ///
+        /// <para>⚠️ "Lägg upp året" ensamt skickade kassören att lägga upp ett år hen redan trodde
+        /// sig ha (felrapport 2026-10-04). Att se vilka år som finns, och deras datum, är vad som
+        /// avgör om rätt åtgärd är att lägga upp ett år eller att välja ett annat datum.</para>
+        /// </summary>
+        private static string NoFiscalYearMessage(IDatabase db, int issuerType, int issuerId, DateTime date)
+        {
+            var head = $"Det finns inget räkenskapsår som omfattar {date:yyyy-MM-dd}. ";
+            try
+            {
+                var years = db.Fetch<LedgerFiscalYear>(
+                    LedgerSchema.Sql(issuerId, @"SELECT * FROM dbo.LedgerFiscalYear
+                       WHERE IssuerType = @0 AND IssuerId = @1 ORDER BY StartDate"),
+                    issuerType, issuerId);
+
+                if (years.Count == 0)
+                    return head + "Lägg upp året i ekonomiinställningarna först.";
+
+                var list = string.Join(", ", years.Select(y => $"{y.Year} ({y.StartDate:yyyy-MM-dd}–{y.EndDate:yyyy-MM-dd})"));
+                return head + "Föreningens räkenskapsår: " + list + ". Välj ett datum inom ett av dem, eller lägg upp det år som saknas "
+                     + "i ekonomiinställningarna.";
+            }
+            catch
+            {
+                return head + "Lägg upp året i ekonomiinställningarna först.";
+            }
+        }
+
+        private static List<LedgerFiscalYear> LoadFiscalYears(IDatabase db, int issuerType, int issuerId)
+            => db.Fetch<LedgerFiscalYear>(
+                LedgerSchema.Sql(issuerId, @"SELECT * FROM dbo.LedgerFiscalYear
+                   WHERE IssuerType = @0 AND IssuerId = @1"),
+                issuerType, issuerId);
+
+        /// <summary>
+        /// Förvalt datum för en rättelse av verifikationen — samma regel som
+        /// <see cref="CreateCorrection"/> använder när inget datum anges. Läses av ytan så att
+        /// dialogen kan visa datumet INNAN kassören trycker. <c>null</c> = inget öppet år.
+        /// </summary>
+        public (DateTime? Date, int? Year) CorrectionDefault(int issuerType, int issuerId, DateTime originalDate)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var years = LoadFiscalYears(db, issuerType, issuerId);
+            var year = LedgerFiscalYearPicker.CorrectionYear(years, originalDate, DateTime.Today);
+            return year is null
+                ? (null, null)
+                : (LedgerFiscalYearPicker.Clamp(DateTime.Today, year), year.Year);
         }
 
         private static LedgerFiscalYear? ResolveFiscalYear(IDatabase db, LedgerPostingRequest request)
