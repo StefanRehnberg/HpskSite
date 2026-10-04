@@ -3171,12 +3171,23 @@ namespace HpskSite.Controllers
             var isAwardingStandardMedals = competition.GetValue<bool>("isAwardingStandardMedals");
             var competitionTypeId = competition.GetValue<string>("competitionType") ?? "Precision";
 
+            // Är den SPARADE listan (resultData — den prisutdelningen, granskningen och medaljerna
+            // läser) äldre än resultaten? Resultat-fliken räknar då om den av sig själv när den
+            // öppnas (Stefan 2026-10-04), i stället för att vänta på att någon trycker Uppdatera.
+            // Bara huvudlistan; deltävlingen räknas alltid live.
+            bool artifactStale = false;
+            DateTime? artifactSavedAt = null;
+            if (resultPage != null && !subCompetitionOnly)
+                (artifactStale, artifactSavedAt) = ReadArtifactFreshness(resultPage, competitionId);
+
             return Json(new
             {
                 Success = true,
                 Exists = true,
                 IsOfficial = isOfficial,
                 LastUpdated = lastUpdated,
+                ArtifactStale = artifactStale,
+                ArtifactSavedAt = artifactSavedAt,
                 Results = resultData,
                 ResultPageUrl = resultPageUrl,
                 HasResultPage = resultPage != null,
@@ -3191,6 +3202,32 @@ namespace HpskSite.Controllers
                 _logger.LogError(ex, "Error getting results list for competition {CompetitionId}", competitionId);
                 return Json(new { Success = false, Message = "Ett fel uppstod vid hämtning av resultatlista: " + ex.Message, Exists = false });
             }
+        }
+
+        /// <summary>
+        /// Billig kontroll som Resultat-fliken gör varje gång den öppnas (2026-10-04): är den sparade
+        /// resultatlistan äldre än resultaten? GetResultsList räknar hela listan och tar 8–16 s på en
+        /// tävling i SM-storlek, så den körs bara när svaret är ja — annars läses listan som den är.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetResultsListFreshness(int competitionId)
+        {
+            if (!await CanManageCompetitionResults(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet för den här tävlingen." });
+            var competition = _contentService.GetById(competitionId);
+            if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
+            var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long _)
+                .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+            if (resultPage == null) return Json(new { success = true, hasResultPage = false, stale = false });
+            var (stale, savedAt) = ReadArtifactFreshness(resultPage, competitionId);
+            return Json(new
+            {
+                success = true,
+                hasResultPage = true,
+                isOfficial = resultPage.GetValue<bool>("isOfficial"),
+                stale,
+                savedAt
+            });
         }
 
         [HttpPost]
@@ -3472,7 +3509,7 @@ namespace HpskSite.Controllers
                     Message = refreshed
                         ? null
                         : "Skotten sparades, men resultatlistan kunde inte räknas om automatiskt. "
-                          + "Klicka Uppdatera på fliken Resultat."
+                          + "Räkna om listan under Åtgärder på fliken Resultat."
                 });
             }
             catch (Exception ex)
@@ -3510,6 +3547,35 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Error in DeleteShootOffEntry");
                 return Json(new { Success = false, Message = "Ett fel uppstod: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Den sparade resultatlistans ålder mot resultaten. Inaktuell = ingen sparad lista, eller en
+        /// resultatrad ändrad efter att listan sparades (<c>lastUpdated</c> sätts av varje skrivväg för
+        /// resultData). Särskjutning, klassbyte och borttagning räknar redan om listan själva, så
+        /// resultattabellens senaste ändring räcker. En billig MAX-fråga — omräkningen själv är det dyra
+        /// (8–16 s på en tävling i SM-storlek), och den körs bara när det här svarar ja.
+        /// </summary>
+        private (bool Stale, DateTime? SavedAt) ReadArtifactFreshness(IContent resultPage, int competitionId)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(resultPage.GetValue<string>("resultData"))) return (true, null);
+                var saved = resultPage.GetValue<DateTime>("lastUpdated");
+                if (saved == default) return (true, null);
+                var table = CompetitionResultTables.ForSharedResultEndpoint(GetCompetitionTypeId(competitionId));
+                using var db = _umbracoDatabaseFactory.CreateDatabase();
+                var newest = db.ExecuteScalar<DateTime?>(
+                    $"SELECT MAX(LastModified) FROM [{table}] WHERE CompetitionId = @0", competitionId);
+                return (newest.HasValue && newest.Value > saved, saved);
+            }
+            catch (Exception ex)
+            {
+                // Kan vi inte avgöra det räknar vi INTE om på chans — omräkningen är dyr, och fliken
+                // fungerar ändå. Felet loggas.
+                _logger.LogWarning(ex, "Kunde inte avgöra om resultatlistan är inaktuell för tävling {CompetitionId}", competitionId);
+                return (false, null);
             }
         }
 
@@ -3770,7 +3836,7 @@ namespace HpskSite.Controllers
                     message = refreshed
                         ? null
                         : "Inställningen sparades, men resultatlistan kunde inte räknas om "
-                          + "automatiskt. Klicka Uppdatera."
+                          + "automatiskt. Räkna om listan under Åtgärder på fliken Resultat."
                 });
             }
             catch (Exception ex)
