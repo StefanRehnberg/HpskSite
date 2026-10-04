@@ -76,6 +76,20 @@ namespace HpskSite.Services.Ledger
         }
 
         /// <summary>
+        /// Utställaren för en klubbträning (fas B2): klubben själv. En träning är ingen nod och har
+        /// alltså ingen förälder att klättra från — ägaren är klubbens nod-id.
+        /// </summary>
+        public Issuer? ResolveForOwner(int ownerNodeId)
+        {
+            using var cref = _contextFactory.EnsureUmbracoContext();
+            var node = cref.UmbracoContext.Content?.GetById(ownerNodeId);
+            var issuer = node is null ? null : FromNode(node);
+            if (issuer is null)
+                _logger.LogWarning("Nod {Id} är ingen klubb eller krets — ingen utställare.", ownerNodeId);
+            return issuer;
+        }
+
+        /// <summary>
         /// Utställaren för en tävling: <c>clubId</c> först, annars <c>regionalFederation</c>.
         /// <para><b>⚠️ BÅDA VÄRDFORMERNA.</b> Ett SM är kretsvärdat (<c>clubId</c> tomt), och en
         /// uppslagning som bara läser <c>clubId</c> låser ute den arrangerande kretsen från sin egen

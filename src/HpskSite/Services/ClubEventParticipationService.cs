@@ -50,6 +50,72 @@ namespace HpskSite.Services
 
         // ── Event context ─────────────────────────────────────────────
 
+        /// <summary>The context for an occasion of either kind (fas B2) — the one entry point that
+        /// sign-up, roster, QR, guests and loan weapons go through for events AND trainings.</summary>
+        public ClubEventContext? GetContext(int occasionId, string? kind)
+            => ClubEvents.NormaliseOccasionKind(kind) == ClubEvents.OccasionTraining
+                ? GetTrainingContext(occasionId)
+                : GetEventContext(occasionId);
+
+        /// <summary>
+        /// A <see cref="ClubTraining"/> as a context. Same rules as an event: the club is the owner,
+        /// the club's Swish number is the default, an unreadable audience is the narrowest. A
+        /// training is ALWAYS club-owned — kretsar never have training.
+        /// </summary>
+        public ClubEventContext? GetTrainingContext(int trainingId)
+        {
+            if (trainingId <= 0) return null;
+            HpskSite.Models.Training.ClubTraining? t;
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                t = db.SingleOrDefault<HpskSite.Models.Training.ClubTraining>("WHERE Id = @0", trainingId);
+            }
+            catch (Exception ex)
+            {
+                // The table may not exist yet (migration not run) — no training then, never a crash.
+                _logger.LogWarning(ex, "ClubTraining {Id} could not be read", trainingId);
+                return null;
+            }
+            if (t == null) return null;
+
+            var club = t.ClubId > 0 ? _contentService.GetById(t.ClubId) : null;
+            var ctx = new ClubEventContext
+            {
+                EventId = t.Id,
+                OccasionKind = ClubEvents.OccasionTraining,
+                EventName = t.Name,
+                EventDate = WithTime(t.Date, t.StartTime),
+                EventEndDate = string.IsNullOrWhiteSpace(t.EndTime) ? null : WithTime(t.Date, t.EndTime),
+                Venue = t.Venue ?? "",
+                EventType = "Träning",
+                RegistrationRequired = t.RegistrationRequired && !t.IsCancelled,
+                MaxParticipants = t.MaxParticipants ?? 0,
+                RegistrationUrl = "",
+                OwnerId = t.ClubId,
+                OwnerName = club?.Name ?? "",
+                IsClubOwned = true,
+                IsRegionOwned = false,
+                IsMandatory = t.IsMandatory,
+                Audience = EventAudience.Normalise(t.Audience),
+                AudiencePropertyExists = true,
+                Prices = EventPrices.Parse(t.Prices),
+                RegistrationDeadline = t.RegistrationDeadline,
+                LoanWeaponsOffered = t.LoanWeaponsOffered,
+                SkjutledareMemberId = t.SkjutledareMemberId,
+                IsCancelled = t.IsCancelled,
+                SwishPropertyExists = true,
+                RegionCode = club?.GetValue<string>("regionalFederation") ?? ""
+            };
+            var own = (t.SwishNumber ?? "").Trim();
+            ctx.SwishNumber = own.Length > 0 ? own : (club?.GetValue<string>(ClubEvents.SwishProperty) ?? "").Trim();
+            ctx.SwishFromOwner = own.Length == 0 && ctx.SwishNumber.Length > 0;
+            return ctx;
+        }
+
+        private static DateTime WithTime(DateTime date, string? hhmm)
+            => TimeSpan.TryParse(hhmm, out var ts) ? date.Date + ts : date.Date;
+
         /// <summary>
         /// Everything about an event that the sign-up rules depend on, resolved once per event
         /// rather than once per participant row.
@@ -331,18 +397,21 @@ namespace HpskSite.Services
 
         // ── Reads ─────────────────────────────────────────────────────
 
-        public async Task<List<ClubEventParticipant>> GetParticipantsAsync(int eventId)
+        // ⚠️ Every read and write below asks BOTH EventId and OccasionKind (fas B2): a node id and a
+        // ClubTraining id are independent series, so EventId alone can name two different occasions.
+        public async Task<List<ClubEventParticipant>> GetParticipantsAsync(int eventId, string kind = ClubEvents.OccasionEvent)
         {
             using var db = _databaseFactory.CreateDatabase();
             return await db.FetchAsync<ClubEventParticipant>(
-                "WHERE EventId = @0 ORDER BY CASE WHEN SignedUpAt IS NULL THEN 1 ELSE 0 END, SignedUpAt, Id", eventId);
+                "WHERE EventId = @0 AND OccasionKind = @1 ORDER BY CASE WHEN SignedUpAt IS NULL THEN 1 ELSE 0 END, SignedUpAt, Id",
+                eventId, ClubEvents.NormaliseOccasionKind(kind));
         }
 
-        public async Task<ClubEventParticipant?> GetParticipantAsync(int eventId, int memberId)
+        public async Task<ClubEventParticipant?> GetParticipantAsync(int eventId, int memberId, string kind = ClubEvents.OccasionEvent)
         {
             using var db = _databaseFactory.CreateDatabase();
             return await db.SingleOrDefaultAsync<ClubEventParticipant>(
-                "WHERE EventId = @0 AND MemberId = @1", eventId, memberId);
+                "WHERE EventId = @0 AND MemberId = @1 AND OccasionKind = @2", eventId, memberId, ClubEvents.NormaliseOccasionKind(kind));
         }
 
         /// <summary>
@@ -351,7 +420,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<ClubEventRoster> BuildRosterAsync(ClubEventContext ctx)
         {
-            var rows = await GetParticipantsAsync(ctx.EventId);
+            var rows = await GetParticipantsAsync(ctx.EventId, ctx.OccasionKind);
             var roster = new ClubEventRoster { Context = ctx };
 
             int seatsTaken = 0;
@@ -434,7 +503,7 @@ namespace HpskSite.Services
             // January for a December event is December's activity.
             return rows.Where(r =>
             {
-                var ctx = GetEventContext(r.EventId);
+                var ctx = GetContext(r.EventId, r.OccasionKind);
                 return ctx?.EventDate?.Year == year;
             }).ToList();
         }
@@ -496,7 +565,7 @@ namespace HpskSite.Services
 
             using var db = _databaseFactory.CreateDatabase();
             var existing = await db.SingleOrDefaultAsync<ClubEventParticipant>(
-                "WHERE EventId = @0 AND MemberId = @1", ctx.EventId, memberId);
+                "WHERE EventId = @0 AND MemberId = @1 AND OccasionKind = @2", ctx.EventId, memberId, ctx.OccasionKind);
 
             // ⚠️ Raden räcker — en diskanmälan utan tidsstämpel är också en anmälan.
             if (existing != null && existing.IsSignedUp)
@@ -508,6 +577,7 @@ namespace HpskSite.Services
                 existing = new ClubEventParticipant
                 {
                     EventId = ctx.EventId,
+                    OccasionKind = ctx.OccasionKind,
                     MemberId = memberId,
                     MemberName = member.Name ?? $"Medlem {memberId}",
                     CreatedDate = now
@@ -572,7 +642,7 @@ namespace HpskSite.Services
             // det ingen som ansvarar for platsen eller avgiften, och avbokningen nedan skulle inte
             // ha nagot att kaskadera fran.
             var hostRow = await db.SingleOrDefaultAsync<ClubEventParticipant>(
-                "WHERE EventId = @0 AND MemberId = @1", ctx.EventId, guestOfMemberId);
+                "WHERE EventId = @0 AND MemberId = @1 AND OccasionKind = @2", ctx.EventId, guestOfMemberId, ctx.OccasionKind);
             // ⚠️ Kravet är att värden STÅR PÅ LISTAN och kan ansvara — inte att raden råkar
             // bära en tidsstämpel. Det var ombudet som gjorde diskens egna deltagare omvalbara.
             if (hostRow == null || !hostRow.IsSignedUp)
@@ -587,8 +657,8 @@ namespace HpskSite.Services
                         false);
 
             var mine = await db.FetchAsync<ClubEventParticipant>(
-                "WHERE EventId = @0 AND GuestOfMemberId = @1 AND CancelledAt IS NULL",
-                ctx.EventId, guestOfMemberId);
+                "WHERE EventId = @0 AND GuestOfMemberId = @1 AND OccasionKind = @2 AND CancelledAt IS NULL",
+                ctx.EventId, guestOfMemberId, ctx.OccasionKind);
             if (mine.Count >= ClubEvents.MaxGuestsPerMember)
                 return (false, $"Du kan ta med högst {ClubEvents.MaxGuestsPerMember} gäster. Kontakta arrangören för fler.", false);
 
@@ -603,6 +673,7 @@ namespace HpskSite.Services
             var row = new ClubEventParticipant
             {
                 EventId = ctx.EventId,
+                OccasionKind = ctx.OccasionKind,
                 MemberId = ClubEvents.GuestMemberId,
                 MemberName = name,
                 GuestOfMemberId = guestOfMemberId,
@@ -631,11 +702,12 @@ namespace HpskSite.Services
         /// kommer. Vill han avboka bara sonen finns <see cref="CancelGuestAsync"/>.</para>
         /// </summary>
         public async Task<(bool Ok, string? Message, int GuestsCancelled)> CancelAsync(
-            int eventId, int memberId, int actingMemberId)
+            int eventId, int memberId, int actingMemberId, string kind = ClubEvents.OccasionEvent)
         {
+            kind = ClubEvents.NormaliseOccasionKind(kind);
             using var db = _databaseFactory.CreateDatabase();
             var row = await db.SingleOrDefaultAsync<ClubEventParticipant>(
-                "WHERE EventId = @0 AND MemberId = @1", eventId, memberId);
+                "WHERE EventId = @0 AND MemberId = @1 AND OccasionKind = @2", eventId, memberId, kind);
             // ⚠️ Ombudet här gjorde en diskanmälan OMÖJLIG att avboka — personen stod i
             // listan och fick ändå "ingen anmälan att avboka".
             if (row == null) return (false, "Ingen anmälan att avboka.", 0);
@@ -648,7 +720,7 @@ namespace HpskSite.Services
             await db.UpdateAsync(row);
 
             var guests = await db.FetchAsync<ClubEventParticipant>(
-                "WHERE EventId = @0 AND GuestOfMemberId = @1 AND CancelledAt IS NULL", eventId, memberId);
+                "WHERE EventId = @0 AND GuestOfMemberId = @1 AND OccasionKind = @2 AND CancelledAt IS NULL", eventId, memberId, kind);
             foreach (var g in guests)
             {
                 g.CancelledAt = now;
@@ -675,7 +747,7 @@ namespace HpskSite.Services
         {
             using var db = _databaseFactory.CreateDatabase();
             var row = await db.SingleOrDefaultAsync<ClubEventParticipant>(
-                "WHERE Id = @0 AND EventId = @1", participantId, ctx.EventId);
+                "WHERE Id = @0 AND EventId = @1 AND OccasionKind = @2", participantId, ctx.EventId, ctx.OccasionKind);
             if (row == null) return (false, "Gästen hittades inte.");
             if (!row.IsGuest) return (false, "Raden är en medlems egen anmälan, inte en gäst.");
             if (row.CancelledAt != null) return (false, "Gästen är redan avbokad.");
@@ -779,7 +851,7 @@ namespace HpskSite.Services
         /// </param>
         public async Task<(bool Ok, string? Message)> SetAttendanceAsync(
             int eventId, int memberId, string? status, string? note, int actingMemberId,
-            string? priceId = null)
+            string? priceId = null, string kind = ClubEvents.OccasionEvent)
         {
             if (status != null && !ClubEvents.IsAttendanceStatus(status))
                 return (false, "Ogiltig närvarostatus.");
@@ -787,9 +859,10 @@ namespace HpskSite.Services
             var member = _memberService.GetById(memberId);
             if (member == null) return (false, "Medlemmen hittades inte.");
 
+            kind = ClubEvents.NormaliseOccasionKind(kind);
             using var db = _databaseFactory.CreateDatabase();
             var row = await db.SingleOrDefaultAsync<ClubEventParticipant>(
-                "WHERE EventId = @0 AND MemberId = @1", eventId, memberId);
+                "WHERE EventId = @0 AND MemberId = @1 AND OccasionKind = @2", eventId, memberId, kind);
 
             var now = DateTime.Now;
             if (row == null)
@@ -805,12 +878,13 @@ namespace HpskSite.Services
                 // ⚠️ SignedUpByMemberId bär funktionären: anmälan är gjord ÅT personen, inte AV
                 // hen. Det är samma skillnad som gästradens GuestOfMemberId vs SignedUpByMemberId,
                 // och den går isar precis när det kostar pengar.
-                var ctx = GetEventContext(eventId);
+                var ctx = GetContext(eventId, kind);
                 var chosen = ctx == null ? null : ResolvePriceChoice(ctx, priceId);
 
                 row = new ClubEventParticipant
                 {
                     EventId = eventId,
+                    OccasionKind = kind,
                     MemberId = memberId,
                     MemberName = member.Name ?? $"Medlem {memberId}",
                     SignedUpAt = now,
@@ -868,14 +942,15 @@ namespace HpskSite.Services
         /// upp oanmäld går via <see cref="AddGuestAsync"/>.</para>
         /// </summary>
         public async Task<(bool Ok, string? Message)> SetAttendanceForRowAsync(
-            int eventId, int participantId, string? status, string? note, int actingMemberId)
+            int eventId, int participantId, string? status, string? note, int actingMemberId,
+            string kind = ClubEvents.OccasionEvent)
         {
             if (status != null && !ClubEvents.IsAttendanceStatus(status))
                 return (false, "Ogiltig närvarostatus.");
 
             using var db = _databaseFactory.CreateDatabase();
             var row = await db.SingleOrDefaultAsync<ClubEventParticipant>(
-                "WHERE Id = @0 AND EventId = @1", participantId, eventId);
+                "WHERE Id = @0 AND EventId = @1 AND OccasionKind = @2", participantId, eventId, ClubEvents.NormaliseOccasionKind(kind));
             if (row == null) return (false, "Deltagaren hittades inte.");
 
             var now = DateTime.Now;
@@ -937,7 +1012,7 @@ namespace HpskSite.Services
 
             using var db = _databaseFactory.CreateDatabase();
             var row = await db.SingleOrDefaultAsync<ClubEventParticipant>(
-                "WHERE Id = @0 AND EventId = @1", participantId, ctx.EventId);
+                "WHERE Id = @0 AND EventId = @1 AND OccasionKind = @2", participantId, ctx.EventId, ctx.OccasionKind);
             if (row == null) return (false, "Deltagaren hittades inte på evenemanget.");
 
             // ⚠⚠ HÄR NAMNGER ANROPAREN ETT PRIS, och då ska det finnas. ResolvePriceChoice duger
@@ -960,15 +1035,35 @@ namespace HpskSite.Services
         }
 
         public async Task<(bool Ok, string? Message)> AddWalkInAsync(
-            int eventId, int memberId, int actingMemberId, string? priceId = null)
+            int eventId, int memberId, int actingMemberId, string? priceId = null, string kind = ClubEvents.OccasionEvent)
             => await SetAttendanceAsync(eventId, memberId, ClubEvents.AttendancePresent, null,
-                                        actingMemberId, priceId);
+                                        actingMemberId, priceId, kind);
     }
 
     /// <summary>Resolved facts about one event — read once, not per participant row.</summary>
     public class ClubEventContext
     {
+        /// <summary>The OCCASION id — a node id for an event, a ClubTraining id for a training.</summary>
         public int EventId { get; set; }
+
+        /// <summary><see cref="ClubEvents.OccasionEvent"/> or <see cref="ClubEvents.OccasionTraining"/> (fas B2).</summary>
+        public string OccasionKind { get; set; } = ClubEvents.OccasionEvent;
+        public bool IsTraining => OccasionKind == ClubEvents.OccasionTraining;
+
+        /// <summary>The liggare source type for this occasion's payments — never hardcode Event.</summary>
+        public string LedgerSource => IsTraining
+            ? HpskSite.Models.Ledger.LedgerSourceType.Training
+            : HpskSite.Models.Ledger.LedgerSourceType.Event;
+
+        /// <summary>The loan-weapon booking kind for this occasion — never hardcode Event.</summary>
+        public string FirearmOccasion => IsTraining
+            ? HpskSite.Services.Firearms.FirearmOccasionKind.Training
+            : HpskSite.Services.Firearms.FirearmOccasionKind.Event;
+
+        /// <summary>Training only — events read lanevapenOffered from the node in the controller.</summary>
+        public bool LoanWeaponsOffered { get; set; }
+        public int? SkjutledareMemberId { get; set; }
+        public bool IsCancelled { get; set; }
         public string EventName { get; set; } = "";
         public DateTime? EventDate { get; set; }
         public DateTime? EventEndDate { get; set; }

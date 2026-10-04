@@ -53,6 +53,10 @@ namespace HpskSite.Models.Training
         public string? Audience { get; set; }
         public bool LoanWeaponsOffered { get; set; }
 
+        /// <summary>Attendance is mandatory (beslut 2026-10-05: own column, migrated from isMandatory).
+        /// A course group can still deviate per occasion (fas D). Missed = shown, never blocks.</summary>
+        public bool IsMandatory { get; set; }
+
         /// <summary>The clubSimpleEvent node this occasion was migrated from (B3); null for new ones.</summary>
         public int? LegacyEventNodeId { get; set; }
 

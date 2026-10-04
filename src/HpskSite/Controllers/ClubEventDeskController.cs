@@ -1,4 +1,5 @@
 ﻿using HpskSite.Services;
+using HpskSite.Models;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
@@ -65,8 +66,11 @@ namespace HpskSite.Controllers
         }
 
         [HttpGet("")]
-        public async Task<IActionResult> Index(int e = 0, int eventId = 0, int id = 0)
+        public async Task<IActionResult> Index(int e = 0, int eventId = 0, int id = 0, string? kind = null)
         {
+            // Fas B2: "training" = en klubbträning (ClubTraining-id). Allt annat = händelse, så varje
+            // gammal länk och QR fungerar oförändrat.
+            kind = ClubEvents.NormaliseOccasionKind(kind);
             // ⚠️ TRE NAMN PÅ SAMMA SAK, och det är inte slarv. /valvet läste bara `club` medan
             // klubbpanelens länk skickade `clubId`, och parametern ignorerades TYST — sidan föll
             // tillbaka på ett annat värde och visade en riktig lista för fel klubb. Att ta emot
@@ -79,7 +83,7 @@ namespace HpskSite.Controllers
             var rootNode = uctx.Content.GetAtRoot().FirstOrDefault();
             if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
 
-            var model = new EventDeskPageModel { EventId = e };
+            var model = new EventDeskPageModel { EventId = e, Kind = kind };
             IActionResult Render()
             {
                 ViewData["EventDeskData"] = model;
@@ -100,11 +104,12 @@ namespace HpskSite.Controllers
                 // Kestrel tolererar den.
                 model.RequiresLogin = true;
                 model.LoginUrl = "/login-register/?tab=login&returnUrl="
-                               + Uri.EscapeDataString($"/evenemang/deltagare?e={e}");
+                               + Uri.EscapeDataString($"/evenemang/deltagare?e={e}"
+                                   + (kind == ClubEvents.OccasionTraining ? "&kind=training" : ""));
                 return Render();
             }
 
-            var ctx = _participation.GetEventContext(e);
+            var ctx = _participation.GetContext(e, kind);
             if (ctx == null)
             {
                 model.Error = "Evenemanget hittades inte.";
@@ -113,9 +118,10 @@ namespace HpskSite.Controllers
 
             // ⚠️ Bäst effort. En trasig länk tillbaka är en olyckligare sida än ingen knapp,
             // men den får aldrig hindra att listan visas — det är listan man kom hit för.
+            // En träning har ingen egen sida — vägen tillbaka är klubbens.
             try
             {
-                var node = uctx.Content.GetById(e);
+                var node = uctx.Content.GetById(ctx.IsTraining ? ctx.OwnerId : e);
                 if (node != null) model.EventUrl = _urls.GetUrl(node) ?? "";
             }
             catch (Exception)
@@ -141,6 +147,8 @@ namespace HpskSite.Controllers
     public class EventDeskPageModel
     {
         public int EventId { get; set; }
+        /// <summary>"Event" eller "Training" (fas B2) — skickas med i varje anrop från sidan.</summary>
+        public string Kind { get; set; } = ClubEvents.OccasionEvent;
         public string EventName { get; set; } = "";
         public DateTime? EventDate { get; set; }
         public string OwnerName { get; set; } = "";
