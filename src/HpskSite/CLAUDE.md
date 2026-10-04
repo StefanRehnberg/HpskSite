@@ -7365,6 +7365,36 @@ rect-fixen); landningen Joe Doe serie 12 → **Andy Haard serie 3** (hans först
 `medalAwardsComputed` false → **true** när omfattningen sätts till Klubbmästerskap utan final,
 och prisutdelningens falska mening borta efter Uppdatera.
 
+### ⚠️ Resultatfliken: ETT kort, listan räknas om av sig själv (2026-10-04) — ersätter avsnittet nedan
+
+Efter Sune-genomgångarna (skiss https://claude.ai/artifact/KGM9DZEfVKEWB3hNi9iJEx). **Avsnittet
+"besluten först" nedan beskriver den tidigare formen** — sektionerna "Klasser och medaljer" och
+knappen Uppdatera finns inte längre.
+
+- **Ett kort `#resultsArtifactSection`:** "Resultatlista · N deltagare · räknad HH:MM", tillståndsbricka,
+  **Publicera** (enda färgade knappen) och **Åtgärder**: Klasser och sammanslagning… · Rätta listan ·
+  Räkna om listan · Öppna och skriv ut · Prisutdelningslistan · Avpublicera (röd, sist). Under rubriken
+  rader: grön `#resultsFlash` (vad som sparades), gul `#resultsHint` (klasser under fem som får slås
+  samman), gul `#resultsStaleHint` (publicerad lista äldre än resultaten), `#resultsEditModeNote`.
+- **⚠️⚠️ Omräkningen sker av sig själv bara när listan är INAKTUELL** — `GetResultsListFreshness` /
+  `ReadArtifactFreshness`: `MAX(LastModified)` i grenens resultattabell > `lastUpdated` på
+  resultatnoden. En omräkning kostar 8–16 s på SM-storlek, så den körs inte vid varje besök.
+  **En PUBLICERAD lista räknas aldrig om tyst** — skyttarna ser den; gul rad med knapp i stället.
+- **Den inbäddade listan** (`/resultat/?embed=1&noRefresh=1[&edit=1]&v=N`) döljer sidhuvudet och
+  postar `{hpskResultsHeight}` till föräldern, som sätter iframens höjd. `v` höjs vid varje
+  omräkning — utan den laddades ramen aldrig om och "sammanslagningen gjorde ingenting".
+  Papperskorgarna (`edit=1`) bara via Åtgärder → Rätta listan. Publika telefonlayouten orörd.
+- **Dialogen "Klasser och sammanslagning"** bär klasserna OCH medaljerna (`#mergeStateContent`
+  flyttades in). ⚠️ **Bara den SPARADE sammanslagningen är förkryssad** — förslagen förkryssades
+  förut, så ett Spara slog samman klasser ingen valt. ⚠️ **Medaljindelningen sparas med samma knapp**
+  (`pendingMedalGrouping` + `saveMedalGrouping` i `applyMergesAndCreateResults`), aldrig direkt på
+  radioknappen — annars vet ingen vad Avbryt ångrar. Ord på skärmen: **medaljgrupp**, inte
+  mästerskapsklass; inga SHB-paragrafer (de står i kodkommentarerna).
+- **Särskjutningskortet** har bricka och döljs när inga medaljplatser är oavgjorda; en oavgjord
+  särskjutning är Nästa steg.
+- Sviter: `hpsk-verify/resultat-flik-verify.mjs 10352 --auto` (32), `resultat-medaljval-verify.mjs
+  10362` (8). ⚠️ `CompetitionResultsManagement.cshtml` har **LF**-radslut.
+
 ### Resultatfliken: besluten först, artefakten under (2026-09-08, omarbetad samma dag)
 
 Samma form som Startlistor-fliken fick. Fliken visade tidigare en omärkt verktygsrad och sedan
@@ -7652,6 +7682,19 @@ skjutlagsnummer över C:s, eftersom konfigurationen bor på gruppens egen nod).
 `GetFinalsStartList` returnerar **`Lists`** (alla listor); de gamla toppnivåfälten beskriver
 första listan och finns kvar för äldre anropare. `PublishFinalsStartList` tog redan ett nod-id
 och är alltså per lista utan ändring.
+
+### ⚠️ Startlistor-fliken: växel Grundomgång | Final (2026-10-04) — ersätter kollapsen nedan
+
+Två staplade, ihopfällbara sektioner blev en **växel** (`#slSwQual` / `#slSwFinal`, panelerna
+`#slPaneQual` / `#slPaneFinal`): en lista i taget, och växeln står på **Final** när en finallista
+finns. Ingen växel utan finalserier. Varje lista visas som tabell (`.hpsk-sl-list`, delad
+renderare `_StartListTable.cshtml` → `window.hpskRenderStartListTable`), med EN tillståndsbricka,
+EN färgad knapp (Publicera) och resten i Åtgärder — där Avpublicera står **sist och i rött** i
+både grundomgångens och finalens meny. Visa/dölj och "Till finalen" är borta.
+Täckningspanelen visas bara vid fel. Nästa steg säger "Publicera alla (N)" när flera
+finallistor väntar, och finalens tre val ser likadana ut där som i Final-panelen.
+⚠️ Grundomgångens dolda tabell ligger FÖRST i DOM:en — en svit måste vänta på
+`.hpsk-sl-list:visible`. Svit: `hpsk-verify/startlistor-vaxel-verify.mjs 10352` (20).
 
 ### Startlistor-fliken: Kalle hittade inte finalen (2026-09-08)
 
