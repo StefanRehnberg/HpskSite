@@ -148,7 +148,7 @@
                     (F1 och framåt) matas in. Skyttarna ser den först när du publicerar den.</p>
                     <p class="d-none" id="fnHowManyGroups">Varje vapengrupp får en egen lista som publiceras
                     för sig. C:s final kan vara publicerad medan A:s ännu är preliminär.</p>
-                    <p class="d-none mb-0" id="fnHowGroupC">I vapengrupp C har varje mästerskapsklass egna
+                    <p class="d-none mb-0" id="fnHowGroupC">I vapengrupp C har varje medaljgrupp egna
                     finalister: Dam C, Veteran C och Junior C tävlar om egna medaljer. Klasserna 1, 2 och 3
                     delar medalj.</p>
                 </div>
@@ -604,7 +604,7 @@
             ? `Bästa sjättedelen, minst 10, går vidare — med ${shooters} skyttar betyder det <strong>alla ${shooters}</strong>.`
             : `Bästa sjättedelen, minst 10, går vidare — <strong>${shb} av ${shooters}</strong>.`;
         const shbNote = isChampionship
-            ? '<span class="badge bg-warning-subtle text-warning-emphasis border mt-1">Så står det i SHB för mästerskap</span>'
+            ? '<span class="badge bg-warning-subtle text-warning-emphasis border mt-1">Regeln för mästerskap</span>'
             : '';
         return { ready: withResults.length > 0, shooters, leaderTxt, shbTxt, shbNote };
     }
@@ -649,7 +649,7 @@
                 <div class="col-md-4">
                     <button class="btn btn-outline-primary btn-sm w-100 h-100 text-start"
                             data-fn-action="wizard" data-fn-group="${esc(group)}">
-                        <i class="bi bi-trophy me-1"></i><strong>Mästerskapsfinal (SHB)</strong>
+                        <i class="bi bi-trophy me-1"></i><strong>Mästerskapsfinal</strong>
                         <span class="d-block small">${shbTxt} Lika poäng med den siste går också vidare.</span>
                         ${shbNote}
                     </button>
@@ -673,12 +673,12 @@
                     Listan följer grundomgångens ordning, så <strong>alla
                     ${withRes.length} ${withRes.length === 1 ? 'klass' : 'klasser'} i vapengruppen
                     ingår</strong> — ingen gallring är gjord.
-                    Vill du gallra till de bästa per mästerskapsklass: välj
+                    Vill du gallra till de bästa per medaljgrupp: välj
                     <strong>Mästerskapsfinal</strong> under Bygg om listan i Åtgärder.
                 </div>
                 <div class="table-responsive mb-3">
                     <table class="table table-sm align-middle mb-0">
-                        <thead><tr><th>Mästerskapsklass</th><th>Skyttar i grundomgången</th></tr></thead>
+                        <thead><tr><th>Medaljgrupp</th><th>Skyttar i grundomgången</th></tr></thead>
                         <tbody>${withRes.map(c => `<tr><td><strong>${esc(c.groupName || c.championshipClass || '')}</strong></td><td>${c.totalShooters || 0}</td></tr>`).join('')}</tbody>
                     </table>
                 </div>`;
@@ -729,7 +729,7 @@
                 <table class="table table-sm align-middle mb-0 fn-class-table">
                     <thead>
                         <tr>
-                            <th>Mästerskapsklass</th>
+                            <th>Medaljgrupp</th>
                             <th>Skyttar i grundomgången</th>
                             <th>Kvalresultat</th>
                             <th>Final</th>
