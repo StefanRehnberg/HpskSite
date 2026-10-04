@@ -79,9 +79,11 @@ namespace HpskSite.Controllers
             MarkenOrderListService orderList,
             StandardMedalProofStorage proofStorage,
             MemberClubService memberClubs,
-            IDataProtectionProvider dataProtectionProvider)
+            IDataProtectionProvider dataProtectionProvider,
+            MarkenBaseValorService baseValor)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _baseValor = baseValor;
             _memberManager = memberManager;
             _memberService = memberService;
             _contentService = contentService;
@@ -101,6 +103,7 @@ namespace HpskSite.Controllers
         }
 
         private const string Family = Marken.FamilyPistolskytte;
+        private readonly MarkenBaseValorService _baseValor;
 
         /// <summary>Integrity rule: nobody (incl. site admins) may validate their own evidence.</summary>
         private const string SelfValidateMsg = "Du kan inte validera din egen inrapportering — be en annan funktionär.";
@@ -1691,6 +1694,16 @@ namespace HpskSite.Controllers
             if (badge == null) return Json(new { success = false, message = "Märket hittades inte." });
             if (!await CanSignOffForMemberAsync(badge.MemberId))
                 return Json(new { success = false, message = "Åtkomst nekad." });
+            // A valör derived from series would come straight back on the next recompute if it were
+            // deleted. Rejecting it is what makes the functionary's removal stick (MarkenBaseValor).
+            if (badge.Source == Marken.SourceSeries)
+            {
+                badge.Status = Marken.StatusRejected;
+                badge.Notes = (badge.Notes + " · Borttaget av funktionär " + DateTime.Now.ToString("yyyy-MM-dd")).Trim(' ', '·');
+                badge.UpdatedAt = DateTime.Now;
+                await _ledger.UpdateBadgeAsync(badge);
+                return Json(new { success = true, message = "Borttaget. Märket räknas inte fram igen ur serierna." });
+            }
             var (ok, msg) = await _ledger.DeleteBadgeAsync(badge.Id);
             return Json(new { success = ok, message = ok ? "Borttaget." : msg });
         }
@@ -2032,6 +2045,7 @@ namespace HpskSite.Controllers
             // Keep the year's Guldfodring in sync with current validated evidence (covers hosted-comp
             // results / fält medals that change outside a series validation). Lazy, no validator.
             await RecomputeYearlyQualificationAsync(memberId, year, null);
+            await RecomputeBaseValorsFromSeriesAsync(memberId);
 
             var badges = await _ledger.GetBadgesForMemberAsync(memberId, Family);
             var quals = await _ledger.GetQualificationsForMemberAsync(memberId, Family);
@@ -2319,9 +2333,13 @@ namespace HpskSite.Controllers
             _ => null
         };
 
+        /// <summary>Pistolskyttemärkets brons/silver ur godkända serier (fas A4) — see MarkenBaseValorService.</summary>
+        private Task RecomputeBaseValorsFromSeriesAsync(int memberId) => _baseValor.RecomputeAsync(memberId);
+
         /// <summary>Auto-award series-proof family valörer + årtalsmärke years (lazy on read / on validation).</summary>
         private async Task RecomputeSeriesProofFamiliesAsync(int memberId)
         {
+            await RecomputeBaseValorsFromSeriesAsync(memberId);
             foreach (var fam in MarkenFamilies.SeriesProofFamilies)
             {
                 (string? Earned, int EarnedYear, List<int> GuldYears, List<MarkenSeries> ThisYear) tuple;

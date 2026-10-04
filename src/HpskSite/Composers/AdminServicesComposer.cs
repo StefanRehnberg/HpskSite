@@ -169,6 +169,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<MemberActivitySummaryService>();
             // Årets beställnings- och utdelningslista per klubb (märken + standardmedaljer).
             // Helt härledd ur de två liggarna — ingen egen lagring, se tjänstens doc-kommentar.
+            builder.Services.AddScoped<MarkenBaseValorService>();
             builder.Services.AddScoped<MarkenOrderListService>();
 
             // Manual klubb-/kretsmästare entries (auto-compute approach abandoned —
