@@ -498,7 +498,9 @@ namespace HpskSite.Services
                 return "Magnum saknar klassindelning — sammanslagning tillämpas inte.";
 
             if (IsClass1(className))
-                return "Klass 1 slås aldrig samman med en annan klass (SHB D.2.3).";
+                // Ingen paragrafhänvisning i texten — den står på arrangörens skärm (Sune 4).
+                // Regeln är SHB D.2.3.
+                return "Klass 1 slås aldrig samman med en annan klass.";
 
             if (string.IsNullOrEmpty(weaponGroup))
                 return "Klassen känns inte igen, så ingen sammanslagning kan föreslås.";
