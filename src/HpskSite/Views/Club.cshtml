@@ -664,9 +664,16 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function loadUpcomingEvents() {
-    fetch(`/umbraco/surface/Club/GetClubEvents?clubId=${clubId}`)
-        .then(response => response.json())
-        .then(data => {
+    // Fas B5: träningarna är inte längre händelser. GetClubEvents är klubbens HÄNDELSER (adminpanelen
+    // redigerar dem därifrån), så träningarna hämtas ur GetUpcomingEvents (kind = 'training') och läggs
+    // in i samma lista. Deras url är "#training-{id}" och öppnar träningspanelen.
+    const trainingsP = fetch(`/umbraco/surface/Club/GetUpcomingEvents?clubId=${clubId}&days=60`)
+        .then(r => r.json())
+        .then(d => (d && d.success && d.data ? d.data : []).filter(e => e.kind === 'training'))
+        .catch(() => []);
+    Promise.all([fetch(`/umbraco/surface/Club/GetClubEvents?clubId=${clubId}`).then(r => r.json()), trainingsP])
+        .then(([data, trainings]) => {
+            if (data && data.success) data.data = (data.data || []).concat(trainings);
             const container = document.getElementById('upcomingEventsContainer');
             if (data.success && data.data && data.data.length > 0) {
                 const now = new Date();

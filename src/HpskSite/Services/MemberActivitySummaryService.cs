@@ -261,11 +261,14 @@ namespace HpskSite.Services
 
                 foreach (var row in eventRows)
                 {
-                    if (!MemberActivitySummary.EventCounts(row.AttendanceStatus)) continue;
+                    if (row.AttendanceStatus != ClubEvents.AttendancePresent) continue;
                     if (!days.TryGetValue(row.MemberId, out var set)) continue;
                     // ⚠️ Sorten avgör uppslaget: en träningsrads id är ingen nod (fas B2).
                     var ctx = _events.GetContext(row.EventId, row.OccasionKind);
                     if (ctx?.EventDate == null || ctx.EventDate.Value.Year != year) continue;
+                    // Samma regel som detaljvyn — badgen och listan får inte vara oense om samma medlem.
+                    if (!MemberActivitySummary.EventCounts(row.AttendanceStatus,
+                            MemberActivitySummary.IsShootingOccasion(ctx.IsTraining, ctx.EventType), ctx.IsMandatory)) continue;
                     set.Add(ctx.EventDate.Value.Date);
                 }
 
@@ -777,12 +780,18 @@ namespace HpskSite.Services
                 bool present = row.AttendanceStatus == ClubEvents.AttendancePresent;
                 bool selfRegistered = row.AttendanceStatus != null && row.RecordedByMemberId == row.MemberId;
 
+                bool shooting = MemberActivitySummary.IsShootingOccasion(ctx.IsTraining, ctx.EventType);
                 string? notCounted = null;
                 if (!present)
                 {
                     notCounted = row.AttendanceStatus == null
                         ? MemberActivitySummary.NotRecordedReason
                         : ClubEvents.AttendanceDisplay(row.AttendanceStatus);
+                }
+                else if (!shooting && !ctx.IsMandatory)
+                {
+                    // Raden SYNS med sitt skäl — en närvaro som försvann ur listan läses som frånvaro.
+                    notCounted = MemberActivitySummary.NotShootingReason;
                 }
 
                 var detail = new List<string>();
@@ -804,7 +813,7 @@ namespace HpskSite.Services
                     SourceId = ctx.EventId,
                     SourceKind = ctx.IsTraining ? MemberActivityEntry.SourceKindClubTraining : MemberActivityEntry.SourceKindEvent,
                     IsMandatoryEvent = ctx.IsMandatory,
-                    CountsAsActivity = MemberActivitySummary.EventCounts(row.AttendanceStatus),
+                    CountsAsActivity = MemberActivitySummary.EventCounts(row.AttendanceStatus, shooting, ctx.IsMandatory),
                     NotCountedReason = notCounted
                 });
             }

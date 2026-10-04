@@ -62,6 +62,22 @@ namespace HpskSite.Services
         /// the club's Swish number is the default, an unreadable audience is the narrowest. A
         /// training is ALWAYS club-owned — kretsar never have training.
         /// </summary>
+        /// <summary>Själva träningsraden (gren, beskrivning) — fältet kontexten inte bär. null om den saknas.</summary>
+        public HpskSite.Models.Training.ClubTraining? GetTrainingRow(int trainingId)
+        {
+            if (trainingId <= 0) return null;
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                return db.SingleOrDefault<HpskSite.Models.Training.ClubTraining>("WHERE Id = @0", trainingId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ClubTraining {Id} could not be read", trainingId);
+                return null;
+            }
+        }
+
         public ClubEventContext? GetTrainingContext(int trainingId)
         {
             if (trainingId <= 0) return null;

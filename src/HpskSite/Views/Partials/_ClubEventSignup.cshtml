@@ -14,12 +14,14 @@
 *@
 @{
     var signupEventId = ViewData["EventId"] as int? ?? 0;
+    // Fas B5: "Training" när kortet visas i träningspanelen. Allt annat = händelse.
+    var signupKind = ViewData["Kind"] as string ?? "Event";
     var signupAccent = ViewData["Accent"] as string ?? "";
 }
 
 @if (signupEventId > 0)
 {
-    <div class="card mb-4" id="ces-card" data-event-id="@signupEventId" style="display:none;">
+    <div class="card mb-4" id="ces-card" data-event-id="@signupEventId" data-kind="@signupKind" style="display:none;">
         <div class="card-header @(string.IsNullOrEmpty(signupAccent) ? "bg-primary text-white" : "")"
              style="@(string.IsNullOrEmpty(signupAccent) ? "" : $"background-color:{signupAccent};color:#fff;")">
             <h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Anmälan</h5>
@@ -46,6 +48,7 @@
         const card = document.getElementById('ces-card');
         if (!card) return;
         const eventId = parseInt(card.dataset.eventId, 10);
+        const KIND = card.dataset.kind || 'Event';
         const body = document.getElementById('ces-body');
 
         const esc = s => {
@@ -59,7 +62,7 @@
             const r = await fetch('/umbraco/surface/ClubEvent/' + action, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(Object.assign({ kind: KIND }, payload))
             });
             // An empty 400 is the stale-antiforgery signature; say so rather than "det gick fel".
             const text = await r.text();
@@ -605,6 +608,7 @@
                 const pay = d.payment || {};
                 window.hpskEventPayOpen({
                     eventId,
+                    kind: KIND,
                     payerMemberId: 0,              // 0 = jag betalar för mig själv
                     // Medlemmens eget kort - hen vet vem hen ar; rubriken ska saga VAD, inte VEM.
                     payerName: 'Din anmälan',
@@ -681,7 +685,7 @@
 
         async function load() {
             try {
-                const r = await fetch(`/umbraco/surface/ClubEvent/GetSignupState?eventId=${eventId}`, { cache: 'no-store' });
+                const r = await fetch(`/umbraco/surface/ClubEvent/GetSignupState?eventId=${eventId}&kind=${KIND}`, { cache: 'no-store' });
                 render(await r.json());
             } catch {
                 card.style.display = 'none';

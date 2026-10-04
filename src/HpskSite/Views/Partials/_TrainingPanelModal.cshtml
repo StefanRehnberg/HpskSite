@@ -1,0 +1,74 @@
+@*
+    Fas B5: träningspanelen — dialogen som öppnas när någon klickar på en träning
+    (Stefans beslut 2026-10-04: panel, ingen egen sida).
+
+    Anropas:  window.hpskOpenTrainingPanel(trainingId)
+
+    Innehållet är /traning/panel?id= i en iframe, så anmälningskortet är EXAKT samma som för en
+    händelse. Iframens höjd sätts av sidan i den (postMessage), så dialogen får en rullningslist och
+    inte två.
+
+    Inkluderas av varje yta som listar träningar. Guardad — flera inkluderingar på samma sida ger
+    EN dialog.
+*@
+@if (Context.Items["hpskTrainingPanelModal"] == null)
+{
+    Context.Items["hpskTrainingPanelModal"] = true;
+    <div class="modal fade" id="hpskTrainingPanel" tabindex="-1" aria-labelledby="hpskTrainingPanelTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-scrollable modal-lg modal-fullscreen-sm-down">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <h2 class="modal-title h6" id="hpskTrainingPanelTitle">Träning</h2>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <iframe id="hpskTrainingPanelFrame" title="Träning" style="width:100%;border:0;display:block;min-height:320px"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function () {
+        if (window.hpskOpenTrainingPanel) return;
+        var frame = function () { return document.getElementById('hpskTrainingPanelFrame'); };
+
+        window.hpskOpenTrainingPanel = function (id) {
+            id = parseInt(id, 10) || 0;
+            if (!id) return;
+            var modal = document.getElementById('hpskTrainingPanel');
+            // ⚠️ Dialogen renderas där partialen inkluderas — ofta inne i kalenderns FLIK, som är
+            // display:none när den inte är vald. En dialog i en dold förälder får .show men blir
+            // aldrig synlig, och iframen i den får ingen layout (höjd 0). Flytta den till body.
+            if (modal.parentElement !== document.body) document.body.appendChild(modal);
+            var f = frame();
+            f.style.height = '320px';
+            f.src = '/traning/panel?id=' + id + '&t=' + Date.now();
+            bootstrap.Modal.getOrCreateInstance(modal).show();
+        };
+
+        window.addEventListener('message', function (e) {
+            if (e.origin !== location.origin || !e.data || !e.data.hpskTrainingPanelHeight) return;
+            var f = frame();
+            if (f) f.style.height = Math.max(320, e.data.hpskTrainingPanelHeight + 8) + 'px';
+        });
+
+        // Tomt src när dialogen stängs, så att nästa öppning inte visar förra träningen ett ögonblick.
+        document.addEventListener('hidden.bs.modal', function (e) {
+            if (e.target && e.target.id === 'hpskTrainingPanel') frame().src = 'about:blank';
+        });
+
+        // Delegerad, i fångstfasen: ett element med data-training-panel="id", eller en länk med
+        // href="#training-{id}" (så sätter servern url på en träning i GetUpcomingEvents), öppnar
+        // panelen i stället för att följas. Fångstfasen behövs eftersom kalenderns rutor själva har
+        // klicklyssnare som annars hinner först.
+        document.addEventListener('click', function (e) {
+            var a = e.target.closest('[data-training-panel], a[href^="#training-"]');
+            if (!a) return;
+            e.preventDefault();
+            e.stopPropagation();
+            var id = a.getAttribute('data-training-panel') || a.getAttribute('href').substring('#training-'.length);
+            window.hpskOpenTrainingPanel(id);
+        }, true);
+    })();
+    </script>
+}

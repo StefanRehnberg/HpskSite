@@ -418,6 +418,9 @@
 </style>
 
 @await Html.PartialAsync("_EventBadges")
+@await Html.PartialAsync("_TrainingPanelModal")
+@* Fas B5: en träning har url "#training-{id}"; _TrainingPanelModal fångar den länken och öppnar
+   panelen — samma för listvyn, dagvyn och månadsrutnätet, som alla bygger länken ur event.url. *@
 <script>
 let currentDate = new Date();
 let currentView = 'calendar'; // 'calendar' or 'list'

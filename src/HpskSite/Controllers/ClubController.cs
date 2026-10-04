@@ -35,6 +35,8 @@ namespace HpskSite.Controllers
         private readonly MemberDataPresenceService _presenceService;
         private readonly ClubMembershipService _clubMembershipService;
         private readonly IAntiforgery _antiforgery;
+        private readonly HpskSite.Services.Training.ClubTrainingService _trainings;
+        private readonly ILogger<ClubController> _logger;
 
         public ClubController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -50,10 +52,14 @@ namespace HpskSite.Controllers
             IMediaService mediaService,
             MemberDataPresenceService presenceService,
             ClubMembershipService clubMembershipService,
-            IAntiforgery antiforgery)
+            IAntiforgery antiforgery,
+            HpskSite.Services.Training.ClubTrainingService trainings,
+            ILogger<ClubController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _antiforgery = antiforgery;
+            _trainings = trainings;
+            _logger = logger;
             _contentService = contentService;
             _memberService = memberService;
             _memberManager = memberManager;
@@ -290,6 +296,44 @@ namespace HpskSite.Controllers
                                     ?.ToString("yyyy-MM-dd") ?? ""
                             });
                         }
+                    }
+
+                    // ── Fas B5: klubbens träningar (ClubTraining) ──────────────────────────────
+                    // En träning har ingen egen sida — den öppnas i träningspanelen. url bär därför
+                    // "#training-{id}", som kalendern fångar med en delegerad lyssnare i stället för
+                    // att följa. Så slipper alla tre renderarna (lista, dag, månad) en egen gren.
+                    // ⚠️ En inställd träning står kvar (märkt) — en medlem som anmält sig ska kunna
+                    // se att den är inställd, inte att den försvunnit.
+                    try
+                    {
+                        foreach (var t in _trainings.List(clubId, startDate, endDate))
+                        {
+                            var day = DateTime.ParseExact(t.Date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                            var when = string.IsNullOrEmpty(t.StartTime) ? day
+                                : day.Add(TimeSpan.ParseExact(t.StartTime, @"hh\:mm", System.Globalization.CultureInfo.InvariantCulture));
+                            events.Add(new
+                            {
+                                id = t.Id,
+                                name = t.IsCancelled ? $"{t.Name} (inställd)" : t.Name,
+                                date = when,
+                                type = "Träning",
+                                scope = CalendarScopeTraining,
+                                description = t.Description ?? "",
+                                venue = t.Venue ?? "",
+                                contactPerson = t.SkjutledareName,
+                                url = $"#training-{t.Id}",
+                                isMandatory = t.IsMandatory,
+                                registrationRequired = t.RegistrationRequired,
+                                registrationDeadline = "",
+                                kind = "training",
+                                isCancelled = t.IsCancelled
+                            });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Tabellen kan saknas i en miljö där migreringen inte körts — kalendern ska ändå visas.
+                        _logger.LogWarning(ex, "Klubbens träningar kunde inte läsas för kalendern (klubb {Club})", clubId);
                     }
 
                     // Also get competitions relevant to this club, scoped to the club's region:

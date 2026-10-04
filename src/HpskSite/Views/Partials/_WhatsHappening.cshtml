@@ -77,6 +77,8 @@
                                    && i.TypeLabel.Contains("Träning", StringComparison.OrdinalIgnoreCase);
 }
 
+@* Fas B5: en träning i flödet har url "#training-{id}" och öppnas i träningspanelen. *@
+@if (isLoggedIn) { @await Html.PartialAsync("_TrainingPanelModal") }
 <div class="card mb-4 wh-feed" id="whFeed" data-anon="@(isLoggedIn ? "0" : "1")" data-locked="@(lockedCode ?? "")"
      data-default="@defaultTab" data-default-region="@(Model?.DefaultRegionCode ?? "")" data-counts='@countsJson' data-regions='@regionsJson'
      data-my-clubs="@myClubsCsv">

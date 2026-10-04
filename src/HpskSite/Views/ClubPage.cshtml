@@ -33,6 +33,8 @@
     <!-- Club Navigation Tabs -->
     <div class="container-fluid mt-4">
         @await Html.PartialAsync("ClubNavigation", new { clubId = clubId, isClubAdmin = isClubAdmin })
+        @* Fas B5: träningar i "Kommande" öppnas i träningspanelen (url "#training-{id}"). *@
+        @await Html.PartialAsync("_TrainingPanelModal")
 
         <!-- Tab Content -->
         <div class="tab-content mt-3" id="clubTabContent">
