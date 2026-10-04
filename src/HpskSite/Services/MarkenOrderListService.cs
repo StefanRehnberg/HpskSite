@@ -26,15 +26,18 @@ namespace HpskSite.Services
         private readonly MarkenLedgerService _ledger;
         private readonly IMemberService _memberService;
         private readonly ClubService _clubService;
+        private readonly MarkenBaseValorService _baseValor;
 
         public MarkenOrderListService(
             MarkenLedgerService ledger,
             IMemberService memberService,
-            ClubService clubService)
+            ClubService clubService,
+            MarkenBaseValorService baseValor)
         {
             _ledger = ledger;
             _memberService = memberService;
             _clubService = clubService;
+            _baseValor = baseValor;
         }
 
         // Group labels — also the render order (see GroupSort).
@@ -54,6 +57,10 @@ namespace HpskSite.Services
             // then narrowed to this club's members. The opposite direction (walk the club roster and
             // ask per member) would miss nobody either, but costs a query per member for the many who
             // earned nothing.
+            // Brons/silver ur serier is written lazily (fas A4). Without this, the list would miss the
+            // badge of every member nobody happened to open this year.
+            await _baseValor.RecomputeForClubYearAsync(clubId, year);
+
             var badges = await _ledger.GetBadgesEarnedInYearAsync(year);
             var quals = await _ledger.GetFulfilledQualificationsForYearAsync(year);
 
