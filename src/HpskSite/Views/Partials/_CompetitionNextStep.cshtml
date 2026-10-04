@@ -148,7 +148,8 @@
             const last = Math.max(0, ...gs.map(g => g.qualLastSeries));
             const team = (gs.find(g => g.qualGapTeam > 0) || {}).qualGapTeam || 0;
             fact = exp > 0
-                ? 'Serie <b>' + Math.max(1, last) + ' av ' + s.qualSeries + '</b> · <b>' + ent + ' av ' + exp + '</b> serier inmatade'
+                // Antalet först: "Serie 6 av 6" ensamt läste som att allt var klart när en serie saknades (Sune 4).
+                ? '<b>' + ent + ' av ' + exp + '</b> serier inmatade · längst har kommit till serie ' + Math.max(1, last) + ' av ' + s.qualSeries
                 : 'Startlistan har inga skyttar än.';
             if (exp > 0) fact += bar(ent, exp);
             if (team > 0) {
