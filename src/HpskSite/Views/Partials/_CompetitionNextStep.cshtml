@@ -189,10 +189,13 @@
                   + (gs.length > 1 ? ' Övriga vapengrupper väljer du därefter.' : '')
                 : 'Grundomgången är inmatad. Hur ska finalen ställas upp?';
             if (ci && ci.ready) {
+                // ⚠️ Samma utseende som valen i Final-panelen (samma färg, ikoner och namn). Tre
+                // färger här och blått där fick Sune att tro att det var olika saker, och gul text
+                // på ljusgult gick knappt att läsa (Sune 4).
                 actions = '<div class="ns-choices w-100">'
-                    + '<button type="button" class="btn btn-outline-success" data-ns="finals" data-action="clone" data-group="' + esc(g) + '"><strong>Fortsätt i samma ordning</strong><span>Alla går vidare och står kvar på sina platser från grundomgången.</span></button>'
-                    + '<button type="button" class="btn btn-outline-primary" data-ns="finals" data-action="rerank" data-group="' + esc(g) + '"><strong>Placera om efter resultat</strong><span>Alla ' + ci.shooters + ' går vidare, i poängordning. ' + ci.leaderTxt + '</span></button>'
-                    + '<button type="button" class="btn btn-outline-warning" data-ns="finals" data-action="wizard" data-group="' + esc(g) + '"><strong>Mästerskapsfinal (SHB)</strong><span>' + ci.shbTxt + '</span>' + ci.shbNote + '</button>'
+                    + '<button type="button" class="btn btn-outline-primary" data-ns="finals" data-action="clone" data-group="' + esc(g) + '"><strong><i class="bi bi-arrow-right-circle me-1"></i>Fortsätt i samma ordning</strong><span>Alla går vidare och står kvar på sina platser från grundomgången.</span></button>'
+                    + '<button type="button" class="btn btn-outline-primary" data-ns="finals" data-action="rerank" data-group="' + esc(g) + '"><strong><i class="bi bi-sort-numeric-down me-1"></i>Placera om efter resultat</strong><span>Alla ' + ci.shooters + ' går vidare, i poängordning. ' + ci.leaderTxt + '</span></button>'
+                    + '<button type="button" class="btn btn-outline-primary" data-ns="finals" data-action="wizard" data-group="' + esc(g) + '"><strong><i class="bi bi-trophy me-1"></i>Mästerskapsfinal</strong><span>' + ci.shbTxt + '</span>' + ci.shbNote + '</button>'
                     + '</div>';
             } else {
                 actions = '<button type="button" class="btn btn-primary" data-ns="goto-finals"><i class="bi bi-trophy me-1"></i>Skapa finalen</button>';
