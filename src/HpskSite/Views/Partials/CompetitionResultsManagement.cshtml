@@ -4378,10 +4378,10 @@ function moveToNextShooterNew() {
         currentSeries = currentSeries + 1;
         currentShooterIndex = 0;
         // Kvitteringen ersätter den tysta nollställningen: funktionären ska aldrig
-        // behöva gissa varför skärmen bytte skytt.
+        // behöva gissa varför skärmen bytte skytt. Kort med flit (Stefan 2026-10-04) —
+        // en rad som radbryter puttar ner sifferpanelen på en smal telefon.
         spPendingSaveLine = {
-            text: 'Serie ' + finished + ' klar för alla dina platser — börjar om på '
-                  + spShooterLabel(0).toLowerCase() + ', serie ' + currentSeries + '.',
+            text: 'Serie ' + finished + ' klar – nu ' + spShooterLabel(0).toLowerCase() + ', serie ' + currentSeries + '.',
             opts: {}
         };
         updateShooterDisplay();
