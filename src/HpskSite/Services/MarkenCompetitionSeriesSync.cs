@@ -185,6 +185,17 @@ namespace HpskSite.Services
             });
             var clubIds = ids.ToDictionary(id => id, GetPrimaryClubId);
 
+            // The highest base valör each member held BEFORE this year (see PrecisionWorthRecording).
+            Dictionary<int, int> heldBefore;
+            try { heldBefore = await ReadHeldBaseValorBeforeAsync(ids, year); }
+            catch (Exception ex)
+            {
+                // Unknown holdings must not make the sync write brons/silver rows for everyone (or
+                // delete them): fall back to "holds guld", which records exactly what it did before.
+                _logger.LogWarning(ex, "Marken competition-series sync could not read held valörer");
+                heldBefore = ids.ToDictionary(id => id, _ => Marken.LevelOrdinal(Marken.LevelGuld));
+            }
+
             // ⚠️ Keyed on (SourceTable, SourceResultId), never on the id alone — the two result tables
             // have independent identity columns, so the same integer names a different row in each.
             var desired = new Dictionary<(string Table, int Id), MarkenSeries>();
@@ -219,11 +230,15 @@ namespace HpskSite.Services
                 // A DUELL series (snabbpistoltavla, 25 m, 3 s/shot) serves ONLY Elit's speed half, so its
                 // single bar is Elit brons. It is not a tillämpningsserie and does nothing for the
                 // Guldfodring's part 2, which SHB 5.1.1.1 pt 2 defines against the B100 / C30 targets.
+                int birthYear = birthYears.GetValueOrDefault(r.MemberId);
                 int threshold = isDuell
                     ? ElitBronsPerSeries
-                    : Marken.PrecisionThreshold(group, year, birthYears.GetValueOrDefault(r.MemberId));
-                int bar = isDuell ? ElitBronsPerSeries : Math.Min(threshold, ElitBronsPerSeries);
-                if (total < bar) continue;
+                    : Marken.PrecisionThreshold(group, year, birthYear);
+                string? valor = isDuell ? null : Marken.ValorFor(total, group, year, birthYear);
+                if (isDuell
+                        ? total < ElitBronsPerSeries
+                        : !PrecisionWorthRecording(total, threshold, valor, heldBefore.GetValueOrDefault(r.MemberId)))
+                    continue;
 
                 desired[(r.SourceTable, r.Id)] = new MarkenSeries
                 {
@@ -241,9 +256,9 @@ namespace HpskSite.Services
                     // and the series was shot on the day of the competition.
                     SeriesDate = ci.Date ?? r.EnteredAt,
                     WeaponGroup = group,
-                    // Precision guldserier claim Guld by definition. A snabbpistol series claims the valör
-                    // its score actually reaches — the same 49/48/45 ladder SubmitSeries applies.
-                    ClaimedLevel = isDuell ? SnabbpistolLevel(total) : Marken.LevelGuld,
+                    // Both kinds claim the valör the score actually reaches: precision via Marken.ValorFor
+                    // (age concession on every level, as SubmitSeries), snabbpistol via the 49/48/45 ladder.
+                    ClaimedLevel = isDuell ? SnabbpistolLevel(total) : valor ?? "",
                     Shots = r.Shots ?? "[]",
                     Total = total,
                     Threshold = threshold,
@@ -380,22 +395,69 @@ namespace HpskSite.Services
             foreach (var s in rows)
             {
                 if (string.IsNullOrWhiteSpace(s.WeaponGroup)) continue;
-                int threshold = Marken.PrecisionThreshold(
-                    s.WeaponGroup, year, birthYears.GetValueOrDefault(s.MemberId));
+                int birthYear = birthYears.GetValueOrDefault(s.MemberId);
+                int threshold = Marken.PrecisionThreshold(s.WeaponGroup, year, birthYear);
                 bool qualifies = s.Total >= threshold;
-                if (s.Threshold == threshold && s.Qualifies == qualifies) continue;
+                // The valör label follows the same arithmetic. Rows written before 2026-10-04 all say
+                // "Guld" whatever they scored; this converges them.
+                string level = Marken.ValorFor(s.Total, s.WeaponGroup, year, birthYear) ?? "";
+                if (s.Threshold == threshold && s.Qualifies == qualifies && s.ClaimedLevel == level) continue;
 
                 _logger.LogInformation(
-                    "Marken series {Id} (member {MemberId}, {Group} {Total} p) threshold {Old} → {New}, qualifies {WasQ} → {IsQ}",
-                    s.Id, s.MemberId, s.WeaponGroup, s.Total, s.Threshold, threshold, s.Qualifies, qualifies);
+                    "Marken series {Id} (member {MemberId}, {Group} {Total} p) threshold {Old} → {New}, qualifies {WasQ} → {IsQ}, valör {OldL} → {NewL}",
+                    s.Id, s.MemberId, s.WeaponGroup, s.Total, s.Threshold, threshold, s.Qualifies, qualifies, s.ClaimedLevel, level);
 
                 s.Threshold = threshold;
                 s.Qualifies = qualifies;
+                s.ClaimedLevel = level;
                 s.UpdatedAt = DateTime.Now;
                 await db.UpdateAsync(s);
                 changed++;
             }
             return changed;
+        }
+
+        /// <summary>
+        /// Whether a competition PRECISION series belongs in the ledger.
+        ///
+        /// <para>Two reasons to record one, either is enough:</para>
+        /// <list type="bullet">
+        /// <item>It reaches the lowest bar a guld consumer cares about — the age-adjusted guldkrav, or
+        /// Elit brons (45), whichever is lower. Unchanged from before brons/silver existed.</item>
+        /// <item>It reaches a valör the member did NOT hold before the series' year (beslut 2026-10-03:
+        /// brons- och silverserier loggas för den som saknar valören, även från tävling). A member who
+        /// already holds silver needs no brons series; one who lacks it needs every one that reaches it.</item>
+        /// </list>
+        ///
+        /// <para>⚠️ "Before the year", never "now". The sync RECONCILES — it deletes rows whose reason
+        /// has gone. Judged against what the member holds today, the brons series would be deleted the
+        /// moment the brons badge they prove is awarded, i.e. the evidence would vanish with the award.
+        /// A badge carries only its year, so a badge earned THIS year does not count as held.</para>
+        /// </summary>
+        public static bool PrecisionWorthRecording(int total, int guldThreshold, string? valor, int heldOrdinalBeforeYear)
+        {
+            if (total >= Math.Min(guldThreshold, ElitBronsPerSeries)) return true;
+            return valor != null && Marken.LevelOrdinal(valor) > heldOrdinalBeforeYear;
+        }
+
+        /// <summary>
+        /// Highest verified Pistolskyttemärke base valör (ordinal 1–3, 0 = none) per member, counting
+        /// only badges from years BEFORE <paramref name="year"/>. One query per 1000 members.
+        /// </summary>
+        private async Task<Dictionary<int, int>> ReadHeldBaseValorBeforeAsync(List<int> ids, int year)
+        {
+            var result = ids.ToDictionary(id => id, _ => 0);
+            using var db = _databaseFactory.CreateDatabase();
+            foreach (var chunk in Chunk(ids, 1000))
+            {
+                var badges = await db.FetchAsync<MemberBadge>(
+                    @"WHERE BadgeFamily = @0 AND Status = @1 AND Level IN (@2) AND AchievedYear < @3 AND MemberId IN (@4)",
+                    Marken.FamilyPistolskytte, Marken.StatusVerified,
+                    new[] { Marken.LevelBrons, Marken.LevelSilver, Marken.LevelGuld }, year, chunk);
+                foreach (var b in badges)
+                    result[b.MemberId] = Math.Max(result.GetValueOrDefault(b.MemberId), Marken.LevelOrdinal(b.Level));
+            }
+            return result;
         }
 
         /// <summary>
