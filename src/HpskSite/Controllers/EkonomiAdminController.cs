@@ -383,9 +383,15 @@ namespace HpskSite.Controllers
             if (detail is null)
                 return Json(new { success = false, message = "Verifikationen finns inte." });
 
+            // Rättelsens förvalda datum — samma regel som CreateCorrection, så att dialogen visar
+            // datumet INNAN kassören trycker (felrapport 2026-10-04).
+            var (corrDate, corrYear) = _postingService.CorrectionDefault(issuerType, issuerId, detail.Head.AccountingDate);
+
             return Json(new
             {
                 success = true,
+                correctionDate = corrDate?.ToString("yyyy-MM-dd"),
+                correctionYear = corrYear,
                 head = detail.Head,
                 lines = detail.Lines,
                 attachments = detail.Attachments,
