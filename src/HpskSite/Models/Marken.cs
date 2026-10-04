@@ -198,17 +198,65 @@
         // (conservative, slightly strict). ⚠️ Confirm the R mapping with SPSF; a functionary signs
         // off anyway, so an over-strict default never produces a wrong award.
 
-        private static int GuldPerSeries(string group) => group switch
-        {
-            "A" => 43,
-            "B" => 45,
-            "C" => 46,
-            "R" => 46,
-            _ => 46
-        };
+        private static int GuldPerSeries(string group) => BaseThreshold(LevelGuld, group);
 
-        // Silverfordringarna (A 38 / B 39 / C 40) står i samma tabell men används INTE här:
-        // åldersavdraget för 65+ är −2 p/serie, inte "silverkravet". Se PrecisionThreshold.
+        /// <summary>
+        /// Per-series points for a valör's precision part, before age concessions (SHB kap 5,
+        /// fordringstabellen under punkt 1): Brons 32/33/34, Silver 38/39/40, Guld 43/45/46 (A/B/C).
+        /// R has no column and reads as C (conservative); an unknown group reads as C too.
+        /// Returns 0 for an unknown valör — callers must not treat that as "every total qualifies".
+        ///
+        /// <para>⚠️ Läs tabellen RAD för rad. Den PDF-utvunna layouten (Documentation/shb_kap5.txt) ser ut
+        /// som att Guld-raden är 38/39/40 — det är Silver; Guld står på raden under. En sammanfattning
+        /// 2026-08-28 läste C-kolumnen nedåt och fick A-guldkravet till 34.</para>
+        /// </summary>
+        public static int BaseThreshold(string level, string group)
+        {
+            var g = group is "A" or "B" ? group : "C";
+            return (level, g) switch
+            {
+                (LevelBrons, "A") => 32, (LevelBrons, "B") => 33, (LevelBrons, _) => 34,
+                (LevelSilver, "A") => 38, (LevelSilver, "B") => 39, (LevelSilver, _) => 40,
+                (LevelGuld, "A") => 43, (LevelGuld, "B") => 45, (LevelGuld, _) => 46,
+                _ => 0
+            };
+        }
+
+        /// <summary>
+        /// Points subtracted per series for age (SHB kap 5, "Reducerade krav" under the whole table —
+        /// it applies to EVERY valör, not just guld; beslut 2026-10-02): turned 55 the previous year
+        /// (ageThisYear ≥ 56) → 1, turned 65 the previous year (≥ 66) → 2. Calendar-year rule
+        /// (D.2.8: ålder = tävlingsår − födelseår). Unknown birth year (0) → 0, the fail-safe.
+        /// </summary>
+        public static int AgeConcession(int year, int birthYear)
+        {
+            if (birthYear <= 0) return 0;
+            int ageThisYear = year - birthYear;
+            if (ageThisYear >= 66) return 2;
+            if (ageThisYear >= 56) return 1;
+            return 0;
+        }
+
+        /// <summary>Per-series requirement for a valör, weapon group and shooter age. 0 = unknown valör.</summary>
+        public static int ThresholdFor(string level, string weaponGroup, int year, int birthYear)
+        {
+            int baseThreshold = BaseThreshold(level, weaponGroup);
+            return baseThreshold == 0 ? 0 : baseThreshold - AgeConcession(year, birthYear);
+        }
+
+        /// <summary>
+        /// The highest valör a single precision series total reaches (Guld → Silver → Brons), with the
+        /// age concession applied to every level. Null when it reaches none of them.
+        /// </summary>
+        public static string? ValorFor(int total, string weaponGroup, int year, int birthYear)
+        {
+            foreach (var level in new[] { LevelGuld, LevelSilver, LevelBrons })
+            {
+                if (total >= ThresholdFor(level, weaponGroup, year, birthYear))
+                    return level;
+            }
+            return null;
+        }
 
         /// <summary>Series required for a Guldfodring precision part (SHB 5.1.1.1 pt 1: 3 precisionsserier).</summary>
         public const int GuldfodringPrecisionSeriesRequired = 3;
@@ -266,14 +314,7 @@
         /// When birthYear is unknown (0), no concession is applied (full Guld requirement — fail safe).
         /// </summary>
         public static int PrecisionThreshold(string weaponGroup, int year, int birthYear)
-        {
-            int ageThisYear = birthYear > 0 ? year - birthYear : 0;
-            if (birthYear > 0 && ageThisYear >= 66)
-                return GuldPerSeries(weaponGroup) - 2;
-            if (birthYear > 0 && ageThisYear >= 56)
-                return GuldPerSeries(weaponGroup) - 1;
-            return GuldPerSeries(weaponGroup);
-        }
+            => ThresholdFor(LevelGuld, weaponGroup, year, birthYear);
 
         // ── Age from Swedish personnummer ─────────────────────────────
         /// <summary>
