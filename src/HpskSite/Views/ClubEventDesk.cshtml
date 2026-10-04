@@ -75,6 +75,10 @@ else
                             new System.Globalization.CultureInfo("sv-SE"))<text> · </text>
                     }
                     @desk.OwnerName
+                    @if (!string.IsNullOrEmpty(desk.SkjutledareName))
+                    {
+                        <text> · Skjutledare: </text>@desk.SkjutledareName
+                    }
                 </div>
             </div>
             @* ⚠️ VÄGEN TILLBAKA. Hit kommer man via knappen på evenemangssidan, via ett

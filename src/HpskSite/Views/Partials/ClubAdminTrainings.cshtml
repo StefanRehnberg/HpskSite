@@ -1,0 +1,593 @@
+@*
+    Fas B4: klubbens träningar i klubbadmin — lista, Ny träning, Nytt schema, skjutledarbyte.
+
+    ⚠️ Ingen landningssida per tillfälle. "Öppna" går till deltagarsidan
+    (/evenemang/deltagare?e={id}&kind=training) — samma sida som för en händelse, så upprop,
+    gäster, betalning, QR och lånevapen är EN kod.
+
+    ⚠️ Knapparna bär ett ID i data-attribut och läses av EN delegerad lyssnare. Ingen användartext
+    (träningens namn, skjutledarens namn) byggs in i ett onclick — det är luckan som gav
+    kodexekvering i Fältskyttes "lägg till skytt".
+*@
+@{
+    var ctrClubId = ViewBag.clubId as int? ?? 0;
+}
+@await Html.PartialAsync("_HtmlEscape")
+
+<div class="tab-pane fade" id="clubTrainingsTab" role="tabpanel" aria-labelledby="clubTrainings-tab">
+    <div id="ctrPanel" data-club-id="@ctrClubId">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <h5 class="mb-0"><i class="bi bi-bullseye me-2"></i>Träningar</h5>
+            <div class="dropdown" id="ctrActions">
+                <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-sliders me-1"></i>Åtgärder
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" style="min-width:240px">
+                    <li><h6 class="dropdown-header">Skapa</h6></li>
+                    <li><button class="dropdown-item" type="button" data-ctr="new"><i class="bi bi-plus-circle me-2"></i>Ny träning</button></li>
+                    <li><button class="dropdown-item" type="button" data-ctr="schedule"><i class="bi bi-calendar-week me-2"></i>Nytt träningsschema</button></li>
+                </ul>
+            </div>
+        </div>
+        <p class="text-muted small">
+            Träningarna syns i klubbens kalender. Klicka <strong>Öppna</strong> på en rad för deltagarlistan —
+            där görs upprop, QR för incheckning och lånevapen.
+        </p>
+        <div id="ctrMsg"></div>
+        <div id="ctrList"><div class="text-center py-4"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
+        <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="ctrShowPast">
+            <label class="form-check-label small" for="ctrShowPast">Visa genomförda träningar (senaste 6 månaderna)</label>
+        </div>
+    </div>
+</div>
+
+<!-- Ny / redigera träning -->
+<div class="modal fade" id="ctrTrainingModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="ctrTrainingTitle">Ny träning</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="ctrId">
+                <div class="mb-3">
+                    <label class="form-label" for="ctrName">Namn</label>
+                    <input class="form-control" id="ctrName" autocomplete="off" placeholder="Tisdagsträning precision">
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-12 col-sm-5">
+                        <label class="form-label" for="ctrDate">Datum</label>
+                        <input class="form-control" id="ctrDate" autocomplete="off">
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label" for="ctrStart">Från</label>
+                        <input class="form-control" id="ctrStart" autocomplete="off" placeholder="18:00">
+                    </div>
+                    <div class="col-6 col-sm-4">
+                        <label class="form-label" for="ctrEnd">Till</label>
+                        <input class="form-control" id="ctrEnd" autocomplete="off" placeholder="20:00">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="ctrDiscipline">Gren</label>
+                    <select class="form-select" id="ctrDiscipline" data-ctr-disciplines></select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="ctrVenue">Plats</label>
+                    <input class="form-control" id="ctrVenue" autocomplete="off" placeholder="Inomhushallen, bana 1–10">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="ctrLeader">Skjutledare</label>
+                    <select class="form-select" id="ctrLeader" data-ctr-members></select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="ctrDescription">Beskrivning</label>
+                    <textarea class="form-control" id="ctrDescription" rows="2"></textarea>
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="ctrRegRequired">
+                    <label class="form-check-label" for="ctrRegRequired">Anmälan krävs</label>
+                </div>
+                <div class="mb-2 ms-4" id="ctrMaxWrap">
+                    <label class="form-label small" for="ctrMax">Antal platser (tomt = obegränsat)</label>
+                    <input class="form-control form-control-sm" style="max-width:120px" id="ctrMax" type="number" min="0">
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="ctrLoan">
+                    <label class="form-check-label" for="ctrLoan">Lånevapen erbjuds</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="ctrMandatory">
+                    <label class="form-check-label" for="ctrMandatory">Obligatoriskt deltagande</label>
+                </div>
+                <div id="ctrTrainingErr" class="text-danger small mt-2"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="ctrSaveTraining">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Nytt träningsschema -->
+<div class="modal fade" id="ctrScheduleModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nytt träningsschema</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label" for="ctsName">Namn</label>
+                    <input class="form-control" id="ctsName" autocomplete="off" placeholder="Tisdagar och torsdagar HT26">
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-12 col-sm-6">
+                        <label class="form-label" for="ctsDiscipline">Gren</label>
+                        <select class="form-select" id="ctsDiscipline" data-ctr-disciplines></select>
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label" for="ctsStart">Från</label>
+                        <input class="form-control" id="ctsStart" autocomplete="off" placeholder="18:00">
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label" for="ctsEnd">Till</label>
+                        <input class="form-control" id="ctsEnd" autocomplete="off" placeholder="20:00">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="form-label">Veckodagar</div>
+                    <div class="btn-group flex-wrap" role="group" aria-label="Veckodagar" id="ctsDays">
+                        @{ var dayNames = new[] { "Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön" }; }
+                        @for (var d = 1; d <= 7; d++)
+                        {
+                            <input type="checkbox" class="btn-check" id="ctsDay@(d)" value="@d" autocomplete="off">
+                            <label class="btn btn-outline-primary" for="ctsDay@(d)">@dayNames[d - 1]</label>
+                        }
+                    </div>
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label" for="ctsFrom">Från datum</label>
+                        <input class="form-control" id="ctsFrom" autocomplete="off">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label" for="ctsTo">Till datum</label>
+                        <input class="form-control" id="ctsTo" autocomplete="off">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="form-label">Uppehåll</div>
+                    <div id="ctsBreaks"></div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="ctsAddBreak"><i class="bi bi-plus me-1"></i>Lägg till uppehåll</button>
+                </div>
+                <div class="mb-3">
+                    <div class="form-label">Skjutledare</div>
+                    <div class="btn-group mb-2" role="group">
+                        <input type="radio" class="btn-check" name="ctsLeaderMode" id="ctsLeaderSame" value="same" checked>
+                        <label class="btn btn-outline-secondary btn-sm" for="ctsLeaderSame">Samma varje gång</label>
+                        <input type="radio" class="btn-check" name="ctsLeaderMode" id="ctsLeaderRotate" value="rotate">
+                        <label class="btn btn-outline-secondary btn-sm" for="ctsLeaderRotate">Turas om</label>
+                    </div>
+                    <div id="ctsLeaderSameWrap">
+                        <select class="form-select" id="ctsLeader" data-ctr-members></select>
+                    </div>
+                    <div id="ctsLeaderRotateWrap" class="d-none">
+                        <ol id="ctsRotation" class="mb-2 ps-4"></ol>
+                        <div class="input-group input-group-sm">
+                            <select class="form-select" id="ctsRotationPick" data-ctr-members></select>
+                            <button class="btn btn-outline-secondary" type="button" id="ctsRotationAdd">Lägg till</button>
+                        </div>
+                        <div class="form-text">Passen delas ut i den här ordningen och börjar om när listan är slut.</div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="ctsVenue">Plats</label>
+                    <input class="form-control" id="ctsVenue" autocomplete="off">
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="ctsRegRequired">
+                    <label class="form-check-label" for="ctsRegRequired">Anmälan krävs</label>
+                </div>
+                <div class="mb-2 ms-4">
+                    <label class="form-label small" for="ctsMax">Antal platser (tomt = obegränsat)</label>
+                    <input class="form-control form-control-sm" style="max-width:120px" id="ctsMax" type="number" min="0">
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="ctsLoan">
+                    <label class="form-check-label" for="ctsLoan">Lånevapen erbjuds</label>
+                </div>
+                <div id="ctsSummary" class="alert alert-light border small mb-0">Välj veckodagar och period.</div>
+                <div id="ctsErr" class="text-danger small mt-2"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="ctsCreate" disabled>Skapa schemat</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Lämna över skjutledare -->
+<div class="modal fade" id="ctrHandoverModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Byt skjutledare</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2" id="ctrHandoverWhat"></p>
+                <label class="form-label" for="ctrHandoverPick">Ny skjutledare</label>
+                <select class="form-select" id="ctrHandoverPick" data-ctr-members></select>
+                <div id="ctrHandoverErr" class="text-danger small mt-2"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="ctrHandoverSave">Byt</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    if (window.__ctrInit) return;
+    window.__ctrInit = true;
+
+    var DISCIPLINES = [
+        ['', '(ingen särskild)'], ['Precision', 'Precision'], ['Faltskytte', 'Fältskytte'],
+        ['Duell', 'Duell'], ['Milsnabb', 'Milsnabb'], ['NationellHelmatch', 'Nationell Helmatch'],
+        ['Springskytte', 'Springskytte'], ['MagnumPrecision', 'Magnum Precision'],
+        ['MagnumFalt', 'Magnum Fältskytte'], ['Standardpistol', 'Standardpistol'], ['Sportpistol', 'Sportpistol']
+    ];
+    var esc = window.hpskEsc || function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]; }); };
+    var rows = [];
+    var members = null;
+    var loaded = false;
+    var canEdit = false;
+
+    function clubId() {
+        var el = document.getElementById('ctrPanel');
+        return el ? (parseInt(el.getAttribute('data-club-id'), 10) || 0) : 0;
+    }
+    function token() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+    function post(url, body) {
+        return fetch(url, {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+            body: JSON.stringify(body)
+        }).then(function (r) { return r.json(); });
+    }
+    function ymd(d) {
+        var p = function (n) { return n < 10 ? '0' + n : '' + n; };
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    }
+    function dayLabel(iso) {
+        var d = new Date(iso + 'T12:00:00');
+        return d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
+    }
+    function msg(html, kind) {
+        document.getElementById('ctrMsg').innerHTML = html ? '<div class="alert alert-' + (kind || 'success') + ' py-2">' + html + '</div>' : '';
+    }
+
+    function fillDisciplines() {
+        document.querySelectorAll('[data-ctr-disciplines]').forEach(function (sel) {
+            if (sel.options.length) return;
+            sel.innerHTML = DISCIPLINES.map(function (d) { return '<option value="' + d[0] + '">' + esc(d[1]) + '</option>'; }).join('');
+        });
+    }
+    function loadMembers() {
+        if (members) return Promise.resolve(members);
+        return fetch('/umbraco/surface/ClubAdmin/GetClubMembers?clubId=' + clubId(), { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                members = (d && d.success ? d.data : []).filter(function (m) { return m.memberName; })
+                    .sort(function (a, b) { return a.memberName.localeCompare(b.memberName, 'sv'); });
+                var opts = '<option value="">(ingen utsedd än)</option>' + members.map(function (m) {
+                    return '<option value="' + m.id + '">' + esc(m.memberName) + '</option>';
+                }).join('');
+                document.querySelectorAll('[data-ctr-members]').forEach(function (sel) { sel.innerHTML = opts; });
+                return members;
+            });
+    }
+    function memberName(id) {
+        var m = (members || []).find(function (x) { return x.id === id; });
+        return m ? m.memberName : ('Medlem ' + id);
+    }
+
+    function load() {
+        var past = document.getElementById('ctrShowPast').checked;
+        var from = new Date(); from.setDate(from.getDate() - (past ? 183 : 1));
+        var to = new Date(); to.setMonth(to.getMonth() + 12);
+        return fetch('/umbraco/surface/ClubTraining/List?clubId=' + clubId() + '&from=' + ymd(from) + '&to=' + ymd(to), { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d.success) { document.getElementById('ctrList').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Träningarna kunde inte läsas.') + '</div>'; return; }
+                rows = d.trainings || [];
+                canEdit = !!d.canEdit;
+                document.getElementById('ctrActions').classList.toggle('d-none', !canEdit);
+                render();
+            })
+            .catch(function () { document.getElementById('ctrList').innerHTML = '<div class="alert alert-danger">Träningarna kunde inte läsas.</div>'; });
+    }
+
+    function render() {
+        var el = document.getElementById('ctrList');
+        if (!rows.length) {
+            el.innerHTML = '<div class="text-center text-muted py-4 border rounded">Inga träningar inlagda.' +
+                (canEdit ? ' Lägg till en under <strong>Åtgärder</strong> — ett schema skapar alla tillfällen på en gång.' : '') + '</div>';
+            return;
+        }
+        var today = ymd(new Date());
+        var html = '<div class="table-responsive"><table class="table table-sm align-middle"><thead><tr>' +
+            '<th>Datum</th><th>Tid</th><th>Träning</th><th>Skjutledare</th><th class="text-center">Anmälda</th><th class="text-end"></th></tr></thead><tbody>';
+        rows.forEach(function (t) {
+            var time = t.startTime ? (t.startTime + (t.endTime ? '–' + t.endTime : '')) : '';
+            var cap = t.maxParticipants ? (t.signedUp + ' av ' + t.maxParticipants) : (t.registrationRequired ? String(t.signedUp) : (t.signedUp ? String(t.signedUp) : '—'));
+            var past = t.date < today;
+            var badges = (t.disciplineLabel ? ' <span class="badge bg-secondary-subtle text-secondary-emphasis">' + esc(t.disciplineLabel) + '</span>' : '') +
+                (t.isMandatory ? ' <span class="badge bg-warning text-dark">Obligatorisk</span>' : '') +
+                (t.isCancelled ? ' <span class="badge bg-danger">Inställd</span>' : '') +
+                (t.loanWeaponsOffered ? ' <i class="bi bi-shield-lock text-muted" title="Lånevapen erbjuds"></i>' : '');
+            html += '<tr' + (past || t.isCancelled ? ' class="text-muted"' : '') + ' data-ctr-row="' + t.id + '">' +
+                '<td class="text-nowrap">' + esc(dayLabel(t.date)) + '</td>' +
+                '<td class="text-nowrap">' + esc(time) + '</td>' +
+                '<td>' + esc(t.name) + badges + '</td>' +
+                '<td>' + (t.skjutledareName ? esc(t.skjutledareName) : '<span class="text-muted">ingen utsedd</span>') + '</td>' +
+                '<td class="text-center">' + esc(cap) + '</td>' +
+                '<td class="text-end text-nowrap">' +
+                '<a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener" href="/evenemang/deltagare?e=' + t.id + '&kind=training">Öppna</a> ' +
+                (canEdit ? '<div class="dropdown d-inline-block"><button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-label="Åtgärder"><i class="bi bi-sliders"></i></button>' +
+                '<ul class="dropdown-menu dropdown-menu-end">' +
+                '<li><button class="dropdown-item" type="button" data-ctr="edit" data-id="' + t.id + '"><i class="bi bi-pencil me-2"></i>Redigera</button></li>' +
+                '<li><button class="dropdown-item" type="button" data-ctr="handover" data-id="' + t.id + '"><i class="bi bi-person-badge me-2"></i>Byt skjutledare…</button></li>' +
+                '<li><button class="dropdown-item" type="button" data-ctr="cancel" data-id="' + t.id + '"><i class="bi bi-slash-circle me-2"></i>' + (t.isCancelled ? 'Ångra inställt' : 'Ställ in') + '</button></li>' +
+                '<li><hr class="dropdown-divider"></li>' +
+                '<li><button class="dropdown-item text-danger" type="button" data-ctr="delete" data-id="' + t.id + '"><i class="bi bi-trash me-2"></i>Ta bort</button></li>' +
+                '</ul></div>' : '') +
+                '</td></tr>';
+        });
+        el.innerHTML = html + '</tbody></table></div>';
+    }
+
+    function initPickers() {
+        if (!window.flatpickr) return;
+        ['ctrDate', 'ctsFrom', 'ctsTo'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el && !el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true });
+        });
+    }
+    function setDate(id, v) {
+        var el = document.getElementById(id);
+        if (el._flatpickr) { if (v) el._flatpickr.setDate(v, false); else el._flatpickr.clear(); } else el.value = v || '';
+    }
+
+    // ── Ny / redigera ──
+    function openTraining(t) {
+        fillDisciplines(); initPickers();
+        loadMembers().then(function () {
+            document.getElementById('ctrTrainingTitle').textContent = t ? 'Redigera träning' : 'Ny träning';
+            document.getElementById('ctrId').value = t ? t.id : '';
+            document.getElementById('ctrName').value = t ? t.name : '';
+            setDate('ctrDate', t ? t.date : '');
+            document.getElementById('ctrStart').value = t ? (t.startTime || '') : '';
+            document.getElementById('ctrEnd').value = t ? (t.endTime || '') : '';
+            document.getElementById('ctrDiscipline').value = t ? (t.discipline || '') : '';
+            document.getElementById('ctrVenue').value = t ? (t.venue || '') : '';
+            document.getElementById('ctrLeader').value = t && t.skjutledareMemberId ? String(t.skjutledareMemberId) : '';
+            document.getElementById('ctrDescription').value = t ? (t.description || '') : '';
+            document.getElementById('ctrRegRequired').checked = t ? t.registrationRequired : false;
+            document.getElementById('ctrMax').value = t && t.maxParticipants ? t.maxParticipants : '';
+            document.getElementById('ctrLoan').checked = t ? t.loanWeaponsOffered : false;
+            document.getElementById('ctrMandatory').checked = t ? t.isMandatory : false;
+            document.getElementById('ctrTrainingErr').textContent = '';
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('ctrTrainingModal')).show();
+        });
+    }
+    function saveTraining() {
+        var btn = document.getElementById('ctrSaveTraining');
+        btn.disabled = true;
+        var max = document.getElementById('ctrMax').value;
+        post('/umbraco/surface/ClubTraining/Save', {
+            id: parseInt(document.getElementById('ctrId').value, 10) || 0,
+            clubId: clubId(),
+            name: document.getElementById('ctrName').value,
+            date: document.getElementById('ctrDate').value,
+            startTime: document.getElementById('ctrStart').value,
+            endTime: document.getElementById('ctrEnd').value,
+            discipline: document.getElementById('ctrDiscipline').value,
+            venue: document.getElementById('ctrVenue').value,
+            description: document.getElementById('ctrDescription').value,
+            skjutledareMemberId: parseInt(document.getElementById('ctrLeader').value, 10) || null,
+            registrationRequired: document.getElementById('ctrRegRequired').checked ? '1' : '0',
+            maxParticipants: max ? parseInt(max, 10) : null,
+            loanWeaponsOffered: document.getElementById('ctrLoan').checked ? '1' : '0',
+            isMandatory: document.getElementById('ctrMandatory').checked ? '1' : '0'
+        }).then(function (d) {
+            btn.disabled = false;
+            if (!d.success) { document.getElementById('ctrTrainingErr').textContent = d.message || 'Kunde inte spara.'; return; }
+            bootstrap.Modal.getInstance(document.getElementById('ctrTrainingModal')).hide();
+            msg(esc(d.message));
+            load();
+        }).catch(function () { btn.disabled = false; document.getElementById('ctrTrainingErr').textContent = 'Kunde inte spara.'; });
+    }
+
+    // ── Schema ──
+    var rotation = [];
+    function scheduleBody() {
+        var days = [];
+        for (var d = 1; d <= 7; d++) if (document.getElementById('ctsDay' + d).checked) days.push(d);
+        var breaks = [];
+        document.querySelectorAll('#ctsBreaks [data-break]').forEach(function (row) {
+            var f = row.querySelector('[data-bf]').value, t = row.querySelector('[data-bt]').value;
+            if (f) breaks.push({ label: row.querySelector('[data-bl]').value, from: f, to: t || f });
+        });
+        var rotate = document.getElementById('ctsLeaderRotate').checked;
+        var max = document.getElementById('ctsMax').value;
+        return {
+            clubId: clubId(),
+            name: document.getElementById('ctsName').value,
+            discipline: document.getElementById('ctsDiscipline').value,
+            startTime: document.getElementById('ctsStart').value,
+            endTime: document.getElementById('ctsEnd').value,
+            weekdays: days,
+            from: document.getElementById('ctsFrom').value,
+            to: document.getElementById('ctsTo').value,
+            breaks: breaks,
+            skjutledareMemberId: rotate ? null : (parseInt(document.getElementById('ctsLeader').value, 10) || null),
+            rotation: rotate ? rotation.slice() : [],
+            venue: document.getElementById('ctsVenue').value,
+            registrationRequired: document.getElementById('ctsRegRequired').checked ? '1' : '0',
+            maxParticipants: max ? parseInt(max, 10) : null,
+            loanWeaponsOffered: document.getElementById('ctsLoan').checked ? '1' : '0'
+        };
+    }
+    var previewTimer = null, previewSeq = 0;
+    function preview() {
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(function () {
+            var seq = ++previewSeq;
+            var body = scheduleBody();
+            var create = document.getElementById('ctsCreate');
+            if (!body.weekdays.length || !body.from || !body.to) {
+                document.getElementById('ctsSummary').textContent = 'Välj veckodagar och period.';
+                create.disabled = true; return;
+            }
+            post('/umbraco/surface/ClubTraining/PreviewSchedule', body).then(function (d) {
+                if (seq !== previewSeq) return;
+                var s = document.getElementById('ctsSummary');
+                if (!d.success) { s.textContent = d.message || 'Schemat går inte att räkna ut.'; create.disabled = true; return; }
+                s.textContent = d.summary + (d.count ? ' Skjutledare kan bytas per tillfälle efteråt.' : '');
+                create.disabled = !d.count;
+            });
+        }, 250);
+    }
+    function renderRotation() {
+        var ol = document.getElementById('ctsRotation');
+        ol.innerHTML = rotation.length ? rotation.map(function (id, i) {
+            return '<li class="mb-1">' + esc(memberName(id)) + ' <button type="button" class="btn btn-link btn-sm p-0 text-danger ms-2" data-ctr="rot-remove" data-index="' + i + '" aria-label="Ta bort">✕</button></li>';
+        }).join('') : '<li class="list-unstyled text-muted small" style="margin-left:-1rem">Ingen än — lägg till dem som ska turas om.</li>';
+        preview();
+    }
+    function addBreakRow() {
+        var div = document.createElement('div');
+        div.className = 'input-group input-group-sm mb-1';
+        div.setAttribute('data-break', '1');
+        div.innerHTML = '<input class="form-control" data-bl placeholder="Höstlov" autocomplete="off">' +
+            '<input class="form-control" data-bf placeholder="Från" autocomplete="off">' +
+            '<input class="form-control" data-bt placeholder="Till" autocomplete="off">' +
+            '<button class="btn btn-outline-secondary" type="button" data-ctr="break-remove" aria-label="Ta bort">✕</button>';
+        document.getElementById('ctsBreaks').appendChild(div);
+        if (window.flatpickr) div.querySelectorAll('[data-bf],[data-bt]').forEach(function (el) {
+            flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true, onChange: preview });
+        });
+    }
+    function openSchedule() {
+        fillDisciplines(); initPickers();
+        loadMembers().then(function () {
+            ['ctsName', 'ctsStart', 'ctsEnd', 'ctsVenue', 'ctsMax'].forEach(function (id) { document.getElementById(id).value = ''; });
+            setDate('ctsFrom', ''); setDate('ctsTo', '');
+            for (var d = 1; d <= 7; d++) document.getElementById('ctsDay' + d).checked = false;
+            document.getElementById('ctsBreaks').innerHTML = '';
+            document.getElementById('ctsLeaderSame').checked = true;
+            document.getElementById('ctsLeaderSameWrap').classList.remove('d-none');
+            document.getElementById('ctsLeaderRotateWrap').classList.add('d-none');
+            document.getElementById('ctsLeader').value = '';
+            document.getElementById('ctsRegRequired').checked = false;
+            document.getElementById('ctsLoan').checked = false;
+            document.getElementById('ctsErr').textContent = '';
+            rotation = []; renderRotation();
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('ctrScheduleModal')).show();
+        });
+    }
+    function createSchedule() {
+        var btn = document.getElementById('ctsCreate');
+        btn.disabled = true;
+        post('/umbraco/surface/ClubTraining/CreateSchedule', scheduleBody()).then(function (d) {
+            if (!d.success) { btn.disabled = false; document.getElementById('ctsErr').textContent = d.message || 'Schemat kunde inte skapas.'; return; }
+            bootstrap.Modal.getInstance(document.getElementById('ctrScheduleModal')).hide();
+            msg(esc(d.message));
+            load();
+        }).catch(function () { btn.disabled = false; document.getElementById('ctsErr').textContent = 'Schemat kunde inte skapas.'; });
+    }
+
+    // ── Byt skjutledare ──
+    var handoverId = 0;
+    function openHandover(t) {
+        loadMembers().then(function () {
+            handoverId = t.id;
+            document.getElementById('ctrHandoverWhat').textContent = t.name + ', ' + dayLabel(t.date) +
+                (t.skjutledareName ? ' — i dag: ' + t.skjutledareName : ' — ingen utsedd');
+            document.getElementById('ctrHandoverPick').value = t.skjutledareMemberId ? String(t.skjutledareMemberId) : '';
+            document.getElementById('ctrHandoverErr').textContent = '';
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('ctrHandoverModal')).show();
+        });
+    }
+    function saveHandover() {
+        post('/umbraco/surface/ClubTraining/SetSkjutledare', {
+            trainingId: handoverId, memberId: parseInt(document.getElementById('ctrHandoverPick').value, 10) || null
+        }).then(function (d) {
+            if (!d.success) { document.getElementById('ctrHandoverErr').textContent = d.message || 'Kunde inte byta.'; return; }
+            bootstrap.Modal.getInstance(document.getElementById('ctrHandoverModal')).hide();
+            msg(esc(d.message)); load();
+        });
+    }
+
+    function byId(id) { return rows.find(function (r) { return r.id === id; }); }
+
+    document.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-ctr]');
+        if (!b) return;
+        var act = b.getAttribute('data-ctr');
+        var id = parseInt(b.getAttribute('data-id'), 10) || 0;
+        var t = byId(id);
+        if (act === 'new') openTraining(null);
+        else if (act === 'schedule') openSchedule();
+        else if (act === 'edit' && t) openTraining(t);
+        else if (act === 'handover' && t) openHandover(t);
+        else if (act === 'cancel' && t) {
+            post('/umbraco/surface/ClubTraining/SetCancelled', { trainingId: id, cancelled: t.isCancelled ? '0' : '1' })
+                .then(function (d) { msg(esc(d.message), d.success ? 'success' : 'warning'); load(); });
+        } else if (act === 'delete' && t) {
+            if (!confirm('Ta bort ' + t.name + ' ' + dayLabel(t.date) + '?\n\nEn träning med anmälda eller bokade lånevapen kan inte tas bort — ställ in den i stället.')) return;
+            post('/umbraco/surface/ClubTraining/Delete', { trainingId: id })
+                .then(function (d) { msg(esc(d.message), d.success ? 'success' : 'warning'); load(); });
+        } else if (act === 'rot-remove') { rotation.splice(parseInt(b.getAttribute('data-index'), 10), 1); renderRotation(); }
+        else if (act === 'break-remove') { b.closest('[data-break]').remove(); preview(); }
+    });
+
+    document.addEventListener('DOMContentLoaded', function () {
+        var tab = document.getElementById('clubTrainings-tab');
+        if (tab) tab.addEventListener('shown.bs.tab', function () { if (!loaded) { loaded = true; load(); } });
+        document.getElementById('ctrShowPast').addEventListener('change', load);
+        document.getElementById('ctrSaveTraining').addEventListener('click', saveTraining);
+        document.getElementById('ctsCreate').addEventListener('click', createSchedule);
+        document.getElementById('ctrHandoverSave').addEventListener('click', saveHandover);
+        document.getElementById('ctsAddBreak').addEventListener('click', function () { addBreakRow(); });
+        document.getElementById('ctsRotationAdd').addEventListener('click', function () {
+            var v = parseInt(document.getElementById('ctsRotationPick').value, 10);
+            if (v) { rotation.push(v); renderRotation(); }
+        });
+        document.querySelectorAll('input[name="ctsLeaderMode"]').forEach(function (r) {
+            r.addEventListener('change', function () {
+                var rot = document.getElementById('ctsLeaderRotate').checked;
+                document.getElementById('ctsLeaderSameWrap').classList.toggle('d-none', rot);
+                document.getElementById('ctsLeaderRotateWrap').classList.toggle('d-none', !rot);
+                preview();
+            });
+        });
+        document.getElementById('ctrScheduleModal').addEventListener('input', preview);
+        document.getElementById('ctrScheduleModal').addEventListener('change', preview);
+    });
+
+    window.hpskLoadClubTrainings = load;
+})();
+</script>
