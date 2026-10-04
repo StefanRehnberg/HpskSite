@@ -324,36 +324,10 @@
     *@
     <div class="mt-3" id="resultsListSection">
 
-        <!-- ===== Sektion 1: Klasser och medaljer ===== -->
-        <div class="card mb-3" id="mergeStateSection">
-            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
-                <span class="fw-bold"><i class="bi bi-intersect me-2"></i>Klasser och medaljer</span>
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <span class="small" id="mergeStateSummary"></span>
-                    <button class="btn btn-outline-secondary btn-sm" onclick="showMergeAnalysisModal(event)" id="btnAnalyzeMerges">
-                        <i class="bi bi-pencil-square me-1"></i>Ändra
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary" type="button"
-                            data-bs-toggle="collapse" data-bs-target="#mergeStateBody"
-                            aria-expanded="false" aria-controls="mergeStateBody">
-                        <i class="bi bi-chevron-expand me-1"></i>Visa/dölj
-                    </button>
-                </div>
-            </div>
-            @* ⚠️ HOPFÄLLD som standard (Sune-genomgången 2026-10-03: 315 ord före Publicera).
-               Rubrikraden bär sammanfattningen, och kroppen fälls ut av sig själv EN gång när
-               något kräver ett beslut — en klass under fem med förslag, eller en reducerad
-               medaljgrupp. Se loadMergeState. *@
-            <div class="collapse" id="mergeStateBody">
-                <div class="card-body py-2">
-                    <div id="mergeStateContent">
-                        <div class="text-muted small py-2">
-                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>Läser klasser…
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        @* "Klasser och medaljer" var ett eget kort FÖRE resultatlistan, så "Granska och publicera"
+           landade på klasstabellen i stället för listan (Stefan 2026-10-04). Det är en inställning
+           PÅ listan: Åtgärder → Klasser och sammanslagning… (dialogen classMergeModal, där också
+           medaljerna står). På sidan står bara en gul rad, och bara när något kräver ett beslut. *@
 
         @*
             ===== Sektion 2: Sarskjutning =====
@@ -368,11 +342,13 @@
             CalculateFinalResults, sa kortet ar dolt pa varje tavling som inte ar ett
             masterskap aven om markupen alltid renderas.
         *@
+        @* Samma kortform som resultatlistan (2026-10-04): rubrik till vänster, tillstånd till höger.
+           Att mata in en särskjutning är "Nästa steg" i kortet ovanför; här står själva inmatningen. *@
         <div id="shootOffSection" class="mb-3" style="display: none;">
-            <div class="card border-info">
-                <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
-                    <span class="fw-bold"><i class="bi bi-bullseye me-2"></i>Särskjutning</span>
-                    <span class="badge bg-info-subtle text-info-emphasis" id="shootOffStatusBadge">Inga oavgjorda medaljplatser</span>
+            <div class="card">
+                <div class="card-header py-2 d-flex align-items-center flex-wrap gap-2">
+                    <h6 class="mb-0 me-auto" style="font-size:1rem">Särskjutning</h6>
+                    <span class="hpsk-state hpsk-state--draft" id="shootOffStatusBadge"><span class="hpsk-state-dot"></span>Inte avgjord</span>
                 </div>
                 <div class="card-body py-3" id="shootOffBody">
                     <div class="text-muted small">Laddar...</div>
@@ -380,98 +356,91 @@
             </div>
         </div>
 
-        <!-- ===== Sektion 3: Resultatlistan ===== -->
+        <!-- ===== Resultatlistan ===== -->
         @*
-            Publiceringen bor i LISTANS huvud, inte i en egen sektion. En sektion som hette
-            "Publicering" sager ATT nagot publiceras men visar inte VAD -- objektet lag i
-            nasta kort. Rapporterat 2026-09-08: "Vad ar det som publiceras dar?"
+            OMGJORD 2026-10-04 (Stefan, efter Sune-genomgången). Skiss:
+            https://claude.ai/artifact/KGM9DZEfVKEWB3hNi9iJEx
 
-            ⚠️ Prisutdelningslanken ligger HAR och inte i "Klasser och medaljer", trots att
-            medaljtabellen star dar. Prislistans enda verkliga felläge ar att den ar ALDRE
-            an resultatlistan, sa knappen hor intill Uppdatera dar beroendet syns. Tva
-            sektioner bort syns det inte -- och da ar vi tillbaka i "prislistan sager att
-            det inte ar avgjort".
-
-            Uppdatera och Publicera star synliga; resten ligger i Atgarder, eftersom fem
-            kontroller pa en rad radbryter pa en surfplatta i portratt.
+            - Resultatlistan är det första kortet; "Granska och publicera" landar här.
+            - EN färgad knapp: Publicera. Allt annat i Åtgärder — Klasser och sammanslagning…,
+              Rätta listan, Räkna om listan, Öppna och skriv ut, Prisutdelningslistan, Avpublicera.
+            - Ingen Uppdatera-knapp: listan räknas om av sig själv när fliken öppnas OM resultat
+              matats in sedan den sparades (GetResultsListFreshness), och direkt efter en sparad
+              sammanslagning. ⚠️ Den inbäddade listan laddades förr bara om när adressen ändrades —
+              och adressen var alltid densamma, så en sparad sammanslagning syntes inte förrän sidan
+              laddades om. Nu bär adressen en version som höjs vid varje omräkning (hpskReloadResultsFrame).
+            - Raden #resultsFlash säger vad som hände; #resultsHint visas bara när något kräver ett beslut.
+            - Papperskorgarna (edit=1) visas bara i läget "Rätta listan".
+            ⚠️ Id:na btnCreateResultsList, btnMarkOfficial, btnMarkPreliminary, resultsListStatusBadge,
+            resultsListCount, btnOpenResultsNewTab, resultsListBody är bevarade — JS och kortet
+            "Nästa steg" slår upp dem.
         *@
         <div class="card" id="resultsArtifactSection">
-            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
-                <span class="fw-bold"><i class="bi bi-list-ol me-2"></i>Resultatlistan</span>
+            <div class="card-header py-2 d-flex align-items-center flex-wrap gap-2">
+                <h6 class="mb-0 me-auto" style="font-size:1rem">Resultatlista
+                    <span class="text-muted fw-normal small" id="resultsListSummary" style="display: none;">· <span id="resultsListCount">0</span> deltagare<span id="resultsListSavedAt"></span></span></h6>
                 <div class="d-flex align-items-center gap-2 flex-wrap" id="resultsListActions">
-                    <span class="text-muted" id="resultsListSummary" style="display: none;">
-                        <small><i class="bi bi-people me-1"></i><span id="resultsListCount">0</span> deltagare</small>
-                    </span>
-
-                    @* ⚠️ TILLSTAND, INTE KNAPP. Klasserna kommer ur .hpsk-state i theme.css;
-                       innehallet skrivs av hpskSetPublishState(). Satt aldrig tillbaka
-                       `badge bg-warning fs-6 px-3 py-2` — det ger exakt en knapps matt och
-                       var halva skalet att brickan lastes som en knapp man skulle trycka pa. *@
+                    <span class="small text-muted d-none" id="resultsRecalcBusy"><span class="spinner-border spinner-border-sm me-1" role="status"></span>Räknar om…</span>
+                    @* ⚠️ TILLSTAND, INTE KNAPP (.hpsk-state). Innehållet skrivs av hpskSetPublishState(). *@
                     <span class="hpsk-state hpsk-state--draft" id="resultsListStatusBadge" style="display: none;">
                         <span class="hpsk-state-dot"></span>Preliminär
                     </span>
-
-                    <button class="btn btn-outline-primary btn-sm" onclick="createResultsList(event)" id="btnCreateResultsList">
-                        <i class="bi bi-arrow-clockwise me-1"></i>Uppdatera
+                    <button class="btn btn-primary btn-sm" id="btnMarkOfficial" onclick="markResultsOfficial(event)" style="display: none;">
+                        Publicera
                     </button>
-                    <button class="btn btn-success btn-sm" id="btnMarkOfficial" onclick="markResultsOfficial(event)" style="display: none;">
-                        <i class="bi bi-check-circle me-1"></i>Publicera
-                    </button>
-                    @* Avpublicera ar ett STEG TILLBAKA, inte en varning. outline-warning gjorde
-                       den gula och larmande i en rad som redan bar en gul tillstandsbricka. *@
-                    <button class="btn btn-outline-secondary btn-sm" id="btnMarkPreliminary" onclick="markResultsPreliminary(event)" style="display: none;">
-                        <i class="bi bi-arrow-counterclockwise me-1"></i>Avpublicera
-                    </button>
-
-                    @* Tva poster ar under husregelns "3+ ger meny", och det ar ett medvetet
-                       undantag: raden bar redan antal, tillstand och tre knappar, och de tva
-                       posterna som fullbreda knappar spranger 768 px. *@
+                    @* Uppdatera-knappen är dold: omräkningen sker av sig själv. Id:t finns kvar för JS
+                       (submitCreateResultsList återställer dess etikett) och för "Nästa steg". *@
+                    <button class="d-none" id="btnCreateResultsList" type="button" onclick="createResultsList(event)" tabindex="-1" aria-hidden="true"></button>
                     <div class="dropdown">
                         <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
-                                data-bs-toggle="dropdown" aria-expanded="false">
+                                data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false">
                             <i class="bi bi-sliders me-1"></i>Åtgärder
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
-                            <li>
-                                <a class="dropdown-item" href="/prisutdelning/@competitionId" target="_blank" rel="noopener">
-                                    <i class="bi bi-award me-2"></i>Prisutdelningslistan
-                                </a>
-                            </li>
-                            <li>
-                                @* ⚠️ Id:t bevarat — loadResultsList() visar knappen forst nar
-                                   det finns en lista att oppna. *@
-                                <button class="dropdown-item" type="button" id="btnOpenResultsNewTab"
+                            <li><h6 class="dropdown-header">Listan</h6></li>
+                            <li><button class="dropdown-item" type="button" onclick="showMergeAnalysisModal(event)" id="btnAnalyzeMerges">
+                                <i class="bi bi-intersect me-2"></i>Klasser och sammanslagning…</button></li>
+                            <li><button class="dropdown-item" type="button" onclick="toggleResultsEditMode()" id="menuEditRows">
+                                <i class="bi bi-pencil-square me-2"></i><span>Rätta listan (ta bort en skytt ur en klass)</span></button></li>
+                            <li><button class="dropdown-item" type="button" onclick="recalcResultsListNow()">
+                                <i class="bi bi-arrow-clockwise me-2"></i>Räkna om listan</button></li>
+                            <li class="d-none" id="menuShowShootOff"><button class="dropdown-item" type="button" onclick="showResolvedShootOff()">
+                                <i class="bi bi-bullseye me-2"></i>Visa särskjutningen</button></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><button class="dropdown-item" type="button" id="btnOpenResultsNewTab"
                                         onclick="openResultsListInNewTab()" style="display: none;">
-                                    <i class="bi bi-box-arrow-up-right me-2"></i>Öppna listan i ny flik
-                                </button>
-                            </li>
+                                <i class="bi bi-box-arrow-up-right me-2"></i>Öppna och skriv ut</button></li>
+                            <li><a class="dropdown-item" href="/prisutdelning/@competitionId" target="_blank" rel="noopener">
+                                <i class="bi bi-award me-2"></i>Prisutdelningslistan</a></li>
+                            @* Ett steg tillbaka hör i menyn, sist och i rött. Id:t bevarat — updateResultsListStatus visar/döljer det. *@
+                            <li id="btnMarkPreliminary" style="display: none;"><hr class="dropdown-divider">
+                                <button class="dropdown-item text-danger" type="button" onclick="markResultsPreliminary(event)">
+                                <i class="bi bi-arrow-counterclockwise me-2"></i>Avpublicera</button></li>
                         </ul>
                     </div>
-
-                    @* ⚠️ VISA/DOLJ LIGGER SIST, likadant pa varje kollapsbar sektion. Den lag
-                       tidigare i menyn har och som knapp mitt i raden pa Startlistor — samma
-                       kontroll pa tva stallen i tva former. Rapporterat 2026-09-08. *@
-                    <button class="btn btn-sm btn-outline-secondary" type="button"
-                            data-bs-toggle="collapse" data-bs-target="#resultsListBody"
-                            aria-expanded="true" aria-controls="resultsListBody">
-                        <i class="bi bi-chevron-expand me-1"></i>Visa/dölj
-                    </button>
                 </div>
             </div>
-            <div class="card-body py-2 border-bottom">
-                <div class="small text-muted mb-0" id="publishHint">
-                    <strong>Uppdatera</strong> räknar om listan ur resultaten.
-                    <strong>Publicera</strong> gör den synlig för skyttarna.
-                </div>
+            @* Vad som just hände (grön) och vad som kräver ett beslut (gul). Visas bara när det finns något att säga. *@
+            <div class="alert alert-success small py-2 mx-2 mt-2 mb-0 d-none" id="resultsFlash" role="status"></div>
+            <div class="alert alert-warning small py-2 mx-2 mt-2 mb-0 d-none" id="resultsHint"></div>
+            @* En PUBLICERAD lista räknas aldrig om tyst — skyttarna ser den. Visas när resultat
+               ändrats efter publiceringen. *@
+            <div class="alert alert-warning small py-2 mx-2 mt-2 mb-0 d-none" id="resultsStaleHint">
+                Resultat har ändrats efter att listan publicerades. Den publicerade listan visar inte ändringen.
+                <button type="button" class="btn btn-link btn-sm p-0 align-baseline fw-semibold" onclick="recalcResultsListNow()">Räkna om den publicerade listan</button>
             </div>
-            <div class="collapse show" id="resultsListBody">
-                <div class="card-body">
+            <div class="alert alert-info small py-2 mx-2 mt-2 mb-0 d-none" id="resultsEditModeNote">
+                Rättningsläge: en papperskorg står på varje rad. Den tar bort skyttens resultat i just den klassen.
+                <button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="toggleResultsEditMode()">Klar</button>
+            </div>
+            <div id="resultsListBody">
+                <div class="card-body p-2">
                     <div id="noResultsMessage" class="text-center py-4" style="display: none;">
-                        <p class="text-muted">Klicka <strong>Uppdatera</strong> här ovanför för att skapa en resultatlista.</p>
+                        <p class="text-muted mb-0">Resultatlistan skapas av sig själv när de första resultaten är inmatade.</p>
                     </div>
                     <div id="resultsDisplay" style="display: none;">
                         <div id="resultsIframeContainer">
-                            <iframe id="resultsManagementIframe" src="" style="width: 100%; height: 800px; border: 1px solid #dee2e6; border-radius: 0.375rem;"></iframe>
+                            <iframe id="resultsManagementIframe" src="" title="Resultatlista" style="width: 100%; height: 600px; border: 0;"></iframe>
                         </div>
                     </div>
                 </div>
@@ -754,13 +723,13 @@
 
 <!-- Class Merge Analysis Modal -->
 <div class="modal fade" id="classMergeModal" tabindex="-1" aria-labelledby="classMergeModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="classMergeModalLabel">
                     @* "klass" + "sammanslagning" — trippel-s dras ihop till två i svensk
                        sammansättning. Rättat 2026-09-07. *@
-                    <i class="bi bi-arrows-collapse me-2"></i>Klassammanslagning
+                    Klasser och sammanslagning
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
@@ -782,23 +751,26 @@
                                 <th>Klass</th>
                                 <th class="text-center">Antal</th>
                                 <th>Sammanslagning</th>
-                                <th>Om ej sammanslagen</th>
+                                <th class="d-none d-sm-table-cell">Om ej sammanslagen</th>
                             </tr>
                         </thead>
                         <tbody id="classMergeTableBody">
                         </tbody>
                     </table>
                 </div>
+                @* Medaljerna (och valet av medaljindelning vid mästerskap) — förut ett eget kort
+                   "Klasser och medaljer" före resultatlistan. Fylls av loadMergeState. *@
+                <div id="mergeStateContent" class="mt-2"></div>
             </div>
+            @* ⚠️ EN spara-knapp (2026-10-04). "Skapa med" / "Skapa utan sammanslagning" var två knappar
+               för samma sak: inga ikryssade + Spara = ingen sammanslagning, och det rensar en
+               tidigare sparad. Listan räknas om och ritas om direkt; beskedet står i resultatkortet. *@
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
                     Avbryt
                 </button>
-                <button type="button" class="btn btn-outline-primary" onclick="submitCreateResultsListNoMerges()">
-                    <i class="bi bi-arrow-clockwise me-1"></i>Skapa utan sammanslagning
-                </button>
                 <button type="button" class="btn btn-primary" onclick="applyMergesAndCreateResults()">
-                    <i class="bi bi-check-circle me-1"></i>Skapa med sammanslagning
+                    Spara och räkna om listan
                 </button>
             </div>
         </div>
@@ -855,6 +827,10 @@ function createResultsList(event) {
 // classes that each already have ≥ 5 participants.
 async function showMergeAnalysisModal(event) {
     if (event) event.stopPropagation();
+    // Öppnad från Åtgärder-menyn: stäng menyn, annars står den kvar bakom dialogen.
+    document.querySelectorAll('#resultsArtifactSection [data-bs-toggle="dropdown"]').forEach(t => {
+        try { bootstrap.Dropdown.getOrCreateInstance(t).hide(); } catch (e) { }
+    });
 
     const competitionId = $('.competition-results-management').data('competition-id');
     if (!competitionId) { alert('Ingen tävling vald.'); return; }
@@ -876,13 +852,15 @@ async function showMergeAnalysisModal(event) {
         }
 
         if (!data.classes || data.classes.length === 0) {
-            alert('Det finns inga resultat att slå samman ännu. Klicka på "Uppdatera" för att skapa resultatlistan först.');
+            alert('Det finns inga resultat att slå samman ännu. Klasserna visas här när de första resultaten är inmatade.');
             return;
         }
 
         _lastMergeAnalysis = data;   // notisen om medaljer läses härifrån
         renderMergeModal(data.classes, data.suggestions || [], data.applied || []);
-        new bootstrap.Modal(document.getElementById('classMergeModal')).show();
+        document.getElementById('mergeStateContent')?.classList.remove('d-none');
+        loadMergeState();   // medaljdelen i dialogen
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('classMergeModal')).show();
     } catch (error) {
         console.error('Error:', error);
         alert('Ett fel uppstod vid analys av klasser.');
@@ -1011,6 +989,7 @@ function renderMergeModal(classes, suggestions, applied) {
         // sig i resultatlistan — medaljerna avgörs per mästerskapsklass och påverkas inte
         // (SHB C.3.4.1). Se notisen ovanför tabellen.
         const tdMedal = document.createElement('td');
+        tdMedal.className = 'd-none d-sm-table-cell';   // telefon: kolumnen trycker ihop tabellen
         tdMedal.innerHTML = cls.belowThreshold
             ? `<span class="text-muted small">Rankas för sig med ${cls.participantCount} deltagare</span>`
             : '<span class="text-muted">—</span>';
@@ -1038,11 +1017,68 @@ function collectMergeConfig() {
     return merges;
 }
 
+// "Spara och räkna om listan" i dialogen Klasser och sammanslagning. Inga ikryssade = ett
+// UTTRYCKLIGT "ingen sammanslagning", som rensar en tidigare sparad (samma som den gamla knappen
+// "Skapa utan sammanslagning"). Beskedet står i resultatkortet och listan ritas om direkt.
 function applyMergesAndCreateResults() {
     const competitionId = $('.competition-results-management').data('competition-id');
     const merges = collectMergeConfig();
     bootstrap.Modal.getInstance(document.getElementById('classMergeModal')).hide();
-    submitCreateResultsList(competitionId, merges.length > 0 ? merges : null, false);
+    const msg = merges.length
+        ? 'Sparat: ' + merges.map(m => m.sourceClass + ' slås samman med ' + m.targetClass).join(', ') + '. Listan är omräknad.'
+        : 'Sparat: ingen sammanslagning. Listan är omräknad.';
+    submitCreateResultsList(competitionId, merges.length > 0 ? merges : null, false, msg);
+    document.getElementById('resultsArtifactSection')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Den inbäddade listan (embed=1) rapporterar sin höjd — ramen växer med listan i stället för en
+// fast ruta med egen rullning.
+window.addEventListener('message', e => {
+    if (e.origin !== window.location.origin || !e.data || typeof e.data.hpskResultsHeight !== 'number') return;
+    const f = document.getElementById('resultsManagementIframe');
+    if (f && e.source === f.contentWindow) f.style.height = Math.max(200, e.data.hpskResultsHeight + 8) + 'px';
+});
+
+// Beskedet i resultatkortet (grön rad). Står kvar tills nästa åtgärd — en ruta som försvinner av
+// sig själv hinner inte läsas av den som tittade bort.
+function showResultsFlash(text) {
+    const el = document.getElementById('resultsFlash');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('d-none', !text);
+}
+
+// Laddar om den inbäddade listan. ⚠️ Adressen bär en version som höjs här — utan den laddades
+// ramen bara om när adressen ändrades, och den var alltid densamma, så en sparad sammanslagning
+// eller omräkning syntes inte förrän hela sidan laddades om (Stefan 2026-10-04).
+let resultsFrameVersion = 0;
+function hpskReloadResultsFrame() {
+    resultsFrameVersion++;
+    if (typeof loadResultsList === 'function') loadResultsList();
+}
+
+// Åtgärder → Räkna om listan. Behövs när den sparade listan är gammal av ett skäl
+// tidskontrollen inte ser (t.ex. räknad innan medaljfunktionen fanns).
+function recalcResultsListNow() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    submitCreateResultsList(competitionId, null, true, 'Listan är omräknad ur de inmatade resultaten.');
+}
+
+// Åtgärder → Rätta listan: papperskorgarna (edit=1) visas bara i det här läget.
+window._resultsEditMode = false;
+function toggleResultsEditMode() {
+    window._resultsEditMode = !window._resultsEditMode;
+    document.getElementById('resultsEditModeNote')?.classList.toggle('d-none', !window._resultsEditMode);
+    const label = document.querySelector('#menuEditRows span');
+    if (label) label.textContent = window._resultsEditMode ? 'Sluta rätta listan' : 'Rätta listan (ta bort en skytt ur en klass)';
+    hpskReloadResultsFrame();
+}
+
+// Åtgärder → Visa särskjutningen (när den redan är avgjord och kortet därför är dolt).
+function showResolvedShootOff() {
+    window._showResolvedShootOff = true;
+    const sec = document.getElementById('shootOffSection');
+    if (sec) { sec.style.display = 'block'; sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 }
 
 // "Skapa utan sammanslagning" i dialogen är ett UTTRYCKLIGT val och rensar därför en
@@ -1064,18 +1100,17 @@ function openResultsListInNewTab() {
     window.open(currentResultPageUrl, '_blank');
 }
 
-function submitCreateResultsList(competitionId, merges, keepExisting) {
-    const btn = document.getElementById('btnCreateResultsList');
-    if (btn) {
-        btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Skapar...';
-        btn.disabled = true;
-    }
+// flashText: beskedet som visas i resultatkortet när omräkningen lyckats. Returnerar ett promise.
+function submitCreateResultsList(competitionId, merges, keepExisting, flashText) {
+    const busy = document.getElementById('resultsRecalcBusy');
+    if (busy) busy.classList.remove('d-none');
+    showResultsFlash('');
 
     const body = { competitionId: parseInt(competitionId) };
     if (merges) body.merges = merges;
     if (keepExisting) body.keepExistingMerges = true;
 
-    fetch('/umbraco/surface/CompetitionResults/CreateResultsList', {
+    return fetch('/umbraco/surface/CompetitionResults/CreateResultsList', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -1086,22 +1121,20 @@ function submitCreateResultsList(competitionId, merges, keepExisting) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showSaveMessage('Resultatlistan har skapats/uppdaterats! (' + data.resultsCount + ' deltagare)', 'success');
-            loadResultsList();
+            showResultsFlash(flashText || 'Listan är omräknad.');
+            hpskReloadResultsFrame();
             loadMergeState();
         } else {
-            alert('Fel vid skapande av resultatlista: ' + (data.message || 'Okänt fel'));
+            alert('Resultatlistan kunde inte räknas om: ' + (data.message || 'Okänt fel'));
         }
+        return data;
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('Ett fel uppstod vid skapande av resultatlista.');
+        alert('Ett fel uppstod när resultatlistan skulle räknas om.');
     })
     .finally(() => {
-        if (btn) {
-            btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Uppdatera';
-            btn.disabled = false;
-        }
+        if (busy) busy.classList.add('d-none');
     });
 }
 
@@ -1176,6 +1209,12 @@ async function loadResultsList() {
                 updateResultsListStatus(data.isOfficial);
             }
 
+            // När den sparade listan räknades, och om den är äldre än resultaten.
+            const savedEl = document.getElementById('resultsListSavedAt');
+            if (savedEl) savedEl.textContent = data.artifactSavedAt
+                ? ' · räknad ' + String(data.artifactSavedAt).slice(11, 16) : '';
+            handleResultsFreshness(!!data.artifactStale, !!data.isOfficial);
+
             // Update summary
             const totalShooters = data.results.classGroups.reduce((sum, group) => sum + group.shooters.length, 0);
             const resultsCountEl = document.getElementById('resultsListCount');
@@ -1193,8 +1232,12 @@ async function loadResultsList() {
             // inbäddningen: den finns för publiken på en storbildsskärm, medan arrangören
             // som tittar på samma lista har en Uppdatera-knapp.
             if (data.resultPageUrl) {
+                // embed=1: sidans egen rubrik och Skriv ut döljs och höjden rapporteras hit.
+                // edit=1 (papperskorgarna) bara i läget "Rätta listan". v höjs vid varje omräkning,
+                // så ramen laddas om när listan faktiskt ändrats — och bara då.
                 const wanted = data.resultPageUrl
-                    + (data.resultPageUrl.includes('?') ? '&' : '?') + 'noRefresh=1&edit=1';
+                    + (data.resultPageUrl.includes('?') ? '&' : '?') + 'noRefresh=1&embed=1'
+                    + (window._resultsEditMode ? '&edit=1' : '') + '&v=' + resultsFrameVersion;
                 currentResultPageUrl = data.resultPageUrl;
                 // ⚠️ Tom strang, inte 'inline-block': knappen ar en .dropdown-item och ska
                 // da vara block. Tom strang aterstaller elementets eget lage och ar riktig
@@ -1232,10 +1275,58 @@ async function loadResultsList() {
             if (summary) summary.style.display = 'none';
             if (btnMarkOfficial) btnMarkOfficial.style.display = 'none';
             if (btnMarkPreliminary) btnMarkPreliminary.style.display = 'none';
+            // Ingen lista än — skapa den av sig själv om det finns resultat.
+            if (!data.hasResultPage) createFirstResultsListIfPossible();
         }
     } catch (error) {
         console.error('Error loading results list:', error);
     }
+}
+
+// Är den sparade listan äldre än resultaten? Preliminär lista → räkna om av sig själv (Stefan
+// 2026-10-04: "räknas om av sig själv när du öppnar fliken"). Publicerad lista → räkna ALDRIG om
+// tyst — skyttarna ser den — utan säg det och erbjud omräkningen.
+let resultsAutoRecalcBusy = false;
+function handleResultsFreshness(stale, isOfficial) {
+    const staleHint = document.getElementById('resultsStaleHint');
+    if (staleHint) staleHint.classList.toggle('d-none', !(stale && isOfficial));
+    if (stale && !isOfficial && !resultsAutoRecalcBusy) {
+        resultsAutoRecalcBusy = true;
+        const competitionId = $('.competition-results-management').data('competition-id');
+        Promise.resolve(submitCreateResultsList(competitionId, null, true, 'Listan är omräknad ur de inmatade resultaten.'))
+            .finally(() => { resultsAutoRecalcBusy = false; });
+    }
+}
+
+// Vid varje nytt besök på fliken: den billiga kontrollen. Hela listan (8–16 s på en stor
+// tävling) räknas bara om när den faktiskt är inaktuell.
+async function checkResultsFreshness() {
+    const competitionId = $('.competition-results-management').data('competition-id');
+    if (!competitionId) return;
+    try {
+        const r = await fetch(`/umbraco/surface/CompetitionResults/GetResultsListFreshness?competitionId=${competitionId}`);
+        const d = await r.json();
+        if (!d || !d.success) return;
+        if (!d.hasResultPage) { createFirstResultsListIfPossible(); return; }
+        handleResultsFreshness(!!d.stale, !!d.isOfficial);
+    } catch (e) { console.warn('Kunde inte kontrollera resultatlistan', e); }
+}
+
+// Ingen resultatlista än: skapa den av sig själv när det finns resultat (det var förr "Klicka
+// Uppdatera"). Finns inga resultat svarar servern det, och rutan säger att listan kommer.
+let resultsFirstCreateTried = false;
+function createFirstResultsListIfPossible() {
+    if (resultsFirstCreateTried) return;
+    resultsFirstCreateTried = true;
+    const competitionId = $('.competition-results-management').data('competition-id');
+    const body = { competitionId: parseInt(competitionId), keepExistingMerges: true };
+    fetch('/umbraco/surface/CompetitionResults/CreateResultsList', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': $('input[name="__RequestVerificationToken"]').val() },
+        body: JSON.stringify(body)
+    }).then(r => r.json()).then(d => {
+        if (d && d.success) { showResultsFlash('Resultatlistan är skapad ur de inmatade resultaten.'); hpskReloadResultsFrame(); loadMergeState(); }
+    }).catch(() => { });
 }
 
 function toggleResultsList(event) {
@@ -1273,7 +1364,9 @@ function updateResultsListStatus(isOfficial) {
     // ett utseende som lastes som en knapp.
     hpskSetPublishState(statusBadge, !!isOfficial, 'Resultatlistan');
     btnMarkOfficial.style.display = isOfficial ? 'none' : 'inline-block';
-    btnMarkPreliminary.style.display = isOfficial ? 'inline-block' : 'none';
+    // Avpublicera är en menypost (li) sedan 2026-10-04 — tom sträng ger dess eget läge.
+    btnMarkPreliminary.style.display = isOfficial ? '' : 'none';
+    window._resultsIsOfficial = !!isOfficial;
 }
 
 async function markResultsOfficial(event) {
@@ -1424,7 +1517,9 @@ async function showSubMergeAnalysisModal(event) {
         _subMergeContext = true;
         _lastMergeAnalysis = data;   // notisen om medaljer läses härifrån
         renderMergeModal(data.classes, data.suggestions || [], data.applied || []);
-        new bootstrap.Modal(document.getElementById('classMergeModal')).show();
+        // Medaljdelen i dialogen gäller huvudlistan — inte deltävlingen.
+        document.getElementById('mergeStateContent')?.classList.add('d-none');
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('classMergeModal')).show();
     } catch (error) {
         console.error('Error:', error);
         alert('Ett fel uppstod vid analys av deltävlingens klasser.');
@@ -1749,47 +1844,28 @@ async function loadMergeState() {
                 : ''}`;
     }
 
+    // Dialogen "Klasser och sammanslagning" bär klasstabellen själv (renderMergeModal); här
+    // ritas medaljdelen under den.
     host.innerHTML = `
-        <div class="row g-3">
-            <div class="col-lg-7">
-                <div class="fw-semibold small mb-1">Klasser i resultatlistan</div>
-                <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-2">
-                        <thead>
-                            <tr>
-                                <th>Klass</th>
-                                <th class="text-center">Deltagare</th>
-                                <th>Sammanslagning</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>
-                </div>
-                <details class="form-text mb-0"><summary>Så fungerar sammanslagningen</summary>
-                    Klasserna styr hur resultatlistan <strong>grupperas</strong> — de påverkar inte
-                    medaljerna. En klass med färre än fem deltagare får slås samman med närmaste
-                    klass inom vapengruppen (SHB F.2.3): damklassen är nivåindelad som de övriga,
-                    så Dam 2 slås samman med C2 — inte med de andra damklasserna. Klass 1 slås
-                    aldrig samman med en annan nivå. Tabellen visar det som är
-                    <strong>sparat</strong> — <strong>Uppdatera</strong> räknar om listan med
-                    precis den här uppställningen.
-                </details>
-            </div>
-            <div class="col-lg-5">
-                <div class="fw-semibold small mb-1">Medaljer</div>
-                ${groupingBlock}
-                ${medalBlock}
-            </div>
-        </div>`;
+        <div class="fw-semibold small mb-1">Medaljer</div>
+        ${groupingBlock}
+        ${medalBlock}`;
 
-    // Fäll ut av sig själv EN gång per sidladdning, och bara när något kräver ett beslut:
-    // en klass under fem som FÅR slås samman men inte är det, eller en reducerad medaljgrupp.
-    // Fälls inte ihop igen av sig själv — den som fällt ut sektionen ska inte få den stängd.
-    const needsDecision = classes.some(c => c.belowThreshold && !appliedMap[c.className] && suggestionMap[c.className])
-        || (data.medalGroups || []).some(g => g.reduced);
-    if (needsDecision && !window._mergeStateAutoOpened && typeof bootstrap !== 'undefined') {
-        window._mergeStateAutoOpened = true;
-        bootstrap.Collapse.getOrCreateInstance(document.getElementById('mergeStateBody'), { toggle: false }).show();
+    // Gul rad i resultatkortet — bara när något kräver ett beslut: en klass under fem som FÅR
+    // slås samman men inte är det. (Ersätter den självöppnande sektionen "Klasser och medaljer".)
+    const hint = document.getElementById('resultsHint');
+    if (hint) {
+        const open = classes.filter(c => c.belowThreshold && !appliedMap[c.className] && suggestionMap[c.className])
+            .map(c => c.className);
+        if (open.length) {
+            const names = open.length === 1 ? open[0] : open.slice(0, -1).join(', ') + ' och ' + open[open.length - 1];
+            hint.innerHTML = `${escapeHtml(names)} har färre än fem deltagare${open.length > 1 ? ' var' : ''}. `
+                + `<button type="button" class="btn btn-link btn-sm p-0 align-baseline fw-semibold" onclick="showMergeAnalysisModal(event)">Slå samman klasser…</button>`;
+            hint.classList.remove('d-none');
+        } else {
+            hint.innerHTML = '';
+            hint.classList.add('d-none');
+        }
     }
 }
 
@@ -1859,7 +1935,6 @@ async function loadShootOffStatus(isSub) {
             return;
         }
 
-        section.style.display = 'block';
         // Count contested medal positions across all tied groups. Contested = a medal slot
         // (rank ≤ 3) whose owning shooter has not yet been uniquely separated from their
         // tied opponents. Decided + Contested = total medal slots in tied groups.
@@ -1875,13 +1950,28 @@ async function loadShootOffStatus(isSub) {
                 totalMedalSlots += medalSlots;
             });
         });
+        // ⚠️ Avgjord särskjutning = kortet försvinner (Stefan 2026-10-04) — det är inte längre ett
+        // steg. Den går att öppna igen under Åtgärder → "Visa särskjutningen", så en felinmatad
+        // omgång fortfarande kan rättas. Deltävlingens kort visas som förut.
+        const showAnyway = !isSub && window._showResolvedShootOff === true;
+        section.style.display = (isSub || unresolvedPositions > 0 || showAnyway) ? 'block' : 'none';
+        if (!isSub) {
+            const item = document.getElementById('menuShowShootOff');
+            if (item) item.classList.toggle('d-none', unresolvedPositions > 0);
+        }
+        // Huvudkortet bär tillståndsbrickan (.hpsk-state, samma form som publiceringen);
+        // deltävlingens kort har kvar sin gamla bricka.
         if (badge) {
-            if (unresolvedPositions > 0) {
-                badge.className = 'badge bg-warning text-dark';
-                badge.textContent = `${unresolvedPositions} medaljplats(er) kvar att avgöra`;
+            const isState = badge.classList.contains('hpsk-state');
+            const label = unresolvedPositions > 0
+                ? (unresolvedPositions === 1 ? 'En medaljplats kvar att avgöra' : `${unresolvedPositions} medaljplatser kvar att avgöra`)
+                : 'Avgjord';
+            if (isState) {
+                badge.className = 'hpsk-state ' + (unresolvedPositions > 0 ? 'hpsk-state--draft' : 'hpsk-state--live');
+                badge.innerHTML = '<span class="hpsk-state-dot"></span>' + label;
             } else {
-                badge.className = 'badge bg-success';
-                badge.textContent = `${totalMedalSlots} medaljplats(er) avgjorda`;
+                badge.className = unresolvedPositions > 0 ? 'badge bg-warning text-dark' : 'badge bg-success';
+                badge.textContent = label;
             }
         }
 
@@ -2343,17 +2433,16 @@ async function toggleSubResultsOfficial(makeOfficial, event) {
 // the modal is shared between the main and sub flows, so the "Skapa" buttons
 // need to route to whichever endpoint matches the open context.
 (function() {
+    // ⚠️ Huvudlistans gren går till den ursprungliga funktionen (_origApply), som bär beskedet i
+    // resultatkortet och rullar dit — en egen kopia här hade tappat det tyst (2026-10-04).
     const _origApply = window.applyMergesAndCreateResults;
     window.applyMergesAndCreateResults = function() {
+        if (!_subMergeContext) { _origApply(); return; }
         const competitionId = $('.competition-results-management').data('competition-id');
         const merges = collectMergeConfig();
         bootstrap.Modal.getInstance(document.getElementById('classMergeModal')).hide();
-        if (_subMergeContext) {
-            _subMergeContext = false;
-            submitCreateSubResultsList(competitionId, merges.length > 0 ? merges : null, false);
-        } else {
-            submitCreateResultsList(competitionId, merges.length > 0 ? merges : null, false);
-        }
+        _subMergeContext = false;
+        submitCreateSubResultsList(competitionId, merges.length > 0 ? merges : null, false);
     };
     const _origSkip = window.submitCreateResultsListNoMerges;
     window.submitCreateResultsListNoMerges = function() {
@@ -2391,8 +2480,11 @@ function loadResultsListOnce() {
 }
 
 $(document).ready(function() {
+    // Första besöket läser listan; varje senare besök gör bara den billiga kontrollen och räknar
+    // om när resultat matats in sedan listan sparades (Stefan 2026-10-04).
     $('button[data-bs-target="#results"], #results-tab').on('shown.bs.tab', function () {
-        setTimeout(loadResultsListOnce, 300);
+        if (_resultsListLoadedOnce) checkResultsFreshness();
+        else setTimeout(loadResultsListOnce, 300);
     });
 
     // Bara om Resultat är den aktiva fliken vid sidladdning.

@@ -131,7 +131,7 @@ namespace HpskSite.Services
                         "Medaljindelningen har ändrats sedan listan räknades ut. Listan nedan är "
                         + $"räknad så här: {MedalGrouping.Describe(artifact.MedalsPerWeaponGroup)} "
                         + $"Tävlingen är nu inställd på: {MedalGrouping.Describe(current)} "
-                        + "Klicka Uppdatera på fliken Resultat.";
+                        + "Räkna om listan på fliken Resultat.";
                 }
             }
 
@@ -186,7 +186,7 @@ namespace HpskSite.Services
                 // Skiljer "inga medaljer" från "vet inte". En tom ceremoni för ett mästerskap är
                 // värre än ett ärligt "räkna om listan först".
                 model.Warnings.Add("Resultatlistan räknades ut innan medaljfunktionen fanns, "
-                    + "så medaljörerna är inte beräknade. Klicka Uppdatera på fliken Resultat.");
+                    + "så medaljörerna är inte beräknade. Räkna om listan på fliken Resultat.");
             }
             else if (!model.IsChampionship)
             {
@@ -540,8 +540,8 @@ namespace HpskSite.Services
                         model.Warnings.Insert(0,
                             $"Särskjutningsresultat matades in {newest:d MMM HH:mm}, efter att den här "
                             + $"listan räknades ut ({artifact.UpdatedAt:d MMM HH:mm}). "
-                            + "Medaljerna nedan kan vara felaktiga — klicka Uppdatera på fliken Resultat "
-                            + "och ladda om den här sidan.");
+                            + "Medaljerna nedan kan vara felaktiga — öppna fliken Resultat (listan räknas "
+                            + "om av sig själv) och ladda om den här sidan.");
                     }
                 }
             }
@@ -552,7 +552,7 @@ namespace HpskSite.Services
                 _logger.LogWarning(ex, "Kunde inte jämföra särskjutningen mot resultatlistan för tävling {CompetitionId}",
                     model.CompetitionId);
                 model.Warnings.Add("Kunde inte kontrollera om listan är räknad efter de senaste "
-                    + "särskjutningsresultaten. Klicka Uppdatera på fliken Resultat om en särskjutning nyligen matats in.");
+                    + "särskjutningsresultaten. Räkna om listan på fliken Resultat om en särskjutning nyligen matats in.");
             }
 
             // C.4.3.1.11: "Tävlingsresultaten skall före prisutdelningen vara noga kontrollerade,
