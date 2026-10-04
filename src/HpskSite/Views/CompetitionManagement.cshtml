@@ -692,19 +692,64 @@
                 }
                 else
                 {
-                    @await Html.PartialAsync("_StartListCoveragePanel", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
                     var isDp = false;
                     try { var dpJson = competition?.HasProperty("direktplaceringConfig") == true ? (competition.Value<string>("direktplaceringConfig") ?? "") : ""; isDp = dpJson.Contains("\"enabled\":true") || dpJson.Contains("\"Enabled\":true"); } catch { }
-                    @await Html.PartialAsync("CompetitionStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId }, { "IsDirektplacering", isDp } })
-
-                    // Finals start-list card — only for precision-family competitions that have finals series configured.
-                    // The card itself further gates on snapshot existence, etc.
                     var numFinalSeries = 0;
                     try { numFinalSeries = competition?.HasProperty("numberOfFinalSeries") == true ? competition.Value<int>("numberOfFinalSeries") : 0; } catch { }
                     numFinalSeries = HpskSite.CompetitionTypes.Common.CompetitionFinals.Effective(ViewData["CompetitionType"]?.ToString(), numFinalSeries);
+
+                    @* ⚠️ GRUNDOMGÅNG OCH FINAL VISAS EN I TAGET (Stefan 2026-10-04, efter Sune-genomgången).
+                       De stod förr under varandra med varsin publiceringsbricka — "Publicerad · syns för
+                       skyttarna" intill "Preliminär · syns inte" — och ögat läste dem som samma sak. Växeln
+                       står på Final när en finallista finns (finalkortet säger till), annars på Grundomgång.
+                       Varningar om grundomgången (täckningspanelen) bor i grundomgångens läge och syns
+                       aldrig under Final: när finalen finns är grundomgången avgjord. *@
                     if (numFinalSeries > 0)
                     {
-                        @await Html.PartialAsync("CompetitionFinalsStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                        <div class="btn-group mb-3 hpsk-sl-switch" role="group" aria-label="Vilken startlista">
+                            <button type="button" class="btn btn-outline-primary" id="slSwQual" data-sl-pane="qual" aria-pressed="true">Grundomgång</button>
+                            <button type="button" class="btn btn-outline-primary" id="slSwFinal" data-sl-pane="final" aria-pressed="false">Final</button>
+                        </div>
+                    }
+                    <div id="slPaneQual">
+                        @await Html.PartialAsync("_StartListCoveragePanel", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                        @await Html.PartialAsync("CompetitionStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId }, { "IsDirektplacering", isDp } })
+                    </div>
+                    if (numFinalSeries > 0)
+                    {
+                        <div id="slPaneFinal" class="d-none">
+                            @await Html.PartialAsync("CompetitionFinalsStartListManagement", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
+                        </div>
+                        <style>
+                            .hpsk-sl-switch .btn { min-width: 9rem; transition: none; }
+                            .hpsk-sl-switch .btn[aria-pressed="true"] { background: var(--bs-primary); color: #fff; }
+                            @@media (max-width: 575.98px) { .hpsk-sl-switch { display: flex; } .hpsk-sl-switch .btn { flex: 1; min-width: 0; } }
+                        </style>
+                        <script>
+                        (function () {
+                            const panes = { qual: document.getElementById('slPaneQual'), final: document.getElementById('slPaneFinal') };
+                            let chosen = false;   // ett val av användaren slår förvalet
+                            // ⚠️ Dialogerna flyttas till body: en Bootstrap-dialog i en dold behållare får
+                            // höjd 0. Redigeraren ligger i grundomgångens partial men öppnas också för
+                            // finalens listor, alltså medan grundomgången är dold.
+                            Object.values(panes).forEach(p => p && p.querySelectorAll('.modal').forEach(m => document.body.appendChild(m)));
+                            function show(name, byUser) {
+                                if (!panes[name]) return;
+                                if (byUser) chosen = true;
+                                Object.keys(panes).forEach(k => panes[k] && panes[k].classList.toggle('d-none', k !== name));
+                                document.querySelectorAll('[data-sl-pane]').forEach(b => {
+                                    const on = b.dataset.slPane === name;
+                                    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+                                    b.classList.toggle('active', on);
+                                });
+                            }
+                            document.querySelectorAll('[data-sl-pane]').forEach(b => b.addEventListener('click', () => show(b.dataset.slPane, true)));
+                            window.hpskShowStartListPane = name => show(name, true);
+                            // Finalkortet anropar när det vet om en finallista finns.
+                            window.hpskStartListPaneDefault = name => { if (!chosen) show(name, false); };
+                            show('qual', false);
+                        })();
+                        </script>
                     }
                 }
             </div>

@@ -96,6 +96,10 @@
     }
     function groupLabel(g) { return g ? 'Vapengrupp ' + g : 'Övriga'; }
     function groupLabelLower(g) { return g ? 'vapengrupp ' + g : 'övriga'; }
+    // Opublicerade finalstartlistor, för "Publicera den" i påminnelserna (publicerar direkt).
+    function unpubFinalGroups() {
+        return esc(((state && state.groups) || []).filter(x => x.hasFinalsList && !x.finalsPublished).map(x => x.group).join('|'));
+    }
     let finalsInfoRetried = false;
 
     // De grupper som ligger i samma fas som kortet visar (den som ligger längst bak).
@@ -122,7 +126,7 @@
                 + '</span></div>'
                 // Påminnelsen om en opublicerad finalstartlista försvann vid publiceringen (Sune 3).
                 + ((s.groups || []).some(x => x.hasFinalsList && !x.finalsPublished)
-                    ? '<div class="ns-note"><i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad, så skyttarna ser den inte. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ns="goto-finals">Publicera den</button></div>'
+                    ? '<div class="ns-note"><i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad, så skyttarna ser den inte. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ns="publish-finals" data-groups="' + unpubFinalGroups() + '">Publicera den</button></div>'
                     : '');
             return;
         }
@@ -168,7 +172,7 @@
                     + '<p class="ns-fact">Finalen i ' + esc(groupLabelLower(partial.group)) + ' har inga skyttar från <b>'
                     + partial.missingFinalCategories.map(esc).join(', ') + '</b>. De klasserna var inte låsta när finalen skapades.</p>'
                     + groupList()
-                    + '<div class="ns-actions"><button type="button" class="btn btn-primary" data-ns="goto-finals"><i class="bi bi-trophy me-1"></i>Lägg till i finalen</button></div>';
+                    + '<div class="ns-actions"><button type="button" class="btn btn-primary" data-ns="finals" data-action="classes" data-group="' + esc(partial.group) + '"><i class="bi bi-trophy me-1"></i>Lägg till i finalen</button></div>';
                 return;
             }
             const info = window.hpskFinalsChoiceInfo;
@@ -200,11 +204,31 @@
             // är unika bara inom en lista. Med flera grupper i finalen får varje grupp sin knapp.
             const finalLink = x => '/station?c=' + compId + '&s=' + (x.finalsGapTeam || 1) + '&phase=finals&fsl=' + (x.finalsListId || 0);
             const open = gs.filter(x => x.finalsEntered < x.finalsExpected);
+            // ⚠️ Före första finalserien är publiceringen steget (Stefan 2026-10-04): skyttarna
+            // behöver se finalstartlistan innan de skjuter. Publiceringen gäller EN vapengrupps
+            // lista; flera opublicerade = "Publicera alla (N)", en = "Publicera vapengrupp X"
+            // (bara "Publicera" när tävlingen har en enda final).
+            const unpub = (s.groups || []).filter(x => x.hasFinalsList && !x.finalsPublished);
+            if (ent === 0 && unpub.length) {
+                const multi = (s.groups || []).filter(x => x.hasFinalsList).length > 1;
+                const label = unpub.length > 1 ? 'Publicera alla (' + unpub.length + ')'
+                    : (multi ? 'Publicera ' + esc(groupLabelLower(unpub[0].group)) : 'Publicera');
+                card.className = 'ns-card';
+                card.innerHTML = '<div class="ns-top"><span class="ns-label">Nästa steg</span>' + steps(s.step) + '</div>'
+                    + '<div class="ns-title">' + (unpub.length > 1 ? 'Publicera finalstartlistorna' : 'Publicera finalstartlistan') + '</div>'
+                    + '<p class="ns-fact">' + (multi ? esc('Vapengrupp ' + unpub.map(x => x.group || 'övriga').join(', ')) + (unpub.length > 1 ? ' är inte publicerade. ' : ' är inte publicerad. ') : '')
+                    + 'Skyttarna ser inte finalens startlista förrän den är publicerad.'
+                    + (unpub.length > 1 ? ' Vill du publicera en i taget gör du det vid listan under Startlistor.' : '') + '</p>'
+                    + '<div class="ns-actions"><button type="button" class="btn btn-primary" data-ns="publish-finals" data-groups="'
+                    + esc(unpub.map(x => x.group).join('|')) + '">' + label + '</button>'
+                    + '<button type="button" class="btn btn-outline-secondary" data-ns="goto-finals">Visa finalstartlistan</button></div>';
+                return;
+            }
             actions = open.length > 1
                 ? open.map(x => '<a class="btn btn-primary" href="' + finalLink(x) + '"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat, ' + esc(groupLabelLower(x.group)) + '</a>').join('')
                 : '<a class="btn btn-primary" href="' + finalLink(g) + '"><i class="bi bi-pencil-square me-1"></i>Mata in finalresultat</a>';
             if (gs.some(x => !x.finalsPublished))
-                extra = '<div class="ns-note"><i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad, så skyttarna ser den inte. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ns="goto-finals">Publicera den</button></div>';
+                extra = '<div class="ns-note"><i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad, så skyttarna ser den inte. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ns="publish-finals" data-groups="' + unpubFinalGroups() + '">Publicera den</button></div>';
         } else if (p === 'ShootOff') {
             const t = s.ties || [];
             // En strid: rubriken säger redan medalj och grupp. Flera: varje rad säger sin.
@@ -216,7 +240,7 @@
             fact = 'Alla serier är inmatade. Resultatlistan är preliminär och syns inte för skyttarna.';
             // Påminnelsen om en opublicerad finalstartlista försvann när finalen var inmatad.
             if ((s.groups || []).some(x => x.hasFinalsList && !x.finalsPublished))
-                extra = '<div class="ns-note"><i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad, så skyttarna ser den inte. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ns="goto-finals">Publicera den</button></div>';
+                extra = '<div class="ns-note"><i class="bi bi-exclamation-triangle me-1"></i>Finalstartlistan är inte publicerad, så skyttarna ser den inte. <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ns="publish-finals" data-groups="' + unpubFinalGroups() + '">Publicera den</button></div>';
             actions = '<button type="button" class="btn btn-primary" data-ns="goto-publish"><i class="bi bi-eye me-1"></i>Granska och publicera</button>'
                 + (s.isChampionship ? '<a class="btn btn-outline-secondary" href="/prisutdelning/' + compId + '" target="_blank" rel="noopener">Prisutdelningslistan</a>' : '');
         }
@@ -311,6 +335,9 @@
         if (!btn) return;
         const a = btn.dataset.ns;
         if (a === 'retry') { load(); return; }
+        // Grundomgångens åtgärder visar grundomgången i växeln Grundomgång | Final.
+        if ((a === 'create-startlist' || a === 'publish-startlist' || a === 'goto-startlists')
+            && typeof window.hpskShowStartListPane === 'function') window.hpskShowStartListPane('qual');
         if (a === 'create-startlist') {
             await showTab('startlists-tab');
             if (typeof window.openGenerateStartListModal === 'function') window.openGenerateStartListModal();
@@ -330,6 +357,11 @@
         } else if (a === 'goto-finals') {
             await showTab('startlists-tab');
             if (window.hpskGoToFinalsSection) window.hpskGoToFinalsSection();
+        } else if (a === 'publish-finals') {
+            if (typeof window.hpskFinalsPublish !== 'function') return;
+            btn.disabled = true;
+            try { await showTab('startlists-tab'); await window.hpskFinalsPublish((btn.dataset.groups || '').split('|')); }
+            finally { btn.disabled = false; load(); }
         } else if (a === 'finals') {
             if (typeof window.hpskFinalsAction !== 'function') return;
             btn.disabled = true;
