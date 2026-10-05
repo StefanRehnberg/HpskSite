@@ -26,10 +26,19 @@ namespace HpskSite.Services.AiChat
 
         public string GetFilteredKnowledgeBase(List<string> userRoles)
         {
-            var docs = LoadDocs();
-            var filtered = docs.Where(d => d.Roles.Any(r => userRoles.Contains(r))).ToList();
+            var filtered = LoadDocs().Where(d => IsVisibleTo(d, userRoles)).ToList();
             return string.Join("\n\n---\n\n", filtered.Select(d => d.Content));
         }
+
+        /// <summary>
+        /// Alla dokument, oberoende av roll. Samma lista (samma objekt) returneras tills cachen
+        /// löper ut, så sökindexet kan avgöra om något ändrats med en referensjämförelse.
+        /// </summary>
+        public IReadOnlyList<KnowledgeBaseDoc> GetAllDocs() => LoadDocs();
+
+        /// <summary>Rollfiltret — ETT ställe, så sökningen och hela-kunskapsbasen-vägen inte kan glida isär.</summary>
+        public static bool IsVisibleTo(KnowledgeBaseDoc doc, IEnumerable<string> userRoles)
+            => doc.Roles.Any(r => userRoles.Contains(r));
 
         private string LoadSystemPrompt()
         {
@@ -46,24 +55,28 @@ namespace HpskSite.Services.AiChat
 
         private List<KnowledgeBaseDoc> LoadDocs()
         {
-            if (_cachedDocs != null && DateTime.UtcNow - _cacheTime < CacheDuration)
-                return _cachedDocs;
+            var cached = _cachedDocs;
+            if (cached != null && DateTime.UtcNow - _cacheTime < CacheDuration)
+                return cached;
 
-            _cachedDocs = new List<KnowledgeBaseDoc>();
+            // Byggs i en lokal lista och publiceras först när den är klar — sökindexet läser
+            // listan från andra trådar och får aldrig se en halvfylld.
+            var docs = new List<KnowledgeBaseDoc>();
 
-            if (!Directory.Exists(_docsPath))
-                return _cachedDocs;
-
-            foreach (var file in Directory.GetFiles(_docsPath, "*.md"))
+            if (Directory.Exists(_docsPath))
             {
-                var text = File.ReadAllText(file);
-                var doc = ParseDoc(text, Path.GetFileName(file));
-                if (doc != null)
-                    _cachedDocs.Add(doc);
+                foreach (var file in Directory.GetFiles(_docsPath, "*.md").OrderBy(f => f, StringComparer.Ordinal))
+                {
+                    var text = File.ReadAllText(file);
+                    var doc = ParseDoc(text, Path.GetFileName(file));
+                    if (doc != null)
+                        docs.Add(doc);
+                }
             }
 
+            _cachedDocs = docs;
             _cacheTime = DateTime.UtcNow;
-            return _cachedDocs;
+            return docs;
         }
 
         private static KnowledgeBaseDoc? ParseDoc(string text, string fileName)
@@ -101,5 +114,19 @@ namespace HpskSite.Services.AiChat
         public string FileName { get; set; } = "";
         public List<string> Roles { get; set; } = new();
         public string Content { get; set; } = "";
+
+        /// <summary>Dokumentets första "# "-rubrik, annars filnamnet utan ändelse.</summary>
+        public string Title
+        {
+            get
+            {
+                foreach (var line in Content.Split('\n'))
+                {
+                    var t = line.Trim();
+                    if (t.StartsWith("# ", StringComparison.Ordinal)) return t.Substring(2).Trim();
+                }
+                return Path.GetFileNameWithoutExtension(FileName);
+            }
+        }
     }
 }

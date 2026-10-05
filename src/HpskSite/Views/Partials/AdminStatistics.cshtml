@@ -1075,7 +1075,8 @@
             <h6 class="card-title">Per krets</h6>
             <div class="table-responsive" style="max-height:520px;overflow-y:auto">
                 <table class="table table-sm table-hover mb-0" id="kgStatTable">
-                    <thead><tr>
+                    @* Rubrikraden står kvar när tabellen rullas i sin egen ruta — annars vet ingen vilken kolumn en nolla står i. *@
+                    <thead style="position:sticky;top:0;z-index:1;background:var(--bs-body-bg)"><tr>
                         <th>Krets</th>
                         <th>Uppdrag</th>
                         <th>Inställningar</th>
@@ -2073,7 +2074,16 @@
         set('statKgCourses', t.courseReviews);
         set('statKgCoursesSub', t.coursePending + ' väntar på kretsarna');
         const e = s => (s == null ? '' : String(s)).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-        const tick = (on, label) => '<span class="badge ' + (on ? 'bg-success-subtle text-success-emphasis' : 'bg-light text-muted border') + ' me-1" title="' + label + (on ? ' tillsatt' : ' saknas') + '">' + label + '</span>';
+        // Bara TILLSATTA uppdrag får en bricka. Grå inramade brickor för de saknade såg ut som
+        // knappar i ljust tema, och med 26 kretsar blev tabellen en vägg av grått. Saknade
+        // uppdrag står som dämpad text i stället.
+        const uppdrag = u => {
+            const all = [['resultatgranskare', 'Resultat'], ['bangranskare', 'Bana'], ['tavlingsansvarig', 'Tävling']];
+            const on = all.filter(a => u[a[0]]).map(a => '<span class="badge bg-success-subtle text-success-emphasis me-1" title="' + a[1] + ' tillsatt">' + a[1] + '</span>');
+            const off = all.filter(a => !u[a[0]]).map(a => a[1]);
+            if (!on.length) return '<span class="text-body-secondary small">inga tillsatta</span>';
+            return on.join('') + (off.length ? '<span class="text-body-secondary small" title="Saknas: ' + off.join(', ') + '">+ ' + off.length + ' saknas</span>' : '');
+        };
         const num = (total, waiting) => total ? total + (waiting ? ' <span class="text-warning-emphasis">(' + waiting + ')</span>' : '') : '<span class="text-muted">0</span>';
         // Igång först, sedan namn — de som kommit längst syns överst, ingen göms.
         const rows = d.regions.slice().sort((a, b) => (b.started - a.started) || a.name.localeCompare(b.name, 'sv'));
@@ -2084,9 +2094,9 @@
             if (s.deadlines) settings.push(s.deadlines + ' sista ansökningsdag' + (s.deadlines === 1 ? '' : 'ar'));
             if (s.checklist) settings.push('checklista ' + s.checklist + ' punkter');
             if (s.ownNeighbours) settings.push('egna grannkretsar');
-            return '<tr' + (r.started ? '' : ' class="text-muted"') + ' data-kg-region="' + r.regionId + '">'
-                + '<td>' + e(r.name) + (r.started ? '' : ' <span class="badge bg-light text-muted border">inte igång</span>') + '</td>'
-                + '<td class="text-nowrap">' + tick(r.uppdrag.resultatgranskare, 'Resultat') + tick(r.uppdrag.bangranskare, 'Bana') + tick(r.uppdrag.tavlingsansvarig, 'Tävling') + '</td>'
+            return '<tr data-kg-region="' + r.regionId + '">'
+                + '<td>' + e(r.name) + (r.started ? ' <span class="badge bg-success-subtle text-success-emphasis">igång</span>' : ' <span class="text-body-secondary small">· inte igång</span>') + '</td>'
+                + '<td class="text-nowrap">' + uppdrag(r.uppdrag) + '</td>'
                 + '<td class="small">' + (settings.length ? e(settings.join(' · ')) : '<span class="text-muted">—</span>') + '</td>'
                 + '<td class="text-end">' + num(r.applications.total, r.applications.atKrets) + '</td>'
                 + '<td class="text-end">' + num(r.results.total, r.results.pending) + '</td>'

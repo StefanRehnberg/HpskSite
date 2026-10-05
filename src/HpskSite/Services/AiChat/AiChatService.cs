@@ -10,33 +10,66 @@ namespace HpskSite.Services.AiChat
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly AiChatOptions _options;
         private readonly KnowledgeBaseService _knowledgeBase;
+        private readonly KnowledgeIndexService _index;
         private readonly string _apiKey;
 
         // Only send the last N messages as conversation context to keep token usage low
         private const int MaxHistoryMessages = 10;
 
-        public AiChatService(IHttpClientFactory httpClientFactory, IOptions<AiChatOptions> options, KnowledgeBaseService knowledgeBase, IConfiguration configuration)
+        public AiChatService(IHttpClientFactory httpClientFactory, IOptions<AiChatOptions> options, KnowledgeBaseService knowledgeBase, KnowledgeIndexService index, IConfiguration configuration)
         {
             _httpClientFactory = httpClientFactory;
             _options = options.Value;
             _knowledgeBase = knowledgeBase;
+            _index = index;
             _apiKey = configuration["AiChat:ApiKey"] ?? "";
         }
 
         public bool IsEnabled => _options.Enabled && !string.IsNullOrEmpty(_apiKey);
 
-        public async Task<string> GetResponseAsync(string userMessage, List<ChatMessage> conversationHistory, List<string> userRoles)
+        /// <summary>
+        /// Svaret och vilket underlag det fick. <see cref="Sources"/> loggas med frågan, så att det
+        /// i efterhand går att se om ett dåligt svar berodde på att rätt stycke aldrig hittades.
+        /// </summary>
+        public sealed record ChatResult(string Response, string Sources);
+
+        public async Task<ChatResult> GetResponseAsync(string userMessage, List<ChatMessage> conversationHistory, List<string> userRoles)
         {
             var systemPrompt = _knowledgeBase.GetSystemPrompt(userRoles);
-            var knowledgeBase = _knowledgeBase.GetFilteredKnowledgeBase(userRoles);
-            var fullSystemPrompt = $"{systemPrompt}\n\n## Kunskapsbas\n\n{knowledgeBase}";
 
             // Trim history to keep costs down
             var trimmedHistory = conversationHistory.Count > MaxHistoryMessages
                 ? conversationHistory.Skip(conversationHistory.Count - MaxHistoryMessages).ToList()
                 : conversationHistory;
 
-            return _options.Provider.ToLowerInvariant() switch
+            string fullSystemPrompt;
+            string sources;
+            var search = await _index.SearchAsync(KnowledgeRetrieval.BuildQuery(userMessage, trimmedHistory), userRoles);
+            if (search != null)
+            {
+                // Ämneslistan är billig (en rad per dokument) och låter modellen veta vad som FINNS
+                // utanför urvalet — annars kan den inte hänvisa vidare, bara säga att den inte vet.
+                var topics = string.Join("\n", _knowledgeBase.GetAllDocs()
+                    .Where(d => KnowledgeBaseService.IsVisibleTo(d, userRoles))
+                    .Select(d => "- " + d.Title));
+
+                fullSystemPrompt = systemPrompt
+                    + "\n\n## Kunskapsbas\n\n"
+                    + "Nedan följer de delar av dokumentationen som bedömts röra frågan — inte hela dokumentationen. "
+                    + "Svara utifrån dem. Räcker de inte för att besvara frågan: säg det, och be användaren "
+                    + "förtydliga eller formulera om frågan. Hitta inte på det som saknas.\n\n"
+                    + search.KnowledgeText
+                    + "\n\n## Ämnen som finns i dokumentationen\n\n" + topics;
+                sources = string.Join(" | ", search.Chunks.Select(c => c.FileName + ": " + c.Path));
+            }
+            else
+            {
+                var knowledgeBase = _knowledgeBase.GetFilteredKnowledgeBase(userRoles);
+                fullSystemPrompt = $"{systemPrompt}\n\n## Kunskapsbas\n\n{knowledgeBase}";
+                sources = "[hela kunskapsbasen]";
+            }
+
+            var response = _options.Provider.ToLowerInvariant() switch
             {
                 "claude" => await CallClaudeAsync(fullSystemPrompt, userMessage, trimmedHistory),
                 "gemini" => await CallGeminiAsync(fullSystemPrompt, userMessage, trimmedHistory),
@@ -45,6 +78,8 @@ namespace HpskSite.Services.AiChat
                 // just a different Endpoint. Any unknown provider also falls through to here.
                 _ => await CallOpenAiAsync(fullSystemPrompt, userMessage, trimmedHistory),
             };
+
+            return new ChatResult(response, sources);
         }
 
         /// <summary>

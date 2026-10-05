@@ -6,6 +6,23 @@ Umbraco v16.2 project for pistol.nu (formerly HPSK) featuring member management,
 ## Knowledge Base Maintenance
 When making changes to **user-facing features** (views, controllers that affect UI/workflows, button labels, new features, removed features), check if the knowledge base at `src/HpskSite/KnowledgeBase/docs/` needs to be updated. The knowledge base is used by an AI chat assistant on the site to help users. Each doc has a `roles` frontmatter tag — update the role list if access control changes.
 
+### AI-chattens sökning (2026-10-04)
+Chatten skickar inte längre hela kunskapsbasen (~460 000 tecken, ~€0,18 per fråga mot
+mistral-medium, 45+ s) utan de stycken som rör frågan. `KnowledgeChunker` delar varje dokument vid
+`##`/`###` (582 stycken, median 560 tecken); `KnowledgeIndexService` gör dem till vektorer via
+Mistrals embeddings-API (`mistral-embed`, härlett ur `AiChat:Endpoint`) och väljer de bästa inom
+`RetrievalMaxChunks` (10) / `RetrievalMaxChars` (16 000), rollfiltrerat. Modellen får dessutom en
+ämneslista över alla dokument.
+- **Ändra kunskapsbasen som vanligt.** Vektorcachen nycklas på styckets TEXT, så bara ändrade stycken
+  räknas om (efter kunskapsbasens 30-minuterscache). Cachen är filen
+  `App_Data/AiChatIndex/embeddings-v1.json` — härledd, ~1 öre att bygga om, därför ingen tabell.
+  `KnowledgeIndexWarmupHostedService` bygger indexet 90 s efter start.
+- **Ett fel stoppar aldrig chatten:** sökningen returnerar null och frågan får hela kunskapsbasen.
+  Det loggas som Warning. Claude/Gemini/Azure får alltid hela kunskapsbasen.
+- Chattloggen har en `K:`-rad före `Q:` med de stycken frågan fick (eller `[hela kunskapsbasen]`).
+  Läs den när ett svar är dåligt: hittades rätt stycke alls?
+- Test: `KnowledgeRetrievalTests` (14).
+
 ## Core Architecture Principles
 
 ### Data Storage Best Practices
