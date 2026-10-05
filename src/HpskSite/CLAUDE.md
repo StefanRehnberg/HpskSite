@@ -3703,9 +3703,19 @@ förlagan till seriens första tillfälle, ingen migrering.
   (anmälningsdatumet förskjuts lika mycket), hoppar över dagar som redan finns i serien.
   Två ingångar: **Kopiera till en period…** (`PreviewCopyPeriod`/`CopyPeriod` via
   `PlanCopyPeriod` → `TrainingSchedulePlanner.Expand`; förhandsvisningen räknar bara NYA dagar)
-  och **kalenderns läge** (`ClubCalendar.cshtml`, `calCopy*`; ett dagklick → `CopyToDates`,
-  Ångra → `Delete`). ⚠️ Läget kapar `showDayEvents`. ⚠️ `calCopyStart` hämtar källorna PÅ NYTT
-  — en cache från sidladdningen gav "lägg först in en träning" direkt efter att man gjort det.
+  och **kalenderns läge** (`ClubCalendar.cshtml`; ett dagklick → `CopyToDates`, Ångra →
+  `Delete`). Startas BARA från träningens meny (`window.hpskCalendarCopyMode`) — kalendern har
+  ingen egen knapp (Stefan 2026-10-05). ⚠️ Läget fångar klicket på `window` i fångstfasen:
+  träningspanelens lyssnare sitter på `document`, så ett klick på en dag som redan har en träning
+  öppnade annars panelen i stället för att lägga in en kopia. ⚠️ Källorna hämtas PÅ NYTT vid start.
+
+**⚠️ Klubbkalendern har kretskalenderns form** (Stefan 2026-10-05): ‹ månad › I dag,
+Månad | Lista, filtren som switchar med färgruta, kc-rutnät, dagvy under, listvy tolv månader,
+Visa helgdagar. **Stilen och helgdagsberäkningen bor i `_CalendarShared`** (en gång per sida,
+`window.hpskSwedishHolidays`), delad med `_KretsCalendar` — skriv aldrig en tredje kopia. Id:n i
+klubbkalendern har prefixet `cc` (krockar inte med kretsens `kc/kcp/kcc`). Filtervalet ligger kvar
+under `hpsk_cal_scopes`. Beskrivningar visas som ren text (DOMParser). Svit:
+`hpsk-verify/club-calendar-verify.mjs` 35/35, med kontrast och färgrutor i ljust och mörkt tema.
 - **"Den här och N kommande"** (`TrainingInput.Scope = "following"` → `ApplyToFollowing`):
   namn, tider, gren, plats, beskrivning, anmälan, platser, lånevapen, obligatorisk på seriens
   tillfällen EFTER det redigerade och från i dag. ⚠️ Skjutledaren och inställd är per tillfälle
