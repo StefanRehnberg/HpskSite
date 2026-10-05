@@ -198,7 +198,7 @@
                         <option value="Mandatory">Obligatorisk</option>
                     </select>
                 </div>
-                <div class="alert alert-warning py-2 small d-none" id="mkOccAllNote">Träningen är dessutom <strong>obligatorisk för alla</strong> som deltar — det sätter klubben under Träningar, inte här.</div>
+                <div class="alert alert-warning py-2 small d-none" id="mkOccAllNote">Träningen är dessutom <strong>obligatorisk för klubbens medlemmar</strong> — det sätter klubben under Träningar, inte här.</div>
                 <div class="mb-3">
                     <label class="form-label" for="mkOccReg">Anmälan för kursens deltagare</label>
                     <select class="form-select" id="mkOccReg">
@@ -458,7 +458,7 @@
         return '<h2 class="h5 mt-2" id="mkOverview">Kursöversikt — alla tillfällen</h2>' +
             '<div class="table-responsive"><table class="table table-sm mk-grid"><thead><tr><th>Deltagare</th>' + head + '<th>Märkesläge</th></tr></thead><tbody>' +
             rows + '</tbody></table></div>' +
-            '<p class="small text-muted">★ = obligatoriskt för kursen · ◆ = obligatoriskt för alla på träningen. QR = incheckad på banan inom en timme kring tillfället. En missad obligatorisk dag visas, men spärrar ingenting. Klicka på ett tillfälle för att ändra kursens krav och namn.</p>';
+            '<p class="small text-muted">★ = obligatoriskt för kursen · ◆ = obligatoriskt för klubbens medlemmar. QR = incheckad på banan inom en timme kring tillfället. En missad obligatorisk dag visas, men spärrar ingenting. Klicka på ett tillfälle för att ändra kursens krav och namn.</p>';
     }
 
     // ── Närvaro ──
@@ -677,7 +677,7 @@
 
     function mandatoryBadges(o) {
         return (o.mandatoryForCourse ? '<span class="badge bg-warning text-dark me-1">Obligatoriskt för kursen</span>' : '') +
-               (o.mandatoryForAll ? '<span class="badge bg-warning-subtle text-warning-emphasis border border-warning me-1">Obligatoriskt för alla</span>' : '');
+               (o.mandatoryForAll ? '<span class="badge bg-warning-subtle text-warning-emphasis border border-warning me-1">Obligatoriskt för klubbens medlemmar</span>' : '');
     }
 
     // ── Kursens deltagare ──
