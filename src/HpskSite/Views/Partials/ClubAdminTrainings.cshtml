@@ -363,7 +363,32 @@
         var all = document.getElementById('ctrSelAll');
         if (all) all.checked = rows.length > 0 && rows.every(function (r) { return selected.has(r.id); });
     }
-    function deleteResult(d) {
+    // Texten när anmälda följer med. Att ställa in är rekommendationen: de anmälda ser det då i
+    // kalendern, och närvaron finns kvar som underlag (aktivitet, föreningsintyg).
+    var FORCE_WARNING = 'Vi rekommenderar att du STÄLLER IN i stället — då ser de anmälda att träningen inte blir av, ' +
+        'och närvaron finns kvar.\n\nTar du bort försvinner anmälningarna och närvaron, och bokade lånevapen avbokas. ' +
+        'De anmälda får inget besked.\n\nTa bort ändå?';
+
+    // Första svaret tar bort de tomma tillfällena och räknar upp dem med anmälda; efter ett ja
+    // skickas SAMMA urval igen med force.
+    function deleteResult(d, body) {
+        if (d.needsConfirm && d.needsConfirm.length && body && !body.force) {
+            var list = d.needsConfirm.slice(0, 12).join('\n') + (d.needsConfirm.length > 12 ? '\n… och ' + (d.needsConfirm.length - 12) + ' till' : '');
+            var head = (d.deleted ? d.deleted + ' träningar utan anmälda är borttagna.\n\n' : '') +
+                d.needsConfirm.length + (d.needsConfirm.length === 1 ? ' träning har' : ' träningar har') + ' anmälda:\n' + list + '\n\n';
+            if (confirm(head + FORCE_WARNING)) {
+                // Id:n ur svaret, inte seriesOf: tillfället man klickade på kan redan vara borttaget.
+                var again = { clubId: d.clubId, ids: d.ids, force: '1' };
+                post('/umbraco/surface/ClubTraining/DeleteMany', again).then(function (d2) {
+                    d2.deleted = (d2.deleted || 0) + (d.deleted || 0);
+                    d2.message = d2.deleted === 1 ? '1 träning är borttagen.' : d2.deleted + ' träningar är borttagna.';
+                    if (d2.blocked && d2.blocked.length) d2.message += ' ' + d2.blocked.length + ' har ett utlämnat lånevapen och togs inte bort.';
+                    deleteResult(d2, again);
+                });
+                return;
+            }
+            d.message = (d.deleted ? d.message + ' ' : '') + d.needsConfirm.length + ' med anmälda står kvar — ställ in dem under träningens meny.';
+        }
         var html = esc(d.message || '');
         if (d.blocked && d.blocked.length)
             html += '<ul class="mb-0 mt-1 small">' + d.blocked.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul>';
@@ -588,20 +613,32 @@
             post('/umbraco/surface/ClubTraining/SetCancelled', { trainingId: id, cancelled: t.isCancelled ? '0' : '1' })
                 .then(function (d) { msg(esc(d.message), d.success ? 'success' : 'warning'); load(); });
         } else if (act === 'delete' && t) {
-            if (!confirm('Ta bort ' + t.name + ' ' + dayLabel(t.date) + '?\n\nEn träning med anmälda eller bokade lånevapen kan inte tas bort — ställ in den i stället.')) return;
-            post('/umbraco/surface/ClubTraining/Delete', { trainingId: id })
-                .then(function (d) { msg(esc(d.message), d.success ? 'success' : 'warning'); load(); });
+            if (!confirm('Ta bort ' + t.name + ' ' + dayLabel(t.date) + '?')) return;
+            post('/umbraco/surface/ClubTraining/Delete', { trainingId: id }).then(function (d) {
+                if (d.needsConfirm) {
+                    if (!confirm(t.name + ' ' + dayLabel(t.date) + ' har ' + d.people + ' anmälda' +
+                        (d.bookings ? ' och ' + d.bookings + ' bokade lånevapen' : '') + '.\n\n' + FORCE_WARNING)) {
+                        msg('Träningen är kvar. Vill du att de anmälda ska se att den inte blir av: välj <strong>Ställ in</strong> i träningens meny.', 'info');
+                        return;
+                    }
+                    return post('/umbraco/surface/ClubTraining/Delete', { trainingId: id, force: '1' })
+                        .then(function (d2) { msg(esc(d2.message), d2.success ? 'success' : 'warning'); load(); });
+                }
+                msg(esc(d.message), d.success ? 'success' : 'warning'); load();
+            });
         } else if (act === 'bulk-delete') {
             var n = selected.size;
-            if (!n || !confirm('Ta bort ' + (n === 1 ? '1 träning' : n + ' träningar') + '?\n\nTräningar med anmälda eller bokade lånevapen tas inte bort — de visas efteråt så att du kan ställa in dem i stället.')) return;
-            post('/umbraco/surface/ClubTraining/DeleteMany', { clubId: clubId(), ids: Array.from(selected) }).then(deleteResult);
+            if (!n || !confirm('Ta bort ' + (n === 1 ? '1 träning' : n + ' träningar') + '?')) return;
+            var bodyB = { clubId: clubId(), ids: Array.from(selected) };
+            post('/umbraco/surface/ClubTraining/DeleteMany', bodyB).then(function (d) { deleteResult(d, bodyB); });
         } else if (act === 'bulk-clear') { selected.clear(); render(); }
         else if ((act === 'delete-series' || act === 'delete-following') && t) {
             var whole = act === 'delete-series';
             var q = whole ? 'Ta bort HELA serien ' + t.name + ' — alla tillfällen, även tidigare?'
                           : 'Ta bort ' + t.name + ' ' + dayLabel(t.date) + ' och alla senare tillfällen i serien?';
-            if (!confirm(q + '\n\nTräningar med anmälda eller bokade lånevapen tas inte bort — de visas efteråt.')) return;
-            post('/umbraco/surface/ClubTraining/DeleteMany', { seriesOf: id, scope: whole ? 'all' : 'following' }).then(deleteResult);
+            if (!confirm(q)) return;
+            var bodyS = { seriesOf: id, scope: whole ? 'all' : 'following' };
+            post('/umbraco/surface/ClubTraining/DeleteMany', bodyS).then(function (d) { deleteResult(d, bodyS); });
         } else if (act === 'rot-remove') { rotation.splice(parseInt(b.getAttribute('data-index'), 10), 1); renderRotation(); }
         else if (act === 'break-remove') { b.closest('[data-break]').remove(); preview(); }
     });

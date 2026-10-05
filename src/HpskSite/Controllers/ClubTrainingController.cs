@@ -172,6 +172,8 @@ namespace HpskSite.Controllers
             public int? MemberId { get; set; }
             /// <summary>"1" = ställ in, "0" = ångra. Sträng — "1" binder inte till bool.</summary>
             public string? Cancelled { get; set; }
+            /// <summary>"1" = ta bort trots anmälda (efter bekräftelse).</summary>
+            public string? Force { get; set; }
         }
 
         /// <summary>Lämna över passet. null/0 = ingen utsedd.</summary>
@@ -221,8 +223,15 @@ namespace HpskSite.Controllers
         {
             var t = _trainings.Get(req?.TrainingId ?? 0);
             if (t == null) return Json(new { success = false, message = "Träningen finns inte." });
-            if (!await CanAdminAsync(t.ClubId, await CurrentMemberIdAsync())) return Json(new { success = false, message = Denied });
-            var error = _trainings.Delete(t.Id);
+            var me = await CurrentMemberIdAsync();
+            if (!await CanAdminAsync(t.ClubId, me)) return Json(new { success = false, message = Denied });
+            var force = req!.Force == "1";
+            var impact = _trainings.Impact(t.Id);
+            // Anmälda utan bekräftelse: fråga först, och rekommendera att ställa in i stället.
+            if (!force && impact.OutBookings == 0 && !impact.IsEmpty)
+                return Json(new { success = false, needsConfirm = true, people = impact.People, bookings = impact.Bookings,
+                    message = $"Träningen har {impact.People} anmälda och {impact.Bookings} lånevapenbokningar." });
+            var error = _trainings.Delete(t.Id, force, me);
             return Json(new { success = error == null, message = error ?? "Träningen är borttagen." });
         }
 
@@ -234,6 +243,8 @@ namespace HpskSite.Controllers
             public int SeriesOf { get; set; }
             /// <summary>"following" = bara från och med träningen, annars hela serien.</summary>
             public string? Scope { get; set; }
+            /// <summary>"1" = ta bort även tillfällen med anmälda (efter bekräftelse).</summary>
+            public string? Force { get; set; }
         }
 
         /// <summary>Tar bort flera träningar (markerade, eller en hel serie). Tillfällen med anmälda
@@ -253,15 +264,17 @@ namespace HpskSite.Controllers
                 ids = _trainings.SeriesIds(t.Id, string.Equals(req.Scope, "following", StringComparison.OrdinalIgnoreCase));
             }
             else ids = req.Ids ?? new();
-            if (!await CanAdminAsync(clubId, await CurrentMemberIdAsync())) return Json(new { success = false, message = Denied });
+            var me = await CurrentMemberIdAsync();
+            if (!await CanAdminAsync(clubId, me)) return Json(new { success = false, message = Denied });
             if (ids.Count == 0) return Json(new { success = false, message = "Inga träningar valda." });
 
-            var r = _trainings.DeleteMany(clubId, ids);
-            var msg = r.DeletedIds.Count == 0 ? "Ingen träning togs bort."
+            var r = _trainings.DeleteMany(clubId, ids, req.Force == "1", me);
+            var msg = r.DeletedIds.Count == 0 ? "Ingen träning togs bort ännu."
                 : r.DeletedIds.Count == 1 ? "1 träning är borttagen." : $"{r.DeletedIds.Count} träningar är borttagna.";
             if (r.Blocked.Count > 0)
-                msg += $" {r.Blocked.Count} har anmälda eller bokade lånevapen och togs inte bort — ställ in dem i stället.";
-            return Json(new { success = r.DeletedIds.Count > 0, deleted = r.DeletedIds.Count, blocked = r.Blocked, message = msg });
+                msg += $" {r.Blocked.Count} har ett utlämnat lånevapen och togs inte bort — registrera återlämningen först.";
+            return Json(new { success = r.DeletedIds.Count > 0, deleted = r.DeletedIds.Count, blocked = r.Blocked,
+                needsConfirm = r.NeedsConfirm, clubId, ids, message = msg });
         }
 
         private async Task<bool> CanAdminAsync(int clubId, int memberId)

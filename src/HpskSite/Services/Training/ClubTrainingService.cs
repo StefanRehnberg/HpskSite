@@ -590,40 +590,84 @@ WHERE ScheduleId = @0 AND [Date] > @1 AND [Date] >= CAST(GETDATE() AS date)",
         }
 
         /// <summary>Raderar ett tillfälle — bara när ingen är anmäld och inget vapen bokat.</summary>
-        public string? Delete(int trainingId)
+        /// <summary>Vad som hänger på ett tillfälle — det en borttagning tar med sig.</summary>
+        public record DeleteImpact(int People, int Bookings, int OutBookings)
+        {
+            public bool IsEmpty => People == 0 && Bookings == 0;
+        }
+
+        public DeleteImpact Impact(int trainingId)
         {
             using var db = _databaseFactory.CreateDatabase();
             var people = db.ExecuteScalar<int>(
                 "SELECT COUNT(*) FROM dbo.ClubEventParticipant WHERE OccasionKind = @0 AND EventId = @1",
                 ClubEvents.OccasionTraining, trainingId);
-            var bookings = 0;
+            int bookings = 0, outBookings = 0;
             try
             {
                 bookings = db.ExecuteScalar<int>(
-                    "SELECT COUNT(*) FROM dbo.FirearmBooking WHERE OccasionKind = @0 AND OccasionId = @1",
-                    FirearmOccasionKind.Training, trainingId);
+                    "SELECT COUNT(*) FROM dbo.FirearmBooking WHERE OccasionKind = @0 AND OccasionId = @1 AND Status IN (@2)",
+                    FirearmOccasionKind.Training, trainingId, FirearmBookingStatus.Blocking);
+                outBookings = db.ExecuteScalar<int>(
+                    "SELECT COUNT(*) FROM dbo.FirearmBooking WHERE OccasionKind = @0 AND OccasionId = @1 AND Status = @2",
+                    FirearmOccasionKind.Training, trainingId, FirearmBookingStatus.Utlamnad);
             }
             catch { /* tabellen saknas — inga bokningar */ }
-            if (people > 0 || bookings > 0)
-                return $"Träningen har {people} deltagare och {bookings} lånevapenbokningar och kan inte tas bort. Ställ in den i stället — då får de som anmält sig se det.";
+            return new DeleteImpact(people, bookings, outBookings);
+        }
+
+        /// <summary>
+        /// Tar bort ett tillfälle. Har det anmälda eller lånevapenbokningar krävs <paramref name="force"/>
+        /// (Stefan 2026-10-05: det ska gå, men med rekommendationen att ställa in i stället). Då följer
+        /// anmälningarna och närvaron med, och reserverade lånevapen AVBOKAS — en bokning får aldrig
+        /// fortsätta blockera ett vapen för ett tillfälle som inte finns.
+        /// ⚠️ Ett UTLÄMNAT vapen stoppar alltid: vapnet är ute, och utan tillfället tappar registret spåret
+        /// av vem som har det. Återlämningen registreras först.
+        /// Kursens serier (TrainingScores/MarkenSeries) är medlemmarnas egna skott och står kvar;
+        /// bara kopplingen till tillfället tas bort.
+        /// </summary>
+        public string? Delete(int trainingId, bool force = false, int actorMemberId = 0)
+        {
+            var impact = Impact(trainingId);
+            if (impact.OutBookings > 0)
+                return $"Ett lånevapen är utlämnat för träningen. Registrera återlämningen i valvet innan träningen tas bort.";
+            if (!impact.IsEmpty && !force)
+                return $"Träningen har {impact.People} anmälda och {impact.Bookings} lånevapenbokningar. Ställ in den i stället — då får de som anmält sig se det.";
+
+            using var db = _databaseFactory.CreateDatabase();
+            using var tx = db.GetTransaction();
+            if (impact.Bookings > 0)
+                db.Execute(@"UPDATE dbo.FirearmBooking SET Status = @0, CancelledAt = GETDATE(), CancelledByMemberId = @1,
+                                    CancelReason = N'Träningen togs bort'
+                             WHERE OccasionKind = @2 AND OccasionId = @3 AND Status = @4",
+                    FirearmBookingStatus.Avbokad, actorMemberId, FirearmOccasionKind.Training, trainingId, FirearmBookingStatus.Reserverad);
+            db.Execute("DELETE FROM dbo.ClubEventParticipant WHERE OccasionKind = @0 AND EventId = @1", ClubEvents.OccasionTraining, trainingId);
+            db.Execute("DELETE FROM dbo.TrainingCourseNote WHERE TrainingId = @0", trainingId);
+            db.Execute("DELETE FROM dbo.TrainingCourseSeries WHERE TrainingId = @0", trainingId);
             var n = db.Execute("DELETE FROM dbo.ClubTraining WHERE Id = @0", trainingId);
+            tx.Complete();
+            if (n == 1 && !impact.IsEmpty)
+                _logger.LogInformation("Träning {Id} borttagen med {People} anmälda och {Bookings} lånevapenbokningar av medlem {Actor}",
+                    trainingId, impact.People, impact.Bookings, actorMemberId);
             return n == 1 ? null : "Träningen finns inte.";
         }
 
         public class DeleteManyResult
         {
             public List<int> DeletedIds { get; } = new();
-            /// <summary>Tillfällen som inte togs bort, med skälet (anmälda/lånevapen) i klartext.</summary>
+            /// <summary>Tillfällen som inte kan tas bort alls (utlämnat lånevapen), med skälet.</summary>
             public List<string> Blocked { get; } = new();
+            /// <summary>Tillfällen med anmälda/bokningar som väntar på bekräftelse (force).</summary>
+            public List<string> NeedsConfirm { get; } = new();
         }
 
         /// <summary>
-        /// Tar bort flera träningar i en klubb. Samma regel som <see cref="Delete"/>: ett tillfälle med
-        /// deltagare eller lånevapenbokningar tas aldrig bort — det hoppas över och namnges, så att de
-        /// andra ändå går. Id:n utanför klubben ignoreras (anroparen har prövat behörigheten för klubben).
+        /// Tar bort flera träningar i en klubb, med samma regler som <see cref="Delete"/>. Utan
+        /// <paramref name="force"/> tas bara tomma tillfällen bort och de med anmälda räknas upp i
+        /// NeedsConfirm. Id:n utanför klubben ignoreras (anroparen har prövat behörigheten för klubben).
         /// En serie som blir tom tas bort med sina tillfällen.
         /// </summary>
-        public DeleteManyResult DeleteMany(int clubId, IEnumerable<int> ids)
+        public DeleteManyResult DeleteMany(int clubId, IEnumerable<int> ids, bool force = false, int actorMemberId = 0)
         {
             var result = new DeleteManyResult();
             var wanted = ids.Where(i => i > 0).Distinct().ToList();
@@ -637,13 +681,23 @@ WHERE ScheduleId = @0 AND [Date] > @1 AND [Date] >= CAST(GETDATE() AS date)",
                 var rows = db.Fetch<ClubTraining>("WHERE ClubId = @0 AND Id IN (@1)", clubId, chunk);
                 foreach (var t in rows.OrderBy(r => r.Date))
                 {
-                    var error = Delete(t.Id);
+                    var label = $"{t.Date.ToString("ddd d MMM", sv)} {t.Name}";
+                    var impact = Impact(t.Id);
+                    // Anmälda/bokningar utan bekräftelse: inget tas bort, men tillfället räknas upp så att
+                    // ytan kan fråga EN gång för alla och sedan skicka samma urval med force.
+                    if (impact.OutBookings == 0 && !impact.IsEmpty && !force)
+                    {
+                        result.NeedsConfirm.Add($"{label} — {impact.People} anmälda" +
+                            (impact.Bookings > 0 ? $", {impact.Bookings} lånevapen" : ""));
+                        continue;
+                    }
+                    var error = Delete(t.Id, force, actorMemberId);
                     if (error == null)
                     {
                         result.DeletedIds.Add(t.Id);
                         if (t.ScheduleId is int sid) schedules.Add(sid);
                     }
-                    else result.Blocked.Add($"{t.Date.ToString("ddd d MMM", sv)} {t.Name}: {error}");
+                    else result.Blocked.Add($"{label}: {error}");
                 }
             }
             foreach (var sid in schedules)
