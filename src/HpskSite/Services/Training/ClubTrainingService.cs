@@ -78,6 +78,28 @@ namespace HpskSite.Services.Training
             return db.SingleOrDefault<ClubTraining>("WHERE Id = @0", id);
         }
 
+        /// <summary>
+        /// Datumen för alla klubbars träningar från <paramref name="from"/>, per klubb — för
+        /// statistiken, som räknar träningar intill klubbens händelser. Inställda räknas inte: de
+        /// ägde aldrig rum. EN fråga för alla klubbar. Fel ger en tom ordbok — statistiken ska visas
+        /// även i en miljö där tabellen saknas.
+        /// </summary>
+        public Dictionary<int, List<DateTime>> DatesByClub(DateTime from)
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                return db.Fetch<ClubTraining>("WHERE [Date] >= @0 AND IsCancelled = 0", from.Date)
+                    .GroupBy(t => t.ClubId)
+                    .ToDictionary(g => g.Key, g => g.Select(t => t.Date).ToList());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Träningarnas datum kunde inte läsas för statistiken");
+                return new();
+            }
+        }
+
         /// <summary>Klubbens tillfällen i [from, to], äldst först, med antal anmälda och närvarande.</summary>
         public List<TrainingRow> List(int clubId, DateTime from, DateTime to)
         {

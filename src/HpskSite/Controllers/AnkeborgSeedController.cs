@@ -78,6 +78,7 @@ namespace HpskSite.Controllers
         private readonly MarkenLedgerService _markenLedger;
         private readonly IMemberManager _memberManager;
         private readonly IUmbracoDatabaseFactory _databaseFactory;
+        private readonly HpskSite.Services.Training.ClubTrainingService _trainings;
         private readonly IConfiguration _configuration;
         private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment _env;
         private readonly ILogger<AnkeborgSeedController> _logger;
@@ -101,9 +102,11 @@ namespace HpskSite.Controllers
             IMemberManager memberManager,
             IConfiguration configuration,
             Microsoft.AspNetCore.Hosting.IWebHostEnvironment env,
-            ILogger<AnkeborgSeedController> logger)
+            ILogger<AnkeborgSeedController> logger,
+            HpskSite.Services.Training.ClubTrainingService trainings)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _trainings = trainings;
             _memberService = memberService;
             _contentService = contentService;
             _clubMembershipService = clubMembershipService;
@@ -600,8 +603,9 @@ VALUES
                 {
                     success = true,
                     dryRun = true,
-                    handelser = "4 st: klubbträning, nybörjarkurs (anmälan + lånevapen), "
-                              + "städdag (obligatorisk, i DÅTID med upprop) och årsmöte",
+                    handelser = "2 st: städdag (obligatorisk, i DÅTID med upprop) och årsmöte",
+                    traningar = "Klubbträning onsdagar i 8 veckor (skjutledare turas om) + nybörjarkurs "
+                              + "(anmälan, avgift, lånevapen, 7 anmälda)",
                     serie = "Ankeborgsserien 2026 med 2 omgångar, båda med anmälningar",
                     tavlingar = "3 st: 2 serieomgångar + 1 klubbmästerskap (Endast klubb, framtida)",
                     styrelse = "5 förtroendevalda + ett styrelsemöte om en vecka",
@@ -625,11 +629,6 @@ VALUES
             // (bild 8) läser närvaro, och ett framtida evenemang har ingen att läsa.
             var eventPlan = new[]
             {
-                new EventSeed("Klubbträning onsdag", "Träning", today.AddDays(5).AddHours(18),
-                              "Ordinarie klubbträning på 25-metersbanan.", false, 0, 0m, false, false),
-                new EventSeed("Nybörjarkurs steg 1", "Annat", today.AddDays(12).AddHours(9),
-                              "Första passet för nya skyttar. Vi går igenom säkerhet, grepp och "
-                              + "sikte. Klubbvapen finns att låna.", true, 12, 300m, true, false),
                 new EventSeed("Städdag på banan", "Städning", today.AddDays(-14).AddHours(9),
                               "Vårstädning av banan och klubbstugan.", true, 0, 0m, false, true),
                 new EventSeed("Årsmöte 2027", "Möte", today.AddDays(40).AddHours(19),
@@ -683,9 +682,15 @@ VALUES
 
             using (var db = _databaseFactory.CreateDatabase())
             {
-                // Anmälningar till nybörjarkursen + upprop på städdagen.
-                signups += SeedEventParticipants(db, eventNodes, "Nybörjarkurs steg 1", 7, false, failures).Item1;
-                var stad = SeedEventParticipants(db, eventNodes, "Städdag på banan", 14, true, failures);
+                // Fas B5: träningarna är ClubTraining, inte händelser — klubbträningen som ett schema
+                // med skjutledare som turas om, nybörjarkursen som ett tillfälle med anmälan och lånevapen.
+                var courseId = SeedTrainings(db, club.Id, today, failures);
+                if (courseId > 0)
+                    signups += SeedParticipants(db, courseId, ClubEvents.OccasionTraining, 7, false, failures).Item1;
+                // Upprop på städdagen.
+                var stad = eventNodes.TryGetValue("Städdag på banan", out var stadNode)
+                    ? SeedParticipants(db, stadNode.Id, ClubEvents.OccasionEvent, 14, true, failures)
+                    : (0, 0);
                 signups += stad.Item1;
                 attendance += stad.Item2;
             }
@@ -906,15 +911,70 @@ VALUES
         /// ⚠️ Uppropet lämnar EN medlem utan status. "Ej registrerad" är ett eget tillstånd och
         /// inte frånvaro — panelen räknar och visar det separat, och filmen ska visa den skillnaden.
         /// </summary>
-        private (int, int) SeedEventParticipants(
+        /// <summary>
+        /// Klubbträningen (schema, onsdagar i 8 veckor, skjutledare som turas om) och nybörjarkursen
+        /// (ett tillfälle med anmälan, avgift och lånevapen). Idempotent på namnet. Returnerar
+        /// nybörjarkursens id, så att anmälningarna kan läggas på den.
+        /// </summary>
+        private int SeedTrainings(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
+                                  int clubId, DateTime today, List<string> failures)
+        {
+            const string scheduleName = "Klubbträning onsdag";
+            const string courseName = "Nybörjarkurs steg 1";
+            var leaders = new[] { FindMember("Sigrid", "Almkvist")?.Id ?? 0 }
+                .Concat(Roster.Where(p => !p.Pending).Take(2).Select(p => FindMember(p.First, p.Last)?.Id ?? 0))
+                .Where(id => id > 0).Distinct().ToList();
+            try
+            {
+                var hasSchedule = db.ExecuteScalar<int>(
+                    "SELECT COUNT(*) FROM ClubTrainingSchedule WHERE ClubId=@0 AND Name=@1", clubId, scheduleName) > 0;
+                if (!hasSchedule)
+                {
+                    var (_, _, err) = _trainings.CreateSchedule(new HpskSite.Services.Training.ClubTrainingService.ScheduleInput
+                    {
+                        ClubId = clubId, Name = scheduleName, Discipline = "Precision",
+                        StartTime = "18:00", EndTime = "20:00", Weekdays = new List<int> { 3 },
+                        From = today.ToString("yyyy-MM-dd"), To = today.AddDays(55).ToString("yyyy-MM-dd"),
+                        Rotation = leaders, Venue = "Ankeborgs skjutbana, 25-metersbanan",
+                        RegistrationRequired = "0", LoanWeaponsOffered = "1"
+                    }, leaders.FirstOrDefault());
+                    if (err != null) failures.Add($"Träningsschema: {err}");
+                }
+
+                var courseId = db.ExecuteScalar<int?>(
+                    "SELECT TOP 1 Id FROM ClubTraining WHERE ClubId=@0 AND Name=@1", clubId, courseName) ?? 0;
+                if (courseId == 0)
+                {
+                    var (id, err) = _trainings.Save(new HpskSite.Services.Training.ClubTrainingService.TrainingInput
+                    {
+                        ClubId = clubId, Name = courseName, Date = today.AddDays(12).ToString("yyyy-MM-dd"),
+                        StartTime = "09:00", EndTime = "12:00", Discipline = "Precision",
+                        Venue = "Ankeborgs skjutbana",
+                        Description = "Första passet för nya skyttar. Vi går igenom säkerhet, grepp och sikte. "
+                                    + "Klubbvapen finns att låna.",
+                        SkjutledareMemberId = leaders.FirstOrDefault(),
+                        RegistrationRequired = "1", MaxParticipants = 12, LoanWeaponsOffered = "1", IsMandatory = "0"
+                    }, leaders.FirstOrDefault());
+                    if (err != null) { failures.Add($"Nybörjarkurs: {err}"); return 0; }
+                    courseId = id;
+                    // Avgiften: prisraderna, samma form som en händelse.
+                    db.Execute("UPDATE ClubTraining SET Prices=@1 WHERE Id=@0", courseId,
+                        HpskSite.Models.EventPrices.Serialize(new[] { new HpskSite.Models.EventPrice("avgift", "Avgift", 300m) }));
+                }
+                return courseId;
+            }
+            catch (Exception ex) { failures.Add($"Träningar: {ex.Message}"); return 0; }
+        }
+
+        private (int, int) SeedParticipants(
             Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db,
-            Dictionary<string, IContent> nodes, string eventName, int count, bool withAttendance,
+            int occasionId, string kind, int count, bool withAttendance,
             List<string> failures)
         {
-            if (!nodes.TryGetValue(eventName, out var node)) return (0, 0);
+            if (occasionId <= 0) return (0, 0);
 
             var existing = db.ExecuteScalar<int>(
-                "SELECT COUNT(*) FROM ClubEventParticipant WHERE EventId=@0", node.Id);
+                "SELECT COUNT(*) FROM ClubEventParticipant WHERE EventId=@0 AND OccasionKind=@1", occasionId, kind);
             if (existing > 0) return (0, 0);
 
             var recorder = FindMember("Sigrid", "Almkvist")?.Id ?? 0;
@@ -931,24 +991,26 @@ VALUES
                 string? note = null;
                 if (withAttendance && i < picked.Count - 1)
                 {
-                    if (i == 4) { status = "GiltigFranvaro"; note = "Anmäld frånvaro, jobbar helg."; }
-                    else if (i == 9) { status = "Franvarande"; }
-                    else { status = "Narvarande"; }
+                    // ⚠️ Systemets konstanter — de svenska orden ("Narvarande") som stod här matchade
+                    // ingenting, så demoklubbens upprop räknades aldrig i aktivitetssammanställningen.
+                    if (i == 4) { status = ClubEvents.AttendanceExcused; note = "Anmäld frånvaro, jobbar helg."; }
+                    else if (i == 9) { status = ClubEvents.AttendanceAbsent; }
+                    else { status = ClubEvents.AttendancePresent; }
                 }
 
                 try
                 {
                     db.Execute(@"
 INSERT INTO ClubEventParticipant
- (EventId, MemberId, MemberName, SignedUpAt, SignedUpByMemberId, AttendanceStatus, AttendanceNote,
+ (EventId, OccasionKind, MemberId, MemberName, SignedUpAt, SignedUpByMemberId, AttendanceStatus, AttendanceNote,
   RecordedByMemberId, RecordedAt, CreatedDate, UpdatedDate)
-VALUES (@0, @1, @2, @3, @1, @4, @5, @6, @7, @8, @8)",
-                        node.Id, m.Id, $"{p.First} {p.Last}",
+VALUES (@0, @9, @1, @2, @3, @1, @4, @5, @6, @7, @8, @8)",
+                        occasionId, m.Id, $"{p.First} {p.Last}",
                         DateTime.Now.AddDays(-20 + i),
                         status, note,
                         status == null ? (object?)null : recorder,
                         status == null ? (object?)null : DateTime.Now.AddDays(-14),
-                        DateTime.Now);
+                        DateTime.Now, kind);
                     signed++;
                     if (status != null) marked++;
                 }
@@ -2093,6 +2155,12 @@ WHERE MemberId=@1 AND Notes=@2 AND TrainingMatchId IS NULL",
 
             db.Execute("DELETE FROM MarkenSeries WHERE ClubId=@0 AND Notes=@1", club.Id, SeedTag);
             db.Execute("DELETE FROM ForeningsintygRequest WHERE ClubId=@0", club.Id);
+            // Fas B5: demoklubbens träningar är SQL-rader, inte noder — de försvinner inte med klubbnoden.
+            db.Execute(@"DELETE FROM ClubEventParticipant WHERE OccasionKind=@1
+                           AND EventId IN (SELECT Id FROM ClubTraining WHERE ClubId=@0)",
+                       club.Id, ClubEvents.OccasionTraining);
+            db.Execute("DELETE FROM ClubTraining WHERE ClubId=@0", club.Id);
+            db.Execute("DELETE FROM ClubTrainingSchedule WHERE ClubId=@0", club.Id);
             if (seededMemberIds.Count > 0)
             {
                 // ⚠️ IN (@0) med en lista tar ~2100 parametrar — se memory/sql-in-list-parameter-cap.

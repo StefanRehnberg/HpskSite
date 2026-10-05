@@ -21,6 +21,7 @@ namespace HpskSite.Controllers
     /// </summary>
     public class RegionalStatisticsController : SurfaceController
     {
+        private readonly HpskSite.Services.Training.ClubTrainingService _trainings;
         private readonly IMemberService _memberService;
         private readonly AdminAuthorizationService _authService;
         private readonly ClubComparisonService _comparisonService;
@@ -40,9 +41,11 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authService,
             ClubComparisonService comparisonService,
             IMemoryCache memoryCache,
-            ILogger<RegionalStatisticsController> logger)
+            ILogger<RegionalStatisticsController> logger,
+            HpskSite.Services.Training.ClubTrainingService trainings)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _trainings = trainings;
             _memberService = memberService;
             _authService = authService;
             _comparisonService = comparisonService;
@@ -233,6 +236,7 @@ namespace HpskSite.Controllers
             var clubsWithoutAdmin = new List<object>();
             var clubsWithoutSkjutledare = new List<object>();
             var clubsWithoutForeningsinstruktor = new List<object>();
+            var recentTrainings = _trainings.DatesByClub(ninetyDaysAgo);
             foreach (var club in clubNodes)
             {
                 var hasRecentEvent = club.Children
@@ -241,7 +245,10 @@ namespace HpskSite.Controllers
                     {
                         var d = e.Value<DateTime?>("eventDate");
                         return d.HasValue && d.Value >= ninetyDaysAgo;
-                    });
+                    })
+                    // Fas B5: en träning räknas också — annars ser en klubb som bara har träningar
+                    // ut att sakna verksamhet.
+                    || (recentTrainings.TryGetValue(club.Id, out var td) && td.Count > 0);
                 if (!hasRecentEvent)
                 {
                     clubsWithoutEvent90d.Add(new { clubId = club.Id, clubName = club.Name ?? "?", url = club.Url() });
