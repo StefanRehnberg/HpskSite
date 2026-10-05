@@ -40,6 +40,14 @@
             där görs upprop, QR för incheckning och lånevapen.
         </p>
         <div id="ctrMsg"></div>
+        @* Markerade rader tas bort tillsammans (Stefan 2026-10-05: "jag vill kunna ta bort alla"). *@
+        <div id="ctrBulkBar" class="alert alert-secondary py-2 d-none">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <span id="ctrBulkCount" class="fw-semibold"></span>
+                <button type="button" class="btn btn-sm btn-danger" data-ctr="bulk-delete"><i class="bi bi-trash me-1"></i>Ta bort markerade</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-ctr="bulk-clear">Avmarkera</button>
+            </div>
+        </div>
         <div id="ctrList"><div class="text-center py-4"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
         <div class="form-check mt-2">
             <input class="form-check-input" type="checkbox" id="ctrShowPast">
@@ -306,7 +314,7 @@
         }
         var today = ymd(new Date());
         var html = '<div class="table-responsive"><table class="table table-sm align-middle"><thead><tr>' +
-            '<th>Datum</th><th>Tid</th><th>Träning</th><th>Skjutledare</th><th class="text-center">Anmälda</th><th class="text-end"></th></tr></thead><tbody>';
+            (canEdit ? '<th style="width:2rem"><input class="form-check-input" type="checkbox" id="ctrSelAll" aria-label="Markera alla"' + (rows.length && rows.every(function (r) { return selected.has(r.id); }) ? ' checked' : '') + '></th>' : '') + '<th>Datum</th><th>Tid</th><th>Träning</th><th>Skjutledare</th><th class="text-center">Anmälda</th><th class="text-end"></th></tr></thead><tbody>';
         rows.forEach(function (t) {
             var time = t.startTime ? (t.startTime + (t.endTime ? '–' + t.endTime : '')) : '';
             var cap = t.maxParticipants ? (t.signedUp + ' av ' + t.maxParticipants) : (t.registrationRequired ? String(t.signedUp) : (t.signedUp ? String(t.signedUp) : '—'));
@@ -317,6 +325,7 @@
                 (t.loanWeaponsOffered ? ' <i class="bi bi-shield-lock text-muted" title="Lånevapen erbjuds"></i>' : '') +
                 (t.followingInSeries > 0 || t.scheduleId ? ' <i class="bi bi-arrow-repeat text-muted" title="Ingår i en serie av kopior"></i>' : '');
             html += '<tr' + (past || t.isCancelled ? ' class="text-muted"' : '') + ' data-ctr-row="' + t.id + '">' +
+                (canEdit ? '<td><input class="form-check-input ctr-sel" type="checkbox" value="' + t.id + '" aria-label="Markera"' + (selected.has(t.id) ? ' checked' : '') + '></td>' : '') +
                 '<td class="text-nowrap">' + esc(dayLabel(t.date)) + '</td>' +
                 '<td class="text-nowrap">' + esc(time) + '</td>' +
                 '<td>' + esc(t.name) + badges + '</td>' +
@@ -334,10 +343,33 @@
                 '<li><button class="dropdown-item" type="button" data-ctr="cancel" data-id="' + t.id + '"><i class="bi bi-slash-circle me-2"></i>' + (t.isCancelled ? 'Ångra inställt' : 'Ställ in') + '</button></li>' +
                 '<li><hr class="dropdown-divider"></li>' +
                 '<li><button class="dropdown-item text-danger" type="button" data-ctr="delete" data-id="' + t.id + '"><i class="bi bi-trash me-2"></i>Ta bort</button></li>' +
+                (t.scheduleId ? '<li><button class="dropdown-item text-danger" type="button" data-ctr="delete-following" data-id="' + t.id + '"><i class="bi bi-trash me-2"></i>Ta bort den här och kommande…</button></li>' +
+                    '<li><button class="dropdown-item text-danger" type="button" data-ctr="delete-series" data-id="' + t.id + '"><i class="bi bi-trash me-2"></i>Ta bort hela serien…</button></li>' : '') +
                 '</ul></div>' : '') +
                 '</td></tr>';
         });
         el.innerHTML = html + '</tbody></table></div>';
+        syncBulk();
+    }
+
+    // Markeringen överlever omritning; rader som inte längre finns släpps.
+    var selected = new Set();
+    function syncBulk() {
+        var ids = new Set(rows.map(function (r) { return r.id; }));
+        selected.forEach(function (id) { if (!ids.has(id)) selected.delete(id); });
+        var bar = document.getElementById('ctrBulkBar');
+        bar.classList.toggle('d-none', selected.size === 0 || !canEdit);
+        document.getElementById('ctrBulkCount').textContent = selected.size === 1 ? '1 träning markerad' : selected.size + ' träningar markerade';
+        var all = document.getElementById('ctrSelAll');
+        if (all) all.checked = rows.length > 0 && rows.every(function (r) { return selected.has(r.id); });
+    }
+    function deleteResult(d) {
+        var html = esc(d.message || '');
+        if (d.blocked && d.blocked.length)
+            html += '<ul class="mb-0 mt-1 small">' + d.blocked.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul>';
+        msg(html, d.blocked && d.blocked.length ? 'warning' : (d.success ? 'success' : 'warning'));
+        selected.clear();
+        load();
     }
 
     function initPickers() {
@@ -559,6 +591,17 @@
             if (!confirm('Ta bort ' + t.name + ' ' + dayLabel(t.date) + '?\n\nEn träning med anmälda eller bokade lånevapen kan inte tas bort — ställ in den i stället.')) return;
             post('/umbraco/surface/ClubTraining/Delete', { trainingId: id })
                 .then(function (d) { msg(esc(d.message), d.success ? 'success' : 'warning'); load(); });
+        } else if (act === 'bulk-delete') {
+            var n = selected.size;
+            if (!n || !confirm('Ta bort ' + (n === 1 ? '1 träning' : n + ' träningar') + '?\n\nTräningar med anmälda eller bokade lånevapen tas inte bort — de visas efteråt så att du kan ställa in dem i stället.')) return;
+            post('/umbraco/surface/ClubTraining/DeleteMany', { clubId: clubId(), ids: Array.from(selected) }).then(deleteResult);
+        } else if (act === 'bulk-clear') { selected.clear(); render(); }
+        else if ((act === 'delete-series' || act === 'delete-following') && t) {
+            var whole = act === 'delete-series';
+            var q = whole ? 'Ta bort HELA serien ' + t.name + ' — alla tillfällen, även tidigare?'
+                          : 'Ta bort ' + t.name + ' ' + dayLabel(t.date) + ' och alla senare tillfällen i serien?';
+            if (!confirm(q + '\n\nTräningar med anmälda eller bokade lånevapen tas inte bort — de visas efteråt.')) return;
+            post('/umbraco/surface/ClubTraining/DeleteMany', { seriesOf: id, scope: whole ? 'all' : 'following' }).then(deleteResult);
         } else if (act === 'rot-remove') { rotation.splice(parseInt(b.getAttribute('data-index'), 10), 1); renderRotation(); }
         else if (act === 'break-remove') { b.closest('[data-break]').remove(); preview(); }
     });
@@ -567,6 +610,16 @@
         var tab = document.getElementById('clubTrainings-tab');
         if (tab) tab.addEventListener('shown.bs.tab', function () { if (!loaded) { loaded = true; load(); } });
         document.getElementById('ctrShowPast').addEventListener('change', load);
+        document.getElementById('ctrList').addEventListener('change', function (e) {
+            if (e.target.id === 'ctrSelAll') {
+                rows.forEach(function (r) { if (e.target.checked) selected.add(r.id); else selected.delete(r.id); });
+                render();
+            } else if (e.target.classList.contains('ctr-sel')) {
+                var v = parseInt(e.target.value, 10);
+                if (e.target.checked) selected.add(v); else selected.delete(v);
+                syncBulk();
+            }
+        });
         document.getElementById('ctrSaveTraining').addEventListener('click', function () { saveTraining('this'); });
         document.getElementById('ctrSaveFollowing').addEventListener('click', function () { saveTraining('following'); });
         document.getElementById('ctrRegRequired').addEventListener('change', syncLoan);
