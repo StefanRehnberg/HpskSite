@@ -261,14 +261,13 @@ namespace HpskSite.Controllers
         // ── Serier ──────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Får den inloggade registrera serier i kursens klubb? Klubbadmin eller skjutledare (sajtadmin
-        /// alltid) — samma folk som får signera märken. En tränare utan den rätten ser serierna men får
-        /// en förklaring i stället för knappen (beslut 2026-10-02: klubben gör utbildaren till skjutledare).
+        /// Får den inloggade registrera serier för kursens deltagare? Samma svar som att få hantera
+        /// gruppen: sajtadmin, klubbadmin, klubbens skjutledare — och **kursens tränare** (Stefans beslut
+        /// 2026-10-05, ersätter 2026-10-02). Kursledaren är ofta inte dagens skjutledare: nybörjarna
+        /// skjuter bland klubbens övriga skyttar, och skjutledaren är den som har banan. Rätten följer
+        /// därför kursen, aldrig skjutledarrollen. Deltagare och kopplad träning prövas per anrop.
         /// </summary>
-        private async Task<bool> CanRecordSeriesAsync(int clubId)
-            => await _auth.IsCurrentUserAdminAsync()
-               || await _auth.IsClubAdminForClub(clubId)
-               || await _auth.IsSkjutledareForClub(clubId);
+        private Task<bool> CanRecordSeriesAsync(int groupId) => _groups.CanManageTrainingGroup(groupId);
 
         [HttpGet]
         public async Task<IActionResult> Series(int groupId, int trainingId)
@@ -280,8 +279,8 @@ namespace HpskSite.Controllers
             return Json(new
             {
                 success = true,
-                canRecord = await CanRecordSeriesAsync(clubId),
-                cannotRecordReason = "Serier registreras av klubbens skjutledare eller klubbadmin — be klubben göra dig till skjutledare.",
+                canRecord = await CanRecordSeriesAsync(groupId),
+                cannotRecordReason = "Serier registreras av kursens tränare eller klubbadmin.",
                 series = _series.ForOccasion(groupId, trainingId),
                 thresholds = (course?.Participants ?? new()).ToDictionary(p => p.MemberId, p =>
                 {
@@ -306,8 +305,8 @@ namespace HpskSite.Controllers
         {
             if (req == null) return Json(new { success = false, message = Denied });
             var clubId = _groups.GetTrainingGroupClubId(req.GroupId);
-            if (clubId <= 0 || !await CanRecordSeriesAsync(clubId))
-                return Json(new { success = false, message = "Serier registreras av klubbens skjutledare eller klubbadmin." });
+            if (clubId <= 0 || !await CanRecordSeriesAsync(req.GroupId))
+                return Json(new { success = false, message = "Serier registreras av kursens tränare eller klubbadmin." });
             if (!_courses.IsLinked(req.GroupId, req.TrainingId)) return Json(new { success = false, message = "Träningen är inte kopplad till kursen." });
             if (!_courses.IsParticipant(req.GroupId, req.MemberId)) return Json(new { success = false, message = "Personen är inte med i kursen." });
             var training = _trainings.Get(req.TrainingId);
@@ -326,8 +325,8 @@ namespace HpskSite.Controllers
         {
             if (req == null) return Json(new { success = false, message = Denied });
             var clubId = _groups.GetTrainingGroupClubId(req.GroupId);
-            if (clubId <= 0 || !await CanRecordSeriesAsync(clubId))
-                return Json(new { success = false, message = "Serier tas bort av klubbens skjutledare eller klubbadmin." });
+            if (clubId <= 0 || !await CanRecordSeriesAsync(req.GroupId))
+                return Json(new { success = false, message = "Serier tas bort av kursens tränare eller klubbadmin." });
             var err = await _series.DeleteAsync(req.GroupId, req.SeriesId);
             return Json(new { success = err == null, message = err ?? "Serien är borttagen — ur träningsloggen och, om den nådde brons, ur märkesserierna." });
         }

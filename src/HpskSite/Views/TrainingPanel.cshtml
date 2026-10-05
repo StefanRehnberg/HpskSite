@@ -55,7 +55,7 @@
             <div class="d-flex align-items-start gap-2 flex-wrap mb-2">
                 <h1 class="h5 mb-0 me-auto">@m.Name</h1>
                 @if (m.IsCancelled) { <span class="badge bg-danger">Inställd</span> }
-                @if (m.IsMandatory) { <span class="badge bg-warning text-dark">Obligatorisk</span> }
+                @if (m.IsMandatory) { <span class="badge bg-warning text-dark">Obligatorisk för alla</span> }
             </div>
             <dl class="tp-facts mb-3">
                 @if (m.Date.HasValue)
@@ -68,6 +68,16 @@
                 <dt>Skjutledare</dt><dd>@(string.IsNullOrEmpty(m.SkjutledareName) ? "Ingen utsedd än" : m.SkjutledareName)</dd>
                 @if (!string.IsNullOrEmpty(m.ClubName)) { <dt>Klubb</dt><dd>@m.ClubName</dd> }
             </dl>
+            @foreach (var c in m.MyCourses)
+            {
+                @* Nybörjaren ska själv se att tillfället hör till hens kurs och vad det kräver. *@
+                <div class="alert alert-info py-2 mb-3" id="tpCourse">
+                    <div><i class="bi bi-mortarboard me-1"></i>Ingår i din kurs <strong>@c.CourseName</strong></div>
+                    @if (!string.IsNullOrWhiteSpace(c.Note)) { <div class="fw-semibold mt-1">@c.Note</div> }
+                    @if (c.Mandatory) { <div class="mt-1"><span class="badge bg-warning text-dark">Obligatoriskt för din kurs</span></div> }
+                    @if (c.RegistrationRequired) { <div class="small mt-1">Kursen kräver att du anmäler dig nedan.</div> }
+                </div>
+            }
             @if (!string.IsNullOrWhiteSpace(m.Description))
             {
                 <p class="mb-3" style="white-space:pre-line">@m.Description</p>

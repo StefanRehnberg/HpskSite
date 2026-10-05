@@ -530,7 +530,7 @@ else
             })
             .then(data => {
                 if (data.success) {
-                    alert('✅ Medlem godkänd! Ett bekräftelsemail har skickats.');
+                    alert(data.emailSent ? '✅ Medlem godkänd! Ett bekräftelsemail har skickats.' : '✅ Medlem godkänd — men mejlet kunde inte skickas. Meddela medlemmen på annat sätt.');
                     loadClubMembers(clubId); // Reload member list
                     updateManageMembersButton(clubId); // Update button text
                 } else {

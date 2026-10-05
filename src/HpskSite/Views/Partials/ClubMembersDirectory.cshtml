@@ -685,7 +685,9 @@ function approveMember(memberId, memberName) {
     })
     .then(data => {
         if (data.success) {
-            alert(`${memberName} har godkänts som medlem! Ett bekräftelsemail har skickats.`);
+            alert(data.emailSent
+                ? `${memberName} har godkänts som medlem! Ett bekräftelsemail har skickats.`
+                : `${memberName} har godkänts som medlem, men mejlet kunde inte skickas. Meddela hen på annat sätt.`);
             loadMembers(); // Reload the member list
         } else {
             alert('Fel vid godkännande: ' + (data.message || 'Okänt fel'));

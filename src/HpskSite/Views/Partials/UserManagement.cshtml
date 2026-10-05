@@ -1992,7 +1992,7 @@ function approvePendingMember(memberId) {
                     makeFirstMemberClubAdmin(memberId, data.firstMemberClubId, data.memberName, data.firstMemberClubName);
                 }
             } else {
-                alert('✅ Medlem godkänd! Ett bekräftelsemail har skickats.');
+                alert(data.emailSent ? '✅ Medlem godkänd! Ett bekräftelsemail har skickats.' : '✅ Medlem godkänd — men mejlet kunde inte skickas. Meddela medlemmen på annat sätt.');
             }
         } else {
             alert('❌ Fel: ' + data.message);

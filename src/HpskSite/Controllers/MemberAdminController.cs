@@ -1561,8 +1561,9 @@ namespace HpskSite.Controllers
                 _memberService.Save(member);
                 Console.WriteLine($"[ApproveMember] Auto-login token generated and saved for: {memberId}");
 
-                // Resolve club info (needed for email and first-member check)
-                var clubId = member.GetValue<int>("primaryClubId");
+                // Resolve club info (needed for email and first-member check).
+                // ⚠️ primaryClubId är en STRÄNG — GetValue<int> gav tyst 0 och "Ingen klubb" i mejlen.
+                var clubId = _memberClubs.GetPrimaryClubId(member);
                 var clubName = "Ingen klubb";
                 if (clubId > 0)
                 {
@@ -1571,6 +1572,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Send approval email - use firstName + lastName as fallback if Name is empty
+                var emailSent = false;
                 try
                 {
                     var memberName = member.Name;
@@ -1587,7 +1589,7 @@ namespace HpskSite.Controllers
                     }
 
                     Console.WriteLine($"[ApproveMember] Sending approval email to: {member.Email}, Name: {memberName}");
-                    await _emailService.SendApprovalNotificationAsync(
+                    emailSent = await _emailService.SendApprovalNotificationAsync(
                         member.Email,
                         memberName,
                         autoLoginToken,
@@ -1638,6 +1640,8 @@ namespace HpskSite.Controllers
                 {
                     success = true,
                     message = "Member approved successfully",
+                    // Om godkännandemejlet faktiskt gick iväg — klienten säger det bara då.
+                    emailSent,
                     isFirstClubMember,
                     firstMemberClubId,
                     firstMemberClubName,

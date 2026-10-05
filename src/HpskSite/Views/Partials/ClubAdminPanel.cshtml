@@ -5965,7 +5965,7 @@ async function loadClubTrainingGroupMembers(groupId) {
 
         let html = `
             <div class="d-flex justify-content-between align-items-center mb-2">
-                <strong>Medlemmar (${members.length})</strong>
+                <strong>Deltagare (${members.filter(m => m.role !== 'Trainer').length}) · tränare (${members.filter(m => m.role === 'Trainer').length})</strong>
                 <div class="d-flex gap-2">
                     <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); showTgLoanWeaponModal(${groupId})">
                         <i class="bi bi-safe2 me-1"></i>Tilldela lånevapen
@@ -6225,13 +6225,14 @@ function searchClubTgMembers() {
                 return;
             }
 
-            resultsContainer.innerHTML = result.data.map(m => `
-                <button type="button" class="list-group-item list-group-item-action py-1" onclick="selectClubTgMember(${m.memberId}, '${(m.memberName || '').replace(/'/g, "\\'")}')">
+            window._clubTgHits = result.data;
+            resultsContainer.innerHTML = result.data.map((m, i) => `
+                <button type="button" class="list-group-item list-group-item-action py-1" onclick="selectClubTgMemberAt(${i})">
                     <div class="d-flex justify-content-between">
-                        <span>${m.memberName}</span>
-                        <small class="text-muted">${m.clubName || ''}</small>
+                        <span>${hpskEsc(m.memberName || '')}</span>
+                        <small class="text-muted">${hpskEsc(m.clubName || '')}</small>
                     </div>
-                    <small class="text-muted">${m.email || ''}</small>
+                    <small class="text-muted">${hpskEsc(m.email || '')}</small>
                 </button>
             `).join('');
         } catch (error) {
@@ -6239,6 +6240,11 @@ function searchClubTgMembers() {
             resultsContainer.innerHTML = '<div class="list-group-item text-danger small">Sökfel</div>';
         }
     }, 300);
+}
+
+function selectClubTgMemberAt(i) {
+    const m = (window._clubTgHits || [])[i];
+    if (m) selectClubTgMember(m.memberId, m.memberName || '');
 }
 
 function selectClubTgMember(memberId, memberName) {
@@ -6410,14 +6416,15 @@ async function loadSkjutledare() {
         if (data.data.length === 0) {
             listEl.innerHTML = '<div class="text-muted small">Inga skjutledare tilldelade.</div>';
         } else {
+            window._skjutledareList = data.data;
             listEl.innerHTML = data.data.map(s => `
                 <div class="d-flex align-items-center justify-content-between py-1 border-bottom">
                     <div>
                         <i class="bi bi-shield-check text-success me-2"></i>
-                        <strong>${s.name}</strong>
-                        <span class="text-muted ms-2 small">${s.email}</span>
+                        <strong>${hpskEsc(s.name || '')}</strong>
+                        <span class="text-muted ms-2 small">${hpskEsc(s.email || '')}</span>
                     </div>
-                    <button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeSkjutledare(${s.id}, '${s.name}')">
+                    <button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeSkjutledare(${s.id})">
                         <i class="bi bi-x-lg"></i>
                     </button>
                 </div>
@@ -6478,7 +6485,8 @@ async function assignSkjutledare() {
     }
 }
 
-async function removeSkjutledare(memberId, name) {
+async function removeSkjutledare(memberId) {
+    const name = ((window._skjutledareList || []).find(x => x.id === memberId) || {}).name || 'skjutledaren';
     if (!confirm(`Ta bort ${name} som skjutledare?`)) return;
     try {
         const formData = new FormData();

@@ -25,12 +25,15 @@ namespace HpskSite.Controllers
         private readonly ClubEventParticipationService _participation;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
+        private readonly HpskSite.Services.Training.TrainingCourseService _courses;
 
         public TrainingPanelController(
             ClubEventParticipationService participation,
             IMemberManager memberManager,
-            IMemberService memberService)
+            IMemberService memberService,
+            HpskSite.Services.Training.TrainingCourseService courses)
         {
+            _courses = courses;
             _participation = participation;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -64,6 +67,7 @@ namespace HpskSite.Controllers
             var current = await _memberManager.GetCurrentMemberAsync();
             var me = current?.Email == null ? null : _memberService.GetByEmail(current.Email);
             model.CanManage = me != null && await _participation.CanManageAsync(ctx, me.Id);
+            if (me != null) model.MyCourses = _courses.CoursesForMemberOnTraining(me.Id, id);
             return View("~/Views/TrainingPanel.cshtml", model);
         }
     }
@@ -82,6 +86,8 @@ namespace HpskSite.Controllers
         public bool IsCancelled { get; set; }
         public bool IsMandatory { get; set; }
         public bool CanManage { get; set; }
+        /// <summary>Kurserna den inloggade går som tillfället hör till, med kursens krav.</summary>
+        public List<HpskSite.Services.Training.TrainingCourseService.MemberCourseOnTraining> MyCourses { get; set; } = new();
         public string? Error { get; set; }
     }
 }

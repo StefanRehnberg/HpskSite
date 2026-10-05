@@ -61,7 +61,12 @@ namespace HpskSite.Services.Training
             public string? EndTime { get; set; }
             public string Name { get; set; } = "";
             public bool IsCancelled { get; set; }
+            /// <summary>Gäller för kursens deltagare: obligatoriskt för kursen ELLER för alla på träningen.</summary>
             public bool IsMandatory { get; set; }
+            /// <summary>Kursens eget krav (gruppens standard eller tillfällets avvikelse).</summary>
+            public bool MandatoryForCourse { get; set; }
+            /// <summary>Träningens egen flagga — gäller alla som deltar, inte bara kursen.</summary>
+            public bool MandatoryForAll { get; set; }
             public bool RegistrationRequired { get; set; }
             public string? AttendanceOverride { get; set; }
             public string? RegistrationOverride { get; set; }
@@ -154,12 +159,17 @@ namespace HpskSite.Services.Training
             foreach (var t in trainings)
             {
                 var l = links[t.Id];
+                // ⚠️ Två skilda krav (Stefan 2026-10-05): kursens, och träningens eget som gäller alla.
+                // Ytan måste kunna säga vilket — men för en kursdeltagare räknas båda som obligatoriska.
+                var forCourse = TrainingCourseRules.IsMandatory(course.DefaultAttendance, l.Attendance);
                 course.Occasions.Add(new Occasion
                 {
                     TrainingId = t.Id,
                     Date = t.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     StartTime = t.StartTime, EndTime = t.EndTime, Name = t.Name, IsCancelled = t.IsCancelled,
-                    IsMandatory = TrainingCourseRules.IsMandatory(course.DefaultAttendance, l.Attendance),
+                    IsMandatory = forCourse || t.IsMandatory,
+                    MandatoryForCourse = forCourse,
+                    MandatoryForAll = t.IsMandatory,
                     RegistrationRequired = TrainingCourseRules.RegistrationRequired(course.DefaultRegistration, l.Registration),
                     AttendanceOverride = TrainingCourseRules.NormaliseAttendance(l.Attendance),
                     RegistrationOverride = TrainingCourseRules.NormaliseRegistration(l.Registration),
@@ -401,6 +411,58 @@ WHERE g.IsActive = 1 AND (
 ORDER BY CASE WHEN EXISTS (SELECT 1 FROM dbo.TrainingGroupMembers m WHERE m.TrainingGroupId = g.Id AND m.MemberId = @0 AND m.Role = 'Trainer' AND m.IsActive = 1) THEN 0 ELSE 1 END, g.Name",
                 memberId, clubs.Count > 0 ? clubs : new List<int> { 0 });
             return rows;
+        }
+
+        public class MemberCourseOnTraining
+        {
+            public string CourseName { get; set; } = "";
+            public bool Mandatory { get; set; }
+            public bool RegistrationRequired { get; set; }
+            public string? Note { get; set; }
+        }
+
+        /// <summary>
+        /// Kurserna medlemmen går (som DELTAGARE, aktiv grupp) som tillfället är kopplat till, med
+        /// kursens krav för just det tillfället. Driver träningspanelen, så att nybörjaren själv ser att
+        /// tillfället är obligatoriskt för hens kurs och vad det är (Stefan 2026-10-05). Ett fel ger tom
+        /// lista — panelen ska visas ändå.
+        /// </summary>
+        public List<MemberCourseOnTraining> CoursesForMemberOnTraining(int memberId, int trainingId)
+        {
+            if (memberId <= 0 || trainingId <= 0) return new();
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                var rows = db.Fetch<CourseLinkRow>(@"
+SELECT g.Name, g.DefaultAttendance, g.DefaultRegistration, l.Attendance, l.Registration, l.Note
+FROM dbo.TrainingGroupTraining l
+JOIN dbo.TrainingGroups g ON g.Id = l.TrainingGroupId AND g.IsActive = 1
+JOIN dbo.TrainingGroupMembers m ON m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.MemberId = @0 AND m.Role <> 'Trainer'
+WHERE l.TrainingId = @1
+ORDER BY g.Name", memberId, trainingId);
+                return rows.Select(r => new MemberCourseOnTraining
+                {
+                    CourseName = r.Name ?? "",
+                    Mandatory = TrainingCourseRules.IsMandatory(r.DefaultAttendance, r.Attendance),
+                    RegistrationRequired = TrainingCourseRules.RegistrationRequired(r.DefaultRegistration, r.Registration),
+                    Note = string.IsNullOrWhiteSpace(r.Note) ? null : r.Note
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte läsa kurser för medlem {MemberId} på träning {TrainingId}", memberId, trainingId);
+                return new();
+            }
+        }
+
+        private class CourseLinkRow
+        {
+            public string? Name { get; set; }
+            public string? DefaultAttendance { get; set; }
+            public string? DefaultRegistration { get; set; }
+            public string? Attendance { get; set; }
+            public string? Registration { get; set; }
+            public string? Note { get; set; }
         }
 
         /// <summary>

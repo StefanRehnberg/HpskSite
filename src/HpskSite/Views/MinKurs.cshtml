@@ -24,6 +24,9 @@
     .mk-ready { color: var(--bs-success-text-emphasis); font-weight: 600; }
     .mk-missed { color: var(--bs-danger-text-emphasis); }
     .mk-grid th, .mk-grid td { white-space: nowrap; text-align: center; vertical-align: middle; }
+    .mk-grid thead th { vertical-align: bottom; }
+    .mk-occname { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: .75rem; line-height: 1.15; white-space: normal; max-width: 7rem; margin: 0 auto; color: var(--bs-secondary-color); }
+    .mk-grid tbody td:first-child { position: sticky; left: 0; background: var(--bs-body-bg); z-index: 1; }
     .mk-grid th:first-child, .mk-grid td:first-child, .mk-grid td.mk-badgecell { text-align: left; }
     .mk-grid .mk-cell-missed { color: var(--bs-danger-text-emphasis); font-weight: 600; }
     .mk-seriesrow { display: flex; justify-content: space-between; align-items: center; padding: .375rem 0; border-bottom: 1px solid var(--bs-border-color); }
@@ -40,6 +43,7 @@
                 <i class="bi bi-sliders me-1"></i>Åtgärder
             </button>
             <ul class="dropdown-menu dropdown-menu-end" style="min-width:240px">
+                <li><button class="dropdown-item" type="button" data-mk="members"><i class="bi bi-people me-2"></i>Kursens deltagare…</button></li>
                 <li><button class="dropdown-item" type="button" data-mk="link"><i class="bi bi-link-45deg me-2"></i>Koppla träningar till kursen…</button></li>
                 <li id="mkLoanItem" class="d-none"><button class="dropdown-item" type="button" data-mk="loan"><i class="bi bi-safe me-2"></i>Lånevapen till tillfället…</button></li>
                 <li><button class="dropdown-item" type="button" data-mk="defaults"><i class="bi bi-gear me-2"></i>Kursens standard…</button></li>
@@ -53,6 +57,9 @@
     <div id="mkMsg"></div>
     <div id="mkBody"><div class="text-center py-5"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
 </div>
+@* Översikten bor UTANFÖR den smala kolumnen (Stefan 2026-10-05): på en skärm som rymmer alla
+   tillfällen ska de synas, i stället för att rulla ut till höger i 760 px. *@
+<div class="container-fluid px-3 px-lg-4 pb-4" id="mkOverviewWrap"></div>
 
 <!-- Registrera serie -->
 <div class="modal fade" id="mkSeriesModal" tabindex="-1" aria-hidden="true">
@@ -191,6 +198,7 @@
                         <option value="Mandatory">Obligatorisk</option>
                     </select>
                 </div>
+                <div class="alert alert-warning py-2 small d-none" id="mkOccAllNote">Träningen är dessutom <strong>obligatorisk för alla</strong> som deltar — det sätter klubben under Träningar, inte här.</div>
                 <div class="mb-3">
                     <label class="form-label" for="mkOccReg">Anmälan för kursens deltagare</label>
                     <select class="form-select" id="mkOccReg">
@@ -200,8 +208,9 @@
                     </select>
                 </div>
                 <div class="mb-1">
-                    <label class="form-label" for="mkOccNote">Anteckning till tillfället</label>
-                    <input class="form-control" id="mkOccNote" maxlength="500" placeholder="Teori och prov för Pistolskyttekortet" autocomplete="off">
+                    <label class="form-label" for="mkOccNote">Vad tillfället är i kursen</label>
+                    <input class="form-control" id="mkOccNote" maxlength="500" placeholder="Teori 1: vapenkunskap och säkerhet" autocomplete="off">
+                    <div class="form-text">Visas i stället för träningens namn, i dagens kort och i kursöversikten.</div>
                 </div>
                 <div id="mkOccErr" class="text-danger small mt-2"></div>
             </div>
@@ -209,6 +218,31 @@
                 <button type="button" class="btn btn-outline-danger me-auto" id="mkOccUnlink">Ta bort från kursen</button>
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-primary" id="mkOccSave">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Kursens deltagare -->
+<div class="modal fade" id="mkMembersModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h2 class="modal-title h5">Kursens deltagare</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label" for="mkMemberSearch">Lägg till en medlem i klubben</label>
+                <input class="form-control mb-2" id="mkMemberSearch" autocomplete="off" placeholder="Skriv namn eller e-post">
+                <div id="mkMemberHits" class="list-group mb-3"></div>
+                <div class="small text-muted mb-2">Hittar du inte personen? Är hen nyregistrerad måste klubben först godkänna medlemskapet.</div>
+                <div id="mkMembersMsg"></div>
+                <h3 class="h6 mt-3" id="mkMembersCount">Deltagare</h3>
+                <div id="mkMembersList"></div>
+                <div class="small text-muted mt-2" id="mkTrainersLine"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
             </div>
         </div>
     </div>
@@ -350,7 +384,7 @@
             html += '<div class="card mk-today mb-3"><div class="card-body py-2">' +
                 '<div class="small text-uppercase text-muted fw-semibold">' + esc(when) + '</div>' +
                 '<div class="fw-semibold">' + esc(current.note || current.name) + '</div>' +
-                '<div class="small text-muted">' + (current.isMandatory ? '<span class="badge bg-warning text-dark me-1">Obligatoriskt för kursen</span>' : '') +
+                '<div class="small text-muted">' + mandatoryBadges(current) +
                 here + ' av ' + course.participants.length + ' här' +
                 (current.skjutledareName ? ' · skjutledare ' + esc(current.skjutledareName) : '') + '</div>' +
                 '</div></div>';
@@ -373,8 +407,8 @@
             course.participants.forEach(function (p) { html += personCard(p); });
         }
 
-        html += overview();
         document.getElementById('mkBody').innerHTML = html;
+        document.getElementById('mkOverviewWrap').innerHTML = overview();
     }
 
     function personCard(p) {
@@ -404,8 +438,11 @@
     function overview() {
         if (!course.occasions.length) return '';
         var head = course.occasions.map(function (o) {
-            return '<th><button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" data-mk="occ" data-training="' + o.trainingId + '" title="Tillfällets krav">' +
-                esc(dayLabel(o.date)) + (o.isMandatory ? ' ★' : '') + '</button>' + (o.isCancelled ? '<div class="small text-danger">inställd</div>' : '') + '</th>';
+            var label = o.note || o.name;
+            return '<th><button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" data-mk="occ" data-training="' + o.trainingId + '" title="' + esc(label) + ' — klicka för tillfällets krav">' +
+                esc(dayLabel(o.date)) + (o.mandatoryForCourse ? ' ★' : '') + (o.mandatoryForAll ? ' ◆' : '') +
+                '<span class="mk-occname">' + esc(label) + '</span></button>' +
+                (o.isCancelled ? '<div class="small text-danger">inställd</div>' : '') + '</th>';
         }).join('');
         var rows = course.participants.map(function (p) {
             var tds = course.occasions.map(function (o) {
@@ -418,10 +455,10 @@
             var b = (course.badges || {})[p.memberId] || {};
             return '<tr><td>' + esc(p.name) + '</td>' + tds + '<td class="mk-badgecell small">' + esc(b.text || '') + '</td></tr>';
         }).join('');
-        return '<h2 class="h5 mt-4" id="mkOverview">Kursöversikt — alla tillfällen</h2>' +
+        return '<h2 class="h5 mt-2" id="mkOverview">Kursöversikt — alla tillfällen</h2>' +
             '<div class="table-responsive"><table class="table table-sm mk-grid"><thead><tr><th>Deltagare</th>' + head + '<th>Märkesläge</th></tr></thead><tbody>' +
             rows + '</tbody></table></div>' +
-            '<p class="small text-muted">★ = obligatoriskt för kursen. QR = incheckad på banan inom en timme kring tillfället. En missad obligatorisk dag visas, men spärrar ingenting. Klicka på ett datum för tillfällets krav.</p>';
+            '<p class="small text-muted">★ = obligatoriskt för kursen · ◆ = obligatoriskt för alla på träningen. QR = incheckad på banan inom en timme kring tillfället. En missad obligatorisk dag visas, men spärrar ingenting. Klicka på ett tillfälle för att ändra kursens krav och namn.</p>';
     }
 
     // ── Närvaro ──
@@ -601,6 +638,7 @@
         document.getElementById('mkOccReg').value = o.registrationOverride || '';
         document.getElementById('mkOccNote').value = o.note || '';
         document.getElementById('mkOccErr').textContent = '';
+        document.getElementById('mkOccAllNote').classList.toggle('d-none', !o.mandatoryForAll);
         bootstrap.Modal.getOrCreateInstance(document.getElementById('mkOccModal')).show();
     }
     function saveOcc() {
@@ -634,6 +672,81 @@
         }).then(function (d) {
             bootstrap.Modal.getInstance(document.getElementById('mkDefModal')).hide();
             msg(d.message, d.success ? 'success' : 'warning'); loadCourse(groupId);
+        });
+    }
+
+    function mandatoryBadges(o) {
+        return (o.mandatoryForCourse ? '<span class="badge bg-warning text-dark me-1">Obligatoriskt för kursen</span>' : '') +
+               (o.mandatoryForAll ? '<span class="badge bg-warning-subtle text-warning-emphasis border border-warning me-1">Obligatoriskt för alla</span>' : '');
+    }
+
+    // ── Kursens deltagare ──
+    // Tränaren lägger till och tar bort DELTAGARE. Tränare utses av klubben (servern vägrar annars).
+    function postForm(url, fields) {
+        var fd = new FormData();
+        fd.append('__RequestVerificationToken', token());
+        Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+        return fetch(url, { method: 'POST', credentials: 'same-origin', body: fd }).then(function (r) {
+            return r.text().then(function (t) { try { return JSON.parse(t); } catch (e) { return { success: false, message: 'Sidan har varit öppen för länge — ladda om och försök igen.' }; } });
+        });
+    }
+    function renderMembers() {
+        var list = course.participants;
+        document.getElementById('mkMembersCount').textContent = 'Deltagare (' + list.length + ')';
+        document.getElementById('mkMembersList').innerHTML = list.length ? list.map(function (p) {
+            return '<div class="d-flex align-items-center border-bottom py-1"><span class="me-auto">' + esc(p.name) + '</span>' +
+                '<button type="button" class="btn btn-sm btn-outline-danger" data-mk="rm-member" data-member="' + p.memberId + '">Ta bort</button></div>';
+        }).join('') : '<div class="text-muted small">Inga deltagare än.</div>';
+        document.getElementById('mkTrainersLine').textContent = course.trainers.length
+            ? 'Tränare: ' + course.trainers.map(function (t) { return t.name; }).join(', ') + ' (utses av klubben)' : '';
+    }
+    function openMembers() {
+        document.getElementById('mkMemberSearch').value = '';
+        document.getElementById('mkMemberHits').innerHTML = '';
+        document.getElementById('mkMembersMsg').innerHTML = '';
+        renderMembers();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('mkMembersModal')).show();
+    }
+    var searchTimer = null, searchSeq = 0;
+    function searchMembers() {
+        var q = document.getElementById('mkMemberSearch').value.trim();
+        var hits = document.getElementById('mkMemberHits');
+        clearTimeout(searchTimer);
+        if (q.length < 2) { hits.innerHTML = ''; return; }
+        searchTimer = setTimeout(function () {
+            var seq = ++searchSeq;
+            getJson('/umbraco/surface/TrainingGroup/SearchMembers?query=' + encodeURIComponent(q) + '&trainingGroupId=' + groupId).then(function (d) {
+                if (seq !== searchSeq) return;
+                var inCourse = {};
+                course.participants.concat(course.trainers).forEach(function (p) { inCourse[p.memberId] = true; });
+                var rows = (d.data || []);
+                hits.innerHTML = rows.length ? rows.map(function (m) {
+                    var taken = inCourse[m.memberId];
+                    return '<button type="button" class="list-group-item list-group-item-action py-1"' + (taken ? ' disabled' : '') +
+                        ' data-mk="add-member" data-member="' + m.memberId + '">' + esc(m.memberName) +
+                        (taken ? ' <span class="small text-muted">(redan med)</span>' : '') + '</button>';
+                }).join('') : '<div class="small text-muted px-1">Ingen medlem i klubben matchar.</div>';
+            });
+        }, 300);
+    }
+    function membersMsg(d) {
+        document.getElementById('mkMembersMsg').innerHTML = '<div class="alert alert-' + (d.success ? 'success' : 'warning') + ' py-1 small">' + esc(d.message || '') + '</div>';
+    }
+    function addMember(id) {
+        postForm('/umbraco/surface/TrainingGroup/AddTrainingGroupMember', { trainingGroupId: groupId, memberId: id, role: 'Member', sendEmail: 'false' }).then(function (d) {
+            membersMsg(d);
+            if (!d.success) return;
+            document.getElementById('mkMemberSearch').value = '';
+            document.getElementById('mkMemberHits').innerHTML = '';
+            loadCourse(groupId).then(renderMembers);
+        });
+    }
+    function removeMember(id) {
+        var p = course.participants.find(function (x) { return x.memberId === id; });
+        if (!confirm('Ta bort ' + (p ? p.name : 'deltagaren') + ' ur kursen? Närvaro och serier som redan registrerats finns kvar.')) return;
+        postForm('/umbraco/surface/TrainingGroup/RemoveTrainingGroupMember', { trainingGroupId: groupId, memberId: id }).then(function (d) {
+            membersMsg(d);
+            if (d.success) loadCourse(groupId).then(renderMembers);
         });
     }
 
@@ -706,6 +819,9 @@
         }
         else if (act === 'defaults') openDefaults();
         else if (act === 'loan') openLoan();
+        else if (act === 'members') openMembers();
+        else if (act === 'add-member') addMember(member);
+        else if (act === 'rm-member') removeMember(member);
         else if (act === 'occ') openOcc(parseInt(b.getAttribute('data-training'), 10));
     });
     document.querySelectorAll('input[name="mkMode"]').forEach(function (r) {
@@ -724,6 +840,7 @@
     document.getElementById('mkOccUnlink').addEventListener('click', unlinkOcc);
     document.getElementById('mkDefSave').addEventListener('click', saveDefaults);
     document.getElementById('mkLoanSave').addEventListener('click', saveLoan);
+    document.getElementById('mkMemberSearch').addEventListener('input', searchMembers);
     document.getElementById('mkPicker').addEventListener('change', function () { loadCourse(parseInt(this.value, 10)); });
     // Uppropet uppdaterar listan när serie-dialogen stängs, så märkesläget följer med.
     document.getElementById('mkSeriesModal').addEventListener('hidden.bs.modal', function () { loadCourse(groupId); });
