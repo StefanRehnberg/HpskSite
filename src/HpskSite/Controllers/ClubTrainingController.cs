@@ -226,6 +226,44 @@ namespace HpskSite.Controllers
             return Json(new { success = error == null, message = error ?? "Träningen är borttagen." });
         }
 
+        public class DeleteManyRequest
+        {
+            public int ClubId { get; set; }
+            public List<int>? Ids { get; set; }
+            /// <summary>Alternativ till Ids: en träning vars serie tas bort.</summary>
+            public int SeriesOf { get; set; }
+            /// <summary>"following" = bara från och med träningen, annars hela serien.</summary>
+            public string? Scope { get; set; }
+        }
+
+        /// <summary>Tar bort flera träningar (markerade, eller en hel serie). Tillfällen med anmälda
+        /// eller lånevapen hoppas över och namnges i svaret.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteMany([FromBody] DeleteManyRequest req)
+        {
+            if (req == null) return Json(new { success = false, message = "Inget att ta bort." });
+            var clubId = req.ClubId;
+            List<int> ids;
+            if (req.SeriesOf > 0)
+            {
+                var t = _trainings.Get(req.SeriesOf);
+                if (t == null) return Json(new { success = false, message = "Träningen finns inte." });
+                clubId = t.ClubId;
+                ids = _trainings.SeriesIds(t.Id, string.Equals(req.Scope, "following", StringComparison.OrdinalIgnoreCase));
+            }
+            else ids = req.Ids ?? new();
+            if (!await CanAdminAsync(clubId, await CurrentMemberIdAsync())) return Json(new { success = false, message = Denied });
+            if (ids.Count == 0) return Json(new { success = false, message = "Inga träningar valda." });
+
+            var r = _trainings.DeleteMany(clubId, ids);
+            var msg = r.DeletedIds.Count == 0 ? "Ingen träning togs bort."
+                : r.DeletedIds.Count == 1 ? "1 träning är borttagen." : $"{r.DeletedIds.Count} träningar är borttagna.";
+            if (r.Blocked.Count > 0)
+                msg += $" {r.Blocked.Count} har anmälda eller bokade lånevapen och togs inte bort — ställ in dem i stället.";
+            return Json(new { success = r.DeletedIds.Count > 0, deleted = r.DeletedIds.Count, blocked = r.Blocked, message = msg });
+        }
+
         private async Task<bool> CanAdminAsync(int clubId, int memberId)
         {
             if (clubId <= 0) return false;

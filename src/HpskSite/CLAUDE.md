@@ -3714,7 +3714,12 @@ förlagan till seriens första tillfälle, ingen migrering.
   varnar när klubben har noll lånebara vapen (`List` bär `loanableWeapons`).
 - Panelen säger **"Ingen anmälan behövs — kom direkt"** (`#tpNoSignup`) när varken träningen
   eller en kurs medlemmen går kräver anmälan.
-Svit: `hpsk-verify/training-copy-verify.mjs` 31/31 (A/B: de tre reglerna borta → 7 röda). **En träning med deltagare eller lånebokningar raderas aldrig** — svaret pekar på att ställa
+Svit: `hpsk-verify/training-copy-verify.mjs` 31/31 (A/B: de tre reglerna borta → 7 röda).
+- **Ta bort flera** (`ClubTraining/DeleteMany`: `ids` för markerade rader, eller `seriesOf` +
+  `scope` för hela serien / den här och kommande). Går genom samma `Delete` per tillfälle, så
+  anmälda/lånevapen hoppas över och NAMNGES (`blocked`). ⚠️ Frågan är scopad på `ClubId` —
+  behörigheten prövas för klubben, inte per id. En serie som blir tom tas bort.
+  Svit: `training-bulk-delete-verify.mjs` 18/18 (A/B: utan klubbspärren → 2 röda). **En träning med deltagare eller lånebokningar raderas aldrig** — svaret pekar på att ställa
 in. Den utsedda skjutledaren håller upprop för sitt tillfälle. Medlemmen anmäler sig i en **panel**
 (`_TrainingPanelModal` → `/traning/panel?id=` i en iframe, `#training-{id}` i kalendern/flödet), aldrig
 en egen sida. Händelsedialogerna har inte längre typen Träning eller lånevapen. Statistiken och

@@ -610,6 +610,66 @@ WHERE ScheduleId = @0 AND [Date] > @1 AND [Date] >= CAST(GETDATE() AS date)",
             return n == 1 ? null : "Träningen finns inte.";
         }
 
+        public class DeleteManyResult
+        {
+            public List<int> DeletedIds { get; } = new();
+            /// <summary>Tillfällen som inte togs bort, med skälet (anmälda/lånevapen) i klartext.</summary>
+            public List<string> Blocked { get; } = new();
+        }
+
+        /// <summary>
+        /// Tar bort flera träningar i en klubb. Samma regel som <see cref="Delete"/>: ett tillfälle med
+        /// deltagare eller lånevapenbokningar tas aldrig bort — det hoppas över och namnges, så att de
+        /// andra ändå går. Id:n utanför klubben ignoreras (anroparen har prövat behörigheten för klubben).
+        /// En serie som blir tom tas bort med sina tillfällen.
+        /// </summary>
+        public DeleteManyResult DeleteMany(int clubId, IEnumerable<int> ids)
+        {
+            var result = new DeleteManyResult();
+            var wanted = ids.Where(i => i > 0).Distinct().ToList();
+            if (wanted.Count == 0) return result;
+            using var db = _databaseFactory.CreateDatabase();
+            var sv = CultureInfo.GetCultureInfo("sv-SE");
+            var schedules = new HashSet<int>();
+            // Chunkat: IN (@0) tar slut kring 2100 parametrar och gör det tyst.
+            foreach (var chunk in wanted.Chunk(500))
+            {
+                var rows = db.Fetch<ClubTraining>("WHERE ClubId = @0 AND Id IN (@1)", clubId, chunk);
+                foreach (var t in rows.OrderBy(r => r.Date))
+                {
+                    var error = Delete(t.Id);
+                    if (error == null)
+                    {
+                        result.DeletedIds.Add(t.Id);
+                        if (t.ScheduleId is int sid) schedules.Add(sid);
+                    }
+                    else result.Blocked.Add($"{t.Date.ToString("ddd d MMM", sv)} {t.Name}: {error}");
+                }
+            }
+            foreach (var sid in schedules)
+            {
+                try
+                {
+                    db.Execute(@"DELETE FROM dbo.ClubTrainingSchedule WHERE Id = @0
+                                 AND NOT EXISTS (SELECT 1 FROM dbo.ClubTraining WHERE ScheduleId = @0)", sid);
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Tom träningsserie {Id} kunde inte tas bort", sid); }
+            }
+            return result;
+        }
+
+        /// <summary>Id:n i träningens serie — alla, eller bara från och med träningen.</summary>
+        public List<int> SeriesIds(int trainingId, bool fromThisOn)
+        {
+            var t = Get(trainingId);
+            if (t == null) return new();
+            if (t.ScheduleId is not int sid) return new() { t.Id };
+            using var db = _databaseFactory.CreateDatabase();
+            return fromThisOn
+                ? db.Fetch<int>("SELECT Id FROM dbo.ClubTraining WHERE ScheduleId = @0 AND [Date] >= @1", sid, t.Date.Date)
+                : db.Fetch<int>("SELECT Id FROM dbo.ClubTraining WHERE ScheduleId = @0", sid);
+        }
+
         private static readonly string[] DayNames = { "", "mån", "tis", "ons", "tor", "fre", "lör", "sön" };
 
         private static string Describe(SchedulePlan p, int breakCount)
