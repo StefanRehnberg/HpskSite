@@ -11,6 +11,9 @@
     så det finns EN sanning om vem som var där.
 *@
 @await Html.PartialAsync("_HtmlEscape")
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 <style>
     .mk-wrap { max-width: 760px; }
     .mk-today { border-left: 4px solid var(--bs-success); }
@@ -138,6 +141,29 @@
             </div>
             <div class="modal-body">
                 <p class="small text-muted">En kopplad träning är fortfarande en vanlig klubbträning för alla. Kursens krav (anmälan, obligatorisk närvaro) gäller bara kursens deltagare.</p>
+                <div class="border rounded p-2 mb-3 bg-body-tertiary" id="mkLinkBulk">
+                    <div class="small fw-semibold mb-1">Markera flera</div>
+                    <div id="mkLinkSchedules" class="d-flex flex-wrap gap-1 mb-2"></div>
+                    <div class="d-flex flex-wrap gap-1 align-items-end">
+                        <div>
+                            <label class="form-label small mb-0" for="mkLinkDay">Veckodag</label>
+                            <select class="form-select form-select-sm" id="mkLinkDay">
+                                <option value="1">måndag</option><option value="2">tisdag</option><option value="3">onsdag</option>
+                                <option value="4">torsdag</option><option value="5">fredag</option><option value="6">lördag</option><option value="0">söndag</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label small mb-0" for="mkLinkFrom">Från</label>
+                            <input type="text" class="form-control form-control-sm" id="mkLinkFrom" autocomplete="off" style="width:8.5rem">
+                        </div>
+                        <div>
+                            <label class="form-label small mb-0" for="mkLinkTo">Till</label>
+                            <input type="text" class="form-control form-control-sm" id="mkLinkTo" autocomplete="off" style="width:8.5rem">
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" data-mk="link-day">Markera</button>
+                    </div>
+                    <div class="small text-muted mt-1" id="mkLinkBulkMsg"></div>
+                </div>
                 <div id="mkLinkList"></div>
             </div>
             <div class="modal-footer">
@@ -502,9 +528,50 @@
     }
 
     // ── Koppla träningar ──
+    var linkCandidates = [];
+    function setLinkDate(id, ymd) {
+        var el = document.getElementById(id);
+        if (window.flatpickr) { if (!el._flatpickr) flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d' }); el._flatpickr.setDate(ymd, false); }
+        else el.value = ymd;
+    }
+    // Snabbval: markerar bara rutor — ingenting kopplas förrän "Koppla valda" trycks, så valet går att granska.
+    function markLink(pred) {
+        var n = 0;
+        linkCandidates.forEach(function (t) {
+            if (t.linked || t.isCancelled || !pred(t)) return;
+            var box = document.getElementById('mkl' + t.id);
+            if (box && !box.checked) { box.checked = true; n++; }
+        });
+        document.getElementById('mkLinkBulkMsg').textContent = n === 0 ? 'Inga fler tillfällen att markera.' : (n === 1 ? 'Ett tillfälle markerades.' : n + ' tillfällen markerades.');
+    }
+    function renderLinkSchedules() {
+        var groups = {};
+        linkCandidates.forEach(function (t) {
+            if (!t.scheduleId || t.linked || t.isCancelled) return;
+            (groups[t.scheduleId] = groups[t.scheduleId] || []).push(t);
+        });
+        var ids = Object.keys(groups);
+        document.getElementById('mkLinkSchedules').innerHTML = ids.map(function (id) {
+            var first = groups[id][0];
+            var wd = new Date(first.date + 'T12:00:00').toLocaleDateString('sv-SE', { weekday: 'long' });
+            return '<button type="button" class="btn btn-sm btn-outline-secondary" data-mk="link-schedule" data-schedule="' + id + '">Hela schemat: ' +
+                esc(first.name) + ' (' + esc(wd) + 'ar, ' + groups[id].length + ')</button>';
+        }).join('');
+    }
+
     function openLink() {
+        document.getElementById('mkLinkBulkMsg').textContent = '';
         getJson('/umbraco/surface/TrainingCourse/Candidates?groupId=' + groupId).then(function (d) {
             var list = (d && d.trainings) || [];
+            linkCandidates = list;
+            var open = list.filter(function (t) { return !t.linked && !t.isCancelled; });
+            document.getElementById('mkLinkBulk').classList.toggle('d-none', open.length < 2);
+            if (open.length) {
+                setLinkDate('mkLinkFrom', open[0].date);
+                setLinkDate('mkLinkTo', open[open.length - 1].date);
+                document.getElementById('mkLinkDay').value = String(new Date(open[0].date + 'T12:00:00').getDay());
+            }
+            renderLinkSchedules();
             document.getElementById('mkLinkList').innerHTML = list.length ? list.map(function (t) {
                 return '<div class="form-check"><input class="form-check-input" type="checkbox" id="mkl' + t.id + '" value="' + t.id + '"' +
                     (t.linked ? ' checked disabled' : '') + '><label class="form-check-label" for="mkl' + t.id + '">' +
@@ -631,6 +698,12 @@
             });
         }
         else if (act === 'link') openLink();
+        else if (act === 'link-schedule') { var sid = parseInt(b.getAttribute('data-schedule'), 10); markLink(function (t) { return t.scheduleId === sid; }); }
+        else if (act === 'link-day') {
+            var wd = parseInt(document.getElementById('mkLinkDay').value, 10);
+            var from = document.getElementById('mkLinkFrom').value, to = document.getElementById('mkLinkTo').value;
+            markLink(function (t) { return new Date(t.date + 'T12:00:00').getDay() === wd && (!from || t.date >= from) && (!to || t.date <= to); });
+        }
         else if (act === 'defaults') openDefaults();
         else if (act === 'loan') openLoan();
         else if (act === 'occ') openOcc(parseInt(b.getAttribute('data-training'), 10));

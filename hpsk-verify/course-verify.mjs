@@ -54,7 +54,7 @@ const insertTraining = (club, name, day, mandatory = 0) => n(`INSERT INTO dbo.Cl
 
 const main = async () => {
   const browser = await chromium.launch();
-  let gA = 0, gB = 0, tToday = 0, tPast = 0, tB = 0, loanWeapons = [];
+  let gA = 0, gB = 0, tToday = 0, tPast = 0, tB = 0, loanWeapons = [], extraTrainings = [];
   try {
     // ── Fixtur ───────────────────────────────────────────────────────────────────────────────
     section('Fixtur');
@@ -172,6 +172,31 @@ const main = async () => {
     const att = await O.post('/umbraco/surface/ClubEvent/SetAttendance', { eventId: tToday, kind: 'Training', memberId: 5601, status: 'Present' });
     ok('men tränaren håller upprop på kursens träning', att.success, att.message);
 
+    // ── Koppla i bulk: veckodag inom en period ───────────────────────────────────────────────
+    // Snabbvalet markerar bara rutor; kopplingen sker först vid "Koppla valda".
+    section('Koppla i bulk');
+    const tW1 = insertTraining(2604, `${P} Vecka 1`, ymd(7)), tW2 = insertTraining(2604, `${P} Vecka 2`, ymd(14)), tOff = insertTraining(2604, `${P} Annan dag`, ymd(8));
+    extraTrainings.push(tW1, tW2, tOff);
+    await admin.goto(`${BASE}/min-kurs?g=${gA}`, { waitUntil: 'domcontentloaded' });
+    await admin.waitForSelector('.mk-person', { timeout: 30000 }).catch(() => {});
+    await admin.evaluate(() => document.getElementById('cookieConsentBanner')?.remove());
+    await admin.click('#mkActions .dropdown-toggle');
+    await admin.click('[data-mk="link"]');
+    await admin.waitForSelector(`#mkl${tW1}`, { timeout: 15000 }).catch(() => {});
+    await admin.evaluate(([from, to, wd]) => {
+      const set = (id, v) => { const el = document.getElementById(id); if (el._flatpickr) el._flatpickr.setDate(v, false); else el.value = v; };
+      set('mkLinkFrom', from); set('mkLinkTo', to); document.getElementById('mkLinkDay').value = String(wd);
+    }, [ymd(7), ymd(14), new Date(ymd(7) + 'T12:00:00').getDay()]);
+    await admin.click('[data-mk="link-day"]');
+    const marks = await admin.evaluate(ids => ids.map(id => document.getElementById('mkl' + id)?.checked), [tW1, tW2, tOff]);
+    eq('veckodagen markerar båda tillfällena inom perioden, inte den andra dagen', marks, [true, true, false]);
+    ok('dialogen säger hur många som markerades', /markerades/.test(await admin.locator('#mkLinkBulkMsg').innerText()));
+    eq('ingenting är kopplat förrän man sparar', n(`SELECT COUNT(*) FROM dbo.TrainingGroupTraining WHERE TrainingGroupId=${gA} AND TrainingId IN (${tW1},${tW2},${tOff})`), 0);
+    if (SHOTS) await admin.screenshot({ path: 'course-link.png' });
+    await admin.click('#mkLinkSave');
+    await admin.waitForTimeout(1500);
+    eq('Koppla valda kopplar just de två', n(`SELECT COUNT(*) FROM dbo.TrainingGroupTraining WHERE TrainingGroupId=${gA} AND TrainingId IN (${tW1},${tW2},${tOff})`), 2);
+
     // ── Lånevapen till tillfället (D7) ───────────────────────────────────────────────────────
     // Klubb 2604 har inga AKTIVA lånebara vapen i dev, så två aktiveras tillfälligt och återställs
     // i finally. Utan dem vägras varje platsbokning av kapacitetsspärren.
@@ -200,8 +225,12 @@ const main = async () => {
     await admin.click('#mkActions .dropdown-toggle');
     await admin.click('[data-mk="loan"]');
     await admin.waitForFunction(() => /har redan en plats/.test(document.getElementById('mkLoanList')?.innerText || ''), null, { timeout: 15000 }).catch(() => {});
+    await admin.waitForSelector('#mkLoanModal.show', { timeout: 5000 }).catch(() => {});
+    await admin.waitForTimeout(400);
+    ok('lånevapendialogen syns (geometri, inte bara text)', await admin.evaluate(() => { const m = document.querySelector('#mkLoanModal.show .modal-content'); if (!m) return false; const r = m.getBoundingClientRect(); return r.height > 100 && r.width > 200; }));
     ok('dialogen säger att båda redan har en plats', /2 av 2 har redan en plats/.test(await admin.locator('#mkLoanList').innerText()));
     ok('och Boka-knappen är avstängd när inget återstår', await admin.locator('#mkLoanSave').isDisabled());
+    if (SHOTS) await admin.screenshot({ path: 'course-loan.png' });
     await admin.keyboard.press('Escape');
 
     // ── Anmälningsrätt via kursen ────────────────────────────────────────────────────────────
@@ -215,10 +244,11 @@ const main = async () => {
     ok('och anmälan går igenom', su.success, su.message);
     await out.context().close();
   } finally {
-    const ids = [tToday, tPast, tB].filter(Boolean).join(',') || '0';
+    const ids = [tToday, tPast, tB, ...extraTrainings].filter(Boolean).join(',') || '0';
     const groups = [gA, gB].filter(Boolean).join(',') || '0';
     if (loanWeapons.length) sql(`UPDATE dbo.Firearm SET IsActive=0 WHERE Id IN (${loanWeapons.join(",")})`);
-    sql(`DELETE FROM dbo.FirearmBooking WHERE OccasionKind='Training' AND OccasionId IN (${ids});`);
+    // Även på namnet: en bokning som tappat sitt id (felet D7 rättade) matchas annars inte.
+    sql(`DELETE FROM dbo.FirearmBooking WHERE (OccasionKind='Training' AND OccasionId IN (${ids})) OR OccasionLabel LIKE '${P}%';`);
     sql(`DELETE FROM dbo.MarkenSeries WHERE Id IN (SELECT MarkenSeriesId FROM dbo.TrainingCourseSeries WHERE TrainingGroupId IN (${groups}) AND MarkenSeriesId IS NOT NULL);
          DELETE FROM dbo.TrainingScores WHERE Id IN (SELECT TrainingScoreId FROM dbo.TrainingCourseSeries WHERE TrainingGroupId IN (${groups}));
          DELETE FROM dbo.TrainingCourseSeries WHERE TrainingGroupId IN (${groups});

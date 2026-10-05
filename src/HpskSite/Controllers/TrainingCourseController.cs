@@ -91,7 +91,9 @@ namespace HpskSite.Controllers
                     startTime = x.Training.StartTime,
                     name = x.Training.Name,
                     isCancelled = x.Training.IsCancelled,
-                    linked = x.Linked
+                    linked = x.Linked,
+                    // Bulkvalet i dialogen: "hela schemat" grupperar på det här.
+                    scheduleId = x.Training.ScheduleId ?? 0
                 })
             });
         }
