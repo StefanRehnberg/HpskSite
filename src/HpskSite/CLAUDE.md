@@ -4635,6 +4635,76 @@ Test: `MarkenValorThresholdTests`, `MarkenPrecisionWorthRecordingTests`, `Marken
 Sviter: `marken-bassvalor-verify` 19/19, `marken-stock-ui-verify` 5/5, `trappa-no-mint-verify` 9/9,
 `marken-compseries-sync` 64/64, `marken-alderseftergift` 39/39, `marken-orderlist` 71/71.
 
+### Träning som egen modell och kursen (fas B–D, 2026-10-04/05)
+
+Fas B–D i `notes/traningsmodell-plan-2026-10-03.md`. Träning bröts ut ur `clubSimpleEvent`; en
+träningsgrupp kan kopplas till träningar och blir en **kurs** med instruktörsytan **Min kurs**.
+
+**Modellen (B1/B2).** `ClubTraining` (ett tillfälle, bara klubbar) + `ClubTrainingSchedule`;
+`TrainingSchedulePlanner` (ren funktion) gör veckodagar + period + uppehåll till tillfällen med
+roterande skjutledare, tak 400. `ClubTraining.IsMandatory` är en egen kolumn.
+- **⚠️⚠️ En träning och en händelse kan ha samma id** (rad i `ClubTraining` resp. Umbraco-nod). Allt
+  som hänger på ett tillfälle bär därför sorten: `ClubEventParticipant.OccasionKind`
+  (`Event`/`Training`, unikt på (OccasionKind, EventId, MemberId)), `LedgerSourceType.Training`,
+  `FirearmOccasionKind.Training`, QR-token `training:{id}`. `ClubEventContext` bär `LedgerSource` och
+  `FirearmOccasion` — **hårdkoda aldrig Event**. Varje GET/POST mot ClubEvent tar `kind`.
+- **⚠️ `FirearmOccasionKind.HasOccasionId` (nod ELLER träning) avgör om `OccasionId` lagras**, inte
+  `HasNodeId`. Med den gamla regeln lagrades varje träningsbokning med id 0, så träningens lånelista
+  och borttagningsspärren hittade den aldrig (rättat i D7, före deploy).
+
+**Migreringen (B3).** `TrainingMigrationRules` (ren funktion, grennamn matchas EXAKT) +
+`TrainingMigrationService`: händelser av typen Träning och grenarna Duell/Precision/Fältskjutning/IPSC
+flyttas till `ClubTraining` med deltagare och lånebokningar, en transaktion per händelse, noden
+**avpubliceras** (raderas aldrig), idempotent via `LegacyEventNodeId`. Lämnas: opublicerade, utan
+datum, och med betalningar i liggaren. `TrainingMigration/Preview` (läser) och `/Run` (`apply="1"`),
+bara sajtadmin, `clubId` begränsar. Torrkörning: `hpsk-verify/training-migration-preview.mjs`.
+
+**Ytorna (B4/B5).** Klubbadmin → **Träningar** (`ClubAdminTrainings.cshtml`, `ClubTrainingController`):
+ny träning, nytt schema (förhandsvisning och skapande går genom samma `Plan()`), byt skjutledare,
+ställ in. **En träning med deltagare eller lånebokningar raderas aldrig** — svaret pekar på att ställa
+in. Den utsedda skjutledaren håller upprop för sitt tillfälle. Medlemmen anmäler sig i en **panel**
+(`_TrainingPanelModal` → `/traning/panel?id=` i en iframe, `#training-{id}` i kalendern/flödet), aldrig
+en egen sida. Händelsedialogerna har inte längre typen Träning eller lånevapen. Statistiken och
+Ankeborg-seedern läser träningarna (`ClubTrainingService.DatesByClub`). Aktivitetssammanställningen:
+träningsnärvaro räknas alltid, händelsenärvaro bara när den är obligatorisk.
+
+**Kursen (fas D).** `TrainingGroupTraining` kopplar grupp ↔ träning med avvikelser per tillfälle
+(närvaro, anmälan, anteckning; null = gruppens standard i `TrainingGroups.DefaultAttendance/
+DefaultRegistration`). **Kraven härleds** (`TrainingCourseRules`) — skriv aldrig till träningens egna
+anmälningsfält.
+- **`/min-kurs`** (`MinKursController`, ingen nod; `MinKurs.cshtml`): dagens tillfälle med närvaro
+  (via `ClubEvent/SetAttendance`, kind Training — EN sanning), serier, anteckningar från förra
+  tillfället, kursöversikt deltagare × tillfällen med ★ och märkesläge. Ingångar: användarmenyn
+  (`TrainingCourseService.IsTrainerInActiveCourse`, en EXISTS per sidladdning) och **Öppna kursen** på
+  klubbadmins Träningsgrupper.
+- Behörighet = `TrainingGroupService.CanManageTrainingGroup` (sajtadmin, klubbadmin, skjutledare,
+  gruppens tränare). **Serier registreras bara av klubbadmin/skjutledare** — tränaren ser varför.
+- **Deltagare = `Role <> 'Trainer'`** överallt. Kursdeltagare får anmäla sig till kursens träningar
+  även utan klubbmedlemskap (`IsEligible`), kursens krav öppnar anmälan (`ApplyCourseRegistration`,
+  anropas i GetSignupState/SignUp/AddGuest), och kursens tränare håller upprop (`CanManageAsync`).
+- QR-incheckning på klubbens banor ±1 h kring tillfället visas som *incheckad* (`CheckInCounts`).
+- Serier (`TrainingCourseSeriesService`, vapengrupp C): en `TrainingScores`-rad per medlem och
+  tillfälle, och en verifierad `MarkenSeries` när totalen når brons. **Trappsteg bockas INTE av**
+  automatiskt (stegtexterna är inte tolkade till regler).
+- Anteckningar (`TrainingCourseNote`) och kursserier ligger i `MemberDataPurgeService`-kartan.
+- **Lånevapen (D7):** Min kurs → Åtgärder → *Lånevapen till tillfället…*
+  (`TrainingCourse/LoanWeapons` + `AssignLoanWeapons`): platsbokningar med `Source = Tilldelad`, bara
+  kursens deltagare, bara en kopplad träning i kursens klubb, svaret per person.
+- Kopplingsdialogen har **Markera flera** (hela schemat / veckodag inom en period) som bara markerar
+  rutor — ingenting kopplas förrän *Koppla valda*.
+
+**Operatörssteg, i ordning** (se `Migrations/PROD-KORORDNING-2026-09-24.md`, avsnitt T):
+`add-stock-handout-to-member-badge.sql`, `create-club-training-tables.sql`,
+`add-occasionkind-to-club-event-participant.sql` (körda i prod), **`create-training-course-tables.sql`
+FÖRE deployen**. Efter deployen: torrkör och kör migreringen av gamla träningshändelser.
+`fix-seeded-attendance-status.sql` bara om Ankeborg-seedern körts i prod.
+
+Test: `TrainingSchedulePlannerTests`, `TrainingMigrationRulesTests`, `ActivityEventRuleTests`,
+`TrainingCourseRulesTests`. Sviter: `club-training-verify` 40/40, `training-migration-verify` 35/35,
+`training-panel-verify` 29/29, `training-stats-verify` 2/2, `event-dialog-no-training-verify` 12/12,
+`course-verify` 64/64 (A/B: deltagarfiltret + kursanmälan → 2 röda; id-regeln → 6 röda),
+`minkurs-entry-verify` 9/9.
+
 ### Märken backlog entry — historical Guldserier/Snabbserier from a paper ledger (2026-06-04)
 Club admins migrate a hand-written ledger of past series in bulk on the club **Märken** tab. Functionary-only card **"Historiska serier från klubbliggare"** (gated on `CanSignOffForClubAsync` — board / Skjutledare-if-enabled / site admin; hidden for plain club admins, wired off `loadClubMarkenQueue`'s `canValidate`). An add-rows grid: per row member (from `ClubAdmin/GetClubMembers`, defaults to the previous row's member), type (Guldserie=`Precision` / Snabbserie=`Speed`), date, weapon group, and score (precision/snabbpistol) or target+valör (tillämpning). "Spara alla" → `POST Marken/AddBacklogSeries` (`AddBacklogSeriesRequest { ClubId, Entries[] }`).
 - Rows insert **directly `Verified`** (the entering functionary is the validator — no queue), `Shots="[]"` (total only), `Notes="Historisk inmatning från klubbliggare"`, `EnteredByMemberId`=`ValidatedByMemberId`=acting functionary. Precision score validated against the age-adjusted `Marken.PrecisionThreshold`; sub-threshold saved but `Qualifies=false`. Speed mirrors `SubmitSeries` (snabbpistol scored 0–50 → valör; tillämpning = valör pass/fail).
