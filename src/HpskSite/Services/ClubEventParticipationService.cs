@@ -1156,6 +1156,13 @@ ORDER BY CASE m.Role WHEN 'Trainer' THEN 0 ELSE 1 END", memberId, trainingId);
         public string EventType { get; set; } = "";
 
         public bool RegistrationRequired { get; set; }
+        /// <summary>
+        /// Anmälan krävs INTE, men lånevapen erbjuds (Stefan 2026-10-05: "det är inte samma sak").
+        /// Då är anmälan öppen bara för den som bokar ett vapen — bokningen blir i praktiken en
+        /// anmälan, så vapenansvarig ser vem som kommer. Sätts av ClubEventController per anrop,
+        /// som <see cref="RegistrationRequired"/> sätts av kursens krav.
+        /// </summary>
+        public bool LoanOnly { get; set; }
         public int MaxParticipants { get; set; }
 
         /// <summary>Legacy escape hatch: an external sign-up link. When set, we link out instead of

@@ -231,8 +231,6 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             if (start != null && end != null && string.CompareOrdinal(end, start) <= 0)
                 return (0, "Sluttiden måste vara efter starttiden.");
             if (input.MaxParticipants is < 0) return (0, "Antalet platser kan inte vara negativt.");
-            if (IsTrue(input.LoanWeaponsOffered) && !IsTrue(input.RegistrationRequired))
-                return (0, "Lånevapen bokas när man anmäler sig — kryssa i Anmälan krävs, eller ta bort Lånevapen erbjuds.");
 
             using var db = _databaseFactory.CreateDatabase();
             ClubTraining t;

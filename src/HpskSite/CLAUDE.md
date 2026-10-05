@@ -3710,8 +3710,18 @@ förlagan till seriens första tillfälle, ingen migrering.
   namn, tider, gren, plats, beskrivning, anmälan, platser, lånevapen, obligatorisk på seriens
   tillfällen EFTER det redigerade och från i dag. ⚠️ Skjutledaren och inställd är per tillfälle
   och följer aldrig med. `TrainingRow.FollowingInSeries` driver knappens text.
-- **Lånevapen kräver anmälan** — `Save` vägrar annars (bokningen sker i anmälan). Dialogen
-  varnar när klubben har noll lånebara vapen (`List` bär `loanableWeapons`).
+- **⚠️⚠️ Lånevapen kräver INTE anmälan** (Stefan 2026-10-05, ersätter regeln från samma dag
+  som spärrade dem ihop): "Anmälan krävs" är ett krav på ALLA som kommer, att boka lånevapen
+  gör bara den som behöver ett vapen. Erbjuds lånevapen utan anmälningskrav sätter
+  `ClubEventController.OpenForLoanBooking` kontexten i **lånevapenläge** (`ctx.LoanOnly`,
+  `RegistrationRequired = true` per anrop, efter kursens krav): SignUp kräver `loanWeapon`,
+  bokningen skapar raden i deltagarlistan (i praktiken en anmälan — vapenansvarig ser vem som
+  kommer), gäster vägras, och ett avbokat vapen tar raden med sig (SetLoanWeapon). Går
+  bokningen inte igenom rullas raden tillbaka. Gäller träningar OCH händelser (samma kort).
+  Kortet (`_ClubEventSignup`, `loanOnlyHtml`): rubriken **Lånevapen**, "Ingen anmälan behövs",
+  "Boka lånevapen" — ingen "Anmäl mig", inga anmälda. TrainingPanel döljer `#tpNoSignup` när
+  lånevapen erbjuds. Dialogen varnar när klubben har noll lånebara vapen. Svit:
+  `training-loan-only-verify` 21/21 (A/B: läget avstängt → sviten avbryter).
 - Panelen säger **"Ingen anmälan behövs — kom direkt"** (`#tpNoSignup`) när varken träningen
   eller en kurs medlemmen går kräver anmälan.
 Svit: `hpsk-verify/training-copy-verify.mjs` 31/31 (A/B: de tre reglerna borta → 7 röda).

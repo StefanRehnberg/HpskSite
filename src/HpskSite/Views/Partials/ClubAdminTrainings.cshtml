@@ -145,7 +145,7 @@
                 <div class="form-check mb-2">
                     <input class="form-check-input" type="checkbox" id="ctrLoan">
                     <label class="form-check-label" for="ctrLoan">Lånevapen erbjuds</label>
-                    <div class="form-text" id="ctrLoanNote">Medlemmen bokar lånevapnet när hen anmäler sig, så det kräver att anmälan krävs.</div>
+                    <div class="form-text" id="ctrLoanNote">Utan <em>Anmälan krävs</em> behöver ingen anmäla sig — bara den som behöver låna vapen bokar ett.</div>
                     <div class="form-text text-warning-emphasis d-none" id="ctrLoanNone"><i class="bi bi-exclamation-triangle me-1"></i>Klubben har inga lånebara vapen inlagda — lägg in dem under Klubbvapen, annars kan ingen boka.</div>
                 </div>
                 <div class="form-check">
@@ -537,13 +537,13 @@
         });
     }
     // Lånevapen bokas på anmälningskortet, så de kräver anmälan. Saknar klubben lånebara vapen sägs det.
+    // Lånevapen kräver INTE anmälan (Stefan 2026-10-05): utan "Anmälan krävs" bokar bara den som
+    // behöver ett vapen. Noten förklarar det läget; saknar klubben lånebara vapen sägs det.
     function syncLoan() {
         var reg = document.getElementById('ctrRegRequired').checked;
         var loan = document.getElementById('ctrLoan');
-        if (!reg) loan.checked = false;
-        loan.disabled = !reg;
-        document.getElementById('ctrLoanNote').classList.toggle('d-none', reg);
-        document.getElementById('ctrLoanNone').classList.toggle('d-none', !(reg && loan.checked && loanable === 0));
+        document.getElementById('ctrLoanNote').classList.toggle('d-none', reg || !loan.checked);
+        document.getElementById('ctrLoanNone').classList.toggle('d-none', !(loan.checked && loanable === 0));
     }
     function saveTraining(scope) {
         var btn = document.getElementById(scope === 'following' ? 'ctrSaveFollowing' : 'ctrSaveTraining');

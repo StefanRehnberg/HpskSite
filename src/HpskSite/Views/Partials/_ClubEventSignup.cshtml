@@ -24,7 +24,7 @@
     <div class="card mb-4" id="ces-card" data-event-id="@signupEventId" data-kind="@signupKind" style="display:none;">
         <div class="card-header @(string.IsNullOrEmpty(signupAccent) ? "bg-primary text-white" : "")"
              style="@(string.IsNullOrEmpty(signupAccent) ? "" : $"background-color:{signupAccent};color:#fff;")">
-            <h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Anmälan</h5>
+            <h5 class="mb-0" id="ces-title"><i class="bi bi-person-plus me-2"></i>Anmälan</h5>
         </div>
         <div class="card-body" id="ces-body">
             <div class="text-center py-2">
@@ -404,6 +404,33 @@
                  + '</div>';
         }
 
+        function loanOnlyHtml(d) {
+            const lw = d.loanWeapons;
+            let h = adminLoanBlock(d);
+            h += '<div class="alert alert-light border py-2 px-3 mb-2">'
+              +  '<i class="bi bi-door-open me-1"></i><strong>Ingen anmälan behövs</strong> — kom direkt.</div>';
+            if (!d.loggedIn) {
+                const back = encodeURIComponent(window.location.pathname + window.location.search);
+                return h + `<a class="btn btn-outline-primary w-100" href="/login-register/?returnUrl=${back}">Logga in för att boka lånevapen</a>`;
+            }
+            if (!d.eligible) {
+                return h + '<div class="small text-muted">Lånevapen kan bokas av medlemmar i '
+                     + esc(d.event.ownerName) + '.</div>';
+            }
+            if (d.me && d.me.signedUp) return h + myLoanBlock(d);
+            if (!d.signupOpen) return h + '<div class="small text-muted">Bokningen av lånevapen är stängd.</div>';
+            h += '<div class="border rounded p-2 mb-2">'
+              +  '<div class="fw-semibold mb-1"><i class="bi bi-safe2 me-1"></i>Behöver du låna klubbvapen?</div>';
+            if (loanFree(lw) > 0) {
+                h += '<div class="small text-muted mb-2">Boka ett här, så vet vapenansvarig att du kommer och behöver ett vapen.</div>'
+                  +  weaponPicker(lw)
+                  +  '<button type="button" class="btn btn-primary w-100 mt-2" id="ces-signup">Boka lånevapen</button>';
+            } else {
+                h += '<div class="small text-muted">Klubbens lånevapen är slut den här dagen.</div>';
+            }
+            return h + '</div>';
+        }
+
         function render(d) {
             // The card only exists for events that actually take sign-ups. An event with an
             // external registration link keeps that link (the page renders it separately) — we must
@@ -416,6 +443,17 @@
 
             let html = '';
 
+            // ⚠️ LÅNEVAPENLÄGE (Stefan 2026-10-05): anmälan krävs inte, men lånevapen erbjuds. Ingen
+            // anmälningsknapp och inga anmälda — bara den som behöver ett vapen bokar ett. Bokningen
+            // blir i praktiken en anmälan på servern, men det är ingenting medlemmen behöver göra.
+            // Rubriken följer läget: i lånevapenläget anmäler sig ingen.
+            const title = document.getElementById('ces-title');
+            if (title) title.innerHTML = d.loanOnly
+                ? '<i class="bi bi-safe2 me-2"></i>Lånevapen'
+                : '<i class="bi bi-person-plus me-2"></i>Anmälan';
+            if (d.loanOnly) {
+                html = loanOnlyHtml(d);
+            } else {
             if (d.event.isMandatory) {
                 html += '<div class="alert alert-warning py-2 px-3 small mb-3">'
                      +  '<i class="bi bi-exclamation-triangle me-1"></i>'
@@ -516,10 +554,12 @@
                      +  (full ? 'Ställ mig som reserv' : 'Anmäl mig')
                      +  '</button>';
             }
+            }
 
             // The roster is the club's own business: shown to the owning club's members and to
-            // functionaries, never to a passer-by.
-            if (d.roster && d.roster.length) {
+            // functionaries, never to a passer-by. (I lånevapenläget visar vapenansvarigs block vilka
+            // som bokat — en lista "Anmälda" där ingen anmäler sig vore fel ord.)
+            if (!d.loanOnly && d.roster && d.roster.length) {
                 const seats = d.roster.filter(r => !r.isReserve);
                 const res = d.roster.filter(r => r.isReserve);
                 // ⚠️ Gästen märks ut. Ett namn utan konto bland medlemsnamnen ser ut som en medlem
@@ -552,7 +592,8 @@
             if (signupBtn) signupBtn.addEventListener('click', () => act(signupBtn, 'SignUp', {
                 eventId,
                 note: document.getElementById('ces-note')?.value || '',
-                loanWeapon: !!(loanChk && loanChk.checked),
+                // I lånevapenläget ÄR knappen bokningen.
+                loanWeapon: !!d.loanOnly || !!(loanChk && loanChk.checked),
                 loanFirearmId: parseInt(document.getElementById('ces-loan-firearm')?.value || '0', 10),
                 // Tomt nar evenemanget saknar avgift eller bara har ett pris - servern avgor,
                 // och vagrar om ett val kravs men saknas. Klienten forvaljer aldrig at medlemmen.

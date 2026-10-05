@@ -86,7 +86,7 @@
             {
                 <div class="alert alert-danger py-2">Träningen är inställd.</div>
             }
-            else if (!m.RegistrationRequired && !m.MyCourses.Any(c => c.RegistrationRequired))
+            else if (!m.RegistrationRequired && !m.LoanWeaponsOffered && !m.MyCourses.Any(c => c.RegistrationRequired))
             {
                 @* Utan anmälan visas inget kort — utan den här raden ser panelen ut att sakna en knapp. *@
                 <div class="alert alert-light border py-2 mb-3" id="tpNoSignup"><i class="bi bi-door-open me-1"></i>Ingen anmälan behövs — kom direkt.</div>
