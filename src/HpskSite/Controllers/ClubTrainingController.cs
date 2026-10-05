@@ -67,6 +67,8 @@ namespace HpskSite.Controllers
             {
                 success = true,
                 canEdit = await CanAdminAsync(clubId, me),
+                // Lånevapen syns bara när klubben har minst ett aktivt lånebart vapen — dialogen säger det.
+                loanableWeapons = _trainings.LoanableWeaponCount(clubId),
                 trainings = _trainings.List(clubId, f, t)
             });
         }
@@ -78,43 +80,91 @@ namespace HpskSite.Controllers
             var me = await CurrentMemberIdAsync();
             if (input == null || !await CanAdminAsync(input.ClubId, me)) return Json(new { success = false, message = Denied });
             var (id, error) = _trainings.Save(input, me);
-            return Json(new { success = error == null, message = error ?? "Träningen är sparad.", id });
+            if (error != null) return Json(new { success = false, message = error, id });
+            // "Den här och alla kommande" — frågan ställs i dialogen när serien har senare tillfällen.
+            var following = string.Equals(input.Scope, "following", StringComparison.OrdinalIgnoreCase) ? _trainings.ApplyToFollowing(id) : 0;
+            return Json(new
+            {
+                success = true, id, following,
+                message = following > 0 ? $"Träningen är sparad, och {following} kommande tillfällen ändrades likadant." : "Träningen är sparad."
+            });
+        }
+
+        /// <summary>Träningar att kopiera från (kalenderns läge "Kopiera in träning").</summary>
+        [HttpGet]
+        public async Task<IActionResult> CopySources(int clubId)
+        {
+            if (!await CanAdminAsync(clubId, await CurrentMemberIdAsync())) return Json(new { success = false, message = Denied });
+            return Json(new { success = true, trainings = _trainings.CopySources(clubId) });
+        }
+
+        public class CopyDatesRequest
+        {
+            public int SourceId { get; set; }
+            public List<string>? Dates { get; set; }
+        }
+
+        /// <summary>Kopierar en träning till valda datum (en dag i taget från kalendern, eller flera).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CopyToDates([FromBody] CopyDatesRequest req)
+        {
+            var src = _trainings.Get(req?.SourceId ?? 0);
+            if (src == null) return Json(new { success = false, message = "Träningen finns inte." });
+            var me = await CurrentMemberIdAsync();
+            if (!await CanAdminAsync(src.ClubId, me)) return Json(new { success = false, message = Denied });
+            var dates = (req!.Dates ?? new()).Select(d => DateTime.TryParseExact(d, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var x) ? x : (DateTime?)null).Where(d => d != null)
+                .Select(d => (d!.Value, (int?)null)).ToList();
+            var r = _trainings.CopyTo(src.Id, dates, me);
+            return Json(CopyJson(r));
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> PreviewSchedule([FromBody] ClubTrainingService.ScheduleInput input)
+        public async Task<IActionResult> PreviewCopyPeriod([FromBody] ClubTrainingService.CopyPeriodInput input)
         {
-            var me = await CurrentMemberIdAsync();
-            if (input == null || !await CanAdminAsync(input.ClubId, me)) return Json(new { success = false, message = Denied });
-            var plan = _trainings.Plan(input);
+            var src = _trainings.Get(input?.SourceId ?? 0);
+            if (src == null || !await CanAdminAsync(src.ClubId, await CurrentMemberIdAsync())) return Json(new { success = false, message = Denied });
+            var (occ, already, error) = _trainings.PlanCopyPeriod(input!);
+            if (error != null) return Json(new { success = false, message = error });
+            var newOnes = occ.Count - already.Count;
             return Json(new
             {
-                success = plan.Error == null,
-                message = plan.Error,
-                count = plan.Count,
-                summary = plan.Summary,
-                firstDate = plan.FirstDate,
-                lastDate = plan.LastDate,
-                capped = plan.Capped
+                success = true,
+                count = newOnes,
+                already = already.Count,
+                firstDate = occ.FirstOrDefault()?.Date.ToString("yyyy-MM-dd"),
+                lastDate = occ.LastOrDefault()?.Date.ToString("yyyy-MM-dd"),
+                capped = occ.Count >= HpskSite.Services.Training.TrainingSchedulePlanner.MaxOccasions
             });
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> CreateSchedule([FromBody] ClubTrainingService.ScheduleInput input)
+        public async Task<IActionResult> CopyPeriod([FromBody] ClubTrainingService.CopyPeriodInput input)
         {
+            var src = _trainings.Get(input?.SourceId ?? 0);
             var me = await CurrentMemberIdAsync();
-            if (input == null || !await CanAdminAsync(input.ClubId, me)) return Json(new { success = false, message = Denied });
-            var (scheduleId, created, error) = _trainings.CreateSchedule(input, me);
-            return Json(new
-            {
-                success = error == null,
-                message = error ?? $"Schemat är skapat med {created} tillfällen.",
-                scheduleId,
-                created
-            });
+            if (src == null || !await CanAdminAsync(src.ClubId, me)) return Json(new { success = false, message = Denied });
+            var (occ, _, error) = _trainings.PlanCopyPeriod(input!);
+            if (error != null) return Json(new { success = false, message = error });
+            var r = _trainings.CopyTo(src.Id, occ.Select(o => (o.Date, o.SkjutledareMemberId)), me);
+            return Json(CopyJson(r));
         }
+
+        private static object CopyJson(ClubTrainingService.CopyResult r) => new
+        {
+            success = r.Error == null && r.CreatedIds.Count > 0,
+            created = r.CreatedIds.Count,
+            createdIds = r.CreatedIds,
+            createdDates = r.CreatedDates,
+            skippedDates = r.SkippedDates,
+            message = r.Error
+                ?? (r.CreatedIds.Count == 0 ? "Inget nytt tillfälle — träningen finns redan på de dagarna."
+                    : (r.CreatedIds.Count == 1 ? "Ett tillfälle är inlagt." : $"{r.CreatedIds.Count} tillfällen är inlagda.")
+                      + (r.SkippedDates.Count > 0 ? $" {r.SkippedDates.Count} dagar hade redan träningen och hoppades över." : ""))
+        };
 
         public class TrainingIdRequest
         {
