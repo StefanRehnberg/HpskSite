@@ -236,21 +236,49 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Klubbens folk för gruppens klubb: sajtadmin, klubbadmin eller skjutledare. En tränare som
+        /// bara är tränare i gruppen får hantera gruppens DELTAGARE (Stefans beslut 2026-10-05) men
+        /// inte göra någon till tränare — vem som leder kursen är klubbens beslut.
+        /// </summary>
+        private async Task<bool> IsClubStaffForGroupAsync(int trainingGroupId)
+        {
+            if (await _authorizationService.IsCurrentUserAdminAsync()) return true;
+            var clubId = _trainingGroupService.GetTrainingGroupClubId(trainingGroupId);
+            return clubId > 0 && (await _authorizationService.IsClubAdminForClub(clubId)
+                                  || await _authorizationService.IsSkjutledareForClub(clubId));
+        }
+
+        private string? TrainerRefusal(int trainingGroupId, int memberId)
+        {
+            var g = _trainingGroupService.GetTrainingGroup(trainingGroupId);
+            var m = g?.Members.FirstOrDefault(x => x.MemberId == memberId);
+            return m != null && m.Role == "Trainer"
+                ? "Bara klubbadmin eller skjutledare kan ändra kursens tränare." : null;
+        }
+
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> AddTrainingGroupMember(int trainingGroupId, int memberId, string role = "Member", bool sendEmail = false)
         {
             try
             {
+                // ⚠️ Gruppen prövas först: annars blev ett ogiltigt id ett rått SQL-fel (främmande nyckel)
+                // i en dialogruta. Sajtadmin släpps igenom av CanManage även för en grupp som inte finns.
+                if (_trainingGroupService.GetTrainingGroup(trainingGroupId) == null)
+                    return Json(new { success = false, message = "Träningsgruppen finns inte." });
+
                 if (!await _trainingGroupService.CanManageTrainingGroup(trainingGroupId))
-                    return Json(new { success = false, message = "Access denied" });
+                    return Json(new { success = false, message = "Du har inte behörighet till den här gruppen." });
 
                 if (role != "Member" && role != "Trainer")
-                    return Json(new { success = false, message = "Invalid role" });
+                    return Json(new { success = false, message = "Okänd roll." });
+                if (role == "Trainer" && !await IsClubStaffForGroupAsync(trainingGroupId))
+                    return Json(new { success = false, message = "Bara klubbadmin eller skjutledare kan lägga till tränare." });
 
                 var member = _memberService.GetById(memberId);
                 if (member == null)
-                    return Json(new { success = false, message = "Member not found" });
+                    return Json(new { success = false, message = "Medlemmen finns inte." });
 
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
                 var currentMemberData = currentMember != null ? _memberService.GetByEmail(currentMember.Email ?? "") : null;
@@ -304,7 +332,8 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                return Json(new { success = false, message = ex.Message });
+                _logger.LogError(ex, "Kunde inte lägga till medlem {MemberId} i träningsgrupp {GroupId}", memberId, trainingGroupId);
+                return Json(new { success = false, message = "Medlemmen kunde inte läggas till. Försök igen, eller kontakta klubbens admin." });
             }
         }
 
@@ -315,7 +344,9 @@ namespace HpskSite.Controllers
             try
             {
                 if (!await _trainingGroupService.CanManageTrainingGroup(trainingGroupId))
-                    return Json(new { success = false, message = "Access denied" });
+                    return Json(new { success = false, message = "Du har inte behörighet till den här gruppen." });
+                if (!await IsClubStaffForGroupAsync(trainingGroupId) && TrainerRefusal(trainingGroupId, memberId) is { } refusal)
+                    return Json(new { success = false, message = refusal });
 
                 _trainingGroupService.RemoveTrainingGroupMember(trainingGroupId, memberId);
 
@@ -333,11 +364,12 @@ namespace HpskSite.Controllers
         {
             try
             {
-                if (!await _trainingGroupService.CanManageTrainingGroup(trainingGroupId))
-                    return Json(new { success = false, message = "Access denied" });
+                // Roller är klubbens beslut — en tränare får inte göra deltagare till tränare.
+                if (!await IsClubStaffForGroupAsync(trainingGroupId))
+                    return Json(new { success = false, message = "Bara klubbadmin eller skjutledare kan ändra roller i gruppen." });
 
                 if (role != "Member" && role != "Trainer")
-                    return Json(new { success = false, message = "Invalid role" });
+                    return Json(new { success = false, message = "Okänd roll." });
 
                 _trainingGroupService.SetTrainingGroupMemberRole(trainingGroupId, memberId, role);
 
@@ -471,7 +503,7 @@ namespace HpskSite.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> SearchMembers(string query, int? clubId = null)
+        public async Task<IActionResult> SearchMembers(string query, int? clubId = null, int? trainingGroupId = null)
         {
             try
             {
@@ -479,12 +511,23 @@ namespace HpskSite.Controllers
                 if (currentMember == null)
                     return Json(new { success = false, message = "Not logged in" });
 
-                // Must be some kind of admin, skjutledare, or trainer
-                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                var managedClubIds = await _authorizationService.GetManagedClubIds();
-                var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
-                if (!isSiteAdmin && !managedClubIds.Any() && !skjutledareClubIds.Any())
-                    return Json(new { success = false, message = "Access denied" });
+                // Admin/skjutledare någonstans — eller tränare i den angivna gruppen. ⚠️ Kommentaren sa
+                // förut "or trainer" men koden nekade tränare; därför kunde ingen kursledare lägga in
+                // sina deltagare. Med trainingGroupId låses sökningen till gruppens klubb.
+                if (trainingGroupId is > 0)
+                {
+                    if (!await _trainingGroupService.CanManageTrainingGroup(trainingGroupId.Value))
+                        return Json(new { success = false, message = "Du har inte behörighet till den här gruppen." });
+                    clubId = _trainingGroupService.GetTrainingGroupClubId(trainingGroupId.Value);
+                }
+                else
+                {
+                    bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
+                    var managedClubIds = await _authorizationService.GetManagedClubIds();
+                    var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
+                    if (!isSiteAdmin && !managedClubIds.Any() && !skjutledareClubIds.Any())
+                        return Json(new { success = false, message = "Access denied" });
+                }
 
                 if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
                     return Json(new { success = true, data = new List<object>() });

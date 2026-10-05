@@ -497,7 +497,8 @@ namespace HpskSite.Services
         /// Send email when a member's registration is approved
         /// Includes auto-login token for one-click login
         /// </summary>
-        public async Task SendApprovalNotificationAsync(string memberEmail, string memberName, string autoLoginToken,
+        /// <returns>Om mejlet faktiskt skickades — ytan får aldrig påstå det annars.</returns>
+        public async Task<bool> SendApprovalNotificationAsync(string memberEmail, string memberName, string autoLoginToken,
             MailReplyTo replyTo)
         {
             var subject = "Ditt Pistol.nu-konto har godkänts!";
@@ -551,7 +552,7 @@ namespace HpskSite.Services
 </body>
 </html>";
 
-            await SendEmailAsync(memberEmail, subject, body, replyTo);
+            return await SendEmailAsync(memberEmail, subject, body, replyTo);
         }
 
         /// <summary>

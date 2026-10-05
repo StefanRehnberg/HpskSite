@@ -3711,7 +3711,18 @@ anmälningsfält.
   (`TrainingCourseService.IsTrainerInActiveCourse`, en EXISTS per sidladdning) och **Öppna kursen** på
   klubbadmins Träningsgrupper.
 - Behörighet = `TrainingGroupService.CanManageTrainingGroup` (sajtadmin, klubbadmin, skjutledare,
-  gruppens tränare). **Serier registreras bara av klubbadmin/skjutledare** — tränaren ser varför.
+  gruppens tränare). **Serier registreras av samma krets — även kursens tränare** (Stefan
+  2026-10-05; ersätter "bara klubbadmin/skjutledare"). Kursledaren är ofta inte dagens skjutledare,
+  så rätten följer kursen och texterna kallar aldrig tränaren skjutledare.
+- **Tränaren hanterar DELTAGARE** (Min kurs → *Kursens deltagare…*; `TrainingGroup/SearchMembers`
+  med `trainingGroupId` låser sökningen till gruppens klubb). Att lägga till/ta bort en **tränare**
+  eller byta roll kräver klubbadmin eller skjutledare (`IsClubStaffForGroupAsync`). Gruppen och
+  träningarna skapas fortfarande bara av klubbadmin.
+- **Två slags obligatoriskt:** `Occasion.MandatoryForCourse` (kursens krav, ★) och
+  `MandatoryForAll` (`ClubTraining.IsMandatory`, ◆, "Obligatoriskt för alla som deltar" i
+  träningsdialogen). `IsMandatory` = någon av dem, och styr "Missad".
+- Kursöversikten ligger i `#mkOverviewWrap` UTANFÖR den smala kolumnen och tar skärmens bredd;
+  varje kolumn visar tillfällets namn (kursens namn på tillfället, annars träningens).
 - **Deltagare = `Role <> 'Trainer'`** överallt. Kursdeltagare får anmäla sig till kursens träningar
   även utan klubbmedlemskap (`IsEligible`), kursens krav öppnar anmälan (`ApplyCourseRegistration`,
   anropas i GetSignupState/SignUp/AddGuest), och kursens tränare håller upprop (`CanManageAsync`).
