@@ -55,7 +55,7 @@
             <div class="d-flex align-items-start gap-2 flex-wrap mb-2">
                 <h1 class="h5 mb-0 me-auto">@m.Name</h1>
                 @if (m.IsCancelled) { <span class="badge bg-danger">Inställd</span> }
-                @if (m.IsMandatory) { <span class="badge bg-warning text-dark">Obligatorisk för alla</span> }
+                @if (m.IsMandatory) { <span class="badge bg-warning text-dark">Obligatorisk för klubbens medlemmar</span> }
             </div>
             <dl class="tp-facts mb-3">
                 @if (m.Date.HasValue)

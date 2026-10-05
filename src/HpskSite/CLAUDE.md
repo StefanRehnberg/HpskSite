@@ -3763,8 +3763,9 @@ anmälningsfält.
   eller byta roll kräver klubbadmin eller skjutledare (`IsClubStaffForGroupAsync`). Gruppen och
   träningarna skapas fortfarande bara av klubbadmin.
 - **Två slags obligatoriskt:** `Occasion.MandatoryForCourse` (kursens krav, ★) och
-  `MandatoryForAll` (`ClubTraining.IsMandatory`, ◆, "Obligatoriskt för alla som deltar" i
-  träningsdialogen). `IsMandatory` = någon av dem, och styr "Missad".
+  `MandatoryForAll` (`ClubTraining.IsMandatory`, ◆, "Obligatoriskt för klubbens medlemmar" i
+  träningsdialogen — samma ord som händelserna; "för alla som deltar" lästes som att kravet
+  bara gällde den som ändå kom). `IsMandatory` = någon av dem, och styr "Missad".
 - Kursöversikten ligger i `#mkOverviewWrap` UTANFÖR den smala kolumnen och tar skärmens bredd;
   varje kolumn visar tillfällets namn (kursens namn på tillfället, annars träningens).
 - **Deltagare = `Role <> 'Trainer'`** överallt. Kursdeltagare får anmäla sig till kursens träningar

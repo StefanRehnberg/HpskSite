@@ -61,11 +61,11 @@ namespace HpskSite.Services.Training
             public string? EndTime { get; set; }
             public string Name { get; set; } = "";
             public bool IsCancelled { get; set; }
-            /// <summary>Gäller för kursens deltagare: obligatoriskt för kursen ELLER för alla på träningen.</summary>
+            /// <summary>Gäller för kursens deltagare: obligatoriskt för kursen ELLER för klubbens medlemmar.</summary>
             public bool IsMandatory { get; set; }
             /// <summary>Kursens eget krav (gruppens standard eller tillfällets avvikelse).</summary>
             public bool MandatoryForCourse { get; set; }
-            /// <summary>Träningens egen flagga — gäller alla som deltar, inte bara kursen.</summary>
+            /// <summary>Träningens egen flagga — alla klubbens medlemmar förväntas komma, inte bara kursen.</summary>
             public bool MandatoryForAll { get; set; }
             public bool RegistrationRequired { get; set; }
             public string? AttendanceOverride { get; set; }
