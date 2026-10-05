@@ -299,6 +299,10 @@
         var d = new Date(iso + 'T12:00:00');
         return d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
     }
+    // ⚠️ KVITTON PÅ LYCKADE ÅTGÄRDER VISAS INTE (Stefan 2026-10-05): ändringen syns i listan — en ny
+    // skjutledare i sin kolumn, en sparad träning på sin rad. Bara fel, och det listan inte kan visa
+    // (överhoppade dagar, något som inte gick att ta bort), får en ruta.
+    function failOnly(d) { msg(d && !d.success ? esc(d.message || 'Det gick inte.') : '', 'warning'); }
     function msg(html, kind) {
         document.getElementById('ctrMsg').innerHTML = html ? '<div class="alert alert-' + (kind || 'success') + ' py-2">' + html + '</div>' : '';
     }
@@ -465,7 +469,7 @@
             btn.disabled = false;
             if (!d.success) { document.getElementById('ctrSeriesErr').textContent = d.message || 'Namnet kunde inte sparas.'; return; }
             bootstrap.Modal.getOrCreateInstance(document.getElementById('ctrSeriesModal')).hide();
-            msg(esc(d.message)); load();
+            msg(''); load();
         });
     }
 
@@ -487,10 +491,11 @@
             }
             d.message = (d.deleted ? d.message + ' ' : '') + d.needsConfirm.length + ' med anmälda står kvar — ställ in dem under träningens meny.';
         }
-        var html = esc(d.message || '');
-        if (d.blocked && d.blocked.length)
+        var blocked = d.blocked && d.blocked.length;
+        var html = blocked || !d.success || (d.needsConfirm && d.needsConfirm.length) ? esc(d.message || '') : '';
+        if (blocked)
             html += '<ul class="mb-0 mt-1 small">' + d.blocked.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul>';
-        msg(html, d.blocked && d.blocked.length ? 'warning' : (d.success ? 'success' : 'warning'));
+        msg(html, 'warning');
         selected.clear();
         load();
     }
@@ -569,7 +574,7 @@
             btn.disabled = false;
             if (!d.success) { document.getElementById('ctrTrainingErr').textContent = d.message || 'Kunde inte spara.'; return; }
             bootstrap.Modal.getInstance(document.getElementById('ctrTrainingModal')).hide();
-            msg(esc(d.message));
+            msg('');
             load();
         }).catch(function () { btn.disabled = false; document.getElementById('ctrTrainingErr').textContent = 'Kunde inte spara.'; });
     }
@@ -665,7 +670,9 @@
         post('/umbraco/surface/ClubTraining/CopyPeriod', scheduleBody()).then(function (d) {
             if (!d.success) { btn.disabled = false; document.getElementById('ctsErr').textContent = d.message || 'Kopieringen misslyckades.'; return; }
             bootstrap.Modal.getInstance(document.getElementById('ctrScheduleModal')).hide();
-            msg(esc(d.message));
+            // Det listan inte visar: dagar som redan hade träningen.
+            var skipped = (d.skippedDates || []).length;
+            msg(skipped ? esc(skipped === 1 ? '1 dag hade redan träningen och hoppades över.' : skipped + ' dagar hade redan träningen och hoppades över.') : '', 'info');
             load();
         }).catch(function () { btn.disabled = false; document.getElementById('ctsErr').textContent = 'Kopieringen misslyckades.'; });
     }
@@ -688,7 +695,7 @@
         }).then(function (d) {
             if (!d.success) { document.getElementById('ctrHandoverErr').textContent = d.message || 'Kunde inte byta.'; return; }
             bootstrap.Modal.getInstance(document.getElementById('ctrHandoverModal')).hide();
-            msg(esc(d.message)); load();
+            msg(''); load();
         });
     }
 
@@ -711,7 +718,7 @@
         else if (act === 'handover' && t) openHandover(t);
         else if (act === 'cancel' && t) {
             post('/umbraco/surface/ClubTraining/SetCancelled', { trainingId: id, cancelled: t.isCancelled ? '0' : '1' })
-                .then(function (d) { msg(esc(d.message), d.success ? 'success' : 'warning'); load(); });
+                .then(function (d) { failOnly(d); load(); });
         } else if (act === 'delete' && t) {
             if (!confirm('Ta bort ' + t.name + ' ' + dayLabel(t.date) + '?')) return;
             post('/umbraco/surface/ClubTraining/Delete', { trainingId: id }).then(function (d) {
@@ -722,9 +729,9 @@
                         return;
                     }
                     return post('/umbraco/surface/ClubTraining/Delete', { trainingId: id, force: '1' })
-                        .then(function (d2) { msg(esc(d2.message), d2.success ? 'success' : 'warning'); load(); });
+                        .then(function (d2) { failOnly(d2); load(); });
                 }
-                msg(esc(d.message), d.success ? 'success' : 'warning'); load();
+                failOnly(d); load();
             });
         } else if (act === 'series-show' && t) {
             document.getElementById('ctrSeriesFilter').value = 's' + t.scheduleId; selected.clear(); render();
