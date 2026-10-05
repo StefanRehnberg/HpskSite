@@ -3709,6 +3709,11 @@ förlagan till seriens första tillfälle, ingen migrering.
   träningspanelens lyssnare sitter på `document`, så ett klick på en dag som redan har en träning
   öppnade annars panelen i stället för att lägga in en kopia. ⚠️ Källorna hämtas PÅ NYTT vid start.
 
+**⚠️ Inga kvitton på lyckade åtgärder i Admin → Träningar** (Stefan 2026-10-05): ändringen syns
+i listan, så "XX är nu skjutledare" / "Träningen är sparad" visas inte. Rutan (`#ctrMsg`, via
+`failOnly`) är för fel och för det listan inte kan visa: överhoppade dagar vid kopiering och
+tillfällen som inte gick att ta bort. Lägg inte tillbaka ett lyckat-kvitto.
+
 **⚠️ Klubbkalendern har kretskalenderns form** (Stefan 2026-10-05): ‹ månad › I dag,
 Månad | Lista, filtren som switchar med färgruta, kc-rutnät, dagvy under, listvy tolv månader,
 Visa helgdagar. **Stilen och helgdagsberäkningen bor i `_CalendarShared`** (en gång per sida,
