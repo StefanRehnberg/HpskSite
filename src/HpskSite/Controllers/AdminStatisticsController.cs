@@ -21,6 +21,7 @@ namespace HpskSite.Controllers
 {
     public partial class AdminStatisticsController : SurfaceController
     {
+        private readonly HpskSite.Services.Training.ClubTrainingService _trainings;
         private readonly IMemberService _memberService;
         private readonly AdminAuthorizationService _authService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
@@ -60,9 +61,11 @@ namespace HpskSite.Controllers
             ILogger<AdminStatisticsController> logger,
             DocumentService documentService,
             IConfiguration configuration,
-            IWebHostEnvironment env)
+            IWebHostEnvironment env,
+            HpskSite.Services.Training.ClubTrainingService trainings)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _trainings = trainings;
             _memberService = memberService;
             _authService = authService;
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -632,6 +635,7 @@ namespace HpskSite.Controllers
                         .Where(id => id > 0)
                         .ToHashSet();
 
+                    var recentTrainings = _trainings.DatesByClub(threeMonthsAgo);
                     int activeClubs = allClubNodes.Count(club =>
                     {
                         if (!membersByClub.ContainsKey(club.Id)) return false;
@@ -641,7 +645,9 @@ namespace HpskSite.Controllers
                             {
                                 var eventDate = e.Value<DateTime?>("eventDate");
                                 return eventDate.HasValue && eventDate.Value >= threeMonthsAgo;
-                            });
+                            })
+                            // Fas B5: en träning är också aktivitet i klubben.
+                            || (recentTrainings.TryGetValue(club.Id, out var td) && td.Count > 0);
                         var hasRecentClubComp = clubIdsWithRecentComp.Contains(club.Id);
                         return hasRecentEvent || hasRecentClubComp;
                     });
@@ -729,6 +735,11 @@ namespace HpskSite.Controllers
                                 eventDate = e.Value<DateTime?>("eventDate")
                             }))
                         .ToList();
+                    // Fas B5: klubbarnas träningar räknas in som typen Träning.
+                    var trainingsByClub = _trainings.DatesByClub(new DateTime(now.Year - 2, 1, 1));
+                    allClubEvents.AddRange(allClubNodes.SelectMany(club =>
+                        (trainingsByClub.TryGetValue(club.Id, out var dates) ? dates : new List<DateTime>())
+                            .Select(d => new { clubId = club.Id, clubName = club.Name ?? "", eventType = "Träning", eventDate = (DateTime?)d })));
 
                     int clubEventsThisYear = allClubEvents.Count(e => e.eventDate.HasValue && e.eventDate.Value.Year == now.Year);
                     int clubEventsLastYear = allClubEvents.Count(e => e.eventDate.HasValue && e.eventDate.Value.Year == now.Year - 1);

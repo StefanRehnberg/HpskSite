@@ -22,6 +22,7 @@ namespace HpskSite.Controllers
     /// </summary>
     public class ClubStatisticsController : SurfaceController
     {
+        private readonly HpskSite.Services.Training.ClubTrainingService _trainings;
         private readonly IMemberService _memberService;
         private readonly AdminAuthorizationService _authService;
         private readonly ClubComparisonService _comparisonService;
@@ -41,9 +42,11 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authService,
             ClubComparisonService comparisonService,
             IMemoryCache memoryCache,
-            ILogger<ClubStatisticsController> logger)
+            ILogger<ClubStatisticsController> logger,
+            HpskSite.Services.Training.ClubTrainingService trainings)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _trainings = trainings;
             _memberService = memberService;
             _authService = authService;
             _comparisonService = comparisonService;
@@ -206,6 +209,9 @@ namespace HpskSite.Controllers
                         eventDate = e.Value<DateTime?>("eventDate")
                     })
                     .ToList();
+                // Fas B5: klubbens träningar är inte längre händelser — räkna in dem som typen Träning.
+                if (_trainings.DatesByClub(new DateTime(today.Year - 2, 1, 1)).TryGetValue(clubNode.Id, out var trainingDates))
+                    clubEvents.AddRange(trainingDates.Select(d => new { eventType = "Träning", eventDate = (DateTime?)d }));
 
                 upcomingEvents = clubEvents.Count(e => e.eventDate.HasValue && e.eventDate.Value >= today);
                 eventsThisYear = clubEvents.Count(e => e.eventDate.HasValue && e.eventDate.Value.Year == today.Year);
