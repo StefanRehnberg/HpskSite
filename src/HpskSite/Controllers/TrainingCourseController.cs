@@ -241,8 +241,8 @@ namespace HpskSite.Controllers
                 created,
                 failed,
                 message = created == 0 ? "Ingen kunde få ett lånevapen."
-                        : failed == 0 ? (created == 1 ? "En deltagare har fått en lånevapenplats." : $"{created} deltagare har fått en lånevapenplats.")
-                        : $"{created} fick en lånevapenplats, {failed} kunde inte bokas.",
+                        : failed == 0 ? (created == 1 ? "Ett lånevapen är bokat åt en deltagare." : $"Lånevapen är bokat åt {created} deltagare.")
+                        : $"Lånevapen är bokat åt {created} deltagare, {failed} kunde inte bokas.",
                 results,
             });
         }
