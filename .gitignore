@@ -83,10 +83,10 @@ appsettings.Development.json
 /notes/*
 !/notes/README.md
 
-# hpsk-verify: verifieringsskripten committas (CLAUDE.md refererar dem per funktion),
-# men aldrig deras beroenden. Playwright drar in 160+ filer och browsrarna laddas
-# separat med `npx playwright install`.
-/hpsk-verify/node_modules/
+# hpsk-verify: verifieringssviterna är lokalt arbetsmaterial och committas inte
+# (Stefans beslut 2026-10-05). De bär skärmdumpar och fixturer ur dev-data, och repot
+# är publikt. CLAUDE.md refererar dem fortfarande per funktion — de finns på den här datorn.
+/hpsk-verify/
 
 # ⚠️⚠️ PERSONUPPGIFTER FÅR INTE IN I DET HÄR REPOT — det är PUBLIKT på GitHub.
 # SSMData/ är underlaget till SSM 2026-testdatat: 280 rader med namngivna skyttar, deras
