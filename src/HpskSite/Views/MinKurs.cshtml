@@ -257,7 +257,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <p class="small text-muted">Du reserverar en plats per deltagare. Vilket vapen var och en får avgörs i valvet när vapnen lämnas ut.</p>
+                <p class="small text-muted">Du bokar ett lånevapen åt varje deltagare du kryssar i. Vilket vapen var och en får avgörs i valvet när vapnen lämnas ut.</p>
                 <div id="mkLoanList"></div>
                 <div id="mkLoanResult" class="small mt-2"></div>
             </div>
@@ -766,12 +766,12 @@
             if (!d.success) { list.innerHTML = '<div class="alert alert-warning py-2">' + esc(d.message || 'Kunde inte läsas.') + '</div>'; return; }
             if (!d.participants.length) { list.innerHTML = '<div class="alert alert-info py-2">Kursen har inga deltagare.</div>'; return; }
             var open = d.participants.filter(function (x) { return !x.booked; }).length;
-            list.innerHTML = '<div class="small text-muted mb-2">' + (d.participants.length - open) + ' av ' + d.participants.length + ' har redan en plats.</div>' +
+            list.innerHTML = '<div class="small text-muted mb-2">' + (d.participants.length - open) + ' av ' + d.participants.length + ' har redan ett lånevapen bokat.</div>' +
                 d.participants.map(function (x, i) {
                     return '<div class="form-check py-1"><input class="form-check-input" type="checkbox" id="mkLoan' + i + '" data-loan-member="' + x.memberId + '"' +
                         (x.booked ? ' checked disabled' : ' checked') + '>' +
                         '<label class="form-check-label" for="mkLoan' + i + '">' + esc(x.name) +
-                        (x.booked ? ' <span class="badge bg-success-subtle text-success-emphasis">har en plats</span>' : '') + '</label></div>';
+                        (x.booked ? ' <span class="badge bg-success-subtle text-success-emphasis">lånevapen bokat</span>' : '') + '</label></div>';
                 }).join('');
             document.getElementById('mkLoanSave').disabled = open === 0;
         }).catch(function (e) { document.getElementById('mkLoanList').innerHTML = '<div class="alert alert-danger py-2">' + esc(e.message) + '</div>'; });
