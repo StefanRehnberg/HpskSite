@@ -13,6 +13,8 @@ namespace HpskSite.Composers
                 builder.Config.GetSection("AiChat"));
 
             builder.Services.AddSingleton<KnowledgeBaseService>();
+            builder.Services.AddSingleton<KnowledgeIndexService>();
+            builder.Services.AddHostedService<KnowledgeIndexWarmupHostedService>();
 
             builder.Services.AddHttpClient("AiChat");
             builder.Services.AddScoped<AiChatService>();

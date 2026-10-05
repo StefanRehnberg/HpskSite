@@ -18,6 +18,7 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly IWebHostEnvironment _env;
+        private readonly ILogger<AiChatController> _logger;
 
         public AiChatController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -29,9 +30,11 @@ namespace HpskSite.Controllers
             AiChatService chatService,
             IMemberManager memberManager,
             IMemberService memberService,
-            IWebHostEnvironment env)
+            IWebHostEnvironment env,
+            ILogger<AiChatController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _logger = logger;
             _chatService = chatService;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -59,18 +62,22 @@ namespace HpskSite.Controllers
                 var roles = GetUserRoles(currentMember);
                 var history = request.History ?? new List<ChatMessage>();
 
-                var response = await _chatService.GetResponseAsync(request.Message, history, roles);
+                var result = await _chatService.GetResponseAsync(request.Message, history, roles);
 
                 // GDPR data minimisation: the chat log is only used for feature-popularity
                 // analytics, so we do NOT record who asked — only the timestamp, question and
                 // answer. The identity is intentionally never passed to LogChat.
-                LogChat(request.Message, response);
+                LogChat(request.Message, result.Response, result.Sources);
 
-                return Json(new { success = true, response });
+                return Json(new { success = true, response = result.Response });
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AiChat] Error: {ex.Message}");
+                // ⚠️ LogError, aldrig Console.WriteLine: prod loggar Warning och uppåt via Serilog,
+                // och konsolen syns ingenstans. Chatten svarade "Ett fel uppstod" på varje fråga
+                // från 2026-09-03 i en månad utan ett spår — statistiken såg bara att inga frågor
+                // loggades och det lästes som att ingen använde chatten.
+                _logger.LogError(ex, "AI-chatten kunde inte svara: {Message}", ex.Message);
                 return Json(new { success = false, message = "Ett fel uppstod. Försök igen senare." });
             }
         }
@@ -88,7 +95,7 @@ namespace HpskSite.Controllers
             return Json(new { enabled, loggedIn });
         }
 
-        private void LogChat(string question, string answer)
+        private void LogChat(string question, string answer, string sources)
         {
             try
             {
@@ -115,7 +122,9 @@ namespace HpskSite.Controllers
 
                 var logFile = Path.Combine(logDir, $"chat-{DateTime.UtcNow:yyyy-MM}.log");
                 var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-                var entry = $"[{timestamp}]\nQ: {question}\nA: {answer}\n---\n";
+                // "K:" = vilka stycken av kunskapsbasen frågan fick med sig. Står FÖRE "Q:", så
+                // statistikens läsare (som läser frågan från "Q:" till "A:") hoppar över den.
+                var entry = $"[{timestamp}]\nK: {sources.Replace('\n', ' ')}\nQ: {question}\nA: {answer}\n---\n";
 
                 System.IO.File.AppendAllText(logFile, entry);
             }
