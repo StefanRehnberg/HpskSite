@@ -149,6 +149,16 @@ namespace HpskSite.Controllers
             if (src == null || !await CanAdminAsync(src.ClubId, me)) return Json(new { success = false, message = Denied });
             var (occ, _, error) = _trainings.PlanCopyPeriod(input!);
             if (error != null) return Json(new { success = false, message = error });
+            // Seriens namn sätts FÖRE kopieringen: ett taget namn ska stoppa innan något skapats.
+            if (!string.IsNullOrWhiteSpace(input!.SeriesName))
+            {
+                // Pröva namnet INNAN förlagan görs till en serie — annars lämnar ett nej en ensam serie efter sig.
+                var precheck = _trainings.SeriesNameError(src.Id, input.SeriesName);
+                if (precheck != null) return Json(new { success = false, message = precheck });
+                _trainings.EnsureSeriesFor(src.Id, me);
+                var nameError = _trainings.RenameSeries(src.Id, input.SeriesName);
+                if (nameError != null) return Json(new { success = false, message = nameError });
+            }
             var r = _trainings.CopyTo(src.Id, occ.Select(o => (o.Date, o.SkjutledareMemberId)), me);
             return Json(CopyJson(r));
         }
@@ -230,9 +240,27 @@ namespace HpskSite.Controllers
             // Anmälda utan bekräftelse: fråga först, och rekommendera att ställa in i stället.
             if (!force && impact.OutBookings == 0 && !impact.IsEmpty)
                 return Json(new { success = false, needsConfirm = true, people = impact.People, bookings = impact.Bookings,
-                    message = $"Träningen har {impact.People} anmälda och {impact.Bookings} lånevapenbokningar." });
+                    message = $"Träningen har {impact.People} anmälda och {impact.Bookings} lånevapenbokningar. Vi rekommenderar att du ställer in den i stället (Ställ in i träningens meny) — då ser de anmälda det." });
             var error = _trainings.Delete(t.Id, force, me);
             return Json(new { success = error == null, message = error ?? "Träningen är borttagen." });
+        }
+
+        public class RenameSeriesRequest
+        {
+            public int TrainingId { get; set; }
+            public string? Name { get; set; }
+        }
+
+        /// <summary>Byter namn på en träningsserie (inte på träningarna i den).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RenameSeries([FromBody] RenameSeriesRequest req)
+        {
+            var t = _trainings.Get(req?.TrainingId ?? 0);
+            if (t == null) return Json(new { success = false, message = "Träningen finns inte." });
+            if (!await CanAdminAsync(t.ClubId, await CurrentMemberIdAsync())) return Json(new { success = false, message = Denied });
+            var error = _trainings.RenameSeries(t.Id, req!.Name);
+            return Json(new { success = error == null, message = error ?? "Serien har bytt namn." });
         }
 
         public class DeleteManyRequest

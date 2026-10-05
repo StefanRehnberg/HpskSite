@@ -50,14 +50,17 @@ namespace HpskSite.Controllers
         private readonly ClubEventParticipationService _participation;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IPublishedUrlProvider _urls;
+        private readonly AdminAuthorizationService _auth;
 
         public ClubEventDeskController(
             IMemberManager memberManager,
             IMemberService memberService,
             ClubEventParticipationService participation,
             IUmbracoContextAccessor umbracoContextAccessor,
-            IPublishedUrlProvider urls)
+            IPublishedUrlProvider urls,
+            AdminAuthorizationService auth)
         {
+            _auth = auth;
             _memberManager = memberManager;
             _memberService = memberService;
             _participation = participation;
@@ -136,6 +139,18 @@ namespace HpskSite.Controllers
                 return Render();
             }
 
+            // En träning har ingen egen sida. Klubbadmin kom hit från Administration → Träningar och
+            // ska tillbaka dit (Club.cshtml öppnar flikarna ur #clubAdmin/clubTrainings); skjutledaren
+            // och kursens tränare når inte adminpanelen och kommer till klubbsidan. Knappen säger vilket.
+            if (ctx.IsTraining && model.EventUrl.Length > 0)
+            {
+                var isAdmin = false;
+                try { isAdmin = await _auth.IsClubAdminForClub(ctx.OwnerId); } catch { }
+                if (isAdmin) { model.EventUrl += "#clubAdmin/clubTrainings"; model.BackLabel = "Till klubbens träningar"; }
+                else model.BackLabel = "Till klubbsidan";
+            }
+            else model.BackLabel = "Till evenemangssidan";
+
             model.EventName = ctx.EventName;
             model.EventDate = ctx.EventDate;
             model.OwnerName = ctx.OwnerName;
@@ -170,5 +185,7 @@ namespace HpskSite.Controllers
         /// visa en länk till ingenting.</para>
         /// </summary>
         public string EventUrl { get; set; } = "";
+        /// <summary>Knappens text — säger vart den går.</summary>
+        public string BackLabel { get; set; } = "";
     }
 }

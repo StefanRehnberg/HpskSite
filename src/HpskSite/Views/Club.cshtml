@@ -646,9 +646,14 @@ const eventTypeColors = {
 document.addEventListener('DOMContentLoaded', function() {
     // Deep-link: open a specific tab when the URL carries its pane id as a hash
     // (e.g. .../region/club/#clubCompetitions from a competition-page breadcrumb).
+    // Flera nivåer skrivs med snedstreck: #clubAdmin/clubTrainings öppnar Administration och
+    // sedan Träningar (deltagarlistans väg tillbaka). Saknas en flik (ingen behörighet) stannar
+    // man där man kom, alltså på klubbsidan.
     if (window.location.hash && window.location.hash.length > 1) {
-        var deepTabBtn = document.getElementById(window.location.hash.substring(1) + '-tab');
-        if (deepTabBtn) deepTabBtn.click();
+        window.location.hash.substring(1).split('/').forEach(function (part) {
+            var deepTabBtn = document.getElementById(part + '-tab');
+            if (deepTabBtn) deepTabBtn.click();
+        });
     }
 
     // Always load public quick link documents (visible to everyone)

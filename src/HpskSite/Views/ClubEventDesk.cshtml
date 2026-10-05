@@ -88,7 +88,7 @@ else
             @if (!string.IsNullOrEmpty(desk.EventUrl))
             {
                 <a href="@desk.EventUrl" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-arrow-left me-1"></i>Till evenemangssidan
+                    <i class="bi bi-arrow-left me-1"></i>@(string.IsNullOrEmpty(desk.BackLabel) ? "Tillbaka" : desk.BackLabel)
                 </a>
             }
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="deskLoad()">

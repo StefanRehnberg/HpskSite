@@ -942,7 +942,8 @@ function calCopyPost(url, body) {
 }
 function calCopyLabel(t) {
     const d = new Date(t.date + 'T12:00:00');
-    return t.name + ' (' + d.toLocaleDateString('sv-SE', { weekday: 'short' }) + (t.startTime ? ' ' + t.startTime : '') + ')';
+    // Seriens namn först: två serier kan ha träningar med samma namn.
+    return (t.seriesName ? t.seriesName + ' — ' : '') + t.name + ' (' + d.toLocaleDateString('sv-SE', { weekday: 'short' }) + (t.startTime ? ' ' + t.startTime : '') + ')';
 }
 function calCopyLoadSources() {
     if (calCopy.sources) return Promise.resolve(calCopy.sources);
