@@ -265,7 +265,69 @@ namespace HpskSite.Services
             if (ctx.Audience == EventAudience.Open) return true;
             if (member == null) return false;
             if (ctx.Audience == EventAudience.AllMembers) return true;
+            // Fas D: en deltagare i en kurs som träningen är kopplad till får anmäla sig — även utan
+            // klubbmedlemskap (en nybörjare på kurs är ofta inte medlem än). Beslut 2026-10-02.
+            if (ctx.IsTraining && CourseRoleForTraining(member.Id, ctx.EventId) != null) return true;
             return IsEligible(GetEligibleClubIds(ctx), member);
+        }
+
+        /// <summary>
+        /// Fas D: kräver en kurs som medlemmen går att hen anmäler sig till det här tillfället? Då är
+        /// anmälan öppen för hen även om träningen själv inte kräver anmälan — kursens krav gäller bara
+        /// kursens deltagare (beslut 2026-10-02). Sätter <see cref="ClubEventContext.RegistrationRequired"/>
+        /// på DEN HÄR kontexten, som byggs per anrop. Anropas av GetSignupState, SignUp och AddGuest, så
+        /// att kortet och servern alltid är överens.
+        /// </summary>
+        public void ApplyCourseRegistration(ClubEventContext ctx, int memberId)
+        {
+            if (!ctx.IsTraining || ctx.RegistrationRequired || memberId <= 0 || ctx.IsCancelled) return;
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                var rows = db.Fetch<CourseRegistrationRow>(@"
+SELECT g.DefaultRegistration, l.Registration
+FROM dbo.TrainingGroupTraining l
+JOIN dbo.TrainingGroups g ON g.Id = l.TrainingGroupId AND g.IsActive = 1
+JOIN dbo.TrainingGroupMembers m ON m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.MemberId = @0 AND m.Role <> 'Trainer'
+WHERE l.TrainingId = @1", memberId, ctx.EventId);
+                if (rows.Any(r => HpskSite.Models.Training.TrainingCourseRules.RegistrationRequired(r.DefaultRegistration, r.Registration)))
+                    ctx.RegistrationRequired = true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kursens anmälningskrav kunde inte läsas (träning {Training})", ctx.EventId);
+            }
+        }
+
+        private class CourseRegistrationRow
+        {
+            public string? DefaultRegistration { get; set; }
+            public string? Registration { get; set; }
+        }
+
+        /// <summary>
+        /// Fas D: medlemmens roll i en AKTIV kurs (träningsgrupp) som träningen är kopplad till —
+        /// "Trainer" före "Member" — eller null. Fel ger null: en trasig fråga får aldrig dela ut rätt.
+        /// </summary>
+        public string? CourseRoleForTraining(int memberId, int trainingId)
+        {
+            if (memberId <= 0 || trainingId <= 0) return null;
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                return db.ExecuteScalar<string?>(@"
+SELECT TOP 1 m.Role
+FROM dbo.TrainingGroupTraining l
+JOIN dbo.TrainingGroups g ON g.Id = l.TrainingGroupId AND g.IsActive = 1
+JOIN dbo.TrainingGroupMembers m ON m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.MemberId = @0
+WHERE l.TrainingId = @1
+ORDER BY CASE m.Role WHEN 'Trainer' THEN 0 ELSE 1 END", memberId, trainingId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kursrollen kunde inte läsas (medlem {Member}, träning {Training})", memberId, trainingId);
+                return null;
+            }
         }
 
         /// <summary>
@@ -383,6 +445,8 @@ namespace HpskSite.Services
             // även utan klubbens skjutledargrupp — med ett roterande schema är det ofta en vanlig
             // medlem som har passet. Gäller bara det egna tillfället.
             if (ctx.IsTraining && actingMemberId > 0 && ctx.SkjutledareMemberId == actingMemberId) return true;
+            // Fas D: kursens tränare håller upprop på kursens träningar.
+            if (ctx.IsTraining && CourseRoleForTraining(actingMemberId, ctx.EventId) == "Trainer") return true;
 
             if (ctx.IsClubOwned)
             {

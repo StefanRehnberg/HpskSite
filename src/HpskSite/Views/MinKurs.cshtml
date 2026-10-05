@@ -1,0 +1,591 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    var initialGroup = ViewData["MinKursGroupId"] as int? ?? 0;
+}
+@*
+    Fas D: Min kurs. Mobil först. Varje knapp bär ett id i ett data-attribut och läses av EN delegerad
+    lyssnare — ingen användartext (namn, anteckningar) byggs in i ett onclick.
+
+    Närvaron skrivs genom ClubEvent/SetAttendance (kind = Training) — samma väg som deltagarsidan,
+    så det finns EN sanning om vem som var där.
+*@
+@await Html.PartialAsync("_HtmlEscape")
+<style>
+    .mk-wrap { max-width: 760px; }
+    .mk-today { border-left: 4px solid var(--bs-success); }
+    .mk-person { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .75rem; margin-bottom: .5rem; background: var(--bs-body-bg); }
+    .mk-person .mk-name { font-weight: 600; }
+    .mk-att .btn { min-width: 4.5rem; }
+    .mk-badge { font-size: .875rem; color: var(--bs-secondary-color); }
+    .mk-ready { color: var(--bs-success-text-emphasis); font-weight: 600; }
+    .mk-missed { color: var(--bs-danger-text-emphasis); }
+    .mk-grid th, .mk-grid td { white-space: nowrap; text-align: center; vertical-align: middle; }
+    .mk-grid th:first-child, .mk-grid td:first-child, .mk-grid td.mk-badgecell { text-align: left; }
+    .mk-grid .mk-cell-missed { color: var(--bs-danger-text-emphasis); font-weight: 600; }
+    .mk-seriesrow { display: flex; justify-content: space-between; align-items: center; padding: .375rem 0; border-bottom: 1px solid var(--bs-border-color); }
+</style>
+
+<div class="container py-3 mk-wrap" id="mkApp" data-group="@initialGroup">
+    <div class="d-flex align-items-start gap-2 flex-wrap mb-2">
+        <div class="me-auto">
+            <h1 class="h4 mb-0">Min kurs</h1>
+            <div class="text-muted small" id="mkCourseSub"></div>
+        </div>
+        <div class="dropdown d-none" id="mkActions">
+            <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-sliders me-1"></i>Åtgärder
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" style="min-width:240px">
+                <li><button class="dropdown-item" type="button" data-mk="link"><i class="bi bi-link-45deg me-2"></i>Koppla träningar till kursen…</button></li>
+                <li><button class="dropdown-item" type="button" data-mk="defaults"><i class="bi bi-gear me-2"></i>Kursens standard…</button></li>
+            </ul>
+        </div>
+    </div>
+    <div class="mb-3 d-none" id="mkPickerWrap">
+        <label class="form-label small text-muted mb-1" for="mkPicker">Kurs</label>
+        <select class="form-select" id="mkPicker"></select>
+    </div>
+    <div id="mkMsg"></div>
+    <div id="mkBody"><div class="text-center py-5"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
+</div>
+
+<!-- Registrera serie -->
+<div class="modal fade" id="mkSeriesModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h2 class="modal-title h5" id="mkSeriesTitle">Registrera serie</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2" id="mkSeriesReq"></p>
+                <div id="mkSeriesDenied" class="alert alert-warning d-none"></div>
+                <div id="mkSeriesEntry">
+                    <div class="btn-group w-100 mb-1" role="group" aria-label="Inmatning">
+                        <input type="radio" class="btn-check" name="mkMode" id="mkModeShots" value="shots" checked>
+                        <label class="btn btn-outline-secondary" for="mkModeShots">Skott</label>
+                        <input type="radio" class="btn-check" name="mkMode" id="mkModeTotal" value="total">
+                        <label class="btn btn-outline-secondary" for="mkModeTotal">Bara total</label>
+                    </div>
+                    <p class="form-text mb-2" id="mkModeHelp">Med skott sparas varje skott i träningsloggen. Med bara total sparas seriens summa.</p>
+                    <div id="mkShotsWrap">
+                        <div class="sp-shots mb-2" id="mkShots">
+                            <span class="sp-shot">_</span><span class="sp-shot">_</span><span class="sp-shot">_</span><span class="sp-shot">_</span><span class="sp-shot">_</span>
+                        </div>
+                        <div class="sp-pad" id="mkPad">
+                            <button type="button" class="sp-key sp-k-w3" data-shot="10">10</button>
+                            <button type="button" class="sp-key sp-k-w3" data-shot="X">X</button>
+                            <button type="button" class="sp-key" data-shot="7">7</button>
+                            <button type="button" class="sp-key" data-shot="8">8</button>
+                            <button type="button" class="sp-key" data-shot="9">9</button>
+                            <button type="button" class="sp-key" data-shot="4">4</button>
+                            <button type="button" class="sp-key" data-shot="5">5</button>
+                            <button type="button" class="sp-key" data-shot="6">6</button>
+                            <button type="button" class="sp-key" data-shot="1">1</button>
+                            <button type="button" class="sp-key" data-shot="2">2</button>
+                            <button type="button" class="sp-key" data-shot="3">3</button>
+                            <button type="button" class="sp-key sp-k-w4 sp-k-ghost" data-shot="0">0</button>
+                            <button type="button" class="sp-key sp-k-clear" data-mk="clear-shots">RENSA</button>
+                        </div>
+                    </div>
+                    <div id="mkTotalWrap" class="d-none mb-2">
+                        <label class="form-label" for="mkTotal">Seriens total (0–50)</label>
+                        <input type="number" min="0" max="50" class="form-control form-control-lg" id="mkTotal" inputmode="numeric">
+                    </div>
+                    <div class="d-flex align-items-center gap-2 mt-3">
+                        <div class="me-auto fw-semibold" id="mkSeriesSum"></div>
+                        <button type="button" class="btn btn-success" id="mkSeriesSave" disabled>Spara serien</button>
+                    </div>
+                    <div id="mkSeriesErr" class="text-danger small mt-2"></div>
+                </div>
+                <h3 class="h6 mt-4 mb-1">Dagens serier</h3>
+                <div id="mkSeriesList" class="small"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Anteckning -->
+<div class="modal fade" id="mkNoteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h2 class="modal-title h5" id="mkNoteTitle">Anteckning</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">Anteckningen följer med till nästa tillfälle, så nästa instruktör ser den. Den sparas tills någon tar bort den.</p>
+                <textarea class="form-control" id="mkNoteText" rows="4" maxlength="2000"></textarea>
+                <div id="mkNoteErr" class="text-danger small mt-2"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="mkNoteSave">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Koppla träningar -->
+<div class="modal fade" id="mkLinkModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h2 class="modal-title h5">Koppla träningar till kursen</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">En kopplad träning är fortfarande en vanlig klubbträning för alla. Kursens krav (anmälan, obligatorisk närvaro) gäller bara kursens deltagare.</p>
+                <div id="mkLinkList"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="mkLinkSave">Koppla valda</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tillfällets krav -->
+<div class="modal fade" id="mkOccModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h2 class="modal-title h5" id="mkOccTitle">Tillfället</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label" for="mkOccAtt">Närvaro för kursens deltagare</label>
+                    <select class="form-select" id="mkOccAtt">
+                        <option value="">Som kursen</option>
+                        <option value="Optional">Valfri</option>
+                        <option value="Mandatory">Obligatorisk</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="mkOccReg">Anmälan för kursens deltagare</label>
+                    <select class="form-select" id="mkOccReg">
+                        <option value="">Som kursen</option>
+                        <option value="NotRequired">Krävs inte</option>
+                        <option value="Required">Krävs</option>
+                    </select>
+                </div>
+                <div class="mb-1">
+                    <label class="form-label" for="mkOccNote">Anteckning till tillfället</label>
+                    <input class="form-control" id="mkOccNote" maxlength="500" placeholder="Teori och prov för Pistolskyttekortet" autocomplete="off">
+                </div>
+                <div id="mkOccErr" class="text-danger small mt-2"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-danger me-auto" id="mkOccUnlink">Ta bort från kursen</button>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="mkOccSave">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Kursens standard -->
+<div class="modal fade" id="mkDefModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h2 class="modal-title h5">Kursens standard</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">Gäller alla kopplade tillfällen som inte har en egen inställning. Kraven gäller bara kursens deltagare. En missad obligatorisk dag visas, men spärrar ingenting.</p>
+                <div class="mb-3">
+                    <label class="form-label" for="mkDefAtt">Närvaro</label>
+                    <select class="form-select" id="mkDefAtt"><option value="Optional">Valfri</option><option value="Mandatory">Obligatorisk</option></select>
+                </div>
+                <div class="mb-1">
+                    <label class="form-label" for="mkDefReg">Anmälan</label>
+                    <select class="form-select" id="mkDefReg"><option value="NotRequired">Krävs inte</option><option value="Required">Krävs</option></select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="mkDefSave">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var esc = window.hpskEsc;
+    var app = document.getElementById('mkApp');
+    var groupId = parseInt(app.getAttribute('data-group'), 10) || 0;
+    var course = null, notes = [], current = null, seriesState = null;
+
+    function token() { var el = document.querySelector('input[name="__RequestVerificationToken"]'); return el ? el.value : ''; }
+    function getJson(url) {
+        return fetch(url, { credentials: 'same-origin' }).then(function (r) {
+            if (!r.ok) throw new Error(window.hpskRequestFailureMessage ? window.hpskRequestFailureMessage(r.status) : 'Fel ' + r.status);
+            return r.json();
+        });
+    }
+    function post(url, body) {
+        return fetch(url, {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+            body: JSON.stringify(body)
+        }).then(function (r) { return r.text().then(function (t) { try { return JSON.parse(t); } catch (e) { return { success: false, message: 'Sidan har varit öppen för länge — ladda om och försök igen.' }; } }); });
+    }
+    function msg(text, kind) {
+        document.getElementById('mkMsg').innerHTML = text ? '<div class="alert alert-' + (kind || 'success') + ' py-2">' + esc(text) + '</div>' : '';
+    }
+    function dayLabel(iso, withWeekday) {
+        var d = new Date(iso + 'T12:00:00');
+        return d.toLocaleDateString('sv-SE', withWeekday ? { weekday: 'short', day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short' });
+    }
+    function cell(m, t) { return (course.cells || {})[m + ':' + t] || { state: 'none', missed: false }; }
+
+    // ── Kurserna ──
+    function loadCourses() {
+        return getJson('/umbraco/surface/TrainingCourse/MyCourses').then(function (d) {
+            var list = (d && d.success && d.courses) || [];
+            if (!list.length) {
+                document.getElementById('mkBody').innerHTML = '<div class="alert alert-info">Du är inte tränare i någon aktiv kurs. ' +
+                    'En kurs är en träningsgrupp — klubbadmin lägger till dig som tränare under <em>Administration → Träningsgrupper</em>.</div>';
+                return null;
+            }
+            var saved = 0;
+            try { saved = parseInt(localStorage.getItem('hpsk_minkurs_group'), 10) || 0; } catch (e) { }
+            var pick = list.some(function (c) { return c.groupId === groupId; }) ? groupId
+                     : list.some(function (c) { return c.groupId === saved; }) ? saved : list[0].groupId;
+            var sel = document.getElementById('mkPicker');
+            sel.innerHTML = list.map(function (c) {
+                return '<option value="' + c.groupId + '">' + esc(c.name) + (c.isTrainer ? '' : ' (klubbens kurs)') + '</option>';
+            }).join('');
+            sel.value = String(pick);
+            document.getElementById('mkPickerWrap').classList.toggle('d-none', list.length < 2);
+            return pick;
+        });
+    }
+
+    function loadCourse(id) {
+        groupId = id;
+        try { localStorage.setItem('hpsk_minkurs_group', String(id)); } catch (e) { }
+        return getJson('/umbraco/surface/TrainingCourse/Get?groupId=' + id).then(function (d) {
+            if (!d.success) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kursen kunde inte läsas.') + '</div>'; return; }
+            course = d.course; notes = d.notes || [];
+            document.getElementById('mkActions').classList.remove('d-none');
+            render();
+        }).catch(function (e) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-danger">' + esc(e.message) + '</div>'; });
+    }
+
+    // Dagens tillfälle, annars nästa, annars det senaste.
+    function pickCurrent() {
+        var occ = course.occasions.filter(function (o) { return !o.isCancelled; });
+        return occ.find(function (o) { return o.isToday; })
+            || occ.find(function (o) { return !o.isPast; })
+            || occ[occ.length - 1] || null;
+    }
+
+    function render() {
+        var sub = course.name + (course.trainers.length ? ' · instruktörer ' + course.trainers.map(function (t) { return t.name; }).join(', ') : '');
+        document.getElementById('mkCourseSub').textContent = sub;
+        current = pickCurrent();
+        var html = '';
+
+        if (!course.occasions.length) {
+            html += '<div class="alert alert-info">Inga träningar är kopplade till kursen än. Välj <strong>Åtgärder → Koppla träningar till kursen…</strong>.</div>';
+        } else if (current) {
+            var here = course.participants.filter(function (p) { var s = cell(p.memberId, current.trainingId).state; return s === 'present' || s === 'checkedin'; }).length;
+            var when = (current.isToday ? 'I dag' : current.isPast ? 'Senast' : 'Nästa') + ' · ' + dayLabel(current.date, true) + (current.startTime ? ' ' + current.startTime : '');
+            html += '<div class="card mk-today mb-3"><div class="card-body py-2">' +
+                '<div class="small text-uppercase text-muted fw-semibold">' + esc(when) + '</div>' +
+                '<div class="fw-semibold">' + esc(current.note || current.name) + '</div>' +
+                '<div class="small text-muted">' + (current.isMandatory ? '<span class="badge bg-warning text-dark me-1">Obligatoriskt för kursen</span>' : '') +
+                here + ' av ' + course.participants.length + ' här' +
+                (current.skjutledareName ? ' · skjutledare ' + esc(current.skjutledareName) : '') + '</div>' +
+                '</div></div>';
+
+            // Från förra tillfället: anteckningar från tillfällen FÖRE det aktuella.
+            var prevIds = course.occasions.filter(function (o) { return o.date < current.date; }).map(function (o) { return o.trainingId; });
+            var handover = notes.filter(function (n) { return prevIds.indexOf(n.trainingId) >= 0; });
+            var seen = {};
+            handover = handover.filter(function (n) { if (seen[n.memberId]) return false; seen[n.memberId] = true; return true; });
+            if (handover.length) {
+                html += '<div class="alert alert-light border mb-3"><div class="small fw-semibold mb-1"><i class="bi bi-chat-left-text me-1"></i>Från tidigare tillfällen</div>' +
+                    handover.map(function (n) {
+                        var p = course.participants.find(function (x) { return x.memberId === n.memberId; });
+                        return '<div class="small"><strong>' + esc(p ? p.name : '') + ':</strong> ' + esc(n.note) +
+                            ' <span class="text-muted">(' + esc(n.authorName) + ', ' + esc(dayLabel(n.date)) + ')</span></div>';
+                    }).join('') + '</div>';
+            }
+
+            if (!course.participants.length) html += '<div class="alert alert-info">Kursen har inga deltagare än.</div>';
+            course.participants.forEach(function (p) { html += personCard(p); });
+        }
+
+        html += overview();
+        document.getElementById('mkBody').innerHTML = html;
+    }
+
+    function personCard(p) {
+        var c = cell(p.memberId, current.trainingId);
+        var b = (course.badges || {})[p.memberId] || {};
+        var missed = course.occasions.filter(function (o) { return cell(p.memberId, o.trainingId).missed; });
+        var btn = function (status, label, active) {
+            return '<button type="button" class="btn btn-sm ' + (active ? 'btn-success' : 'btn-outline-secondary') + '" data-mk="att" data-member="' + p.memberId + '" data-status="' + status + '">' + label + '</button>';
+        };
+        var isHere = c.state === 'present', isAbsent = c.state === 'absent', isExcused = c.state === 'excused';
+        return '<div class="mk-person" data-mk-person="' + p.memberId + '">' +
+            '<div class="d-flex align-items-center gap-2 flex-wrap">' +
+            '<div class="mk-name me-auto">' + esc(p.name) + '</div>' +
+            (c.state === 'checkedin' ? '<span class="badge bg-info-subtle text-info-emphasis">Incheckad via QR</span>' : '') +
+            '<div class="btn-group mk-att" role="group" aria-label="Närvaro">' +
+            btn('Present', 'Här', isHere) + btn('Absent', 'Ej här', isAbsent) + btn('Excused', 'Giltig', isExcused) +
+            '</div></div>' +
+            '<div class="mk-badge mt-1 ' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + esc(b.text || '') +
+            (b.readyForPistolskyttekort ? ' · klar för Pistolskyttekortet' : '') + '</div>' +
+            (missed.length ? '<div class="small mk-missed">Missade obligatoriskt ' + missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ') + '</div>' : '') +
+            '<div class="mt-2 d-flex gap-2">' +
+            '<button type="button" class="btn btn-sm btn-outline-primary" data-mk="series" data-member="' + p.memberId + '"><i class="bi bi-bullseye me-1"></i>Registrera serie</button>' +
+            '<button type="button" class="btn btn-sm btn-outline-secondary" data-mk="note" data-member="' + p.memberId + '"><i class="bi bi-pencil me-1"></i>Anteckning</button>' +
+            '</div></div>';
+    }
+
+    function overview() {
+        if (!course.occasions.length) return '';
+        var head = course.occasions.map(function (o) {
+            return '<th><button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" data-mk="occ" data-training="' + o.trainingId + '" title="Tillfällets krav">' +
+                esc(dayLabel(o.date)) + (o.isMandatory ? ' ★' : '') + '</button>' + (o.isCancelled ? '<div class="small text-danger">inställd</div>' : '') + '</th>';
+        }).join('');
+        var rows = course.participants.map(function (p) {
+            var tds = course.occasions.map(function (o) {
+                var c = cell(p.memberId, o.trainingId);
+                if (o.isCancelled) return '<td class="text-muted">–</td>';
+                if (c.missed) return '<td class="mk-cell-missed">Missad</td>';
+                var text = { present: '✓', checkedin: 'QR', excused: 'Giltig', absent: '✗', signedup: o.isPast ? '?' : 'Anmäld', none: o.isPast ? '' : '–' }[c.state] || '';
+                return '<td>' + text + '</td>';
+            }).join('');
+            var b = (course.badges || {})[p.memberId] || {};
+            return '<tr><td>' + esc(p.name) + '</td>' + tds + '<td class="mk-badgecell small">' + esc(b.text || '') + '</td></tr>';
+        }).join('');
+        return '<h2 class="h5 mt-4" id="mkOverview">Kursöversikt — alla tillfällen</h2>' +
+            '<div class="table-responsive"><table class="table table-sm mk-grid"><thead><tr><th>Deltagare</th>' + head + '<th>Märkesläge</th></tr></thead><tbody>' +
+            rows + '</tbody></table></div>' +
+            '<p class="small text-muted">★ = obligatoriskt för kursen. QR = incheckad på banan inom en timme kring tillfället. En missad obligatorisk dag visas, men spärrar ingenting. Klicka på ett datum för tillfällets krav.</p>';
+    }
+
+    // ── Närvaro ──
+    function setAttendance(memberId, status) {
+        if (!current) return;
+        var c = cell(memberId, current.trainingId);
+        var already = (status === 'Present' && c.state === 'present') || (status === 'Absent' && c.state === 'absent') || (status === 'Excused' && c.state === 'excused');
+        post('/umbraco/surface/ClubEvent/SetAttendance', {
+            eventId: current.trainingId, kind: 'Training', memberId: memberId, status: already ? '' : status
+        }).then(function (d) {
+            if (!d.success) { msg(d.message || 'Närvaron kunde inte sparas.', 'warning'); return; }
+            msg('');
+            loadCourse(groupId);
+        });
+    }
+
+    // ── Serier ──
+    var shots = [];
+    function renderShots() {
+        var spans = document.querySelectorAll('#mkShots .sp-shot');
+        spans.forEach(function (s, i) { s.textContent = shots[i] || '_'; s.classList.toggle('filled', !!shots[i]); s.classList.toggle('is-next', i === shots.length); });
+        document.querySelectorAll('#mkPad [data-shot]').forEach(function (k) { k.disabled = shots.length >= 5; });
+        updateSum();
+    }
+    function mode() { return document.getElementById('mkModeTotal').checked ? 'total' : 'shots'; }
+    function currentTotal() {
+        if (mode() === 'total') { var v = document.getElementById('mkTotal').value; return v === '' ? null : parseInt(v, 10); }
+        if (shots.length !== 5) return null;
+        return shots.reduce(function (a, s) { return a + (s === 'X' ? 10 : parseInt(s, 10)); }, 0);
+    }
+    function valorFor(total, t) {
+        if (total == null || !t) return '';
+        return total >= t.guld ? 'Guld' : total >= t.silver ? 'Silver' : total >= t.brons ? 'Brons' : 'under brons';
+    }
+    function updateSum() {
+        var total = currentTotal();
+        var t = seriesState && seriesState.thresholds[seriesState.memberId];
+        document.getElementById('mkSeriesSum').textContent = total == null ? '' : total + ' p — ' + valorFor(total, t);
+        document.getElementById('mkSeriesSave').disabled = total == null || total < 0 || total > 50 || !(seriesState && seriesState.canRecord);
+    }
+    function renderSeriesList() {
+        var list = (seriesState.series || []).filter(function (s) { return s.memberId === seriesState.memberId; });
+        document.getElementById('mkSeriesList').innerHTML = list.length ? list.map(function (s) {
+            var v = s.valor ? '<span class="badge bg-success-subtle text-success-emphasis">' + esc(s.valor) + '</span>' : '<span class="text-muted">under brons</span>';
+            return '<div class="mk-seriesrow"><div>Serie ' + s.seriesNumber + ' · ' + s.total + ' p ' + v +
+                (s.shotByShot ? '' : ' <span class="text-muted">(bara total)</span>') + '</div>' +
+                (seriesState.canRecord ? '<button type="button" class="btn btn-sm btn-link text-danger" data-mk="del-series" data-series="' + s.id + '">Ta bort</button>' : '') + '</div>';
+        }).join('') : '<div class="text-muted">Inga serier registrerade på det här tillfället än.</div>';
+    }
+    function openSeries(memberId) {
+        if (!current) return;
+        var p = course.participants.find(function (x) { return x.memberId === memberId; });
+        getJson('/umbraco/surface/TrainingCourse/Series?groupId=' + groupId + '&trainingId=' + current.trainingId).then(function (d) {
+            if (!d.success) { msg(d.message || 'Serierna kunde inte läsas.', 'warning'); return; }
+            seriesState = { memberId: memberId, canRecord: d.canRecord, series: d.series || [], thresholds: d.thresholds || {} };
+            var t = seriesState.thresholds[memberId];
+            document.getElementById('mkSeriesTitle').textContent = p ? p.name : 'Registrera serie';
+            document.getElementById('mkSeriesReq').textContent = 'Precision · vapengrupp C (.22)' +
+                (t ? ' · krav brons ' + t.brons + ', silver ' + t.silver + ', guld ' + t.guld : '') + ' · ' + dayLabel(current.date, true);
+            var denied = document.getElementById('mkSeriesDenied');
+            denied.textContent = d.canRecord ? '' : d.cannotRecordReason;
+            denied.classList.toggle('d-none', !!d.canRecord);
+            document.getElementById('mkSeriesEntry').classList.toggle('d-none', !d.canRecord);
+            shots = []; document.getElementById('mkTotal').value = ''; document.getElementById('mkSeriesErr').textContent = '';
+            renderShots(); renderSeriesList();
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('mkSeriesModal')).show();
+        });
+    }
+    function saveSeries() {
+        var btn = document.getElementById('mkSeriesSave');
+        btn.disabled = true;
+        var body = { groupId: groupId, trainingId: current.trainingId, memberId: seriesState.memberId };
+        if (mode() === 'total') body.total = currentTotal(); else body.shots = shots.slice();
+        post('/umbraco/surface/TrainingCourse/RecordSeries', body).then(function (d) {
+            if (!d.success) { document.getElementById('mkSeriesErr').textContent = d.message || 'Serien kunde inte sparas.'; updateSum(); return; }
+            seriesState.series.push(d.series);
+            shots = []; document.getElementById('mkTotal').value = '';
+            document.getElementById('mkSeriesErr').textContent = '';
+            renderShots(); renderSeriesList();
+            msg(d.message);
+        });
+    }
+
+    // ── Anteckning ──
+    var noteMember = 0;
+    function openNote(memberId) {
+        if (!current) return;
+        noteMember = memberId;
+        var p = course.participants.find(function (x) { return x.memberId === memberId; });
+        var existing = notes.find(function (n) { return n.memberId === memberId && n.trainingId === current.trainingId; });
+        document.getElementById('mkNoteTitle').textContent = 'Anteckning — ' + (p ? p.name : '') + ', ' + dayLabel(current.date);
+        document.getElementById('mkNoteText').value = existing ? existing.note : '';
+        document.getElementById('mkNoteErr').textContent = '';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('mkNoteModal')).show();
+    }
+    function saveNote() {
+        post('/umbraco/surface/TrainingCourse/SaveNote', {
+            groupId: groupId, trainingId: current.trainingId, memberId: noteMember, note: document.getElementById('mkNoteText').value
+        }).then(function (d) {
+            if (!d.success) { document.getElementById('mkNoteErr').textContent = d.message || 'Kunde inte spara.'; return; }
+            bootstrap.Modal.getInstance(document.getElementById('mkNoteModal')).hide();
+            msg(d.message); loadCourse(groupId);
+        });
+    }
+
+    // ── Koppla träningar ──
+    function openLink() {
+        getJson('/umbraco/surface/TrainingCourse/Candidates?groupId=' + groupId).then(function (d) {
+            var list = (d && d.trainings) || [];
+            document.getElementById('mkLinkList').innerHTML = list.length ? list.map(function (t) {
+                return '<div class="form-check"><input class="form-check-input" type="checkbox" id="mkl' + t.id + '" value="' + t.id + '"' +
+                    (t.linked ? ' checked disabled' : '') + '><label class="form-check-label" for="mkl' + t.id + '">' +
+                    esc(dayLabel(t.date, true)) + (t.startTime ? ' ' + esc(t.startTime) : '') + ' — ' + esc(t.name) +
+                    (t.linked ? ' <span class="text-muted small">(kopplad)</span>' : '') + (t.isCancelled ? ' <span class="text-danger small">(inställd)</span>' : '') +
+                    '</label></div>';
+            }).join('') : '<div class="text-muted">Klubben har inga kommande träningar. Skapa dem under <em>Administration → Träningar</em>.</div>';
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('mkLinkModal')).show();
+        });
+    }
+    function saveLink() {
+        var ids = Array.prototype.slice.call(document.querySelectorAll('#mkLinkList input:checked:not(:disabled)')).map(function (i) { return parseInt(i.value, 10); });
+        post('/umbraco/surface/TrainingCourse/Link', { groupId: groupId, trainingIds: ids }).then(function (d) {
+            bootstrap.Modal.getInstance(document.getElementById('mkLinkModal')).hide();
+            msg(d.message, d.success ? 'success' : 'warning'); loadCourse(groupId);
+        });
+    }
+
+    // ── Tillfällets krav ──
+    var occId = 0;
+    function openOcc(trainingId) {
+        var o = course.occasions.find(function (x) { return x.trainingId === trainingId; });
+        if (!o) return;
+        occId = trainingId;
+        document.getElementById('mkOccTitle').textContent = o.name + ', ' + dayLabel(o.date, true);
+        document.getElementById('mkOccAtt').value = o.attendanceOverride || '';
+        document.getElementById('mkOccReg').value = o.registrationOverride || '';
+        document.getElementById('mkOccNote').value = o.note || '';
+        document.getElementById('mkOccErr').textContent = '';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('mkOccModal')).show();
+    }
+    function saveOcc() {
+        post('/umbraco/surface/TrainingCourse/SetLink', {
+            groupId: groupId, trainingId: occId,
+            attendance: document.getElementById('mkOccAtt').value || null,
+            registration: document.getElementById('mkOccReg').value || null,
+            note: document.getElementById('mkOccNote').value
+        }).then(function (d) {
+            if (!d.success) { document.getElementById('mkOccErr').textContent = d.message || 'Kunde inte spara.'; return; }
+            bootstrap.Modal.getInstance(document.getElementById('mkOccModal')).hide();
+            msg(d.message); loadCourse(groupId);
+        });
+    }
+    function unlinkOcc() {
+        if (!confirm('Ta bort tillfället från kursen? Träningen finns kvar som vanlig klubbträning, och närvaron som redan är registrerad står kvar.')) return;
+        post('/umbraco/surface/TrainingCourse/Unlink', { groupId: groupId, trainingId: occId }).then(function (d) {
+            bootstrap.Modal.getInstance(document.getElementById('mkOccModal')).hide();
+            msg(d.message, d.success ? 'success' : 'warning'); loadCourse(groupId);
+        });
+    }
+
+    function openDefaults() {
+        document.getElementById('mkDefAtt').value = course.defaultAttendance || 'Optional';
+        document.getElementById('mkDefReg').value = course.defaultRegistration || 'NotRequired';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('mkDefModal')).show();
+    }
+    function saveDefaults() {
+        post('/umbraco/surface/TrainingCourse/SetDefaults', {
+            groupId: groupId, attendance: document.getElementById('mkDefAtt').value, registration: document.getElementById('mkDefReg').value
+        }).then(function (d) {
+            bootstrap.Modal.getInstance(document.getElementById('mkDefModal')).hide();
+            msg(d.message, d.success ? 'success' : 'warning'); loadCourse(groupId);
+        });
+    }
+
+    document.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-mk], [data-shot]');
+        if (!b) return;
+        if (b.hasAttribute('data-shot')) { if (shots.length < 5) { shots.push(b.getAttribute('data-shot')); renderShots(); } return; }
+        var act = b.getAttribute('data-mk');
+        var member = parseInt(b.getAttribute('data-member'), 10) || 0;
+        if (act === 'att') setAttendance(member, b.getAttribute('data-status'));
+        else if (act === 'series') openSeries(member);
+        else if (act === 'note') openNote(member);
+        else if (act === 'clear-shots') { shots = []; renderShots(); }
+        else if (act === 'del-series') {
+            if (!confirm('Ta bort serien? Den tas bort ur träningsloggen och, om den nådde brons, ur märkesserierna.')) return;
+            post('/umbraco/surface/TrainingCourse/DeleteSeries', { groupId: groupId, seriesId: parseInt(b.getAttribute('data-series'), 10) }).then(function (d) {
+                if (!d.success) { document.getElementById('mkSeriesErr').textContent = d.message; return; }
+                openSeries(seriesState.memberId);
+            });
+        }
+        else if (act === 'link') openLink();
+        else if (act === 'defaults') openDefaults();
+        else if (act === 'occ') openOcc(parseInt(b.getAttribute('data-training'), 10));
+    });
+    document.querySelectorAll('input[name="mkMode"]').forEach(function (r) {
+        r.addEventListener('change', function () {
+            var t = mode() === 'total';
+            document.getElementById('mkShotsWrap').classList.toggle('d-none', t);
+            document.getElementById('mkTotalWrap').classList.toggle('d-none', !t);
+            updateSum();
+        });
+    });
+    document.getElementById('mkTotal').addEventListener('input', updateSum);
+    document.getElementById('mkSeriesSave').addEventListener('click', saveSeries);
+    document.getElementById('mkNoteSave').addEventListener('click', saveNote);
+    document.getElementById('mkLinkSave').addEventListener('click', saveLink);
+    document.getElementById('mkOccSave').addEventListener('click', saveOcc);
+    document.getElementById('mkOccUnlink').addEventListener('click', unlinkOcc);
+    document.getElementById('mkDefSave').addEventListener('click', saveDefaults);
+    document.getElementById('mkPicker').addEventListener('change', function () { loadCourse(parseInt(this.value, 10)); });
+    // Uppropet uppdaterar listan när serie-dialogen stängs, så märkesläget följer med.
+    document.getElementById('mkSeriesModal').addEventListener('hidden.bs.modal', function () { loadCourse(groupId); });
+
+    loadCourses().then(function (id) { if (id) loadCourse(id); });
+})();
+</script>

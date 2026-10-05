@@ -131,6 +131,7 @@ namespace HpskSite.Controllers
 
             int me = await CurrentMemberIdAsync();
             var member = me > 0 ? _memberService.GetById(me) : null;
+            _participation.ApplyCourseRegistration(ctx, me);   // fas D: kursens krav öppnar anmälan för deltagaren
             var roster = await _participation.BuildRosterAsync(ctx);
             bool canManage = me > 0 && await _participation.CanManageAsync(ctx, me);
             // ⚠️⚠️ `me > 0` OCH `!IsGuest` — BÅDA behövs, och utan dem läcker kortet.
@@ -369,6 +370,7 @@ namespace HpskSite.Controllers
 
             var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+            _participation.ApplyCourseRegistration(ctx, me);   // fas D: kursens krav öppnar anmälan för deltagaren
             if (!ctx.RegistrationRequired) return Json(new { success = false, message = "Det här evenemanget har ingen anmälan." });
             if (!ClubEventParticipationService.IsSignupOpen(ctx)) return Json(new { success = false, message = "Anmälan är stängd." });
 
@@ -483,6 +485,7 @@ namespace HpskSite.Controllers
 
             var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+            _participation.ApplyCourseRegistration(ctx, me);   // fas D: kursens krav öppnar anmälan för deltagaren
             if (!ctx.RegistrationRequired) return Json(new { success = false, message = "Det här evenemanget har ingen anmälan." });
             if (!ClubEventParticipationService.IsSignupOpen(ctx)) return Json(new { success = false, message = "Anmälan är stängd." });
 
