@@ -116,6 +116,11 @@ namespace HpskSite.Services
             // ── Lånevapenbokningar (subject = medlemmen som lånar) ──
             ("FirearmBooking",               "MemberId"),
 
+            // ── Kursen (fas D): anteckningar och registrerade serier om deltagaren ──
+            // AuthorMemberId/RecordedByMemberId är aktörer och räknas inte.
+            ("TrainingCourseNote",           "MemberId"),
+            ("TrainingCourseSeries",         "MemberId"),
+
             // ── Auth / devices / push ──
             ("RefreshTokens",                "MemberId"),
             ("DeviceRegistrations",          "MemberId"),

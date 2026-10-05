@@ -330,6 +330,16 @@ namespace HpskSite.Services
                   WHERE MemberId = @0 AND YEAR(TrainingDate) = @1
                   ORDER BY TrainingDate DESC", memberId, year);
 
+            // Fas D: rader som en funktionär registrerat på ett kurstillfälle finns i
+            // TrainingCourseSeries — de är funktionärsregistrerade, inte självrapporterade.
+            var functionaryRows = new HashSet<int>();
+            try
+            {
+                functionaryRows = scope.Database.Fetch<int>(
+                    "SELECT DISTINCT TrainingScoreId FROM dbo.TrainingCourseSeries WHERE MemberId = @0", memberId).ToHashSet();
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "Kursserierna kunde inte läsas"); }
+
             var entries = new List<MemberActivityEntry>();
             foreach (var r in rows)
             {
@@ -370,11 +380,9 @@ namespace HpskSite.Services
                 {
                     Date = r.TrainingDate,
                     Kind = kind,
-                    // ALL träningslogg är självrapporterad. Funktionärsverifiering av träningspass
-                    // är INTE byggd (verifierat mot schemat 2026-09-01: TrainingScores har inga
-                    // Verified*-kolumner). Den dagen den byggs är det HÄR underlagsstyrkan höjs —
-                    // inget annat i sammanställningen behöver ändras.
-                    Evidence = ActivityEvidence.SelfReported,
+                    // Träningsloggen är självrapporterad — utom rader en funktionär registrerat på
+                    // ett kurstillfälle (fas D, TrainingCourseSeries). Det är HÄR underlagsstyrkan höjs.
+                    Evidence = functionaryRows.Contains(r.Id) ? ActivityEvidence.FunctionaryRecorded : ActivityEvidence.SelfReported,
                     Title = title,
                     Detail = detail.Count > 0 ? string.Join(" · ", detail) : null,
                     SourceId = r.Id,

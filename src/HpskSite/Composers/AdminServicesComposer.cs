@@ -165,6 +165,8 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<ClubEventParticipationService>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingMigrationService>();
             builder.Services.AddScoped<HpskSite.Services.Training.ClubTrainingService>();
+            builder.Services.AddScoped<HpskSite.Services.Training.TrainingCourseService>();
+            builder.Services.AddScoped<HpskSite.Services.Training.TrainingCourseSeriesService>();
             // Aktivitetssammanställning per medlem och år — mellanlagret mellan närvarologgningen
             // och Föreningsintyget. Helt härledd ur träningslogg + tävlingsdeltagande +
             // evenemangsnärvaro; ETT svar som både Min sida och intygsgenereringen läser.
