@@ -1984,22 +1984,23 @@
 
         var h = '';
 
-        // Horisonten. Sätts i dagar, och 0 betyder ingen gräns — sagt i klartext, för "0" som
-        // "obegränsat" är inte självklart för någon.
+        // När bokningen tidigast öppnar, i dagar FÖRE tillfället, från midnatt. 0 = samma dag och är
+        // förvalet (Stefan 2026-10-05) — utan gräns bokades årets alla tillfällen långt i förväg.
         if (!j.horizonPropertyExists) {
             h += lwMissing(j.horizonProperty);
         } else {
             h += '<div class="mb-3">';
             h += '<label class="form-label small fw-semibold mb-1" for="vapLwHorizon">' +
-                 'Hur långt fram får medlemmar boka?</label>';
-            h += '<div class="input-group input-group-sm" style="max-width:16rem">';
+                 'När får medlemmar tidigast boka lånevapen?</label>';
+            h += '<div class="input-group input-group-sm" style="max-width:20rem">';
             h += '<input type="number" class="form-control" id="vapLwHorizon" min="0" max="365" ' +
                  'value="' + (j.horizonDays || 0) + '">';
-            h += '<span class="input-group-text">dagar</span></div>';
+            h += '<span class="input-group-text">dagar före tillfället</span></div>';
             h += '<div class="form-text">' +
-                 '<strong>0 = ingen gräns.</strong> En gräns hindrar att någon bokar upp hela ' +
-                 'säsongen i förväg och sedan inte kommer — vapnet står då reserverat för en ' +
-                 'nybörjare som hade velat ha det.</div>';
+                 '<strong>0 = samma dag, från midnatt</strong> (förval). Bokningen öppnar vid midnatt så ' +
+                 'många dagar före tillfället. Utan gräns bokar medlemmarna långt innan de vet om de kan ' +
+                 'komma, och vapnet står reserverat för någon som inte dyker upp. Kursens tilldelningar ' +
+                 'påverkas inte.</div>';
             h += '</div>';
         }
 

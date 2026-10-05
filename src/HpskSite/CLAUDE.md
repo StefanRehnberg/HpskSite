@@ -10010,6 +10010,16 @@ skrivs i en av dem försvinner tyst vid nästa sparning från en annan.
 horisonten finns för att hindra ENSKILDA från att lägga beslag på vapen hela säsongen. Samma regel
 på båda hade gjort kursplanering omöjlig för att skydda mot något kursen inte gör.
 
+⚠️⚠️ **`lanevapenHorizonDays` = dagar FÖRE tillfället som bokningen öppnar, från midnatt. 0 = SAMMA
+DAG och är förvalet** (Stefan 2026-10-05). Tidigare betydde 0 "ingen gräns", och då bokade
+medlemmarna årets alla tillfällen i förväg. Regeln bor i `LoanWeaponClubSettings`
+(`WithinHorizon`, `OpensOn`, `RuleText`; `LoanWeaponBookingOpensTests`). Undantagna: `Tilldelad`
+och **externa lån** (`OccasionKind = Externt` — planeras i förväg och kräver medföljandes ja).
+Ytorna visar när bokningen öppnar i stället för ett val som vägras: anmälningskortet
+(`loanWeapons.bookingOpen/bookingOpensText/bookingRule`) och /lanevapen (`notYetMessage`).
+⚠️ Valvtavlan (`GetVaultBoard` med tillfälle) listar också AVBOKADE lån — `lanevapen-verify`
+"en rad på tillfället" är röd av det, inte av horisonten. Ej åtgärdat.
+
 ### Externt lån = en bokning av ett vapen OCH en person
 
 `FirearmOccasionKind.Externt` är det enda slaget där vapnet lämnar klubbens område, och därmed det

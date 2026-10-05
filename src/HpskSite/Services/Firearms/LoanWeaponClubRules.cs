@@ -53,9 +53,11 @@ namespace HpskSite.Services.Firearms
                     AllowExternalPropertyExists = hasAllow,
                     HorizonPropertyExists = hasHorizon,
                     AllowExternal = hasAllow && club.GetValue<bool>(AllowExternalProperty),
-                    // ⚠️ 0 betyder INGEN gräns, inte "noll dagar framåt". En klubb som aldrig rört
-                    // inställningen ska inte plötsligt bara kunna boka i dag.
-                    HorizonDays = hasHorizon ? Math.Max(0, club.GetValue<int>(HorizonProperty)) : 0,
+                    // ⚠️ 0 = SAMMA DAG, från midnatt (Stefan 2026-10-05). Det är förvalet med flit:
+                    // utan gräns bokade medlemmarna årets alla tillfällen långt innan de visste om de
+                    // kunde komma, och vapnen stod reserverade för folk som aldrig dök upp. En klubb
+                    // som vill öppna tidigare sätter antalet dagar.
+                    HorizonDays = hasHorizon ? Math.Clamp(club.GetValue<int>(HorizonProperty), 0, 365) : 0,
                 };
             }
             catch (Exception ex)
@@ -101,14 +103,25 @@ namespace HpskSite.Services.Firearms
         /// </summary>
         public bool AllowExternal { get; set; }
 
-        /// <summary>Hur långt fram en medlem får boka. <b>0 = ingen gräns.</b></summary>
+        /// <summary>
+        /// Hur många dagar FÖRE tillfället bokningen öppnar, från midnatt. <b>0 = samma dag.</b>
+        /// Gäller medlemmens egna bokningar, aldrig klubbens tilldelningar (kursen).
+        /// </summary>
         public int HorizonDays { get; set; }
 
         public bool AllowExternalPropertyExists { get; set; }
         public bool HorizonPropertyExists { get; set; }
 
-        /// <summary>Ligger datumet inom klubbens horisont?</summary>
+        /// <summary>Får ett tillfälle som börjar <paramref name="from"/> bokas nu?</summary>
         public bool WithinHorizon(DateTime from, DateTime now) =>
-            HorizonDays <= 0 || from.Date <= now.Date.AddDays(HorizonDays);
+            from.Date <= now.Date.AddDays(HorizonDays);
+
+        /// <summary>Dagen (från midnatt) då ett tillfälle den dagen går att boka.</summary>
+        public DateTime OpensOn(DateTime occasionDay) => occasionDay.Date.AddDays(-HorizonDays);
+
+        /// <summary>Regeln i klartext, för beskeden och inställningen.</summary>
+        public string RuleText => HorizonDays == 0
+            ? "från midnatt samma dag som tillfället"
+            : HorizonDays == 1 ? "från midnatt dagen före tillfället" : $"från midnatt {HorizonDays} dagar före tillfället";
     }
 }

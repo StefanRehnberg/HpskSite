@@ -348,9 +348,18 @@ namespace HpskSite.Controllers
             var taken = _bookings.BookedFirearmIds(clubId, from, to);
             var usual = memberId > 0 ? _bookings.UsualFirearmFor(memberId, clubId) : null;
 
+            // ⚠️ När bokningen öppnar (klubbens inställning, förval: midnatt samma dag). Kortet visar
+            // datumet i stället för en knapp som bara skulle vägras — servern prövar ändå i Create.
+            var rules = _loanRules.For(clubId);
+            var opensOn = rules.OpensOn(day);
+
             return new
             {
                 offered = true,
+                bookingOpen = rules.WithinHorizon(day, DateTime.Now),
+                bookingOpensOn = opensOn.ToString("yyyy-MM-dd"),
+                bookingOpensText = opensOn.ToString("dddd d MMMM", new System.Globalization.CultureInfo("sv-SE")),
+                bookingRule = rules.RuleText,
                 propertyExists,
                 loanable,
                 occupied = _bookings.CountOccupiedInWindow(clubId, from, to),
