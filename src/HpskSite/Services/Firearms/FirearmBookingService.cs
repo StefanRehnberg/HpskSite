@@ -558,10 +558,16 @@ namespace HpskSite.Services.Firearms
             var isClubAssignment = string.Equals(
                 request.Source, FirearmBookingSource.Tilldelad, StringComparison.Ordinal);
 
-            if (!isClubAssignment && !rules.WithinHorizon(from, DateTime.Now))
+            // ⚠️ Externa lån (vapnet följer med till en tävling någon annanstans) undantas också: de
+            // planeras i förväg och kräver att en medföljande hinner svara — med förvalet "samma dag"
+            // hade de inte gått att göra alls. Regeln gäller tillfällen på klubbens egen bana.
+            var isExternal = string.Equals(request.OccasionKind, FirearmOccasionKind.Externt, StringComparison.Ordinal);
+
+            if (!isClubAssignment && !isExternal && !rules.WithinHorizon(from, DateTime.Now))
             {
-                return (0, $"Klubben tar bokningar högst {rules.HorizonDays} dagar framåt. " +
-                           "Prova igen närmare tillfället.");
+                var opens = rules.OpensOn(from);
+                return (0, $"Lånevapen kan bokas {rules.RuleText}. Det här tillfället går att boka från och med " +
+                           opens.ToString("dddd d MMMM", new System.Globalization.CultureInfo("sv-SE")) + ".");
             }
 
             var blocking = string.Join(",", FirearmBookingStatus.Blocking.Select(s => $"'{s}'"));

@@ -25,6 +25,14 @@
     .cal-copy-mode .kc-day:not(.cc-past):hover { outline: 2px solid var(--bs-primary); outline-offset: -2px; }
     .cc-day-card .cc-row { padding: .5rem 0; border-top: 1px solid var(--bs-border-color); }
     .cc-day-card .cc-row:first-of-type { border-top: 0; }
+    /* Varje filter är en egen avgränsad ruta: switch, färg och text hör ihop och står med tydligt
+       avstånd till nästa (Stefan 2026-10-05: det gick inte att se vilken switch texten hörde till).
+       Hela rutan är klickbar via etiketten. Bara Bootstrap-variabler, så den följer båda temana. */
+    .cc-filter { display: inline-flex; align-items: center; gap: .4rem; margin: 0; padding: .2rem .7rem .2rem 2.6rem;
+                 border: 1px solid var(--bs-border-color); border-radius: 2rem; background: var(--bs-body-bg); min-height: 2rem; }
+    .cc-filter .form-check-input { margin-top: 0; }
+    .cc-filter .form-check-label { display: inline-flex; align-items: center; gap: .35rem; cursor: pointer; }
+    .cc-filter:has(.form-check-input:checked) { border-color: var(--bs-primary-border-subtle); background: var(--bs-tertiary-bg); }
 </style>
 
 <div class="club-calendar kc-wrap" id="ccRoot" data-club-id="@clubId">
@@ -45,22 +53,22 @@
 
     @* Vad kalendern visar. Varje sort är en switch med sin färg intill — förklaringen och filtret
        är samma rad, så en sort som är avslagen syns som avslagen där man läser vad färgen betyder. *@
-    <div class="kc-legend mb-2 d-flex flex-wrap align-items-center gap-1" id="ccScopeBar" aria-label="Visa i kalendern">
-        <div class="form-check form-switch mb-0 me-2">
+    <div class="kc-legend mb-2 d-flex flex-wrap align-items-center gap-2" id="ccScopeBar" aria-label="Visa i kalendern">
+        <div class="form-check form-switch cc-filter">
             <input class="form-check-input" type="checkbox" role="switch" id="ccScope-training" data-cal-scope="training">
-            <label class="form-check-label small" for="ccScope-training"><i class="sw kc-s-traning me-1"></i>Träningar</label>
+            <label class="form-check-label small" for="ccScope-training"><i class="sw m-0 kc-s-traning"></i>Träningar</label>
         </div>
-        <div class="form-check form-switch mb-0 me-2">
+        <div class="form-check form-switch cc-filter">
             <input class="form-check-input" type="checkbox" role="switch" id="ccScope-competition" data-cal-scope="competition">
-            <label class="form-check-label small" for="ccScope-competition"><i class="sw kc-s-tavling me-1"></i>Tävlingar</label>
+            <label class="form-check-label small" for="ccScope-competition"><i class="sw m-0 kc-s-tavling"></i>Tävlingar</label>
         </div>
-        <div class="form-check form-switch mb-0 me-2">
+        <div class="form-check form-switch cc-filter">
             <input class="form-check-input" type="checkbox" role="switch" id="ccScope-club" data-cal-scope="club">
-            <label class="form-check-label small" for="ccScope-club"><i class="sw kc-s-handelse me-1"></i>Övrigt i klubben</label>
+            <label class="form-check-label small" for="ccScope-club"><i class="sw m-0 kc-s-handelse"></i>Övrigt i klubben</label>
         </div>
-        <div class="form-check form-switch mb-0 me-2">
+        <div class="form-check form-switch cc-filter">
             <input class="form-check-input" type="checkbox" role="switch" id="ccScope-outside" data-cal-scope="outside">
-            <label class="form-check-label small" for="ccScope-outside" title="Kretsens händelser och andra klubbars öppna tävlingar"><i class="sw kc-s-utanfor me-1"></i>Utanför klubben</label>
+            <label class="form-check-label small" for="ccScope-outside" title="Kretsens händelser och andra klubbars öppna tävlingar"><i class="sw m-0 kc-s-utanfor"></i>Utanför klubben</label>
         </div>
         <span class="small text-muted ms-auto" id="calHiddenNote"></span>
     </div>

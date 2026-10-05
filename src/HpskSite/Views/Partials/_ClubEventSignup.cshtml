@@ -111,9 +111,19 @@
             return h;
         }
 
+        // ⚠️ Bokningen öppnar först enligt klubbens regel (förval: midnatt samma dag). Före dess visas
+        // DATUMET, inte ett val som servern ändå skulle vägra — och inte ingenting, för då tror
+        // nybörjaren att det inte finns lånevapen alls.
+        function loanNotYet(lw) {
+            return '<div class="small text-muted"><i class="bi bi-clock me-1"></i>Lånevapen kan bokas '
+                 + esc(lw.bookingRule || 'närmare tillfället') + ' — för det här tillfället från och med <strong>'
+                 + esc(lw.bookingOpensText || '') + '</strong>.</div>';
+        }
+
         function loanWeaponBlock(d) {
             const lw = d.loanWeapons;
             if (!lw || !lw.offered) return '';
+            if (lw.bookingOpen === false) return '<div class="border rounded p-2 mb-2">' + loanNotYet(lw) + '</div>';
 
             const kvar = loanFree(lw);
             let h = '<div class="border rounded p-2 mb-2">';
@@ -161,7 +171,9 @@
             } else {
                 h += '<div class="small"><i class="bi bi-safe2 text-muted me-1"></i>'
                   +  'Du har <strong>inte</strong> bokat lånevapen.</div>';
-                if (d.cancelOpen && loanFree(lw) > 0) {
+                if (lw.bookingOpen === false) {
+                    h += '<div class="mt-1">' + loanNotYet(lw) + '</div>';
+                } else if (d.cancelOpen && loanFree(lw) > 0) {
                     h += '<div class="mt-2 d-none" id="ces-loan-add-pick">' + weaponPicker(lw)
                       +  '<button type="button" class="btn btn-sm btn-primary mt-2" id="ces-loan-add">'
                       +  'Boka lånevapen</button></div>';
@@ -421,7 +433,9 @@
             if (!d.signupOpen) return h + '<div class="small text-muted">Bokningen av lånevapen är stängd.</div>';
             h += '<div class="border rounded p-2 mb-2">'
               +  '<div class="fw-semibold mb-1"><i class="bi bi-safe2 me-1"></i>Behöver du låna klubbvapen?</div>';
-            if (loanFree(lw) > 0) {
+            if (lw.bookingOpen === false) {
+                h += loanNotYet(lw);
+            } else if (loanFree(lw) > 0) {
                 h += '<div class="small text-muted mb-2">Boka ett här, så vet vapenansvarig att du kommer och behöver ett vapen.</div>'
                   +  weaponPicker(lw)
                   +  '<button type="button" class="btn btn-primary w-100 mt-2" id="ces-signup">Boka lånevapen</button>';

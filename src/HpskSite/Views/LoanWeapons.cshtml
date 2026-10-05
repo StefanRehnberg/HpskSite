@@ -272,7 +272,10 @@
             return;
         }
 
-        var html = '<p class="small text-muted mb-2">Visar tillgänglighet ' +
+        // Öppnar bokningen senare (klubbens regel) säger rutan när — annars ser vapnen lediga ut
+        // utan en Boka-knapp, och det läses som ett fel.
+        var html = (j.notYetMessage ? '<div class="alert alert-info small py-2"><i class="bi bi-clock me-1"></i>' + esc(j.notYetMessage) + '</div>' : '') +
+            '<p class="small text-muted mb-2">Visar tillgänglighet ' +
             esc(j.windowLabel) + '.</p>' +
             '<div class="table-responsive"><table class="table align-middle">' +
             '<thead><tr><th>Nr</th><th>Vapen</th><th>Status</th><th></th></tr></thead><tbody>';
@@ -289,6 +292,9 @@
             } else if (w.isBooked) {
                 html += '<span class="badge bg-warning-subtle text-warning-emphasis">' +
                     '<i class="bi bi-clock-history me-1"></i>Bokat</span>';
+            } else if (j.notYetMessage && w.statusLabel !== 'Service' && w.statusLabel !== 'Utgallrat') {
+                html += '<span class="badge bg-info-subtle text-info-emphasis">' +
+                    '<i class="bi bi-clock me-1"></i>Kan bokas senare</span>';
             } else {
                 html += '<span class="badge bg-secondary-subtle text-secondary-emphasis">' +
                     esc(w.statusLabel) + '</span>';

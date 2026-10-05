@@ -99,14 +99,24 @@ namespace HpskSite.Controllers
                     .Select(b => b.FirearmId)
                     .ToHashSet();
 
+                // ⚠️ Samma regel som bokningen (FirearmBookingService.Create): öppnar bokningen inte
+                // förrän senare får listan inte säga "ledig" om ett vapen som sedan vägras.
+                var rules = _clubRules.For(clubId);
+                var notYet = !rules.WithinHorizon(winFrom, DateTime.Now);
+                var notYetMessage = notYet
+                    ? $"Lånevapen kan bokas {rules.RuleText} — för den här dagen från och med " +
+                      rules.OpensOn(winFrom).ToString("dddd d MMMM", new System.Globalization.CultureInfo("sv-SE")) + "."
+                    : null;
+
                 return Json(new
                 {
                     success = true,
                     windowLabel = label,
+                    notYetMessage,
                     weapons = weapons.Select(f =>
                     {
                         // Service och utgallrat blockerar oavsett kalender — det är ett fysiskt läge.
-                        var blockedByStatus = f.Status is FirearmStatus.Service or FirearmStatus.Utgallrat;
+                        var blockedByStatus = f.Status is FirearmStatus.Service or FirearmStatus.Utgallrat || notYet;
                         var isBooked = booked.Contains(f.Id);
                         return new
                         {
