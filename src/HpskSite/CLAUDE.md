@@ -3693,8 +3693,28 @@ datum, och med betalningar i liggaren. `TrainingMigration/Preview` (läser) och 
 bara sajtadmin, `clubId` begränsar. Torrkörning: `hpsk-verify/training-migration-preview.mjs`.
 
 **Ytorna (B4/B5).** Klubbadmin → **Träningar** (`ClubAdminTrainings.cshtml`, `ClubTrainingController`):
-ny träning, nytt schema (förhandsvisning och skapande går genom samma `Plan()`), byt skjutledare,
-ställ in. **En träning med deltagare eller lånebokningar raderas aldrig** — svaret pekar på att ställa
+ny träning, byt skjutledare, ställ in.
+
+**⚠️ Ett schema skapas genom att KOPIERA en träning (Stefan 2026-10-05).** "Nytt träningsschema"
+och endpointsen `PreviewSchedule`/`CreateSchedule` är borttagna (tjänstens `CreateSchedule`/`Plan`
+finns kvar för Ankeborg-seedern). En serie = `ClubTraining.ScheduleId`; `EnsureSeries` gör
+förlagan till seriens första tillfälle, ingen migrering.
+- `CopyTo(sourceId, datum)` är ENDA skrivvägen: en transaktion, kopierar allt utom datumet
+  (anmälningsdatumet förskjuts lika mycket), hoppar över dagar som redan finns i serien.
+  Två ingångar: **Kopiera till en period…** (`PreviewCopyPeriod`/`CopyPeriod` via
+  `PlanCopyPeriod` → `TrainingSchedulePlanner.Expand`; förhandsvisningen räknar bara NYA dagar)
+  och **kalenderns läge** (`ClubCalendar.cshtml`, `calCopy*`; ett dagklick → `CopyToDates`,
+  Ångra → `Delete`). ⚠️ Läget kapar `showDayEvents`. ⚠️ `calCopyStart` hämtar källorna PÅ NYTT
+  — en cache från sidladdningen gav "lägg först in en träning" direkt efter att man gjort det.
+- **"Den här och N kommande"** (`TrainingInput.Scope = "following"` → `ApplyToFollowing`):
+  namn, tider, gren, plats, beskrivning, anmälan, platser, lånevapen, obligatorisk på seriens
+  tillfällen EFTER det redigerade och från i dag. ⚠️ Skjutledaren och inställd är per tillfälle
+  och följer aldrig med. `TrainingRow.FollowingInSeries` driver knappens text.
+- **Lånevapen kräver anmälan** — `Save` vägrar annars (bokningen sker i anmälan). Dialogen
+  varnar när klubben har noll lånebara vapen (`List` bär `loanableWeapons`).
+- Panelen säger **"Ingen anmälan behövs — kom direkt"** (`#tpNoSignup`) när varken träningen
+  eller en kurs medlemmen går kräver anmälan.
+Svit: `hpsk-verify/training-copy-verify.mjs` 31/31 (A/B: de tre reglerna borta → 7 röda). **En träning med deltagare eller lånebokningar raderas aldrig** — svaret pekar på att ställa
 in. Den utsedda skjutledaren håller upprop för sitt tillfälle. Medlemmen anmäler sig i en **panel**
 (`_TrainingPanelModal` → `/traning/panel?id=` i en iframe, `#training-{id}` i kalendern/flödet), aldrig
 en egen sida. Händelsedialogerna har inte längre typen Träning eller lånevapen. Statistiken och
@@ -3744,7 +3764,7 @@ FÖRE deployen**. Efter deployen: torrkör och kör migreringen av gamla tränin
 `fix-seeded-attendance-status.sql` bara om Ankeborg-seedern körts i prod.
 
 Test: `TrainingSchedulePlannerTests`, `TrainingMigrationRulesTests`, `ActivityEventRuleTests`,
-`TrainingCourseRulesTests`. Sviter: `club-training-verify` 40/40, `training-migration-verify` 35/35,
+`TrainingCourseRulesTests`. Sviter: `club-training-verify` 42/42, `training-copy-verify` 31/31, `training-migration-verify` 35/35,
 `training-panel-verify` 29/29, `training-stats-verify` 2/2, `event-dialog-no-training-verify` 12/12,
 `course-verify` 64/64 (A/B: deltagarfiltret + kursanmälan → 2 röda; id-regeln → 6 röda),
 `minkurs-entry-verify` 9/9.

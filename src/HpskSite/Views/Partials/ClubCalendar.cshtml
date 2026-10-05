@@ -9,6 +9,11 @@
                 <h5 class="mb-0">
                     <i class="bi bi-calendar-event me-2"></i>Klubbkalender
                 </h5>
+                <div class="d-flex align-items-center gap-2">
+                @* Bara för klubbadmin — visas när servern svarar att man får kopiera träningar. *@
+                <button type="button" class="btn btn-sm btn-outline-success d-none" id="calCopyStart">
+                    <i class="bi bi-calendar-plus me-1"></i>Lägg in träningar…
+                </button>
                 <div class="btn-group btn-group-sm" role="group" aria-label="Kalendervy">
                     <button type="button" class="btn btn-outline-primary active" id="calendarViewBtn" title="Kalendervy">
                         <i class="bi bi-calendar3"></i>
@@ -16,6 +21,7 @@
                     <button type="button" class="btn btn-outline-primary" id="listViewBtn" title="Listvy">
                         <i class="bi bi-list-ul"></i>
                     </button>
+                </div>
                 </div>
             </div>
         </div>
@@ -28,6 +34,19 @@
                 <button type="button" class="btn btn-sm btn-outline-secondary" data-cal-scope="club" aria-pressed="false"><i class="bi bi-people me-1"></i>Övrigt i klubben</button>
                 <button type="button" class="btn btn-sm btn-outline-dark" data-cal-scope="outside" aria-pressed="false" title="Kretsens händelser och andra klubbars öppna tävlingar"><i class="bi bi-globe2 me-1"></i>Utanför klubben</button>
                 <small class="text-muted ms-auto" id="calHiddenNote"></small>
+            </div>
+
+            <!-- Lägg in träningar dag för dag (klubbadmin, Stefan 2026-10-05) -->
+            <div class="alert alert-primary d-none" id="calCopyBar" role="region" aria-label="Lägg in träningar">
+                <div class="fw-semibold mb-1"><i class="bi bi-calendar-plus me-1"></i>Lägg in träningar dag för dag</div>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <label class="small mb-0" for="calCopySource">Träning att kopiera</label>
+                    <select class="form-select form-select-sm w-auto" id="calCopySource"></select>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="calCopyUndo" disabled>Ångra senaste</button>
+                    <button type="button" class="btn btn-sm btn-primary ms-auto" id="calCopyDone">Klar</button>
+                </div>
+                <div class="small mt-2">Klicka på en dag i kalendern så läggs träningen in där. Varje klick sparas direkt — allt utom datumet kommer från träningen du valt.</div>
+                <div class="small mt-1 fw-semibold" id="calCopyMsg" aria-live="polite"></div>
             </div>
 
             <!-- Calendar Navigation -->
@@ -108,6 +127,9 @@
 </div>
 
 <style>
+    /* Lägg in träningar: dagarna går att klicka på för att lägga in en kopia. */
+    .cal-copy-mode .calendar-day:not(.past-date) { cursor: copy; }
+    .cal-copy-mode .calendar-day:not(.past-date):hover { outline: 2px solid var(--bs-primary); outline-offset: -2px; }
 .calendar-grid {
     display: flex;
     flex-direction: column;
@@ -417,6 +439,7 @@
 }
 </style>
 
+@await Html.PartialAsync("_HtmlEscape")
 @await Html.PartialAsync("_EventBadges")
 @await Html.PartialAsync("_TrainingPanelModal")
 @* Fas B5: en träning har url "#training-{id}"; _TrainingPanelModal fångar den länken och öppnar
@@ -907,7 +930,99 @@ function renderDayCell(date, otherMonth) {
     return html;
 }
 
+// ── Lägg in träningar dag för dag ─────────────────────────────────────────────────────────────
+// Klubbadmin väljer en träning och klickar på dagar; varje klick skapar en kopia i samma serie
+// (ClubTraining/CopyToDates). Läget kapar dagklicket, så det fungerar i månadsrutnätet.
+const calCopy = { on: false, sources: null, created: [] };
+function calCopyToken() { const el = document.querySelector('input[name="__RequestVerificationToken"]'); return el ? el.value : ''; }
+function calCopyPost(url, body) {
+    return fetch(url, { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': calCopyToken() }, body: JSON.stringify(body) })
+        .then(r => r.text()).then(t => { try { return JSON.parse(t); } catch (e) { return { success: false, message: 'Sidan har varit öppen för länge — ladda om och försök igen.' }; } });
+}
+function calCopyLabel(t) {
+    const d = new Date(t.date + 'T12:00:00');
+    return t.name + ' (' + d.toLocaleDateString('sv-SE', { weekday: 'short' }) + (t.startTime ? ' ' + t.startTime : '') + ')';
+}
+function calCopyLoadSources() {
+    if (calCopy.sources) return Promise.resolve(calCopy.sources);
+    return fetch('/umbraco/surface/ClubTraining/CopySources?clubId=' + clubId, { credentials: 'same-origin' })
+        .then(r => r.ok ? r.json() : { success: false }).catch(() => ({ success: false }))
+        .then(d => { calCopy.sources = (d && d.success) ? (d.trainings || []) : null; return calCopy.sources; });
+}
+function calCopyStart(sourceId, scheduleId) {
+    calCopy.sources = null; // hämta alltid på nytt — träningen kan just ha lagts in under Admin
+    calCopyLoadSources().then(list => {
+        if (!list || !list.length) { alert('Lägg först in en träning under Admin → Träningar. Den kopierar du sedan till fler dagar.'); return; }
+        const sel = document.getElementById('calCopySource');
+        sel.innerHTML = list.map(t => '<option value="' + t.id + '">' + hpskEsc(calCopyLabel(t)) + '</option>').join('');
+        // Listan har en rad per serie (seriens senaste tillfälle) — matcha på id, annars på serien.
+        const hit = list.find(t => t.id === sourceId) || (scheduleId ? list.find(t => t.scheduleId === scheduleId) : null);
+        if (hit) sel.value = String(hit.id);
+        calCopy.on = true; calCopy.created = [];
+        document.getElementById('calCopyUndo').disabled = true;
+        document.getElementById('calCopyMsg').textContent = '';
+        document.getElementById('calCopyBar').classList.remove('d-none');
+        document.querySelector('.club-calendar').classList.add('cal-copy-mode');
+        if (currentView === 'list') switchView('calendar');
+        document.getElementById('selectedDayEvents').style.display = 'none';
+        document.getElementById('calCopyBar').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+}
+function calCopyStop() {
+    calCopy.on = false;
+    document.getElementById('calCopyBar').classList.add('d-none');
+    document.querySelector('.club-calendar').classList.remove('cal-copy-mode');
+    if (typeof window.hpskLoadClubTrainings === 'function') window.hpskLoadClubTrainings();
+}
+function calCopyToDay(dateStr) {
+    const msgEl = document.getElementById('calCopyMsg');
+    const today = localDateKey(new Date());
+    if (dateStr < today) { msgEl.textContent = 'Välj en dag från i dag och framåt.'; return; }
+    const sourceId = parseInt(document.getElementById('calCopySource').value, 10) || 0;
+    // "okt." bär redan en punkt — ta bort den så att meningen inte får två.
+    const label = new Date(dateStr + 'T12:00:00').toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\.$/, '');
+    msgEl.textContent = 'Lägger in ' + label + '…';
+    calCopyPost('/umbraco/surface/ClubTraining/CopyToDates', { sourceId: sourceId, dates: [dateStr] }).then(d => {
+        if (d.success) {
+            (d.createdIds || []).forEach(id => calCopy.created.push({ id: id, label: label }));
+            document.getElementById('calCopyUndo').disabled = calCopy.created.length === 0;
+            msgEl.textContent = 'Inlagd ' + label + '. Klicka på nästa dag, eller på Klar.';
+            calCopy.sources = null; // nästa öppning ser de nya tillfällena
+            loadCalendarData();
+        } else {
+            msgEl.textContent = (d.skippedDates && d.skippedDates.length) ? 'Träningen finns redan ' + label + '.' : (d.message || 'Det gick inte att lägga in träningen.');
+        }
+    });
+}
+function calCopyUndo() {
+    const last = calCopy.created.pop();
+    if (!last) return;
+    const msgEl = document.getElementById('calCopyMsg');
+    calCopyPost('/umbraco/surface/ClubTraining/Delete', { trainingId: last.id }).then(d => {
+        if (!d.success) { calCopy.created.push(last); msgEl.textContent = d.message || 'Det gick inte att ångra.'; return; }
+        msgEl.textContent = 'Borttagen ' + last.label + '.';
+        document.getElementById('calCopyUndo').disabled = calCopy.created.length === 0;
+        loadCalendarData();
+    });
+}
+// Admin-panelens "Kopiera dag för dag i kalendern…" byter till kalenderfliken och startar läget.
+window.hpskCalendarCopyMode = function (trainingId, scheduleId) {
+    const tabBtn = document.querySelector('[data-bs-target="#clubCalendar"]');
+    if (tabBtn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(tabBtn).show();
+    calCopyStart(trainingId, scheduleId);
+};
+document.addEventListener('DOMContentLoaded', function () {
+    const start = document.getElementById('calCopyStart');
+    if (!start || !(clubId > 0)) return;
+    calCopyLoadSources().then(list => { if (list) start.classList.remove('d-none'); });
+    start.addEventListener('click', () => calCopyStart(0, 0));
+    document.getElementById('calCopyDone').addEventListener('click', calCopyStop);
+    document.getElementById('calCopyUndo').addEventListener('click', calCopyUndo);
+});
+
 function showDayEvents(dateStr) {
+    if (calCopy.on) { calCopyToDay(dateStr); return; }
     const dayEvents = window.calendarEvents?.filter(e => eventDateKey(e) === dateStr) || [];
 
     const eventsList = document.getElementById('eventsList');

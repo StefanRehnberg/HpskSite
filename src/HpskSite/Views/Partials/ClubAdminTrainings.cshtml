@@ -1,5 +1,10 @@
 @*
-    Fas B4: klubbens träningar i klubbadmin — lista, Ny träning, Nytt schema, skjutledarbyte.
+    Fas B4: klubbens träningar i klubbadmin — lista, Ny träning, kopiera, skjutledarbyte.
+
+    ⚠️ Ett schema skapas genom att KOPIERA en träning (Stefan 2026-10-05): först en träning som
+    fungerar, sedan "Kopiera till en period…" här eller "Kopiera in träning" dag för dag i
+    klubbens kalender. Kopiorna hör till samma serie (ScheduleId), så Spara frågar "bara den här"
+    eller "den här och alla kommande".
 
     ⚠️ Ingen landningssida per tillfälle. "Öppna" går till deltagarsidan
     (/evenemang/deltagare?e={id}&kind=training) — samma sida som för en händelse, så upprop,
@@ -25,7 +30,8 @@
                 <ul class="dropdown-menu dropdown-menu-end" style="min-width:240px">
                     <li><h6 class="dropdown-header">Skapa</h6></li>
                     <li><button class="dropdown-item" type="button" data-ctr="new"><i class="bi bi-plus-circle me-2"></i>Ny träning</button></li>
-                    <li><button class="dropdown-item" type="button" data-ctr="schedule"><i class="bi bi-calendar-week me-2"></i>Nytt träningsschema</button></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><span class="dropdown-item-text small text-muted" style="white-space:normal">Ett schema skapar du genom att kopiera en träning — välj <strong>Kopiera</strong> i träningens meny.</span></li>
                 </ul>
             </div>
         </div>
@@ -97,6 +103,8 @@
                 <div class="form-check mb-2">
                     <input class="form-check-input" type="checkbox" id="ctrLoan">
                     <label class="form-check-label" for="ctrLoan">Lånevapen erbjuds</label>
+                    <div class="form-text" id="ctrLoanNote">Medlemmen bokar lånevapnet när hen anmäler sig, så det kräver att anmälan krävs.</div>
+                    <div class="form-text text-warning-emphasis d-none" id="ctrLoanNone"><i class="bi bi-exclamation-triangle me-1"></i>Klubben har inga lånebara vapen inlagda — lägg in dem under Klubbvapen, annars kan ingen boka.</div>
                 </div>
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" id="ctrMandatory">
@@ -107,39 +115,23 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-outline-primary d-none" id="ctrSaveFollowing">Spara den här och alla kommande</button>
                 <button type="button" class="btn btn-primary" id="ctrSaveTraining">Spara</button>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Nytt träningsschema -->
+<!-- Kopiera till en period -->
 <div class="modal fade" id="ctrScheduleModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Nytt träningsschema</h5>
+                <h5 class="modal-title" id="ctsTitle">Kopiera till en period</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <div class="mb-3">
-                    <label class="form-label" for="ctsName">Namn</label>
-                    <input class="form-control" id="ctsName" autocomplete="off" placeholder="Tisdagar och torsdagar HT26">
-                </div>
-                <div class="row g-2 mb-3">
-                    <div class="col-12 col-sm-6">
-                        <label class="form-label" for="ctsDiscipline">Gren</label>
-                        <select class="form-select" id="ctsDiscipline" data-ctr-disciplines></select>
-                    </div>
-                    <div class="col-6 col-sm-3">
-                        <label class="form-label" for="ctsStart">Från</label>
-                        <input class="form-control" id="ctsStart" autocomplete="off" placeholder="18:00">
-                    </div>
-                    <div class="col-6 col-sm-3">
-                        <label class="form-label" for="ctsEnd">Till</label>
-                        <input class="form-control" id="ctsEnd" autocomplete="off" placeholder="20:00">
-                    </div>
-                </div>
+                <p class="small text-muted mb-3" id="ctsSourceLine"></p>
                 <div class="mb-3">
                     <div class="form-label">Veckodagar</div>
                     <div class="btn-group flex-wrap" role="group" aria-label="Veckodagar" id="ctsDays">
@@ -170,12 +162,9 @@
                     <div class="form-label">Skjutledare</div>
                     <div class="btn-group mb-2" role="group">
                         <input type="radio" class="btn-check" name="ctsLeaderMode" id="ctsLeaderSame" value="same" checked>
-                        <label class="btn btn-outline-secondary btn-sm" for="ctsLeaderSame">Samma varje gång</label>
+                        <label class="btn btn-outline-secondary btn-sm" for="ctsLeaderSame">Samma som träningen</label>
                         <input type="radio" class="btn-check" name="ctsLeaderMode" id="ctsLeaderRotate" value="rotate">
                         <label class="btn btn-outline-secondary btn-sm" for="ctsLeaderRotate">Turas om</label>
-                    </div>
-                    <div id="ctsLeaderSameWrap">
-                        <select class="form-select" id="ctsLeader" data-ctr-members></select>
                     </div>
                     <div id="ctsLeaderRotateWrap" class="d-none">
                         <ol id="ctsRotation" class="mb-2 ps-4"></ol>
@@ -186,28 +175,13 @@
                         <div class="form-text">Passen delas ut i den här ordningen och börjar om när listan är slut.</div>
                     </div>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label" for="ctsVenue">Plats</label>
-                    <input class="form-control" id="ctsVenue" autocomplete="off">
-                </div>
-                <div class="form-check mb-2">
-                    <input class="form-check-input" type="checkbox" id="ctsRegRequired">
-                    <label class="form-check-label" for="ctsRegRequired">Anmälan krävs</label>
-                </div>
-                <div class="mb-2 ms-4">
-                    <label class="form-label small" for="ctsMax">Antal platser (tomt = obegränsat)</label>
-                    <input class="form-control form-control-sm" style="max-width:120px" id="ctsMax" type="number" min="0">
-                </div>
-                <div class="form-check mb-3">
-                    <input class="form-check-input" type="checkbox" id="ctsLoan">
-                    <label class="form-check-label" for="ctsLoan">Lånevapen erbjuds</label>
-                </div>
                 <div id="ctsSummary" class="alert alert-light border small mb-0">Välj veckodagar och period.</div>
                 <div id="ctsErr" class="text-danger small mt-2"></div>
+                <div class="small text-muted mt-2">Vill du hellre välja dagarna en och en? Använd <strong>Kopiera dag för dag i kalendern</strong> i träningens meny.</div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-primary" id="ctsCreate" disabled>Skapa schemat</button>
+                <button type="button" class="btn btn-primary" id="ctsCreate" disabled>Kopiera</button>
             </div>
         </div>
     </div>
@@ -251,6 +225,8 @@
     var members = null;
     var loaded = false;
     var canEdit = false;
+    var loanable = 0;
+    var copySource = null;
 
     function clubId() {
         var el = document.getElementById('ctrPanel');
@@ -314,6 +290,7 @@
                 if (!d.success) { document.getElementById('ctrList').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Träningarna kunde inte läsas.') + '</div>'; return; }
                 rows = d.trainings || [];
                 canEdit = !!d.canEdit;
+                loanable = d.loanableWeapons || 0;
                 document.getElementById('ctrActions').classList.toggle('d-none', !canEdit);
                 render();
             })
@@ -324,7 +301,7 @@
         var el = document.getElementById('ctrList');
         if (!rows.length) {
             el.innerHTML = '<div class="text-center text-muted py-4 border rounded">Inga träningar inlagda.' +
-                (canEdit ? ' Lägg till en under <strong>Åtgärder</strong> — ett schema skapar alla tillfällen på en gång.' : '') + '</div>';
+                (canEdit ? ' Lägg in en träning under <strong>Åtgärder → Ny träning</strong>. När den är som du vill kopierar du den till fler dagar.' : '') + '</div>';
             return;
         }
         var today = ymd(new Date());
@@ -337,7 +314,8 @@
             var badges = (t.disciplineLabel ? ' <span class="badge bg-secondary-subtle text-secondary-emphasis">' + esc(t.disciplineLabel) + '</span>' : '') +
                 (t.isMandatory ? ' <span class="badge bg-warning text-dark">Obligatorisk</span>' : '') +
                 (t.isCancelled ? ' <span class="badge bg-danger">Inställd</span>' : '') +
-                (t.loanWeaponsOffered ? ' <i class="bi bi-shield-lock text-muted" title="Lånevapen erbjuds"></i>' : '');
+                (t.loanWeaponsOffered ? ' <i class="bi bi-shield-lock text-muted" title="Lånevapen erbjuds"></i>' : '') +
+                (t.followingInSeries > 0 || t.scheduleId ? ' <i class="bi bi-arrow-repeat text-muted" title="Ingår i en serie av kopior"></i>' : '');
             html += '<tr' + (past || t.isCancelled ? ' class="text-muted"' : '') + ' data-ctr-row="' + t.id + '">' +
                 '<td class="text-nowrap">' + esc(dayLabel(t.date)) + '</td>' +
                 '<td class="text-nowrap">' + esc(time) + '</td>' +
@@ -350,6 +328,9 @@
                 '<ul class="dropdown-menu dropdown-menu-end">' +
                 '<li><button class="dropdown-item" type="button" data-ctr="edit" data-id="' + t.id + '"><i class="bi bi-pencil me-2"></i>Redigera</button></li>' +
                 '<li><button class="dropdown-item" type="button" data-ctr="handover" data-id="' + t.id + '"><i class="bi bi-person-badge me-2"></i>Byt skjutledare…</button></li>' +
+                '<li><h6 class="dropdown-header">Kopiera</h6></li>' +
+                '<li><button class="dropdown-item" type="button" data-ctr="copy-period" data-id="' + t.id + '"><i class="bi bi-calendar-week me-2"></i>Kopiera till en period…</button></li>' +
+                '<li><button class="dropdown-item" type="button" data-ctr="copy-calendar" data-id="' + t.id + '"><i class="bi bi-calendar-plus me-2"></i>Kopiera dag för dag i kalendern…</button></li>' +
                 '<li><button class="dropdown-item" type="button" data-ctr="cancel" data-id="' + t.id + '"><i class="bi bi-slash-circle me-2"></i>' + (t.isCancelled ? 'Ångra inställt' : 'Ställ in') + '</button></li>' +
                 '<li><hr class="dropdown-divider"></li>' +
                 '<li><button class="dropdown-item text-danger" type="button" data-ctr="delete" data-id="' + t.id + '"><i class="bi bi-trash me-2"></i>Ta bort</button></li>' +
@@ -390,11 +371,27 @@
             document.getElementById('ctrLoan').checked = t ? t.loanWeaponsOffered : false;
             document.getElementById('ctrMandatory').checked = t ? t.isMandatory : false;
             document.getElementById('ctrTrainingErr').textContent = '';
+            syncLoan();
+            // Har serien kommande tillfällen frågar Spara: bara den här, eller alla kommande.
+            var following = t ? (t.followingInSeries || 0) : 0;
+            var fb = document.getElementById('ctrSaveFollowing');
+            fb.classList.toggle('d-none', following === 0);
+            fb.textContent = 'Spara den här och ' + following + ' kommande';
+            document.getElementById('ctrSaveTraining').textContent = following > 0 ? 'Spara bara den här' : 'Spara';
             bootstrap.Modal.getOrCreateInstance(document.getElementById('ctrTrainingModal')).show();
         });
     }
-    function saveTraining() {
-        var btn = document.getElementById('ctrSaveTraining');
+    // Lånevapen bokas på anmälningskortet, så de kräver anmälan. Saknar klubben lånebara vapen sägs det.
+    function syncLoan() {
+        var reg = document.getElementById('ctrRegRequired').checked;
+        var loan = document.getElementById('ctrLoan');
+        if (!reg) loan.checked = false;
+        loan.disabled = !reg;
+        document.getElementById('ctrLoanNote').classList.toggle('d-none', reg);
+        document.getElementById('ctrLoanNone').classList.toggle('d-none', !(reg && loan.checked && loanable === 0));
+    }
+    function saveTraining(scope) {
+        var btn = document.getElementById(scope === 'following' ? 'ctrSaveFollowing' : 'ctrSaveTraining');
         btn.disabled = true;
         var max = document.getElementById('ctrMax').value;
         post('/umbraco/surface/ClubTraining/Save', {
@@ -411,7 +408,8 @@
             registrationRequired: document.getElementById('ctrRegRequired').checked ? '1' : '0',
             maxParticipants: max ? parseInt(max, 10) : null,
             loanWeaponsOffered: document.getElementById('ctrLoan').checked ? '1' : '0',
-            isMandatory: document.getElementById('ctrMandatory').checked ? '1' : '0'
+            isMandatory: document.getElementById('ctrMandatory').checked ? '1' : '0',
+            scope: scope === 'following' ? 'following' : 'this'
         }).then(function (d) {
             btn.disabled = false;
             if (!d.success) { document.getElementById('ctrTrainingErr').textContent = d.message || 'Kunde inte spara.'; return; }
@@ -421,7 +419,7 @@
         }).catch(function () { btn.disabled = false; document.getElementById('ctrTrainingErr').textContent = 'Kunde inte spara.'; });
     }
 
-    // ── Schema ──
+    // ── Kopiera till en period ──
     var rotation = [];
     function scheduleBody() {
         var days = [];
@@ -432,23 +430,13 @@
             if (f) breaks.push({ label: row.querySelector('[data-bl]').value, from: f, to: t || f });
         });
         var rotate = document.getElementById('ctsLeaderRotate').checked;
-        var max = document.getElementById('ctsMax').value;
         return {
-            clubId: clubId(),
-            name: document.getElementById('ctsName').value,
-            discipline: document.getElementById('ctsDiscipline').value,
-            startTime: document.getElementById('ctsStart').value,
-            endTime: document.getElementById('ctsEnd').value,
+            sourceId: copySource ? copySource.id : 0,
             weekdays: days,
             from: document.getElementById('ctsFrom').value,
             to: document.getElementById('ctsTo').value,
             breaks: breaks,
-            skjutledareMemberId: rotate ? null : (parseInt(document.getElementById('ctsLeader').value, 10) || null),
-            rotation: rotate ? rotation.slice() : [],
-            venue: document.getElementById('ctsVenue').value,
-            registrationRequired: document.getElementById('ctsRegRequired').checked ? '1' : '0',
-            maxParticipants: max ? parseInt(max, 10) : null,
-            loanWeaponsOffered: document.getElementById('ctsLoan').checked ? '1' : '0'
+            rotation: rotate ? rotation.slice() : []
         };
     }
     var previewTimer = null, previewSeq = 0;
@@ -462,11 +450,15 @@
                 document.getElementById('ctsSummary').textContent = 'Välj veckodagar och period.';
                 create.disabled = true; return;
             }
-            post('/umbraco/surface/ClubTraining/PreviewSchedule', body).then(function (d) {
+            post('/umbraco/surface/ClubTraining/PreviewCopyPeriod', body).then(function (d) {
                 if (seq !== previewSeq) return;
                 var s = document.getElementById('ctsSummary');
-                if (!d.success) { s.textContent = d.message || 'Schemat går inte att räkna ut.'; create.disabled = true; return; }
-                s.textContent = d.summary + (d.count ? ' Skjutledare kan bytas per tillfälle efteråt.' : '');
+                if (!d.success) { s.textContent = d.message || 'Perioden går inte att räkna ut.'; create.disabled = true; return; }
+                s.textContent = d.count === 0 ? 'Inga nya tillfällen — träningen finns redan på de dagarna.'
+                    : (d.count === 1 ? 'Kopierar till 1 dag' : 'Kopierar till ' + d.count + ' dagar') +
+                      ' (' + dayLabel(d.firstDate) + ' – ' + dayLabel(d.lastDate) + ').' +
+                      (d.already ? ' ' + d.already + ' dagar har redan träningen och hoppas över.' : '') +
+                      (d.capped ? ' Högst 400 åt gången.' : '');
                 create.disabled = !d.count;
             });
         }, 250);
@@ -491,19 +483,20 @@
             flatpickr(el, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true, onChange: preview });
         });
     }
-    function openSchedule() {
-        fillDisciplines(); initPickers();
+    function openCopyPeriod(t) {
+        copySource = t;
+        initPickers();
         loadMembers().then(function () {
-            ['ctsName', 'ctsStart', 'ctsEnd', 'ctsVenue', 'ctsMax'].forEach(function (id) { document.getElementById(id).value = ''; });
-            setDate('ctsFrom', ''); setDate('ctsTo', '');
-            for (var d = 1; d <= 7; d++) document.getElementById('ctsDay' + d).checked = false;
+            document.getElementById('ctsTitle').textContent = 'Kopiera ' + t.name + ' till en period';
+            document.getElementById('ctsSourceLine').textContent = 'Allt följer med från träningen ' + dayLabel(t.date) +
+                (t.startTime ? ' ' + t.startTime : '') + ' — tid, plats, gren, anmälan och lånevapen. Bara datumet ändras.';
+            var iso = ((new Date(t.date + 'T12:00:00').getDay() + 6) % 7) + 1;
+            for (var d = 1; d <= 7; d++) document.getElementById('ctsDay' + d).checked = d === iso;
+            var next = new Date(t.date + 'T12:00:00'); next.setDate(next.getDate() + 7);
+            setDate('ctsFrom', ymd(next)); setDate('ctsTo', '');
             document.getElementById('ctsBreaks').innerHTML = '';
             document.getElementById('ctsLeaderSame').checked = true;
-            document.getElementById('ctsLeaderSameWrap').classList.remove('d-none');
             document.getElementById('ctsLeaderRotateWrap').classList.add('d-none');
-            document.getElementById('ctsLeader').value = '';
-            document.getElementById('ctsRegRequired').checked = false;
-            document.getElementById('ctsLoan').checked = false;
             document.getElementById('ctsErr').textContent = '';
             rotation = []; renderRotation();
             bootstrap.Modal.getOrCreateInstance(document.getElementById('ctrScheduleModal')).show();
@@ -512,12 +505,12 @@
     function createSchedule() {
         var btn = document.getElementById('ctsCreate');
         btn.disabled = true;
-        post('/umbraco/surface/ClubTraining/CreateSchedule', scheduleBody()).then(function (d) {
-            if (!d.success) { btn.disabled = false; document.getElementById('ctsErr').textContent = d.message || 'Schemat kunde inte skapas.'; return; }
+        post('/umbraco/surface/ClubTraining/CopyPeriod', scheduleBody()).then(function (d) {
+            if (!d.success) { btn.disabled = false; document.getElementById('ctsErr').textContent = d.message || 'Kopieringen misslyckades.'; return; }
             bootstrap.Modal.getInstance(document.getElementById('ctrScheduleModal')).hide();
             msg(esc(d.message));
             load();
-        }).catch(function () { btn.disabled = false; document.getElementById('ctsErr').textContent = 'Schemat kunde inte skapas.'; });
+        }).catch(function () { btn.disabled = false; document.getElementById('ctsErr').textContent = 'Kopieringen misslyckades.'; });
     }
 
     // ── Byt skjutledare ──
@@ -551,7 +544,12 @@
         var id = parseInt(b.getAttribute('data-id'), 10) || 0;
         var t = byId(id);
         if (act === 'new') openTraining(null);
-        else if (act === 'schedule') openSchedule();
+        else if (act === 'copy-period' && t) openCopyPeriod(t);
+        else if (act === 'copy-calendar' && t) {
+            // Klubbens kalender är en egen flik på klubbsidan; dess kopieringsläge startar med den här träningen.
+            if (typeof window.hpskCalendarCopyMode === 'function') window.hpskCalendarCopyMode(t.id, t.scheduleId || 0);
+            else msg('Kalendern finns inte på den här sidan.', 'warning');
+        }
         else if (act === 'edit' && t) openTraining(t);
         else if (act === 'handover' && t) openHandover(t);
         else if (act === 'cancel' && t) {
@@ -569,7 +567,10 @@
         var tab = document.getElementById('clubTrainings-tab');
         if (tab) tab.addEventListener('shown.bs.tab', function () { if (!loaded) { loaded = true; load(); } });
         document.getElementById('ctrShowPast').addEventListener('change', load);
-        document.getElementById('ctrSaveTraining').addEventListener('click', saveTraining);
+        document.getElementById('ctrSaveTraining').addEventListener('click', function () { saveTraining('this'); });
+        document.getElementById('ctrSaveFollowing').addEventListener('click', function () { saveTraining('following'); });
+        document.getElementById('ctrRegRequired').addEventListener('change', syncLoan);
+        document.getElementById('ctrLoan').addEventListener('change', syncLoan);
         document.getElementById('ctsCreate').addEventListener('click', createSchedule);
         document.getElementById('ctrHandoverSave').addEventListener('click', saveHandover);
         document.getElementById('ctsAddBreak').addEventListener('click', function () { addBreakRow(); });
@@ -580,7 +581,6 @@
         document.querySelectorAll('input[name="ctsLeaderMode"]').forEach(function (r) {
             r.addEventListener('change', function () {
                 var rot = document.getElementById('ctsLeaderRotate').checked;
-                document.getElementById('ctsLeaderSameWrap').classList.toggle('d-none', rot);
                 document.getElementById('ctsLeaderRotateWrap').classList.toggle('d-none', !rot);
                 preview();
             });

@@ -57,6 +57,7 @@ namespace HpskSite.Controllers
             model.ClubName = ctx.OwnerName;
             model.IsCancelled = ctx.IsCancelled;
             model.IsMandatory = ctx.IsMandatory;
+            model.RegistrationRequired = ctx.RegistrationRequired;
             if (ctx.SkjutledareMemberId is > 0)
                 model.SkjutledareName = _memberService.GetById(ctx.SkjutledareMemberId.Value)?.Name ?? "";
 
@@ -85,6 +86,7 @@ namespace HpskSite.Controllers
         public string SkjutledareName { get; set; } = "";
         public bool IsCancelled { get; set; }
         public bool IsMandatory { get; set; }
+        public bool RegistrationRequired { get; set; }
         public bool CanManage { get; set; }
         /// <summary>Kurserna den inloggade går som tillfället hör till, med kursens krav.</summary>
         public List<HpskSite.Services.Training.TrainingCourseService.MemberCourseOnTraining> MyCourses { get; set; } = new();
