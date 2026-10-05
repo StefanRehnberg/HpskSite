@@ -403,6 +403,30 @@ ORDER BY CASE WHEN EXISTS (SELECT 1 FROM dbo.TrainingGroupMembers m WHERE m.Trai
             return rows;
         }
 
+        /// <summary>
+        /// Är medlemmen tränare i någon aktiv kurs? Styr menyvalet "Min kurs" i sidhuvudet, så frågan
+        /// körs vid varje sidladdning för inloggade — därför en enda EXISTS, och ett fel svarar nej
+        /// i stället för att ta ner sidhuvudet.
+        /// </summary>
+        public bool IsTrainerInActiveCourse(int memberId)
+        {
+            if (memberId <= 0) return false;
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                return db.ExecuteScalar<int>(@"
+SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.TrainingGroupMembers m
+                         JOIN dbo.TrainingGroups g ON g.Id = m.TrainingGroupId AND g.IsActive = 1
+                         WHERE m.MemberId = @0 AND m.Role = 'Trainer' AND m.IsActive = 1)
+            THEN 1 ELSE 0 END", memberId) == 1;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte avgöra om medlem {MemberId} är kurstränare", memberId);
+                return false;
+            }
+        }
+
         public bool IsParticipant(int groupId, int memberId)
         {
             using var db = _databaseFactory.CreateDatabase();

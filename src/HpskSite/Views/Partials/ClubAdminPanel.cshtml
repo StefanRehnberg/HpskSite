@@ -5888,7 +5888,10 @@ async function loadClubTrainingGroups() {
                     <td>${g.startDate}</td>
                     <td class="text-center"><span class="badge bg-primary">${g.memberCount}</span></td>
                     <td class="text-center"><span class="badge bg-info">${g.trainerCount}</span></td>
-                    <td class="text-end">
+                    <td class="text-end text-nowrap">
+                        ${g.isActive ? `<a class="btn btn-sm btn-outline-primary me-1" href="/min-kurs?g=${g.id}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Närvaro, serier och kursöversikt för gruppen">
+                            <i class="bi bi-mortarboard"></i> Öppna kursen
+                        </a>` : ''}
                         <button class="btn btn-sm btn-outline-secondary me-1" onclick="event.stopPropagation(); editClubTrainingGroup(${g.id})" title="Redigera">
                             <i class="bi bi-pencil"></i>
                         </button>
