@@ -199,7 +199,9 @@ const main = async () => {
     m = await readModal(page, '#eventModal', B);
     eq('och därefter På plats', m.shown.indexOf(true), 5);
     ok('obligatoriskt deltagande syns där', await page.locator('#clubEventIsMandatory').isVisible());
-    ok('lånevapen också', await page.locator('#clubEventLanevapenOffered').isVisible());
+    // Fas B4/B5: lånevapen hör till träningar — rutan är dold på en NY händelse (den visas bara på en
+    // gammal händelse som redan har lånevapen; se event-dialog-no-training-verify.mjs).
+    ok('lånevapen syns INTE på en ny händelse', !(await page.locator('#clubEventLanevapenOffered').isVisible()));
     ok('och nu är det sista steget igen', m.save && !m.next);
 
     // ⚠️ Kontrollprov åt andra hållet. Utan det kunde "sex avsnitt" lika gärna betyda att de

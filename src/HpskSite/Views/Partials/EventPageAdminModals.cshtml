@@ -25,7 +25,6 @@
                     <div class="col-md-6 mb-3">
                         <label for="editEventType" class="form-label">Typ</label>
                         <select class="form-select" id="editEventType" onchange="onEditEventTypeChange()">
-                            <option value="Träning">Träning</option>
                             <option value="Städning">Städning</option>
                             <option value="Möte">Möte</option>
                             <option value="Socialt">Socialt</option>
@@ -395,7 +394,9 @@ function getEditEventTypeValue() {
 function setEditEventType(typeValue) {
     var sel = document.getElementById('editEventType');
     var customInput = document.getElementById('editEventCustomType');
-    var knownTypes = ['Träning', 'Städning', 'Möte', 'Socialt', 'Nyhet'];
+    // Fas B4: Träning är ingen händelsetyp längre — träningar skapas under Träningar. En gammal
+    // träningshändelse hamnar därför på "Annat…" med typen i fritextfältet och sparas oförändrad.
+    var knownTypes = ['Städning', 'Möte', 'Socialt', 'Nyhet'];
     if (knownTypes.indexOf(typeValue) >= 0) {
         sel.value = typeValue;
         customInput.style.display = 'none';
@@ -405,7 +406,7 @@ function setEditEventType(typeValue) {
         customInput.style.display = '';
         customInput.value = typeValue;
     } else {
-        sel.value = 'Träning';
+        sel.value = 'Städning';
         customInput.style.display = 'none';
         customInput.value = '';
     }

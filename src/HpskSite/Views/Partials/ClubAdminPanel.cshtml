@@ -990,7 +990,6 @@
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Typ *</label>
                             <select class="form-select" id="eventType" required onchange="onEventTypeChange()">
-                                <option value="Träning">Träning</option>
                                 <option value="Städning">Städning</option>
                                 <option value="Möte">Möte</option>
                                 <option value="Socialt">Socialt</option>
@@ -4169,7 +4168,9 @@ function toggleEventPageName(e) {
     }
 }
 
-var knownEventTypes = ['Träning', 'Städning', 'Möte', 'Socialt', 'Nyhet'];
+// Fas B4: Träning är ingen händelsetyp längre — träningar skapas under Träningar. En gammal
+// träningshändelse hamnar därför på "Annat…" med typen i fritextfältet och sparas oförändrad.
+var knownEventTypes = ['Städning', 'Möte', 'Socialt', 'Nyhet'];
 
 function onEventTypeChange() {
     var select = document.getElementById('eventType');
@@ -4249,7 +4250,7 @@ function editEvent(eventId) {
     document.getElementById('eventName').value = event.name || '';
 
     // Set event type — if not a known type, select "Annat" and populate custom field
-    var typeVal = event.type || 'Träning';
+    var typeVal = event.type || '';
     if (knownEventTypes.indexOf(typeVal) >= 0) {
         document.getElementById('eventType').value = typeVal;
         document.getElementById('eventCustomType').style.display = 'none';
