@@ -1,1065 +1,439 @@
-﻿@{
+@{
     var clubId = ViewBag.clubId as int? ?? 0;
 }
+@*
+    Klubbkalendern. ⚠️ SAMMA FORM SOM KRETSKALENDERN (Stefan 2026-10-05): rubrikrad med ‹ månad ›
+    och I dag, segmentknappen Månad | Lista, filtren som switchar, färgrutor som förklaring, tätt
+    rutnät med en etikett per händelse, dagvy under rutnätet och listvy över tolv månader. Stilen och
+    helgdagarna bor i _CalendarShared och delas med _KretsCalendar — skriv inte en egen kopia här.
 
-<div class="club-calendar">
-    <div class="card">
-        <div class="card-header border-bottom">
-            <div class="d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="bi bi-calendar-event me-2"></i>Klubbkalender
-                </h5>
-                <div class="d-flex align-items-center gap-2">
-                @* Bara för klubbadmin — visas när servern svarar att man får kopiera träningar. *@
-                <button type="button" class="btn btn-sm btn-outline-success d-none" id="calCopyStart">
-                    <i class="bi bi-calendar-plus me-1"></i>Lägg in träningar…
-                </button>
-                <div class="btn-group btn-group-sm" role="group" aria-label="Kalendervy">
-                    <button type="button" class="btn btn-outline-primary active" id="calendarViewBtn" title="Kalendervy">
-                        <i class="bi bi-calendar3"></i>
-                    </button>
-                    <button type="button" class="btn btn-outline-primary" id="listViewBtn" title="Listvy">
-                        <i class="bi bi-list-ul"></i>
-                    </button>
-                </div>
-                </div>
-            </div>
-        </div>
-        <div class="card-body">
-            <!-- Vad kalendern visar (fas C). Valet sparas i webbläsaren; förval = allt i egna klubben. -->
-            <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="calScopeBar" role="group" aria-label="Visa i kalendern">
-                <small class="text-muted me-1">Visa:</small>
-                <button type="button" class="btn btn-sm btn-outline-success" data-cal-scope="training" aria-pressed="false"><i class="bi bi-bullseye me-1"></i>Träningar</button>
-                <button type="button" class="btn btn-sm btn-outline-primary" data-cal-scope="competition" aria-pressed="false"><i class="bi bi-flag-fill me-1"></i>Tävlingar</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" data-cal-scope="club" aria-pressed="false"><i class="bi bi-people me-1"></i>Övrigt i klubben</button>
-                <button type="button" class="btn btn-sm btn-outline-dark" data-cal-scope="outside" aria-pressed="false" title="Kretsens händelser och andra klubbars öppna tävlingar"><i class="bi bi-globe2 me-1"></i>Utanför klubben</button>
-                <small class="text-muted ms-auto" id="calHiddenNote"></small>
-            </div>
+    Id:n bär prefixet "cc" så att de aldrig krockar med kretskalendern (kc/kcp/kcc), som kan stå
+    på samma sida (klubbens adminpanel → Kretskalender).
 
-            <!-- Lägg in träningar dag för dag (klubbadmin, Stefan 2026-10-05) -->
-            <div class="alert alert-primary d-none" id="calCopyBar" role="region" aria-label="Lägg in träningar">
-                <div class="fw-semibold mb-1"><i class="bi bi-calendar-plus me-1"></i>Lägg in träningar dag för dag</div>
-                <div class="d-flex flex-wrap gap-2 align-items-center">
-                    <label class="small mb-0" for="calCopySource">Träning att kopiera</label>
-                    <select class="form-select form-select-sm w-auto" id="calCopySource"></select>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="calCopyUndo" disabled>Ångra senaste</button>
-                    <button type="button" class="btn btn-sm btn-primary ms-auto" id="calCopyDone">Klar</button>
-                </div>
-                <div class="small mt-2">Klicka på en dag i kalendern så läggs träningen in där. Varje klick sparas direkt — allt utom datumet kommer från träningen du valt.</div>
-                <div class="small mt-1 fw-semibold" id="calCopyMsg" aria-live="polite"></div>
-            </div>
-
-            <!-- Calendar Navigation -->
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <button id="prevMonth" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-chevron-left me-1"></i>Tidigare
-                </button>
-                <div class="d-flex align-items-center gap-2">
-                    <h6 id="monthDisplay" class="mb-0">Januari 2025</h6>
-                    <button id="todayBtn" class="btn btn-sm btn-primary" title="Gå till idag">
-                        <i class="bi bi-calendar-check"></i>
-                    </button>
-                </div>
-                <button id="nextMonth" class="btn btn-sm btn-outline-secondary">
-                    Senare<i class="bi bi-chevron-right ms-1"></i>
-                </button>
-            </div>
-
-            <!-- Calendar Grid -->
-            <div class="calendar-grid mb-4">
-                <!-- Days of week headers -->
-                <div class="calendar-header">
-                    <div class="day-header">Mån</div>
-                    <div class="day-header">Tis</div>
-                    <div class="day-header">Ons</div>
-                    <div class="day-header">Tor</div>
-                    <div class="day-header">Fre</div>
-                    <div class="day-header">Lör</div>
-                    <div class="day-header">Sön</div>
-                </div>
-
-                <!-- Calendar days -->
-                <div id="calendarDays" class="calendar-days">
-                    <!-- Populated by JavaScript -->
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Laddar...</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- List View -->
-            <div class="event-list-view" style="display: none;">
-                <div id="eventListContainer">
-                    <!-- Populated by JavaScript -->
-                    <div class="text-center py-5">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Laddar...</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Event List for Selected Day -->
-            <div id="selectedDayEvents" style="display: none;">
-                <div class="alert alert-info mb-3">
-                    <span id="selectedDateDisplay"></span>
-                </div>
-                <div id="eventsList" class="event-list">
-                    <!-- Populated by JavaScript -->
-                </div>
-            </div>
-
-            <!-- Event Type Legend -->
-            <div class="mt-4 pt-3 border-top">
-                <small class="text-muted d-block mb-2"><strong>Händelsetyper:</strong></small>
-                <div class="d-flex flex-wrap gap-2">
-                    <span class="badge" style="background-color: #0d6efd;"><i class="bi bi-flag-fill me-1"></i>Tävling</span>
-                    <span class="badge" style="background-color: #198754;"><i class="bi bi-bullseye me-1"></i>Träning</span>
-                    <span class="badge" style="background-color: #d63384;"><i class="bi bi-broom-fill me-1"></i>Städning</span>
-                    <span class="badge" style="background-color: #fd7e14;"><i class="bi bi-megaphone-fill me-1"></i>Möte</span>
-                    <span class="badge" style="background-color: #0dcaf0;"><i class="bi bi-people-fill me-1"></i>Socialt</span>
-                    <span class="badge" style="background-color: #6610f2;"><i class="bi bi-newspaper me-1"></i>Nyhet</span>
-                    <span class="badge" style="background-color: #6c757d;"><i class="bi bi-tag-fill me-1"></i>Annat</span>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<style>
-    /* Lägg in träningar: dagarna går att klicka på för att lägga in en kopia. */
-    .cal-copy-mode .calendar-day:not(.past-date) { cursor: copy; }
-    .cal-copy-mode .calendar-day:not(.past-date):hover { outline: 2px solid var(--bs-primary); outline-offset: -2px; }
-.calendar-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    width: 100%;
-    overflow: hidden;
-}
-
-.calendar-header {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 5px;
-    margin-bottom: 10px;
-    width: 100%;
-}
-
-.day-header {
-    text-align: center;
-    font-weight: 600;
-    font-size: 0.85rem;
-    padding: 8px;
-    color: var(--bs-secondary-color);
-    min-width: 0;
-}
-
-.calendar-days {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 5px;
-    width: 100%;
-}
-
-.calendar-day {
-    aspect-ratio: 1.5;
-    border: 1px solid var(--bs-border-color);
-    border-radius: 4px;
-    padding: 6px;
-    min-height: 70px;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    background: var(--bs-body-bg);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 0.85rem;
-    overflow: hidden;
-}
-
-.calendar-day:hover {
-    border-color: var(--bs-primary);
-    background-color: var(--bs-primary-bg-subtle);
-}
-
-.calendar-day.other-month {
-    background-color: var(--bs-secondary-bg);
-    color: var(--bs-secondary-color);
-}
-
-/* Grannmånadens dagar visar sina händelser men ska fortfarande läsas som utanför månaden.
-   Dämpas med opacity, inte med en egen textfärg — färgtoken mot .has-events ljusa bakgrund
-   blir olässbar i mörkt läge. */
-.calendar-day.other-month.has-events {
-    opacity: 0.75;
-}
-
-.calendar-day.has-events {
-    background-color: var(--bs-primary-bg-subtle);
-    border-color: var(--bs-primary);
-}
-
-.calendar-day.today {
-    background-color: var(--bs-warning-bg-subtle);
-    border-color: var(--bs-warning);
-    font-weight: 600;
-}
-
-.calendar-day-number {
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-
-.calendar-day-events {
-    flex: 1;
-    overflow: hidden;
-    font-size: 0.75rem;
-}
-
-.event-dot {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    margin-right: 4px;
-}
-
-.event-item-preview {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding: 2px 0;
-    line-height: 1.2;
-}
-
-/* Händelsen i dagrutan är en egen länk till händelsens sida. Den SKA se ut att gå att klicka
-   på — hela buggrapporten var att den redan såg klickbar ut och bara fällde ut dagen längre
-   ner på sidan. Träffytan går ut till rutans kant (display:block) så man inte behöver pricka
-   texten. */
-.event-preview-link {
-    display: block;
-    color: var(--bs-body-color);
-    text-decoration: none;
-}
-
-.event-preview-link:hover,
-.event-preview-link:focus {
-    color: var(--bs-primary);
-    text-decoration: underline;
-}
-
-.event-list {
-    max-height: 400px;
-    overflow-y: auto;
-}
-
-.event-list .list-group-item {
-    border-left: 4px solid var(--bs-primary);
-    padding: 10px 12px;
-    margin-bottom: 8px;
-    border-radius: 4px;
-}
-
-.event-list .event-name {
-    font-weight: 600;
-    display: block;
-    margin-bottom: 4px;
-}
-
-.event-list .event-link {
-    font-weight: 600;
-    display: block;
-    margin-bottom: 4px;
-    color: var(--bs-primary);
-    text-decoration: none;
-    transition: color 0.2s ease;
-}
-
-.event-list .event-link:hover {
-    color: var(--bs-primary-border-subtle);
-    text-decoration: underline;
-}
-
-.event-list .event-meta {
-    font-size: 0.85rem;
-    color: var(--bs-secondary-color);
-}
-
-/* List View Styles */
-.event-list-view {
-    min-height: 400px;
-}
-
-.event-date-group {
-    margin-bottom: 2rem;
-}
-
-.event-date-header {
-    padding: 10px 0;
-    border-bottom: 2px solid var(--bs-border-color);
-    margin-bottom: 15px;
-}
-
-.event-date-header strong {
-    font-size: 1.1rem;
-    color: var(--bs-body-color);
-}
-
-.event-date-header .weekday {
-    color: var(--bs-secondary);
-    font-size: 0.9rem;
-    margin-left: 8px;
-}
-
-.event-items {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.event-item {
-    padding: 12px 16px;
-    border-left: 4px solid var(--bs-primary);
-    background-color: var(--bs-body-bg);
-    border-radius: 4px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    transition: box-shadow 0.2s ease;
-}
-
-.event-item:hover {
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-}
-
-.event-item .event-name,
-.event-item .event-link {
-    font-size: 1rem;
-    font-weight: 600;
-    margin: 4px 0;
-    display: block;
-}
-
-.event-item .event-link {
-    color: var(--bs-primary);
-    text-decoration: none;
-}
-
-.event-item .event-link:hover {
-    text-decoration: underline;
-}
-
-/* Event description container and truncation styles */
-.event-description-container {
-    position: relative;
-    margin: 8px 0;
-}
-
-.event-description.truncated {
-    color: var(--bs-secondary-color);
-    font-size: 0.9rem;
-    line-height: 1.5;
-    display: -webkit-box;
-    -webkit-line-clamp: 1;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: normal;
-}
-
-.event-description.expanded {
-    color: var(--bs-secondary-color);
-    font-size: 0.9rem;
-    line-height: 1.5;
-    display: block;
-}
-
-.expand-description-link {
-    color: var(--bs-primary);
-    text-decoration: none;
-    font-size: 0.85rem;
-    font-weight: 500;
-    cursor: pointer;
-    display: inline-block;
-    margin-top: 4px;
-}
-
-.expand-description-link:hover {
-    text-decoration: underline;
-    color: var(--bs-primary-border-subtle);
-}
-
-.expand-description-link.hidden {
-    display: none;
-}
-
-.event-item .event-meta {
-    margin-top: 8px;
-    font-size: 0.85rem;
-}
-
-.event-item .badge {
-    font-size: 0.75rem;
-    padding: 4px 8px;
-}
-
-.list-view-empty {
-    text-align: center;
-    padding: 60px 20px;
-    color: var(--bs-secondary-color);
-}
-
-.list-view-empty i {
-    font-size: 3rem;
-    margin-bottom: 16px;
-    opacity: 0.5;
-}
-
-/* Past Event Styles */
-.calendar-day.past-date {
-    opacity: 0.6;
-    background-color: var(--bs-secondary-bg);
-}
-
-.calendar-day.past-date .calendar-day-number {
-    color: var(--bs-secondary-color);
-}
-
-.calendar-day.past-date.has-events {
-    opacity: 0.75;
-}
-
-.event-item.past-event {
-    opacity: 0.7;
-    background-color: var(--bs-secondary-bg);
-}
-
-.event-item.past-event .event-name,
-.event-item.past-event .event-link {
-    color: var(--bs-secondary-color);
-}
-</style>
-
+    Data: Club/GetUpcomingEvents (klubbens händelser, träningar, tävlingar och kretsens händelser),
+    filtrerat i webbläsaren per sort (scope). En träning har url "#training-{id}", som
+    _TrainingPanelModal fångar och öppnar i panelen.
+*@
 @await Html.PartialAsync("_HtmlEscape")
 @await Html.PartialAsync("_EventBadges")
 @await Html.PartialAsync("_TrainingPanelModal")
-@* Fas B5: en träning har url "#training-{id}"; _TrainingPanelModal fångar den länken och öppnar
-   panelen — samma för listvyn, dagvyn och månadsrutnätet, som alla bygger länken ur event.url. *@
+@await Html.PartialAsync("_CalendarShared")
+
+<style>
+    /* Lägg in träningar: dagarna går att klicka på för att lägga in en kopia. */
+    .cal-copy-mode .kc-day:not(.cc-past) { cursor: copy; }
+    .cal-copy-mode .kc-day:not(.cc-past):hover { outline: 2px solid var(--bs-primary); outline-offset: -2px; }
+    .cc-day-card .cc-row { padding: .5rem 0; border-top: 1px solid var(--bs-border-color); }
+    .cc-day-card .cc-row:first-of-type { border-top: 0; }
+</style>
+
+<div class="club-calendar kc-wrap" id="ccRoot" data-club-id="@clubId">
+    <div class="kc-head">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="ccPrev" aria-label="Föregående"><i class="bi bi-chevron-left"></i></button>
+        <h3 id="ccTitle" aria-live="polite"></h3>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="ccNext" aria-label="Nästa"><i class="bi bi-chevron-right"></i></button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="ccToday">I dag</button>
+        <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Visning">
+            <button type="button" class="btn btn-outline-primary active" id="ccMonthBtn">Månad</button>
+            <button type="button" class="btn btn-outline-primary" id="ccListBtn">Lista</button>
+        </div>
+        <div class="form-check form-switch ms-2 mb-0">
+            <input class="form-check-input" type="checkbox" role="switch" id="ccHolidays">
+            <label class="form-check-label small" for="ccHolidays">Visa helgdagar</label>
+        </div>
+    </div>
+
+    @* Vad kalendern visar. Varje sort är en switch med sin färg intill — förklaringen och filtret
+       är samma rad, så en sort som är avslagen syns som avslagen där man läser vad färgen betyder. *@
+    <div class="kc-legend mb-2 d-flex flex-wrap align-items-center gap-1" id="ccScopeBar" aria-label="Visa i kalendern">
+        <div class="form-check form-switch mb-0 me-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="ccScope-training" data-cal-scope="training">
+            <label class="form-check-label small" for="ccScope-training"><i class="sw kc-s-traning me-1"></i>Träningar</label>
+        </div>
+        <div class="form-check form-switch mb-0 me-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="ccScope-competition" data-cal-scope="competition">
+            <label class="form-check-label small" for="ccScope-competition"><i class="sw kc-s-tavling me-1"></i>Tävlingar</label>
+        </div>
+        <div class="form-check form-switch mb-0 me-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="ccScope-club" data-cal-scope="club">
+            <label class="form-check-label small" for="ccScope-club"><i class="sw kc-s-handelse me-1"></i>Övrigt i klubben</label>
+        </div>
+        <div class="form-check form-switch mb-0 me-2">
+            <input class="form-check-input" type="checkbox" role="switch" id="ccScope-outside" data-cal-scope="outside">
+            <label class="form-check-label small" for="ccScope-outside" title="Kretsens händelser och andra klubbars öppna tävlingar"><i class="sw kc-s-utanfor me-1"></i>Utanför klubben</label>
+        </div>
+        <span class="small text-muted ms-auto" id="calHiddenNote"></span>
+    </div>
+
+    <!-- Lägg in träningar dag för dag (klubbadmin, från träningens meny under Admin → Träningar) -->
+    <div class="alert alert-primary d-none" id="calCopyBar" role="region" aria-label="Lägg in träningar">
+        <div class="fw-semibold mb-1"><i class="bi bi-calendar-plus me-1"></i>Lägg in träningar dag för dag</div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <label class="small mb-0" for="calCopySource">Träning att kopiera</label>
+            <select class="form-select form-select-sm w-auto" id="calCopySource"></select>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="calCopyUndo" disabled>Ångra senaste</button>
+            <button type="button" class="btn btn-sm btn-primary ms-auto" id="calCopyDone">Klar</button>
+        </div>
+        <div class="small mt-2">Klicka på en dag i kalendern så läggs träningen in där. Varje klick sparas direkt — allt utom datumet kommer från träningen du valt.</div>
+        <div class="small mt-1 fw-semibold" id="calCopyMsg" aria-live="polite"></div>
+    </div>
+
+    <div id="ccBody"><div class="text-muted small">Hämtar…</div></div>
+    <div id="ccDay" class="mt-3"></div>
+</div>
+
 <script>
-let currentDate = new Date();
-let currentView = 'calendar'; // 'calendar' or 'list'
+(function () {
+    const root = document.getElementById('ccRoot');
+    if (!root || root.dataset.ccInit) return;
+    root.dataset.ccInit = '1';
+    const CLUB_ID = parseInt(root.dataset.clubId, 10) || 0;
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc(s == null ? '' : String(s));
+    const MONTHS = ['januari', 'februari', 'mars', 'april', 'maj', 'juni', 'juli', 'augusti', 'september', 'oktober', 'november', 'december'];
+    const DOW = ['Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör', 'Sön'];
+    const pad = n => String(n).padStart(2, '0');
+    const key = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
-// Note: eventTypeColors is declared in Club.cshtml parent page
+    const pref = (k, d) => { try { return localStorage.getItem('cc_' + k) ?? d; } catch (e) { return d; } };
+    const setPref = (k, v) => { try { localStorage.setItem('cc_' + k, v); } catch (e) { } };
 
-// View switching function
-function switchView(view) {
-    const calendarGrid = document.querySelector('.calendar-grid');
-    const listView = document.querySelector('.event-list-view');
-    const selectedDayEvents = document.getElementById('selectedDayEvents');
-    const calendarBtn = document.getElementById('calendarViewBtn');
-    const listBtn = document.getElementById('listViewBtn');
+    // På en smal skärm får en dagruta inte plats med ett namn — där är listan förvald, tills
+    // medlemmen själv väljer vy.
+    let view = pref('view', window.innerWidth < 768 ? 'list' : 'month') === 'list' ? 'list' : 'month';
+    // Beskrivningen är formaterad text (RTE). Visa den som REN text: DOMParser kör varken skript
+    // eller händelseattribut, till skillnad från innerHTML på ett lösryckt element.
+    const plain = html => {
+        if (!html) return '';
+        try { return (new DOMParser().parseFromString(String(html), 'text/html').body.textContent || '').trim(); }
+        catch (e) { return String(html); }
+    };
+    let cursor = new Date(); cursor.setDate(1);
+    let all = null;          // allt servern skickade
+    let shown = [];          // efter filtret
+    let selectedDay = null;
+    $('ccHolidays').checked = pref('holidays', '0') === '1';
 
-    if (view === 'calendar') {
-        calendarGrid.style.display = 'block';
-        listView.style.display = 'none';
-        selectedDayEvents.style.display = 'none';
-        calendarBtn.classList.add('active');
-        listBtn.classList.remove('active');
-        currentView = 'calendar';
-        // Render the grid on switch — otherwise #calendarDays keeps its initial
-        // loading spinner forever when the user arrives from list view (the spinner
-        // is only replaced by loadCalendarData()'s one-time render on first load).
-        renderCalendar();
-    } else {
-        calendarGrid.style.display = 'none';
-        listView.style.display = 'block';
-        selectedDayEvents.style.display = 'none';
-        calendarBtn.classList.remove('active');
-        listBtn.classList.add('active');
-        currentView = 'list';
-        renderListView();
+    const holidayOn = k => $('ccHolidays').checked ? (window.hpskSwedishHolidays(parseInt(k.slice(0, 4), 10))[k] || '') : '';
+
+    // ── Filtret ─────────────────────────────────────────────────────────────────────────────
+    // ⚠️ Valet sparas under samma nyckel som förut, så en medlem behåller sitt val. Strängarna
+    // speglar CalendarScope* i ClubController. Förval = allt i egna klubben.
+    const SCOPE_KEY = 'hpsk_cal_scopes';
+    const SCOPE_DEFAULT = ['training', 'competition', 'club'];
+    function readScopes() {
+        try { const v = JSON.parse(localStorage.getItem(SCOPE_KEY)); if (Array.isArray(v)) return new Set(v); } catch (e) { }
+        return new Set(SCOPE_DEFAULT);
+    }
+    const scopeOf = e => e.scope || (e.type === 'Tävling' ? 'competition' : 'club');
+    function applyScopes() {
+        const scopes = readScopes();
+        root.querySelectorAll('[data-cal-scope]').forEach(c => { c.checked = scopes.has(c.dataset.calScope); });
+        shown = (all || []).filter(e => scopes.has(scopeOf(e)));
+        updateHiddenNote();
+    }
+    // Ett filter som tyst gömmer saker läses som "min tävling är borta" — säg hur många som döljs.
+    function updateHiddenNote() {
+        const note = $('calHiddenNote');
+        if (!note || !all) return;
+        const [f, t] = range();
+        const inRange = list => list.filter(e => e.k >= key(f) && e.k <= key(t)).length;
+        const hidden = inRange(all) - inRange(shown);
+        note.textContent = hidden > 0 ? hidden + ' dold' + (hidden === 1 ? '' : 'a') + ' av filtret' : '';
     }
 
-    // Save preference
-    localStorage.setItem('clubCalendarView', view);
-}
-
-// Datumnyckel yyyy-MM-dd ur LOKAL tid. `new Date(...).toISOString()` går via UTC och flyttar
-// en svensk midnatt till dagen innan — händelsen hamnade då i fel ruta.
-function localDateKey(date) {
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-// API:t skickar datumet som "2026-10-03T00:00:00" (utan tidszon). Ta de tio första tecknen rakt
-// av när formatet är sådant, annars gå via en lokal Date.
-function eventDateKey(event) {
-    const raw = event.date;
-    if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-    return localDateKey(new Date(raw));
-}
-
-// Helper function to get events for a specific month
-function getEventsForMonth(year, month) {
-    if (!window.calendarEvents) return [];
-
-    const prefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
-    return window.calendarEvents.filter(event => eventDateKey(event).startsWith(prefix));
-}
-
-// Helper function to group events by date
-function groupEventsByDate(events) {
-    const grouped = {};
-
-    events.forEach(event => {
-        const dateKey = eventDateKey(event);
-        const eventDate = new Date(dateKey + 'T00:00:00');
-
-        if (!grouped[dateKey]) {
-            grouped[dateKey] = {
-                date: eventDate,
-                events: []
-            };
-        }
-        grouped[dateKey].events.push(event);
-    });
-
-    // Sort by date
-    return Object.keys(grouped)
-        .sort()
-        .map(key => grouped[key]);
-}
-
-// Render list view
-function renderListView() {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-
-    // Get and group events
-    const monthEvents = getEventsForMonth(year, month);
-    const groupedEvents = groupEventsByDate(monthEvents);
-
-    const container = document.getElementById('eventListContainer');
-
-    if (groupedEvents.length === 0) {
-        container.innerHTML = `
-            <div class="list-view-empty">
-                <i class="bi bi-calendar-x d-block"></i>
-                <p class="mb-0">Inga händelser denna månad</p>
-            </div>
-        `;
-        return;
+    // ── Data ────────────────────────────────────────────────────────────────────────────────
+    // API:t skickar datumet utan tidszon ("2026-10-03T18:30:00") — de tio första tecknen är dagen.
+    // `new Date(...).toISOString()` går via UTC och flyttar en svensk midnatt till dagen innan.
+    function dateKeyOf(raw) {
+        if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+        return key(new Date(raw));
     }
-
-    let html = '';
-
-    groupedEvents.forEach(dateGroup => {
-        const dateStr = dateGroup.date.toLocaleDateString('sv-SE', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric'
-        });
-        const weekdayStr = dateGroup.date.toLocaleDateString('sv-SE', { weekday: 'long' });
-
-        html += `
-            <div class="event-date-group">
-                <div class="event-date-header">
-                    <strong>${dateStr}</strong>
-                    <span class="weekday">${weekdayStr}</span>
-                </div>
-                <div class="event-items">
-        `;
-
-        dateGroup.events.forEach((event, idx) => {
-            const color = eventTypeColors[event.eventType] || eventTypeColors.default;
-            const eventName = event.name || event.type;
-
-            // Generate unique event ID for expand/collapse functionality
-            const eventId = `event-${dateGroup.date.getTime()}-${idx}`;
-
-            // Check if event is in the past
-            const eventDate = new Date(event.date);
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const isPast = eventDate < today;
-            const pastClass = isPast ? ' past-event' : '';
-
-            html += `
-                <div class="event-item${pastClass}" style="border-left-color: ${color}">
-                    ${event.url
-                        ? `<a href="${event.url}" class="event-link">${eventName} <i class="bi bi-box-arrow-up-right ms-1"></i></a>`
-                        : `<div class="event-name">${eventName}</div>`
-                    }
-                    ${event.description ? `
-                        <div class="event-description-container">
-                            <div class="event-description truncated" data-event-id="${eventId}">
-                                ${event.description}
-                            </div>
-                            <a href="#" class="expand-description-link" data-event-id="${eventId}">...mer</a>
-                        </div>
-                    ` : ''}
-                    <div class="event-meta">
-                        <span class="badge" style="background-color: ${color}">${event.eventType || event.type}</span>${hpskEventBadges(event)}
-                        ${event.venue ? `<span class="ms-2"><i class="bi bi-geo-alt me-1"></i>${event.venue}</span>` : ''}
-                        ${event.contactPerson ? `<span class="ms-2"><i class="bi bi-person me-1"></i>${event.contactPerson}</span>` : ''}
-                    </div>
-                </div>
-            `;
-        });
-
-        html += `
-                </div>
-            </div>
-        `;
-    });
-
-    container.innerHTML = html;
-
-    // Initialize truncation checking and event handlers
-    setTimeout(() => {
-        initializeDescriptionTruncation();
-    }, 50); // Small delay to ensure DOM is fully rendered
-}
-
-// Toggle description expansion for individual events
-function toggleDescriptionExpansion(eventId) {
-    const descriptionEl = document.querySelector(`.event-description[data-event-id="${eventId}"]`);
-    const linkEl = document.querySelector(`.expand-description-link[data-event-id="${eventId}"]`);
-
-    if (!descriptionEl || !linkEl) return;
-
-    if (descriptionEl.classList.contains('truncated')) {
-        // Expand
-        descriptionEl.classList.remove('truncated');
-        descriptionEl.classList.add('expanded');
-        linkEl.textContent = '...mindre';
-    } else {
-        // Collapse
-        descriptionEl.classList.remove('expanded');
-        descriptionEl.classList.add('truncated');
-        linkEl.textContent = '...mer';
+    function timeOf(raw) {
+        const m = typeof raw === 'string' ? raw.match(/T(\d{2}):(\d{2})/) : null;
+        return m && !(m[1] === '00' && m[2] === '00') ? m[1] + ':' + m[2] : '';
     }
-}
-
-// Check if description needs truncation (is it longer than one line?)
-function checkDescriptionTruncation(eventId) {
-    const descriptionEl = document.querySelector(`.event-description[data-event-id="${eventId}"]`);
-    const linkEl = document.querySelector(`.expand-description-link[data-event-id="${eventId}"]`);
-
-    if (!descriptionEl || !linkEl) return;
-
-    // Check if content is actually truncated (scrollHeight > clientHeight)
-    if (descriptionEl.scrollHeight <= descriptionEl.clientHeight + 2) { // +2px tolerance
-        // Content fits in one line, hide the "...mer" link
-        linkEl.classList.add('hidden');
-    } else {
-        // Content is truncated, show the "...mer" link
-        linkEl.classList.remove('hidden');
-    }
-}
-
-// Initialize description truncation after rendering
-function initializeDescriptionTruncation() {
-    // Add click handlers to all expand links
-    document.querySelectorAll('.expand-description-link').forEach(link => {
-        const eventId = link.getAttribute('data-event-id');
-
-        // Check if truncation is needed
-        checkDescriptionTruncation(eventId);
-
-        // Add click handler
-        link.addEventListener('click', function(e) {
-            e.preventDefault();
-            toggleDescriptionExpansion(eventId);
-        });
-    });
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    if (clubId > 0) {
-        // Initialize view based on saved preference or screen size
-        const savedView = localStorage.getItem('clubCalendarView');
-        const isMobile = window.innerWidth < 768;
-
-        if (savedView) {
-            currentView = savedView;
-        } else if (isMobile) {
-            currentView = 'list';
-        }
-
-        // Set initial view UI state
-        if (currentView === 'list') {
-            switchView('list');
-        }
-
-        // Load calendar data - callback will render the appropriate view with data
-        loadCalendarData();
-
-        // Toggle button handlers
-        document.getElementById('calendarViewBtn').addEventListener('click', () => {
-            switchView('calendar');
-        });
-
-        document.getElementById('listViewBtn').addEventListener('click', () => {
-            switchView('list');
-        });
-
-        // Month navigation - works for both views
-        document.getElementById('prevMonth').addEventListener('click', () => {
-            currentDate.setMonth(currentDate.getMonth() - 1);
-            updateMonthDisplay();
-            if (currentView === 'calendar') {
-                renderCalendar();
-            } else {
-                renderListView();
-            }
-        });
-
-        document.getElementById('nextMonth').addEventListener('click', () => {
-            currentDate.setMonth(currentDate.getMonth() + 1);
-            updateMonthDisplay();
-            if (currentView === 'calendar') {
-                renderCalendar();
-            } else {
-                renderListView();
-            }
-        });
-
-        // Today button - jumps back to current month
-        document.getElementById('todayBtn').addEventListener('click', () => {
-            currentDate = new Date();
-            updateMonthDisplay();
-            if (currentView === 'calendar') {
-                renderCalendar();
-            } else {
-                renderListView();
-            }
-        });
-
-        // Auto-switch to list view on narrow screens
-        let resizeTimeout;
-        window.addEventListener('resize', () => {
-            clearTimeout(resizeTimeout);
-            resizeTimeout = setTimeout(() => {
-                const isNarrow = window.innerWidth < 768;
-                if (isNarrow && currentView === 'calendar') {
-                    switchView('list');
-                }
-            }, 150);
-        });
-    }
-});
-
-// Update month display for both views
-function updateMonthDisplay() {
-    const monthNames = ['Januari', 'Februari', 'Mars', 'April', 'Maj', 'Juni',
-                       'Juli', 'Augusti', 'September', 'Oktober', 'November', 'December'];
-    const displayText = `${monthNames[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
-    document.getElementById('monthDisplay').textContent = displayText;
-    updateCalHiddenNote();
-}
-
-// ── Filtret (fas C) ─────────────────────────────────────────────────────────
-// ⚠️ EN plats filtrerar: window.calendarEvents är den filtrerade mängden som månadsrutnätet,
-// listvyn och dagvyn redan läser; window.allCalendarEvents är allt servern skickade.
-// Strängarna speglar CalendarScope* i ClubController.
-const CAL_SCOPE_KEY = 'hpsk_cal_scopes';
-const CAL_SCOPE_DEFAULT = ['training', 'competition', 'club'];
-function readCalScopes() {
-    try {
-        const v = JSON.parse(localStorage.getItem(CAL_SCOPE_KEY));
-        if (Array.isArray(v)) return new Set(v);
-    } catch (e) { }
-    return new Set(CAL_SCOPE_DEFAULT);
-}
-function eventScope(e) {
-    return e.scope || (e.type === 'Tävling' ? 'competition' : 'club');
-}
-function applyCalScopes() {
-    const scopes = readCalScopes();
-    document.querySelectorAll('#calScopeBar [data-cal-scope]').forEach(b => {
-        const on = scopes.has(b.dataset.calScope);
-        b.classList.toggle('active', on);
-        b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    });
-    window.calendarEvents = (window.allCalendarEvents || []).filter(e => scopes.has(eventScope(e)));
-    updateCalHiddenNote();
-}
-// Ett filter som tyst gömmer saker läses som "min tävling är borta" — säg hur många som döljs.
-function updateCalHiddenNote() {
-    const note = document.getElementById('calHiddenNote');
-    if (!note || !window.allCalendarEvents) return;
-    const prefix = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-`;
-    const all = window.allCalendarEvents.filter(e => eventDateKey(e).startsWith(prefix)).length;
-    const shown = (window.calendarEvents || []).filter(e => eventDateKey(e).startsWith(prefix)).length;
-    note.textContent = all > shown ? `${all - shown} händelse${all - shown === 1 ? '' : 'r'} dold${all - shown === 1 ? '' : 'a'} av filtret` : '';
-}
-document.addEventListener('click', function (ev) {
-    const btn = ev.target.closest('#calScopeBar [data-cal-scope]');
-    if (!btn) return;
-    const scopes = readCalScopes();
-    const s = btn.dataset.calScope;
-    if (scopes.has(s)) scopes.delete(s); else scopes.add(s);
-    try { localStorage.setItem(CAL_SCOPE_KEY, JSON.stringify([...scopes])); } catch (e) { }
-    applyCalScopes();
-    if (currentView === 'list') renderListView(); else renderCalendar();
-    document.getElementById('selectedDayEvents').style.display = 'none';
-});
-
-function loadCalendarData() {
-    // GetUpcomingEvents with allYears=true returns events from current year + next year
-    fetch(`/umbraco/surface/Club/GetUpcomingEvents?clubId=${clubId}&allYears=true`)
-        .then(r => r.json())
-        .then(data => {
-            if (data.success && data.data) {
-                // Map to use 'type' from API (which has correct values)
-                window.allCalendarEvents = data.data.map(e => ({
+    function load() {
+        if (!(CLUB_ID > 0)) return Promise.resolve();
+        return fetch('/umbraco/surface/Club/GetUpcomingEvents?clubId=' + CLUB_ID + '&allYears=true', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) { $('ccBody').innerHTML = '<div class="text-danger small">Kalendern kunde inte hämtas.</div>'; return; }
+                all = (d.data || []).map(e => ({
                     ...e,
                     // Kretsens händelser bär sin ägare i namnet, annars ser de ut som klubbens egna.
-                    name: e.owner ? `${e.name || e.type} (${e.owner})` : e.name,
-                    eventType: e.type,  // Use 'type' from API response
-                    category: e.type === 'Tävling' ? 'competition' : 'event'
-                }));
-                applyCalScopes();
-                // Listvyn satte aldrig månadsrubriken — den stod kvar på platshållaren
-                // "Januari 2025" över en lista med innevarande månads händelser.
-                updateMonthDisplay();
+                    name: e.owner ? (e.name || e.type) + ' (' + e.owner + ')' : (e.name || e.type),
+                    k: dateKeyOf(e.date),
+                    time: timeOf(e.date)
+                })).sort((a, b) => (a.k + a.time).localeCompare(b.k + b.time));
+                window.allCalendarEvents = all;
+                applyScopes();
+                render();
+            })
+            .catch(() => { $('ccBody').innerHTML = '<div class="text-danger small">Kalendern kunde inte hämtas.</div>'; });
+    }
+    window.loadCalendarData = load;   // dag-för-dag-läget läser om efter varje kopia
 
-                // Re-render the CURRENT view, not just calendar view
-                if (currentView === 'list') {
-                    renderListView();
-                } else {
-                    renderCalendar();
-                }
-            } else {
-                console.error('Failed to load calendar data:', data.message);
-                document.getElementById('calendarDays').innerHTML =
-                    '<p class="text-danger">Fel vid hämtning av kalenderdata.</p>';
+    function range() {
+        if (view === 'list') return [new Date(cursor.getFullYear(), cursor.getMonth(), 1), new Date(cursor.getFullYear(), cursor.getMonth() + 12, 0)];
+        const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+        const start = new Date(first); start.setDate(first.getDate() - ((first.getDay() + 6) % 7));
+        const last = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
+        const end = new Date(last); end.setDate(last.getDate() + (6 - ((last.getDay() + 6) % 7)));
+        return [start, end];
+    }
+
+    // ── Ritning ─────────────────────────────────────────────────────────────────────────────
+    const statusClass = e => {
+        const s = scopeOf(e);
+        return s === 'training' ? 'kc-s-traning' : s === 'competition' ? 'kc-s-tavling' : s === 'outside' ? 'kc-s-utanfor' : 'kc-s-handelse';
+    };
+    // ⚠️ VARJE ETIKETT ÄR SIN EGEN LÄNK. Rapporterat flera gånger som "kalendern är trasig": ett
+    // klick på händelsen i rutan fällde bara ut dagen längre ner. Etiketten ser klickbar ut, så den
+    // är en länk — och klicket stannar där (dagrutans lyssnare hoppar över länkar).
+    function chip(e) {
+        const mand = e.isMandatory ? '<i class="bi bi-exclamation-triangle-fill text-warning me-1" aria-hidden="true"></i>' : '';
+        const label = (e.time ? e.time + ' ' : '') + e.name;
+        const title = (e.isMandatory ? 'Obligatorisk: ' : '') + label + (e.type ? ' · ' + e.type : '');
+        const cls = 'kc-chip ' + statusClass(e) + (e.isCancelled ? ' kc-cancelled' : '');
+        return e.url
+            ? '<a class="' + cls + '" href="' + esc(e.url) + '" title="' + esc(title) + '">' + mand + esc(label) + '</a>'
+            : '<span class="' + cls + '" title="' + esc(title) + '">' + mand + esc(label) + '</span>';
+    }
+    function render() {
+        $('ccTitle').textContent = view === 'list'
+            ? 'Från ' + MONTHS[cursor.getMonth()] + ' ' + cursor.getFullYear()
+            : cap(MONTHS[cursor.getMonth()]) + ' ' + cursor.getFullYear();
+        if (!all) return;
+        updateHiddenNote();
+        view === 'list' ? renderList() : renderMonth();
+    }
+    function renderMonth() {
+        const [f, t] = range();
+        const today = key(new Date());
+        let html = '<div class="kc-grid" id="ccGrid">' + DOW.map(d => '<div class="kc-dow">' + d + '</div>').join('');
+        for (let d = new Date(f); d <= t; d.setDate(d.getDate() + 1)) {
+            const k = key(d);
+            const items = shown.filter(e => e.k === k);
+            const other = d.getMonth() !== cursor.getMonth();
+            const hol = holidayOn(k);
+            html += '<div class="kc-day' + (other ? ' kc-other' : '') + (k === today ? ' kc-today' : '') + (k < today ? ' cc-past' : '')
+                + (hol ? ' kc-holiday' : '') + (k === selectedDay ? ' kc-selected' : '')
+                + '" tabindex="0" role="button" data-cc-day="' + k + '" aria-label="' + d.getDate() + ' ' + MONTHS[d.getMonth()]
+                + (hol ? ', ' + esc(hol) : '') + (items.length ? ', ' + items.length + ' poster' : '') + '">'
+                + '<span class="kc-num">' + d.getDate() + '</span>'
+                + (hol ? '<span class="kc-hol" title="' + esc(hol) + '">' + esc(hol) + '</span>' : '')
+                + items.slice(0, 3).map(chip).join('')
+                + (items.length > 3 ? '<span class="kc-chip">+' + (items.length - 3) + ' till</span>' : '')
+                + '</div>';
+        }
+        $('ccBody').innerHTML = html + '</div>';
+    }
+    function details(e) {
+        const name = e.url ? '<a href="' + esc(e.url) + '">' + esc(e.name) + '</a>' : esc(e.name);
+        const meta = [e.time, e.venue ? '<i class="bi bi-geo-alt me-1"></i>' + esc(e.venue) : '', e.contactPerson ? '<i class="bi bi-person me-1"></i>' + esc(e.contactPerson) : '']
+            .filter(Boolean).join(' · ');
+        return '<div><span class="kc-chip ' + statusClass(e) + ' d-inline-block me-1">' + esc(e.type || '') + '</span>' + name
+            + (typeof window.hpskEventBadges === 'function' ? window.hpskEventBadges(e) : '') + '</div>'
+            + (meta ? '<div class="small text-muted">' + meta + '</div>' : '')
+            + (plain(e.description) ? '<div class="small text-muted mt-1">' + esc(plain(e.description)) + '</div>' : '');
+    }
+    function renderList() {
+        const [f, t] = range();
+        const items = shown.filter(e => e.k >= key(f) && e.k <= key(t)).map(e => ({ ...e }));
+        if ($('ccHolidays').checked) {
+            for (let y = f.getFullYear(); y <= t.getFullYear(); y++)
+                Object.entries(window.hpskSwedishHolidays(y)).forEach(([k, name]) => {
+                    if (k >= key(f) && k <= key(t)) items.push({ holiday: true, k: k, name: name, time: '' });
+                });
+        }
+        items.sort((a, b) => (a.k + a.time).localeCompare(b.k + b.time));
+        if (!items.length) { $('ccBody').innerHTML = '<div class="text-muted">Inget i kalendern de kommande tolv månaderna.</div>'; return; }
+        let html = '', lastMonth = '';
+        items.forEach(e => {
+            const m = e.k.slice(0, 7);
+            if (m !== lastMonth) {
+                const [y, mo] = m.split('-');
+                html += '<div class="kc-list-month">' + cap(MONTHS[parseInt(mo, 10) - 1]) + ' ' + y + '</div>';
+                lastMonth = m;
             }
-        })
-        .catch(error => {
-            console.error('Error loading calendar data:', error);
-            document.getElementById('calendarDays').innerHTML =
-                '<p class="text-danger">Fel vid hämtning av kalenderdata.</p>';
+            const d = new Date(e.k + 'T12:00:00');
+            const dateText = d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\.$/, '');
+            html += e.holiday
+                ? '<div class="kc-list-row kc-holiday-row"><div class="kc-list-date">' + esc(dateText) + '</div><div class="flex-grow-1"><i class="bi bi-flag me-1"></i>' + esc(e.name) + '</div></div>'
+                : '<div class="kc-list-row"><div class="kc-list-date">' + esc(dateText) + '</div><div class="flex-grow-1">' + details(e) + '</div></div>';
         });
-}
-
-function renderCalendar() {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-
-    // Update month display
-    updateMonthDisplay();
-
-    // Get first day of month and number of days
-    // Convert from Sunday-based (getDay: Sun=0..Sat=6) to Monday-based (Mon=0..Sun=6)
-    const firstDaySun = new Date(year, month, 1).getDay();
-    const firstDay = (firstDaySun === 0) ? 7 : firstDaySun;
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const daysInPrevMonth = new Date(year, month, 0).getDate();
-
-    let html = '';
-
-    // Previous month days
-    for (let i = firstDay - 1; i > 0; i--) {
-        html += renderDayCell(new Date(year, month - 1, daysInPrevMonth - i + 1), true);
+        $('ccBody').innerHTML = '<div id="ccList">' + html + '</div>';
+    }
+    function showDay(k) {
+        if (window.hpskCalCopyActive && window.hpskCalCopyActive()) { window.hpskCalCopyToDay(k); return; }
+        const items = shown.filter(e => e.k === k);
+        const [y, mo, d] = k.split('-');
+        const hol = holidayOn(k);
+        let html = '<div class="card border-primary cc-day-card"><div class="card-body"><h4 class="h6 mb-2">'
+            + cap(new Date(k + 'T12:00:00').toLocaleDateString('sv-SE', { weekday: 'long' })) + ' ' + parseInt(d, 10) + ' ' + MONTHS[parseInt(mo, 10) - 1] + ' ' + y
+            + (hol ? ' <span class="small fw-normal kc-hol d-inline">— ' + esc(hol) + '</span>' : '') + '</h4>';
+        html += items.length ? items.map(e => '<div class="cc-row">' + details(e) + '</div>').join('') : '<div class="text-muted small">Inget den dagen.</div>';
+        $('ccDay').innerHTML = html + '</div></div>';
+        selectedDay = k;
+        root.querySelectorAll('.kc-day.kc-selected').forEach(x => x.classList.remove('kc-selected'));
+        const cell = root.querySelector('[data-cc-day="' + k + '"]');
+        if (cell) cell.classList.add('kc-selected');
+        // ⚠️ Dagvyn står under rutnätet, ofta nedanför skärmkanten — utan rullningen ser ett klick
+        // på en dag ut att inte göra någonting.
+        const card = $('ccDay').firstElementChild;
+        if (card) {
+            const r = card.getBoundingClientRect();
+            if (r.top < 0 || r.bottom > window.innerHeight) card.scrollIntoView({ behavior: 'smooth', block: r.height > window.innerHeight ? 'start' : 'nearest' });
+        }
     }
 
-    // Current month days
-    for (let day = 1; day <= daysInMonth; day++) {
-        html += renderDayCell(new Date(year, month, day), false);
+    // ── Händelser ───────────────────────────────────────────────────────────────────────────
+    root.addEventListener('click', function (e) {
+        if (e.target.closest('a')) return;   // etiketten är en egen länk
+        const day = e.target.closest('[data-cc-day]');
+        if (day) showDay(day.dataset.ccDay);
+    });
+    root.addEventListener('keydown', function (e) {
+        const day = e.target.closest && e.target.closest('[data-cc-day]');
+        if (day && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showDay(day.dataset.ccDay); }
+    });
+    root.addEventListener('change', function (e) {
+        const c = e.target.closest('[data-cal-scope]');
+        if (!c) return;
+        const scopes = readScopes();
+        if (c.checked) scopes.add(c.dataset.calScope); else scopes.delete(c.dataset.calScope);
+        try { localStorage.setItem(SCOPE_KEY, JSON.stringify([...scopes])); } catch (err) { }
+        applyScopes();
+        $('ccDay').innerHTML = ''; selectedDay = null;
+        render();
+    });
+    $('ccPrev').addEventListener('click', () => { cursor.setMonth(cursor.getMonth() - 1); render(); });
+    $('ccNext').addEventListener('click', () => { cursor.setMonth(cursor.getMonth() + 1); render(); });
+    $('ccToday').addEventListener('click', () => { cursor = new Date(); cursor.setDate(1); render(); });
+    function setView(v, remember) {
+        view = v;
+        if (remember !== false) setPref('view', v);
+        $('ccMonthBtn').classList.toggle('active', v === 'month');
+        $('ccListBtn').classList.toggle('active', v === 'list');
+        $('ccDay').innerHTML = ''; selectedDay = null;
+        render();
     }
-
-    // Next month days
-    const totalCells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
-    for (let day = 1; day <= totalCells - firstDay - daysInMonth; day++) {
-        html += renderDayCell(new Date(year, month + 1, day), true);
-    }
-
-    document.getElementById('calendarDays').innerHTML = html;
-}
-
-// En dagruta ser likadan ut oavsett om dagen tillhör månaden man tittar på eller är en
-// utfyllnadsdag från grannmånaden. ⚠️ Utfyllnadsdagarna renderades tidigare som en naken siffra
-// utan datum, klick eller händelser — en klubbtävling den 3/10 syntes därför som en TOM ruta i
-// septembervyn, och slutsatsen blev att kalendern tappat bort tävlingen.
-function renderDayCell(date, otherMonth) {
-    const dateStr = localDateKey(date);
-    const dayEvents = window.calendarEvents?.filter(e => eventDateKey(e) === dateStr) || [];
-
-    const now = new Date();
-    const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const isToday = date.getTime() === todayDate.getTime();
-    const isPastDate = date.getTime() < todayDate.getTime();
-    const hasEvents = dayEvents.length > 0;
-
-    let classNames = 'calendar-day';
-    if (otherMonth) classNames += ' other-month';
-    if (isToday) classNames += ' today';
-    if (hasEvents) classNames += ' has-events';
-    if (isPastDate) classNames += ' past-date';
-
-    let html = `<div class="${classNames}" data-date="${dateStr}" onclick="showDayEvents('${dateStr}')">`;
-    html += `<div class="calendar-day-number">${date.getDate()}</div>`;
-    html += `<div class="calendar-day-events">`;
-
-    // ⚠️ VARJE HÄNDELSE ÄR SIN EGEN LÄNK. Rapporterat flera gånger som "kalendern är trasig":
-    // man klickar på händelsen i rutan, dagen fälls ut LÄNGRE NER på sidan utanför blickfånget,
-    // och slutsatsen blir att inget hände. Namnet i rutan ser ut som en länk, så det ska vara
-    // en länk — `stopPropagation` hindrar att dagen fälls ut samtidigt.
-    //
-    // Klick på dagrutan men UTANFÖR en händelse beter sig oförändrat (showDayEvents), och det
-    // är enda vägen in för en händelse utan egen sida — därför är det fortfarande en div då.
-    dayEvents.slice(0, 2).forEach(event => {
-        const color = eventTypeColors[event.eventType] || eventTypeColors.default;
-        const mand = event.isMandatory
-            ? '<i class="bi bi-exclamation-triangle-fill text-warning me-1" title="Obligatorisk"></i>'
-            : '';
-        const label = event.name || event.type;
-        const title = `${event.isMandatory ? 'Obligatorisk: ' : ''}${label}`;
-        const inner = `<span class="event-dot" style="background-color: ${color}"></span>${mand}${label}`;
-
-        html += event.url
-            ? `<a class="event-item-preview event-preview-link" href="${event.url}" title="${title}" onclick="event.stopPropagation()">${inner}</a>`
-            : `<div class="event-item-preview" title="${title}">${inner}</div>`;
+    window.hpskClubCalendarSetView = setView;
+    $('ccMonthBtn').addEventListener('click', () => setView('month'));
+    $('ccListBtn').addEventListener('click', () => setView('list'));
+    // Helgdagarna räknas i webbläsaren — ingen ny hämtning, bara en ny ritning.
+    $('ccHolidays').addEventListener('change', () => {
+        setPref('holidays', $('ccHolidays').checked ? '1' : '0');
+        render();
+        if (selectedDay && $('ccDay').innerHTML) showDay(selectedDay);
     });
 
-    if (dayEvents.length > 2) {
-        html += `<div class="event-item-preview text-muted small">+${dayEvents.length - 2} mer</div>`;
-    }
-
-    html += `</div></div>`;
-    return html;
-}
+    setView(view, false);   // förvalet sparas inte — bara medlemmens eget val
+    load();
+})();
 
 // ── Lägg in träningar dag för dag ─────────────────────────────────────────────────────────────
 // Klubbadmin väljer en träning och klickar på dagar; varje klick skapar en kopia i samma serie
-// (ClubTraining/CopyToDates). Läget kapar dagklicket, så det fungerar i månadsrutnätet.
-const calCopy = { on: false, sources: null, created: [] };
-function calCopyToken() { const el = document.querySelector('input[name="__RequestVerificationToken"]'); return el ? el.value : ''; }
-function calCopyPost(url, body) {
-    return fetch(url, { method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': calCopyToken() }, body: JSON.stringify(body) })
-        .then(r => r.text()).then(t => { try { return JSON.parse(t); } catch (e) { return { success: false, message: 'Sidan har varit öppen för länge — ladda om och försök igen.' }; } });
-}
-function calCopyLabel(t) {
-    const d = new Date(t.date + 'T12:00:00');
-    // Seriens namn först: två serier kan ha träningar med samma namn.
-    return (t.seriesName ? t.seriesName + ' — ' : '') + t.name + ' (' + d.toLocaleDateString('sv-SE', { weekday: 'short' }) + (t.startTime ? ' ' + t.startTime : '') + ')';
-}
-function calCopyLoadSources() {
-    if (calCopy.sources) return Promise.resolve(calCopy.sources);
-    return fetch('/umbraco/surface/ClubTraining/CopySources?clubId=' + clubId, { credentials: 'same-origin' })
-        .then(r => r.ok ? r.json() : { success: false }).catch(() => ({ success: false }))
-        .then(d => { calCopy.sources = (d && d.success) ? (d.trainings || []) : null; return calCopy.sources; });
-}
-function calCopyStart(sourceId, scheduleId) {
-    calCopy.sources = null; // hämta alltid på nytt — träningen kan just ha lagts in under Admin
-    calCopyLoadSources().then(list => {
-        if (!list || !list.length) { alert('Lägg först in en träning under Admin → Träningar. Den kopierar du sedan till fler dagar.'); return; }
-        const sel = document.getElementById('calCopySource');
-        sel.innerHTML = list.map(t => '<option value="' + t.id + '">' + hpskEsc(calCopyLabel(t)) + '</option>').join('');
-        // Listan har en rad per serie (seriens senaste tillfälle) — matcha på id, annars på serien.
-        const hit = list.find(t => t.id === sourceId) || (scheduleId ? list.find(t => t.scheduleId === scheduleId) : null);
-        if (hit) sel.value = String(hit.id);
-        calCopy.on = true; calCopy.created = [];
-        document.getElementById('calCopyUndo').disabled = true;
-        document.getElementById('calCopyMsg').textContent = '';
-        document.getElementById('calCopyBar').classList.remove('d-none');
-        document.querySelector('.club-calendar').classList.add('cal-copy-mode');
-        if (currentView === 'list') switchView('calendar');
-        document.getElementById('selectedDayEvents').style.display = 'none';
-        document.getElementById('calCopyBar').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-}
-function calCopyStop() {
-    calCopy.on = false;
-    document.getElementById('calCopyBar').classList.add('d-none');
-    document.querySelector('.club-calendar').classList.remove('cal-copy-mode');
-    if (typeof window.hpskLoadClubTrainings === 'function') window.hpskLoadClubTrainings();
-}
-function calCopyToDay(dateStr) {
-    const msgEl = document.getElementById('calCopyMsg');
-    const today = localDateKey(new Date());
-    if (dateStr < today) { msgEl.textContent = 'Välj en dag från i dag och framåt.'; return; }
-    const sourceId = parseInt(document.getElementById('calCopySource').value, 10) || 0;
-    // "okt." bär redan en punkt — ta bort den så att meningen inte får två.
-    const label = new Date(dateStr + 'T12:00:00').toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\.$/, '');
-    msgEl.textContent = 'Lägger in ' + label + '…';
-    calCopyPost('/umbraco/surface/ClubTraining/CopyToDates', { sourceId: sourceId, dates: [dateStr] }).then(d => {
-        if (d.success) {
-            (d.createdIds || []).forEach(id => calCopy.created.push({ id: id, label: label }));
-            document.getElementById('calCopyUndo').disabled = calCopy.created.length === 0;
-            msgEl.textContent = 'Inlagd ' + label + '. Klicka på nästa dag, eller på Klar.';
-            calCopy.sources = null; // nästa öppning ser de nya tillfällena
-            loadCalendarData();
-        } else {
-            msgEl.textContent = (d.skippedDates && d.skippedDates.length) ? 'Träningen finns redan ' + label + '.' : (d.message || 'Det gick inte att lägga in träningen.');
-        }
-    });
-}
-function calCopyUndo() {
-    const last = calCopy.created.pop();
-    if (!last) return;
-    const msgEl = document.getElementById('calCopyMsg');
-    calCopyPost('/umbraco/surface/ClubTraining/Delete', { trainingId: last.id }).then(d => {
-        if (!d.success) { calCopy.created.push(last); msgEl.textContent = d.message || 'Det gick inte att ångra.'; return; }
-        msgEl.textContent = 'Borttagen ' + last.label + '.';
-        document.getElementById('calCopyUndo').disabled = calCopy.created.length === 0;
-        loadCalendarData();
-    });
-}
-// Admin-panelens "Kopiera dag för dag i kalendern…" byter till kalenderfliken och startar läget.
-window.hpskCalendarCopyMode = function (trainingId, scheduleId) {
-    const tabBtn = document.querySelector('[data-bs-target="#clubCalendar"]');
-    if (tabBtn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(tabBtn).show();
-    calCopyStart(trainingId, scheduleId);
-};
-document.addEventListener('DOMContentLoaded', function () {
-    const start = document.getElementById('calCopyStart');
-    if (!start || !(clubId > 0)) return;
-    calCopyLoadSources().then(list => { if (list) start.classList.remove('d-none'); });
-    start.addEventListener('click', () => calCopyStart(0, 0));
-    document.getElementById('calCopyDone').addEventListener('click', calCopyStop);
-    document.getElementById('calCopyUndo').addEventListener('click', calCopyUndo);
-});
-
-function showDayEvents(dateStr) {
-    if (calCopy.on) { calCopyToDay(dateStr); return; }
-    const dayEvents = window.calendarEvents?.filter(e => eventDateKey(e) === dateStr) || [];
-
-    const eventsList = document.getElementById('eventsList');
-    const selectedDayEvents = document.getElementById('selectedDayEvents');
-
-    if (dayEvents.length === 0) {
-        selectedDayEvents.style.display = 'none';
-        return;
+// (ClubTraining/CopyToDates). Startas från träningens meny under Admin → Träningar
+// (window.hpskCalendarCopyMode) — kalendern har ingen egen knapp för det (Stefan 2026-10-05).
+(function () {
+    const root = document.getElementById('ccRoot');
+    if (!root) return;
+    const clubId = parseInt(root.dataset.clubId, 10) || 0;
+    const calCopy = { on: false, sources: null, created: [] };
+    const pad = n => String(n).padStart(2, '0');
+    const today = () => { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+    function token() { const el = document.querySelector('input[name="__RequestVerificationToken"]'); return el ? el.value : ''; }
+    function post(url, body) {
+        return fetch(url, { method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() }, body: JSON.stringify(body) })
+            .then(r => r.text()).then(t => { try { return JSON.parse(t); } catch (e) { return { success: false, message: 'Sidan har varit öppen för länge — ladda om och försök igen.' }; } });
     }
-
-    const date = new Date(dateStr + 'T00:00:00');
-    document.getElementById('selectedDateDisplay').textContent =
-        date.toLocaleDateString('sv-SE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-
-    let html = '';
-    dayEvents.forEach(event => {
-        const color = eventTypeColors[event.eventType] || eventTypeColors.default;
-        const eventName = event.name || event.type;
-        const eventNameHtml = event.url
-            ? `<a href="${event.url}" class="event-link">${eventName} <i class="bi bi-box-arrow-up-right ms-1"></i></a>`
-            : `<span class="event-name">${eventName}</span>`;
-
-        html += `
-            <div class="list-group-item" style="border-left-color: ${color}">
-                ${eventNameHtml}
-                ${event.description ? `<div class="event-description mt-2 mb-2 text-muted" style="font-size: 0.9rem;">${event.description}</div>` : ''}
-                <div class="event-meta">
-                    <span class="badge" style="background-color: ${color}">${event.eventType || event.type}</span>${hpskEventBadges(event)}
-                    ${event.venue ? `<span class="ms-2"><i class="bi bi-geo-alt me-1"></i>${event.venue}</span>` : ''}
-                    ${event.contactPerson ? `<span class="ms-2"><i class="bi bi-person me-1"></i>${event.contactPerson}</span>` : ''}
-                </div>
-            </div>
-        `;
-    });
-
-    eventsList.innerHTML = html;
-    selectedDayEvents.style.display = 'block';
-}
+    function label(t) {
+        const d = new Date(t.date + 'T12:00:00');
+        // Seriens namn först: två serier kan ha träningar med samma namn.
+        return (t.seriesName ? t.seriesName + ' — ' : '') + t.name + ' (' + d.toLocaleDateString('sv-SE', { weekday: 'short' }) + (t.startTime ? ' ' + t.startTime : '') + ')';
+    }
+    function loadSources() {
+        return fetch('/umbraco/surface/ClubTraining/CopySources?clubId=' + clubId, { credentials: 'same-origin' })
+            .then(r => r.ok ? r.json() : { success: false }).catch(() => ({ success: false }))
+            .then(d => (calCopy.sources = (d && d.success) ? (d.trainings || []) : null));
+    }
+    function start(sourceId, scheduleId) {
+        // Hämtas alltid på nytt — träningen kan just ha lagts in under Admin.
+        loadSources().then(list => {
+            if (!list || !list.length) { alert('Lägg först in en träning under Admin → Träningar. Den kopierar du sedan till fler dagar.'); return; }
+            const sel = document.getElementById('calCopySource');
+            sel.innerHTML = list.map(t => '<option value="' + t.id + '">' + window.hpskEsc(label(t)) + '</option>').join('');
+            // Listan har en rad per serie (seriens senaste tillfälle) — matcha på id, annars på serien.
+            const hit = list.find(t => t.id === sourceId) || (scheduleId ? list.find(t => t.scheduleId === scheduleId) : null);
+            if (hit) sel.value = String(hit.id);
+            calCopy.on = true; calCopy.created = [];
+            document.getElementById('calCopyUndo').disabled = true;
+            document.getElementById('calCopyMsg').textContent = '';
+            document.getElementById('calCopyBar').classList.remove('d-none');
+            root.classList.add('cal-copy-mode');
+            if (window.hpskClubCalendarSetView) window.hpskClubCalendarSetView('month', false);
+            document.getElementById('calCopyBar').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    }
+    function stop() {
+        calCopy.on = false;
+        document.getElementById('calCopyBar').classList.add('d-none');
+        root.classList.remove('cal-copy-mode');
+        if (typeof window.hpskLoadClubTrainings === 'function') window.hpskLoadClubTrainings();
+    }
+    function toDay(dateStr) {
+        const msgEl = document.getElementById('calCopyMsg');
+        if (dateStr < today()) { msgEl.textContent = 'Välj en dag från i dag och framåt.'; return; }
+        const sourceId = parseInt(document.getElementById('calCopySource').value, 10) || 0;
+        // "okt." bär redan en punkt — ta bort den så att meningen inte får två.
+        const lbl = new Date(dateStr + 'T12:00:00').toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\.$/, '');
+        msgEl.textContent = 'Lägger in ' + lbl + '…';
+        post('/umbraco/surface/ClubTraining/CopyToDates', { sourceId: sourceId, dates: [dateStr] }).then(d => {
+            if (d.success) {
+                (d.createdIds || []).forEach(id => calCopy.created.push({ id: id, label: lbl }));
+                document.getElementById('calCopyUndo').disabled = calCopy.created.length === 0;
+                msgEl.textContent = 'Inlagd ' + lbl + '. Klicka på nästa dag, eller på Klar.';
+                if (window.loadCalendarData) window.loadCalendarData();
+            } else {
+                msgEl.textContent = (d.skippedDates && d.skippedDates.length) ? 'Träningen finns redan ' + lbl + '.' : (d.message || 'Det gick inte att lägga in träningen.');
+            }
+        });
+    }
+    function undo() {
+        const last = calCopy.created.pop();
+        if (!last) return;
+        const msgEl = document.getElementById('calCopyMsg');
+        post('/umbraco/surface/ClubTraining/Delete', { trainingId: last.id }).then(d => {
+            if (!d.success) { calCopy.created.push(last); msgEl.textContent = d.message || 'Det gick inte att ångra.'; return; }
+            msgEl.textContent = 'Borttagen ' + last.label + '.';
+            document.getElementById('calCopyUndo').disabled = calCopy.created.length === 0;
+            if (window.loadCalendarData) window.loadCalendarData();
+        });
+    }
+    // ⚠️ I läget betyder ett klick var som helst i dagrutan "lägg in här" — även på en etikett. Annars
+    // öppnar ett klick på en dag som redan har en träning träningspanelen i stället. Panelens lyssnare
+    // sitter i fångstfasen på document, så läget fångar klicket före den, på window.
+    window.addEventListener('click', function (e) {
+        if (!calCopy.on) return;
+        const day = e.target.closest && e.target.closest('#ccRoot [data-cc-day]');
+        if (!day) return;
+        e.preventDefault();
+        e.stopPropagation();
+        toDay(day.dataset.ccDay);
+    }, true);
+    window.hpskCalCopyActive = () => calCopy.on;
+    window.hpskCalCopyToDay = toDay;
+    // Admin-panelens "Kopiera dag för dag i kalendern…" byter till kalenderfliken och startar läget.
+    window.hpskCalendarCopyMode = function (trainingId, scheduleId) {
+        const tabBtn = document.querySelector('[data-bs-target="#clubCalendar"]');
+        if (tabBtn && window.bootstrap) bootstrap.Tab.getOrCreateInstance(tabBtn).show();
+        start(trainingId, scheduleId);
+    };
+    document.getElementById('calCopyDone').addEventListener('click', stop);
+    document.getElementById('calCopyUndo').addEventListener('click', undo);
+})();
 </script>
