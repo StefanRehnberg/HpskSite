@@ -1111,7 +1111,7 @@ namespace HpskSite.Controllers
                 ClubId = clubId,
                 FirearmId = firearmId > 0 ? firearmId : null,
                 OccasionKind = kind,
-                OccasionId = FirearmOccasionKind.HasNodeId(kind) ? occasionId : 0,
+                OccasionId = FirearmOccasionKind.HasOccasionId(kind) ? occasionId : 0,
                 From = DateTime.Now.Date,
                 To = DateTime.Now.Date.AddDays(1).AddSeconds(-1),
                 Source = FirearmBookingSource.Valv,
@@ -1201,7 +1201,7 @@ namespace HpskSite.Controllers
                     ClubId = clubId,
                     FirearmId = null,               // platsbokning — valvet avgör vilket vapen
                     OccasionKind = kind,
-                    OccasionId = FirearmOccasionKind.HasNodeId(kind) ? occasionId : 0,
+                    OccasionId = FirearmOccasionKind.HasOccasionId(kind) ? occasionId : 0,
                     OccasionLabel = string.IsNullOrWhiteSpace(occasionLabel)
                         ? group.Name : occasionLabel,
                     From = ParseWhen(from),

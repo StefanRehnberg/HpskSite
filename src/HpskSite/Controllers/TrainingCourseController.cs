@@ -25,6 +25,7 @@ namespace HpskSite.Controllers
         private readonly TrainingGroupService _groups;
         private readonly TrainingCourseSeriesService _series;
         private readonly ClubTrainingService _trainings;
+        private readonly HpskSite.Services.Firearms.FirearmBookingService _bookings;
         private readonly AdminAuthorizationService _auth;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
@@ -42,7 +43,8 @@ namespace HpskSite.Controllers
             IMemberManager memberManager,
             IMemberService memberService,
             TrainingCourseSeriesService series,
-            ClubTrainingService trainings)
+            ClubTrainingService trainings,
+            HpskSite.Services.Firearms.FirearmBookingService bookings)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _courses = courses;
@@ -52,6 +54,7 @@ namespace HpskSite.Controllers
             _memberService = memberService;
             _series = series;
             _trainings = trainings;
+            _bookings = bookings;
         }
 
         private const string Denied = "Du har inte behörighet till den här kursen.";
@@ -141,6 +144,105 @@ namespace HpskSite.Controllers
             public int TrainingId { get; set; }
             public int MemberId { get; set; }
             public string? Note { get; set; }
+        }
+
+        // ── Lånevapen till kursens tillfälle (D7) ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Prövar att träningen hör till kursen och till samma klubb. Utan klubbkontrollen kunde en
+        /// tränare boka en annan klubbs vapen genom att koppla en främmande träning.
+        /// </summary>
+        private async Task<(ClubTraining? Training, int ClubId, string? Error)> LoanContextAsync(int groupId, int trainingId)
+        {
+            if (!await _groups.CanManageTrainingGroup(groupId)) return (null, 0, Denied);
+            if (!_courses.IsLinked(groupId, trainingId)) return (null, 0, "Träningen är inte kopplad till kursen.");
+            var t = _trainings.Get(trainingId);
+            var clubId = _groups.GetTrainingGroupClubId(groupId);
+            if (t == null || clubId <= 0 || t.ClubId != clubId) return (null, 0, "Träningen hör inte till kursens klubb.");
+            return (t, clubId, null);
+        }
+
+        /// <summary>Vilka deltagare har ett lånevapen bokat till tillfället? Läser bara.</summary>
+        [HttpGet]
+        public async Task<IActionResult> LoanWeapons(int groupId, int trainingId)
+        {
+            var (t, clubId, error) = await LoanContextAsync(groupId, trainingId);
+            if (error != null) return Json(new { success = false, message = error });
+            var booked = _bookings.GetForOccasion(clubId, HpskSite.Services.Firearms.FirearmOccasionKind.Training, trainingId)
+                .Where(b => b.IsActive).Select(b => b.MemberId).ToHashSet();
+            var participants = _groups.GetGroupMemberIds(groupId).Select(id =>
+            {
+                var m = _memberService.GetById(id);
+                var name = m == null ? $"Medlem {id}" : $"{m.GetValue<string>("firstName")} {m.GetValue<string>("lastName")}".Trim();
+                return new { memberId = id, name, booked = booked.Contains(id) };
+            }).OrderBy(p => p.name, StringComparer.Create(new System.Globalization.CultureInfo("sv-SE"), true)).ToList();
+            return Json(new { success = true, cancelled = t!.IsCancelled, participants });
+        }
+
+        public class LoanRequest
+        {
+            public int GroupId { get; set; }
+            public int TrainingId { get; set; }
+            public List<int>? MemberIds { get; set; }
+        }
+
+        /// <summary>
+        /// Bokar en lånevapenplats per vald deltagare. Samma form som klubbens kurstilldelning:
+        /// <c>Source = Tilldelad</c> (går förbi klubbens horisont — en kurs planeras i förväg) och
+        /// platsbokningar utan nummer, eftersom valvet avgör vilket vapen var och en får.
+        ///
+        /// <para>⚠️ Bara kursens DELTAGARE kan bokas; ett id utanför kursen vägras per rad. Och svaret
+        /// säger per person vad som hände — tränaren måste veta vem som blev utan vapen.</para>
+        /// </summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> AssignLoanWeapons([FromBody] LoanRequest req)
+        {
+            var (t, clubId, error) = await LoanContextAsync(req.GroupId, req.TrainingId);
+            if (error != null) return Json(new { success = false, message = error });
+            if (t!.IsCancelled) return Json(new { success = false, message = "Träningen är inställd." });
+
+            var participants = _groups.GetGroupMemberIds(req.GroupId).ToHashSet();
+            var wanted = (req.MemberIds ?? new()).Distinct().ToList();
+            if (wanted.Count == 0) return Json(new { success = false, message = "Välj minst en deltagare." });
+
+            var day = t.Date.Date;
+            var results = new List<object>();
+            int created = 0;
+            foreach (var id in wanted)
+            {
+                var m = _memberService.GetById(id);
+                var name = m == null ? $"Medlem {id}" : $"{m.GetValue<string>("firstName")} {m.GetValue<string>("lastName")}".Trim();
+                if (!participants.Contains(id))
+                {
+                    results.Add(new { memberId = id, name, ok = false, message = "Inte deltagare i kursen." });
+                    continue;
+                }
+                var (bookingId, err) = _bookings.Create(new HpskSite.Services.Firearms.FirearmBookingRequest
+                {
+                    MemberId = id,
+                    ClubId = clubId,
+                    FirearmId = null,
+                    OccasionKind = HpskSite.Services.Firearms.FirearmOccasionKind.Training,
+                    OccasionId = t.Id,
+                    OccasionLabel = t.Name,
+                    From = day,
+                    To = day.AddDays(1).AddSeconds(-1),
+                    Source = HpskSite.Services.Firearms.FirearmBookingSource.Tilldelad,
+                });
+                if (err == null) created++;
+                results.Add(new { memberId = id, name, ok = err == null, bookingId, message = err });
+            }
+            var failed = wanted.Count - created;
+            return Json(new
+            {
+                success = created > 0,
+                created,
+                failed,
+                message = created == 0 ? "Ingen kunde få ett lånevapen."
+                        : failed == 0 ? (created == 1 ? "En deltagare har fått en lånevapenplats." : $"{created} deltagare har fått en lånevapenplats.")
+                        : $"{created} fick en lånevapenplats, {failed} kunde inte bokas.",
+                results,
+            });
         }
 
         [HttpPost, ValidateAntiForgeryToken]
