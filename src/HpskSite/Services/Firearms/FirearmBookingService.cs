@@ -91,6 +91,18 @@ namespace HpskSite.Services.Firearms
             return k == Event || k == Competition;
         }
 
+        /// <summary>
+        /// Bär slaget ett id till ett tillfälle hos oss — en nod (händelse, tävling) ELLER en
+        /// klubbträning? Avgör om <c>OccasionId</c> lagras. ⚠️ Inte samma fråga som
+        /// <see cref="HasNodeId"/>: en träning är en rad i <c>ClubTraining</c>, ingen nod, men utan
+        /// sitt id hittar träningens lånelista inte bokningen.
+        /// </summary>
+        public static bool HasOccasionId(string? v)
+        {
+            var k = (v ?? "").Trim();
+            return k == Event || k == Competition || k == Training;
+        }
+
         public static string Label(string? v) => (v ?? "").Trim() switch
         {
             Fritt => "Egen tid",
@@ -498,8 +510,8 @@ namespace HpskSite.Services.Firearms
                 return (0, "Okänt slag av tillfälle.");
 
             var kind = request.OccasionKind.Trim();
-            var occId = FirearmOccasionKind.HasNodeId(kind) ? Math.Max(0, request.OccasionId) : 0;
-            if (FirearmOccasionKind.HasNodeId(kind) && occId == 0)
+            var occId = FirearmOccasionKind.HasOccasionId(kind) ? Math.Max(0, request.OccasionId) : 0;
+            if (FirearmOccasionKind.HasOccasionId(kind) && occId == 0)
                 return (0, "Välj vilket tillfälle bokningen gäller.");
 
             var label = Trim(request.OccasionLabel, 200);

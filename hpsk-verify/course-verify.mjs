@@ -54,7 +54,7 @@ const insertTraining = (club, name, day, mandatory = 0) => n(`INSERT INTO dbo.Cl
 
 const main = async () => {
   const browser = await chromium.launch();
-  let gA = 0, gB = 0, tToday = 0, tPast = 0, tB = 0;
+  let gA = 0, gB = 0, tToday = 0, tPast = 0, tB = 0, loanWeapons = [];
   try {
     // ── Fixtur ───────────────────────────────────────────────────────────────────────────────
     section('Fixtur');
@@ -172,6 +172,38 @@ const main = async () => {
     const att = await O.post('/umbraco/surface/ClubEvent/SetAttendance', { eventId: tToday, kind: 'Training', memberId: 5601, status: 'Present' });
     ok('men tränaren håller upprop på kursens träning', att.success, att.message);
 
+    // ── Lånevapen till tillfället (D7) ───────────────────────────────────────────────────────
+    // Klubb 2604 har inga AKTIVA lånebara vapen i dev, så två aktiveras tillfälligt och återställs
+    // i finally. Utan dem vägras varje platsbokning av kapacitetsspärren.
+    section('Lånevapen till tillfället');
+    loanWeapons = sql(`SELECT TOP 2 Id FROM dbo.Firearm WHERE ScopeKind='Club' AND ScopeId=2604 AND IsLoanable=1 AND IsActive=0 ORDER BY Id`).split(/\s+/).filter(Boolean).map(Number);
+    if (loanWeapons.length) sql(`UPDATE dbo.Firearm SET IsActive=1 WHERE Id IN (${loanWeapons.join(',')})`);
+    const lw0 = await O.get(`/umbraco/surface/TrainingCourse/LoanWeapons?groupId=${gA}&trainingId=${tToday}`);
+    ok('kursens tränare (inte klubbadmin) får läsa tillfällets lånevapen', lw0.success, lw0.message);
+    eq('ingen deltagare har en plats än', (lw0.participants || []).filter(p => p.booked).length, 0);
+    const asg = await O.post('/umbraco/surface/TrainingCourse/AssignLoanWeapons', { groupId: gA, trainingId: tToday, memberIds: [5514, 5601, 5513] });
+    eq('två deltagare får en plats', asg.created, 2);
+    ok('en tränare (inte deltagare) vägras per rad', (asg.results || []).some(r => r.memberId === 5513 && !r.ok && /deltagare/.test(r.message || '')));
+    // ⚠️ Kärnan i fixen: en träningsbokning måste bära träningens id, annars hittar träningens
+    // lånelista och borttagningsspärren den aldrig.
+    eq('bokningarna bär träningens id', n(`SELECT COUNT(*) FROM dbo.FirearmBooking WHERE OccasionKind='Training' AND OccasionId=${tToday}`), 2);
+    eq('källan är Tilldelad', n(`SELECT COUNT(*) FROM dbo.FirearmBooking WHERE OccasionKind='Training' AND OccasionId=${tToday} AND Source='Tilldelad'`), 2);
+    const lw1 = await O.get(`/umbraco/surface/TrainingCourse/LoanWeapons?groupId=${gA}&trainingId=${tToday}`);
+    eq('listan visar båda som bokade', (lw1.participants || []).filter(p => p.booked).length, 2);
+    ok('en träning som inte är kopplad till kursen vägras', !(await O.post('/umbraco/surface/TrainingCourse/AssignLoanWeapons', { groupId: gA, trainingId: tB, memberIds: [5514] })).success);
+    const delT = await A.post('/umbraco/surface/ClubTraining/Delete', { trainingId: tToday });
+    ok('borttagningsspärren räknar lånevapenbokningarna', delT.success !== true && /2 lånevapenbokningar/.test(delT.message || ''), delT.message);
+    await admin.goto(`${BASE}/min-kurs?g=${gA}`, { waitUntil: 'domcontentloaded' });
+    await admin.waitForSelector('.mk-person', { timeout: 30000 }).catch(() => {});
+    ok('menyvalet Lånevapen syns i Min kurs', await admin.locator('#mkLoanItem:not(.d-none)').count() === 1);
+    await admin.evaluate(() => document.getElementById('cookieConsentBanner')?.remove());
+    await admin.click('#mkActions .dropdown-toggle');
+    await admin.click('[data-mk="loan"]');
+    await admin.waitForFunction(() => /har redan en plats/.test(document.getElementById('mkLoanList')?.innerText || ''), null, { timeout: 15000 }).catch(() => {});
+    ok('dialogen säger att båda redan har en plats', /2 av 2 har redan en plats/.test(await admin.locator('#mkLoanList').innerText()));
+    ok('och Boka-knappen är avstängd när inget återstår', await admin.locator('#mkLoanSave').isDisabled());
+    await admin.keyboard.press('Escape');
+
     // ── Anmälningsrätt via kursen ────────────────────────────────────────────────────────────
     section('Anmälningsrätt via kursen');
     const before = await O.get(`/umbraco/surface/ClubEvent/GetSignupState?eventId=${tB}&kind=training`);
@@ -185,6 +217,8 @@ const main = async () => {
   } finally {
     const ids = [tToday, tPast, tB].filter(Boolean).join(',') || '0';
     const groups = [gA, gB].filter(Boolean).join(',') || '0';
+    if (loanWeapons.length) sql(`UPDATE dbo.Firearm SET IsActive=0 WHERE Id IN (${loanWeapons.join(",")})`);
+    sql(`DELETE FROM dbo.FirearmBooking WHERE OccasionKind='Training' AND OccasionId IN (${ids});`);
     sql(`DELETE FROM dbo.MarkenSeries WHERE Id IN (SELECT MarkenSeriesId FROM dbo.TrainingCourseSeries WHERE TrainingGroupId IN (${groups}) AND MarkenSeriesId IS NOT NULL);
          DELETE FROM dbo.TrainingScores WHERE Id IN (SELECT TrainingScoreId FROM dbo.TrainingCourseSeries WHERE TrainingGroupId IN (${groups}));
          DELETE FROM dbo.TrainingCourseSeries WHERE TrainingGroupId IN (${groups});
