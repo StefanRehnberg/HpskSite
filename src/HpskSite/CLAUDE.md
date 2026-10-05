@@ -3719,7 +3719,16 @@ Svit: `hpsk-verify/training-copy-verify.mjs` 31/31 (A/B: de tre reglerna borta �
   `scope` för hela serien / den här och kommande). Går genom samma `Delete` per tillfälle, så
   anmälda/lånevapen hoppas över och NAMNGES (`blocked`). ⚠️ Frågan är scopad på `ClubId` —
   behörigheten prövas för klubben, inte per id. En serie som blir tom tas bort.
-  Svit: `training-bulk-delete-verify.mjs` 18/18 (A/B: utan klubbspärren → 2 röda). **En träning med deltagare eller lånebokningar raderas aldrig** — svaret pekar på att ställa
+  Svit: `training-bulk-delete-verify.mjs` 27/27 (A/B: utan klubbspärren → 2 röda).
+  **Med anmälda går det efter bekräftelse** (`force: "1"`; första svaret `needsConfirm`):
+  anmälningar/närvaro raderas, reserverade lånevapen AVBOKAS, kursens anteckningar och
+  seriekopplingar rensas (medlemmarnas skott står kvar). ⚠️ Ett UTLÄMNAT vapen stoppar alltid.
+- **Seriens eget namn** = `ClubTrainingSchedule.Name` (`TrainingRow.SeriesName`), unikt per klubb
+  (`UniqueSeriesName` vid skapande, `SeriesNameError` prövas FÖRE `EnsureSeriesFor` så att ett nej
+  inte lämnar en ensam serie). `RenameSeries`; `CopyPeriodInput.SeriesName`. Listan: seriefilter
+  och "Visa genomförda" ÖVER listan, radmenyn är husets textade Åtgärder med deltagarlistan först.
+  Deltagarsidans väg tillbaka: klubbadmin → `klubbens URL#clubAdmin/clubTrainings` (Club.cshtml
+  öppnar flikarna i tur och ordning), övriga → klubbsidan. Svit: `training-list-ux-verify` 20/20. **En träning med deltagare eller lånebokningar raderas aldrig** — svaret pekar på att ställa
 in. Den utsedda skjutledaren håller upprop för sitt tillfälle. Medlemmen anmäler sig i en **panel**
 (`_TrainingPanelModal` → `/traning/panel?id=` i en iframe, `#training-{id}` i kalendern/flödet), aldrig
 en egen sida. Händelsedialogerna har inte längre typen Träning eller lånevapen. Statistiken och

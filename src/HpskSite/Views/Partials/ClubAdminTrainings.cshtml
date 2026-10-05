@@ -36,9 +36,23 @@
             </div>
         </div>
         <p class="text-muted small">
-            Träningarna syns i klubbens kalender. Klicka <strong>Öppna</strong> på en rad för deltagarlistan —
-            där görs upprop, QR för incheckning och lånevapen.
+            Träningarna syns i klubbens kalender. Välj <strong>Åtgärder → Deltagarlistan</strong> på en rad för
+            upprop, QR för incheckning och lånevapen.
         </p>
+        @* Filtren står ÖVER listan — under en lång lista syns de aldrig (Stefan 2026-10-05). *@
+        <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+            <div class="d-flex align-items-center gap-2">
+                <label class="small mb-0 text-nowrap" for="ctrSeriesFilter">Serie</label>
+                <select class="form-select form-select-sm w-auto" id="ctrSeriesFilter">
+                    <option value="">Alla träningar</option>
+                </select>
+            </div>
+            <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" id="ctrShowPast">
+                <label class="form-check-label small" for="ctrShowPast">Visa genomförda träningar (senaste 6 månaderna)</label>
+            </div>
+            <span class="small text-muted ms-auto" id="ctrCount"></span>
+        </div>
         <div id="ctrMsg"></div>
         @* Markerade rader tas bort tillsammans (Stefan 2026-10-05: "jag vill kunna ta bort alla"). *@
         <div id="ctrBulkBar" class="alert alert-secondary py-2 d-none">
@@ -49,9 +63,29 @@
             </div>
         </div>
         <div id="ctrList"><div class="text-center py-4"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
-        <div class="form-check mt-2">
-            <input class="form-check-input" type="checkbox" id="ctrShowPast">
-            <label class="form-check-label small" for="ctrShowPast">Visa genomförda träningar (senaste 6 månaderna)</label>
+    </div>
+</div>
+
+<!-- Byt namn på serien -->
+<div class="modal fade" id="ctrSeriesModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Byt namn på serien</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="ctrSeriesTrainingId">
+                <label class="form-label" for="ctrSeriesName">Seriens namn</label>
+                <input type="text" class="form-control" id="ctrSeriesName" maxlength="200" autocomplete="off">
+                <div class="form-text">Seriens namn skiljer den från klubbens andra serier, till exempel <em>Tisdagar hösten 2026</em>.
+                    Träningarnas egna namn ändras inte.</div>
+                <div class="text-danger small mt-2" id="ctrSeriesErr"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="ctrSeriesSave">Spara</button>
+            </div>
         </div>
     </div>
 </div>
@@ -140,6 +174,12 @@
             </div>
             <div class="modal-body">
                 <p class="small text-muted mb-3" id="ctsSourceLine"></p>
+                <div class="mb-3">
+                    <label class="form-label" for="ctsSeriesName">Seriens namn</label>
+                    <input type="text" class="form-control" id="ctsSeriesName" maxlength="200" autocomplete="off">
+                    <div class="form-text">Skiljer serien från klubbens andra serier, till exempel <em>Tisdagar hösten 2026</em>.
+                        Varje träning behåller sitt eget namn.</div>
+                </div>
                 <div class="mb-3">
                     <div class="form-label">Veckodagar</div>
                     <div class="btn-group flex-wrap" role="group" aria-label="Veckodagar" id="ctsDays">
@@ -305,48 +345,91 @@
             .catch(function () { document.getElementById('ctrList').innerHTML = '<div class="alert alert-danger">Träningarna kunde inte läsas.</div>'; });
     }
 
+    // Seriefiltret: "" = alla, "s<id>" = en serie, "none" = träningar utan serie.
+    function visibleRows() {
+        var f = document.getElementById('ctrSeriesFilter').value;
+        if (!f) return rows;
+        if (f === 'none') return rows.filter(function (r) { return !r.scheduleId; });
+        var sid = parseInt(f.substring(1), 10);
+        return rows.filter(function (r) { return r.scheduleId === sid; });
+    }
+    function fillSeriesFilter() {
+        var sel = document.getElementById('ctrSeriesFilter');
+        var keep = sel.value, seen = {}, opts = [];
+        rows.forEach(function (r) {
+            if (r.scheduleId && !seen[r.scheduleId]) { seen[r.scheduleId] = true; opts.push({ id: r.scheduleId, name: r.seriesName || r.name }); }
+        });
+        opts.sort(function (a, b) { return a.name.localeCompare(b.name, 'sv'); });
+        var hasLoose = rows.some(function (r) { return !r.scheduleId; });
+        sel.innerHTML = '<option value="">Alla träningar</option>' +
+            opts.map(function (o) {
+                var n = rows.filter(function (r) { return r.scheduleId === o.id; }).length;
+                return '<option value="s' + o.id + '">' + esc(o.name) + ' (' + n + ')</option>';
+            }).join('') +
+            (hasLoose && opts.length ? '<option value="none">Träningar utan serie</option>' : '');
+        sel.value = Array.prototype.some.call(sel.options, function (o) { return o.value === keep; }) ? keep : '';
+        sel.closest('div').classList.toggle('d-none', opts.length === 0);
+    }
+
     function render() {
         var el = document.getElementById('ctrList');
+        fillSeriesFilter();
         if (!rows.length) {
+            document.getElementById('ctrCount').textContent = '';
             el.innerHTML = '<div class="text-center text-muted py-4 border rounded">Inga träningar inlagda.' +
                 (canEdit ? ' Lägg in en träning under <strong>Åtgärder → Ny träning</strong>. När den är som du vill kopierar du den till fler dagar.' : '') + '</div>';
+            syncBulk();
             return;
         }
+        var list = visibleRows();
+        document.getElementById('ctrCount').textContent = list.length === rows.length
+            ? rows.length + (rows.length === 1 ? ' träning' : ' träningar')
+            : 'Visar ' + list.length + ' av ' + rows.length;
         var today = ymd(new Date());
         var html = '<div class="table-responsive"><table class="table table-sm align-middle"><thead><tr>' +
-            (canEdit ? '<th style="width:2rem"><input class="form-check-input" type="checkbox" id="ctrSelAll" aria-label="Markera alla"' + (rows.length && rows.every(function (r) { return selected.has(r.id); }) ? ' checked' : '') + '></th>' : '') + '<th>Datum</th><th>Tid</th><th>Träning</th><th>Skjutledare</th><th class="text-center">Anmälda</th><th class="text-end"></th></tr></thead><tbody>';
-        rows.forEach(function (t) {
+            (canEdit ? '<th style="width:2rem"><input class="form-check-input" type="checkbox" id="ctrSelAll" aria-label="Markera alla som visas"></th>' : '') +
+            '<th>Datum</th><th>Tid</th><th>Träning</th><th>Skjutledare</th><th class="text-center">Anmälda</th><th class="text-end"></th></tr></thead><tbody>';
+        list.forEach(function (t) {
             var time = t.startTime ? (t.startTime + (t.endTime ? '–' + t.endTime : '')) : '';
             var cap = t.maxParticipants ? (t.signedUp + ' av ' + t.maxParticipants) : (t.registrationRequired ? String(t.signedUp) : (t.signedUp ? String(t.signedUp) : '—'));
             var past = t.date < today;
             var badges = (t.disciplineLabel ? ' <span class="badge bg-secondary-subtle text-secondary-emphasis">' + esc(t.disciplineLabel) + '</span>' : '') +
                 (t.isMandatory ? ' <span class="badge bg-warning text-dark">Obligatorisk</span>' : '') +
                 (t.isCancelled ? ' <span class="badge bg-danger">Inställd</span>' : '') +
-                (t.loanWeaponsOffered ? ' <i class="bi bi-shield-lock text-muted" title="Lånevapen erbjuds"></i>' : '') +
-                (t.followingInSeries > 0 || t.scheduleId ? ' <i class="bi bi-arrow-repeat text-muted" title="Ingår i en serie av kopior"></i>' : '');
+                (t.loanWeaponsOffered ? ' <i class="bi bi-shield-lock text-muted" title="Lånevapen erbjuds"></i>' : '');
+            // Seriens namn under träningens: två serier kan ha träningar med samma namn.
+            var series = t.scheduleId ? '<div class="small text-muted"><i class="bi bi-arrow-repeat me-1"></i>Serie: ' + esc(t.seriesName || t.name) + '</div>' : '';
+            var item = function (act, icon, text, danger) {
+                return '<li><button class="dropdown-item' + (danger ? ' text-danger' : '') + '" type="button" data-ctr="' + act + '" data-id="' + t.id + '"><i class="bi ' + icon + ' me-2"></i>' + text + '</button></li>';
+            };
+            var menu = '<li><a class="dropdown-item" target="_blank" rel="noopener" href="/evenemang/deltagare?e=' + t.id + '&kind=training"><i class="bi bi-people me-2"></i>Deltagarlistan och upprop</a></li>';
+            if (canEdit) {
+                menu += item('edit', 'bi-pencil', 'Redigera') +
+                    item('handover', 'bi-person-badge', 'Byt skjutledare…') +
+                    item('cancel', 'bi-slash-circle', t.isCancelled ? 'Ångra inställt' : 'Ställ in') +
+                    '<li><h6 class="dropdown-header">Kopiera</h6></li>' +
+                    item('copy-period', 'bi-calendar-week', 'Kopiera till en period…') +
+                    item('copy-calendar', 'bi-calendar-plus', 'Kopiera dag för dag i kalendern…');
+                if (t.scheduleId)
+                    menu += '<li><h6 class="dropdown-header">Serien</h6></li>' +
+                        item('series-rename', 'bi-tag', 'Byt namn på serien…') +
+                        item('series-show', 'bi-funnel', 'Visa bara den här serien');
+                menu += '<li><hr class="dropdown-divider"></li>' +
+                    item('delete', 'bi-trash', 'Ta bort', true) +
+                    (t.scheduleId ? item('delete-following', 'bi-trash', 'Ta bort den här och kommande…', true) +
+                                    item('delete-series', 'bi-trash', 'Ta bort hela serien…', true) : '');
+            }
             html += '<tr' + (past || t.isCancelled ? ' class="text-muted"' : '') + ' data-ctr-row="' + t.id + '">' +
                 (canEdit ? '<td><input class="form-check-input ctr-sel" type="checkbox" value="' + t.id + '" aria-label="Markera"' + (selected.has(t.id) ? ' checked' : '') + '></td>' : '') +
                 '<td class="text-nowrap">' + esc(dayLabel(t.date)) + '</td>' +
                 '<td class="text-nowrap">' + esc(time) + '</td>' +
-                '<td>' + esc(t.name) + badges + '</td>' +
+                '<td>' + esc(t.name) + badges + series + '</td>' +
                 '<td>' + (t.skjutledareName ? esc(t.skjutledareName) : '<span class="text-muted">ingen utsedd</span>') + '</td>' +
                 '<td class="text-center">' + esc(cap) + '</td>' +
-                '<td class="text-end text-nowrap">' +
-                '<a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener" href="/evenemang/deltagare?e=' + t.id + '&kind=training">Öppna</a> ' +
-                (canEdit ? '<div class="dropdown d-inline-block"><button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-label="Åtgärder"><i class="bi bi-sliders"></i></button>' +
-                '<ul class="dropdown-menu dropdown-menu-end">' +
-                '<li><button class="dropdown-item" type="button" data-ctr="edit" data-id="' + t.id + '"><i class="bi bi-pencil me-2"></i>Redigera</button></li>' +
-                '<li><button class="dropdown-item" type="button" data-ctr="handover" data-id="' + t.id + '"><i class="bi bi-person-badge me-2"></i>Byt skjutledare…</button></li>' +
-                '<li><h6 class="dropdown-header">Kopiera</h6></li>' +
-                '<li><button class="dropdown-item" type="button" data-ctr="copy-period" data-id="' + t.id + '"><i class="bi bi-calendar-week me-2"></i>Kopiera till en period…</button></li>' +
-                '<li><button class="dropdown-item" type="button" data-ctr="copy-calendar" data-id="' + t.id + '"><i class="bi bi-calendar-plus me-2"></i>Kopiera dag för dag i kalendern…</button></li>' +
-                '<li><button class="dropdown-item" type="button" data-ctr="cancel" data-id="' + t.id + '"><i class="bi bi-slash-circle me-2"></i>' + (t.isCancelled ? 'Ångra inställt' : 'Ställ in') + '</button></li>' +
-                '<li><hr class="dropdown-divider"></li>' +
-                '<li><button class="dropdown-item text-danger" type="button" data-ctr="delete" data-id="' + t.id + '"><i class="bi bi-trash me-2"></i>Ta bort</button></li>' +
-                (t.scheduleId ? '<li><button class="dropdown-item text-danger" type="button" data-ctr="delete-following" data-id="' + t.id + '"><i class="bi bi-trash me-2"></i>Ta bort den här och kommande…</button></li>' +
-                    '<li><button class="dropdown-item text-danger" type="button" data-ctr="delete-series" data-id="' + t.id + '"><i class="bi bi-trash me-2"></i>Ta bort hela serien…</button></li>' : '') +
-                '</ul></div>' : '') +
-                '</td></tr>';
+                '<td class="text-end text-nowrap"><div class="dropdown">' +
+                '<button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false" title="Åtgärder för ' + esc(t.name) + '">' +
+                '<i class="bi bi-sliders me-2"></i>Åtgärder</button>' +
+                '<ul class="dropdown-menu dropdown-menu-end">' + menu + '</ul></div></td></tr>';
         });
         el.innerHTML = html + '</tbody></table></div>';
         syncBulk();
@@ -355,13 +438,15 @@
     // Markeringen överlever omritning; rader som inte längre finns släpps.
     var selected = new Set();
     function syncBulk() {
-        var ids = new Set(rows.map(function (r) { return r.id; }));
+        // Bara rader som SYNS kan vara markerade — annars tar "Ta bort markerade" bort något filtret gömmer.
+        var ids = new Set(visibleRows().map(function (r) { return r.id; }));
         selected.forEach(function (id) { if (!ids.has(id)) selected.delete(id); });
         var bar = document.getElementById('ctrBulkBar');
         bar.classList.toggle('d-none', selected.size === 0 || !canEdit);
         document.getElementById('ctrBulkCount').textContent = selected.size === 1 ? '1 träning markerad' : selected.size + ' träningar markerade';
         var all = document.getElementById('ctrSelAll');
-        if (all) all.checked = rows.length > 0 && rows.every(function (r) { return selected.has(r.id); });
+        var vis = visibleRows();
+        if (all) all.checked = vis.length > 0 && vis.every(function (r) { return selected.has(r.id); });
     }
     // Texten när anmälda följer med. Att ställa in är rekommendationen: de anmälda ser det då i
     // kalendern, och närvaron finns kvar som underlag (aktivitet, föreningsintyg).
@@ -371,6 +456,19 @@
 
     // Första svaret tar bort de tomma tillfällena och räknar upp dem med anmälda; efter ett ja
     // skickas SAMMA urval igen med force.
+    function saveSeriesName() {
+        var btn = document.getElementById('ctrSeriesSave'); btn.disabled = true;
+        post('/umbraco/surface/ClubTraining/RenameSeries', {
+            trainingId: parseInt(document.getElementById('ctrSeriesTrainingId').value, 10) || 0,
+            name: document.getElementById('ctrSeriesName').value
+        }).then(function (d) {
+            btn.disabled = false;
+            if (!d.success) { document.getElementById('ctrSeriesErr').textContent = d.message || 'Namnet kunde inte sparas.'; return; }
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('ctrSeriesModal')).hide();
+            msg(esc(d.message)); load();
+        });
+    }
+
     function deleteResult(d, body) {
         if (d.needsConfirm && d.needsConfirm.length && body && !body.force) {
             var list = d.needsConfirm.slice(0, 12).join('\n') + (d.needsConfirm.length > 12 ? '\n… och ' + (d.needsConfirm.length - 12) + ' till' : '');
@@ -493,7 +591,8 @@
             from: document.getElementById('ctsFrom').value,
             to: document.getElementById('ctsTo').value,
             breaks: breaks,
-            rotation: rotate ? rotation.slice() : []
+            rotation: rotate ? rotation.slice() : [],
+            seriesName: document.getElementById('ctsSeriesName').value.trim()
         };
     }
     var previewTimer = null, previewSeq = 0;
@@ -547,6 +646,7 @@
             document.getElementById('ctsTitle').textContent = 'Kopiera ' + t.name + ' till en period';
             document.getElementById('ctsSourceLine').textContent = 'Allt följer med från träningen ' + dayLabel(t.date) +
                 (t.startTime ? ' ' + t.startTime : '') + ' — tid, plats, gren, anmälan och lånevapen. Bara datumet ändras.';
+            document.getElementById('ctsSeriesName').value = t.seriesName || t.name;
             var iso = ((new Date(t.date + 'T12:00:00').getDay() + 6) % 7) + 1;
             for (var d = 1; d <= 7; d++) document.getElementById('ctsDay' + d).checked = d === iso;
             var next = new Date(t.date + 'T12:00:00'); next.setDate(next.getDate() + 7);
@@ -626,6 +726,13 @@
                 }
                 msg(esc(d.message), d.success ? 'success' : 'warning'); load();
             });
+        } else if (act === 'series-show' && t) {
+            document.getElementById('ctrSeriesFilter').value = 's' + t.scheduleId; selected.clear(); render();
+        } else if (act === 'series-rename' && t) {
+            document.getElementById('ctrSeriesTrainingId').value = t.id;
+            document.getElementById('ctrSeriesName').value = t.seriesName || t.name;
+            document.getElementById('ctrSeriesErr').textContent = '';
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('ctrSeriesModal')).show();
         } else if (act === 'bulk-delete') {
             var n = selected.size;
             if (!n || !confirm('Ta bort ' + (n === 1 ? '1 träning' : n + ' träningar') + '?')) return;
@@ -634,7 +741,7 @@
         } else if (act === 'bulk-clear') { selected.clear(); render(); }
         else if ((act === 'delete-series' || act === 'delete-following') && t) {
             var whole = act === 'delete-series';
-            var q = whole ? 'Ta bort HELA serien ' + t.name + ' — alla tillfällen, även tidigare?'
+            var q = whole ? 'Ta bort HELA serien ' + (t.seriesName || t.name) + ' — alla tillfällen, även tidigare?'
                           : 'Ta bort ' + t.name + ' ' + dayLabel(t.date) + ' och alla senare tillfällen i serien?';
             if (!confirm(q)) return;
             var bodyS = { seriesOf: id, scope: whole ? 'all' : 'following' };
@@ -647,9 +754,11 @@
         var tab = document.getElementById('clubTrainings-tab');
         if (tab) tab.addEventListener('shown.bs.tab', function () { if (!loaded) { loaded = true; load(); } });
         document.getElementById('ctrShowPast').addEventListener('change', load);
+        document.getElementById('ctrSeriesFilter').addEventListener('change', render);
+        document.getElementById('ctrSeriesSave').addEventListener('click', saveSeriesName);
         document.getElementById('ctrList').addEventListener('change', function (e) {
             if (e.target.id === 'ctrSelAll') {
-                rows.forEach(function (r) { if (e.target.checked) selected.add(r.id); else selected.delete(r.id); });
+                visibleRows().forEach(function (r) { if (e.target.checked) selected.add(r.id); else selected.delete(r.id); });
                 render();
             } else if (e.target.classList.contains('ctr-sel')) {
                 var v = parseInt(e.target.value, 10);

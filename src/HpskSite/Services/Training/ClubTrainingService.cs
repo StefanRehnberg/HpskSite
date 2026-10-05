@@ -58,6 +58,8 @@ namespace HpskSite.Services.Training
             public int Bookings { get; set; }
             /// <summary>Kommande tillfällen i samma serie EFTER det här — styr frågan "bara den här eller alla kommande".</summary>
             public int FollowingInSeries { get; set; }
+            /// <summary>Seriens eget namn (ClubTrainingSchedule.Name) — skiljer två serier med samma träningsnamn åt.</summary>
+            public string? SeriesName { get; set; }
         }
 
         private class CountRow
@@ -155,6 +157,7 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             var seriesDates = db.Fetch<ClubTraining>(
                 "WHERE ClubId = @0 AND ScheduleId IS NOT NULL AND [Date] >= @1", clubId, DateTime.Today)
                 .GroupBy(x => x.ScheduleId!.Value).ToDictionary(g => g.Key, g => g.Select(x => x.Date.Date).ToList());
+            var seriesNames = SeriesNames(db, clubId);
             int Following(ClubTraining t) => t.ScheduleId is int sid && seriesDates.TryGetValue(sid, out var ds)
                 ? ds.Count(d => d > t.Date.Date) : 0;
 
@@ -180,7 +183,8 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
                 SignedUp = counts.TryGetValue(t.Id, out var c) ? c.SignedUp : 0,
                 Present = counts.TryGetValue(t.Id, out var c2) ? c2.Present : 0,
                 Bookings = bookings.GetValueOrDefault(t.Id),
-                FollowingInSeries = Following(t)
+                FollowingInSeries = Following(t),
+                SeriesName = t.ScheduleId is int sn && seriesNames.TryGetValue(sn, out var nm) ? nm : null
             }).ToList();
         }
 
@@ -419,6 +423,61 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
         // kalendern. Kopiorna hör till samma serie (ScheduleId), så en ändring kan gälla "den här och
         // alla kommande". Ingen ny tabell: en schemarad blir seriens nyckel.
 
+        private static Dictionary<int, string> SeriesNames(IUmbracoDatabase db, int clubId)
+            => db.Fetch<ClubTrainingSchedule>("WHERE ClubId = @0", clubId)
+                 .ToDictionary(s => s.Id, s => s.Name ?? "");
+
+        /// <summary>
+        /// Ett namn ingen annan serie i klubben har. Två serier med samma namn går inte att skilja åt
+        /// i listan och i "Ta bort hela serien" — därför "(2)", "(3)" när förlagans namn redan är taget.
+        /// </summary>
+        private static string UniqueSeriesName(IUmbracoDatabase db, int clubId, string wanted, int exceptId)
+        {
+            var taken = db.Fetch<ClubTrainingSchedule>("WHERE ClubId = @0 AND Id <> @1", clubId, exceptId)
+                .Select(s => (s.Name ?? "").Trim()).ToHashSet(StringComparer.CurrentCultureIgnoreCase);
+            var name = (wanted ?? "").Trim();
+            if (name.Length == 0) name = "Serie";
+            if (!taken.Contains(name)) return name;
+            for (var i = 2; ; i++) if (!taken.Contains($"{name} ({i})")) return $"{name} ({i})";
+        }
+
+        /// <summary>
+        /// Prövar ett serienamn för träningen UTAN att skriva något — så att en kopiering kan stoppas
+        /// innan förlagan görs till en serie. Träningens egen serie räknas inte som krock.
+        /// </summary>
+        public string? SeriesNameError(int trainingId, string? name)
+        {
+            var t = Get(trainingId);
+            if (t == null) return "Träningen finns inte.";
+            var clean = (name ?? "").Trim();
+            if (clean.Length == 0) return "Ange ett namn på serien.";
+            if (clean.Length > 200) return "Namnet är för långt (högst 200 tecken).";
+            using var db = _databaseFactory.CreateDatabase();
+            var clash = db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.ClubTrainingSchedule WHERE ClubId = @0 AND Id <> @1 AND Name = @2",
+                t.ClubId, t.ScheduleId ?? 0, clean);
+            return clash > 0 ? $"Klubben har redan en serie som heter {clean}. Välj ett annat namn, så att serierna går att skilja åt." : null;
+        }
+
+        /// <summary>Byter namn på träningens serie. Vägrar ett namn en annan serie i klubben redan har.</summary>
+        public string? RenameSeries(int trainingId, string? name)
+        {
+            var t = Get(trainingId);
+            if (t?.ScheduleId is not int sid) return "Träningen ingår inte i någon serie.";
+            var error = SeriesNameError(trainingId, name);
+            if (error != null) return error;
+            using var db = _databaseFactory.CreateDatabase();
+            db.Execute("UPDATE dbo.ClubTrainingSchedule SET Name = @1, UpdatedDate = GETDATE() WHERE Id = @0", sid, (name ?? "").Trim());
+            return null;
+        }
+
+        /// <summary>Gör träningen till förlaga i en serie (om den inte redan är det) och returnerar seriens id.</summary>
+        public int EnsureSeriesFor(int trainingId, int actingMemberId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var t = db.SingleOrDefault<ClubTraining>("WHERE Id = @0", trainingId);
+            return t == null ? 0 : EnsureSeries(db, t, actingMemberId);
+        }
+
         /// <summary>Ser till att träningen hör till en serie och returnerar seriens id.</summary>
         private int EnsureSeries(IUmbracoDatabase db, ClubTraining source, int actingMemberId)
         {
@@ -427,7 +486,7 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             var iso = ((int)source.Date.DayOfWeek + 6) % 7 + 1;
             var schedule = new ClubTrainingSchedule
             {
-                ClubId = source.ClubId, Name = source.Name, Discipline = source.Discipline,
+                ClubId = source.ClubId, Name = UniqueSeriesName(db, source.ClubId, source.Name, 0), Discipline = source.Discipline,
                 Weekdays = iso.ToString(CultureInfo.InvariantCulture),
                 StartTime = source.StartTime, EndTime = source.EndTime,
                 PeriodFrom = source.Date.Date, PeriodTo = source.Date.Date,
@@ -513,6 +572,8 @@ WHERE s.Id = @0", seriesId);
             public List<BreakInput>? Breaks { get; set; }
             /// <summary>Turas om. Tom = förlagans skjutledare varje gång.</summary>
             public List<int>? Rotation { get; set; }
+            /// <summary>Seriens namn. Tomt = behåll (eller förlagans namn för en ny serie).</summary>
+            public string? SeriesName { get; set; }
         }
 
         /// <summary>Räknar ut datumen för "Kopiera till en period" — samma funktion för förhandsvisning och skapande.</summary>
