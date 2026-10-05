@@ -132,6 +132,7 @@ namespace HpskSite.Controllers
             int me = await CurrentMemberIdAsync();
             var member = me > 0 ? _memberService.GetById(me) : null;
             _participation.ApplyCourseRegistration(ctx, me);   // fas D: kursens krav öppnar anmälan för deltagaren
+            OpenForLoanBooking(ctx);   // lånevapen utan anmälningskrav: bokningen är anmälan
             var roster = await _participation.BuildRosterAsync(ctx);
             bool canManage = me > 0 && await _participation.CanManageAsync(ctx, me);
             // ⚠️⚠️ `me > 0` OCH `!IsGuest` — BÅDA behövs, och utan dem läcker kortet.
@@ -167,6 +168,8 @@ namespace HpskSite.Controllers
                 // även efter sista anmälningsdag — annars slutar den som inte kan komma säga till,
                 // och listan påstår att hen är väntad.
                 cancelOpen = ClubEventParticipationService.IsCancelOpen(ctx),
+                // Lånevapenläge: kortet visar bara lånevapnet, ingen anmälan.
+                loanOnly = ctx.LoanOnly,
                 @event = new
                 {
                     id = ctx.EventId,
@@ -294,6 +297,24 @@ namespace HpskSite.Controllers
         /// <c>occupied</c> svarar på en annan fråga (finns det plats kvar) och duger inte till
         /// någondera.</para>
         /// </summary>
+        /// <summary>
+        /// Lånevapen utan anmälningskrav (Stefan 2026-10-05): "Anmälan krävs" är ett krav på ALLA som
+        /// kommer, att boka lånevapen är något bara den som behöver ett vapen gör. Erbjuds lånevapen
+        /// men krävs ingen anmälan öppnas anmälan i LÅNEVAPENLÄGE — bara för den som bokar ett vapen.
+        /// Bokningen blir i praktiken en anmälan (raden står i deltagarlistan, så vapenansvarig vet
+        /// vem som kommer), men ingen annan behöver anmäla sig. Körs EFTER kursens krav: kräver en kurs
+        /// anmälan är det vanlig anmälan som gäller.
+        /// </summary>
+        private void OpenForLoanBooking(ClubEventContext ctx)
+        {
+            if (ctx.RegistrationRequired || ctx.IsCancelled || ctx.IsRegionOwned || ctx.OwnerId <= 0) return;
+            if (!string.IsNullOrEmpty(ctx.RegistrationUrl)) return;
+            var offered = ctx.IsTraining ? ctx.LoanWeaponsOffered : _loanRules.EventOffersLoanWeapons(ctx.EventId).Item1;
+            if (!offered || _firearms.CountLoanable(ctx.OwnerId) == 0) return;
+            ctx.RegistrationRequired = true;
+            ctx.LoanOnly = true;
+        }
+
         private object? BuildLoanWeaponState(ClubEventContext ctx, int memberId, bool canManage)
         {
             if (ctx.IsRegionOwned) return null;
@@ -371,8 +392,12 @@ namespace HpskSite.Controllers
             var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
             _participation.ApplyCourseRegistration(ctx, me);   // fas D: kursens krav öppnar anmälan för deltagaren
+            OpenForLoanBooking(ctx);   // lånevapen utan anmälningskrav: bokningen är anmälan
             if (!ctx.RegistrationRequired) return Json(new { success = false, message = "Det här evenemanget har ingen anmälan." });
             if (!ClubEventParticipationService.IsSignupOpen(ctx)) return Json(new { success = false, message = "Anmälan är stängd." });
+            // I lånevapenläget är bokningen hela poängen — en anmälan utan vapen är inget att anmäla.
+            if (ctx.LoanOnly && request?.LoanWeapon != true)
+                return Json(new { success = false, message = "Ingen anmälan behövs — kom direkt. Här bokar du bara lånevapen." });
 
             var member = _memberService.GetById(me);
             if (!_participation.IsEligible(ctx, member))
@@ -410,12 +435,21 @@ namespace HpskSite.Controllers
                 // ⚠️ ANMÄLAN RULLAS INTE TILLBAKA om vapnet inte gick att boka. Att vara anmäld
                 // utan vapen är bättre än att inte vara anmäld — och skytten måste få veta vilket
                 // av de två som blev av, inte ett samlat "det gick inte".
+                // I lånevapenläget finns anmälan BARA för vapnets skull — gick bokningen inte igenom
+                // tas raden bort igen, annars står hen anmäld till något som inte kräver det.
+                if (loanError != null && ctx.LoanOnly)
+                {
+                    await _participation.CancelAsync(ctx.EventId, me, me, ctx.OccasionKind);
+                    return Json(new { success = false, message = "Vapnet kunde inte bokas: " + loanError });
+                }
                 loanMessage = loanError is null
                     ? (request.LoanFirearmId > 0
                         ? "Vapnet är reserverat."
                         : "Ett vapen är reserverat åt dig.")
                     : "⚠️ Du är anmäld, men vapnet kunde inte bokas: " + loanError;
             }
+            if (ctx.LoanOnly)
+                return Json(new { success = true, isReserve = false, loanMessage, message = "Lånevapnet är bokat. Välkommen!" });
 
             return Json(new
             {
@@ -438,6 +472,8 @@ namespace HpskSite.Controllers
 
             var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+            _participation.ApplyCourseRegistration(ctx, me);
+            OpenForLoanBooking(ctx);
 
             // A member may withdraw themselves; a functionary may withdraw anyone on their event.
             int target = request?.MemberId > 0 ? request.MemberId : me;
@@ -486,7 +522,9 @@ namespace HpskSite.Controllers
             var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
             _participation.ApplyCourseRegistration(ctx, me);   // fas D: kursens krav öppnar anmälan för deltagaren
+            OpenForLoanBooking(ctx);   // lånevapen utan anmälningskrav: bokningen är anmälan
             if (!ctx.RegistrationRequired) return Json(new { success = false, message = "Det här evenemanget har ingen anmälan." });
+            if (ctx.LoanOnly) return Json(new { success = false, message = "Ingen anmälan behövs — gäster kommer direkt." });
             if (!ClubEventParticipationService.IsSignupOpen(ctx)) return Json(new { success = false, message = "Anmälan är stängd." });
 
             var member = _memberService.GetById(me);
@@ -590,6 +628,8 @@ namespace HpskSite.Controllers
 
             var ctx = _participation.GetContext(request?.EventId ?? 0, request?.Kind);
             if (ctx == null) return Json(new { success = false, message = "Evenemanget hittades inte." });
+            _participation.ApplyCourseRegistration(ctx, me);
+            OpenForLoanBooking(ctx);
             if (ctx.IsRegionOwned || ctx.OwnerId <= 0)
                 return Json(new { success = false, message = "Lånevapen hör till en klubb, inte till kretsens evenemang." });
             if (!ClubEventParticipationService.IsCancelOpen(ctx))
@@ -617,9 +657,10 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Vapnet är utlämnat och måste återlämnas i valvet." });
 
                 var cancelError = _bookings.Cancel(existing.Id, me, false, "Behövde inget lånevapen.");
-                return cancelError is null
-                    ? Json(new { success = true, loanMessage = "Lånevapnet är avbokat." })
-                    : Json(new { success = false, message = cancelError });
+                if (cancelError != null) return Json(new { success = false, message = cancelError });
+                // I lånevapenläget fanns raden bara för vapnets skull — den följer med.
+                if (ctx.LoanOnly) await _participation.CancelAsync(ctx.EventId, me, me, ctx.OccasionKind);
+                return Json(new { success = true, loanMessage = "Lånevapnet är avbokat." });
             }
 
             if (existing != null)

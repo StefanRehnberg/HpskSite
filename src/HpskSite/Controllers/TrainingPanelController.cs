@@ -58,6 +58,7 @@ namespace HpskSite.Controllers
             model.IsCancelled = ctx.IsCancelled;
             model.IsMandatory = ctx.IsMandatory;
             model.RegistrationRequired = ctx.RegistrationRequired;
+            model.LoanWeaponsOffered = ctx.LoanWeaponsOffered;
             if (ctx.SkjutledareMemberId is > 0)
                 model.SkjutledareName = _memberService.GetById(ctx.SkjutledareMemberId.Value)?.Name ?? "";
 
@@ -87,6 +88,8 @@ namespace HpskSite.Controllers
         public bool IsCancelled { get; set; }
         public bool IsMandatory { get; set; }
         public bool RegistrationRequired { get; set; }
+        /// <summary>Erbjuds l�nevapen visar anm�lningskortet sj�lv "Ingen anm�lan beh�vs" med bokningen under.</summary>
+        public bool LoanWeaponsOffered { get; set; }
         public bool CanManage { get; set; }
         /// <summary>Kurserna den inloggade går som tillfället hör till, med kursens krav.</summary>
         public List<HpskSite.Services.Training.TrainingCourseService.MemberCourseOnTraining> MyCourses { get; set; } = new();
