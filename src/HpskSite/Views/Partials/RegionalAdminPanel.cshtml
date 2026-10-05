@@ -32,7 +32,6 @@
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Typ *</label>
                             <select class="form-select" id="regionEventType" required onchange="onRegionEventTypeChange()">
-                                <option value="Träning">Träning</option>
                                 <option value="Städning">Städning</option>
                                 <option value="Möte">Möte</option>
                                 <option value="Socialt">Socialt</option>
@@ -958,7 +957,7 @@
         document.getElementById('regionEventName').value = event.name || '';
 
         // Set event type — if not a known type, select "Annat" and populate custom field
-        var typeVal = event.type || 'Träning';
+        var typeVal = event.type || '';
         if (knownRegionEventTypes.indexOf(typeVal) >= 0) {
             document.getElementById('regionEventType').value = typeVal;
             document.getElementById('regionEventCustomType').style.display = 'none';
@@ -1179,7 +1178,8 @@
         });
     };
 
-    var knownRegionEventTypes = ['Träning', 'Städning', 'Möte', 'Socialt', 'Nyhet'];
+    // Kretsar har ingen träning (beslut 2026-10-03) — typen finns inte här.
+    var knownRegionEventTypes = ['Städning', 'Möte', 'Socialt', 'Nyhet'];
 
     window.onRegionEventTypeChange = function() {
         var select = document.getElementById('regionEventType');
