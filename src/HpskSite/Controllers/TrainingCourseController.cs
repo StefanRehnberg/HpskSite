@@ -10,6 +10,7 @@ using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Web;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Web.Website.Controllers;
+using Umbraco.Extensions;
 
 namespace HpskSite.Controllers
 {
@@ -92,7 +93,7 @@ namespace HpskSite.Controllers
             if (!_courses.IsParticipant(groupId, me)) return Json(new { success = false, message = "Du går inte den här kursen." });
             var v = _courses.GetForParticipant(groupId, me, DateTime.Today);
             if (v == null) return Json(new { success = false, message = "Kursen finns inte." });
-            return Json(new { success = true, course = v });
+            return Json(new { success = true, course = v, club = ClubOf(_courses.ClubIdOf(groupId)) });
         }
 
         [HttpGet]
@@ -101,7 +102,34 @@ namespace HpskSite.Controllers
             if (!await _groups.CanManageTrainingGroup(groupId)) return Json(new { success = false, message = Denied });
             var c = _courses.Get(groupId, DateTime.Today);
             if (c == null) return Json(new { success = false, message = "Kursen finns inte." });
-            return Json(new { success = true, course = c, notes = _courses.Notes(groupId) });
+            return Json(new { success = true, course = c, notes = _courses.Notes(groupId), club = ClubOf(c.ClubId) });
+        }
+
+        /// <summary>
+        /// Klubbens namn och adress — Min kurs har Ekonomins skal med klubben i vänsterkortet och
+        /// "← Tillbaka" till klubben (UX-omgången 2026-10-06).
+        /// </summary>
+        private object ClubOf(int clubId)
+        {
+            var node = clubId > 0 ? UmbracoContext.Content?.GetById(clubId) : null;
+            return new
+            {
+                id = clubId,
+                name = node == null ? "" : (node.Value<string>("clubName") is { Length: > 0 } n ? n : node.Name),
+                url = node?.Url() ?? ""
+            };
+        }
+
+        /// <summary>
+        /// Admin → Träningsgrupper: instruktörer, antal kopplade tillfällen och nästa tillfälle per
+        /// grupp i klubben — i EN fråga för listan. Samma grind som klubbens träningar.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> ClubSummary(int clubId)
+        {
+            if (!await _auth.IsClubAdminForClub(clubId) && !await _auth.IsSkjutledareForClub(clubId))
+                return Json(new { success = false, message = Denied });
+            return Json(new { success = true, groups = _courses.ClubSummaries(clubId, DateTime.Today) });
         }
 
         [HttpGet]

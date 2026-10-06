@@ -517,12 +517,32 @@
         </div>
 
         <!-- Training Groups Tab -->
+        @* Samma form som Träningar (UX-omgången 2026-10-06): ikon + rubrik + en förklarande rad,
+           blå Åtgärder för sidan, filter ovanför listan och en Åtgärder-meny per rad. Medlemmarna
+           hanteras i en dialog — den utfällda raden i tabellen följde ingen annan admin-yta. *@
         <div class="tab-pane fade" id="trainingGroupsTab">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5>Träningsgrupper</h5>
-                <button class="btn btn-success" onclick="showCreateClubTrainingGroupModal()">
-                    <i class="bi bi-plus-circle me-2"></i>Ny Träningsgrupp
-                </button>
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Träningsgrupper</h5>
+                <div class="dropdown" id="clubTgActions">
+                    <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-sliders me-1"></i>Åtgärder
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end" style="min-width:240px">
+                        <li><h6 class="dropdown-header">Skapa</h6></li>
+                        <li><button class="dropdown-item" type="button" data-ctg="new"><i class="bi bi-plus-circle me-2"></i>Ny träningsgrupp</button></li>
+                    </ul>
+                </div>
+            </div>
+            <p class="text-muted small">
+                En träningsgrupp är en kurs: deltagare och instruktörer, kopplade till klubbens träningar.
+                Välj <strong>Åtgärder → Öppna kursen</strong> på en rad för upprop, serier och kursöversikt.
+            </p>
+            <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+                <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="clubTgShowInactive">
+                    <label class="form-check-label small" for="clubTgShowInactive">Visa avslutade grupper</label>
+                </div>
+                <span class="small text-muted ms-auto" id="clubTgCount"></span>
             </div>
             <div id="clubTrainingGroupList">
                 <div class="text-center py-4">
@@ -1878,7 +1898,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="clubTrainingGroupModalTitle">Ny Träningsgrupp</h5>
+                <h5 class="modal-title" id="clubTrainingGroupModalTitle">Ny träningsgrupp</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -1899,17 +1919,31 @@
                     <div class="mb-3 d-none" id="clubTgIsActiveGroup">
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" id="clubTgIsActive" checked>
-                            <label class="form-check-label" for="clubTgIsActive">Aktiv</label>
+                            <label class="form-check-label" for="clubTgIsActive">Pågår</label>
                         </div>
-                        <small class="text-muted">Inaktiva grupper visas inte för deltagare.</small>
+                        <small class="text-muted">En avslutad grupp syns inte för deltagarna, och instruktörerna når den inte längre från Min kurs.</small>
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-success" onclick="submitClubTrainingGroup()">
-                    <i class="bi bi-save me-2"></i>Spara
-                </button>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="submitClubTrainingGroup()">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Deltagare och instruktörer i en träningsgrupp -->
+<div class="modal fade" id="clubTgMembersModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="clubTgMembersTitle">Deltagare och instruktörer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="clubTgMembersBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
             </div>
         </div>
     </div>
@@ -1980,7 +2014,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Lägg till medlem i träningsgrupp</h5>
+                <h5 class="modal-title">Lägg till i träningsgruppen</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -1997,8 +2031,8 @@
                 <div class="mb-3">
                     <label class="form-label">Roll</label>
                     <select class="form-select" id="clubTgMemberRole">
-                        <option value="Member">Medlem</option>
-                        <option value="Trainer">Tränare</option>
+                        <option value="Member">Deltagare</option>
+                        <option value="Trainer">Instruktör</option>
                     </select>
                 </div>
                 <div class="form-check">
@@ -2009,10 +2043,8 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-success" onclick="addClubTgMember()">
-                    <i class="bi bi-person-plus me-2"></i>Lägg till
-                </button>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" onclick="addClubTgMember()">Lägg till</button>
             </div>
         </div>
     </div>
@@ -5836,186 +5868,182 @@ document.getElementById('editMemberPersonNumber').addEventListener('blur', funct
 
 let clubTrainingGroups = [];
 let clubTgSearchTimeout = null;
-let expandedClubTgId = null;
+let clubTgSummaries = {};    // groupId → { trainers, occasionCount, nextDate, nextTime, nextName }
+let clubTgMembersGroupId = 0;
+let clubTgMembersList = [];  // senast ritade medlemmar i dialogen — knapparna bär index hit
 
+function clubTgDay(iso) {
+    const d = new Date(iso + 'T12:00:00');
+    return d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+// Samma form som Träningar (UX-omgången 2026-10-06): en tabell, instruktörernas NAMN och nästa
+// tillfälle i stället för färgade siffror, och en Åtgärder-meny per rad. Knapparna bär ett id i
+// data-attribut och läses av EN delegerad lyssnare — ingen användartext i ett onclick.
 async function loadClubTrainingGroups() {
     const container = document.getElementById('clubTrainingGroupList');
-    container.innerHTML = `
-        <div class="text-center py-4">
-            <div class="spinner-border" role="status">
-                <span class="visually-hidden">Laddar...</span>
-            </div>
-        </div>`;
+    container.innerHTML = '<div class="text-center py-4"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div>';
 
     try {
-        const response = await fetch('/umbraco/surface/TrainingGroup/GetTrainingGroups');
-        const result = await response.json();
-
+        const [result, sum] = await Promise.all([
+            fetch('/umbraco/surface/TrainingGroup/GetTrainingGroups').then(r => r.json()),
+            fetch('/umbraco/surface/TrainingCourse/ClubSummary?clubId=' + clubId).then(r => r.json()).catch(() => null)
+        ]);
         if (!result.success) {
-            container.innerHTML = `<div class="alert alert-warning">${result.message || 'Kunde inte ladda träningsgrupper'}</div>`;
+            container.innerHTML = `<div class="alert alert-warning">${hpskEsc(result.message || 'Kunde inte ladda träningsgrupperna.')}</div>`;
             return;
         }
-
-        // Filter to only show groups for this club
         clubTrainingGroups = (result.data || []).filter(g => g.clubId === clubId);
-
-        if (clubTrainingGroups.length === 0) {
-            container.innerHTML = `
-                <div class="alert alert-info">
-                    <i class="bi bi-info-circle me-2"></i>Inga träningsgrupper ännu. Skapa en ny träningsgrupp för att komma igång.
-                </div>`;
-            return;
-        }
-
-        let html = '<div class="table-responsive"><table class="table table-hover">';
-        html += `<thead><tr>
-            <th>Namn</th>
-            <th>Startdatum</th>
-            <th class="text-center">Medlemmar</th>
-            <th class="text-center">Tränare</th>
-            <th></th>
-        </tr></thead><tbody>`;
-
-        clubTrainingGroups.forEach(g => {
-            const inactiveClass = g.isActive ? '' : ' class="table-secondary text-muted"';
-            html += `
-                <tr${inactiveClass} style="cursor: pointer;" onclick="expandClubTrainingGroup(${g.id})">
-                    <td>
-                        <span class="fw-bold">${g.name}</span>
-                        ${!g.isActive ? ' <span class="badge bg-secondary">Inaktiv</span>' : ''}
-                        ${g.description ? `<br><small class="text-muted">${g.description}</small>` : ''}
-                    </td>
-                    <td>${g.startDate}</td>
-                    <td class="text-center"><span class="badge bg-primary">${g.memberCount}</span></td>
-                    <td class="text-center"><span class="badge bg-info">${g.trainerCount}</span></td>
-                    <td class="text-end text-nowrap">
-                        ${g.isActive ? `<a class="btn btn-sm btn-outline-primary me-1" href="/min-kurs?g=${g.id}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Närvaro, serier och kursöversikt för gruppen">
-                            <i class="bi bi-mortarboard"></i> Öppna kursen
-                        </a>` : ''}
-                        <button class="btn btn-sm btn-outline-secondary me-1" onclick="event.stopPropagation(); editClubTrainingGroup(${g.id})" title="Redigera">
-                            <i class="bi bi-pencil"></i>
-                        </button>
-                    </td>
-                </tr>
-                <tr id="clubTgDetail_${g.id}" style="display: none;">
-                    <td colspan="5" class="bg-body-tertiary">
-                        <div id="clubTgMembers_${g.id}" class="p-2">
-                            <div class="text-center py-2">
-                                <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
-                            </div>
-                        </div>
-                    </td>
-                </tr>`;
-        });
-
-        html += '</tbody></table></div>';
-        container.innerHTML = html;
-
-        // Re-expand if there was one expanded
-        if (expandedClubTgId) {
-            const detailRow = document.getElementById(`clubTgDetail_${expandedClubTgId}`);
-            if (detailRow) {
-                detailRow.style.display = '';
-                loadClubTrainingGroupMembers(expandedClubTgId);
-            }
-        }
+        clubTgSummaries = {};
+        ((sum && sum.groups) || []).forEach(s => { clubTgSummaries[s.groupId] = s; });
+        renderClubTrainingGroups();
     } catch (error) {
         console.error('Error loading training groups:', error);
-        container.innerHTML = '<div class="alert alert-danger">Fel vid laddning av träningsgrupper.</div>';
+        container.innerHTML = '<div class="alert alert-danger">Träningsgrupperna kunde inte läsas.</div>';
     }
 }
 
-async function expandClubTrainingGroup(groupId) {
-    const detailRow = document.getElementById(`clubTgDetail_${groupId}`);
-    if (!detailRow) return;
+function renderClubTrainingGroups() {
+    const container = document.getElementById('clubTrainingGroupList');
+    const showInactive = document.getElementById('clubTgShowInactive').checked;
+    const list = clubTrainingGroups.filter(g => showInactive || g.isActive);
+    const active = clubTrainingGroups.filter(g => g.isActive).length;
+    document.getElementById('clubTgCount').textContent = clubTrainingGroups.length === 0 ? ''
+        : (list.length === clubTrainingGroups.length
+            ? `${list.length} ${list.length === 1 ? 'grupp' : 'grupper'}`
+            : `${active} pågående av ${clubTrainingGroups.length}`);
 
-    // Toggle visibility
-    if (detailRow.style.display !== 'none' && expandedClubTgId === groupId) {
-        detailRow.style.display = 'none';
-        expandedClubTgId = null;
+    if (clubTrainingGroups.length === 0) {
+        container.innerHTML = '<div class="alert alert-info"><i class="bi bi-info-circle me-2"></i>Inga träningsgrupper än. Välj <strong>Åtgärder → Ny träningsgrupp</strong>.</div>';
+        return;
+    }
+    if (list.length === 0) {
+        container.innerHTML = '<div class="text-muted small">Inga pågående grupper. Kryssa i <em>Visa avslutade grupper</em> för att se de avslutade.</div>';
         return;
     }
 
-    // Collapse others
-    clubTrainingGroups.forEach(g => {
-        const el = document.getElementById(`clubTgDetail_${g.id}`);
-        if (el) el.style.display = 'none';
+    let html = '<div class="table-responsive"><table class="table align-middle"><thead><tr>' +
+        '<th>Namn</th><th>Start</th><th class="text-center">Deltagare</th><th>Instruktörer</th><th>Nästa tillfälle</th><th></th></tr></thead><tbody>';
+    list.forEach(g => {
+        const s = clubTgSummaries[g.id] || {};
+        const participants = Math.max(0, (g.memberCount || 0) - (g.trainerCount || 0));
+        const trainers = (s.trainers || []).length ? hpskEsc(s.trainers.join(', ')) : '<span class="text-muted">ingen utsedd</span>';
+        const next = s.nextDate
+            ? `<div class="text-nowrap">${hpskEsc(clubTgDay(s.nextDate))}${s.nextTime ? ' ' + hpskEsc(s.nextTime) : ''}</div><div class="small text-muted">${hpskEsc(s.nextName || '')}</div>`
+            : `<span class="text-muted small">${(s.occasionCount || 0) ? 'inga kommande' : 'inga tillfällen kopplade'}</span>`;
+        const item = (act, icon, text, danger) =>
+            `<li><button class="dropdown-item${danger ? ' text-danger' : ''}" type="button" data-ctg="${act}" data-id="${g.id}"><i class="bi ${icon} me-2"></i>${text}</button></li>`;
+        let menu = g.isActive
+            ? `<li><a class="dropdown-item" href="/min-kurs?g=${g.id}" target="_blank" rel="noopener"><i class="bi bi-mortarboard me-2"></i>Öppna kursen <i class="bi bi-box-arrow-up-right small ms-1"></i></a></li>`
+            : '';
+        menu += item('edit', 'bi-pencil', 'Redigera…') +
+                item('members', 'bi-people', 'Deltagare och instruktörer…') +
+                (g.isActive ? item('loan', 'bi-safe2', 'Tilldela lånevapen…') : '') +
+                '<li><hr class="dropdown-divider"></li>' +
+                (g.isActive ? item('finish', 'bi-archive', 'Avsluta gruppen', true) : item('reopen', 'bi-arrow-counterclockwise', 'Återuppta gruppen'));
+        html += `<tr${g.isActive ? '' : ' class="text-muted"'}>` +
+            `<td><span class="fw-semibold">${hpskEsc(g.name)}</span>${g.isActive ? '' : ' <span class="badge bg-secondary-subtle text-secondary-emphasis">Avslutad</span>'}` +
+            (g.description ? `<div class="small text-muted">${hpskEsc(g.description)}</div>` : '') + '</td>' +
+            `<td class="text-nowrap">${hpskEsc(g.startDate)}</td>` +
+            `<td class="text-center">${participants}</td>` +
+            `<td>${trainers}</td>` +
+            `<td>${next}</td>` +
+            '<td class="text-end text-nowrap"><div class="dropdown">' +
+            `<button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false" title="Åtgärder för ${hpskEsc(g.name)}">` +
+            '<i class="bi bi-sliders me-2"></i>Åtgärder</button>' +
+            `<ul class="dropdown-menu dropdown-menu-end">${menu}</ul></div></td></tr>`;
     });
+    container.innerHTML = html + '</tbody></table></div>';
+}
 
-    detailRow.style.display = '';
-    expandedClubTgId = groupId;
+// Avsluta/återuppta = gruppens Pågår-flagga, via samma sparning som Redigera.
+async function setClubTgActive(groupId, active) {
+    const g = clubTrainingGroups.find(x => x.id === groupId);
+    if (!g) return;
+    if (!active && !confirm(`Avsluta "${g.name}"? Gruppen syns inte längre för deltagarna och kursen försvinner från Min kurs. Inget raderas — du kan återuppta den.`)) return;
+    const fd = new FormData();
+    fd.append('__RequestVerificationToken', getAntiForgeryToken());
+    fd.append('trainingGroupId', groupId);
+    fd.append('name', g.name);
+    fd.append('description', g.description || '');
+    fd.append('startDate', g.startDate);
+    fd.append('isActive', active);
+    const r = await fetch('/umbraco/surface/TrainingGroup/UpdateTrainingGroup', { method: 'POST', body: fd }).then(x => x.json()).catch(() => ({ success: false }));
+    if (!r.success) { alert(r.message || 'Gruppen kunde inte sparas.'); return; }
+    loadClubTrainingGroups();
+}
+
+document.addEventListener('click', function (e) {
+    const b = e.target.closest('[data-ctg]');
+    if (!b) return;
+    const act = b.getAttribute('data-ctg');
+    const id = parseInt(b.getAttribute('data-id'), 10) || 0;
+    if (act === 'new') showCreateClubTrainingGroupModal();
+    else if (act === 'edit') editClubTrainingGroup(id);
+    else if (act === 'members') openClubTgMembers(id);
+    else if (act === 'loan') showTgLoanWeaponModal(id);
+    else if (act === 'finish') setClubTgActive(id, false);
+    else if (act === 'reopen') setClubTgActive(id, true);
+    else if (act === 'add-member') showAddClubTgMemberModal(clubTgMembersGroupId);
+    else if (act === 'role' || act === 'remove') {
+        const m = clubTgMembersList[parseInt(b.getAttribute('data-idx'), 10)];
+        if (!m) return;
+        if (act === 'role') toggleClubTgMemberRole(clubTgMembersGroupId, m.memberId, m.role);
+        else removeClubTgMember(clubTgMembersGroupId, m.memberId, m.memberName);
+    }
+});
+document.addEventListener('change', function (e) {
+    if (e.target && e.target.id === 'clubTgShowInactive') renderClubTrainingGroups();
+});
+
+function openClubTgMembers(groupId) {
+    clubTgMembersGroupId = groupId;
+    const g = clubTrainingGroups.find(x => x.id === groupId);
+    document.getElementById('clubTgMembersTitle').textContent = 'Deltagare och instruktörer' + (g ? ' — ' + g.name : '');
+    document.getElementById('clubTgMembersBody').innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('clubTgMembersModal')).show();
     loadClubTrainingGroupMembers(groupId);
 }
 
 async function loadClubTrainingGroupMembers(groupId) {
-    const container = document.getElementById(`clubTgMembers_${groupId}`);
-    if (!container) return;
-
+    const container = document.getElementById('clubTgMembersBody');
+    if (!container || groupId !== clubTgMembersGroupId) return;
     try {
-        const response = await fetch(`/umbraco/surface/TrainingGroup/GetTrainingGroup?trainingGroupId=${groupId}`);
-        const result = await response.json();
-
-        if (!result.success) {
-            container.innerHTML = `<div class="alert alert-warning">${result.message}</div>`;
-            return;
-        }
-
-        const group = result.data;
-        const members = group.members || [];
-
-        let html = `
-            <div class="d-flex justify-content-between align-items-center mb-2">
-                <strong>Deltagare (${members.filter(m => m.role !== 'Trainer').length}) · tränare (${members.filter(m => m.role === 'Trainer').length})</strong>
-                <div class="d-flex gap-2">
-                    <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); showTgLoanWeaponModal(${groupId})">
-                        <i class="bi bi-safe2 me-1"></i>Tilldela lånevapen
-                    </button>
-                    <button class="btn btn-sm btn-outline-success" onclick="event.stopPropagation(); showAddClubTgMemberModal(${groupId})">
-                        <i class="bi bi-person-plus me-1"></i>Lägg till medlem
-                    </button>
-                </div>
-            </div>`;
-
-        if (members.length === 0) {
-            html += '<p class="text-muted small">Inga medlemmar i gruppen ännu.</p>';
+        const result = await fetch(`/umbraco/surface/TrainingGroup/GetTrainingGroup?trainingGroupId=${groupId}`).then(r => r.json());
+        if (!result.success) { container.innerHTML = `<div class="alert alert-warning">${hpskEsc(result.message || '')}</div>`; return; }
+        const members = (result.data.members || []).slice().sort((a, b) =>
+            (a.role === 'Trainer') === (b.role === 'Trainer') ? (a.memberName || '').localeCompare(b.memberName || '', 'sv') : (a.role === 'Trainer' ? -1 : 1));
+        clubTgMembersList = members;
+        const nTrainers = members.filter(m => m.role === 'Trainer').length;
+        let html = '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">' +
+            `<span class="text-muted small">${members.length - nTrainers} deltagare · ${nTrainers} ${nTrainers === 1 ? 'instruktör' : 'instruktörer'}</span>` +
+            '<button type="button" class="btn btn-sm btn-primary" data-ctg="add-member"><i class="bi bi-person-plus me-1"></i>Lägg till</button></div>';
+        if (!members.length) {
+            html += '<p class="text-muted small mb-0">Gruppen har inga deltagare än.</p>';
         } else {
-            html += '<div class="table-responsive"><table class="table table-sm mb-0">';
-            html += '<thead><tr><th>Namn</th><th>Klubb</th><th>Roll</th><th>Tillagd</th><th></th></tr></thead><tbody>';
-
-            // Sort: trainers first
-            const sorted = [...members].sort((a, b) => {
-                if (a.role === 'Trainer' && b.role !== 'Trainer') return -1;
-                if (a.role !== 'Trainer' && b.role === 'Trainer') return 1;
-                return 0;
+            // Klubb och Tillagd göms på telefonen — annars klipps radens Åtgärder-meny.
+            html += '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Namn</th><th class="d-none d-md-table-cell">Klubb</th><th>Roll</th><th class="d-none d-md-table-cell">Tillagd</th><th></th></tr></thead><tbody>';
+            members.forEach((m, i) => {
+                const isTrainer = m.role === 'Trainer';
+                html += '<tr>' +
+                    `<td>${hpskEsc(m.memberName || '')}</td>` +
+                    `<td class="text-muted d-none d-md-table-cell">${hpskEsc(m.clubName || '–')}</td>` +
+                    `<td>${isTrainer ? 'Instruktör' : 'Deltagare'}</td>` +
+                    `<td class="text-muted small text-nowrap d-none d-md-table-cell">${hpskEsc(m.joinedDate || '')}</td>` +
+                    '<td class="text-end text-nowrap"><div class="dropdown">' +
+                    `<button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false"><i class="bi bi-sliders me-2"></i>Åtgärder</button>` +
+                    '<ul class="dropdown-menu dropdown-menu-end">' +
+                    `<li><button class="dropdown-item" type="button" data-ctg="role" data-idx="${i}"><i class="bi bi-arrow-left-right me-2"></i>${isTrainer ? 'Gör till deltagare' : 'Gör till instruktör'}</button></li>` +
+                    '<li><hr class="dropdown-divider"></li>' +
+                    `<li><button class="dropdown-item text-danger" type="button" data-ctg="remove" data-idx="${i}"><i class="bi bi-trash me-2"></i>Ta bort ur gruppen</button></li>` +
+                    '</ul></div></td></tr>';
             });
-
-            sorted.forEach(m => {
-                html += `
-                    <tr>
-                        <td>${m.memberName}</td>
-                        <td class="text-muted">${m.clubName || '-'}</td>
-                        <td>
-                            <span class="badge ${m.isTrainer ? 'bg-info' : 'bg-secondary'}">${m.isTrainer ? 'Tränare' : 'Medlem'}</span>
-                        </td>
-                        <td class="text-muted small">${m.joinedDate}</td>
-                        <td class="text-end">
-                            <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="event.stopPropagation(); toggleClubTgMemberRole(${groupId}, ${m.memberId}, '${m.role}')" title="${m.role === 'Trainer' ? 'Gör till medlem' : 'Gör till tränare'}">
-                                <i class="bi bi-arrow-left-right"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="event.stopPropagation(); removeClubTgMember(${groupId}, ${m.memberId}, '${m.memberName.replace(/'/g, "\\'")}')" title="Ta bort">
-                                <i class="bi bi-x-lg"></i>
-                            </button>
-                        </td>
-                    </tr>`;
-            });
-
             html += '</tbody></table></div>';
         }
-
         container.innerHTML = html;
     } catch (error) {
         console.error('Error loading training group members:', error);
-        container.innerHTML = '<div class="alert alert-danger">Fel vid laddning</div>';
+        container.innerHTML = '<div class="alert alert-danger">Medlemmarna kunde inte läsas.</div>';
     }
 }
 
@@ -6100,7 +6128,7 @@ async function submitTgLoanWeapons(btn) {
 }
 
 function showCreateClubTrainingGroupModal() {
-    document.getElementById('clubTrainingGroupModalTitle').textContent = 'Ny Träningsgrupp';
+    document.getElementById('clubTrainingGroupModalTitle').textContent = 'Ny träningsgrupp';
     document.getElementById('clubTgId').value = '';
     document.getElementById('clubTgName').value = '';
     document.getElementById('clubTgDescription').value = '';
@@ -6115,7 +6143,7 @@ async function editClubTrainingGroup(groupId) {
     const group = clubTrainingGroups.find(g => g.id === groupId);
     if (!group) return;
 
-    document.getElementById('clubTrainingGroupModalTitle').textContent = 'Redigera Träningsgrupp';
+    document.getElementById('clubTrainingGroupModalTitle').textContent = 'Redigera träningsgrupp';
     document.getElementById('clubTgId').value = groupId;
     document.getElementById('clubTgName').value = group.name;
     document.getElementById('clubTgDescription').value = group.description || '';
@@ -6183,7 +6211,6 @@ async function deactivateClubTrainingGroup(groupId, groupName) {
         const result = await response.json();
 
         if (result.success) {
-            expandedClubTgId = null;
             loadClubTrainingGroups();
         } else {
             alert('Fel: ' + result.message);

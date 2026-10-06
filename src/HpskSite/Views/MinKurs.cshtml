@@ -17,10 +17,40 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 <style>
-    /* 960 px: på en dator fick sidan en 560 px smal kolumn mitt på en bred skärm. */
-    .mk-wrap { max-width: 960px; }
+    /* ── Skalet: samma form som Ekonomin (Stefan 2026-10-06) ─────────────────────────────────
+       Vänsterkort med kursens namn, rollen och klubben, "← Tillbaka" och sidans delar; allt
+       innehåll i EN kolumn till höger. Värdena är Ekonomins (.ek-page .rail) så de två sidorna
+       ser likadana ut — ändras den ena, ändra den andra. */
+    .mk-page .mk-shell { display: flex; gap: 1.5rem; align-items: flex-start; }
+    .mk-page .mk-rail { width: 250px; flex-shrink: 0; position: sticky; top: 1rem;
+        background-color: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color);
+        border-radius: .5rem; padding: 8px; }
+    .mk-page .mk-rail .mk-course { font-size: 1.1rem; font-weight: 700; padding: 6px 12px 0; }
+    .mk-page .mk-rail .mk-role { font-size: .8rem; color: var(--bs-secondary-color); padding: 0 12px 10px; }
+    .mk-page .mk-rail a.mk-nav { display: block; padding: 8px 12px; border-radius: 8px;
+        color: var(--bs-body-color); text-decoration: none; border-left: 3px solid transparent; }
+    .mk-page .mk-rail a.mk-nav:hover { background-color: var(--bs-secondary-bg); }
+    .mk-page .mk-rail a.mk-nav.on { font-weight: 600; background-color: var(--bs-primary-bg-subtle);
+        color: var(--bs-primary-text-emphasis); border-left-color: var(--bs-primary); }
+    .mk-page .mk-rail a.mk-back { color: var(--bs-secondary-color); font-size: .9rem; padding-bottom: 10px;
+        margin-bottom: 6px; border-bottom: 1px solid var(--bs-border-color); border-radius: 0; }
+    .mk-page .mk-rail a.mk-back:hover { color: var(--bs-link-color); background: none; }
+    .mk-page .mk-main { flex: 1 1 auto; min-width: 0; }
+    .mk-page .mk-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;
+        flex-wrap: wrap; margin-bottom: 1rem; }
+    .mk-page h1 { font-size: 1.6rem; font-weight: 700; margin: 0; }
+    @@media (max-width: 991px) {
+        .mk-page .mk-shell { flex-direction: column; }
+        .mk-page .mk-rail { width: 100%; position: static; display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
+        .mk-page .mk-rail .mk-course, .mk-page .mk-rail .mk-role, .mk-page .mk-rail #mkPickerWrap { width: 100%; }
+        .mk-page .mk-rail .mk-role { padding-bottom: 4px; }
+        .mk-page .mk-rail a.mk-nav { border-left: 0; }
+        .mk-page .mk-rail a.mk-nav.on { border-left: 0; box-shadow: inset 0 -3px 0 var(--bs-primary); }
+        .mk-page .mk-rail a.mk-back { width: 100%; }
+        .mk-page .mk-main { width: 100%; }
+    }
     /* Chattknappen ligger fast nere till höger — luft under sista raden så den aldrig täcker den. */
-    #mkOverviewWrap { padding-bottom: 5.5rem; }
+    .mk-page .mk-main { padding-bottom: 5.5rem; }
     .mk-today { border-left: 4px solid var(--bs-success); }
     .mk-person { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem .75rem; margin-bottom: .375rem; background: var(--bs-body-bg); }
     .mk-person .mk-name { font-weight: 600; min-width: 0; }
@@ -42,10 +72,24 @@
     .mk-seriesrow { display: flex; justify-content: space-between; align-items: center; padding: .375rem 0; border-bottom: 1px solid var(--bs-border-color); }
 </style>
 
-<div class="container py-3 mk-wrap" id="mkApp" data-group="@initialGroup">
-    <div class="d-flex align-items-start gap-2 flex-wrap mb-2">
-        <div class="me-auto">
-            <h1 class="h4 mb-0">Min kurs</h1>
+@* ⚠️ container-FLUID, som Ekonomin och klubbsidans adminpanel — en smal centrerad kolumn med en
+   kant-till-kant-översikt under såg ut som två sidor ihopklistrade. *@
+<div class="mk-page container-fluid py-4" id="mkApp" data-group="@initialGroup">
+<div class="mk-shell">
+    <nav class="mk-rail" id="mkRail" aria-label="Kursens delar">
+        <div class="mk-course" id="mkRailName">Min kurs</div>
+        <div class="mk-role" id="mkRailRole"></div>
+        <div class="mb-2 px-2 d-none" id="mkPickerWrap">
+            <label class="form-label small text-muted mb-1" for="mkPicker">Byt kurs</label>
+            <select class="form-select form-select-sm" id="mkPicker"></select>
+        </div>
+        <a href="/" class="mk-nav mk-back" id="mkBack">← Tillbaka</a>
+        <div id="mkRailLinks" style="display:contents"></div>
+    </nav>
+    <div class="mk-main">
+    <div class="mk-head">
+        <div>
+            <h1 id="mkTitle">Min kurs</h1>
             <div class="text-muted small" id="mkCourseSub"></div>
         </div>
         <div class="dropdown d-none" id="mkActions">
@@ -60,21 +104,18 @@
             </ul>
         </div>
     </div>
-    <div class="mb-3 d-none" id="mkPickerWrap">
-        <label class="form-label small text-muted mb-1" for="mkPicker">Kurs</label>
-        <select class="form-select" id="mkPicker"></select>
-    </div>
     <div id="mkMsg"></div>
     <div id="mkBody"><div class="text-center py-5"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
+    @* Översikten är en egen del i rälsen och tar hela innehållskolumnens bredd. *@
+    <div id="mkOverviewWrap"></div>
+    </div>
+</div>
 </div>
 @* Notisinställningen för deltagarens påminnelse. Renderas EN gång här (partialen äger fasta id:n)
    och flyttas in i deltagarvyn när den ritas — tränarvyn visar den inte. *@
 <div class="d-none" id="mkPushHome">
     @await Html.PartialAsync("_WebPushSetup", new ViewDataDictionary(ViewData) { { "WebPushShowMatchPrefs", false }, { "WebPushShowRankingPref", false }, { "WebPushShowSchedulePref", true }, { "WebPushMatchPrefDefault", "Off" } })
 </div>
-@* Översikten bor UTANFÖR den smala kolumnen (Stefan 2026-10-05): på en skärm som rymmer alla
-   tillfällen ska de synas, i stället för att rulla ut till höger i 760 px. *@
-<div class="container-fluid px-3 px-lg-4" id="mkOverviewWrap"></div>
 
 <!-- Registrera serie -->
 <div class="modal fade" id="mkSeriesModal" tabindex="-1" aria-hidden="true">
@@ -373,14 +414,47 @@
         return c ? c.role : 'trainer';
     }
 
+    // ── Skalet: rälsen (samma form som Ekonomin, Stefan 2026-10-06) ──
+    // Vyn står i adressen (#vy=…) så att en omladdning eller ett bokmärke landar där man var.
+    var view = null, club = null, partView = null;
+    // "Upprop", inte "I dag": vyn visar dagens tillfälle, annars nästa — en rubrik "I dag" över
+    // ett tillfälle i april läses som fel.
+    var TRAINER_VIEWS = [['idag', 'Upprop'], ['deltagare', 'Deltagare'], ['tillfallen', 'Tillfällen'], ['oversikt', 'Översikt'], ['installningar', 'Inställningar']];
+    var PART_VIEWS = [['min', 'Min kurs'], ['tillfallen', 'Tillfällen'], ['serier', 'Mina serier']];
+    function viewsFor(role) { return role === 'participant' ? PART_VIEWS : TRAINER_VIEWS; }
+    function ensureView(role) {
+        var list = viewsFor(role);
+        if (view && list.some(function (x) { return x[0] === view; })) return;
+        var m = (location.hash || '').match(/vy=([a-z]+)/);
+        view = m && list.some(function (x) { return x[0] === m[1]; }) ? m[1] : list[0][0];
+    }
+    function drawShell(name, counts) {
+        var role = roleOf(groupId);
+        document.getElementById('mkRailName').textContent = name;
+        document.getElementById('mkRailRole').textContent =
+            (role === 'participant' ? 'Deltagare' : role === 'manager' ? 'Klubbens kurs' : 'Instruktör') + (club && club.name ? ' · ' + club.name : '');
+        // Tillbaka dit man kom ifrån: klubbadmin till Träningsgrupper, instruktören till klubben,
+        // deltagaren (som kanske inte ens är medlem i klubben) till startsidan.
+        var back = document.getElementById('mkBack');
+        back.href = role === 'manager' && club && club.url ? club.url + '#clubAdmin/traininggroups'
+                  : role === 'trainer' && club && club.url ? club.url : '/';
+        var list = viewsFor(role);
+        document.getElementById('mkRailLinks').innerHTML = list.map(function (v) {
+            var n = counts && counts[v[0]] != null ? ' <span class="text-muted small">(' + counts[v[0]] + ')</span>' : '';
+            return '<a href="#vy=' + v[0] + '" class="mk-nav' + (v[0] === view ? ' on' : '') + '" data-mk-view="' + v[0] + '">' + esc(v[1]) + n + '</a>';
+        }).join('');
+        var label = list.find(function (x) { return x[0] === view; });
+        document.getElementById('mkTitle').textContent = label ? label[1] : 'Min kurs';
+    }
+
     function loadCourse(id) {
         groupId = id;
         try { localStorage.setItem('hpsk_minkurs_group', String(id)); } catch (e) { }
+        ensureView(roleOf(id));
         if (roleOf(id) === 'participant') return loadParticipant(id);
-        document.getElementById('mkOverviewWrap').classList.remove('d-none');
         return getJson('/umbraco/surface/TrainingCourse/Get?groupId=' + id).then(function (d) {
             if (!d.success) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kursen kunde inte läsas.') + '</div>'; return; }
-            course = d.course; notes = d.notes || [];
+            course = d.course; notes = d.notes || []; club = d.club || null;
             document.getElementById('mkActions').classList.remove('d-none');
             render();
         }).catch(function (e) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-danger">' + esc(e.message) + '</div>'; });
@@ -394,6 +468,7 @@
         document.getElementById('mkOverviewWrap').innerHTML = '';
         return getJson('/umbraco/surface/TrainingCourse/Mine?groupId=' + id).then(function (d) {
             if (!d.success) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kursen kunde inte läsas.') + '</div>'; return; }
+            club = d.club || null; partView = d.course;
             renderParticipant(d.course);
         }).catch(function (e) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-danger">' + esc(e.message) + '</div>'; });
     }
@@ -438,7 +513,10 @@
         var mine = function (o) { return v.mine[o.trainingId] || { state: 'none', missed: false }; };
         var occ = v.occasions || [];
         var next = occ.find(function (o) { return !o.isCancelled && !o.isPast; });
-        var html = '';
+        drawShell(v.name, { tillfallen: occ.length, serier: (v.series || []).length });
+        document.getElementById('mkOverviewWrap').innerHTML = '';
+        // Tre delar i rälsen: Min kurs (nästa gång, krav, märke, påminnelser), Tillfällen, Mina serier.
+        var html = '', occHtml = '', seriesHtml = '';
 
         if (!occ.length) {
             html += '<div class="alert alert-info">Kursen har inga tillfällen inlagda än. Din instruktör lägger in dem — titta in här igen.</div>';
@@ -481,19 +559,17 @@
 
         var upcoming = occ.filter(function (o) { return !o.isPast; });
         var past = occ.filter(function (o) { return o.isPast; }).reverse();
-        if (occ.length) {
-            html += '<h2 class="h6 mt-3">Kursens tillfällen</h2>';
-            html += upcoming.length
-                ? '<div class="list-group mb-2">' + upcoming.map(function (o) { return occRow(o, mine(o)); }).join('') + '</div>'
-                : '<div class="text-muted small mb-2">Inga kommande tillfällen.</div>';
-            if (past.length) {
-                html += '<details class="mb-3"' + (upcoming.length ? '' : ' open') + '><summary class="small">Tidigare tillfällen (' + past.length + ')</summary>' +
-                    '<div class="list-group mt-2">' + past.map(function (o) { return occRow(o, mine(o)); }).join('') + '</div></details>';
-            }
-        }
+        occHtml = !occ.length ? '<div class="text-muted">Kursen har inga tillfällen inlagda än.</div>'
+            : '<p class="text-muted small">Tryck på ett tillfälle för att anmäla dig eller boka lånevapen. ★ = obligatoriskt för kursen.</p>' +
+              '<h2 class="h6">Kommande</h2>' +
+              (upcoming.length
+                ? '<div class="list-group mb-3">' + upcoming.map(function (o) { return occRow(o, mine(o)); }).join('') + '</div>'
+                : '<div class="text-muted small mb-3">Inga kommande tillfällen.</div>') +
+              (past.length ? '<h2 class="h6">Tidigare</h2><div class="list-group mb-3">' + past.map(function (o) { return occRow(o, mine(o)); }).join('') + '</div>' : '');
+        if (upcoming.length)
+            html += '<a href="#vy=tillfallen" class="small" data-mk-view="tillfallen">Alla kursens tillfällen (' + occ.length + ') →</a>';
 
-        html += '<h2 class="h6 mt-3">Mina serier i kursen</h2>';
-        html += (v.series && v.series.length)
+        seriesHtml = (v.series && v.series.length)
             ? '<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Dag</th><th>Tillfälle</th><th class="text-end">Poäng</th><th>Valör</th></tr></thead><tbody>' +
                 v.series.map(function (s) {
                     return '<tr><td class="text-nowrap">' + esc(dayLabel(s.date)) + '</td><td>' + esc(s.occasion) + '</td><td class="text-end">' + s.total + '</td><td>' +
@@ -501,7 +577,7 @@
                 }).join('') + '</tbody></table></div>'
             : '<div class="text-muted small mb-3">Inga serier registrerade än. Din instruktör registrerar dem på banan.</div>';
 
-        html += '<div class="card mb-3"><div class="card-body py-2">' +
+        html += '<div class="card mb-3 mt-3"><div class="card-body py-2">' +
             '<div class="small text-uppercase text-muted fw-semibold mb-1">Håll koll</div>' +
             (upcoming.some(function (o) { return o.startTime && !o.isCancelled; })
                 ? '<a class="btn btn-outline-primary btn-sm mb-2" href="/min-kurs/kalender.ics?g=' + v.groupId + '"><i class="bi bi-calendar-plus me-1"></i>Lägg kursens tillfällen i min kalender</a>' +
@@ -510,7 +586,7 @@
             '<div id="mkPushSlot"></div>' +
             '</div></div>';
 
-        document.getElementById('mkBody').innerHTML = html;
+        document.getElementById('mkBody').innerHTML = view === 'tillfallen' ? occHtml : view === 'serier' ? seriesHtml : html;
         // Notisinställningen flyttas in (inte kopieras — den äger fasta id:n och sina lyssnare).
         var push = document.getElementById('webPushSetup');
         var slot = document.getElementById('mkPushSlot');
@@ -574,9 +650,78 @@
         // och en åtgärd bakom en meny hittar August inte.
         html += '<button type="button" class="btn btn-outline-primary btn-sm mt-1 mb-3" data-mk="members"><i class="bi bi-person-plus me-1"></i>Lägg till eller ta bort deltagare</button>';
 
+        drawShell(course.name, { deltagare: course.participants.length, tillfallen: course.occasions.length });
+        var ov = '';
+        if (view === 'deltagare') html = participantsView();
+        else if (view === 'tillfallen') html = occasionsView();
+        else if (view === 'oversikt') { html = ''; ov = overview(); }
+        else if (view === 'installningar') html = settingsView();
         document.getElementById('mkBody').innerHTML = html;
-        document.getElementById('mkOverviewWrap').innerHTML = overview();
-        afterOverview();
+        document.getElementById('mkOverviewWrap').innerHTML = ov;
+        if (ov) afterOverview();
+    }
+
+    function trainerNames() { return course.trainers.map(function (t) { return t.name; }).join(', '); }
+
+    // Deltagare: en rad per deltagare med närvaro, missade obligatoriska och märkesläget.
+    function participantsView() {
+        var held = course.occasions.filter(function (o) { return !o.isCancelled && (o.isPast || o.isToday); });
+        var h = '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">' +
+            '<span class="text-muted small">' + course.participants.length + ' deltagare · ' +
+            (course.trainers.length ? 'instruktör' + (course.trainers.length > 1 ? 'er ' : ' ') + esc(trainerNames()) : 'ingen instruktör utsedd') + '</span>' +
+            '<button type="button" class="btn btn-sm btn-outline-primary" data-mk="members"><i class="bi bi-person-plus me-1"></i>Lägg till eller ta bort deltagare</button></div>';
+        if (!course.participants.length) return h + '<div class="alert alert-info">Kursen har inga deltagare än.</div>';
+        h += '<div class="table-responsive"><table class="table align-middle"><thead><tr><th>Namn</th><th class="text-center">Närvaro</th><th>Missade obligatoriska</th><th>Märkesläge</th></tr></thead><tbody>';
+        course.participants.forEach(function (p) {
+            var here = held.filter(function (o) { var s = cell(p.memberId, o.trainingId).state; return s === 'present' || s === 'checkedin'; }).length;
+            var missed = course.occasions.filter(function (o) { return cell(p.memberId, o.trainingId).missed; });
+            var b = (course.badges || {})[p.memberId] || {};
+            h += '<tr><td class="fw-semibold">' + esc(p.name) + '</td>' +
+                '<td class="text-center text-nowrap">' + here + ' av ' + held.length + '</td>' +
+                '<td>' + (missed.length ? '<span class="mk-missed">' + missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ') + '</span>' : '<span class="text-muted">–</span>') + '</td>' +
+                '<td class="small ' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + esc(b.text || '') + (b.readyForPistolskyttekort ? ' · klar för Pistolskyttekortet' : '') + '</td></tr>';
+        });
+        return h + '</tbody></table></div>';
+    }
+
+    // Tillfällen: kursens kopplade träningar med kursens krav och hur många som var där.
+    function occasionsView() {
+        var h = '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">' +
+            '<span class="text-muted small">★ = obligatoriskt för kursen. Ändra ett tillfälles krav och namn med <em>Ändra</em>.</span>' +
+            '<button type="button" class="btn btn-sm btn-outline-primary" data-mk="link"><i class="bi bi-link-45deg me-1"></i>Koppla träningar till kursen…</button></div>';
+        if (!course.occasions.length) return h + '<div class="alert alert-info">Inga träningar är kopplade till kursen än.</div>';
+        h += '<div class="table-responsive"><table class="table align-middle"><thead><tr><th>Datum</th><th>Tid</th><th>Tillfälle</th><th>Krav</th><th class="text-center">Var där</th><th></th></tr></thead><tbody>';
+        course.occasions.forEach(function (o) {
+            var here = course.participants.filter(function (p) { var s = cell(p.memberId, o.trainingId).state; return s === 'present' || s === 'checkedin'; }).length;
+            var req = (o.mandatoryForCourse ? '<span class="badge bg-warning text-dark me-1">★ Obligatoriskt</span>' : '') +
+                (o.registrationRequired ? '<span class="badge bg-secondary-subtle text-secondary-emphasis">Anmälan krävs</span>' : '');
+            h += '<tr' + (o.isPast || o.isCancelled ? ' class="text-muted"' : '') + '>' +
+                '<td class="text-nowrap">' + esc(dayLabel(o.date, true)) + (o.isToday ? ' <span class="badge bg-success">I dag</span>' : '') + '</td>' +
+                '<td class="text-nowrap">' + esc(o.startTime || '') + '</td>' +
+                '<td>' + esc(o.note || o.name) + (o.note ? '<div class="small text-muted">' + esc(o.name) + '</div>' : '') +
+                (o.isCancelled ? ' <span class="badge bg-danger">Inställd</span>' : '') + '</td>' +
+                '<td>' + (req || '<span class="text-muted">–</span>') + '</td>' +
+                '<td class="text-center">' + (o.isPast || o.isToday ? here + ' av ' + course.participants.length : '–') + '</td>' +
+                '<td class="text-end"><button type="button" class="btn btn-sm btn-outline-secondary" data-mk="occ" data-training="' + o.trainingId + '">Ändra</button></td></tr>';
+        });
+        return h + '</tbody></table></div>';
+    }
+
+    // Inställningar: kursens standardkrav och vem som leder kursen.
+    function settingsView() {
+        var att = course.defaultAttendance === 'Mandatory' ? 'Obligatorisk' : 'Valfri';
+        var reg = course.defaultRegistration === 'Required' ? 'Krävs' : 'Krävs inte';
+        return '<div class="card mb-3"><div class="card-body">' +
+            '<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">' +
+            '<div><h2 class="h6 mb-1">Kursens standard</h2>' +
+            '<div>Närvaro: <strong>' + att + '</strong> · Anmälan: <strong>' + reg + '</strong></div>' +
+            '<div class="small text-muted">Gäller alla kopplade tillfällen som inte har en egen inställning, och bara kursens deltagare.</div></div>' +
+            '<button type="button" class="btn btn-sm btn-outline-primary" data-mk="defaults">Ändra…</button></div></div></div>' +
+            '<div class="card mb-3"><div class="card-body">' +
+            '<h2 class="h6 mb-1">Instruktörer</h2>' +
+            '<div>' + (course.trainers.length ? esc(trainerNames()) : '<span class="text-muted">Ingen utsedd</span>') + '</div>' +
+            '<div class="small text-muted">Instruktörer utses av klubben (klubbadmin eller skjutledare) under Admin → Träningsgrupper.</div>' +
+            '</div></div>';
     }
 
     // Översikten rullar i sidled när tillfällena inte får plats. Utan ett synligt tecken ser den
@@ -892,7 +1037,7 @@
                 '<button type="button" class="btn btn-sm btn-outline-danger" data-mk="rm-member" data-member="' + p.memberId + '">Ta bort</button></div>';
         }).join('') : '<div class="text-muted small">Inga deltagare än.</div>';
         document.getElementById('mkTrainersLine').textContent = course.trainers.length
-            ? 'Tränare: ' + course.trainers.map(function (t) { return t.name; }).join(', ') + ' (utses av klubben)' : '';
+            ? 'Instruktör' + (course.trainers.length > 1 ? 'er' : '') + ': ' + course.trainers.map(function (t) { return t.name; }).join(', ') + ' (utses av klubben)' : '';
     }
     function openMembers() {
         document.getElementById('mkMemberSearch').value = '';
@@ -988,6 +1133,9 @@
     }
 
     document.addEventListener('click', function (e) {
+        // Rälsens delar är vanliga länkar (#vy=…): webbläsaren gör en historikpost av klicket, så
+        // bakåtknappen går till förra delen, och hashchange-lyssnaren nedan ritar om.
+        if (e.target.closest('[data-mk-view]')) return;
         var b = e.target.closest('[data-mk], [data-shot]');
         if (!b) return;
         if (b.hasAttribute('data-shot')) { if (shots.length < 5) { shots.push(b.getAttribute('data-shot')); renderShots(); } return; }
@@ -1035,7 +1183,19 @@
     document.getElementById('mkDefSave').addEventListener('click', saveDefaults);
     document.getElementById('mkLoanSave').addEventListener('click', saveLoan);
     document.getElementById('mkMemberSearch').addEventListener('input', searchMembers);
-    document.getElementById('mkPicker').addEventListener('change', function () { loadCourse(parseInt(this.value, 10)); });
+    // Bakåtknappen och en inklistrad länk byter också del (#vy=…).
+    window.addEventListener('hashchange', function () {
+        var m = (location.hash || '').match(/vy=([a-z]+)/);
+        if (!m || m[1] === view) return;
+        var role = roleOf(groupId);
+        if (!viewsFor(role).some(function (x) { return x[0] === m[1]; })) return;
+        view = m[1];
+        if (role === 'participant') { if (partView) renderParticipant(partView); }
+        else if (course) render();
+        window.scrollTo({ top: 0 });
+    });
+    // Byte av kurs börjar på kursens första del — en annan kurs kan ha en annan roll och andra delar.
+    document.getElementById('mkPicker').addEventListener('change', function () { view = null; loadCourse(parseInt(this.value, 10)); });
     // Uppropet uppdaterar listan när serie-dialogen stängs, så märkesläget följer med.
     document.getElementById('mkSeriesModal').addEventListener('hidden.bs.modal', function () { loadCourse(groupId); });
 

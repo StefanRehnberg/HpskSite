@@ -3797,6 +3797,22 @@ anmälningsfält.
     ett rullningstips och rullas till dagens tillfälle; luft under sidan för chattknappen.
   Svit: `hpsk-verify/minkurs-participant-verify.mjs` 40/40 (A/B: menyn bara för tränare +
   deltagarlistan på Skyttetrappan → 3 röda).
+- **⚠️⚠️ Min kurs har EKONOMINS skal, Admin → Träningsgrupper har TRÄNINGARS form** (Stefans val
+  2026-10-06, efter "avviker från hur vi normalt bygger sidor"). Rör du någon av dem: följ förlagan.
+  - `/min-kurs`: `container-fluid`, vänsterkort (`.mk-rail`, samma mått som `.ek-page .rail`) med
+    kursens namn, roll · klubb, kursväljare vid fler än en kurs, **← Tillbaka** (klubbadmin →
+    `klubbens url#clubAdmin/traininggroups`, instruktör → klubbsidan, deltagare → startsidan) och
+    delarna. Instruktör/klubbadmin: **Upprop** (inte "I dag" — vyn visar dagens ELLER nästa
+    tillfälle), Deltagare, Tillfällen, Översikt, Inställningar. Deltagare: Min kurs, Tillfällen,
+    Mina serier. Delen står i adressen (`#vy=…`); rälsens länkar är vanliga länkar så bakåtknappen
+    fungerar, och `hashchange` ritar om. `TrainingCourse/Get` och `Mine` bär `club` (namn, url).
+  - Admin → Träningsgrupper: ikon + rubrik + förklarande rad, blå Åtgärder (Ny träningsgrupp),
+    *Visa avslutade grupper* + antal ovanför, tabell med instruktörernas NAMN och nästa tillfälle
+    (`TrainingCourse/ClubSummary`, två frågor för hela listan), radens Åtgärder (Öppna kursen,
+    Redigera, Deltagare och instruktörer…, Tilldela lånevapen, Avsluta/Återuppta). Medlemmarna i en
+    DIALOG (`#clubTgMembersModal`), inte en utfälld tabellrad. Ordet är **instruktör**, inte tränare.
+    Knapparna bär id/index i data-attribut (delegerad lyssnare `data-ctg`).
+  Svit: samma, 60/60 (A/B: vyerna från förra committen → sviten avbryter vid skalet).
 - Behörighet = `TrainingGroupService.CanManageTrainingGroup` (sajtadmin, klubbadmin, skjutledare,
   gruppens tränare). **Serier registreras av samma krets — även kursens tränare** (Stefan
   2026-10-05; ersätter "bara klubbadmin/skjutledare"). Kursledaren är ofta inte dagens skjutledare,

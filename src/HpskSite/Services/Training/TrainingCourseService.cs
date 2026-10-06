@@ -729,6 +729,72 @@ WHERE l.TrainingId IN (@1)", memberId, chunk.ToList()))
             return result;
         }
 
+        public int ClubIdOf(int groupId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return db.ExecuteScalar<int>("SELECT ClubId FROM dbo.TrainingGroups WHERE Id = @0", groupId);
+        }
+
+        public class ClubSummary
+        {
+            public int GroupId { get; set; }
+            public int OccasionCount { get; set; }
+            public List<string> Trainers { get; set; } = new();
+            public string? NextDate { get; set; }
+            public string? NextTime { get; set; }
+            public string? NextName { get; set; }
+        }
+
+        private class SummaryRow
+        {
+            public int GroupId { get; set; }
+            public int OccasionCount { get; set; }
+            public DateTime? NextDate { get; set; }
+            public string? NextTime { get; set; }
+            public string? NextName { get; set; }
+            public string? NextNote { get; set; }
+        }
+
+        private class TrainerRow { public int GroupId { get; set; } public int MemberId { get; set; } }
+
+        /// <summary>
+        /// Admin → Träningsgrupper: per grupp i klubben antal kopplade tillfällen, nästa (ej
+        /// inställda) tillfälle och instruktörernas namn — två frågor för hela listan.
+        /// </summary>
+        public List<ClubSummary> ClubSummaries(int clubId, DateTime today)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var rows = db.Fetch<SummaryRow>(@"
+SELECT g.Id AS GroupId,
+       (SELECT COUNT(*) FROM dbo.TrainingGroupTraining l WHERE l.TrainingGroupId = g.Id) AS OccasionCount,
+       nx.[Date] AS NextDate, nx.StartTime AS NextTime, nx.Name AS NextName, nx.Note AS NextNote
+FROM dbo.TrainingGroups g
+OUTER APPLY (SELECT TOP 1 t.[Date], t.StartTime, t.Name, l.Note
+             FROM dbo.TrainingGroupTraining l
+             JOIN dbo.ClubTraining t ON t.Id = l.TrainingId AND t.IsCancelled = 0
+             WHERE l.TrainingGroupId = g.Id AND t.[Date] >= @1
+             ORDER BY t.[Date], t.StartTime) nx
+WHERE g.ClubId = @0", clubId, today.Date);
+            var trainers = db.Fetch<TrainerRow>(@"
+SELECT m.TrainingGroupId AS GroupId, m.MemberId FROM dbo.TrainingGroupMembers m
+JOIN dbo.TrainingGroups g ON g.Id = m.TrainingGroupId
+WHERE g.ClubId = @0 AND m.Role = 'Trainer' AND m.IsActive = 1", clubId);
+            var names = new Dictionary<int, string>();
+            string Name(int id)
+            {
+                if (!names.TryGetValue(id, out var n)) names[id] = n = _memberService.GetById(id)?.Name ?? $"Medlem {id}";
+                return n;
+            }
+            return rows.Select(r => new ClubSummary
+            {
+                GroupId = r.GroupId, OccasionCount = r.OccasionCount,
+                Trainers = trainers.Where(t => t.GroupId == r.GroupId).Select(t => Name(t.MemberId)).OrderBy(n => n).ToList(),
+                NextDate = r.NextDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                NextTime = r.NextTime,
+                NextName = string.IsNullOrWhiteSpace(r.NextNote) ? r.NextName : r.NextNote
+            }).ToList();
+        }
+
         public class ReminderOccasion
         {
             public int MemberId { get; set; }
