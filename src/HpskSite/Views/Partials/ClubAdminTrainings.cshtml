@@ -148,11 +148,9 @@
                     <div class="form-text" id="ctrLoanNote">Utan <em>Anmälan krävs</em> behöver ingen anmäla sig — bara den som behöver låna vapen bokar ett.</div>
                     <div class="form-text text-warning-emphasis d-none" id="ctrLoanNone"><i class="bi bi-exclamation-triangle me-1"></i>Klubben har inga lånebara vapen inlagda — lägg in dem under Klubbvapen, annars kan ingen boka.</div>
                 </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="ctrMandatory">
-                    <label class="form-check-label" for="ctrMandatory">Obligatoriskt för klubbens medlemmar</label>
-                    <div class="form-text">Alla medlemmar förväntas komma, och träningen märks <em>Obligatorisk</em> i kalendern. Ska bara en kurs vara obligatorisk sätter kursens tränare det i Min kurs.</div>
-                </div>
+                @* Ingen "obligatoriskt"-ruta, med flit (Stefan 2026-10-06, efter Luleå PK): obligatorisk
+                   närvaro för föreningsintyget hör till HÄNDELSER, och en kurs krav sätts i Min kurs. *@
+                <div class="form-text">Ska närvaron vara obligatorisk för nybörjarna i en kurs sätter kursens tränare det i <em>Min kurs</em>.</div>
                 <div id="ctrTrainingErr" class="text-danger small mt-2"></div>
             </div>
             <div class="modal-footer">
@@ -398,7 +396,6 @@
             var cap = t.maxParticipants ? (t.signedUp + ' av ' + t.maxParticipants) : (t.registrationRequired ? String(t.signedUp) : (t.signedUp ? String(t.signedUp) : '—'));
             var past = t.date < today;
             var badges = (t.disciplineLabel ? ' <span class="badge bg-secondary-subtle text-secondary-emphasis">' + esc(t.disciplineLabel) + '</span>' : '') +
-                (t.isMandatory ? ' <span class="badge bg-warning text-dark">Obligatorisk</span>' : '') +
                 (t.isCancelled ? ' <span class="badge bg-danger">Inställd</span>' : '') +
                 (t.loanWeaponsOffered ? ' <i class="bi bi-shield-lock text-muted" title="Lånevapen erbjuds"></i>' : '');
             // Seriens namn under träningens: två serier kan ha träningar med samma namn.
@@ -529,7 +526,6 @@
             document.getElementById('ctrRegRequired').checked = t ? t.registrationRequired : false;
             document.getElementById('ctrMax').value = t && t.maxParticipants ? t.maxParticipants : '';
             document.getElementById('ctrLoan').checked = t ? t.loanWeaponsOffered : false;
-            document.getElementById('ctrMandatory').checked = t ? t.isMandatory : false;
             document.getElementById('ctrTrainingErr').textContent = '';
             syncLoan();
             // Har serien kommande tillfällen frågar Spara: bara den här, eller alla kommande.
@@ -568,7 +564,6 @@
             registrationRequired: document.getElementById('ctrRegRequired').checked ? '1' : '0',
             maxParticipants: max ? parseInt(max, 10) : null,
             loanWeaponsOffered: document.getElementById('ctrLoan').checked ? '1' : '0',
-            isMandatory: document.getElementById('ctrMandatory').checked ? '1' : '0',
             scope: scope === 'following' ? 'following' : 'this'
         }).then(function (d) {
             btn.disabled = false;

@@ -112,7 +112,9 @@ namespace HpskSite.Services
                 OwnerName = club?.Name ?? "",
                 IsClubOwned = true,
                 IsRegionOwned = false,
-                IsMandatory = t.IsMandatory,
+                // En träning är aldrig obligatorisk för alla (Stefan 2026-10-06) — läs inte kolumnen,
+                // den kan bära en flagga migrerad från en gammal händelse.
+                IsMandatory = false,
                 Audience = EventAudience.Normalise(t.Audience),
                 AudiencePropertyExists = true,
                 Prices = EventPrices.Parse(t.Prices),

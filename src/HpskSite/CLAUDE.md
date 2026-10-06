@@ -3675,7 +3675,8 @@ träningsgrupp kan kopplas till träningar och blir en **kurs** med instruktörs
 
 **Modellen (B1/B2).** `ClubTraining` (ett tillfälle, bara klubbar) + `ClubTrainingSchedule`;
 `TrainingSchedulePlanner` (ren funktion) gör veckodagar + period + uppehåll till tillfällen med
-roterande skjutledare, tak 400. `ClubTraining.IsMandatory` är en egen kolumn.
+roterande skjutledare, tak 400. `ClubTraining.IsMandatory` finns som kolumn men är DÖD — se
+"En träning är aldrig obligatorisk för alla" nedan.
 - **⚠️⚠️ En träning och en händelse kan ha samma id** (rad i `ClubTraining` resp. Umbraco-nod). Allt
   som hänger på ett tillfälle bär därför sorten: `ClubEventParticipant.OccasionKind`
   (`Event`/`Training`, unikt på (OccasionKind, EventId, MemberId)), `LedgerSourceType.Training`,
@@ -3777,10 +3778,14 @@ anmälningsfält.
   med `trainingGroupId` låser sökningen till gruppens klubb). Att lägga till/ta bort en **tränare**
   eller byta roll kräver klubbadmin eller skjutledare (`IsClubStaffForGroupAsync`). Gruppen och
   träningarna skapas fortfarande bara av klubbadmin.
-- **Två slags obligatoriskt:** `Occasion.MandatoryForCourse` (kursens krav, ★) och
-  `MandatoryForAll` (`ClubTraining.IsMandatory`, ◆, "Obligatoriskt för klubbens medlemmar" i
-  träningsdialogen — samma ord som händelserna; "för alla som deltar" lästes som att kravet
-  bara gällde den som ändå kom). `IsMandatory` = någon av dem, och styr "Missad".
+- **⚠️⚠️ En träning är aldrig obligatorisk för alla** (Stefan 2026-10-06, bekräftat av Michael
+  Holmgren, Luleå PK). Obligatorisk närvaro för föreningsintyget hör till HÄNDELSER (städdag,
+  säkerhetsdag, sjukvårdsdag — `clubSimpleEvent.isMandatory`, orört); en träning räknas ändå alltid
+  som aktivitet. En kurs krav är `Occasion.MandatoryForCourse` (★) och styr "Missad". Rutan i
+  träningsdialogen, ◆ och panelens bricka är borttagna. `ClubTraining.IsMandatory` finns kvar som
+  kolumn men skrivs alltid 0 och LÄSES INTE (`ClubEventParticipationService`, kalendern,
+  `TrainingCourseService`). Migreringen för inte över flaggan utan lägger en not i torrkörningen
+  ("koppla träningen till kursen"). Läs aldrig kolumnen igen — den kan bära gamla flaggor.
 - Kursöversikten ligger i `#mkOverviewWrap` UTANFÖR den smala kolumnen och tar skärmens bredd;
   varje kolumn visar tillfällets namn (kursens namn på tillfället, annars träningens).
 - **Deltagare = `Role <> 'Trainer'`** överallt. Kursdeltagare får anmäla sig till kursens träningar

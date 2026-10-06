@@ -204,7 +204,6 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             public string? RegistrationRequired { get; set; }
             public int? MaxParticipants { get; set; }
             public string? LoanWeaponsOffered { get; set; }
-            public string? IsMandatory { get; set; }
             /// <summary>"following" = för över ändringen till seriens kommande tillfällen (kontrollern gör det).</summary>
             public string? Scope { get; set; }
         }
@@ -256,7 +255,11 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             t.RegistrationRequired = IsTrue(input.RegistrationRequired);
             t.MaxParticipants = input.MaxParticipants is > 0 ? input.MaxParticipants : null;
             t.LoanWeaponsOffered = IsTrue(input.LoanWeaponsOffered);
-            t.IsMandatory = IsTrue(input.IsMandatory);
+            // ⚠️ En träning är aldrig obligatorisk för alla (Stefan 2026-10-06, efter Luleå PK):
+            // obligatorisk närvaro för föreningsintyget hör till HÄNDELSER, och en kurs krav sätts på
+            // kursens koppling (★). Kolumnen finns kvar men skrivs alltid 0 — en sparning nollar
+            // därmed också en flagga som migrerats från en gammal händelse.
+            t.IsMandatory = false;
             t.UpdatedDate = DateTime.Now;
 
             if (t.Id > 0) db.Update(t); else db.Insert(t);
@@ -282,7 +285,6 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             public string? RegistrationRequired { get; set; }
             public int? MaxParticipants { get; set; }
             public string? LoanWeaponsOffered { get; set; }
-            public string? IsMandatory { get; set; }
         }
 
         public class BreakInput
@@ -405,7 +407,6 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
                         RegistrationRequired = schedule.RegistrationRequired,
                         MaxParticipants = schedule.MaxParticipants,
                         LoanWeaponsOffered = schedule.LoanWeaponsOffered,
-                        IsMandatory = IsTrue(input.IsMandatory),
                         CreatedByMemberId = actingMemberId,
                         CreatedDate = now,
                         UpdatedDate = now
