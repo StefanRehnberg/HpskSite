@@ -3833,6 +3833,18 @@ anmälningsfält.
     `TrainingCourseService.BadgeSeriesFor` är ENDA urvalet, delat med deltagarens Mina serier
     (`badgeSeriesTable()`). På telefon döljs tabellkolumnerna (`d-none d-md-table-cell`) och
     uppgifterna står under namnet, annars rullade radens Åtgärder ut ur bild. Svit 87/87.
+  - ⚠️⚠️ **Rälsen = platser, blå Åtgärder = HANDLINGAR för delen man står på** (Stefan 2026-10-06,
+    "ta ett steg tillbaka"). Menyn byggs per del (`setActions(actionsFor(view))`) och döljs där det
+    inte finns några: Upprop → Lånevapen till tillfället…, Ändra tillfället i kursen…; Deltagare →
+    Lägg till deltagare…; Tillfällen → Koppla träningar till kursen…; Översikt och Inställningar →
+    ingen. Lägg ALDRIG en plats som rälsen har i menyn ("Kursens deltagare…", "Kursens standard…").
+    **Upprop är sidan för ETT tillfälle**: väljare (‹ datum ›, `#mkOccPick`), `#vy=idag&t=<id>`,
+    `gotoOcc()`; Tillfällens "Öppna tillfället" och Översiktens datum leder dit. Träningspanelen
+    ("Visa tillfället") erbjuds inte i kursen — dess "Deltagarlistan och upprop" gäller hela
+    träningen och var en omväg. Tillfällets dialog heter "Tillfället … i kursen" och säger att den
+    bara gäller det tillfället; "Ta bort ur kursen" ligger rött sist i radens meny (både tillfälle och
+    deltagare). Kursens krav redigeras direkt under Inställningar. Serie och anteckning finns bara i
+    Upprop (de hör till ett tillfälle). Svit 95/95.
 - **⚠️⚠️ Min kurs har EKONOMINS skal, Admin → Träningsgrupper har TRÄNINGARS form** (Stefans val
   2026-10-06, efter "avviker från hur vi normalt bygger sidor"). Rör du någon av dem: följ förlagan.
   - `/min-kurs`: `container-fluid`, vänsterkort (`.mk-rail`, samma mått som `.ek-page .rail`) med
