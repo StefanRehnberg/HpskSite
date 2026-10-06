@@ -2526,17 +2526,27 @@ namespace HpskSite.Services
         /// <summary>
         /// Send a group message from a trainer to a training group member
         /// </summary>
-        public async Task SendTrainingGroupMessageAsync(
+        /// <summary>
+        /// Instruktörens meddelande till kursens deltagare (och ev. målsman). Svaret går till
+        /// instruktören via Reply-To — mejlet säger därför INTE "svara inte" (det gjorde det förut,
+        /// i strid med sin egen svarsadress). Returnerar om mejlet faktiskt gick iväg, så att
+        /// anroparen inte räknar ett misslyckat utskick som skickat.
+        /// </summary>
+        public async Task<bool> SendTrainingGroupMessageAsync(
             string recipientEmail,
             string recipientName,
             string senderName,
             string groupName,
             string messageSubject,
             string messageBody,
-            MailReplyTo replyTo)
+            MailReplyTo replyTo,
+            string? asGuardianOf = null)
         {
             var subject = $"[{groupName}] {messageSubject}";
-            var escapedBody = System.Net.WebUtility.HtmlEncode(messageBody).Replace("\n", "<br/>");
+            var enc = (Func<string?, string>)(s => System.Net.WebUtility.HtmlEncode(s ?? ""));
+            var escapedBody = enc(messageBody).Replace("\n", "<br/>");
+            var guardianLine = string.IsNullOrWhiteSpace(asGuardianOf) ? ""
+                : $"<p style='color: #666; font-size: 13px;'>Du f&aring;r meddelandet som m&aring;lsman till {enc(asGuardianOf)}.</p>";
 
             var body = $@"
 <html>
@@ -2546,21 +2556,20 @@ namespace HpskSite.Services
     </style>
 </head>
 <body>
-    <h2>Meddelande fr&aring;n {senderName}</h2>
-    <p style='color: #666; font-size: 13px;'>Tr&auml;ningsgrupp: {groupName}</p>
-
+    <h2>Meddelande fr&aring;n {enc(senderName)}</h2>
+    <p style='color: #666; font-size: 13px;'>Kurs: {enc(groupName)}</p>
+    {guardianLine}
     <div style='background-color: #f8f9fa; border-left: 4px solid #6c757d; padding: 15px; margin: 20px 0;'>
         {escapedBody}
     </div>
 
     <p style='color: #999; font-size: 12px;'>
-        Detta meddelande skickades via Pistol.nu fr&aring;n tr&auml;ningsgruppen {groupName}.
-        Svara inte p&aring; detta e-postmeddelande.
+        Meddelandet skickades via Pistol.nu fr&aring;n kursen {enc(groupName)}.
     </p>
 </body>
 </html>";
 
-            await SendEmailAsync(recipientEmail, subject, body, replyTo);
+            return await SendEmailAsync(recipientEmail, subject, body, replyTo);
         }
 
         /// <summary>

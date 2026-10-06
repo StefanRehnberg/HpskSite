@@ -213,6 +213,56 @@
     </div>
 </div>
 
+<!-- En deltagares uppgifter: kontakt, adress, målsmän, närmast anhörig (Stefan 2026-10-06) -->
+<div class="modal fade" id="mkPersonModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h2 class="modal-title h5" id="mkPersonTitle">Deltagaren</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="mkPersonBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Mejla deltagare: välj alla eller några -->
+<div class="modal fade" id="mkMailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h2 class="modal-title h5">Mejla deltagare</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex align-items-center mb-1">
+                    <span class="form-label mb-0 me-auto">Mottagare</span>
+                    <button type="button" class="btn btn-link btn-sm p-0 me-3" data-mk="mail-all">Markera alla</button>
+                    <button type="button" class="btn btn-link btn-sm p-0" data-mk="mail-none">Avmarkera alla</button>
+                </div>
+                <div id="mkMailList" class="border rounded p-2 mb-2" style="max-height:14rem;overflow:auto"></div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="mkMailGuardians">
+                    <label class="form-check-label" for="mkMailGuardians">Skicka också till målsman (när deltagaren har en registrerad)</label>
+                </div>
+                <label class="form-label" for="mkMailSubject">Ämne</label>
+                <input class="form-control mb-2" id="mkMailSubject" maxlength="150" autocomplete="off">
+                <label class="form-label" for="mkMailBody">Meddelande</label>
+                <textarea class="form-control" id="mkMailBody" rows="6" maxlength="5000"></textarea>
+                <div class="form-text">Svar på mejlet går direkt till dig.</div>
+                <div id="mkMailMsg" class="mt-2"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="mkMailSend">Skicka</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Koppla träningar -->
 <div class="modal fade" id="mkLinkModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-scrollable">
@@ -676,7 +726,8 @@
             a.push(menuItem('data-mk="occ" data-training="' + current.trainingId + '"', 'bi-pencil', 'Ändra tillfället i kursen…'));
             return a;
         }
-        if (v === 'deltagare') return [menuItem('data-mk="members"', 'bi-person-plus', 'Lägg till deltagare…')];
+        if (v === 'deltagare') return [menuItem('data-mk="members"', 'bi-person-plus', 'Lägg till deltagare…'),
+                                       menuItem('data-mk="mail"', 'bi-envelope', 'Mejla deltagare…')];
         if (v === 'tillfallen') return [menuItem('data-mk="link"', 'bi-link-45deg', 'Koppla träningar till kursen…')];
         return [];
     }
@@ -786,6 +837,76 @@
         });
     }
 
+    // ── Visa deltagaren: kontakt, adress, målsmän, närmast anhörig ──
+    function openPerson(memberId) {
+        var body = document.getElementById('mkPersonBody');
+        body.innerHTML = '<div class="text-muted">Laddar…</div>';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('mkPersonModal')).show();
+        getJson('/umbraco/surface/TrainingCourse/ParticipantInfo?groupId=' + groupId + '&memberId=' + memberId).then(function (d) {
+            if (!d.success) { body.innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Uppgifterna kunde inte läsas.') + '</div>'; return; }
+            var p = d.person;
+            document.getElementById('mkPersonTitle').textContent = p.name;
+            var b = (course.badges || {})[memberId] || {};
+            // Ett tomt fält står som "saknas" — en tom rad läses som att ingen tittat.
+            var val = function (v) { return v ? esc(v) : '<span class="text-muted">saknas</span>'; };
+            var tel = function (v) { return v ? '<a href="tel:' + esc(v.replace(/[^\d+]/g, '')) + '">' + esc(v) + '</a>' : '<span class="text-muted">saknas</span>'; };
+            var mail = function (v) { return v ? '<a href="mailto:' + esc(v) + '">' + esc(v) + '</a>' : '<span class="text-muted">saknas</span>'; };
+            var row = function (label, html) { return '<dt class="col-5 col-sm-4 fw-normal text-muted">' + label + '</dt><dd class="col-7 col-sm-8 mb-1 text-break">' + html + '</dd>'; };
+            var addr = [p.coAddress ? 'c/o ' + p.coAddress : '', p.address, (p.postalCode + ' ' + p.city).trim()].filter(Boolean).map(esc).join('<br>');
+            var h = '<div class="d-flex align-items-center gap-3 mb-3">' + badgeImg(b, 40) +
+                '<div><div class="small text-muted">' + esc(p.club || '') + '</div>' +
+                '<div class="small ' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + esc(b.text || '') + '</div></div></div>' +
+                '<h3 class="h6">Kontakt</h3><dl class="row mb-3">' +
+                row('Mobil', tel(p.phone)) + (p.landline ? row('Telefon', tel(p.landline)) : '') +
+                row('E-post', mail(p.email)) + row('Adress', addr || '<span class="text-muted">saknas</span>') +
+                row('Född', p.born ? esc(p.born) + ' (' + p.age + ' år)' : '<span class="text-muted">saknas</span>') + '</dl>' +
+                '<h3 class="h6">Närmast anhörig</h3><dl class="row mb-3">' +
+                row('Namn', val(p.emergency.name)) + row('Telefon', tel(p.emergency.phone)) + '</dl>';
+            if (p.guardians.length || (p.age != null && p.age < 18)) {
+                h += '<h3 class="h6">Målsman</h3>' + (p.guardians.length
+                    ? p.guardians.map(function (g) { return '<dl class="row mb-2">' + row('Namn', val(g.name)) + row('Mobil', tel(g.mobile)) + row('E-post', mail(g.email)) + '</dl>'; }).join('')
+                    : '<p class="small text-warning-emphasis">Deltagaren är under 18 men har ingen målsman registrerad.</p>');
+            }
+            h += '<p class="small text-muted mb-0">Uppgifterna kommer från medlemsregistret. Medlemmen ändrar dem själv under Min sida, eller klubben i medlemsregistret.</p>';
+            body.innerHTML = h;
+        });
+    }
+
+    // ── Mejla deltagare: alla förvalda, eller bara den rad man kom från ──
+    function openMail(memberId) {
+        var list = document.getElementById('mkMailList');
+        list.innerHTML = course.participants.map(function (p, i) {
+            var on = !memberId || p.memberId === memberId;
+            return '<div class="form-check"><input class="form-check-input" type="checkbox" id="mkMail' + i + '" data-mail-member="' + p.memberId + '"' + (on ? ' checked' : '') + '>' +
+                '<label class="form-check-label" for="mkMail' + i + '">' + esc(p.name) + '</label></div>';
+        }).join('') || '<div class="text-muted small">Kursen har inga deltagare.</div>';
+        document.getElementById('mkMailGuardians').checked = false;
+        document.getElementById('mkMailSubject').value = '';
+        document.getElementById('mkMailBody').value = '';
+        document.getElementById('mkMailMsg').innerHTML = '';
+        document.getElementById('mkMailSend').disabled = false;
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('mkMailModal')).show();
+    }
+    function sendMail() {
+        var ids = Array.prototype.map.call(document.querySelectorAll('#mkMailList input:checked'), function (c) { return c.getAttribute('data-mail-member'); });
+        var box = document.getElementById('mkMailMsg');
+        var subject = document.getElementById('mkMailSubject').value.trim(), message = document.getElementById('mkMailBody').value.trim();
+        var fail = function (t) { box.innerHTML = '<div class="alert alert-warning py-2 small">' + esc(t) + '</div>'; };
+        if (!ids.length) return fail('Välj minst en mottagare.');
+        if (!subject || !message) return fail('Skriv ämne och meddelande.');
+        var btn = document.getElementById('mkMailSend');
+        btn.disabled = true;
+        postForm('/umbraco/surface/TrainingGroup/SendGroupMessage', {
+            trainingGroupId: groupId, subject: subject, message: message, memberIds: ids.join(','),
+            includeGuardians: document.getElementById('mkMailGuardians').checked ? '1' : '0'
+        }).then(function (d) {
+            btn.disabled = false;
+            // ⚠️ Svaret säger vilka som INTE nåddes — det står kvar i dialogen så att det går att läsa.
+            box.innerHTML = '<div class="alert alert-' + (d.success && !(d.noEmail || []).length && !(d.failed || []).length ? 'success' : 'warning') + ' py-2 small">' + esc(d.message || '') + '</div>';
+            if (d.success) btn.disabled = true;
+        });
+    }
+
     // Radens Åtgärder — samma form som Träningars rader (grå, text, popper fixed i .table-responsive).
     function rowMenu(items) {
         return '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" ' +
@@ -818,7 +939,9 @@
             var b = (course.badges || {})[p.memberId] || {};
             // Bara det som gäller deltagaren i hela kursen. Serie och anteckning hör till ett tillfälle
             // och görs under Upprop — här vore de "för vilket tillfälle?".
-            var items = [menuItem('data-mk="badge-series" data-member="' + p.memberId + '"', 'bi-award', 'Märkesserier i år…'),
+            var items = [menuItem('data-mk="person" data-member="' + p.memberId + '"', 'bi-person-vcard', 'Visa deltagaren…'),
+                         menuItem('data-mk="mail" data-member="' + p.memberId + '"', 'bi-envelope', 'Mejla deltagaren…'),
+                         menuItem('data-mk="badge-series" data-member="' + p.memberId + '"', 'bi-award', 'Märkesserier i år…'),
                          '<li><hr class="dropdown-divider"></li>',
                          dangerItem('data-mk="rm-member" data-member="' + p.memberId + '"', 'bi-person-dash', 'Ta bort ur kursen…')];
             var missedTxt = missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ');
@@ -1355,6 +1478,9 @@
         else if (act === 'rm-member') removeMember(member);
         else if (act === 'occ') openOcc(parseInt(b.getAttribute('data-training'), 10));
         else if (act === 'badge-series') openBadgeSeries(member);
+        else if (act === 'person') openPerson(member);
+        else if (act === 'mail') openMail(member);
+        else if (act === 'mail-all' || act === 'mail-none') document.querySelectorAll('#mkMailList input').forEach(function (c) { c.checked = act === 'mail-all'; });
         else if (act === 'unlink-occ') unlinkOcc(parseInt(b.getAttribute('data-training'), 10));
         else if (act === 'goto-occ') gotoOcc(parseInt(b.getAttribute('data-training'), 10));
         else if (act === 'occ-step') stepOcc(parseInt(b.getAttribute('data-dir'), 10));
@@ -1378,6 +1504,7 @@
     document.getElementById('mkOccSave').addEventListener('click', saveOcc);
     document.getElementById('mkLoanSave').addEventListener('click', saveLoan);
     document.getElementById('mkMemberSearch').addEventListener('input', searchMembers);
+    document.getElementById('mkMailSend').addEventListener('click', sendMail);
     // Bakåtknappen och en inklistrad länk byter också del (#vy=…).
     window.addEventListener('hashchange', function () {
         var m = (location.hash || '').match(/vy=([a-z]+)/);

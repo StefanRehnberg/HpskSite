@@ -585,7 +585,11 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SendGroupMessage(int trainingGroupId, string subject, string message)
+        /// <param name="memberIds">Kommaseparerade mottagare (Min kurs → Deltagare → Mejla). Bara gruppens
+        /// DELTAGARE godtas. Utelämnat = hela gruppen som förut (äldre anropare).</param>
+        /// <param name="includeGuardians">"1" = även målsmännens e-post (sträng: "1" binder inte till bool).</param>
+        public async Task<IActionResult> SendGroupMessage(int trainingGroupId, string subject, string message,
+            string? memberIds = null, string? includeGuardians = null)
         {
             try
             {
@@ -608,33 +612,67 @@ namespace HpskSite.Controllers
                 var currentMemberData = _memberService.GetByEmail(currentMember?.Email ?? "");
                 int senderId = currentMemberData?.Id ?? 0;
 
-                int sentCount = 0;
-                foreach (var gm in group.Members)
+                // Urvalet: bara gruppens deltagare när mottagare anges — ett handpostat id utanför
+                // gruppen (eller en instruktör) mejlas aldrig.
+                var recipients = group.Members.Where(gm => gm.MemberId != senderId).ToList();
+                if (!string.IsNullOrWhiteSpace(memberIds))
                 {
-                    // Don't send to the sender
-                    if (gm.MemberId == senderId) continue;
+                    var wanted = memberIds.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(s => int.TryParse(s.Trim(), out var v) ? v : 0).Where(v => v > 0).ToHashSet();
+                    recipients = recipients.Where(gm => wanted.Contains(gm.MemberId) && gm.Role != "Trainer").ToList();
+                    if (recipients.Count == 0)
+                        return Json(new { success = false, message = "Välj minst en deltagare i kursen." });
+                }
+                var withGuardians = includeGuardians is "1" or "true" or "on";
 
+                int sentCount = 0;
+                var noEmail = new List<string>();
+                var failed = new List<string>();
+                var reply = _replyContacts.ForMember(senderId);
+                foreach (var gm in recipients)
+                {
                     var member = _memberService.GetById(gm.MemberId);
-                    if (member == null || string.IsNullOrEmpty(member.Email)) continue;
+                    if (member == null) continue;
 
-                    try
+                    // Mottagarna: deltagaren själv, och målsmännen när det valts — en gång per adress.
+                    var targets = new List<(string Email, string Name, string? GuardianOf)>();
+                    if (!string.IsNullOrWhiteSpace(member.Email)) targets.Add((member.Email, member.Name ?? "", null));
+                    if (withGuardians)
+                        foreach (var g in new[] { "guardian1", "guardian2" })
+                        {
+                            var ge = member.GetValue(g + "Email")?.ToString();
+                            if (!string.IsNullOrWhiteSpace(ge) && !targets.Any(t => t.Email.Equals(ge, StringComparison.OrdinalIgnoreCase)))
+                                targets.Add((ge.Trim(), member.GetValue(g + "Name")?.ToString() ?? "", member.Name));
+                        }
+                    if (targets.Count == 0) { noEmail.Add(member.Name ?? $"Medlem {member.Id}"); continue; }
+
+                    foreach (var t in targets)
                     {
-                        // ⚠️ HÄR är svaret på ett mejl RÄTT väg, inte svara-i-appen. Ett
-                        // gruppmeddelande från tränaren är ett SAMTAL, inte ett ärende — och
-                        // svaret ska gå till tränaren som skrev det.
-                        await _emailService.SendTrainingGroupMessageAsync(
-                            member.Email, member.Name ?? "", senderName,
-                            group.Name, subject, message,
-                            _replyContacts.ForMember(senderId));
-                        sentCount++;
-                    }
-                    catch (Exception emailEx)
-                    {
-                        _logger.LogWarning(emailEx, "Failed to send group message to member {MemberId}", gm.MemberId);
+                        try
+                        {
+                            // ⚠️ HÄR är svaret på ett mejl RÄTT väg, inte svara-i-appen. Ett
+                            // gruppmeddelande från tränaren är ett SAMTAL, inte ett ärende — och
+                            // svaret ska gå till tränaren som skrev det.
+                            if (await _emailService.SendTrainingGroupMessageAsync(
+                                    t.Email, t.Name, senderName, group.Name, subject, message, reply, t.GuardianOf))
+                                sentCount++;
+                            else failed.Add(t.Name.Length > 0 ? t.Name : t.Email);
+                        }
+                        catch (Exception emailEx)
+                        {
+                            _logger.LogWarning(emailEx, "Failed to send group message to member {MemberId}", gm.MemberId);
+                            failed.Add(t.Name.Length > 0 ? t.Name : t.Email);
+                        }
                     }
                 }
 
-                return Json(new { success = true, message = $"Meddelande skickat till {sentCount} mottagare" });
+                // ⚠️ Räknar bara mejl som FAKTISKT gick iväg, och namnger dem som inte nåddes.
+                var msg = sentCount == 0 && (failed.Count > 0 || noEmail.Count > 0)
+                    ? "Inget mejl kunde skickas."
+                    : $"Meddelandet skickades till {sentCount} mottagare.";
+                if (noEmail.Count > 0) msg += " Saknar e-post: " + string.Join(", ", noEmail) + ".";
+                if (failed.Count > 0) msg += " Kunde inte skickas till: " + string.Join(", ", failed) + ".";
+                return Json(new { success = sentCount > 0, sent = sentCount, noEmail, failed, message = msg });
             }
             catch (Exception ex)
             {
