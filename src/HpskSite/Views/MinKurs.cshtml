@@ -11,15 +11,25 @@
     så det finns EN sanning om vem som var där.
 *@
 @await Html.PartialAsync("_HtmlEscape")
+@* Deltagarens vy öppnar ett tillfälle (anmälan, lånevapen) i samma panel som kalendern. *@
+@await Html.PartialAsync("_TrainingPanelModal")
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 <style>
-    .mk-wrap { max-width: 760px; }
+    /* 960 px: på en dator fick sidan en 560 px smal kolumn mitt på en bred skärm. */
+    .mk-wrap { max-width: 960px; }
+    /* Chattknappen ligger fast nere till höger — luft under sista raden så den aldrig täcker den. */
+    #mkOverviewWrap { padding-bottom: 5.5rem; }
     .mk-today { border-left: 4px solid var(--bs-success); }
-    .mk-person { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .75rem; margin-bottom: .5rem; background: var(--bs-body-bg); }
-    .mk-person .mk-name { font-weight: 600; }
-    .mk-att .btn { min-width: 4.5rem; }
+    .mk-person { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem .75rem; margin-bottom: .375rem; background: var(--bs-body-bg); }
+    .mk-person .mk-name { font-weight: 600; min-width: 0; }
+    .mk-person .mk-sub { min-width: 0; }
+    .mk-person .btn-link { text-decoration: none; }
+    .mk-att .btn { min-width: 3.6rem; padding-left: .5rem; padding-right: .5rem; }
+    .mk-grid thead th:first-child { position: sticky; left: 0; background: var(--bs-body-bg); z-index: 2; }
+    .mk-occ-row { cursor: pointer; }
+    .mk-state { font-size: .8125rem; white-space: nowrap; }
     .mk-badge { font-size: .875rem; color: var(--bs-secondary-color); }
     .mk-ready { color: var(--bs-success-text-emphasis); font-weight: 600; }
     .mk-missed { color: var(--bs-danger-text-emphasis); }
@@ -57,9 +67,14 @@
     <div id="mkMsg"></div>
     <div id="mkBody"><div class="text-center py-5"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
 </div>
+@* Notisinställningen för deltagarens påminnelse. Renderas EN gång här (partialen äger fasta id:n)
+   och flyttas in i deltagarvyn när den ritas — tränarvyn visar den inte. *@
+<div class="d-none" id="mkPushHome">
+    @await Html.PartialAsync("_WebPushSetup", new ViewDataDictionary(ViewData) { { "WebPushShowMatchPrefs", false }, { "WebPushShowRankingPref", false }, { "WebPushShowSchedulePref", true }, { "WebPushMatchPrefDefault", "Off" } })
+</div>
 @* Översikten bor UTANFÖR den smala kolumnen (Stefan 2026-10-05): på en skärm som rymmer alla
    tillfällen ska de synas, i stället för att rulla ut till höger i 760 px. *@
-<div class="container-fluid px-3 px-lg-4 pb-4" id="mkOverviewWrap"></div>
+<div class="container-fluid px-3 px-lg-4" id="mkOverviewWrap"></div>
 
 <!-- Registrera serie -->
 <div class="modal fade" id="mkSeriesModal" tabindex="-1" aria-hidden="true">
@@ -301,6 +316,7 @@
     var app = document.getElementById('mkApp');
     var groupId = parseInt(app.getAttribute('data-group'), 10) || 0;
     var course = null, notes = [], current = null, seriesState = null;
+    var courses = [];   // MyCourses — bär rollen (trainer / manager / participant) per kurs
 
     function token() { var el = document.querySelector('input[name="__RequestVerificationToken"]'); return el ? el.value : ''; }
     function getJson(url) {
@@ -329,9 +345,12 @@
     function loadCourses() {
         return getJson('/umbraco/surface/TrainingCourse/MyCourses').then(function (d) {
             var list = (d && d.success && d.courses) || [];
+            courses = list;
             if (!list.length) {
-                document.getElementById('mkBody').innerHTML = '<div class="alert alert-info">Du är inte tränare i någon aktiv kurs. ' +
-                    'En kurs är en träningsgrupp — klubbadmin lägger till dig som tränare under <em>Administration → Träningsgrupper</em>.</div>';
+                // ⚠️ Texten talar till BÅDE den som går en kurs och den som leder en. Den sa förut bara
+                // "du är inte tränare", vilket är fel besked till en nybörjare som letar efter sin kurs.
+                document.getElementById('mkBody').innerHTML = '<div class="alert alert-info">Du är inte med i någon pågående kurs just nu. ' +
+                    'Går du en nybörjarkurs lägger klubben eller din instruktör till dig i kursen — då dyker den upp här.</div>';
                 return null;
             }
             var saved = 0;
@@ -340,7 +359,8 @@
                      : list.some(function (c) { return c.groupId === saved; }) ? saved : list[0].groupId;
             var sel = document.getElementById('mkPicker');
             sel.innerHTML = list.map(function (c) {
-                return '<option value="' + c.groupId + '">' + esc(c.name) + (c.isTrainer ? '' : ' (klubbens kurs)') + '</option>';
+                return '<option value="' + c.groupId + '">' + esc(c.name) +
+                    (c.role === 'participant' ? ' (du går kursen)' : c.role === 'manager' ? ' (klubbens kurs)' : '') + '</option>';
             }).join('');
             sel.value = String(pick);
             document.getElementById('mkPickerWrap').classList.toggle('d-none', list.length < 2);
@@ -348,15 +368,159 @@
         });
     }
 
+    function roleOf(id) {
+        var c = courses.find(function (x) { return x.groupId === id; });
+        return c ? c.role : 'trainer';
+    }
+
     function loadCourse(id) {
         groupId = id;
         try { localStorage.setItem('hpsk_minkurs_group', String(id)); } catch (e) { }
+        if (roleOf(id) === 'participant') return loadParticipant(id);
+        document.getElementById('mkOverviewWrap').classList.remove('d-none');
         return getJson('/umbraco/surface/TrainingCourse/Get?groupId=' + id).then(function (d) {
             if (!d.success) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kursen kunde inte läsas.') + '</div>'; return; }
             course = d.course; notes = d.notes || [];
             document.getElementById('mkActions').classList.remove('d-none');
             render();
         }).catch(function (e) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-danger">' + esc(e.message) + '</div>'; });
+    }
+
+    // ── Deltagarens vy (UX-omgången 2026-10-06) ──
+    // ⚠️ Bara hens egna rader: servern (TrainingCourse/Mine) skickar inga andra deltagare och inga
+    // tränaranteckningar. Tillfällena öppnas i träningspanelen, där anmälan och lånevapen finns.
+    function loadParticipant(id) {
+        document.getElementById('mkActions').classList.add('d-none');
+        document.getElementById('mkOverviewWrap').innerHTML = '';
+        return getJson('/umbraco/surface/TrainingCourse/Mine?groupId=' + id).then(function (d) {
+            if (!d.success) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kursen kunde inte läsas.') + '</div>'; return; }
+            renderParticipant(d.course);
+        }).catch(function (e) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-danger">' + esc(e.message) + '</div>'; });
+    }
+
+    function myState(o, c) {
+        if (o.isCancelled) return '<span class="mk-state text-muted">inställt</span>';
+        if (c.missed) return '<span class="mk-state badge bg-danger-subtle text-danger-emphasis">Missad</span>';
+        switch (c.state) {
+            case 'present': return '<span class="mk-state badge bg-success-subtle text-success-emphasis"><i class="bi bi-check-lg"></i> Var där</span>';
+            case 'checkedin': return '<span class="mk-state badge bg-success-subtle text-success-emphasis">Incheckad</span>';
+            case 'excused': return '<span class="mk-state badge bg-secondary-subtle text-secondary-emphasis">Giltig frånvaro</span>';
+            case 'absent': return '<span class="mk-state badge bg-warning-subtle text-warning-emphasis">Inte där</span>';
+            case 'signedup': return '<span class="mk-state badge bg-primary-subtle text-primary-emphasis">Anmäld</span>';
+        }
+        return o.isPast ? '<span class="mk-state text-muted">–</span>' : '';
+    }
+
+    function occTitle(o) { return o.note || o.name; }
+    function occWhen(o) { return dayLabel(o.date, true) + (o.startTime ? ' ' + o.startTime + (o.endTime ? '–' + o.endTime : '') : ''); }
+
+    function occRow(o, c) {
+        return '<button type="button" class="list-group-item list-group-item-action d-flex align-items-center gap-2 mk-occ-row" data-training-panel="' + o.trainingId + '">' +
+            '<div class="me-auto text-start" style="min-width:0">' +
+            '<div class="small text-muted">' + esc(occWhen(o)) + '</div>' +
+            // Märket på EGEN rad: inne i den trunkerade titeln klipptes det bort på telefonen,
+            // och då syntes inte att tillfället var obligatoriskt.
+            '<div class="text-truncate">' + esc(occTitle(o)) + '</div>' +
+            (o.mandatoryForCourse ? '<span class="badge bg-warning text-dark">★ Obligatoriskt</span>' : '') +
+            '</div>' + myState(o, c) + '</button>';
+    }
+
+    // ⚠️ Notisinställningen bor i #mkPushHome och lånas in i deltagarvyn. Den måste parkeras FÖRE
+    // varje omritning av #mkBody — annars följer den med ut ur DOM:en och är borta vid nästa kursbyte.
+    function parkPush() {
+        var home = document.getElementById('mkPushHome'), p = document.getElementById('webPushSetup');
+        if (home && p && !home.contains(p)) home.appendChild(p);
+    }
+
+    function renderParticipant(v) {
+        parkPush();
+        document.getElementById('mkCourseSub').textContent = v.name + (v.trainers.length ? ' · instruktör' + (v.trainers.length > 1 ? 'er ' : ' ') + v.trainers.join(', ') : '');
+        var mine = function (o) { return v.mine[o.trainingId] || { state: 'none', missed: false }; };
+        var occ = v.occasions || [];
+        var next = occ.find(function (o) { return !o.isCancelled && !o.isPast; });
+        var html = '';
+
+        if (!occ.length) {
+            html += '<div class="alert alert-info">Kursen har inga tillfällen inlagda än. Din instruktör lägger in dem — titta in här igen.</div>';
+        }
+        if (next) {
+            var c = mine(next);
+            html += '<div class="card mk-today mb-3"><div class="card-body">' +
+                '<div class="small text-uppercase text-muted fw-semibold">' + (next.isToday ? 'I dag' : 'Nästa gång') + ' · ' + esc(occWhen(next)) + '</div>' +
+                '<div class="fs-5 fw-semibold">' + esc(occTitle(next)) + '</div>' +
+                '<div class="small text-muted mb-2">' +
+                (next.mandatoryForCourse ? '<span class="badge bg-warning text-dark me-1">★ Obligatoriskt för kursen</span>' : '') +
+                (next.venue ? '<i class="bi bi-geo-alt me-1"></i>' + esc(next.venue) : '') +
+                (next.skjutledareName ? ' · skjutledare ' + esc(next.skjutledareName) : '') + '</div>' +
+                (next.registrationRequired && c.state !== 'signedup' && c.state !== 'present'
+                    ? '<div class="small mb-2"><i class="bi bi-exclamation-circle me-1"></i>Anmälan krävs till det här tillfället.</div>' : '') +
+                '<button type="button" class="btn btn-primary" data-training-panel="' + next.trainingId + '">' +
+                (next.registrationRequired && c.state !== 'signedup' ? 'Anmäl dig' : 'Visa tillfället') + '</button>' +
+                (c.state === 'signedup' ? ' <span class="badge bg-primary-subtle text-primary-emphasis ms-1">Du är anmäld</span>' : '') +
+                '</div></div>';
+        } else if (occ.length) {
+            html += '<div class="alert alert-light border">Kursen har inga fler tillfällen inlagda.</div>';
+        }
+
+        var missed = occ.filter(function (o) { return mine(o).missed; });
+        if (missed.length) {
+            // Kort, med datumen — vilka tillfällen det gäller står märkta "Missad" under Tidigare tillfällen.
+            html += '<div class="alert alert-warning py-2"><i class="bi bi-exclamation-triangle me-1"></i>Du har missat ' +
+                (missed.length === 1 ? 'ett obligatoriskt tillfälle' : missed.length + ' obligatoriska tillfällen') + ' (' +
+                missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ') +
+                '). Prata med din instruktör om hur du tar igen det.</div>';
+        }
+
+        var b = v.badge || {};
+        html += '<div class="card mb-3"><div class="card-body py-2">' +
+            '<div class="small text-uppercase text-muted fw-semibold">Mitt märkesläge</div>' +
+            '<div class="' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + esc(b.text || 'Inga godkända serier än.') +
+            (b.readyForPistolskyttekort ? ' · klar för Pistolskyttekortet' : '') + '</div>' +
+            '<div class="small text-muted">Bronsmärket krävs för Pistolskyttekortet. Din instruktör registrerar serierna på banan.</div>' +
+            '</div></div>';
+
+        var upcoming = occ.filter(function (o) { return !o.isPast; });
+        var past = occ.filter(function (o) { return o.isPast; }).reverse();
+        if (occ.length) {
+            html += '<h2 class="h6 mt-3">Kursens tillfällen</h2>';
+            html += upcoming.length
+                ? '<div class="list-group mb-2">' + upcoming.map(function (o) { return occRow(o, mine(o)); }).join('') + '</div>'
+                : '<div class="text-muted small mb-2">Inga kommande tillfällen.</div>';
+            if (past.length) {
+                html += '<details class="mb-3"' + (upcoming.length ? '' : ' open') + '><summary class="small">Tidigare tillfällen (' + past.length + ')</summary>' +
+                    '<div class="list-group mt-2">' + past.map(function (o) { return occRow(o, mine(o)); }).join('') + '</div></details>';
+            }
+        }
+
+        html += '<h2 class="h6 mt-3">Mina serier i kursen</h2>';
+        html += (v.series && v.series.length)
+            ? '<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Dag</th><th>Tillfälle</th><th class="text-end">Poäng</th><th>Valör</th></tr></thead><tbody>' +
+                v.series.map(function (s) {
+                    return '<tr><td class="text-nowrap">' + esc(dayLabel(s.date)) + '</td><td>' + esc(s.occasion) + '</td><td class="text-end">' + s.total + '</td><td>' +
+                        (s.valor ? '<span class="badge bg-success-subtle text-success-emphasis">' + esc(s.valor) + '</span>' : '<span class="text-muted small">under brons</span>') + '</td></tr>';
+                }).join('') + '</tbody></table></div>'
+            : '<div class="text-muted small mb-3">Inga serier registrerade än. Din instruktör registrerar dem på banan.</div>';
+
+        html += '<div class="card mb-3"><div class="card-body py-2">' +
+            '<div class="small text-uppercase text-muted fw-semibold mb-1">Håll koll</div>' +
+            (upcoming.some(function (o) { return o.startTime && !o.isCancelled; })
+                ? '<a class="btn btn-outline-primary btn-sm mb-2" href="/min-kurs/kalender.ics?g=' + v.groupId + '"><i class="bi bi-calendar-plus me-1"></i>Lägg kursens tillfällen i min kalender</a>' +
+                  '<div class="small text-muted mb-2">Filen påminner dig dagen innan. Ändras schemat behöver du hämta den igen.</div>'
+                : '') +
+            '<div id="mkPushSlot"></div>' +
+            '</div></div>';
+
+        document.getElementById('mkBody').innerHTML = html;
+        // Notisinställningen flyttas in (inte kopieras — den äger fasta id:n och sina lyssnare).
+        var push = document.getElementById('webPushSetup');
+        var slot = document.getElementById('mkPushSlot');
+        if (push && slot) {
+            slot.appendChild(push);
+            var label = document.createElement('div');
+            label.className = 'small text-muted mt-1';
+            label.textContent = 'Med notiser påslagna och "Påminnelser" ikryssat får du ett meddelande dagen innan varje tillfälle.';
+            slot.appendChild(label);
+        }
     }
 
     // Dagens tillfälle, annars nästa, annars det senaste.
@@ -368,6 +532,7 @@
     }
 
     function render() {
+        parkPush();
         var sub = course.name + (course.trainers.length ? ' · instruktörer ' + course.trainers.map(function (t) { return t.name; }).join(', ') : '');
         document.getElementById('mkCourseSub').textContent = sub;
         current = pickCurrent();
@@ -405,9 +570,31 @@
             if (!course.participants.length) html += '<div class="alert alert-info">Kursen har inga deltagare än.</div>';
             course.participants.forEach(function (p) { html += personCard(p); });
         }
+        // Lyft ur Åtgärder-menyn: att lägga till en nybörjare som dyker upp är vardag för tränaren,
+        // och en åtgärd bakom en meny hittar August inte.
+        html += '<button type="button" class="btn btn-outline-primary btn-sm mt-1 mb-3" data-mk="members"><i class="bi bi-person-plus me-1"></i>Lägg till eller ta bort deltagare</button>';
 
         document.getElementById('mkBody').innerHTML = html;
         document.getElementById('mkOverviewWrap').innerHTML = overview();
+        afterOverview();
+    }
+
+    // Översikten rullar i sidled när tillfällena inte får plats. Utan ett synligt tecken ser den
+    // avklippt ut ("8 o…"), så: en rad som säger det, och tabellen rullas så att det aktuella
+    // tillfället syns. ⚠️ Avståndet mäts med getBoundingClientRect, inte offsetLeft (som räknas mot
+    // offsetParent och inte mot rullningsytan).
+    function afterOverview() {
+        var box = document.getElementById('mkOverviewScroll');
+        var hint = document.getElementById('mkScrollHint');
+        if (!box || !hint) return;
+        var overflow = box.scrollWidth > box.clientWidth + 2;
+        hint.classList.toggle('d-none', !overflow);
+        if (!overflow || !current) return;
+        var th = box.querySelector('th[data-occ="' + current.trainingId + '"]');
+        var first = box.querySelector('thead th');
+        if (!th || !first) return;
+        var delta = th.getBoundingClientRect().left - box.getBoundingClientRect().left - first.getBoundingClientRect().width - 8;
+        if (delta > 0) box.scrollLeft += delta;
     }
 
     function personCard(p) {
@@ -418,27 +605,36 @@
             return '<button type="button" class="btn btn-sm ' + (active ? 'btn-success' : 'btn-outline-secondary') + '" data-mk="att" data-member="' + p.memberId + '" data-status="' + status + '">' + label + '</button>';
         };
         var isHere = c.state === 'present', isAbsent = c.state === 'absent', isExcused = c.state === 'excused';
+        // Två rader i stället för tre (UX-omgången 2026-10-06): namn + närvaro överst, märkesläget och
+        // serie/anteckning under. Elva deltagare gav en 3 000 px lång sida på telefonen.
         return '<div class="mk-person" data-mk-person="' + p.memberId + '">' +
-            '<div class="d-flex align-items-center gap-2 flex-wrap">' +
-            '<div class="mk-name me-auto">' + esc(p.name) + '</div>' +
-            (c.state === 'checkedin' ? '<span class="badge bg-info-subtle text-info-emphasis">Incheckad via QR</span>' : '') +
-            '<div class="btn-group mk-att" role="group" aria-label="Närvaro">' +
+            '<div class="d-flex align-items-center gap-2">' +
+            '<div class="mk-name me-auto text-truncate">' + esc(p.name) +
+            (c.state === 'checkedin' ? ' <span class="badge bg-info-subtle text-info-emphasis fw-normal">QR</span>' : '') + '</div>' +
+            '<div class="btn-group mk-att flex-shrink-0" role="group" aria-label="Närvaro">' +
             btn('Present', 'Här', isHere) + btn('Absent', 'Ej här', isAbsent) + btn('Excused', 'Giltig', isExcused) +
             '</div></div>' +
-            '<div class="mk-badge mt-1 ' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + esc(b.text || '') +
-            (b.readyForPistolskyttekort ? ' · klar för Pistolskyttekortet' : '') + '</div>' +
-            (missed.length ? '<div class="small mk-missed">Missade obligatoriskt ' + missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ') + '</div>' : '') +
-            '<div class="mt-2 d-flex gap-2">' +
-            '<button type="button" class="btn btn-sm btn-outline-primary" data-mk="series" data-member="' + p.memberId + '"><i class="bi bi-bullseye me-1"></i>Registrera serie</button>' +
-            '<button type="button" class="btn btn-sm btn-outline-secondary" data-mk="note" data-member="' + p.memberId + '"><i class="bi bi-pencil me-1"></i>Anteckning</button>' +
-            '</div></div>';
+            // Knapparna står ihop till höger (flex-shrink-0) och texten bryter i sin egen kolumn —
+            // med flex-wrap hamnade "Anteckning" ensam på en tredje rad på telefonen.
+            '<div class="d-flex align-items-start gap-1 mt-1">' +
+            '<div class="mk-sub flex-grow-1 small">' +
+            '<span class="mk-badge ' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + esc(b.text || '') +
+            (b.readyForPistolskyttekort ? ' · klar för Pistolskyttekortet' : '') + '</span>' +
+            // Fler än två datum gör raden hög — då ett antal, och datumen i titeln (och i översikten).
+            (missed.length ? '<span class="mk-missed" title="' + esc(missed.map(function (o) { return dayLabel(o.date); }).join(', ')) + '"> · <i class="bi bi-exclamation-triangle-fill"></i> missade ' +
+                (missed.length <= 2 ? missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ') : missed.length + ' obligatoriska') + '</span>' : '') +
+            '</div>' +
+            '<div class="d-flex flex-shrink-0">' +
+            '<button type="button" class="btn btn-sm btn-link px-1 py-0" data-mk="series" data-member="' + p.memberId + '"><i class="bi bi-bullseye me-1"></i>Serie</button>' +
+            '<button type="button" class="btn btn-sm btn-link px-1 py-0" data-mk="note" data-member="' + p.memberId + '"><i class="bi bi-pencil me-1"></i>Anteckning</button>' +
+            '</div></div></div>';
     }
 
     function overview() {
         if (!course.occasions.length) return '';
         var head = course.occasions.map(function (o) {
             var label = o.note || o.name;
-            return '<th><button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" data-mk="occ" data-training="' + o.trainingId + '" title="' + esc(label) + ' — klicka för tillfällets krav">' +
+            return '<th data-occ="' + o.trainingId + '"><button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" data-mk="occ" data-training="' + o.trainingId + '" title="' + esc(label) + ' — klicka för tillfällets krav">' +
                 esc(dayLabel(o.date)) + (o.mandatoryForCourse ? ' ★' : '') +
                 '<span class="mk-occname">' + esc(label) + '</span></button>' +
                 (o.isCancelled ? '<div class="small text-danger">inställd</div>' : '') + '</th>';
@@ -455,7 +651,8 @@
             return '<tr><td>' + esc(p.name) + '</td>' + tds + '<td class="mk-badgecell small">' + esc(b.text || '') + '</td></tr>';
         }).join('');
         return '<h2 class="h5 mt-2" id="mkOverview">Kursöversikt — alla tillfällen</h2>' +
-            '<div class="table-responsive"><table class="table table-sm mk-grid"><thead><tr><th>Deltagare</th>' + head + '<th>Märkesläge</th></tr></thead><tbody>' +
+            '<div class="small text-muted mb-1 d-none" id="mkScrollHint"><i class="bi bi-arrow-left-right me-1"></i>Rulla tabellen i sidled för fler tillfällen.</div>' +
+            '<div class="table-responsive" id="mkOverviewScroll"><table class="table table-sm mk-grid"><thead><tr><th>Deltagare</th>' + head + '<th>Märkesläge</th></tr></thead><tbody>' +
             rows + '</tbody></table></div>' +
             '<p class="small text-muted">★ = obligatoriskt för kursen. QR = incheckad på banan inom en timme kring tillfället. En missad obligatorisk dag visas, men spärrar ingenting. Klicka på ett tillfälle för att ändra kursens krav och namn.</p>';
     }

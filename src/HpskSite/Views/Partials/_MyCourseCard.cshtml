@@ -1,0 +1,58 @@
+@model List<HpskSite.Services.Training.TrainingCourseService.HomeCard>
+@using System.Globalization
+@*
+    "Din kurs" på startsidan (UX-omgången 2026-10-06). Den som går eller leder en kurs ser nästa
+    tillfälle direkt när hen loggar in — förut nämnde startsidan inte kursen alls, och nybörjaren
+    hittade den bara via en klubbkalender där kursens träningar såg ut som alla andra.
+
+    Ett kort per kurs med ett kommande tillfälle. Datan byggs i HomePage-vyns toppblock
+    (TrainingCourseService.HomeCardsFor) — inga kodblock i den vyns markup, se varningen där.
+*@
+@{
+    var sv = CultureInfo.GetCultureInfo("sv-SE");
+}
+@foreach (var c in Model)
+{
+    var o = c.Next!;
+    var day = DateTime.ParseExact(o.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+    var when = o.IsToday ? "I dag" : day.Date == DateTime.Today.AddDays(1) ? "I morgon" : "Nästa gång · " + day.ToString("dddd d MMMM", sv);
+    var title = string.IsNullOrWhiteSpace(o.Note) ? o.Name : o.Note;
+    var isTrainer = c.Role == HpskSite.Services.Training.TrainingCourseService.RoleTrainer;
+    <div class="card mb-4 @(o.IsToday ? "border-success" : "border-success-subtle")" data-home-course="@c.GroupId">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 @(o.IsToday ? "bg-success-subtle" : "")">
+            <span class="fw-semibold"><i class="bi bi-mortarboard me-2 text-success"></i>@(isTrainer ? "Din kurs (du är instruktör)" : "Din kurs")</span>
+            <span class="small text-muted">@c.Name</span>
+        </div>
+        <div class="card-body">
+            <div class="small text-uppercase text-muted fw-semibold">
+                @when@(string.IsNullOrEmpty(o.StartTime) ? "" : " " + o.StartTime)
+            </div>
+            <div class="fs-5 fw-semibold">@title</div>
+            <div class="small text-muted mb-2">
+                @if (o.MandatoryForCourse)
+                {
+                    <span class="badge bg-warning text-dark me-1">★ Obligatoriskt för kursen</span>
+                }
+                @if (!string.IsNullOrEmpty(o.Venue))
+                {
+                    <span><i class="bi bi-geo-alt me-1"></i>@o.Venue</span>
+                }
+            </div>
+            @if (c.MissedCount > 0)
+            {
+                <div class="small text-danger-emphasis mb-2">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>Du har missat @(c.MissedCount == 1 ? "ett obligatoriskt tillfälle" : c.MissedCount + " obligatoriska tillfällen") — se kursen.
+                </div>
+            }
+            <div class="d-flex flex-wrap gap-2">
+                <a class="btn btn-success" href="/min-kurs?g=@c.GroupId">
+                    @(isTrainer ? (o.IsToday ? "Öppna uppropet" : "Öppna kursen") : "Öppna kursen")
+                </a>
+                @if (!string.IsNullOrEmpty(o.StartTime))
+                {
+                    <a class="btn btn-outline-secondary" href="/min-kurs/kalender.ics?g=@c.GroupId"><i class="bi bi-calendar-plus me-1"></i>Lägg i kalendern</a>
+                }
+            </div>
+        </div>
+    </div>
+}

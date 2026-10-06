@@ -3768,8 +3768,35 @@ anmälningsfält.
 - **`/min-kurs`** (`MinKursController`, ingen nod; `MinKurs.cshtml`): dagens tillfälle med närvaro
   (via `ClubEvent/SetAttendance`, kind Training — EN sanning), serier, anteckningar från förra
   tillfället, kursöversikt deltagare × tillfällen med ★ och märkesläge. Ingångar: användarmenyn
-  (`TrainingCourseService.IsTrainerInActiveCourse`, en EXISTS per sidladdning) och **Öppna kursen** på
-  klubbadmins Träningsgrupper.
+  (`TrainingCourseService.IsInActiveCourse` — tränare ELLER deltagare, en EXISTS per sidladdning),
+  startsidans kort och **Öppna kursen** på klubbadmins Träningsgrupper.
+- **⚠️⚠️ Deltagaren har en egen kursvy (UX-omgången 2026-10-06).** Förut fanns Min kurs bara för
+  tränare; nybörjaren hittade sin kurs bara via en klubbkalender. Nu:
+  - `TrainingCourse/MyCourses` bär `role` per kurs: `trainer`, `manager` (klubbadmin/skjutledare) eller
+    `participant`. Är rollen `participant` ritar `/min-kurs` deltagarvyn ur **`TrainingCourse/Mine`**
+    (`GetForParticipant`): nästa tillfälle (öppnas i träningspanelen — anmälan, lånevapen), missade
+    obligatoriska, märkesläget, kursens tillfällen med MIN status, mina serier, kalenderfil och
+    notisinställningen. ⚠️ **Bara hens rader** — inga andra deltagare, inga tränaranteckningar; `Mine`
+    nekar den som inte är deltagare. Sviten mäter det i JSON:en.
+  - **Startsidan:** kortet *Din kurs* (`_MyCourseCard`, `HomeCardsFor`) före *Ditt schema*, en per kurs
+    med ett kommande tillfälle.
+  - **Kalenderfil:** `/min-kurs/kalender.ics?g=` (`CourseIcsBuilder`, delar escaping med
+    `ScheduleIcsBuilder`), påminnelse dagen innan, obligatoriska även två timmar före. Bara för den som
+    är med i kursen.
+  - **Push dagen innan:** `ScheduleReminderHostedService.SendCourseRemindersAsync`, samma opt-in
+    (`ScheduleRemindersEnabled`) och logg som tävlingarna, nyckel `course-{träning}` med CompetitionId 0.
+    Bara deltagare. ⚠️ **Inte provad med en riktig push** (dev saknar VAPID-nycklar).
+  - **Kalendern** märker kursens tillfällen med ★ "Din kurs" (`GetUpcomingEvents` → `myCourse`,
+    `myCourseMandatory`; `CalendarMarksFor`).
+  - **Skyttetrappans flik heter Min kurs.** Deltagaren får bara en länk till `/min-kurs` — fliken
+    visade förut HELA gruppens trappframsteg för varje deltagare. Tränaren behåller steggodkännandet
+    där (rubrik *Trappsteg i kursen*), utan sig själv i listan, och knapparna bär ett index i stället
+    för namnet i ett onclick.
+  - **Tränarvyn:** en deltagare = två rader (namn + närvaro; märkesläge + Serie/Anteckning),
+    *Lägg till eller ta bort deltagare* står synligt under listan, översikten har låst namnkolumn,
+    ett rullningstips och rullas till dagens tillfälle; luft under sidan för chattknappen.
+  Svit: `hpsk-verify/minkurs-participant-verify.mjs` 40/40 (A/B: menyn bara för tränare +
+  deltagarlistan på Skyttetrappan → 3 röda).
 - Behörighet = `TrainingGroupService.CanManageTrainingGroup` (sajtadmin, klubbadmin, skjutledare,
   gruppens tränare). **Serier registreras av samma krets — även kursens tränare** (Stefan
   2026-10-05; ersätter "bara klubbadmin/skjutledare"). Kursledaren är ofta inte dagens skjutledare,

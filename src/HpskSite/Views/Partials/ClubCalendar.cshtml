@@ -200,10 +200,16 @@
     // ⚠️ VARJE ETIKETT ÄR SIN EGEN LÄNK. Rapporterat flera gånger som "kalendern är trasig": ett
     // klick på händelsen i rutan fällde bara ut dagen längre ner. Etiketten ser klickbar ut, så den
     // är en länk — och klicket stannar där (dagrutans lyssnare hoppar över länkar).
+    // "Din kurs" (UX-omgången 2026-10-06): en träning som hör till en kurs den inloggade går eller
+    // leder bär myCourse = kursens namn. Stjärnan är samma ★ som kursen använder för obligatoriskt —
+    // här betyder den "din", och titeln säger om tillfället dessutom är obligatoriskt.
+    const courseMark = e => e.myCourse ? '<i class="bi bi-star-fill text-success me-1" aria-hidden="true"></i>' : '';
     function chip(e) {
-        const mand = e.isMandatory ? '<i class="bi bi-exclamation-triangle-fill text-warning me-1" aria-hidden="true"></i>' : '';
+        const mand = (e.isMandatory ? '<i class="bi bi-exclamation-triangle-fill text-warning me-1" aria-hidden="true"></i>' : '') + courseMark(e);
         const label = (e.time ? e.time + ' ' : '') + e.name;
-        const title = (e.isMandatory ? 'Obligatorisk: ' : '') + label + (e.type ? ' · ' + e.type : '');
+        const title = (e.isMandatory ? 'Obligatorisk: ' : '')
+            + (e.myCourse ? 'Din kurs ' + e.myCourse + (e.myCourseMandatory ? ' (obligatoriskt för kursen)' : '') + ': ' : '')
+            + label + (e.type ? ' · ' + e.type : '');
         const cls = 'kc-chip ' + statusClass(e) + (e.isCancelled ? ' kc-cancelled' : '');
         return e.url
             ? '<a class="' + cls + '" href="' + esc(e.url) + '" title="' + esc(title) + '">' + mand + esc(label) + '</a>'
@@ -243,7 +249,10 @@
         const meta = [e.time, e.venue ? '<i class="bi bi-geo-alt me-1"></i>' + esc(e.venue) : '', e.contactPerson ? '<i class="bi bi-person me-1"></i>' + esc(e.contactPerson) : '']
             .filter(Boolean).join(' · ');
         return '<div><span class="kc-chip ' + statusClass(e) + ' d-inline-block me-1">' + esc(e.type || '') + '</span>' + name
-            + (typeof window.hpskEventBadges === 'function' ? window.hpskEventBadges(e) : '') + '</div>'
+            + (typeof window.hpskEventBadges === 'function' ? window.hpskEventBadges(e) : '')
+            + (e.myCourse ? ' <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-star-fill me-1"></i>Din kurs: ' + esc(e.myCourse) + '</span>'
+                + (e.myCourseMandatory ? ' <span class="badge bg-warning text-dark">Obligatoriskt för kursen</span>' : '') : '')
+            + '</div>'
             + (meta ? '<div class="small text-muted">' + meta + '</div>' : '')
             + (plain(e.description) ? '<div class="small text-muted mt-1">' + esc(plain(e.description)) + '</div>' : '');
     }
