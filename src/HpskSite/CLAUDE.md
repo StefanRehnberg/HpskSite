@@ -10017,8 +10017,8 @@ medlemmarna årets alla tillfällen i förväg. Regeln bor i `LoanWeaponClubSett
 och **externa lån** (`OccasionKind = Externt` — planeras i förväg och kräver medföljandes ja).
 Ytorna visar när bokningen öppnar i stället för ett val som vägras: anmälningskortet
 (`loanWeapons.bookingOpen/bookingOpensText/bookingRule`) och /lanevapen (`notYetMessage`).
-⚠️ Valvtavlan (`GetVaultBoard` med tillfälle) listar också AVBOKADE lån — `lanevapen-verify`
-"en rad på tillfället" är röd av det, inte av horisonten. Ej åtgärdat.
+Valvtavlan (`GetVaultBoard`) visar inte AVBOKADE lån (Stefan 2026-10-06) — valvet svarar på vem
+som ska ha ett vapen; historiken finns under Klubbvapen → Alla lån.
 
 ### Externt lån = en bokning av ett vapen OCH en person
 
