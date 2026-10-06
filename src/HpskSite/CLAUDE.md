@@ -3734,8 +3734,11 @@ under `hpsk_cal_scopes`. Beskrivningar visas som ren text (DOMParser). Svit:
   bokningen skapar raden i deltagarlistan (i praktiken en anmälan — vapenansvarig ser vem som
   kommer), gäster vägras, och ett avbokat vapen tar raden med sig (SetLoanWeapon). Går
   bokningen inte igenom rullas raden tillbaka. Gäller träningar OCH händelser (samma kort).
-  Kortet (`_ClubEventSignup`, `loanOnlyHtml`): rubriken **Lånevapen**, "Ingen anmälan behövs",
-  "Boka lånevapen" — ingen "Anmäl mig", inga anmälda. TrainingPanel döljer `#tpNoSignup` när
+  Kortet (`_ClubEventSignup`, `loanOnlyHtml`): rubriken **Lånevapen**, en rad om att man
+  inte behöver anmäla sig men kan boka ett lånevapen om man saknar eget (⚠️ "Ingen anmälan behövs"
+  ensamt lästes som att inget vapen behövs — Stefan 2026-10-06), "Boka lånevapen" — ingen "Anmäl
+  mig", inga anmälda. Ett bokat lån avbokas med **Avboka lånevapnet** (hette "Jag behöver inget
+  lånevapen"). TrainingPanel döljer `#tpNoSignup` när
   lånevapen erbjuds. Dialogen varnar när klubben har noll lånebara vapen. Svit:
   `training-loan-only-verify` 21/21 (A/B: läget avstängt → sviten avbryter).
 - Panelen säger **"Ingen anmälan behövs — kom direkt"** (`#tpNoSignup`) när varken träningen
@@ -3797,6 +3800,16 @@ anmälningsfält.
     ett rullningstips och rullas till dagens tillfälle; luft under sidan för chattknappen.
   Svit: `hpsk-verify/minkurs-participant-verify.mjs` 40/40 (A/B: menyn bara för tränare +
   deltagarlistan på Skyttetrappan → 3 röda).
+  - **Deltagarens genomgång (Stefan 2026-10-06):** kursväljaren listar bara kurser man går eller
+    leder (klubbadmins `manager`-kurser nås från Träningsgrupper, den öppna står alltid med);
+    ingen "Alla kursens tillfällen"-länk (rälsen har Tillfällen); `Occasion` bär `Discipline`
+    (visningsnamn via `ActivityDiscipline`) och `Description`, och både nästa-kortet och
+    Tillfällen-raderna visar gren · plats · skjutledare (+ instruktörer och beskrivning på kortet).
+    ⚠️⚠️ **Mina serier visar `ParticipantView.BadgeSeries`** = årets verifierade MarkenSeries med
+    `CountsTowardGuldfodring = 1`, SAMMA urval som `BadgeStatusFor` — förut bara kursens serier,
+    så märkesläget kunde säga "Precision 3/3" över en tom lista. Kursens serier står under.
+    Sidan sätter `ViewBag.Title = "Min kurs"`, och Masters Hem-länk är aktiv bara när ADRESSEN
+    är rotens — routade sidor renderas med startsidan som modell. Svit 71/71.
 - **⚠️⚠️ Min kurs har EKONOMINS skal, Admin → Träningsgrupper har TRÄNINGARS form** (Stefans val
   2026-10-06, efter "avviker från hur vi normalt bygger sidor"). Rör du någon av dem: följ förlagan.
   - `/min-kurs`: `container-fluid`, vänsterkort (`.mk-rail`, samma mått som `.ek-page .rail`) med

@@ -1,6 +1,7 @@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
+    ViewBag.Title = "Min kurs";
     var initialGroup = ViewData["MinKursGroupId"] as int? ?? 0;
 }
 @*
@@ -59,6 +60,8 @@
     .mk-att .btn { min-width: 3.6rem; padding-left: .5rem; padding-right: .5rem; }
     .mk-grid thead th:first-child { position: sticky; left: 0; background: var(--bs-body-bg); z-index: 2; }
     .mk-occ-row { cursor: pointer; }
+    .mk-occ-desc { white-space: pre-line; }
+    .mk-occ-facts i { opacity: .7; }
     .mk-state { font-size: .8125rem; white-space: nowrap; }
     .mk-badge { font-size: .875rem; color: var(--bs-secondary-color); }
     .mk-ready { color: var(--bs-success-text-emphasis); font-weight: 600; }
@@ -398,13 +401,18 @@
             try { saved = parseInt(localStorage.getItem('hpsk_minkurs_group'), 10) || 0; } catch (e) { }
             var pick = list.some(function (c) { return c.groupId === groupId; }) ? groupId
                      : list.some(function (c) { return c.groupId === saved; }) ? saved : list[0].groupId;
+            // ⚠️ Väljaren listar bara kurser man GÅR eller LEDER. En klubbadmin har rätt att öppna
+            // klubbens alla kurser, men de nås från Admin → Träningsgrupper — i väljaren läste de
+            // som att en deltagare kunde byta till kurser hen inte är med i (Stefan 2026-10-06).
+            // Den öppna kursen står alltid med, även när den nåddes som klubbens kurs.
+            var mineList = list.filter(function (c) { return c.role !== 'manager' || c.groupId === pick; });
             var sel = document.getElementById('mkPicker');
-            sel.innerHTML = list.map(function (c) {
+            sel.innerHTML = mineList.map(function (c) {
                 return '<option value="' + c.groupId + '">' + esc(c.name) +
                     (c.role === 'participant' ? ' (du går kursen)' : c.role === 'manager' ? ' (klubbens kurs)' : '') + '</option>';
             }).join('');
             sel.value = String(pick);
-            document.getElementById('mkPickerWrap').classList.toggle('d-none', list.length < 2);
+            document.getElementById('mkPickerWrap').classList.toggle('d-none', mineList.length < 2);
             return pick;
         });
     }
@@ -489,13 +497,24 @@
     function occTitle(o) { return o.note || o.name; }
     function occWhen(o) { return dayLabel(o.date, true) + (o.startTime ? ' ' + o.startTime + (o.endTime ? '–' + o.endTime : '') : ''); }
 
+    // Gren · plats · skjutledare — det som skiljer tillfällena åt. Utan raden var listan bara datum.
+    function occFacts(o) {
+        var parts = [];
+        if (o.discipline) parts.push('<i class="bi bi-bullseye me-1"></i>' + esc(o.discipline));
+        if (o.venue) parts.push('<i class="bi bi-geo-alt me-1"></i>' + esc(o.venue));
+        if (o.skjutledareName) parts.push('<i class="bi bi-person-badge me-1"></i>skjutledare ' + esc(o.skjutledareName));
+        return parts.join('<span class="mx-1">·</span>');
+    }
+
     function occRow(o, c) {
+        var facts = occFacts(o);
         return '<button type="button" class="list-group-item list-group-item-action d-flex align-items-center gap-2 mk-occ-row" data-training-panel="' + o.trainingId + '">' +
             '<div class="me-auto text-start" style="min-width:0">' +
             '<div class="small text-muted">' + esc(occWhen(o)) + '</div>' +
             // Märket på EGEN rad: inne i den trunkerade titeln klipptes det bort på telefonen,
             // och då syntes inte att tillfället var obligatoriskt.
             '<div class="text-truncate">' + esc(occTitle(o)) + '</div>' +
+            (facts ? '<div class="small text-muted mk-occ-facts">' + facts + '</div>' : '') +
             (o.mandatoryForCourse ? '<span class="badge bg-warning text-dark">★ Obligatoriskt</span>' : '') +
             '</div>' + myState(o, c) + '</button>';
     }
@@ -513,7 +532,7 @@
         var mine = function (o) { return v.mine[o.trainingId] || { state: 'none', missed: false }; };
         var occ = v.occasions || [];
         var next = occ.find(function (o) { return !o.isCancelled && !o.isPast; });
-        drawShell(v.name, { tillfallen: occ.length, serier: (v.series || []).length });
+        drawShell(v.name, { tillfallen: occ.length, serier: (v.badgeSeries || []).length });
         document.getElementById('mkOverviewWrap').innerHTML = '';
         // Tre delar i rälsen: Min kurs (nästa gång, krav, märke, påminnelser), Tillfällen, Mina serier.
         var html = '', occHtml = '', seriesHtml = '';
@@ -526,10 +545,12 @@
             html += '<div class="card mk-today mb-3"><div class="card-body">' +
                 '<div class="small text-uppercase text-muted fw-semibold">' + (next.isToday ? 'I dag' : 'Nästa gång') + ' · ' + esc(occWhen(next)) + '</div>' +
                 '<div class="fs-5 fw-semibold">' + esc(occTitle(next)) + '</div>' +
-                '<div class="small text-muted mb-2">' +
-                (next.mandatoryForCourse ? '<span class="badge bg-warning text-dark me-1">★ Obligatoriskt för kursen</span>' : '') +
-                (next.venue ? '<i class="bi bi-geo-alt me-1"></i>' + esc(next.venue) : '') +
-                (next.skjutledareName ? ' · skjutledare ' + esc(next.skjutledareName) : '') + '</div>' +
+                // Vad det är för träning: gren, plats, skjutledare — och träningens egen beskrivning.
+                (occFacts(next) ? '<div class="small text-muted mt-1">' + occFacts(next) + '</div>' : '') +
+                (v.trainers.length ? '<div class="small text-muted"><i class="bi bi-people me-1"></i>Instruktör' + (v.trainers.length > 1 ? 'er ' : ' ') + esc(v.trainers.join(', ')) + '</div>' : '') +
+                (next.description ? '<div class="small mt-2 mk-occ-desc">' + esc(next.description) + '</div>' : '') +
+                '<div class="small mb-2 mt-2">' +
+                (next.mandatoryForCourse ? '<span class="badge bg-warning text-dark me-1">★ Obligatoriskt för kursen</span>' : '') + '</div>' +
                 (next.registrationRequired && c.state !== 'signedup' && c.state !== 'present'
                     ? '<div class="small mb-2"><i class="bi bi-exclamation-circle me-1"></i>Anmälan krävs till det här tillfället.</div>' : '') +
                 '<button type="button" class="btn btn-primary" data-training-panel="' + next.trainingId + '">' +
@@ -566,16 +587,31 @@
                 ? '<div class="list-group mb-3">' + upcoming.map(function (o) { return occRow(o, mine(o)); }).join('') + '</div>'
                 : '<div class="text-muted small mb-3">Inga kommande tillfällen.</div>') +
               (past.length ? '<h2 class="h6">Tidigare</h2><div class="list-group mb-3">' + past.map(function (o) { return occRow(o, mine(o)); }).join('') + '</div>' : '');
-        if (upcoming.length)
-            html += '<a href="#vy=tillfallen" class="small" data-mk-view="tillfallen">Alla kursens tillfällen (' + occ.length + ') →</a>';
-
-        seriesHtml = (v.series && v.series.length)
-            ? '<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Dag</th><th>Tillfälle</th><th class="text-end">Poäng</th><th>Valör</th></tr></thead><tbody>' +
-                v.series.map(function (s) {
-                    return '<tr><td class="text-nowrap">' + esc(dayLabel(s.date)) + '</td><td>' + esc(s.occasion) + '</td><td class="text-end">' + s.total + '</td><td>' +
-                        (s.valor ? '<span class="badge bg-success-subtle text-success-emphasis">' + esc(s.valor) + '</span>' : '<span class="text-muted small">under brons</span>') + '</td></tr>';
-                }).join('') + '</tbody></table></div>'
-            : '<div class="text-muted small mb-3">Inga serier registrerade än. Din instruktör registrerar dem på banan.</div>';
+        function valorBadge(val) {
+            return val ? '<span class="badge bg-success-subtle text-success-emphasis">' + esc(val) + '</span>' : '<span class="text-muted small">under brons</span>';
+        }
+        // ⚠️ Två listor, och den första är den märkesläget räknar: årets godkända serier oavsett var
+        // de sköts (kursen, en tävling, inskickade). Förut visades bara kursens serier, så märkesläget
+        // kunde säga "Precision 3/3" över en tom lista.
+        var bs = v.badgeSeries || [];
+        seriesHtml = '<h2 class="h6">Räknas mot märket i år</h2>' +
+            '<p class="text-muted small mb-2">Det är de här serierna märkesläget räknar. ' +
+            (b.targetLevel ? 'Serier markerade med ✓ når ' + esc(b.targetLevel.toLowerCase()) + ', nästa valör.' : '') + '</p>' +
+            (bs.length
+                ? '<div class="table-responsive mb-3"><table class="table table-sm mk-badge-series"><thead><tr><th>Dag</th><th>Serie</th><th>Var</th><th class="text-end">Poäng</th><th>Valör</th><th></th></tr></thead><tbody>' +
+                    bs.map(function (s) {
+                        return '<tr><td class="text-nowrap">' + esc(dayLabel(s.date)) + '</td><td>' + esc(s.kind) + (s.weaponGroup ? ' <span class="text-muted small">' + esc(s.weaponGroup) + '</span>' : '') +
+                            '</td><td class="small">' + esc(s.source) + '</td><td class="text-end">' + (s.kind && s.kind.indexOf('tillämpning') >= 0 ? '' : s.total) + '</td><td>' + valorBadge(s.valor) +
+                            '</td><td>' + (s.countsTowardTarget ? '<i class="bi bi-check-lg text-success" title="Räknas mot nästa valör"></i>' : '') + '</td></tr>';
+                    }).join('') + '</tbody></table></div>'
+                : '<div class="text-muted small mb-3">Inga godkända serier i år än.</div>') +
+            '<h2 class="h6">Skjutna på kursen</h2>' +
+            ((v.series && v.series.length)
+                ? '<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Dag</th><th>Tillfälle</th><th class="text-end">Poäng</th><th>Valör</th></tr></thead><tbody>' +
+                    v.series.map(function (s) {
+                        return '<tr><td class="text-nowrap">' + esc(dayLabel(s.date)) + '</td><td>' + esc(s.occasion) + '</td><td class="text-end">' + s.total + '</td><td>' + valorBadge(s.valor) + '</td></tr>';
+                    }).join('') + '</tbody></table></div>'
+                : '<div class="text-muted small mb-3">Inga serier registrerade på kursen än. Din instruktör registrerar dem på banan.</div>');
 
         html += '<div class="card mb-3 mt-3"><div class="card-body py-2">' +
             '<div class="small text-uppercase text-muted fw-semibold mb-1">Håll koll</div>' +

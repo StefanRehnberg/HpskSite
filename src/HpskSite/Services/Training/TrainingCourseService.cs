@@ -74,6 +74,9 @@ namespace HpskSite.Services.Training
             public bool IsPast { get; set; }
             public string? SkjutledareName { get; set; }
             public string? Venue { get; set; }
+            /// <summary>Grenens visningsnamn (Precision, Fältskytte …), eller null.</summary>
+            public string? Discipline { get; set; }
+            public string? Description { get; set; }
         }
 
         /// <summary>
@@ -176,13 +179,22 @@ namespace HpskSite.Services.Training
                     IsToday = t.Date.Date == today.Date,
                     IsPast = t.Date.Date < today.Date,
                     SkjutledareName = t.SkjutledareMemberId is > 0 ? Name(t.SkjutledareMemberId.Value) : null,
-                    Venue = t.Venue
+                    Venue = t.Venue,
+                    Discipline = DisciplineLabel(t.Discipline),
+                    Description = string.IsNullOrWhiteSpace(t.Description) ? null : t.Description.Trim()
                 });
             }
 
             FillCells(db, course, trainings);
             course.Badges = BadgeStatusFor(db, course.Participants.Select(p => p.MemberId).ToList(), today.Year);
             return course;
+        }
+
+        private static string? DisciplineLabel(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            var c = ActivityDiscipline.Canonical(raw);
+            return c.Length > 0 ? ActivityDiscipline.Label(c) : raw.Trim();
         }
 
         private void FillCells(IUmbracoDatabase db, Course course, List<ClubTraining> trainings)
@@ -596,6 +608,40 @@ WHERE m.TrainingGroupId = @0 AND m.MemberId = @1 AND m.IsActive = 1", groupId, m
             public Dictionary<int, Cell> Mine { get; set; } = new();
             public BadgeStatus? Badge { get; set; }
             public List<MySeries> Series { get; set; } = new();
+            /// <summary>
+            /// Årets godkända serier som märkesläget räknar — samma urval som <see cref="BadgeStatusFor"/>.
+            /// ⚠️ Utan dem säger märkesläget "Precision 3/3" medan Mina serier är tom: kursens serier
+            /// är bara en del av underlaget (tävlingsserier och inskickade serier räknas också).
+            /// </summary>
+            public List<BadgeSeries> BadgeSeries { get; set; } = new();
+        }
+
+        public class BadgeSeries
+        {
+            public string Date { get; set; } = "";
+            /// <summary>Precision / Tillämpning / Snabbpistol / Luftpistol.</summary>
+            public string Kind { get; set; } = "";
+            public string? WeaponGroup { get; set; }
+            public int Total { get; set; }
+            public string? Valor { get; set; }
+            /// <summary>Var serien kom ifrån: tävlingens namn, "Kursen" eller "Inskickad".</summary>
+            public string Source { get; set; } = "";
+            /// <summary>Räknas mot nästa valör (når målvalören), som märkesläget räknar.</summary>
+            public bool CountsTowardTarget { get; set; }
+        }
+
+        private class BadgeSeriesRow
+        {
+            public DateTime SeriesDate { get; set; }
+            public string SeriesType { get; set; } = "";
+            public string? Target { get; set; }
+            public string? BadgeFamily { get; set; }
+            public string? WeaponGroup { get; set; }
+            public int Total { get; set; }
+            public string? ClaimedLevel { get; set; }
+            public int? SourceCompetitionId { get; set; }
+            public string? CompetitionName { get; set; }
+            public string? Notes { get; set; }
         }
 
         private class MySeriesRow
@@ -639,6 +685,33 @@ ORDER BY t.[Date] DESC, s.SeriesNumber", groupId, memberId)
                     }).ToList();
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Deltagarens serier kunde inte läsas (kurs {Group})", groupId); }
+
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                var targetOrd = Marken.LevelOrdinal(v.Badge?.TargetLevel);
+                // Samma urval som BadgeStatusFor — annars kan listan och märkesläget säga olika saker.
+                v.BadgeSeries = db.Fetch<BadgeSeriesRow>(@"
+SELECT s.SeriesDate, s.SeriesType, s.Target, s.BadgeFamily, s.WeaponGroup, s.Total, s.ClaimedLevel,
+       s.SourceCompetitionId, n.[text] AS CompetitionName, s.Notes
+FROM dbo.MarkenSeries s
+LEFT JOIN dbo.umbracoNode n ON n.id = s.SourceCompetitionId
+WHERE s.MemberId = @0 AND s.[Year] = @1 AND s.Status = 'Verified' AND s.CountsTowardGuldfodring = 1
+ORDER BY s.SeriesDate DESC, s.Id DESC", memberId, today.Year)
+                    .Select(r => new BadgeSeries
+                    {
+                        Date = r.SeriesDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                        Kind = Marken.DisciplineDisplay(Marken.SeriesDiscipline(r.BadgeFamily, r.SeriesType, r.Target)),
+                        WeaponGroup = r.WeaponGroup,
+                        Total = r.Total,
+                        Valor = string.IsNullOrWhiteSpace(r.ClaimedLevel) ? null : r.ClaimedLevel,
+                        Source = r.SourceCompetitionId is > 0
+                            ? (string.IsNullOrWhiteSpace(r.CompetitionName) ? "Tävling" : r.CompetitionName!)
+                            : (r.Notes ?? "").StartsWith("Kursserie", StringComparison.Ordinal) ? "Kursen" : "Inskickad",
+                        CountsTowardTarget = targetOrd > 0 && Marken.LevelOrdinal(r.ClaimedLevel) >= targetOrd
+                    }).ToList();
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Märkesserierna kunde inte läsas (medlem {Member})", memberId); }
             return v;
         }
 
