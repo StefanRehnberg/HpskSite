@@ -1,3 +1,4 @@
+using HpskSite.Models;
 using HpskSite.Models.Training;
 using HpskSite.Services;
 using HpskSite.Services.Training;
@@ -25,6 +26,7 @@ namespace HpskSite.Controllers
         private readonly TrainingCourseService _courses;
         private readonly TrainingGroupService _groups;
         private readonly TrainingCourseSeriesService _series;
+        private readonly MarkenSignoffAuthority _signoff;
         private readonly ClubTrainingService _trainings;
         private readonly HpskSite.Services.Firearms.FirearmBookingService _bookings;
         private readonly AdminAuthorizationService _auth;
@@ -45,9 +47,11 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             TrainingCourseSeriesService series,
             ClubTrainingService trainings,
-            HpskSite.Services.Firearms.FirearmBookingService bookings)
+            HpskSite.Services.Firearms.FirearmBookingService bookings,
+            MarkenSignoffAuthority signoff)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _signoff = signoff;
             _courses = courses;
             _groups = groups;
             _auth = auth;
@@ -102,7 +106,11 @@ namespace HpskSite.Controllers
             if (!await _groups.CanManageTrainingGroup(groupId)) return Json(new { success = false, message = Denied });
             var c = _courses.Get(groupId, DateTime.Today);
             if (c == null) return Json(new { success = false, message = "Kursen finns inte." });
-            return Json(new { success = true, course = c, notes = _courses.Notes(groupId), club = ClubOf(c.ClubId) });
+            // Lånevapen lämnas ut av klubbadmin eller skjutledare (Stefans beslut 2026-10-06, oförändrad
+            // regel) — Upprop säger det och ger dem en genväg till valvet.
+            var canHandOut = await _auth.IsClubAdminForClub(c.ClubId) || await _auth.IsSkjutledareForClub(c.ClubId);
+            return Json(new { success = true, course = c, notes = _courses.Notes(groupId), club = ClubOf(c.ClubId), canHandOutLoans = canHandOut,
+                me = await CurrentMemberIdAsync() });
         }
 
         /// <summary>
@@ -401,13 +409,17 @@ namespace HpskSite.Controllers
             {
                 success = true,
                 canRecord = await CanRecordSeriesAsync(groupId),
-                cannotRecordReason = "Serier registreras av kursens tränare eller klubbadmin.",
+                cannotRecordReason = "Serier registreras av kursens instruktör eller klubbadmin.",
+                // Guld kräver styrelse/skjutledare (MarkenSignoffAuthority) — annars väntar serien i kön.
+                canSignOffGuld = await _signoff.CanSignOffForClubAsync(clubId),
                 series = _series.ForOccasion(groupId, trainingId),
+                // Per deltagare och vapengrupp: krav med ålderseftergift.
                 thresholds = (course?.Participants ?? new()).ToDictionary(p => p.MemberId, p =>
-                {
-                    var t = _series.Thresholds(p.MemberId, year);
-                    return new { brons = t.Brons, silver = t.Silver, guld = t.Guld };
-                })
+                    new[] { "A", "B", "C" }.ToDictionary(g => g, g =>
+                    {
+                        var t = _series.Thresholds(p.MemberId, year, g);
+                        return new { brons = t.Brons, silver = t.Silver, guld = t.Guld };
+                    }))
             });
         }
 
@@ -419,6 +431,12 @@ namespace HpskSite.Controllers
             public List<string>? Shots { get; set; }
             public int? Total { get; set; }
             public int SeriesId { get; set; }
+            /// <summary>Precision (standard) eller Speed (tillämpning).</summary>
+            public string? SeriesType { get; set; }
+            public string? WeaponGroup { get; set; }
+            public string? Target { get; set; }
+            /// <summary>Tillämpning: valören skytten klarade; tomt = inte godkänd.</summary>
+            public string? ClaimedLevel { get; set; }
         }
 
         [HttpPost, ValidateAntiForgeryToken]
@@ -433,11 +451,22 @@ namespace HpskSite.Controllers
             var training = _trainings.Get(req.TrainingId);
             if (training == null) return Json(new { success = false, message = "Träningen finns inte." });
 
-            var (series, error) = await _series.RecordAsync(req.GroupId, clubId, training, req.MemberId, req.Shots, req.Total, await CurrentMemberIdAsync());
+            var input = new TrainingCourseSeriesService.RecordInput
+            {
+                SeriesType = req.SeriesType, WeaponGroup = req.WeaponGroup, Shots = req.Shots, Total = req.Total,
+                Target = req.Target, ClaimedLevel = req.ClaimedLevel
+            };
+            var (series, error) = await _series.RecordAsync(req.GroupId, clubId, training, req.MemberId, input,
+                await CurrentMemberIdAsync(), await _signoff.CanSignOffForClubAsync(clubId));
             if (error != null) return Json(new { success = false, message = error });
-            var msg = series!.Valor != null
-                ? $"Serie {series.SeriesNumber}: {series.Total} p — {series.Valor.ToLowerInvariant()}. Sparad i träningsloggen och som märkesserie."
-                : $"Serie {series.SeriesNumber}: {series.Total} p — under brons. Sparad i träningsloggen.";
+            var what = series!.SeriesType == Marken.SeriesTypeSpeed
+                ? $"Tillämpningsserie {series.SeriesNumber} ({Marken.SpeedTargetDisplay(series.Target)})"
+                : $"Serie {series.SeriesNumber}: {series.Total} p";
+            var msg = series.Valor == null
+                ? $"{what} — {(series.SeriesType == Marken.SeriesTypeSpeed ? "inte godkänd" : "under brons")}. Sparad."
+                : series.Pending
+                    ? $"{what} — {series.Valor.ToLowerInvariant()}. Guldserier godkänns av styrelsen eller skjutledare — serien väntar i klubbens kö."
+                    : $"{what} — {series.Valor.ToLowerInvariant()}. Sparad som godkänd märkesserie.";
             return Json(new { success = true, message = msg, series });
         }
 

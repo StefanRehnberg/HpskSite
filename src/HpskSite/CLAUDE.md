@@ -3893,10 +3893,27 @@ anmälningsfält.
   gruppens tränare). **Serier registreras av samma krets — även kursens tränare** (Stefan
   2026-10-05; ersätter "bara klubbadmin/skjutledare"). Kursledaren är ofta inte dagens skjutledare,
   så rätten följer kursen och texterna kallar aldrig tränaren skjutledare.
-- **Tränaren hanterar DELTAGARE** (Min kurs → *Kursens deltagare…*; `TrainingGroup/SearchMembers`
-  med `trainingGroupId` låser sökningen till gruppens klubb). Att lägga till/ta bort en **tränare**
-  eller byta roll kräver klubbadmin eller skjutledare (`IsClubStaffForGroupAsync`). Gruppen och
-  träningarna skapas fortfarande bara av klubbadmin.
+- **Tränaren hanterar DELTAGARE** (Min kurs → Deltagare → *Lägg till deltagare…*; `TrainingGroup/SearchMembers`
+  med `trainingGroupId` låser sökningen till gruppens klubb) **och får LÄGGA TILL andra instruktörer**
+  (Inställningar → *Lägg till instruktör…*, Stefan 2026-10-06 — t.ex. en vikarie). Att TA BORT en
+  instruktör eller BYTA ROLL kräver klubbadmin eller skjutledare (`IsClubStaffForGroupAsync`).
+  ⚠️ `TrainingGroupService.AddTrainingGroupMember` skriver om rollen på en befintlig rad, så
+  controllern vägrar en icke-klubbfunktionär att "lägga till" någon som redan är med med en annan
+  roll — annars kunde en instruktör befordra en deltagare. Gruppen och träningarna skapas
+  fortfarande bara av klubbadmin.
+- **⚠️⚠️ Kursens serier (Holger-omgången, Stefan 2026-10-06).** Serie-dialogen har typ
+  (precision/tillämpning) och vapengrupp A/B/C. Tillämpning: bara `B100_50m`/`C30_25m`, valör
+  angiven (tom = ej godkänd), ingen `TrainingScores`-rad. **Brons och silver godkänns av
+  instruktören; GULD läggs `Pending` i klubbens kö** när den som registrerar inte får signera
+  (`MarkenSignoffAuthority.CanSignOffForClubAsync` — utbruten ur MarkenController, samma regel:
+  sajtadmin, styrelse, skjutledare om klubben tillåter). Svaret säger att guldserien väntar.
+  Migrering `Migrations/add-type-to-training-course-series.sql` **FÖRE deploy** (SeriesType,
+  Target, WeaponGroup på `TrainingCourseSeries`).
+- **Lånevapen i Upprop:** utlämningen görs av klubbens skjutledarroll eller klubbadmin
+  (`canHandOutLoans`, länk till /valvet). ⚠️ Tillfällets skjutledare (`Occasion.SkjutledareMemberId`)
+  är INTE samma sak som skjutledarrollen — kortet säger det till den som står som skjutledare utan rollen.
+- **Kursmejlet** har *Länka till kursen* (`includeCourseLink`, förvald): en knapp till
+  `/min-kurs?g=` för deltagare, aldrig till målsmän. Ingen schemalista i mejlet.
 - **⚠️⚠️ En träning är aldrig obligatorisk för alla** (Stefan 2026-10-06, bekräftat av Michael
   Holmgren, Luleå PK). Obligatorisk närvaro för föreningsintyget hör till HÄNDELSER (städdag,
   säkerhetsdag, sjukvårdsdag — `clubSimpleEvent.isMandatory`, orört); en träning räknas ändå alltid

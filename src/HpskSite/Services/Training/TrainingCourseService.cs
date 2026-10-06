@@ -73,6 +73,7 @@ namespace HpskSite.Services.Training
             public bool IsToday { get; set; }
             public bool IsPast { get; set; }
             public string? SkjutledareName { get; set; }
+            public int? SkjutledareMemberId { get; set; }
             public string? Venue { get; set; }
             /// <summary>Grenens visningsnamn (Precision, Fältskytte …), eller null.</summary>
             public string? Discipline { get; set; }
@@ -181,6 +182,7 @@ namespace HpskSite.Services.Training
                     IsToday = t.Date.Date == today.Date,
                     IsPast = t.Date.Date < today.Date,
                     SkjutledareName = t.SkjutledareMemberId is > 0 ? Name(t.SkjutledareMemberId.Value) : null,
+                    SkjutledareMemberId = t.SkjutledareMemberId is > 0 ? t.SkjutledareMemberId : null,
                     Venue = t.Venue,
                     Discipline = DisciplineLabel(t.Discipline),
                     Description = string.IsNullOrWhiteSpace(t.Description) ? null : t.Description.Trim()

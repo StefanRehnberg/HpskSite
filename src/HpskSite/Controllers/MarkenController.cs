@@ -80,9 +80,11 @@ namespace HpskSite.Controllers
             StandardMedalProofStorage proofStorage,
             MemberClubService memberClubs,
             IDataProtectionProvider dataProtectionProvider,
-            MarkenBaseValorService baseValor)
+            MarkenBaseValorService baseValor,
+            MarkenSignoffAuthority signoff)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _signoff = signoff;
             _baseValor = baseValor;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -104,6 +106,7 @@ namespace HpskSite.Controllers
 
         private const string Family = Marken.FamilyPistolskytte;
         private readonly MarkenBaseValorService _baseValor;
+        private readonly MarkenSignoffAuthority _signoff;
 
         /// <summary>Integrity rule: nobody (incl. site admins) may validate their own evidence.</summary>
         private const string SelfValidateMsg = "Du kan inte validera din egen inrapportering — be en annan funktionär.";
@@ -2844,20 +2847,8 @@ namespace HpskSite.Controllers
             => await CanSignOffForClubAsync(GetPrimaryClubId(memberId));
 
         /// <summary>Site admin, board member (Styrelse) of the club, or (if the club enabled it) Skjutledare.</summary>
-        private async Task<bool> CanSignOffForClubAsync(int clubId)
-        {
-            if (await _auth.IsCurrentUserAdminAsync()) return true;
-            if (clubId <= 0) return false;
-
-            int actingId = await GetCurrentMemberIdAsync();
-            if (actingId <= 0) return false;
-
-            var board = _boardRoles.GetBoardMembers(DocumentOwnerType.Club, clubId, boardOnly: true);
-            if (board.Any(r => r.MemberId == actingId)) return true;
-
-            if (SkjutledareSignoffEnabled(clubId) && await _auth.IsSkjutledareForClub(clubId)) return true;
-            return false;
-        }
+        // ⚠️ Regeln bor i MarkenSignoffAuthority — kursens serier läser samma (guld kräver den).
+        private Task<bool> CanSignOffForClubAsync(int clubId) => _signoff.CanSignOffForClubAsync(clubId);
 
         // ── Series authority: EVERY club the member belongs to (Falkenbergs PK 2026-09-30) ──
         // A member's guldserier are the member's, not the submitting club's, so any of the member's
@@ -3095,17 +3086,7 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>Reads the per-club <c>markenSignoffSkjutledare</c> toggle (default false = board only).</summary>
-        private bool SkjutledareSignoffEnabled(int clubId)
-        {
-            try
-            {
-                var club = _contentService.GetById(clubId);
-                if (club == null) return false;
-                if (!club.HasProperty("markenSignoffSkjutledare")) return false;
-                return club.GetValue<bool>("markenSignoffSkjutledare");
-            }
-            catch { return false; }
-        }
+        private bool SkjutledareSignoffEnabled(int clubId) => _signoff.SkjutledareSignoffEnabled(clubId);
 
         /// <summary>Mints a QR verify token that expires (see <see cref="VerifyTokenLifetime"/>).</summary>
         private string ProtectVerifyToken(string payload) => _verifyProtector.Protect(payload, VerifyTokenLifetime);
