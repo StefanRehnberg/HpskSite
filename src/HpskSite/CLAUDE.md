@@ -3816,6 +3816,13 @@ anmälningsfält.
     Utlamnad, EN fråga) bär lånet. Förut stod "Du är anmäld" för den som bara bokat ett vapen.
     Kursväljaren säger klubb och roll per kurs (`MyCourses` bär `clubName`). Svit 73/73 (A/B: utan
     villkoret → 1 röd).
+  - **Märkesbilden** (Stefan 2026-10-06): `badgeImg(b, px)` visar Pistolskyttemärket i den valör
+    deltagaren HÅLLER (`heldLevel`; `wwwroot/images/marken/PistolskytteB.png` / `PistolskytteS.png` /
+    `Pistolskytte.png` = guld) — i Upprop-korten, Deltagare-tabellen och deltagarens märkeslägeskort.
+    Ingen bild före brons. I Upprop-kortet stryks "Xmärket klart · " och "klar för
+    Pistolskyttekortet" ur texten när bilden står där (det står i bildens titel) — annars blir raden
+    för hög på telefonen. "Missad" räknar även tillfällen före anslutningsdatum, med flit (Stefan
+    2026-10-06). Svit 78/78.
 - **⚠️⚠️ Min kurs har EKONOMINS skal, Admin → Träningsgrupper har TRÄNINGARS form** (Stefans val
   2026-10-06, efter "avviker från hur vi normalt bygger sidor"). Rör du någon av dem: följ förlagan.
   - `/min-kurs`: `container-fluid`, vänsterkort (`.mk-rail`, samma mått som `.ek-page .rail`) med
