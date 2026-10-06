@@ -3809,7 +3809,11 @@ anmälningsfält.
   - Admin → Träningsgrupper: ikon + rubrik + förklarande rad, blå Åtgärder (Ny träningsgrupp),
     *Visa avslutade grupper* + antal ovanför, tabell med instruktörernas NAMN och nästa tillfälle
     (`TrainingCourse/ClubSummary`, två frågor för hela listan), radens Åtgärder (Öppna kursen,
-    Redigera, Deltagare och instruktörer…, Tilldela lånevapen, Avsluta/Återuppta). Medlemmarna i en
+    Redigera, Deltagare och instruktörer…, Avsluta/Återuppta). ⚠️ **Inget "Tilldela lånevapen" här**
+    (borttaget 2026-10-06): det bokade ett FRITT tillfälle som kursen inte såg, så en deltagare kunde
+    få två vapen reserverade. Kursens lånevapen bokas i Min kurs → Upprop → Åtgärder → Lånevapen till
+    tillfället (`TrainingCourse/AssignLoanWeapons`, kind Training). Endpointen
+    `FirearmAdmin/AssignLoanWeaponsToGroup` finns kvar men har ingen yta. Medlemmarna i en
     DIALOG (`#clubTgMembersModal`), inte en utfälld tabellrad. Ordet är **instruktör**, inte tränare.
     Knapparna bär id/index i data-attribut (delegerad lyssnare `data-ctg`).
   Svit: samma, 60/60 (A/B: vyerna från förra committen → sviten avbryter vid skalet).
@@ -9930,7 +9934,7 @@ löftet som avgör om hen kommer alls. En PLATSbokning får omvänt **inte** utl
 | Skanning | `/v/{kod}` | medlem (kräver inloggning) |
 | Klubbens regler + länkar | vapenfliken, kortet **Lånevapen** | klubbadmin |
 | Kryssruta i anmälan | `_ClubEventSignup.cshtml` | medlem |
-| Kurstilldelning | klubbpanelen → träningsgrupp | klubbadmin/skjutledare |
+| Kurstilldelning | Min kurs → Upprop → Åtgärder → Lånevapen till tillfället (flyttad 2026-10-06) | kursens instruktör, klubbadmin/skjutledare |
 | Externt lån + medföljande | `/lanevapen` | medlem |
 
 ### ⚠️⚠️ EN SKANNING FÅR BARA ÖKA DET MAN SVARAR FÖR, ALDRIG MINSKA DET
