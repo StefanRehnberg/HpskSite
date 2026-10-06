@@ -21,7 +21,7 @@ namespace HpskSite.Controllers
     /// </summary>
     public class BoardKallelseController : SurfaceController
     {
-        private const int MaxSmtp = 250;
+        private const int MaxSmtp = HpskSite.Services.Mail.MailLimits.MaxRecipientsPerSend;
 
         private readonly BoardMeetingService _meetingService;
         private readonly BoardGovernanceService _gov;

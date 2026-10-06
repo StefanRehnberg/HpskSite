@@ -152,6 +152,23 @@ namespace HpskSite.Services.Mail
         }
 
         /// <summary>
+        /// En PERSON som skriver ett eget meddelande (instruktören till kursens deltagare): avsändarnamnet
+        /// är personens ("Anna Andersson via Pistol.nu") och svaret går till hen.
+        ///
+        /// <para><b>⚠️ From-ADRESSEN förblir sajtens</b> (SPF <c>-all</c>, DMARC <c>p=reject</c>, och
+        /// Simply skickar bara från den inloggade domänen) — bara namnet och Reply-To blir personens.
+        /// Saknar personen e-post går svaret till klubben, aldrig till sajtägaren.</para>
+        /// </summary>
+        public MailReplyTo ForPersonalMessage(int memberId, int clubId)
+        {
+            var person = ForMember(memberId);
+            if (person.Kind == MailReplyTo.ReplyKind.Address)
+                return MailReplyTo.To(person.Email, person.Name,
+                    person.Name.Length > 0 ? $"{person.Name} via Pistol.nu" : null);
+            return ForClub(clubId);
+        }
+
+        /// <summary>
         /// Klubbadministratörens val vid det enskilda tillfället: hens egen adress eller klubbens.
         ///
         /// <para><b>⚠️ VALET GÖRS VID VARJE UTSKICK, inte en gång i en inställning.</b> Stefans

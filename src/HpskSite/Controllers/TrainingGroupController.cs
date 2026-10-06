@@ -603,7 +603,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Meddelande krävs" });
 
                 var currentMember = await _memberManager.GetCurrentMemberAsync();
-                var senderName = currentMember?.Name ?? "Tränare";
+                var senderName = currentMember?.Name ?? "Instruktören";
 
                 var group = _trainingGroupService.GetTrainingGroup(trainingGroupId);
                 if (group == null)
@@ -628,41 +628,48 @@ namespace HpskSite.Controllers
                 int sentCount = 0;
                 var noEmail = new List<string>();
                 var failed = new List<string>();
-                var reply = _replyContacts.ForMember(senderId);
+                // Avsändaren är INSTRUKTÖREN: "Anna Andersson via Pistol.nu", svaret till hen
+                // (Stefan 2026-10-06). Ett gruppmeddelande är ett SAMTAL, inte ett ärende.
+                var reply = _replyContacts.ForPersonalMessage(senderId, group.ClubId);
+
+                // Pass 1: mottagarna — deltagaren själv och målsmännen när det valts, en gång per adress.
+                var targets = new List<(string Email, string Name, string? GuardianOf, int MemberId)>();
                 foreach (var gm in recipients)
                 {
                     var member = _memberService.GetById(gm.MemberId);
                     if (member == null) continue;
-
-                    // Mottagarna: deltagaren själv, och målsmännen när det valts — en gång per adress.
-                    var targets = new List<(string Email, string Name, string? GuardianOf)>();
-                    if (!string.IsNullOrWhiteSpace(member.Email)) targets.Add((member.Email, member.Name ?? "", null));
+                    var before = targets.Count;
+                    if (!string.IsNullOrWhiteSpace(member.Email)
+                        && !targets.Any(t => t.Email.Equals(member.Email, StringComparison.OrdinalIgnoreCase)))
+                        targets.Add((member.Email, member.Name ?? "", null, member.Id));
                     if (withGuardians)
                         foreach (var g in new[] { "guardian1", "guardian2" })
                         {
-                            var ge = member.GetValue(g + "Email")?.ToString();
+                            var ge = member.GetValue(g + "Email")?.ToString()?.Trim();
                             if (!string.IsNullOrWhiteSpace(ge) && !targets.Any(t => t.Email.Equals(ge, StringComparison.OrdinalIgnoreCase)))
-                                targets.Add((ge.Trim(), member.GetValue(g + "Name")?.ToString() ?? "", member.Name));
+                                targets.Add((ge, member.GetValue(g + "Name")?.ToString() ?? "", member.Name, member.Id));
                         }
-                    if (targets.Count == 0) { noEmail.Add(member.Name ?? $"Medlem {member.Id}"); continue; }
+                    if (targets.Count == before && string.IsNullOrWhiteSpace(member.Email)) noEmail.Add(member.Name ?? $"Medlem {member.Id}");
+                }
 
-                    foreach (var t in targets)
+                // ⚠️ Gränsen prövas FÖRE första mejlet — ett halvt utskick går inte att ta tillbaka.
+                if (targets.Count > HpskSite.Services.Mail.MailLimits.MaxRecipientsPerSend)
+                    return Json(new { success = false, message = $"För många mottagare ({targets.Count}). Ett utskick via pistol.nu får ha högst {HpskSite.Services.Mail.MailLimits.MaxRecipientsPerSend}." });
+
+                // Pass 2: utskicket.
+                foreach (var t in targets)
+                {
+                    try
                     {
-                        try
-                        {
-                            // ⚠️ HÄR är svaret på ett mejl RÄTT väg, inte svara-i-appen. Ett
-                            // gruppmeddelande från tränaren är ett SAMTAL, inte ett ärende — och
-                            // svaret ska gå till tränaren som skrev det.
-                            if (await _emailService.SendTrainingGroupMessageAsync(
-                                    t.Email, t.Name, senderName, group.Name, subject, message, reply, t.GuardianOf))
-                                sentCount++;
-                            else failed.Add(t.Name.Length > 0 ? t.Name : t.Email);
-                        }
-                        catch (Exception emailEx)
-                        {
-                            _logger.LogWarning(emailEx, "Failed to send group message to member {MemberId}", gm.MemberId);
-                            failed.Add(t.Name.Length > 0 ? t.Name : t.Email);
-                        }
+                        if (await _emailService.SendTrainingGroupMessageAsync(
+                                t.Email, t.Name, senderName, group.Name, subject, message, reply, t.GuardianOf))
+                            sentCount++;
+                        else failed.Add(t.Name.Length > 0 ? t.Name : t.Email);
+                    }
+                    catch (Exception emailEx)
+                    {
+                        _logger.LogWarning(emailEx, "Failed to send group message to member {MemberId}", t.MemberId);
+                        failed.Add(t.Name.Length > 0 ? t.Name : t.Email);
                     }
                 }
 

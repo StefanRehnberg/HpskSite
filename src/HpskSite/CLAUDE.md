@@ -3861,6 +3861,14 @@ anmälningsfält.
     född + ålder, målsmän, närmast anhörig; ⚠️ ALDRIG personnumret — dataminimering, instruktören är
     inte klubbadmin). Bara kursens deltagare, bara för den som får leda kursen. Under 18 utan
     målsman sägs uttryckligen. Svit 106/106.
+  - **Avsändaren är instruktören**: `ReplyContactResolver.ForPersonalMessage(memberId, clubId)` ger
+    visningsnamnet "Namn via Pistol.nu" och Reply-To till personen (saknar hen e-post → klubben,
+    aldrig sajtägaren). From-ADRESSEN förblir `admin@pistol.nu` (SPF `-all`, DMARC `p=reject`,
+    och websmtp skickar bara från den inloggade domänen). **`Services/Mail/MailLimits.MaxRecipientsPerSend`
+    (250) är ENDA gränsen per utskick** — klubbutskicket och kallelsen pekar dit, och kursmejlet
+    räknar alla mottagare (målsmän inräknade) och vägrar FÖRE första mejlet. Prod skickar via
+    `websmtp.simply.com`, som enligt Simply saknar gränser; gränsen skyddar ryktet för den delade
+    avsändaren (alla klubbar), inte ett krav från Simply. Svit 107/107.
 - **⚠️⚠️ Min kurs har EKONOMINS skal, Admin → Träningsgrupper har TRÄNINGARS form** (Stefans val
   2026-10-06, efter "avviker från hur vi normalt bygger sidor"). Rör du någon av dem: följ förlagan.
   - `/min-kurs`: `container-fluid`, vänsterkort (`.mk-rail`, samma mått som `.ek-page .rail`) med
