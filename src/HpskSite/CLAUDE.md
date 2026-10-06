@@ -3823,6 +3823,16 @@ anmälningsfält.
     Pistolskyttekortet" ur texten när bilden står där (det står i bildens titel) — annars blir raden
     för hög på telefonen. "Missad" räknar även tillfällen före anslutningsdatum, med flit (Stefan
     2026-10-06). Svit 78/78.
+  - **Instruktörens/adminens delar i förlagans form (Stefan 2026-10-06, "gör om gör rätt"):**
+    Upprop-kortet har gren · plats · skjutledare, beskrivning och antal bokade lånevapen; för ett
+    KOMMANDE tillfälle visas inga närvaroknappar ("Närvaron tas på tillfällets dag") och ingen Serie.
+    Lånevapen syns per deltagare (`Cell.LoanBooked`). Inga extra knappar bredvid/under den blå
+    Åtgärder. Deltagare och Tillfällen: förklarande rad, grå `rowMenu()` per rad (popper fixed),
+    Tillfällen har "Visa genomförda (N)" + "x av y" och gren/plats/skjutledare per rad. Deltagarens
+    "Märkesserier i år…" öppnar `#mkBadgeModal` ur `TrainingCourse/MemberBadgeSeries` —
+    `TrainingCourseService.BadgeSeriesFor` är ENDA urvalet, delat med deltagarens Mina serier
+    (`badgeSeriesTable()`). På telefon döljs tabellkolumnerna (`d-none d-md-table-cell`) och
+    uppgifterna står under namnet, annars rullade radens Åtgärder ut ur bild. Svit 87/87.
 - **⚠️⚠️ Min kurs har EKONOMINS skal, Admin → Träningsgrupper har TRÄNINGARS form** (Stefans val
   2026-10-06, efter "avviker från hur vi normalt bygger sidor"). Rör du någon av dem: följ förlagan.
   - `/min-kurs`: `container-fluid`, vänsterkort (`.mk-rail`, samma mått som `.ek-page .rail`) med
