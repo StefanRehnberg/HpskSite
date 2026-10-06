@@ -165,8 +165,8 @@
                          : 'Ett <strong>lånevapen</strong> är reserverat åt dig.')
                   +  '</div>';
                 if (d.cancelOpen) {
-                    h += '<button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="ces-loan-drop">'
-                      +  'Jag behöver inget lånevapen</button>';
+                    h += '<button type="button" class="btn btn-sm btn-outline-danger mt-2" id="ces-loan-drop">'
+                      +  '<i class="bi bi-x-circle me-1"></i>Avboka lånevapnet</button>';
                 }
             } else {
                 h += '<div class="small"><i class="bi bi-safe2 text-muted me-1"></i>'
@@ -419,8 +419,11 @@
         function loanOnlyHtml(d) {
             const lw = d.loanWeapons;
             let h = adminLoanBlock(d);
-            h += '<div class="alert alert-light border py-2 px-3 mb-2">'
-              +  '<i class="bi bi-door-open me-1"></i><strong>Ingen anmälan behövs</strong> — kom direkt.</div>';
+            // ⚠️ Säg vad lånet är till för. "Ingen anmälan behövs" ensamt lästes som att inget
+            // vapen behövs — rutan handlar om lånevapen, så meningen måste skilja de två åt.
+            h += '<div class="small text-muted mb-2">'
+              +  '<i class="bi bi-info-circle me-1"></i>Du behöver inte anmäla dig för att komma. '
+              +  'Har du inget eget vapen kan du boka ett av klubbens lånevapen här.</div>';
             if (!d.loggedIn) {
                 const back = encodeURIComponent(window.location.pathname + window.location.search);
                 return h + `<a class="btn btn-outline-primary w-100" href="/login-register/?returnUrl=${back}">Logga in för att boka lånevapen</a>`;

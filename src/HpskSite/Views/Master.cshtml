@@ -422,7 +422,9 @@
                 <div class="collapse navbar-collapse" id="navbarNav">
                     <ul class="navbar-nav ms-auto">
                         <li class="nav-item">
-                            <a class="nav-link @(Model.Id == Model.Root().Id ? "active" : "")"
+                            @* ⚠️ Routade sidor (/min-kurs, /styrelse, /ekonomi …) renderas med startsidan som
+                               modell, så "modellen är roten" räcker inte — adressen måste också vara rotens. *@
+                            <a class="nav-link @(Model.Id == Model.Root().Id && string.Equals((Context.Request.Path.Value ?? "").TrimEnd('/'), (Model.Root().Url() ?? "").TrimEnd('/'), StringComparison.OrdinalIgnoreCase) ? "active" : "")"
                                href="@Model.Root().Url()">Hem</a>
                         </li>
 
