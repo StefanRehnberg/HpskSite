@@ -41,6 +41,12 @@ namespace HpskSite.Models.Training
         public int? MarkenSeriesId { get; set; }
         public int RecordedByMemberId { get; set; }
         public DateTime CreatedDate { get; set; } = DateTime.Now;
+        /// <summary><c>Precision</c> (null i äldre rader) eller <c>Speed</c> (tillämpning, ingen poäng).</summary>
+        public string? SeriesType { get; set; }
+        /// <summary>Tillämpningens mål (<c>Marken.SpeedTarget*</c>). Null för precision.</summary>
+        public string? Target { get; set; }
+        /// <summary>A / B / C (null i äldre rader = C).</summary>
+        public string? WeaponGroup { get; set; }
     }
 
     /// <summary>Anteckning per deltagare och tillfälle — överlämningen till nästa instruktör.</summary>

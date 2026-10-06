@@ -132,6 +132,35 @@
                 <p class="small text-muted mb-2" id="mkSeriesReq"></p>
                 <div id="mkSeriesDenied" class="alert alert-warning d-none"></div>
                 <div id="mkSeriesEntry">
+                    <div class="d-flex gap-2 mb-2">
+                        <div class="btn-group flex-grow-1" role="group" aria-label="Serietyp">
+                            <input type="radio" class="btn-check" name="mkType" id="mkTypePrec" value="Precision" checked>
+                            <label class="btn btn-outline-primary" for="mkTypePrec">Precision</label>
+                            <input type="radio" class="btn-check" name="mkType" id="mkTypeSpeed" value="Speed">
+                            <label class="btn btn-outline-primary" for="mkTypeSpeed">Tillämpning</label>
+                        </div>
+                        <select class="form-select w-auto" id="mkWeaponGroup" aria-label="Vapengrupp">
+                            <option value="C">C (.22)</option>
+                            <option value="B">B</option>
+                            <option value="A">A</option>
+                        </select>
+                    </div>
+                    <div id="mkSpeedWrap" class="d-none mb-2">
+                        <label class="form-label" for="mkSpeedTarget">Mål</label>
+                        <select class="form-select mb-2" id="mkSpeedTarget">
+                            <option value="C30_25m">1/6 C30, 25 m</option>
+                            <option value="B100_50m">B100, 50 m</option>
+                        </select>
+                        <label class="form-label" for="mkSpeedLevel">Klarade valör</label>
+                        <select class="form-select" id="mkSpeedLevel">
+                            <option value="">Välj…</option>
+                            <option value="Brons">Brons</option>
+                            <option value="Silver">Silver</option>
+                            <option value="Guld">Guld</option>
+                            <option value="none">Inte godkänd</option>
+                        </select>
+                    </div>
+                    <div id="mkPrecWrap">
                     <div class="btn-group w-100 mb-1" role="group" aria-label="Inmatning">
                         <input type="radio" class="btn-check" name="mkMode" id="mkModeShots" value="shots" checked>
                         <label class="btn btn-outline-secondary" for="mkModeShots">Skott</label>
@@ -163,6 +192,8 @@
                         <label class="form-label" for="mkTotal">Seriens total (0–50)</label>
                         <input type="number" min="0" max="50" class="form-control form-control-lg" id="mkTotal" inputmode="numeric">
                     </div>
+                    </div>
+                    <div class="small text-muted mt-2" id="mkGuldNote"></div>
                     <div class="d-flex align-items-center gap-2 mt-3">
                         <div class="me-auto fw-semibold" id="mkSeriesSum"></div>
                         <button type="button" class="btn btn-success" id="mkSeriesSave" disabled>Spara serien</button>
@@ -247,6 +278,10 @@
                 <div class="form-check mb-3">
                     <input class="form-check-input" type="checkbox" id="mkMailGuardians">
                     <label class="form-check-label" for="mkMailGuardians">Skicka också till målsman (när deltagaren har en registrerad)</label>
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="mkMailLink" checked>
+                    <label class="form-check-label" for="mkMailLink">Lägg till en länk till kursen — där ser eleven alla tillfällen och vilka som är obligatoriska</label>
                 </div>
                 <label class="form-label" for="mkMailSubject">Ämne</label>
                 <input class="form-control mb-2" id="mkMailSubject" maxlength="150" autocomplete="off">
@@ -352,7 +387,7 @@
     <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h2 class="modal-title h5">Lägg till deltagare</h2>
+                <h2 class="modal-title h5" id="mkMembersTitle">Lägg till deltagare</h2>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
@@ -466,7 +501,7 @@
     // Vyn står i adressen (#vy=…) så att en omladdning eller ett bokmärke landar där man var.
     var view = null, club = null, partView = null;
     // Tillfällen: genomförda döljs som standard, som i Träningar.
-    var showDone = false;
+    var showDone = false, canHandOutLoans = false, meId = 0;
     // "Upprop", inte "I dag": vyn visar dagens tillfälle, annars nästa — en rubrik "I dag" över
     // ett tillfälle i april läses som fel.
     var TRAINER_VIEWS = [['idag', 'Upprop'], ['deltagare', 'Deltagare'], ['tillfallen', 'Tillfällen'], ['oversikt', 'Översikt'], ['installningar', 'Inställningar']];
@@ -504,7 +539,7 @@
         if (roleOf(id) === 'participant') return loadParticipant(id);
         return getJson('/umbraco/surface/TrainingCourse/Get?groupId=' + id).then(function (d) {
             if (!d.success) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kursen kunde inte läsas.') + '</div>'; return; }
-            course = d.course; notes = d.notes || []; club = d.club || null;
+            course = d.course; notes = d.notes || []; club = d.club || null; canHandOutLoans = !!d.canHandOutLoans; meId = d.me || 0;
             render();
         }).catch(function (e) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-danger">' + esc(e.message) + '</div>'; });
     }
@@ -729,6 +764,7 @@
         if (v === 'deltagare') return [menuItem('data-mk="members"', 'bi-person-plus', 'Lägg till deltagare…'),
                                        menuItem('data-mk="mail"', 'bi-envelope', 'Mejla deltagare…')];
         if (v === 'tillfallen') return [menuItem('data-mk="link"', 'bi-link-45deg', 'Koppla träningar till kursen…')];
+        if (v === 'installningar') return [menuItem('data-mk="members" data-role="Trainer"', 'bi-person-plus', 'Lägg till instruktör…')];
         return [];
     }
 
@@ -759,6 +795,19 @@
                 (future ? course.participants.length + ' deltagare' : here + ' av ' + course.participants.length + ' här') +
                 (loansNow ? ' · <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-safe2 me-1"></i>' + loansNow + ' lånevapen bokade</span>' : '') + '</div>' +
                 (future ? '<div class="small text-muted mt-1"><i class="bi bi-info-circle me-1"></i>Närvaron tas på tillfällets dag.</div>' : '') +
+                // Vem lämnar ut lånevapnen — skjutledaren eller klubbadmin (Stefans beslut 2026-10-06).
+                (loansNow && !current.isPast
+                    ? '<div class="small mt-2"><i class="bi bi-safe2 me-1"></i>' +
+                      // ⚠️ "Skjutledare för tillfället" (vald per träning) är inte klubbens skjutledarroll,
+                      // som valvet kräver. Står Holger själv som skjutledare utan rollen ska texten säga det —
+                      // inte hänvisa honom till sig själv.
+                      (canHandOutLoans
+                          ? 'Lånevapnen lämnar du ut i valvet. <a href="/valvet?club=' + (club ? club.id : '') + '" target="_blank" rel="noopener">Öppna valvet</a>'
+                          : current.skjutledareMemberId && current.skjutledareMemberId === meId
+                              ? 'Du står som skjutledare för tillfället, men lånevapen lämnas ut av den som har klubbens skjutledarroll eller av klubbadmin. Be klubbadmin om rollen om du ska lämna ut vapen.'
+                              : 'Lånevapnen lämnas ut av klubbens skjutledare eller av klubbadmin' + (current.skjutledareName ? ' — i kväll är ' + esc(current.skjutledareName) + ' skjutledare' : '') + '.') +
+                      '</div>'
+                    : '') +
                 '</div></div>';
 
             // Från förra tillfället: anteckningar från tillfällen FÖRE det aktuella.
@@ -881,6 +930,7 @@
                 '<label class="form-check-label" for="mkMail' + i + '">' + esc(p.name) + '</label></div>';
         }).join('') || '<div class="text-muted small">Kursen har inga deltagare.</div>';
         document.getElementById('mkMailGuardians').checked = false;
+        document.getElementById('mkMailLink').checked = true;
         document.getElementById('mkMailSubject').value = '';
         document.getElementById('mkMailBody').value = '';
         document.getElementById('mkMailMsg').innerHTML = '';
@@ -898,7 +948,8 @@
         btn.disabled = true;
         postForm('/umbraco/surface/TrainingGroup/SendGroupMessage', {
             trainingGroupId: groupId, subject: subject, message: message, memberIds: ids.join(','),
-            includeGuardians: document.getElementById('mkMailGuardians').checked ? '1' : '0'
+            includeGuardians: document.getElementById('mkMailGuardians').checked ? '1' : '0',
+            includeCourseLink: document.getElementById('mkMailLink').checked ? '1' : '0'
         }).then(function (d) {
             btn.disabled = false;
             // ⚠️ Svaret säger vilka som INTE nåddes — det står kvar i dialogen så att det går att läsa.
@@ -1033,7 +1084,8 @@
             '<div class="card mb-3"><div class="card-body">' +
             '<h2 class="h6 mb-1">Instruktörer</h2>' +
             '<div>' + (course.trainers.length ? esc(trainerNames()) : '<span class="text-muted">Ingen utsedd</span>') + '</div>' +
-            '<div class="small text-muted">Instruktörer utses av klubben (klubbadmin eller skjutledare) under Admin → Träningsgrupper.</div>' +
+            '<div class="small text-muted">Behöver du en vikarie eller fler instruktörer: <strong>Åtgärder → Lägg till instruktör…</strong> ' +
+            'En instruktör tas bort av klubbadmin eller skjutledare.</div>' +
             '</div></div>';
     }
 
@@ -1147,6 +1199,25 @@
         updateSum();
     }
     function mode() { return document.getElementById('mkModeTotal').checked ? 'total' : 'shots'; }
+    function seriesType() { return document.getElementById('mkTypeSpeed').checked ? 'Speed' : 'Precision'; }
+    function weaponGroup() { return document.getElementById('mkWeaponGroup').value || 'C'; }
+    function thresholdsNow() {
+        var t = seriesState && seriesState.thresholds[seriesState.memberId];
+        return t ? t[weaponGroup()] : null;
+    }
+    // Växla mellan precision (poäng) och tillämpning (mål + klarad valör).
+    function syncSeriesType() {
+        var speed = seriesType() === 'Speed';
+        document.getElementById('mkSpeedWrap').classList.toggle('d-none', !speed);
+        document.getElementById('mkPrecWrap').classList.toggle('d-none', speed);
+        var t = thresholdsNow();
+        document.getElementById('mkSeriesReq').textContent = (speed ? 'Tillämpning' : 'Precision') + ' · vapengrupp ' + weaponGroup() +
+            (!speed && t ? ' · krav brons ' + t.brons + ', silver ' + t.silver + ', guld ' + t.guld : '') +
+            (current ? ' · ' + dayLabel(current.date, true) : '');
+        document.getElementById('mkGuldNote').textContent = seriesState && !seriesState.canSignOffGuld
+            ? 'Brons och silver godkänner du själv. En guldserie godkänns av styrelsen eller skjutledare — den sparas och väntar i klubbens kö.' : '';
+        updateSum();
+    }
     function currentTotal() {
         if (mode() === 'total') { var v = document.getElementById('mkTotal').value; return v === '' ? null : parseInt(v, 10); }
         if (shots.length !== 5) return null;
@@ -1157,17 +1228,30 @@
         return total >= t.guld ? 'Guld' : total >= t.silver ? 'Silver' : total >= t.brons ? 'Brons' : 'under brons';
     }
     function updateSum() {
+        var can = !!(seriesState && seriesState.canRecord);
+        if (seriesType() === 'Speed') {
+            var lvl = document.getElementById('mkSpeedLevel').value;
+            document.getElementById('mkSeriesSum').textContent = lvl === 'none' ? 'Inte godkänd' : lvl ? 'Klarade ' + lvl.toLowerCase() : '';
+            document.getElementById('mkSeriesSave').disabled = !lvl || !can;
+            return;
+        }
         var total = currentTotal();
-        var t = seriesState && seriesState.thresholds[seriesState.memberId];
-        document.getElementById('mkSeriesSum').textContent = total == null ? '' : total + ' p — ' + valorFor(total, t);
-        document.getElementById('mkSeriesSave').disabled = total == null || total < 0 || total > 50 || !(seriesState && seriesState.canRecord);
+        document.getElementById('mkSeriesSum').textContent = total == null ? '' : total + ' p — ' + valorFor(total, thresholdsNow());
+        document.getElementById('mkSeriesSave').disabled = total == null || total < 0 || total > 50 || !can;
     }
+    var SPEED_TARGETS = { 'C30_25m': '1/6 C30, 25 m', 'B100_50m': 'B100, 50 m' };
     function renderSeriesList() {
         var list = (seriesState.series || []).filter(function (s) { return s.memberId === seriesState.memberId; });
         document.getElementById('mkSeriesList').innerHTML = list.length ? list.map(function (s) {
-            var v = s.valor ? '<span class="badge bg-success-subtle text-success-emphasis">' + esc(s.valor) + '</span>' : '<span class="text-muted">under brons</span>';
-            return '<div class="mk-seriesrow"><div>Serie ' + s.seriesNumber + ' · ' + s.total + ' p ' + v +
-                (s.shotByShot ? '' : ' <span class="text-muted">(bara total)</span>') + '</div>' +
+            var speed = s.seriesType === 'Speed';
+            var v = s.valor ? '<span class="badge bg-success-subtle text-success-emphasis">' + esc(s.valor) + '</span>'
+                : '<span class="text-muted">' + (speed ? 'inte godkänd' : 'under brons') + '</span>';
+            var pend = s.pending ? ' <span class="badge bg-warning-subtle text-warning-emphasis" title="Godkänns av styrelsen eller skjutledare">väntar på godkännande</span>' : '';
+            return '<div class="mk-seriesrow"><div>' +
+                (speed ? 'Tillämpning ' + s.seriesNumber + ' · ' + esc(SPEED_TARGETS[s.target] || s.target || '') + ' '
+                       : 'Serie ' + s.seriesNumber + ' · ' + s.total + ' p ') + v + pend +
+                (s.weaponGroup && s.weaponGroup !== 'C' ? ' <span class="text-muted">vapengrupp ' + esc(s.weaponGroup) + '</span>' : '') +
+                (speed || s.shotByShot ? '' : ' <span class="text-muted">(bara total)</span>') + '</div>' +
                 (seriesState.canRecord ? '<button type="button" class="btn btn-sm btn-link text-danger" data-mk="del-series" data-series="' + s.id + '">Ta bort</button>' : '') + '</div>';
         }).join('') : '<div class="text-muted">Inga serier registrerade på det här tillfället än.</div>';
     }
@@ -1176,29 +1260,34 @@
         var p = course.participants.find(function (x) { return x.memberId === memberId; });
         getJson('/umbraco/surface/TrainingCourse/Series?groupId=' + groupId + '&trainingId=' + current.trainingId).then(function (d) {
             if (!d.success) { msg(d.message || 'Serierna kunde inte läsas.', 'warning'); return; }
-            seriesState = { memberId: memberId, canRecord: d.canRecord, series: d.series || [], thresholds: d.thresholds || {} };
-            var t = seriesState.thresholds[memberId];
+            seriesState = { memberId: memberId, canRecord: d.canRecord, canSignOffGuld: !!d.canSignOffGuld, series: d.series || [], thresholds: d.thresholds || {} };
             document.getElementById('mkSeriesTitle').textContent = p ? p.name : 'Registrera serie';
-            document.getElementById('mkSeriesReq').textContent = 'Precision · vapengrupp C (.22)' +
-                (t ? ' · krav brons ' + t.brons + ', silver ' + t.silver + ', guld ' + t.guld : '') + ' · ' + dayLabel(current.date, true);
             var denied = document.getElementById('mkSeriesDenied');
             denied.textContent = d.canRecord ? '' : d.cannotRecordReason;
             denied.classList.toggle('d-none', !!d.canRecord);
             document.getElementById('mkSeriesEntry').classList.toggle('d-none', !d.canRecord);
+            // Valen (typ, vapengrupp, mål) står kvar mellan deltagarna — samma tillfälle skjuter ofta samma sak.
             shots = []; document.getElementById('mkTotal').value = ''; document.getElementById('mkSeriesErr').textContent = '';
-            renderShots(); renderSeriesList();
+            document.getElementById('mkSpeedLevel').value = '';
+            renderShots(); renderSeriesList(); syncSeriesType();
             bootstrap.Modal.getOrCreateInstance(document.getElementById('mkSeriesModal')).show();
         });
     }
     function saveSeries() {
         var btn = document.getElementById('mkSeriesSave');
         btn.disabled = true;
-        var body = { groupId: groupId, trainingId: current.trainingId, memberId: seriesState.memberId };
-        if (mode() === 'total') body.total = currentTotal(); else body.shots = shots.slice();
+        var body = { groupId: groupId, trainingId: current.trainingId, memberId: seriesState.memberId,
+                     seriesType: seriesType(), weaponGroup: weaponGroup() };
+        if (seriesType() === 'Speed') {
+            var lvl = document.getElementById('mkSpeedLevel').value;
+            body.target = document.getElementById('mkSpeedTarget').value;
+            body.claimedLevel = lvl === 'none' ? '' : lvl;
+        }
+        else if (mode() === 'total') body.total = currentTotal(); else body.shots = shots.slice();
         post('/umbraco/surface/TrainingCourse/RecordSeries', body).then(function (d) {
             if (!d.success) { document.getElementById('mkSeriesErr').textContent = d.message || 'Serien kunde inte sparas.'; updateSum(); return; }
             seriesState.series.push(d.series);
-            shots = []; document.getElementById('mkTotal').value = '';
+            shots = []; document.getElementById('mkTotal').value = ''; document.getElementById('mkSpeedLevel').value = '';
             document.getElementById('mkSeriesErr').textContent = '';
             renderShots(); renderSeriesList();
             msg(d.message);
@@ -1347,10 +1436,18 @@
             return r.text().then(function (t) { try { return JSON.parse(t); } catch (e) { return { success: false, message: 'Sidan har varit öppen för länge — ladda om och försök igen.' }; } });
         });
     }
+    // Samma sökdialog lägger till deltagare (Deltagare → Åtgärder) och instruktörer (Inställningar →
+    // Åtgärder). Instruktören får lägga till andra instruktörer, t.ex. en vikarie (Stefan 2026-10-06).
+    var memberRole = 'Member';
     function renderMembers() {
-        document.getElementById('mkMembersCount').textContent = 'Kursen har ' + course.participants.length + ' deltagare.';
+        document.getElementById('mkMembersCount').textContent = memberRole === 'Trainer'
+            ? 'Kursens instruktörer: ' + (course.trainers.map(function (t) { return t.name; }).join(', ') || 'ingen') +
+              '. En instruktör kan bara tas bort av klubbadmin eller skjutledare.'
+            : 'Kursen har ' + course.participants.length + ' deltagare.';
     }
-    function openMembers() {
+    function openMembers(role) {
+        memberRole = role === 'Trainer' ? 'Trainer' : 'Member';
+        document.getElementById('mkMembersTitle').textContent = memberRole === 'Trainer' ? 'Lägg till instruktör' : 'Lägg till deltagare';
         document.getElementById('mkMemberSearch').value = '';
         document.getElementById('mkMemberHits').innerHTML = '';
         document.getElementById('mkMembersMsg').innerHTML = '';
@@ -1383,7 +1480,7 @@
         document.getElementById('mkMembersMsg').innerHTML = '<div class="alert alert-' + (d.success ? 'success' : 'warning') + ' py-1 small">' + esc(d.message || '') + '</div>';
     }
     function addMember(id) {
-        postForm('/umbraco/surface/TrainingGroup/AddTrainingGroupMember', { trainingGroupId: groupId, memberId: id, role: 'Member', sendEmail: 'false' }).then(function (d) {
+        postForm('/umbraco/surface/TrainingGroup/AddTrainingGroupMember', { trainingGroupId: groupId, memberId: id, role: memberRole, sendEmail: 'false' }).then(function (d) {
             membersMsg(d);
             if (!d.success) return;
             document.getElementById('mkMemberSearch').value = '';
@@ -1473,7 +1570,7 @@
         }
         else if (act === 'save-defaults') saveDefaults();
         else if (act === 'loan') openLoan();
-        else if (act === 'members') openMembers();
+        else if (act === 'members') openMembers(b.getAttribute('data-role'));
         else if (act === 'add-member') addMember(member);
         else if (act === 'rm-member') removeMember(member);
         else if (act === 'occ') openOcc(parseInt(b.getAttribute('data-training'), 10));
@@ -1498,6 +1595,9 @@
         });
     });
     document.getElementById('mkTotal').addEventListener('input', updateSum);
+    document.querySelectorAll('input[name="mkType"]').forEach(function (r) { r.addEventListener('change', syncSeriesType); });
+    document.getElementById('mkWeaponGroup').addEventListener('change', syncSeriesType);
+    document.getElementById('mkSpeedLevel').addEventListener('change', updateSum);
     document.getElementById('mkSeriesSave').addEventListener('click', saveSeries);
     document.getElementById('mkNoteSave').addEventListener('click', saveNote);
     document.getElementById('mkLinkSave').addEventListener('click', saveLink);

@@ -2540,7 +2540,8 @@ namespace HpskSite.Services
             string messageSubject,
             string messageBody,
             MailReplyTo replyTo,
-            string? asGuardianOf = null)
+            string? asGuardianOf = null,
+            string? courseUrl = null)
         {
             var subject = $"[{groupName}] {messageSubject}";
             var enc = (Func<string?, string>)(s => System.Net.WebUtility.HtmlEncode(s ?? ""));
@@ -2562,6 +2563,7 @@ namespace HpskSite.Services
     <div style='background-color: #f8f9fa; border-left: 4px solid #6c757d; padding: 15px; margin: 20px 0;'>
         {escapedBody}
     </div>
+    {(string.IsNullOrWhiteSpace(courseUrl) ? "" : $"<p><a href='{enc(courseUrl)}' style='display:inline-block;background:#0d6efd;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;'>Se kursen och alla tillf&auml;llen</a></p><p style='color:#666;font-size:12px;'>Logga in p&aring; pistol.nu f&ouml;r att se kursen.</p>")}
 
     <p style='color: #999; font-size: 12px;'>
         Meddelandet skickades via Pistol.nu fr&aring;n kursen {enc(groupName)}.

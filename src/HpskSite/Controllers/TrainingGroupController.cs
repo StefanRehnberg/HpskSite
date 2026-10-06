@@ -238,8 +238,8 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Klubbens folk för gruppens klubb: sajtadmin, klubbadmin eller skjutledare. En tränare som
-        /// bara är tränare i gruppen får hantera gruppens DELTAGARE (Stefans beslut 2026-10-05) men
-        /// inte göra någon till tränare — vem som leder kursen är klubbens beslut.
+        /// bara är instruktör i gruppen får hantera gruppens DELTAGARE (2026-10-05) och LÄGGA TILL andra
+        /// instruktörer (2026-10-06), men inte ta bort en instruktör eller byta roll — det är klubbens beslut.
         /// </summary>
         private async Task<bool> IsClubStaffForGroupAsync(int trainingGroupId)
         {
@@ -273,8 +273,16 @@ namespace HpskSite.Controllers
 
                 if (role != "Member" && role != "Trainer")
                     return Json(new { success = false, message = "Okänd roll." });
-                if (role == "Trainer" && !await IsClubStaffForGroupAsync(trainingGroupId))
-                    return Json(new { success = false, message = "Bara klubbadmin eller skjutledare kan lägga till tränare." });
+                // Kursens instruktör får lägga till ANDRA instruktörer (Stefan 2026-10-06: "instruktör måste
+                // få lägga till andra som instruktörer i sina kurser" — t.ex. en vikarie). CanManage ovan
+                // har redan släppt in klubbadmin, skjutledare och gruppens instruktörer. Att TA BORT en
+                // instruktör eller byta roll är fortfarande klubbens beslut (se RemoveTrainingGroupMember).
+                // ⚠️ Tjänsten skriver om ROLLEN på en befintlig rad — utan spärren nedan kunde en instruktör
+                // göra en deltagare till instruktör (eller tvärtom) genom att "lägga till" hen igen.
+                var existing = _trainingGroupService.GetTrainingGroup(trainingGroupId)?.Members
+                    .FirstOrDefault(x => x.MemberId == memberId);
+                if (existing != null && existing.Role != role && !await IsClubStaffForGroupAsync(trainingGroupId))
+                    return Json(new { success = false, message = "Personen är redan med i kursen. Att byta roll görs av klubbadmin eller skjutledare." });
 
                 var member = _memberService.GetById(memberId);
                 if (member == null)
@@ -589,7 +597,7 @@ namespace HpskSite.Controllers
         /// DELTAGARE godtas. Utelämnat = hela gruppen som förut (äldre anropare).</param>
         /// <param name="includeGuardians">"1" = även målsmännens e-post (sträng: "1" binder inte till bool).</param>
         public async Task<IActionResult> SendGroupMessage(int trainingGroupId, string subject, string message,
-            string? memberIds = null, string? includeGuardians = null)
+            string? memberIds = null, string? includeGuardians = null, string? includeCourseLink = null)
         {
             try
             {
@@ -624,6 +632,10 @@ namespace HpskSite.Controllers
                         return Json(new { success = false, message = "Välj minst en deltagare i kursen." });
                 }
                 var withGuardians = includeGuardians is "1" or "true" or "on";
+                // En länk till kursen i stället för ett avskrivet schema (Stefan 2026-10-06): där står
+                // alltid de aktuella tillfällena och vilka som är obligatoriska.
+                var courseUrl = includeCourseLink is "1" or "true" or "on"
+                    ? $"{Request.Scheme}://{Request.Host}/min-kurs?g={trainingGroupId}" : null;
 
                 int sentCount = 0;
                 var noEmail = new List<string>();
@@ -662,7 +674,8 @@ namespace HpskSite.Controllers
                     try
                     {
                         if (await _emailService.SendTrainingGroupMessageAsync(
-                                t.Email, t.Name, senderName, group.Name, subject, message, reply, t.GuardianOf))
+                                t.Email, t.Name, senderName, group.Name, subject, message, reply, t.GuardianOf,
+                                t.GuardianOf == null ? courseUrl : null))   // målsman har sällan konto — ingen länk dit
                             sentCount++;
                         else failed.Add(t.Name.Length > 0 ? t.Name : t.Email);
                     }
