@@ -3845,6 +3845,12 @@ anmälningsfält.
     bara gäller det tillfället; "Ta bort ur kursen" ligger rött sist i radens meny (både tillfälle och
     deltagare). Kursens krav redigeras direkt under Inställningar. Serie och anteckning finns bara i
     Upprop (de hör till ett tillfälle). Svit 95/95.
+  - **Träningspanelen för den som leder kursen** (Stefan 2026-10-06): "Upprop i kursen X" (primär,
+    `/min-kurs?g=X#vy=idag&t=<träning>`, `TrainingCourseService.CoursesOnTraining` filtrerad på
+    `CanManageTrainingGroup`) står FÖRST. Träningens allmänna lista (`/evenemang/deltagare?kind=training`)
+    heter nu **Anmälda och närvaro** (hette "Deltagarlistan och upprop", även i Admin → Träningar) och
+    förklaras: alla som kommer på träningen, även de som inte går kursen, med anmälningar, platser,
+    betalning och "Lägg till deltagare". Båda skriver samma närvaro. Svit 99/99.
 - **⚠️⚠️ Min kurs har EKONOMINS skal, Admin → Träningsgrupper har TRÄNINGARS form** (Stefans val
   2026-10-06, efter "avviker från hur vi normalt bygger sidor"). Rör du någon av dem: följ förlagan.
   - `/min-kurs`: `container-fluid`, vänsterkort (`.mk-rail`, samma mått som `.ek-page .rail`) med

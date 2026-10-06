@@ -26,14 +26,17 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly HpskSite.Services.Training.TrainingCourseService _courses;
+        private readonly TrainingGroupService _groups;
 
         public TrainingPanelController(
             ClubEventParticipationService participation,
             IMemberManager memberManager,
             IMemberService memberService,
-            HpskSite.Services.Training.TrainingCourseService courses)
+            HpskSite.Services.Training.TrainingCourseService courses,
+            TrainingGroupService groups)
         {
             _courses = courses;
+            _groups = groups;
             _participation = participation;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -69,7 +72,14 @@ namespace HpskSite.Controllers
             var current = await _memberManager.GetCurrentMemberAsync();
             var me = current?.Email == null ? null : _memberService.GetByEmail(current.Email);
             model.CanManage = me != null && await _participation.CanManageAsync(ctx, me.Id);
-            if (me != null) model.MyCourses = _courses.CoursesForMemberOnTraining(me.Id, id);
+            if (me != null)
+            {
+                model.MyCourses = _courses.CoursesForMemberOnTraining(me.Id, id);
+                // Kurser den inloggade får leda (instruktör, klubbadmin, skjutledare) som tillfället hör
+                // till: deras Upprop är rätt ställe för närvaron, inte träningens allmänna lista.
+                foreach (var c in _courses.CoursesOnTraining(id))
+                    if (await _groups.CanManageTrainingGroup(c.GroupId)) model.LedCourses.Add(c);
+            }
             return View("~/Views/TrainingPanel.cshtml", model);
         }
     }
@@ -88,11 +98,13 @@ namespace HpskSite.Controllers
         public bool IsCancelled { get; set; }
         public bool IsMandatory { get; set; }
         public bool RegistrationRequired { get; set; }
-        /// <summary>Erbjuds l�nevapen visar anm�lningskortet sj�lv "Ingen anm�lan beh�vs" med bokningen under.</summary>
+        /// <summary>Erbjuds lånevapen visar anmälningskortet självt att man inte behöver anmäla sig, med bokningen under.</summary>
         public bool LoanWeaponsOffered { get; set; }
         public bool CanManage { get; set; }
         /// <summary>Kurserna den inloggade går som tillfället hör till, med kursens krav.</summary>
         public List<HpskSite.Services.Training.TrainingCourseService.MemberCourseOnTraining> MyCourses { get; set; } = new();
+        /// <summary>Kurser den inloggade får leda som tillfället hör till.</summary>
+        public List<HpskSite.Services.Training.TrainingCourseService.CourseOnTraining> LedCourses { get; set; } = new();
         public string? Error { get; set; }
     }
 }

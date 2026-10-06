@@ -90,12 +90,35 @@
                 @* Utan anmälan visas inget kort — utan den här raden ser panelen ut att sakna en knapp. *@
                 <div class="alert alert-light border py-2 mb-3" id="tpNoSignup"><i class="bi bi-door-open me-1"></i>Ingen anmälan behövs — kom direkt.</div>
             }
+            @* ⚠️ Två närvarolistor finns för en kursträning, och de svarar på olika frågor (Stefan
+               2026-10-06: "jag förstår inte vad sidan ska användas till"):
+               - kursens Upprop — kursens deltagare, med serier och anteckningar (instruktörens verktyg);
+               - träningens anmälningar och närvaro — ALLA som kommer, även de som inte går kursen, med
+                 anmälningar, platser, betalning och "Lägg till deltagare" för den som dyker upp
+                 (skjutledarens verktyg). Båda skriver samma närvaro.
+               Den som leder en kurs får kursens Upprop först; den allmänna listan säger vad den är. *@
+            @if (m.LedCourses.Any() && !m.IsCancelled)
+            {
+                foreach (var c in m.LedCourses)
+                {
+                    <p class="mb-2">
+                        <a class="btn btn-sm btn-primary" href="/min-kurs?g=@c.GroupId#vy=idag&t=@m.Id" target="_top">
+                            <i class="bi bi-list-check me-1"></i>Upprop i kursen @c.Name
+                        </a>
+                    </p>
+                }
+            }
             @if (m.CanManage)
             {
                 <p class="mb-3">
-                    <a class="btn btn-sm btn-outline-primary" href="/evenemang/deltagare?e=@m.Id&kind=training" target="_blank" rel="noopener">
-                        <i class="bi bi-list-check me-1"></i>Deltagarlistan och upprop
+                    <a class="btn btn-sm btn-outline-secondary" href="/evenemang/deltagare?e=@m.Id&kind=training" target="_blank" rel="noopener">
+                        <i class="bi bi-people me-1"></i>Anmälda och närvaro
                     </a>
+                    <span class="d-block small text-muted mt-1">
+                        @(m.LedCourses.Any()
+                            ? "Hela träningens anmälningar och närvaro — även de som inte går kursen. Här lägger du till den som dyker upp."
+                            : "Anmälningar, närvaro och betalning för alla som kommer. Här lägger du till den som dyker upp.")
+                    </span>
                 </p>
             }
         </div>

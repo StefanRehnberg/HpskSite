@@ -457,6 +457,31 @@ ORDER BY CASE WHEN EXISTS (SELECT 1 FROM dbo.TrainingGroupMembers m WHERE m.Trai
         /// tillfället är obligatoriskt för hens kurs och vad det är (Stefan 2026-10-05). Ett fel ger tom
         /// lista — panelen ska visas ändå.
         /// </summary>
+        public class CourseOnTraining { public int GroupId { get; set; } public string Name { get; set; } = ""; }
+
+        /// <summary>
+        /// Aktiva kurser som tillfället är kopplat till. Anroparen filtrerar på vem som får leda dem —
+        /// träningspanelen visar då kursens Upprop i stället för träningens allmänna deltagarlista.
+        /// Ett fel ger tom lista.
+        /// </summary>
+        public List<CourseOnTraining> CoursesOnTraining(int trainingId)
+        {
+            if (trainingId <= 0) return new();
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                return db.Fetch<CourseOnTraining>(@"
+SELECT g.Id AS GroupId, g.Name FROM dbo.TrainingGroupTraining l
+JOIN dbo.TrainingGroups g ON g.Id = l.TrainingGroupId AND g.IsActive = 1
+WHERE l.TrainingId = @0 ORDER BY g.Name", trainingId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte läsa kurser på träning {TrainingId}", trainingId);
+                return new();
+            }
+        }
+
         public List<MemberCourseOnTraining> CoursesForMemberOnTraining(int memberId, int trainingId)
         {
             if (memberId <= 0 || trainingId <= 0) return new();

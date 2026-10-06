@@ -36,7 +36,7 @@
             </div>
         </div>
         <p class="text-muted small">
-            Träningarna syns i klubbens kalender. Välj <strong>Åtgärder → Deltagarlistan</strong> på en rad för
+            Träningarna syns i klubbens kalender. Välj <strong>Åtgärder → Anmälda och närvaro</strong> på en rad för
             upprop, QR för incheckning och lånevapen.
         </p>
         @* Filtren står ÖVER listan — under en lång lista syns de aldrig (Stefan 2026-10-05). *@
@@ -403,7 +403,7 @@
             var item = function (act, icon, text, danger) {
                 return '<li><button class="dropdown-item' + (danger ? ' text-danger' : '') + '" type="button" data-ctr="' + act + '" data-id="' + t.id + '"><i class="bi ' + icon + ' me-2"></i>' + text + '</button></li>';
             };
-            var menu = '<li><a class="dropdown-item" target="_blank" rel="noopener" href="/evenemang/deltagare?e=' + t.id + '&kind=training"><i class="bi bi-people me-2"></i>Deltagarlistan och upprop</a></li>';
+            var menu = '<li><a class="dropdown-item" target="_blank" rel="noopener" href="/evenemang/deltagare?e=' + t.id + '&kind=training"><i class="bi bi-people me-2"></i>Anmälda och närvaro</a></li>';
             if (canEdit) {
                 menu += item('edit', 'bi-pencil', 'Redigera') +
                     item('handover', 'bi-person-badge', 'Byt skjutledare…') +
