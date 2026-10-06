@@ -119,7 +119,7 @@
                 <!-- Tab 3: Min Träningsgrupp (hidden by default, shown via JS if user belongs to a training group) -->
                 <li class="nav-item" role="presentation" id="mytraininggroup-tab-item" style="display: none;">
                     <button class="nav-link" id="mytraininggroup-tab" data-bs-toggle="tab" data-bs-target="#mytraininggroup" type="button" role="tab">
-                        <i class="bi bi-people-fill me-1"></i>Min Träningsgrupp
+                        <i class="bi bi-people-fill me-1"></i>Min kurs
                     </button>
                 </li>
                 <!-- Tab 4 (Deltagare/leaderboard) removed 2026-06-16: Skyttetrappan is scoped to
@@ -173,7 +173,7 @@
                         <div class="card-header bg-primary text-white">
                             <div class="d-flex justify-content-between align-items-center">
                                 <div>
-                                    <h4 class="mb-0"><i class="bi bi-people-fill me-2"></i>Min Träningsgrupp</h4>
+                                    <h4 class="mb-0"><i class="bi bi-people-fill me-2"></i><span id="trainingGroupTitle">Min kurs</span></h4>
                                     <small class="opacity-75" id="trainingGroupHeader"></small>
                                 </div>
                                 <div class="d-flex align-items-center gap-2">
@@ -1919,21 +1919,35 @@ async function loadTrainingGroupProgress() {
         document.getElementById('sendGroupMessageBtn').style.display =
             (isTrainer || isAdmin) ? '' : 'none';
 
-        // Show trainer names
-        let trainers = myGroup?.trainers || [];
-        let trainerHtml = trainers.length > 0
-            ? `<div class="mb-3"><small class="text-muted">Tränare: ${trainers.map(t => t.memberName).join(', ')}</small></div>`
-            : '';
+        // ⚠️ UX-omgången 2026-10-06: EN kursvy, inte två. Schema, närvaro, serier och märkesläge bor
+        // på /min-kurs. Den här fliken visade förut hela gruppens trappframsteg för VARJE deltagare
+        // (en integritetsfråga) och sa "0 steg" där Min kurs sa "Precision 3/3 brons" — två sanningar.
+        // Deltagaren får nu bara en väg till kursen; tränaren behåller trappans steggodkännande här,
+        // eftersom stegen 1–3 fortfarande bockas för hand.
+        const minKursUrl = '/min-kurs?g=' + selectedTrainingGroupId;
+        const groupName = myGroup?.name || '';
+        document.getElementById('trainingGroupTitle').textContent = (isTrainer || isAdmin) ? 'Trappsteg i kursen' : 'Min kurs';
 
-        let html = trainerHtml;
+        if (!isTrainer && !isAdmin) {
+            container.innerHTML =
+                '<p class="mb-2">Du går kursen <strong>' + escapeHtml(groupName) + '</strong>.</p>' +
+                '<p class="text-muted small">Nästa tillfälle, vilka dagar som är obligatoriska, din närvaro och ditt märkesläge finns under <em>Min kurs</em>.</p>' +
+                '<a class="btn btn-success" href="' + minKursUrl + '"><i class="bi bi-mortarboard me-1"></i>Öppna Min kurs</a>';
+            return;
+        }
 
-        if (data.members.length === 0) {
-            html += '<p class="text-muted">Inga medlemmar i gruppen.</p>';
+        // Tränarna står i rubriken, inte i deltagarlistan (förut stod tränaren där på "Steg 1").
+        const trainers = data.members.filter(m => m.role === 'Trainer');
+        let html = '<div class="alert alert-light border small py-2 mb-3"><i class="bi bi-info-circle me-1"></i>' +
+            'Här godkänner du trappsteg. Närvaro, serier och anteckningar för kursen finns under ' +
+            '<a href="' + minKursUrl + '">Min kurs</a>.</div>';
+        if (trainers.length) html += `<div class="mb-3"><small class="text-muted">Instruktör${trainers.length > 1 ? 'er' : ''}: ${trainers.map(t => escapeHtml(t.memberName)).join(', ')}</small></div>`;
+
+        const participants = data.members.filter(m => m.role !== 'Trainer');
+        if (participants.length === 0) {
+            html += '<p class="text-muted">Inga deltagare i kursen.</p>';
         } else {
-            // Sort: trainers first, then by level desc, step desc
-            const sorted = [...data.members].sort((a, b) => {
-                if (a.role === 'Trainer' && b.role !== 'Trainer') return -1;
-                if (a.role !== 'Trainer' && b.role === 'Trainer') return 1;
+            const sorted = [...participants].sort((a, b) => {
                 if (b.currentLevel !== a.currentLevel) return b.currentLevel - a.currentLevel;
                 return b.currentStep - a.currentStep;
             });
@@ -1947,8 +1961,7 @@ async function loadTrainingGroupProgress() {
                             <div class="me-3" style="min-width: 0;">
                                 <div class="fw-bold text-truncate">
                                     ${m.levelBadge ? `<span class="me-1">${m.levelBadge}</span>` : ''}
-                                    ${m.memberName}
-                                    ${m.role === 'Trainer' ? '<span class="badge bg-info ms-1">Tränare</span>' : ''}
+                                    ${escapeHtml(m.memberName)}
                                 </div>
                                 <small class="text-muted">${m.levelName} - Steg ${m.currentStep}</small>
                                 ${m.lastActivity ? `<br><small class="text-muted">Senast aktiv: ${m.lastActivity}</small>` : ''}
@@ -1962,20 +1975,22 @@ async function loadTrainingGroupProgress() {
                                         </div>
                                     </div>
                                 </div>
-                                ${(isTrainer || isAdmin) && m.role !== 'Trainer' ? `
-                                    <button class="btn btn-sm btn-outline-primary py-0 px-2" onclick="viewMemberProgressWithApproval(${m.memberId}, '${escapeHtml(m.memberName)}')" title="Visa framsteg">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-success py-0 px-2" onclick="showCompleteStepModal(${m.memberId}, '${escapeHtml(m.memberName)}', ${m.currentLevel}, ${m.currentStep})" title="Godkänn steg">
-                                        <i class="bi bi-check-lg"></i> Godkänn
-                                    </button>
-                                ` : ''}
+                                ${/* ⚠️ Namnet bärs aldrig i ett onclick: escapeHtml escapar inte fnuttar, och en
+                                     enkelfnutt i ett namn avslutade JS-strängen (samma lucka som i Fältskytte).
+                                     Knappen bär ett index i listan; den delegerade lyssnaren slår upp resten. */ ''}
+                                <button class="btn btn-sm btn-outline-primary py-0 px-2" data-tg-action="view" data-tg-idx="${sorted.indexOf(m)}" title="Visa framsteg">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                                <button class="btn btn-sm btn-success py-0 px-2" data-tg-action="approve" data-tg-idx="${sorted.indexOf(m)}" title="Godkänn steg">
+                                    <i class="bi bi-check-lg"></i> Godkänn
+                                </button>
                             </div>
                         </div>
                     </div>
                 `;
             });
             html += '</div>';
+            window._tgSorted = sorted;
         }
 
         container.innerHTML = html;
@@ -1990,6 +2005,16 @@ function escapeHtml(str) {
     div.appendChild(document.createTextNode(str));
     return div.innerHTML;
 }
+
+// Kursens trappstegsknappar bär ett index i den senast ritade listan, aldrig namnet (se ovan).
+document.addEventListener('click', function (e) {
+    const b = e.target.closest('[data-tg-action]');
+    if (!b) return;
+    const m = (window._tgSorted || [])[parseInt(b.getAttribute('data-tg-idx'), 10)];
+    if (!m) return;
+    if (b.getAttribute('data-tg-action') === 'view') viewMemberProgressWithApproval(m.memberId, m.memberName);
+    else showCompleteStepModal(m.memberId, m.memberName, m.currentLevel, m.currentStep);
+});
 
 function showSendGroupMessageModal() {
     document.getElementById('groupMsgSubject').value = '';

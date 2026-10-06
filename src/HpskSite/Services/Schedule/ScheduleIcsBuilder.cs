@@ -105,14 +105,14 @@ namespace HpskSite.Services.Schedule
             return string.Join("\\n", parts);
         }
 
-        private static string Utc(DateTime d) => d.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
-        private static string Local(DateTime d) => d.ToString("yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture);
+        internal static string Utc(DateTime d) => d.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
+        internal static string Local(DateTime d) => d.ToString("yyyyMMdd'T'HHmmss", CultureInfo.InvariantCulture);
 
         /// <summary>
         /// Writes one property, escaped per RFC 5545 and folded at 73 octets. Skips empty values so we
         /// never emit a bare "LOCATION:" that some clients render as a blank line.
         /// </summary>
-        private static void AppendLine(StringBuilder sb, string name, string? value)
+        internal static void AppendLine(StringBuilder sb, string name, string? value)
         {
             if (string.IsNullOrWhiteSpace(value)) return;
             var escaped = value

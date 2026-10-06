@@ -23,7 +23,7 @@
     var hasAdminAccess = false; // True if site admin OR regional admin
     var isOnBoard = false;      // True if the member sits on any club/region board (shows the Styrelse link)
     var isElectedAuditor = false; // Elected Revisor/Revisorssuppleant anywhere (shows the Revision link)
-    var isCourseTrainer = false;  // Tränare i en aktiv kurs (visar länken Min kurs)
+    var isCourseTrainer = false;  // Med i en aktiv kurs, som tränare ELLER deltagare (visar länken Min kurs)
 
     if (isLoggedIn && currentMember != null)
     {
@@ -116,7 +116,9 @@
             // ⚠️ En VALD revisor läser ekonomin genom sitt uppdrag (2026-09-24) men är ingen
             //    styrelseledamot — utan länken fanns ingen väg till /revision.
             isElectedAuditor = BoardRoleService.IsElectedAuditorAnywhere(memberData.Id);
-            isCourseTrainer = TrainingCourseService.IsTrainerInActiveCourse(memberData.Id);
+            // Deltagaren också (UX-omgången 2026-10-06): länken fanns bara för tränare, och
+            // nybörjaren hade då ingen väg alls till sin kurs.
+            isCourseTrainer = TrainingCourseService.IsInActiveCourse(memberData.Id);
         }
     }
 }

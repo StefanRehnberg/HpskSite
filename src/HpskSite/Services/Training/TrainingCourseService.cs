@@ -73,6 +73,7 @@ namespace HpskSite.Services.Training
             public bool IsToday { get; set; }
             public bool IsPast { get; set; }
             public string? SkjutledareName { get; set; }
+            public string? Venue { get; set; }
         }
 
         /// <summary>
@@ -174,7 +175,8 @@ namespace HpskSite.Services.Training
                     Note = l.Note,
                     IsToday = t.Date.Date == today.Date,
                     IsPast = t.Date.Date < today.Date,
-                    SkjutledareName = t.SkjutledareMemberId is > 0 ? Name(t.SkjutledareMemberId.Value) : null
+                    SkjutledareName = t.SkjutledareMemberId is > 0 ? Name(t.SkjutledareMemberId.Value) : null,
+                    Venue = t.Venue
                 });
             }
 
@@ -491,6 +493,275 @@ SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.TrainingGroupMembers m
         {
             using var db = _databaseFactory.CreateDatabase();
             return db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.TrainingGroupMembers WHERE TrainingGroupId=@0 AND MemberId=@1 AND IsActive=1 AND Role <> 'Trainer'", groupId, memberId) > 0;
+        }
+
+        // ── Medlemmens egna kurser (UX-omgången 2026-10-06) ───────────────────────────────────
+        //
+        // ⚠️ Deltagaren hade INGEN kursyta: Min kurs fanns bara för tränare, startsidan nämnde inte
+        // kursen och kalendern visade kursens tillfällen som vilka träningar som helst. Allt nedan
+        // finns för att nybörjaren ska hitta sin kurs utan att veta var hen ska leta.
+
+        public const string RoleTrainer = "Trainer";
+        public const string RoleParticipant = "Participant";
+
+        public class MemberCourse
+        {
+            public int GroupId { get; set; }
+            public string Name { get; set; } = "";
+            public int ClubId { get; set; }
+            /// <summary><see cref="RoleTrainer"/> eller <see cref="RoleParticipant"/>.</summary>
+            public string Role { get; set; } = RoleParticipant;
+        }
+
+        /// <summary>
+        /// Aktiva kurser medlemmen är med i, som tränare eller deltagare. En rad per kurs; är hen
+        /// både och (ska inte hända) vinner tränarrollen.
+        /// </summary>
+        public List<MemberCourse> CoursesOfMember(int memberId)
+        {
+            if (memberId <= 0) return new();
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                return db.Fetch<MemberCourse>(@"
+SELECT g.Id AS GroupId, g.Name, g.ClubId,
+       CASE WHEN MAX(CASE WHEN m.Role = 'Trainer' THEN 1 ELSE 0 END) = 1 THEN 'Trainer' ELSE 'Participant' END AS Role
+FROM dbo.TrainingGroupMembers m
+JOIN dbo.TrainingGroups g ON g.Id = m.TrainingGroupId AND g.IsActive = 1
+WHERE m.MemberId = @0 AND m.IsActive = 1
+GROUP BY g.Id, g.Name, g.ClubId
+ORDER BY g.Name", memberId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte läsa medlem {MemberId}s kurser", memberId);
+                return new();
+            }
+        }
+
+        /// <summary>
+        /// Är medlemmen med i någon aktiv kurs, som tränare ELLER deltagare? Styr menyvalet "Min kurs"
+        /// — körs vid varje sidladdning för inloggade, därför en EXISTS och nej vid fel.
+        /// </summary>
+        public bool IsInActiveCourse(int memberId)
+        {
+            if (memberId <= 0) return false;
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                return db.ExecuteScalar<int>(@"
+SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.TrainingGroupMembers m
+                         JOIN dbo.TrainingGroups g ON g.Id = m.TrainingGroupId AND g.IsActive = 1
+                         WHERE m.MemberId = @0 AND m.IsActive = 1)
+            THEN 1 ELSE 0 END", memberId) == 1;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte avgöra om medlem {MemberId} går en kurs", memberId);
+                return false;
+            }
+        }
+
+        /// <summary>Är medlemmen med i kursen (tränare eller deltagare, aktiv grupp)?</summary>
+        public bool IsInCourse(int groupId, int memberId)
+        {
+            if (groupId <= 0 || memberId <= 0) return false;
+            using var db = _databaseFactory.CreateDatabase();
+            return db.ExecuteScalar<int>(@"
+SELECT COUNT(*) FROM dbo.TrainingGroupMembers m JOIN dbo.TrainingGroups g ON g.Id = m.TrainingGroupId AND g.IsActive = 1
+WHERE m.TrainingGroupId = @0 AND m.MemberId = @1 AND m.IsActive = 1", groupId, memberId) > 0;
+        }
+
+        public class MySeries
+        {
+            public string Date { get; set; } = "";
+            public string Occasion { get; set; } = "";
+            public int SeriesNumber { get; set; }
+            public int Total { get; set; }
+            public string? Valor { get; set; }
+        }
+
+        /// <summary>
+        /// Deltagarens egen bild av kursen. ⚠️ Bara HENS rader: inga andra deltagare, inga tränarens
+        /// anteckningar (de är tränarens överlämning, inte till deltagaren).
+        /// </summary>
+        public class ParticipantView
+        {
+            public int GroupId { get; set; }
+            public string Name { get; set; } = "";
+            public string? Description { get; set; }
+            public List<string> Trainers { get; set; } = new();
+            public List<Occasion> Occasions { get; set; } = new();
+            /// <summary>trainingId → min cell.</summary>
+            public Dictionary<int, Cell> Mine { get; set; } = new();
+            public BadgeStatus? Badge { get; set; }
+            public List<MySeries> Series { get; set; } = new();
+        }
+
+        private class MySeriesRow
+        {
+            public DateTime Date { get; set; }
+            public string Name { get; set; } = "";
+            public string? Note { get; set; }
+            public int SeriesNumber { get; set; }
+            public int Total { get; set; }
+            public string? Valor { get; set; }
+        }
+
+        public ParticipantView? GetForParticipant(int groupId, int memberId, DateTime today)
+        {
+            var c = Get(groupId, today);
+            if (c == null) return null;
+            var v = new ParticipantView
+            {
+                GroupId = c.GroupId, Name = c.Name, Description = c.Description,
+                Trainers = c.Trainers.Select(t => t.Name).ToList(),
+                Occasions = c.Occasions
+            };
+            foreach (var o in c.Occasions)
+                v.Mine[o.TrainingId] = c.Cells.TryGetValue($"{memberId}:{o.TrainingId}", out var cell) ? cell : new Cell();
+            v.Badge = c.Badges.GetValueOrDefault(memberId);
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                v.Series = db.Fetch<MySeriesRow>(@"
+SELECT t.[Date], t.Name, l.Note, s.SeriesNumber, s.Total, s.Valor
+FROM dbo.TrainingCourseSeries s
+JOIN dbo.ClubTraining t ON t.Id = s.TrainingId
+LEFT JOIN dbo.TrainingGroupTraining l ON l.TrainingGroupId = s.TrainingGroupId AND l.TrainingId = s.TrainingId
+WHERE s.TrainingGroupId = @0 AND s.MemberId = @1
+ORDER BY t.[Date] DESC, s.SeriesNumber", groupId, memberId)
+                    .Select(r => new MySeries
+                    {
+                        Date = r.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                        Occasion = string.IsNullOrWhiteSpace(r.Note) ? r.Name : r.Note!,
+                        SeriesNumber = r.SeriesNumber, Total = r.Total, Valor = r.Valor
+                    }).ToList();
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Deltagarens serier kunde inte läsas (kurs {Group})", groupId); }
+            return v;
+        }
+
+        /// <summary>Startsidans kort: kursen, min roll, nästa tillfälle och (för deltagaren) missade obligatoriska.</summary>
+        public class HomeCard
+        {
+            public int GroupId { get; set; }
+            public string Name { get; set; } = "";
+            public string Role { get; set; } = RoleParticipant;
+            public Occasion? Next { get; set; }
+            public int MissedCount { get; set; }
+            public int ParticipantCount { get; set; }
+        }
+
+        /// <summary>
+        /// Ett kort per aktiv kurs som har ett kommande (eller dagens) tillfälle. En kurs utan fler
+        /// tillfällen visas inte — det finns inget att göra på startsidan för den.
+        /// </summary>
+        public List<HomeCard> HomeCardsFor(int memberId, DateTime today)
+        {
+            var result = new List<HomeCard>();
+            foreach (var mc in CoursesOfMember(memberId))
+            {
+                try
+                {
+                    var c = Get(mc.GroupId, today);
+                    if (c == null) continue;
+                    var next = c.Occasions.FirstOrDefault(o => !o.IsCancelled && !o.IsPast);
+                    if (next == null) continue;
+                    result.Add(new HomeCard
+                    {
+                        GroupId = c.GroupId, Name = c.Name, Role = mc.Role, Next = next,
+                        ParticipantCount = c.Participants.Count,
+                        MissedCount = mc.Role == RoleParticipant
+                            ? c.Occasions.Count(o => c.Cells.TryGetValue($"{memberId}:{o.TrainingId}", out var x) && x.Missed)
+                            : 0
+                    });
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Kurskortet kunde inte byggas (kurs {Group})", mc.GroupId); }
+            }
+            return result.OrderBy(r => r.Next!.Date).ThenBy(r => r.Next!.StartTime).ToList();
+        }
+
+        public class CalendarMark
+        {
+            public string CourseName { get; set; } = "";
+            public bool Mandatory { get; set; }
+        }
+
+        private class MarkRow
+        {
+            public int TrainingId { get; set; }
+            public string Name { get; set; } = "";
+            public string? DefaultAttendance { get; set; }
+            public string? Attendance { get; set; }
+        }
+
+        /// <summary>
+        /// Vilka av träningarna hör till en kurs medlemmen går (eller leder)? Kalendern märker dem
+        /// "din kurs" — annars ser kursens tillfällen ut som klubbens vanliga träningar.
+        /// </summary>
+        public Dictionary<int, CalendarMark> CalendarMarksFor(int memberId, IEnumerable<int> trainingIds)
+        {
+            var ids = trainingIds.Where(i => i > 0).Distinct().ToList();
+            var result = new Dictionary<int, CalendarMark>();
+            if (memberId <= 0 || ids.Count == 0) return result;
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                foreach (var chunk in ids.Chunk(1000))
+                {
+                    foreach (var r in db.Fetch<MarkRow>(@"
+SELECT l.TrainingId, g.Name, g.DefaultAttendance, l.Attendance
+FROM dbo.TrainingGroupTraining l
+JOIN dbo.TrainingGroups g ON g.Id = l.TrainingGroupId AND g.IsActive = 1
+JOIN dbo.TrainingGroupMembers m ON m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.MemberId = @0
+WHERE l.TrainingId IN (@1)", memberId, chunk.ToList()))
+                    {
+                        var mand = TrainingCourseRules.IsMandatory(r.DefaultAttendance, r.Attendance);
+                        if (result.TryGetValue(r.TrainingId, out var existing))
+                            existing.Mandatory |= mand;
+                        else
+                            result[r.TrainingId] = new CalendarMark { CourseName = r.Name, Mandatory = mand };
+                    }
+                }
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Kursmarkeringen i kalendern kunde inte läsas"); }
+            return result;
+        }
+
+        public class ReminderOccasion
+        {
+            public int MemberId { get; set; }
+            public int GroupId { get; set; }
+            public int TrainingId { get; set; }
+            public DateTime Date { get; set; }
+            public string? StartTime { get; set; }
+            public string Name { get; set; } = "";
+            public string? Note { get; set; }
+            public string? Venue { get; set; }
+            public string GroupName { get; set; } = "";
+            public string? DefaultAttendance { get; set; }
+            public string? Attendance { get; set; }
+            public bool Mandatory => TrainingCourseRules.IsMandatory(DefaultAttendance, Attendance);
+            public DateTime? StartsAt => TimeSpan.TryParseExact(StartTime ?? "", @"hh\:mm", CultureInfo.InvariantCulture, out var ts)
+                ? Date.Date.Add(ts) : null;
+        }
+
+        /// <summary>
+        /// Kursernas tillfällen mellan två dagar, en rad per DELTAGARE (inte tränare — de leder
+        /// tillfället). Inställda tas inte med. Underlag för påminnelsen dagen innan.
+        /// </summary>
+        public List<ReminderOccasion> ParticipantOccasionsBetween(DateTime fromDate, DateTime toDate)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return db.Fetch<ReminderOccasion>(@"
+SELECT m.MemberId, g.Id AS GroupId, t.Id AS TrainingId, t.[Date], t.StartTime, t.Name, l.Note, t.Venue,
+       g.Name AS GroupName, g.DefaultAttendance, l.Attendance
+FROM dbo.TrainingGroupTraining l
+JOIN dbo.ClubTraining t ON t.Id = l.TrainingId AND t.IsCancelled = 0
+JOIN dbo.TrainingGroups g ON g.Id = l.TrainingGroupId AND g.IsActive = 1
+JOIN dbo.TrainingGroupMembers m ON m.TrainingGroupId = g.Id AND m.IsActive = 1 AND m.Role <> 'Trainer'
+WHERE t.[Date] >= @0 AND t.[Date] <= @1", fromDate.Date, toDate.Date);
         }
     }
 }

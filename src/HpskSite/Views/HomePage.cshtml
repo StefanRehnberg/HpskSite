@@ -8,6 +8,7 @@
 @inject HpskSite.Services.RangeHubService RangeHub
 @inject HpskSite.Services.StaffHubService StaffHub
 @inject HpskSite.Services.Schedule.ScheduleHubService ScheduleHub
+@inject HpskSite.Services.Training.TrainingCourseService CourseService
 @{
     Layout = "Master.cshtml";
     var sv = new CultureInfo("sv-SE");
@@ -55,6 +56,9 @@
     HpskSite.Services.RangeHubSummary? range = null;
     HpskSite.Services.StaffHubSummary? staff = null;
     HpskSite.Models.Schedule.ScheduleHubSummary? schedule = null;
+    // "Din kurs"-korten (UX-omgången 2026-10-06). Tom lista = inget kort. ⚠️ Ingen explicit
+    // generisk typ här — en vinkelparentes tolkas som en HTML-tagg och spräcker vyn. Medlem 0 ger tom lista.
+    var myCourseCards = CourseService.HomeCardsFor(0, DateTime.Today);
     if (isLoggedIn)
     {
         var member = MemberService.GetByEmail(cm!.Email ?? "");
@@ -76,6 +80,7 @@
             range = await RangeHub.GetSummaryAsync(member.Id);
             staff = StaffHub.GetSummary(member.Id);
             schedule = ScheduleHub.GetSummary(member.Id);
+            myCourseCards = CourseService.HomeCardsFor(member.Id, DateTime.Today);
         }
     }
 
@@ -293,6 +298,12 @@ else
         view's runtime compilation with a messageless UmbracoCompilationException. Anything that needs
         computing goes in the top code block.
     *@
+    @* "Din kurs" — nästa kurstillfälle för den som går eller leder en kurs. Före "Ditt schema":
+       kursen är veckans återkommande åtagande, tävlingsschemat det enstaka. *@
+    @if (myCourseCards.Count > 0)
+    {
+        @await Html.PartialAsync("_MyCourseCard", myCourseCards)
+    }
     @if (schedule?.HasAny == true)
     {
         <div class="card mb-4 @(schedule.AnyToday ? "border-primary" : "border-primary-subtle")">

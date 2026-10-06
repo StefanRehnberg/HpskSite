@@ -214,7 +214,7 @@ namespace HpskSite.Controllers
         /// Get upcoming events for a club (competitions and simple events from club hierarchy)
         /// </summary>
         [HttpGet]
-        public IActionResult GetUpcomingEvents(int clubId, int days = 30, bool allYears = false)
+        public async Task<IActionResult> GetUpcomingEvents(int clubId, int days = 30, bool allYears = false)
         {
             try
             {
@@ -306,8 +306,18 @@ namespace HpskSite.Controllers
                     // se att den är inställd, inte att den försvunnit.
                     try
                     {
-                        foreach (var t in _trainings.List(clubId, startDate, endDate))
+                        var trainingRows = _trainings.List(clubId, startDate, endDate);
+                        // "Din kurs" (UX-omgången 2026-10-06): träningar som hör till en kurs den
+                        // inloggade går eller leder märks, annars ser de ut som klubbens vanliga.
+                        var courseMarks = new Dictionary<int, HpskSite.Services.Training.TrainingCourseService.CalendarMark>();
+                        var viewer = await _memberManager.GetCurrentMemberAsync();
+                        var viewerId = viewer?.Email == null ? 0 : _memberService.GetByEmail(viewer.Email)?.Id ?? 0;
+                        if (viewerId > 0 && trainingRows.Count > 0)
+                            courseMarks = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Training.TrainingCourseService>()
+                                .CalendarMarksFor(viewerId, trainingRows.Select(r => r.Id));
+                        foreach (var t in trainingRows)
                         {
+                            courseMarks.TryGetValue(t.Id, out var mark);
                             var day = DateTime.ParseExact(t.Date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
                             var when = string.IsNullOrEmpty(t.StartTime) ? day
                                 : day.Add(TimeSpan.ParseExact(t.StartTime, @"hh\:mm", System.Globalization.CultureInfo.InvariantCulture));
@@ -326,7 +336,9 @@ namespace HpskSite.Controllers
                                 registrationRequired = t.RegistrationRequired,
                                 registrationDeadline = "",
                                 kind = "training",
-                                isCancelled = t.IsCancelled
+                                isCancelled = t.IsCancelled,
+                                myCourse = mark?.CourseName ?? "",
+                                myCourseMandatory = mark?.Mandatory ?? false
                             });
                         }
                     }

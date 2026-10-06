@@ -65,7 +65,34 @@ namespace HpskSite.Controllers
             var me = await CurrentMemberIdAsync();
             if (me <= 0) return Json(new { success = false, message = "Logga in för att se dina kurser." });
             var clubs = (await _auth.GetManagedClubIds()).Concat(await _auth.GetSkjutledareClubIds());
-            return Json(new { success = true, courses = _courses.CoursesFor(me, clubs) });
+            // role: "trainer" (leder kursen), "manager" (klubbens kurs, via klubbadmin/skjutledare)
+            // eller "participant" (går kursen — får deltagarens läsvy, UX-omgången 2026-10-06).
+            var list = _courses.CoursesFor(me, clubs)
+                .Select(c => new { c.GroupId, c.Name, c.ClubId, c.IsTrainer, role = c.IsTrainer ? "trainer" : "manager" })
+                .ToList();
+            foreach (var p in _courses.CoursesOfMember(me).Where(p => p.Role == TrainingCourseService.RoleParticipant))
+            {
+                // En klubbadmin som själv går en kurs i sin klubb ser den redan som "manager" —
+                // deltagarens vy är då inte vad hen letar efter i första hand, men den ska finnas.
+                if (list.Any(x => x.GroupId == p.GroupId && x.role != "manager")) continue;
+                list.RemoveAll(x => x.GroupId == p.GroupId);
+                list.Add(new { p.GroupId, p.Name, p.ClubId, IsTrainer = false, role = "participant" });
+            }
+            return Json(new { success = true, courses = list });
+        }
+
+        /// <summary>
+        /// Deltagarens egen vy av kursen. Bara för den som går kursen; visar bara hens egna rader.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> Mine(int groupId)
+        {
+            var me = await CurrentMemberIdAsync();
+            if (me <= 0) return Json(new { success = false, message = "Logga in för att se din kurs." });
+            if (!_courses.IsParticipant(groupId, me)) return Json(new { success = false, message = "Du går inte den här kursen." });
+            var v = _courses.GetForParticipant(groupId, me, DateTime.Today);
+            if (v == null) return Json(new { success = false, message = "Kursen finns inte." });
+            return Json(new { success = true, course = v });
         }
 
         [HttpGet]

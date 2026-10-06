@@ -125,6 +125,8 @@ namespace HpskSite.Services.Schedule
                     }
                 }
 
+                sent += await SendCourseRemindersAsync(scope.ServiceProvider, push, scopeProvider, optedIn, now, ct);
+
                 if (sent > 0) _logger.LogInformation("Schedule reminders sent: {Count}", sent);
             }
             catch (OperationCanceledException) { /* shutdown */ }
@@ -132,6 +134,54 @@ namespace HpskSite.Services.Schedule
             {
                 _logger.LogError(ex, "Schedule reminder sweep failed.");
             }
+        }
+
+        /// <summary>
+        /// Kursens tillfällen (UX-omgången 2026-10-06): en påminnelse DAGEN INNAN till varje deltagare
+        /// som slagit på påminnelser. Dagen innan och inte 30 minuter före — den som går en kurs
+        /// behöver planera kvällen, inte bara hinna fram. Samma claim-then-send och samma logg som
+        /// tävlingarna; nyckeln <c>course-{träning}</c> med CompetitionId 0 kan inte krocka med dem.
+        /// Ett tillfälle som flyttas får en ny tid men samma nyckel — påminnelsen skickas inte igen.
+        /// </summary>
+        private async Task<int> SendCourseRemindersAsync(IServiceProvider sp, WebPushService push,
+            IScopeProvider scopeProvider, IReadOnlyCollection<int> optedIn, DateTime now, CancellationToken ct)
+        {
+            var sent = 0;
+            try
+            {
+                var courses = sp.GetRequiredService<HpskSite.Services.Training.TrainingCourseService>();
+                var opted = optedIn as ISet<int> ?? optedIn.ToHashSet();
+                var horizon = now.AddHours(24);
+                foreach (var o in courses.ParticipantOccasionsBetween(now.Date, horizon.Date))
+                {
+                    if (ct.IsCancellationRequested) break;
+                    if (!opted.Contains(o.MemberId)) continue;
+                    if (o.StartsAt is not { } startsAt || startsAt <= now.AddMinutes(30) || startsAt > horizon) continue;
+                    if (!TryClaim(scopeProvider, 0, o.MemberId, $"course-{o.TrainingId}", startsAt)) continue;
+
+                    var dayWord = startsAt.Date == now.Date ? "I dag" : "I morgon";
+                    var title = string.IsNullOrWhiteSpace(o.Note) ? o.Name : o.Note!;
+                    var body = $"{dayWord} {startsAt:HH\\:mm}: {title}"
+                               + (string.IsNullOrWhiteSpace(o.Venue) ? "" : $", {o.Venue}")
+                               + (o.Mandatory ? " — obligatoriskt för kursen" : "");
+                    try
+                    {
+                        await push.SendScheduleReminderAsync(o.MemberId, $"Kurs: {o.GroupName}", body,
+                            $"/min-kurs?g={o.GroupId}", $"kurs-{o.TrainingId}");
+                        sent++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Course reminder push failed for member {Member}", o.MemberId);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Saknade kurstabeller eller ett läsfel får inte stoppa tävlingarnas påminnelser.
+                _logger.LogWarning(ex, "Course reminder sweep failed.");
+            }
+            return sent;
         }
 
         /// <summary>
