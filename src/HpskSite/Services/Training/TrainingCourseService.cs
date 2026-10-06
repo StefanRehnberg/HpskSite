@@ -61,12 +61,11 @@ namespace HpskSite.Services.Training
             public string? EndTime { get; set; }
             public string Name { get; set; } = "";
             public bool IsCancelled { get; set; }
-            /// <summary>Gäller för kursens deltagare: obligatoriskt för kursen ELLER för klubbens medlemmar.</summary>
+            /// <summary>Gäller för kursens deltagare. Är alltid kursens krav (gruppens standard eller
+            /// tillfällets avvikelse) — en träning är aldrig obligatorisk för alla (Stefan 2026-10-06).</summary>
             public bool IsMandatory { get; set; }
-            /// <summary>Kursens eget krav (gruppens standard eller tillfällets avvikelse).</summary>
+            /// <summary>Samma som <see cref="IsMandatory"/>; namnet finns kvar för Min kurs-ytan.</summary>
             public bool MandatoryForCourse { get; set; }
-            /// <summary>Träningens egen flagga — alla klubbens medlemmar förväntas komma, inte bara kursen.</summary>
-            public bool MandatoryForAll { get; set; }
             public bool RegistrationRequired { get; set; }
             public string? AttendanceOverride { get; set; }
             public string? RegistrationOverride { get; set; }
@@ -159,17 +158,16 @@ namespace HpskSite.Services.Training
             foreach (var t in trainings)
             {
                 var l = links[t.Id];
-                // ⚠️ Två skilda krav (Stefan 2026-10-05): kursens, och träningens eget som gäller alla.
-                // Ytan måste kunna säga vilket — men för en kursdeltagare räknas båda som obligatoriska.
+                // Bara kursens krav. Träningens egen flagga läses inte (Stefan 2026-10-06, efter
+                // Luleå PK): obligatoriskt för alla hör till händelser, inte träningar.
                 var forCourse = TrainingCourseRules.IsMandatory(course.DefaultAttendance, l.Attendance);
                 course.Occasions.Add(new Occasion
                 {
                     TrainingId = t.Id,
                     Date = t.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     StartTime = t.StartTime, EndTime = t.EndTime, Name = t.Name, IsCancelled = t.IsCancelled,
-                    IsMandatory = forCourse || t.IsMandatory,
+                    IsMandatory = forCourse,
                     MandatoryForCourse = forCourse,
-                    MandatoryForAll = t.IsMandatory,
                     RegistrationRequired = TrainingCourseRules.RegistrationRequired(course.DefaultRegistration, l.Registration),
                     AttendanceOverride = TrainingCourseRules.NormaliseAttendance(l.Attendance),
                     RegistrationOverride = TrainingCourseRules.NormaliseRegistration(l.Registration),

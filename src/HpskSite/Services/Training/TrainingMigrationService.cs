@@ -253,12 +253,16 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
                 SwishNumber = Blank(node.GetValue<string>(ClubEvents.SwishProperty)),
                 Audience = Blank(node.GetValue<string>(EventAudience.Property)),
                 LoanWeaponsOffered = node.GetValue<bool>(LoanWeaponClubRules.EventOfferedProperty),
-                IsMandatory = node.GetValue<bool>(ClubEvents.MandatoryProperty),
+                // En träning är aldrig obligatorisk för alla (Stefan 2026-10-06). Flaggan förs inte
+                // över; en kurs krav sätts på kursens koppling — se noten nedan.
+                IsMandatory = false,
                 LegacyEventNodeId = node.Id,
                 CreatedByMemberId = actingMemberId,
                 CreatedDate = now,
                 UpdatedDate = now
             };
+            if (node.GetValue<bool>(ClubEvents.MandatoryProperty))
+                row.Notes.Add("Var markerad som obligatorisk. Det togs inte med — gäller kravet en kurs, koppla träningen till kursen och sätt närvaron som krävd där.");
             var url = node.GetValue<string>("registrationUrl");
             if (!string.IsNullOrWhiteSpace(url)) row.Notes.Add($"Extern anmälningslänk togs inte med: {url}");
 

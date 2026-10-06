@@ -953,7 +953,7 @@ VALUES
                         Description = "Första passet för nya skyttar. Vi går igenom säkerhet, grepp och sikte. "
                                     + "Klubbvapen finns att låna.",
                         SkjutledareMemberId = leaders.FirstOrDefault(),
-                        RegistrationRequired = "1", MaxParticipants = 12, LoanWeaponsOffered = "1", IsMandatory = "0"
+                        RegistrationRequired = "1", MaxParticipants = 12, LoanWeaponsOffered = "1"
                     }, leaders.FirstOrDefault());
                     if (err != null) { failures.Add($"Nybörjarkurs: {err}"); return 0; }
                     courseId = id;

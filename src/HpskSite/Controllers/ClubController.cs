@@ -322,7 +322,7 @@ namespace HpskSite.Controllers
                                 venue = t.Venue ?? "",
                                 contactPerson = t.SkjutledareName,
                                 url = $"#training-{t.Id}",
-                                isMandatory = t.IsMandatory,
+                                isMandatory = false, // en träning är aldrig obligatorisk för alla
                                 registrationRequired = t.RegistrationRequired,
                                 registrationDeadline = "",
                                 kind = "training",
