@@ -934,11 +934,14 @@ namespace HpskSite.Controllers
             var from = date;
             var to = date.AddDays(1).AddSeconds(-1);
 
-            var loans = string.IsNullOrWhiteSpace(occasionKind)
-                ? _bookings.GetForClub(clubId)
-                    .Where(b => b.FromTime.Date <= date && b.ToTime.Date >= date)
-                    .ToList()
-                : _bookings.GetForOccasion(clubId, occasionKind, occasionId);
+            // Avbokade lån visas inte: valvet svarar på vem som ska ha ett vapen, och en avbokning
+            // är ingen som ska det. Historiken finns kvar under Klubbvapen → Alla lån.
+            var loans = (string.IsNullOrWhiteSpace(occasionKind)
+                    ? _bookings.GetForClub(clubId)
+                        .Where(b => b.FromTime.Date <= date && b.ToTime.Date >= date)
+                    : _bookings.GetForOccasion(clubId, occasionKind, occasionId))
+                .Where(b => b.Status != FirearmBookingStatus.Avbokad)
+                .ToList();
 
             var free = _bookings.AvailableInWindow(clubId, from, to);
             var loanable = _firearms.CountLoanable(clubId);
