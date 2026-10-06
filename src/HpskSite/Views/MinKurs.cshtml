@@ -407,9 +407,11 @@
             // Den öppna kursen står alltid med, även när den nåddes som klubbens kurs.
             var mineList = list.filter(function (c) { return c.role !== 'manager' || c.groupId === pick; });
             var sel = document.getElementById('mkPicker');
+            // Kurserna heter ofta likadant ("Nybörjare 2026", "Nybörjare 2027") och kan ligga i olika
+            // klubbar — raden säger därför både klubben och om man går eller leder kursen.
             sel.innerHTML = mineList.map(function (c) {
-                return '<option value="' + c.groupId + '">' + esc(c.name) +
-                    (c.role === 'participant' ? ' (du går kursen)' : c.role === 'manager' ? ' (klubbens kurs)' : '') + '</option>';
+                var role = c.role === 'participant' ? 'du går kursen' : c.role === 'manager' ? 'klubbens kurs' : 'du är instruktör';
+                return '<option value="' + c.groupId + '">' + esc(c.name) + ' (' + (c.clubName ? esc(c.clubName) + ', ' : '') + role + ')</option>';
             }).join('');
             sel.value = String(pick);
             document.getElementById('mkPickerWrap').classList.toggle('d-none', mineList.length < 2);
@@ -516,7 +518,8 @@
             '<div class="text-truncate">' + esc(occTitle(o)) + '</div>' +
             (facts ? '<div class="small text-muted mk-occ-facts">' + facts + '</div>' : '') +
             (o.mandatoryForCourse ? '<span class="badge bg-warning text-dark">★ Obligatoriskt</span>' : '') +
-            '</div>' + myState(o, c) + '</button>';
+            '</div>' + (c.loanBooked && !o.isPast ? '<span class="mk-state badge bg-info-subtle text-info-emphasis"><i class="bi bi-safe2 me-1"></i>Lånevapen</span>' : '') +
+            myState(o, c) + '</button>';
     }
 
     // ⚠️ Notisinställningen bor i #mkPushHome och lånas in i deltagarvyn. Den måste parkeras FÖRE
@@ -556,6 +559,7 @@
                 '<button type="button" class="btn btn-primary" data-training-panel="' + next.trainingId + '">' +
                 (next.registrationRequired && c.state !== 'signedup' ? 'Anmäl dig' : 'Visa tillfället') + '</button>' +
                 (c.state === 'signedup' ? ' <span class="badge bg-primary-subtle text-primary-emphasis ms-1">Du är anmäld</span>' : '') +
+                (c.loanBooked ? ' <span class="badge bg-info-subtle text-info-emphasis ms-1"><i class="bi bi-safe2 me-1"></i>Lånevapen bokat</span>' : '') +
                 '</div></div>';
         } else if (occ.length) {
             html += '<div class="alert alert-light border">Kursen har inga fler tillfällen inlagda.</div>';
