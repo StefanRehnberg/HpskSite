@@ -89,6 +89,8 @@ namespace HpskSite.Services.Training
         {
             public string State { get; set; } = "none";
             public bool Missed { get; set; }
+            /// <summary>Ett lånevapen är reserverat eller utlämnat till tillfället.</summary>
+            public bool LoanBooked { get; set; }
         }
 
         public class BadgeStatus
@@ -219,12 +221,25 @@ WHERE s.MemberId IN (@0) AND CAST(s.[Date] AS date) IN (@1)
             }
             catch (Exception ex) { _logger.LogDebug(ex, "Incheckningar kunde inte läsas för kursen"); }
 
+            // Lånevapen bokade till kursens tillfällen — EN fråga.
+            var loans = new HashSet<string>();
+            try
+            {
+                foreach (var lr in db.Fetch<AttendanceRow>(@"
+SELECT OccasionId AS EventId, MemberId FROM dbo.FirearmBooking
+WHERE OccasionKind = @0 AND OccasionId IN (@1) AND MemberId IN (@2) AND Status IN (@3)",
+                    HpskSite.Services.Firearms.FirearmOccasionKind.Training, trainingIds, memberIds,
+                    new[] { HpskSite.Services.Firearms.FirearmBookingStatus.Reserverad, HpskSite.Services.Firearms.FirearmBookingStatus.Utlamnad }))
+                    loans.Add($"{lr.MemberId}:{lr.EventId}");
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "Lånevapen kunde inte läsas för kursen"); }
+
             foreach (var t in trainings)
             {
                 var occ = course.Occasions.First(o => o.TrainingId == t.Id);
                 foreach (var m in memberIds)
                 {
-                    var cell = new Cell();
+                    var cell = new Cell { LoanBooked = loans.Contains($"{m}:{t.Id}") };
                     if (rows.TryGetValue($"{m}:{t.Id}", out var r) && r.CancelledAt == null)
                     {
                         cell.State = r.AttendanceStatus switch
@@ -232,7 +247,10 @@ WHERE s.MemberId IN (@0) AND CAST(s.[Date] AS date) IN (@1)
                             ClubEvents.AttendancePresent => "present",
                             ClubEvents.AttendanceAbsent => "absent",
                             ClubEvents.AttendanceExcused => "excused",
-                            _ => r.SignedUpAt != null ? "signedup" : "none"
+                            // ⚠️ När tillfället inte kräver anmälan är raden en LÅNEVAPENBOKNING
+                            // (lånevapenläget skapar raden åt vapenansvarig) — inte en anmälan.
+                            // Den lästes förut som "Du är anmäld" (Stefan 2026-10-06).
+                            _ => r.SignedUpAt != null && occ.RegistrationRequired ? "signedup" : "none"
                         };
                     }
                     if (cell.State is "none" or "signedup"

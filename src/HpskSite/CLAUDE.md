@@ -3810,6 +3810,12 @@ anmälningsfält.
     så märkesläget kunde säga "Precision 3/3" över en tom lista. Kursens serier står under.
     Sidan sätter `ViewBag.Title = "Min kurs"`, och Masters Hem-länk är aktiv bara när ADRESSEN
     är rotens — routade sidor renderas med startsidan som modell. Svit 71/71.
+  - ⚠️⚠️ **En lånevapenbokning är INTE en anmälan.** Lånevapenläget skapar en rad i
+    `ClubEventParticipant` åt vapenansvarig; när tillfället inte kräver anmälan (`occ.RegistrationRequired`
+    = false) ger raden därför `state = none`, och `Cell.LoanBooked` (ur `FirearmBooking`, Reserverad/
+    Utlamnad, EN fråga) bär lånet. Förut stod "Du är anmäld" för den som bara bokat ett vapen.
+    Kursväljaren säger klubb och roll per kurs (`MyCourses` bär `clubName`). Svit 73/73 (A/B: utan
+    villkoret → 1 röd).
 - **⚠️⚠️ Min kurs har EKONOMINS skal, Admin → Träningsgrupper har TRÄNINGARS form** (Stefans val
   2026-10-06, efter "avviker från hur vi normalt bygger sidor"). Rör du någon av dem: följ förlagan.
   - `/min-kurs`: `container-fluid`, vänsterkort (`.mk-rail`, samma mått som `.ek-page .rail`) med

@@ -69,7 +69,7 @@ namespace HpskSite.Controllers
             // role: "trainer" (leder kursen), "manager" (klubbens kurs, via klubbadmin/skjutledare)
             // eller "participant" (går kursen — får deltagarens läsvy, UX-omgången 2026-10-06).
             var list = _courses.CoursesFor(me, clubs)
-                .Select(c => new { c.GroupId, c.Name, c.ClubId, c.IsTrainer, role = c.IsTrainer ? "trainer" : "manager" })
+                .Select(c => new { c.GroupId, c.Name, c.ClubId, clubName = ClubNameOf(c.ClubId), c.IsTrainer, role = c.IsTrainer ? "trainer" : "manager" })
                 .ToList();
             foreach (var p in _courses.CoursesOfMember(me).Where(p => p.Role == TrainingCourseService.RoleParticipant))
             {
@@ -77,7 +77,7 @@ namespace HpskSite.Controllers
                 // deltagarens vy är då inte vad hen letar efter i första hand, men den ska finnas.
                 if (list.Any(x => x.GroupId == p.GroupId && x.role != "manager")) continue;
                 list.RemoveAll(x => x.GroupId == p.GroupId);
-                list.Add(new { p.GroupId, p.Name, p.ClubId, IsTrainer = false, role = "participant" });
+                list.Add(new { p.GroupId, p.Name, p.ClubId, clubName = ClubNameOf(p.ClubId), IsTrainer = false, role = "participant" });
             }
             return Json(new { success = true, courses = list });
         }
@@ -115,9 +115,15 @@ namespace HpskSite.Controllers
             return new
             {
                 id = clubId,
-                name = node == null ? "" : (node.Value<string>("clubName") is { Length: > 0 } n ? n : node.Name),
+                name = ClubNameOf(clubId),
                 url = node?.Url() ?? ""
             };
+        }
+
+        private string ClubNameOf(int clubId)
+        {
+            var node = clubId > 0 ? UmbracoContext.Content?.GetById(clubId) : null;
+            return node == null ? "" : (node.Value<string>("clubName") is { Length: > 0 } n ? n : node.Name);
         }
 
         /// <summary>
