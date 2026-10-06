@@ -55,6 +55,7 @@
     .mk-today { border-left: 4px solid var(--bs-success); }
     .mk-person { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem .75rem; margin-bottom: .375rem; background: var(--bs-body-bg); }
     .mk-person .mk-name { font-weight: 600; min-width: 0; }
+    .mk-badge-img { vertical-align: middle; }
     .mk-person .mk-sub { min-width: 0; }
     .mk-person .btn-link { text-decoration: none; }
     .mk-att .btn { min-width: 3.6rem; padding-left: .5rem; padding-right: .5rem; }
@@ -575,12 +576,14 @@
         }
 
         var b = v.badge || {};
-        html += '<div class="card mb-3"><div class="card-body py-2">' +
+        html += '<div class="card mb-3"><div class="card-body py-2 d-flex align-items-center gap-3">' +
+            (badgeImg(b, 64) ? '<div class="flex-shrink-0">' + badgeImg(b, 64) + '</div>' : '') +
+            '<div>' +
             '<div class="small text-uppercase text-muted fw-semibold">Mitt märkesläge</div>' +
             '<div class="' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + esc(b.text || 'Inga godkända serier än.') +
             (b.readyForPistolskyttekort ? ' · klar för Pistolskyttekortet' : '') + '</div>' +
             '<div class="small text-muted">Bronsmärket krävs för Pistolskyttekortet. Din instruktör registrerar serierna på banan.</div>' +
-            '</div></div>';
+            '</div></div></div>';
 
         var upcoming = occ.filter(function (o) { return !o.isPast; });
         var past = occ.filter(function (o) { return o.isPast; }).reverse();
@@ -703,6 +706,17 @@
 
     function trainerNames() { return course.trainers.map(function (t) { return t.name; }).join(', '); }
 
+    // Pistolskyttemärket i den valör deltagaren HÅLLER (verifierat märke, heldLevel). Ingen bild
+    // före bronsmärket — bilden visar vad hen har tagit, inte vad hen siktar på.
+    var BADGE_IMG = { Brons: 'PistolskytteB.png', Silver: 'PistolskytteS.png', Guld: 'Pistolskytte.png' };
+    function badgeImg(b, size) {
+        var f = b && BADGE_IMG[b.heldLevel];
+        if (!f) return '';
+        var t = 'Pistolskyttemärket i ' + b.heldLevel.toLowerCase() + ' — klar för Pistolskyttekortet';
+        return '<img src="/images/marken/' + f + '" alt="' + esc(t) + '" title="' + esc(t) + '" class="mk-badge-img" ' +
+            'style="height:' + size + 'px;width:auto" onerror="this.remove()">';
+    }
+
     // Deltagare: en rad per deltagare med närvaro, missade obligatoriska och märkesläget.
     function participantsView() {
         var held = course.occasions.filter(function (o) { return !o.isCancelled && (o.isPast || o.isToday); });
@@ -716,7 +730,7 @@
             var here = held.filter(function (o) { var s = cell(p.memberId, o.trainingId).state; return s === 'present' || s === 'checkedin'; }).length;
             var missed = course.occasions.filter(function (o) { return cell(p.memberId, o.trainingId).missed; });
             var b = (course.badges || {})[p.memberId] || {};
-            h += '<tr><td class="fw-semibold">' + esc(p.name) + '</td>' +
+            h += '<tr><td class="fw-semibold text-nowrap">' + badgeImg(b, 28) + (badgeImg(b, 28) ? ' ' : '') + esc(p.name) + '</td>' +
                 '<td class="text-center text-nowrap">' + here + ' av ' + held.length + '</td>' +
                 '<td>' + (missed.length ? '<span class="mk-missed">' + missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ') + '</span>' : '<span class="text-muted">–</span>') + '</td>' +
                 '<td class="small ' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + esc(b.text || '') + (b.readyForPistolskyttekort ? ' · klar för Pistolskyttekortet' : '') + '</td></tr>';
@@ -794,7 +808,7 @@
         // serie/anteckning under. Elva deltagare gav en 3 000 px lång sida på telefonen.
         return '<div class="mk-person" data-mk-person="' + p.memberId + '">' +
             '<div class="d-flex align-items-center gap-2">' +
-            '<div class="mk-name me-auto text-truncate">' + esc(p.name) +
+            '<div class="mk-name me-auto text-truncate">' + badgeImg(b, 24) + (badgeImg(b, 24) ? ' ' : '') + esc(p.name) +
             (c.state === 'checkedin' ? ' <span class="badge bg-info-subtle text-info-emphasis fw-normal">QR</span>' : '') + '</div>' +
             '<div class="btn-group mk-att flex-shrink-0" role="group" aria-label="Närvaro">' +
             btn('Present', 'Här', isHere) + btn('Absent', 'Ej här', isAbsent) + btn('Excused', 'Giltig', isExcused) +
@@ -803,8 +817,13 @@
             // med flex-wrap hamnade "Anteckning" ensam på en tredje rad på telefonen.
             '<div class="d-flex align-items-start gap-1 mt-1">' +
             '<div class="mk-sub flex-grow-1 small">' +
-            '<span class="mk-badge ' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + esc(b.text || '') +
-            (b.readyForPistolskyttekort ? ' · klar för Pistolskyttekortet' : '') + '</span>' +
+            // Med märkesbilden bredvid namnet är "Bronsmärket klart · " en upprepning som gjorde raden
+            // en rad högre på telefonen — bilden säger det redan.
+            '<span class="mk-badge ' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' +
+            // Likaså "klar för Pistolskyttekortet": det är exakt samma sak som att hålla bronsmärket,
+            // så med bilden står det i bildens titel i stället.
+            esc(badgeImg(b, 24) ? (b.text || '').replace(/^(Brons|Silver)märket klart · /, '') : (b.text || '')) +
+            (b.readyForPistolskyttekort && !badgeImg(b, 24) ? ' · klar för Pistolskyttekortet' : '') + '</span>' +
             // Fler än två datum gör raden hög — då ett antal, och datumen i titeln (och i översikten).
             (missed.length ? '<span class="mk-missed" title="' + esc(missed.map(function (o) { return dayLabel(o.date); }).join(', ')) + '"> · <i class="bi bi-exclamation-triangle-fill"></i> missade ' +
                 (missed.length <= 2 ? missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ') : missed.length + ' obligatoriska') + '</span>' : '') +
