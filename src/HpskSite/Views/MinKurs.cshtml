@@ -101,12 +101,10 @@
             <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                 <i class="bi bi-sliders me-1"></i>Åtgärder
             </button>
-            <ul class="dropdown-menu dropdown-menu-end" style="min-width:240px">
-                <li><button class="dropdown-item" type="button" data-mk="members"><i class="bi bi-people me-2"></i>Kursens deltagare…</button></li>
-                <li><button class="dropdown-item" type="button" data-mk="link"><i class="bi bi-link-45deg me-2"></i>Koppla träningar till kursen…</button></li>
-                <li id="mkLoanItem" class="d-none"><button class="dropdown-item" type="button" data-mk="loan"><i class="bi bi-safe me-2"></i>Lånevapen till tillfället…</button></li>
-                <li><button class="dropdown-item" type="button" data-mk="defaults"><i class="bi bi-gear me-2"></i>Kursens standard…</button></li>
-            </ul>
+            @* ⚠️ Menyn byggs PER DEL (setActions) och bär bara HANDLINGAR för delen man står på —
+               aldrig en plats som rälsen redan har (Stefan 2026-10-06: "Deltagare" och "Kursens
+               deltagare…", "Inställningar" och "Kursens standard…" på två ställen). *@
+            <ul class="dropdown-menu dropdown-menu-end" style="min-width:240px" id="mkActionsList"></ul>
         </div>
     </div>
     <div id="mkMsg"></div>
@@ -267,6 +265,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
+                <p class="small text-muted">Gäller bara det här tillfället och bara kursens deltagare. Kursens krav för alla tillfällen ställs in under <strong>Inställningar</strong>.</p>
                 <div class="mb-3">
                     <label class="form-label" for="mkOccAtt">Närvaro för kursens deltagare</label>
                     <select class="form-select" id="mkOccAtt">
@@ -284,14 +283,13 @@
                     </select>
                 </div>
                 <div class="mb-1">
-                    <label class="form-label" for="mkOccNote">Vad tillfället är i kursen</label>
+                    <label class="form-label" for="mkOccNote">Rubrik i kursen</label>
                     <input class="form-control" id="mkOccNote" maxlength="500" placeholder="Teori 1: vapenkunskap och säkerhet" autocomplete="off">
                     <div class="form-text">Visas i stället för träningens namn, i dagens kort och i kursöversikten.</div>
                 </div>
                 <div id="mkOccErr" class="text-danger small mt-2"></div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-outline-danger me-auto" id="mkOccUnlink">Ta bort från kursen</button>
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-primary" id="mkOccSave">Spara</button>
             </div>
@@ -304,18 +302,17 @@
     <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h2 class="modal-title h5">Kursens deltagare</h2>
+                <h2 class="modal-title h5">Lägg till deltagare</h2>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
             </div>
             <div class="modal-body">
-                <label class="form-label" for="mkMemberSearch">Lägg till en medlem i klubben</label>
+                <label class="form-label" for="mkMemberSearch">Sök en medlem i klubben</label>
                 <input class="form-control mb-2" id="mkMemberSearch" autocomplete="off" placeholder="Skriv namn eller e-post">
                 <div id="mkMemberHits" class="list-group mb-3"></div>
                 <div class="small text-muted mb-2">Hittar du inte personen? Är hen nyregistrerad måste klubben först godkänna medlemskapet.</div>
                 <div id="mkMembersMsg"></div>
-                <h3 class="h6 mt-3" id="mkMembersCount">Deltagare</h3>
-                <div id="mkMembersList"></div>
-                <div class="small text-muted mt-2" id="mkTrainersLine"></div>
+                @* Listan över deltagarna står under Deltagare — här bara antalet, så dialogen inte blir en andra deltagarlista. *@
+                <div class="small text-muted mt-2" id="mkMembersCount"></div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
@@ -340,33 +337,6 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
                 <button type="button" class="btn btn-primary" id="mkLoanSave">Boka för valda</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Kursens standard -->
-<div class="modal fade" id="mkDefModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header py-2">
-                <h2 class="modal-title h5">Kursens standard</h2>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
-            </div>
-            <div class="modal-body">
-                <p class="small text-muted">Gäller alla kopplade tillfällen som inte har en egen inställning. Kraven gäller bara kursens deltagare. En missad obligatorisk dag visas, men spärrar ingenting.</p>
-                <div class="mb-3">
-                    <label class="form-label" for="mkDefAtt">Närvaro</label>
-                    <select class="form-select" id="mkDefAtt"><option value="Optional">Valfri</option><option value="Mandatory">Obligatorisk</option></select>
-                </div>
-                <div class="mb-1">
-                    <label class="form-label" for="mkDefReg">Anmälan</label>
-                    <select class="form-select" id="mkDefReg"><option value="NotRequired">Krävs inte</option><option value="Required">Krävs</option></select>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
-                <button type="button" class="btn btn-primary" id="mkDefSave">Spara</button>
             </div>
         </div>
     </div>
@@ -485,7 +455,6 @@
         return getJson('/umbraco/surface/TrainingCourse/Get?groupId=' + id).then(function (d) {
             if (!d.success) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Kursen kunde inte läsas.') + '</div>'; return; }
             course = d.course; notes = d.notes || []; club = d.club || null;
-            document.getElementById('mkActions').classList.remove('d-none');
             render();
         }).catch(function (e) { document.getElementById('mkBody').innerHTML = '<div class="alert alert-danger">' + esc(e.message) + '</div>'; });
     }
@@ -650,12 +619,66 @@
         }
     }
 
-    // Dagens tillfälle, annars nästa, annars det senaste.
+    // Upprop är sidan för ETT tillfälle: det valda (Tillfällen → Öppna tillfället, Översiktens rubrik,
+    // väljaren), annars dagens, annars nästa, annars det senaste. Valet står i adressen (#vy=idag&t=…).
+    var selectedOcc = 0;
+    (function () { var m = (location.hash || '').match(/[&#]t=(\d+)/); if (m) selectedOcc = parseInt(m[1], 10); })();
     function pickCurrent() {
+        if (selectedOcc) {
+            var sel = course.occasions.find(function (o) { return o.trainingId === selectedOcc; });
+            if (sel) return sel;
+        }
         var occ = course.occasions.filter(function (o) { return !o.isCancelled; });
         return occ.find(function (o) { return o.isToday; })
             || occ.find(function (o) { return !o.isPast; })
             || occ[occ.length - 1] || null;
+    }
+    function gotoOcc(trainingId) {
+        if (!trainingId) return;
+        selectedOcc = trainingId;
+        var h = '#vy=idag&t=' + trainingId;
+        if (location.hash === h) { view = 'idag'; render(); return; }
+        if (view === 'idag') { history.replaceState(null, '', h); render(); }
+        else location.hash = h;   // hashchange ritar om och gör en historikpost
+        window.scrollTo({ top: 0 });
+    }
+    function stepOcc(dir) {
+        var list = course.occasions;
+        var i = list.findIndex(function (o) { return current && o.trainingId === current.trainingId; });
+        var n = list[i + dir];
+        if (n) gotoOcc(n.trainingId);
+    }
+    // Väljaren överst i Upprop: föregående · datum · nästa.
+    function occNavigator() {
+        var list = course.occasions;
+        var i = list.findIndex(function (o) { return o.trainingId === current.trainingId; });
+        return '<div class="d-flex align-items-center gap-2 mb-3 mk-occnav">' +
+            '<button type="button" class="btn btn-sm btn-outline-secondary" data-mk="occ-step" data-dir="-1"' + (i <= 0 ? ' disabled' : '') + ' aria-label="Föregående tillfälle"><i class="bi bi-chevron-left"></i></button>' +
+            // ⚠️ min-width:0 + flex: en lång tillfällesrubrik gjorde annars sidan bredare än telefonen.
+            '<select class="form-select form-select-sm flex-grow-1" style="min-width:0;max-width:30rem" id="mkOccPick" aria-label="Välj tillfälle">' +
+            list.map(function (o) {
+                return '<option value="' + o.trainingId + '"' + (o.trainingId === current.trainingId ? ' selected' : '') + '>' +
+                    esc(dayLabel(o.date, true) + ' · ' + (o.note || o.name)) + (o.isToday ? ' (i dag)' : '') + (o.isCancelled ? ' (inställt)' : '') + '</option>';
+            }).join('') + '</select>' +
+            '<button type="button" class="btn btn-sm btn-outline-secondary" data-mk="occ-step" data-dir="1"' + (i >= list.length - 1 ? ' disabled' : '') + ' aria-label="Nästa tillfälle"><i class="bi bi-chevron-right"></i></button>' +
+            '</div>';
+    }
+
+    // Sidans blå Åtgärder: bara HANDLINGAR för delen man står på. Ingen handling → ingen knapp.
+    function setActions(items) {
+        document.getElementById('mkActionsList').innerHTML = items.join('');
+        document.getElementById('mkActions').classList.toggle('d-none', !items.length);
+    }
+    function actionsFor(v) {
+        if (v === 'idag' && current) {
+            var a = [];
+            if (!current.isPast) a.push(menuItem('data-mk="loan"', 'bi-safe', 'Lånevapen till tillfället…'));
+            a.push(menuItem('data-mk="occ" data-training="' + current.trainingId + '"', 'bi-pencil', 'Ändra tillfället i kursen…'));
+            return a;
+        }
+        if (v === 'deltagare') return [menuItem('data-mk="members"', 'bi-person-plus', 'Lägg till deltagare…')];
+        if (v === 'tillfallen') return [menuItem('data-mk="link"', 'bi-link-45deg', 'Koppla träningar till kursen…')];
+        return [];
     }
 
     function render() {
@@ -663,15 +686,15 @@
         var sub = course.name + (course.trainers.length ? ' · instruktörer ' + course.trainers.map(function (t) { return t.name; }).join(', ') : '');
         document.getElementById('mkCourseSub').textContent = sub;
         current = pickCurrent();
-        // Lånevapen bokas för dagens eller ett kommande tillfälle — aldrig i efterhand.
-        document.getElementById('mkLoanItem').classList.toggle('d-none', !current || current.isPast);
         var html = '';
 
         if (!course.occasions.length) {
-            html += '<div class="alert alert-info">Inga träningar är kopplade till kursen än. Välj <strong>Åtgärder → Koppla träningar till kursen…</strong></div>';
+            html += '<div class="alert alert-info">Inga träningar är kopplade till kursen än. Gå till <strong>Tillfällen</strong> och välj <strong>Åtgärder → Koppla träningar till kursen…</strong></div>';
         } else if (current) {
+            html += occNavigator();
             var here = course.participants.filter(function (p) { var s = cell(p.memberId, current.trainingId).state; return s === 'present' || s === 'checkedin'; }).length;
-            var when = (current.isToday ? 'I dag' : current.isPast ? 'Senast' : 'Nästa') + ' · ' + dayLabel(current.date, true) + (current.startTime ? ' ' + current.startTime : '');
+            var when = (current.isToday ? 'I dag' : current.isPast ? 'Genomfört' : 'Kommande') + ' · ' + dayLabel(current.date, true) + (current.startTime ? ' ' + current.startTime : '') +
+                (current.isCancelled ? ' · inställt' : '');
             var future = !current.isToday && !current.isPast;
             var loansNow = course.participants.filter(function (p) { return cell(p.memberId, current.trainingId).loanBooked; }).length;
             // Samma uppgifter som deltagarens nästa-kort: vad det är för träning, var, vem.
@@ -706,6 +729,7 @@
         }
 
         drawShell(course.name, { deltagare: course.participants.length, tillfallen: course.occasions.length });
+        setActions(actionsFor(view));
         var ov = '';
         if (view === 'deltagare') html = participantsView();
         else if (view === 'tillfallen') html = occasionsView();
@@ -771,6 +795,10 @@
     function menuItem(attrs, icon, label) {
         return '<li><button type="button" class="dropdown-item" ' + attrs + '><i class="bi ' + icon + ' me-2"></i>' + label + '</button></li>';
     }
+    // Destruktivt sist, i rött, med utskriven text (husregeln för radmenyer).
+    function dangerItem(attrs, icon, label) {
+        return '<li><button type="button" class="dropdown-item text-danger" ' + attrs + '><i class="bi ' + icon + ' me-2"></i>' + label + '</button></li>';
+    }
 
     // Deltagare: en rad per deltagare med närvaro, missade obligatoriska och märkesläget.
     function participantsView() {
@@ -779,9 +807,8 @@
         // Åtgärder och i varje rads grå Åtgärder — ingen extra knapp bredvid den blå.
         var h = '<p class="text-muted small mb-2">' + course.participants.length + ' deltagare · ' +
             (course.trainers.length ? 'instruktör' + (course.trainers.length > 1 ? 'er ' : ' ') + esc(trainerNames()) : 'ingen instruktör utsedd') +
-            '. Lägg till eller ta bort deltagare under <strong>Åtgärder → Kursens deltagare…</strong></p>';
+            '. Närvaro, serier och anteckningar för ett tillfälle tas under <strong>Upprop</strong>.</p>';
         if (!course.participants.length) return h + '<div class="alert alert-info">Kursen har inga deltagare än.</div>';
-        var canEnter = current && (current.isToday || current.isPast);
         // ⚠️ På telefon står närvaro, missade och märkesläge under namnet — som kolumner rullade
         // märkesläget och radens Åtgärder ut ur bild.
         h += '<div class="table-responsive"><table class="table align-middle"><thead><tr><th>Namn</th><th class="text-center d-none d-md-table-cell">Närvaro</th><th class="d-none d-md-table-cell">Missade obligatoriska</th><th class="d-none d-md-table-cell">Märkesläge</th><th class="text-end"></th></tr></thead><tbody>';
@@ -789,9 +816,11 @@
             var here = held.filter(function (o) { var s = cell(p.memberId, o.trainingId).state; return s === 'present' || s === 'checkedin'; }).length;
             var missed = course.occasions.filter(function (o) { return cell(p.memberId, o.trainingId).missed; });
             var b = (course.badges || {})[p.memberId] || {};
-            var items = [menuItem('data-mk="badge-series" data-member="' + p.memberId + '"', 'bi-award', 'Märkesserier i år…')];
-            if (canEnter) items.push(menuItem('data-mk="series" data-member="' + p.memberId + '"', 'bi-bullseye', 'Registrera serie…'));
-            if (current) items.push(menuItem('data-mk="note" data-member="' + p.memberId + '"', 'bi-pencil', 'Skriv anteckning…'));
+            // Bara det som gäller deltagaren i hela kursen. Serie och anteckning hör till ett tillfälle
+            // och görs under Upprop — här vore de "för vilket tillfälle?".
+            var items = [menuItem('data-mk="badge-series" data-member="' + p.memberId + '"', 'bi-award', 'Märkesserier i år…'),
+                         '<li><hr class="dropdown-divider"></li>',
+                         dangerItem('data-mk="rm-member" data-member="' + p.memberId + '"', 'bi-person-dash', 'Ta bort ur kursen…')];
             var missedTxt = missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ');
             var badgeTxt = esc(b.text || '') + (b.readyForPistolskyttekort ? ' · klar för Pistolskyttekortet' : '');
             h += '<tr><td><div class="fw-semibold text-nowrap">' + badgeImg(b, 28) + (badgeImg(b, 28) ? ' ' : '') + esc(p.name) + '</div>' +
@@ -812,15 +841,17 @@
     function occasionsView() {
         // Förlagan (Träningar): förklarande rad, filter + antal ovanför listan, grå Åtgärder per rad.
         var h = '<p class="text-muted small mb-2">Kursens kopplade träningar. ★ = obligatoriskt för kursen. ' +
-            'Koppla fler under <strong>Åtgärder → Koppla träningar till kursen…</strong></p>';
+            'Öppna ett tillfälle för upprop, serier och lånevapen.</p>';
         if (!course.occasions.length) return h + '<div class="alert alert-info">Inga träningar är kopplade till kursen än.</div>';
         var done = course.occasions.filter(function (o) { return o.isPast; }).length;
-        var shown = course.occasions.filter(function (o) { return showDone || !o.isPast; });
+        // Är kursen slut finns inget kommande att visa — då visas alla direkt, utan växel.
+        var allDone = done === course.occasions.length;
+        var shown = course.occasions.filter(function (o) { return showDone || allDone || !o.isPast; });
         h += '<div class="d-flex align-items-center flex-wrap gap-3 mb-2">' +
-            '<div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" id="mkShowDone"' + (showDone ? ' checked' : '') + '>' +
-            '<label class="form-check-label small" for="mkShowDone">Visa genomförda (' + done + ')</label></div>' +
+            (allDone ? '<span class="small text-muted">Alla kursens tillfällen är genomförda.</span>'
+                : '<div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" id="mkShowDone"' + (showDone ? ' checked' : '') + '>' +
+                  '<label class="form-check-label small" for="mkShowDone">Visa genomförda (' + done + ')</label></div>') +
             '<span class="text-muted small ms-auto">' + shown.length + ' av ' + course.occasions.length + ' tillfällen</span></div>';
-        if (!shown.length) return h + '<div class="alert alert-light border">Alla kursens tillfällen är genomförda. Slå på <em>Visa genomförda</em> för att se dem.</div>';
         // ⚠️ På telefon döljs Tid, Krav och Var där och står i stället under namnet — med alla sex
         // kolumner rullade radens Åtgärder ut ur bild.
         var md = ' class="d-none d-md-table-cell"';
@@ -831,8 +862,13 @@
             var req = (o.mandatoryForCourse ? '<span class="badge bg-warning text-dark me-1">★ Obligatoriskt</span>' : '') +
                 (o.registrationRequired ? '<span class="badge bg-secondary-subtle text-secondary-emphasis">Anmälan krävs</span>' : '');
             var facts = occFacts(o);
-            var items = [menuItem('data-training-panel="' + o.trainingId + '"', 'bi-box-arrow-up-right', 'Visa tillfället'),
-                         menuItem('data-mk="occ" data-training="' + o.trainingId + '"', 'bi-pencil', 'Ändra kursens krav och namn…')];
+            // "Öppna tillfället" leder till Upprop för just det tillfället — kursens sida för ett
+            // tillfälle. Träningspanelen (med träningens allmänna deltagarlista) erbjuds inte här: den
+            // gäller hela träningen, inte kursen, och var en omväg till en annan sida.
+            var items = [menuItem('data-mk="goto-occ" data-training="' + o.trainingId + '"', 'bi-box-arrow-in-right', 'Öppna tillfället'),
+                         menuItem('data-mk="occ" data-training="' + o.trainingId + '"', 'bi-pencil', 'Ändra tillfället i kursen…'),
+                         '<li><hr class="dropdown-divider"></li>',
+                         dangerItem('data-mk="unlink-occ" data-training="' + o.trainingId + '"', 'bi-x-circle', 'Ta bort ur kursen…')];
             h += '<tr' + (o.isPast || o.isCancelled ? ' class="text-muted"' : '') + '>' +
                 '<td class="text-nowrap d-none d-md-table-cell">' + esc(dayLabel(o.date, true)) + (o.isToday ? ' <span class="badge bg-success">I dag</span>' : '') + '</td>' +
                 '<td class="text-nowrap d-none d-md-table-cell">' + (o.startTime ? esc(o.startTime + (o.endTime ? '–' + o.endTime : '')) : '<span class="text-muted">–</span>') + '</td>' +
@@ -853,14 +889,24 @@
 
     // Inställningar: kursens standardkrav och vem som leder kursen.
     function settingsView() {
-        var att = course.defaultAttendance === 'Mandatory' ? 'Obligatorisk' : 'Valfri';
-        var reg = course.defaultRegistration === 'Required' ? 'Krävs' : 'Krävs inte';
+        // Redigeras här, direkt — Inställningar ÄR platsen för kursens krav (inget menyval, ingen dialog).
+        var sel = function (id, cur, opts) {
+            return '<select class="form-select" id="' + id + '">' + opts.map(function (o) {
+                return '<option value="' + o[0] + '"' + (o[0] === cur ? ' selected' : '') + '>' + o[1] + '</option>';
+            }).join('') + '</select>';
+        };
         return '<div class="card mb-3"><div class="card-body">' +
-            '<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">' +
-            '<div><h2 class="h6 mb-1">Kursens standard</h2>' +
-            '<div>Närvaro: <strong>' + att + '</strong> · Anmälan: <strong>' + reg + '</strong></div>' +
-            '<div class="small text-muted">Gäller alla kopplade tillfällen som inte har en egen inställning, och bara kursens deltagare.</div></div>' +
-            '<button type="button" class="btn btn-sm btn-outline-primary" data-mk="defaults">Ändra…</button></div></div></div>' +
+            '<h2 class="h6 mb-1">Kursens krav</h2>' +
+            '<p class="small text-muted">Gäller alla kursens tillfällen som inte har en egen inställning, och bara kursens deltagare. ' +
+            'Ett enskilt tillfälle ändras under <strong>Tillfällen</strong>. En missad obligatorisk dag visas, men spärrar ingenting.</p>' +
+            '<div class="row g-3 mb-3" style="max-width:520px">' +
+            '<div class="col-sm-6"><label class="form-label" for="mkSetAtt">Närvaro</label>' +
+            sel('mkSetAtt', course.defaultAttendance || 'Optional', [['Optional', 'Valfri'], ['Mandatory', 'Obligatorisk']]) + '</div>' +
+            '<div class="col-sm-6"><label class="form-label" for="mkSetReg">Anmälan</label>' +
+            sel('mkSetReg', course.defaultRegistration || 'NotRequired', [['NotRequired', 'Krävs inte'], ['Required', 'Krävs']]) + '</div>' +
+            '</div>' +
+            '<button type="button" class="btn btn-primary" data-mk="save-defaults">Spara</button>' +
+            '</div></div>' +
             '<div class="card mb-3"><div class="card-body">' +
             '<h2 class="h6 mb-1">Instruktörer</h2>' +
             '<div>' + (course.trainers.length ? esc(trainerNames()) : '<span class="text-muted">Ingen utsedd</span>') + '</div>' +
@@ -932,7 +978,7 @@
         if (!course.occasions.length) return '';
         var head = course.occasions.map(function (o) {
             var label = o.note || o.name;
-            return '<th data-occ="' + o.trainingId + '"><button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" data-mk="occ" data-training="' + o.trainingId + '" title="' + esc(label) + ' — klicka för tillfällets krav">' +
+            return '<th data-occ="' + o.trainingId + '"><button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" data-mk="goto-occ" data-training="' + o.trainingId + '" title="' + esc(label) + ' — öppna tillfället">' +
                 esc(dayLabel(o.date)) + (o.mandatoryForCourse ? ' ★' : '') +
                 '<span class="mk-occname">' + esc(label) + '</span></button>' +
                 (o.isCancelled ? '<div class="small text-danger">inställd</div>' : '') + '</th>';
@@ -952,7 +998,7 @@
             '<div class="small text-muted mb-1 d-none" id="mkScrollHint"><i class="bi bi-arrow-left-right me-1"></i>Rulla tabellen i sidled för fler tillfällen.</div>' +
             '<div class="table-responsive" id="mkOverviewScroll"><table class="table table-sm mk-grid"><thead><tr><th>Deltagare</th>' + head + '<th>Märkesläge</th></tr></thead><tbody>' +
             rows + '</tbody></table></div>' +
-            '<p class="small text-muted">★ = obligatoriskt för kursen. QR = incheckad på banan inom en timme kring tillfället. En missad obligatorisk dag visas, men spärrar ingenting. Klicka på ett tillfälle för att ändra kursens krav och namn.</p>';
+            '<p class="small text-muted">★ = obligatoriskt för kursen. QR = incheckad på banan inom en timme kring tillfället. En missad obligatorisk dag visas, men spärrar ingenting. Klicka på ett datum för att öppna tillfället.</p>';
     }
 
     // ── Närvaro ──
@@ -1127,7 +1173,7 @@
         var o = course.occasions.find(function (x) { return x.trainingId === trainingId; });
         if (!o) return;
         occId = trainingId;
-        document.getElementById('mkOccTitle').textContent = o.name + ', ' + dayLabel(o.date, true);
+        document.getElementById('mkOccTitle').textContent = 'Tillfället ' + dayLabel(o.date, true) + ' i kursen';
         document.getElementById('mkOccAtt').value = o.attendanceOverride || '';
         document.getElementById('mkOccReg').value = o.registrationOverride || '';
         document.getElementById('mkOccNote').value = o.note || '';
@@ -1146,24 +1192,20 @@
             msg(d.message); loadCourse(groupId);
         });
     }
-    function unlinkOcc() {
-        if (!confirm('Ta bort tillfället från kursen? Träningen finns kvar som vanlig klubbträning, och närvaron som redan är registrerad står kvar.')) return;
-        post('/umbraco/surface/TrainingCourse/Unlink', { groupId: groupId, trainingId: occId }).then(function (d) {
-            bootstrap.Modal.getInstance(document.getElementById('mkOccModal')).hide();
+    // Från tillfällets rad under Tillfällen.
+    function unlinkOcc(trainingId) {
+        var o = course.occasions.find(function (x) { return x.trainingId === trainingId; });
+        if (!confirm('Ta bort tillfället ' + (o ? dayLabel(o.date, true) : '') + ' ur kursen? Träningen finns kvar som vanlig klubbträning, och närvaron som redan är registrerad står kvar.')) return;
+        post('/umbraco/surface/TrainingCourse/Unlink', { groupId: groupId, trainingId: trainingId }).then(function (d) {
             msg(d.message, d.success ? 'success' : 'warning'); loadCourse(groupId);
         });
     }
 
-    function openDefaults() {
-        document.getElementById('mkDefAtt').value = course.defaultAttendance || 'Optional';
-        document.getElementById('mkDefReg').value = course.defaultRegistration || 'NotRequired';
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('mkDefModal')).show();
-    }
+    // Kursens standard redigeras direkt under Inställningar — ingen dialog, inget menyval.
     function saveDefaults() {
         post('/umbraco/surface/TrainingCourse/SetDefaults', {
-            groupId: groupId, attendance: document.getElementById('mkDefAtt').value, registration: document.getElementById('mkDefReg').value
+            groupId: groupId, attendance: document.getElementById('mkSetAtt').value, registration: document.getElementById('mkSetReg').value
         }).then(function (d) {
-            bootstrap.Modal.getInstance(document.getElementById('mkDefModal')).hide();
             msg(d.message, d.success ? 'success' : 'warning'); loadCourse(groupId);
         });
     }
@@ -1183,14 +1225,7 @@
         });
     }
     function renderMembers() {
-        var list = course.participants;
-        document.getElementById('mkMembersCount').textContent = 'Deltagare (' + list.length + ')';
-        document.getElementById('mkMembersList').innerHTML = list.length ? list.map(function (p) {
-            return '<div class="d-flex align-items-center border-bottom py-1"><span class="me-auto">' + esc(p.name) + '</span>' +
-                '<button type="button" class="btn btn-sm btn-outline-danger" data-mk="rm-member" data-member="' + p.memberId + '">Ta bort</button></div>';
-        }).join('') : '<div class="text-muted small">Inga deltagare än.</div>';
-        document.getElementById('mkTrainersLine').textContent = course.trainers.length
-            ? 'Instruktör' + (course.trainers.length > 1 ? 'er' : '') + ': ' + course.trainers.map(function (t) { return t.name; }).join(', ') + ' (utses av klubben)' : '';
+        document.getElementById('mkMembersCount').textContent = 'Kursen har ' + course.participants.length + ' deltagare.';
     }
     function openMembers() {
         document.getElementById('mkMemberSearch').value = '';
@@ -1233,12 +1268,13 @@
             loadCourse(groupId).then(renderMembers);
         });
     }
+    // Ta bort ur kursen görs från deltagarens rad under Deltagare.
     function removeMember(id) {
         var p = course.participants.find(function (x) { return x.memberId === id; });
         if (!confirm('Ta bort ' + (p ? p.name : 'deltagaren') + ' ur kursen? Närvaro och serier som redan registrerats finns kvar.')) return;
         postForm('/umbraco/surface/TrainingGroup/RemoveTrainingGroupMember', { trainingGroupId: groupId, memberId: id }).then(function (d) {
-            membersMsg(d);
-            if (d.success) loadCourse(groupId).then(renderMembers);
+            if (!d.success) { msg(d.message || 'Kunde inte ta bort deltagaren.', 'warning'); return; }
+            loadCourse(groupId);
         });
     }
 
@@ -1312,16 +1348,20 @@
             var from = document.getElementById('mkLinkFrom').value, to = document.getElementById('mkLinkTo').value;
             markLink(function (t) { return new Date(t.date + 'T12:00:00').getDay() === wd && (!from || t.date >= from) && (!to || t.date <= to); });
         }
-        else if (act === 'defaults') openDefaults();
+        else if (act === 'save-defaults') saveDefaults();
         else if (act === 'loan') openLoan();
         else if (act === 'members') openMembers();
         else if (act === 'add-member') addMember(member);
         else if (act === 'rm-member') removeMember(member);
         else if (act === 'occ') openOcc(parseInt(b.getAttribute('data-training'), 10));
         else if (act === 'badge-series') openBadgeSeries(member);
+        else if (act === 'unlink-occ') unlinkOcc(parseInt(b.getAttribute('data-training'), 10));
+        else if (act === 'goto-occ') gotoOcc(parseInt(b.getAttribute('data-training'), 10));
+        else if (act === 'occ-step') stepOcc(parseInt(b.getAttribute('data-dir'), 10));
     });
     document.addEventListener('change', function (e) {
         if (e.target && e.target.id === 'mkShowDone') { showDone = e.target.checked; render(); }
+        if (e.target && e.target.id === 'mkOccPick') gotoOcc(parseInt(e.target.value, 10));
     });
     document.querySelectorAll('input[name="mkMode"]').forEach(function (r) {
         r.addEventListener('change', function () {
@@ -1336,17 +1376,19 @@
     document.getElementById('mkNoteSave').addEventListener('click', saveNote);
     document.getElementById('mkLinkSave').addEventListener('click', saveLink);
     document.getElementById('mkOccSave').addEventListener('click', saveOcc);
-    document.getElementById('mkOccUnlink').addEventListener('click', unlinkOcc);
-    document.getElementById('mkDefSave').addEventListener('click', saveDefaults);
     document.getElementById('mkLoanSave').addEventListener('click', saveLoan);
     document.getElementById('mkMemberSearch').addEventListener('input', searchMembers);
     // Bakåtknappen och en inklistrad länk byter också del (#vy=…).
     window.addEventListener('hashchange', function () {
         var m = (location.hash || '').match(/vy=([a-z]+)/);
-        if (!m || m[1] === view) return;
+        var t = (location.hash || '').match(/[&#]t=(\d+)/);
+        var occ = t ? parseInt(t[1], 10) : 0;
+        if (!m || (m[1] === view && occ === selectedOcc)) return;
         var role = roleOf(groupId);
         if (!viewsFor(role).some(function (x) { return x[0] === m[1]; })) return;
         view = m[1];
+        // Rälsens "Upprop" (utan t=) går tillbaka till dagens/nästa tillfälle.
+        selectedOcc = occ;
         if (role === 'participant') { if (partView) renderParticipant(partView); }
         else if (course) render();
         window.scrollTo({ top: 0 });
