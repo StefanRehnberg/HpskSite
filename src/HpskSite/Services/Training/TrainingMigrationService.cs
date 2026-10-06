@@ -190,6 +190,10 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
                 {
                     row.Action = ActionMigrate;
                     row.Reason = cls.Reason;
+                    // Sägs redan i torrkörningen — det är där klubben ser vilka tillfällen som ska
+                    // kopplas till en kurs.
+                    if (node.GetValue<bool>(ClubEvents.MandatoryProperty))
+                        row.Notes.Add("Var markerad som obligatorisk. Det togs inte med — gäller kravet en kurs, koppla träningen till kursen och sätt närvaron som krävd där.");
                     if (apply) Migrate(node, row, actingMemberId);
                 }
                 result.Rows.Add(row);
@@ -261,8 +265,6 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
                 CreatedDate = now,
                 UpdatedDate = now
             };
-            if (node.GetValue<bool>(ClubEvents.MandatoryProperty))
-                row.Notes.Add("Var markerad som obligatorisk. Det togs inte med — gäller kravet en kurs, koppla träningen till kursen och sätt närvaron som krävd där.");
             var url = node.GetValue<string>("registrationUrl");
             if (!string.IsNullOrWhiteSpace(url)) row.Notes.Add($"Extern anmälningslänk togs inte med: {url}");
 
