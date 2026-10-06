@@ -3851,6 +3851,16 @@ anmälningsfält.
     heter nu **Anmälda och närvaro** (hette "Deltagarlistan och upprop", även i Admin → Träningar) och
     förklaras: alla som kommer på träningen, även de som inte går kursen, med anmälningar, platser,
     betalning och "Lägg till deltagare". Båda skriver samma närvaro. Svit 99/99.
+  - **Instruktören mejlar och ser deltagarens uppgifter** (Stefan 2026-10-06). Deltagare → Åtgärder →
+    *Mejla deltagare…* (alla förvalda; radens *Mejla deltagaren…* förväljer en) med valet *Skicka också
+    till målsman*. Går genom `TrainingGroup/SendGroupMessage`, som fått `memberIds` (bara gruppens
+    DELTAGARE godtas; utelämnat = hela gruppen som förut) och `includeGuardians` ("1"). ⚠️
+    `SendTrainingGroupMessageAsync` returnerar nu `bool` och svaret räknar bara mejl som gick iväg och
+    namnger dem utan e-post/som misslyckades; mejlet sa förut "Svara inte" trots Reply-To till
+    instruktören. Radens *Visa deltagaren…* → `TrainingCourse/ParticipantInfo` (kontakt, adress,
+    född + ålder, målsmän, närmast anhörig; ⚠️ ALDRIG personnumret — dataminimering, instruktören är
+    inte klubbadmin). Bara kursens deltagare, bara för den som får leda kursen. Under 18 utan
+    målsman sägs uttryckligen. Svit 106/106.
 - **⚠️⚠️ Min kurs har EKONOMINS skal, Admin → Träningsgrupper har TRÄNINGARS form** (Stefans val
   2026-10-06, efter "avviker från hur vi normalt bygger sidor"). Rör du någon av dem: följ förlagan.
   - `/min-kurs`: `container-fluid`, vänsterkort (`.mk-rail`, samma mått som `.ek-page .rail`) med

@@ -331,6 +331,52 @@ namespace HpskSite.Controllers
         private Task<bool> CanRecordSeriesAsync(int groupId) => _groups.CanManageTrainingGroup(groupId);
 
         /// <summary>
+        /// Allt instruktören behöver veta om en deltagare: kontakt, adress, målsmän och närmast
+        /// anhörig (Stefan 2026-10-06). Bara kursens DELTAGARE, bara för den som får leda kursen.
+        /// ⚠️ Personnumret lämnas INTE ut — bara födelsedatum och ålder (det instruktören behöver för
+        /// junior/vuxen och vid en olycka). Dataminimering: en instruktör är inte klubbadmin.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> ParticipantInfo(int groupId, int memberId)
+        {
+            if (!await _groups.CanManageTrainingGroup(groupId)) return Json(new { success = false, message = Denied });
+            if (!_courses.IsParticipant(groupId, memberId)) return Json(new { success = false, message = "Medlemmen går inte kursen." });
+            var m = _memberService.GetById(memberId);
+            if (m == null) return Json(new { success = false, message = "Medlemmen finns inte." });
+            string V(string alias) { try { return m.GetValue(alias)?.ToString()?.Trim() ?? ""; } catch { return ""; } }
+
+            string? born = null; int? age = null;
+            var digits = new string(V("personNumber").Where(char.IsDigit).ToArray());
+            if (digits.Length >= 8 && DateTime.TryParseExact(digits[..8], "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var bd))
+            {
+                born = bd.ToString("yyyy-MM-dd");
+                var today = DateTime.Today;
+                age = today.Year - bd.Year - (today < bd.AddYears(today.Year - bd.Year) ? 1 : 0);
+            }
+            int.TryParse(V("primaryClubId"), out var clubId);
+
+            return Json(new
+            {
+                success = true,
+                person = new
+                {
+                    name = m.Name ?? "",
+                    email = m.Email ?? "",
+                    phone = V("phoneNumber"),
+                    landline = V("landlinePhone"),
+                    address = V("address"), coAddress = V("coAddress"), postalCode = V("postalCode"), city = V("city"),
+                    born, age,
+                    club = ClubNameOf(clubId),
+                    guardians = new[] { "guardian1", "guardian2" }
+                        .Select(g => new { name = V(g + "Name"), mobile = V(g + "Mobile"), email = V(g + "Email") })
+                        .Where(g => g.name.Length + g.mobile.Length + g.email.Length > 0).ToList(),
+                    emergency = new { name = V("emergencyContactName"), phone = V("emergencyContactPhone") }
+                }
+            });
+        }
+
+        /// <summary>
         /// En deltagares årliga märkesserier — vad märkesläget i Deltagare räknar. Bara kursens
         /// deltagare, bara för den som får leda kursen.
         /// </summary>
