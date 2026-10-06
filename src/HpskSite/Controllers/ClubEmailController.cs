@@ -27,7 +27,7 @@ namespace HpskSite.Controllers
 
         // Simply.com's websmtp is fine for club-sized sends but discourages high volume. Cap the
         // per-send recipient count and steer larger campaigns to Brevo / a dedicated ESP.
-        private const int MaxSmtpRecipients = 250;
+        private const int MaxSmtpRecipients = HpskSite.Services.Mail.MailLimits.MaxRecipientsPerSend;
 
         public ClubEmailController(
             IUmbracoContextAccessor umbracoContextAccessor,
