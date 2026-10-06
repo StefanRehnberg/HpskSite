@@ -330,6 +330,20 @@ namespace HpskSite.Controllers
         /// </summary>
         private Task<bool> CanRecordSeriesAsync(int groupId) => _groups.CanManageTrainingGroup(groupId);
 
+        /// <summary>
+        /// En deltagares årliga märkesserier — vad märkesläget i Deltagare räknar. Bara kursens
+        /// deltagare, bara för den som får leda kursen.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> MemberBadgeSeries(int groupId, int memberId)
+        {
+            if (!await _groups.CanManageTrainingGroup(groupId)) return Json(new { success = false, message = Denied });
+            if (!_courses.IsParticipant(groupId, memberId)) return Json(new { success = false, message = "Medlemmen går inte kursen." });
+            var c = _courses.Get(groupId, DateTime.Today);
+            var badge = c?.Badges.GetValueOrDefault(memberId);
+            return Json(new { success = true, badge, series = _courses.BadgeSeriesFor(memberId, DateTime.Today.Year, badge?.TargetLevel) });
+        }
+
         [HttpGet]
         public async Task<IActionResult> Series(int groupId, int trainingId)
         {

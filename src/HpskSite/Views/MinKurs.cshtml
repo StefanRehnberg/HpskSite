@@ -62,6 +62,7 @@
     .mk-grid thead th:first-child { position: sticky; left: 0; background: var(--bs-body-bg); z-index: 2; }
     .mk-occ-row { cursor: pointer; }
     .mk-occ-desc { white-space: pre-line; }
+    .mk-occ-cell { overflow-wrap: anywhere; }
     .mk-occ-facts i { opacity: .7; }
     .mk-state { font-size: .8125rem; white-space: nowrap; }
     .mk-badge { font-size: .875rem; color: var(--bs-secondary-color); }
@@ -193,6 +194,22 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-primary" id="mkNoteSave">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Märkesserier för en deltagare: det märkesläget räknar (Stefan 2026-10-06) -->
+<div class="modal fade" id="mkBadgeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h2 class="modal-title h5" id="mkBadgeTitle">Märkesserier i år</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="mkBadgeBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
             </div>
         </div>
     </div>
@@ -428,6 +445,8 @@
     // ── Skalet: rälsen (samma form som Ekonomin, Stefan 2026-10-06) ──
     // Vyn står i adressen (#vy=…) så att en omladdning eller ett bokmärke landar där man var.
     var view = null, club = null, partView = null;
+    // Tillfällen: genomförda döljs som standard, som i Träningar.
+    var showDone = false;
     // "Upprop", inte "I dag": vyn visar dagens tillfälle, annars nästa — en rubrik "I dag" över
     // ett tillfälle i april läses som fel.
     var TRAINER_VIEWS = [['idag', 'Upprop'], ['deltagare', 'Deltagare'], ['tillfallen', 'Tillfällen'], ['oversikt', 'Översikt'], ['installningar', 'Inställningar']];
@@ -600,18 +619,7 @@
         // ⚠️ Två listor, och den första är den märkesläget räknar: årets godkända serier oavsett var
         // de sköts (kursen, en tävling, inskickade). Förut visades bara kursens serier, så märkesläget
         // kunde säga "Precision 3/3" över en tom lista.
-        var bs = v.badgeSeries || [];
-        seriesHtml = '<h2 class="h6">Räknas mot märket i år</h2>' +
-            '<p class="text-muted small mb-2">Det är de här serierna märkesläget räknar. ' +
-            (b.targetLevel ? 'Serier markerade med ✓ når ' + esc(b.targetLevel.toLowerCase()) + ', nästa valör.' : '') + '</p>' +
-            (bs.length
-                ? '<div class="table-responsive mb-3"><table class="table table-sm mk-badge-series"><thead><tr><th>Dag</th><th>Serie</th><th>Var</th><th class="text-end">Poäng</th><th>Valör</th><th></th></tr></thead><tbody>' +
-                    bs.map(function (s) {
-                        return '<tr><td class="text-nowrap">' + esc(dayLabel(s.date)) + '</td><td>' + esc(s.kind) + (s.weaponGroup ? ' <span class="text-muted small">' + esc(s.weaponGroup) + '</span>' : '') +
-                            '</td><td class="small">' + esc(s.source) + '</td><td class="text-end">' + (s.kind && s.kind.indexOf('tillämpning') >= 0 ? '' : s.total) + '</td><td>' + valorBadge(s.valor) +
-                            '</td><td>' + (s.countsTowardTarget ? '<i class="bi bi-check-lg text-success" title="Räknas mot nästa valör"></i>' : '') + '</td></tr>';
-                    }).join('') + '</tbody></table></div>'
-                : '<div class="text-muted small mb-3">Inga godkända serier i år än.</div>') +
+        seriesHtml = '<h2 class="h6">Räknas mot märket i år</h2>' + badgeSeriesTable(v.badgeSeries || [], b) +
             '<h2 class="h6">Skjutna på kursen</h2>' +
             ((v.series && v.series.length)
                 ? '<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Dag</th><th>Tillfälle</th><th class="text-end">Poäng</th><th>Valör</th></tr></thead><tbody>' +
@@ -660,16 +668,23 @@
         var html = '';
 
         if (!course.occasions.length) {
-            html += '<div class="alert alert-info">Inga träningar är kopplade till kursen än. Välj <strong>Åtgärder → Koppla träningar till kursen…</strong>.</div>';
+            html += '<div class="alert alert-info">Inga träningar är kopplade till kursen än. Välj <strong>Åtgärder → Koppla träningar till kursen…</strong></div>';
         } else if (current) {
             var here = course.participants.filter(function (p) { var s = cell(p.memberId, current.trainingId).state; return s === 'present' || s === 'checkedin'; }).length;
             var when = (current.isToday ? 'I dag' : current.isPast ? 'Senast' : 'Nästa') + ' · ' + dayLabel(current.date, true) + (current.startTime ? ' ' + current.startTime : '');
+            var future = !current.isToday && !current.isPast;
+            var loansNow = course.participants.filter(function (p) { return cell(p.memberId, current.trainingId).loanBooked; }).length;
+            // Samma uppgifter som deltagarens nästa-kort: vad det är för träning, var, vem.
             html += '<div class="card mk-today mb-3"><div class="card-body py-2">' +
-                '<div class="small text-uppercase text-muted fw-semibold">' + esc(when) + '</div>' +
-                '<div class="fw-semibold">' + esc(current.note || current.name) + '</div>' +
-                '<div class="small text-muted">' + mandatoryBadges(current) +
-                here + ' av ' + course.participants.length + ' här' +
-                (current.skjutledareName ? ' · skjutledare ' + esc(current.skjutledareName) : '') + '</div>' +
+                '<div class="small text-uppercase text-muted fw-semibold">' + esc(when) + (current.endTime && current.startTime ? '–' + esc(current.endTime) : '') + '</div>' +
+                '<div class="fs-5 fw-semibold">' + esc(current.note || current.name) + '</div>' +
+                (occFacts(current) ? '<div class="small text-muted mt-1">' + occFacts(current) + '</div>' : '') +
+                (current.description ? '<div class="small mt-2 mk-occ-desc">' + esc(current.description) + '</div>' : '') +
+                '<div class="small text-muted mt-2">' + mandatoryBadges(current) +
+                // Före tillfället finns ingen närvaro att räkna — "0 av 4 här" läses som att ingen kom.
+                (future ? course.participants.length + ' deltagare' : here + ' av ' + course.participants.length + ' här') +
+                (loansNow ? ' · <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-safe2 me-1"></i>' + loansNow + ' lånevapen bokade</span>' : '') + '</div>' +
+                (future ? '<div class="small text-muted mt-1"><i class="bi bi-info-circle me-1"></i>Närvaron tas på tillfällets dag.</div>' : '') +
                 '</div></div>';
 
             // Från förra tillfället: anteckningar från tillfällen FÖRE det aktuella.
@@ -689,9 +704,6 @@
             if (!course.participants.length) html += '<div class="alert alert-info">Kursen har inga deltagare än.</div>';
             course.participants.forEach(function (p) { html += personCard(p); });
         }
-        // Lyft ur Åtgärder-menyn: att lägga till en nybörjare som dyker upp är vardag för tränaren,
-        // och en åtgärd bakom en meny hittar August inte.
-        html += '<button type="button" class="btn btn-outline-primary btn-sm mt-1 mb-3" data-mk="members"><i class="bi bi-person-plus me-1"></i>Lägg till eller ta bort deltagare</button>';
 
         drawShell(course.name, { deltagare: course.participants.length, tillfallen: course.occasions.length });
         var ov = '';
@@ -717,46 +729,124 @@
             'style="height:' + size + 'px;width:auto" onerror="this.remove()">';
     }
 
+    // Årets godkända märkesserier — det märkesläget räknar. EN renderare för deltagarens Mina serier
+    // och instruktörens dialog, så de två aldrig visar olika saker.
+    function badgeSeriesTable(bs, b) {
+        var vb = function (val) {
+            return val ? '<span class="badge bg-success-subtle text-success-emphasis">' + esc(val) + '</span>' : '<span class="text-muted small">under brons</span>';
+        };
+        return '<p class="text-muted small mb-2">Det är de här serierna märkesläget räknar — från kursen, tävlingar och inskickade serier. ' +
+            (b && b.targetLevel ? 'Serier markerade med ✓ når ' + esc(b.targetLevel.toLowerCase()) + ', nästa valör.' : '') + '</p>' +
+            (bs.length
+                ? '<div class="table-responsive mb-3"><table class="table table-sm mk-badge-series"><thead><tr><th>Dag</th><th>Serie</th><th>Var</th><th class="text-end">Poäng</th><th>Valör</th><th></th></tr></thead><tbody>' +
+                    bs.map(function (s) {
+                        return '<tr><td class="text-nowrap">' + esc(dayLabel(s.date)) + '</td><td>' + esc(s.kind) + (s.weaponGroup ? ' <span class="text-muted small">' + esc(s.weaponGroup) + '</span>' : '') +
+                            '</td><td class="small">' + esc(s.source) + '</td><td class="text-end">' + (s.kind && s.kind.indexOf('tillämpning') >= 0 ? '' : s.total) + '</td><td>' + vb(s.valor) +
+                            '</td><td>' + (s.countsTowardTarget ? '<i class="bi bi-check-lg text-success" title="Räknas mot nästa valör"></i>' : '') + '</td></tr>';
+                    }).join('') + '</tbody></table></div>'
+                : '<div class="text-muted small mb-3">Inga godkända serier i år än.</div>');
+    }
+
+    function openBadgeSeries(memberId) {
+        var p = course.participants.find(function (x) { return x.memberId === memberId; });
+        document.getElementById('mkBadgeTitle').textContent = 'Märkesserier i år — ' + (p ? p.name : '');
+        document.getElementById('mkBadgeBody').innerHTML = '<div class="text-muted">Laddar…</div>';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('mkBadgeModal')).show();
+        getJson('/umbraco/surface/TrainingCourse/MemberBadgeSeries?groupId=' + groupId + '&memberId=' + memberId).then(function (d) {
+            if (!d.success) { document.getElementById('mkBadgeBody').innerHTML = '<div class="alert alert-warning">' + esc(d.message || 'Serierna kunde inte läsas.') + '</div>'; return; }
+            var b = d.badge || {};
+            document.getElementById('mkBadgeBody').innerHTML =
+                '<div class="d-flex align-items-center gap-3 mb-3">' + badgeImg(b, 48) +
+                '<div class="' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + esc(b.text || '') + '</div></div>' +
+                badgeSeriesTable(d.series || [], b);
+        });
+    }
+
+    // Radens Åtgärder — samma form som Träningars rader (grå, text, popper fixed i .table-responsive).
+    function rowMenu(items) {
+        return '<div class="dropdown"><button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" ' +
+            'data-bs-popper-config=\'{"strategy":"fixed"}\' aria-expanded="false"><i class="bi bi-sliders me-1"></i>Åtgärder</button>' +
+            '<ul class="dropdown-menu dropdown-menu-end">' + items.join('') + '</ul></div>';
+    }
+    function menuItem(attrs, icon, label) {
+        return '<li><button type="button" class="dropdown-item" ' + attrs + '><i class="bi ' + icon + ' me-2"></i>' + label + '</button></li>';
+    }
+
     // Deltagare: en rad per deltagare med närvaro, missade obligatoriska och märkesläget.
     function participantsView() {
         var held = course.occasions.filter(function (o) { return !o.isCancelled && (o.isPast || o.isToday); });
-        var h = '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">' +
-            '<span class="text-muted small">' + course.participants.length + ' deltagare · ' +
-            (course.trainers.length ? 'instruktör' + (course.trainers.length > 1 ? 'er ' : ' ') + esc(trainerNames()) : 'ingen instruktör utsedd') + '</span>' +
-            '<button type="button" class="btn btn-sm btn-outline-primary" data-mk="members"><i class="bi bi-person-plus me-1"></i>Lägg till eller ta bort deltagare</button></div>';
+        // Förlagan (Träningar): förklarande rad + antal ovanför listan, åtgärderna i sidans blå
+        // Åtgärder och i varje rads grå Åtgärder — ingen extra knapp bredvid den blå.
+        var h = '<p class="text-muted small mb-2">' + course.participants.length + ' deltagare · ' +
+            (course.trainers.length ? 'instruktör' + (course.trainers.length > 1 ? 'er ' : ' ') + esc(trainerNames()) : 'ingen instruktör utsedd') +
+            '. Lägg till eller ta bort deltagare under <strong>Åtgärder → Kursens deltagare…</strong></p>';
         if (!course.participants.length) return h + '<div class="alert alert-info">Kursen har inga deltagare än.</div>';
-        h += '<div class="table-responsive"><table class="table align-middle"><thead><tr><th>Namn</th><th class="text-center">Närvaro</th><th>Missade obligatoriska</th><th>Märkesläge</th></tr></thead><tbody>';
+        var canEnter = current && (current.isToday || current.isPast);
+        // ⚠️ På telefon står närvaro, missade och märkesläge under namnet — som kolumner rullade
+        // märkesläget och radens Åtgärder ut ur bild.
+        h += '<div class="table-responsive"><table class="table align-middle"><thead><tr><th>Namn</th><th class="text-center d-none d-md-table-cell">Närvaro</th><th class="d-none d-md-table-cell">Missade obligatoriska</th><th class="d-none d-md-table-cell">Märkesläge</th><th class="text-end"></th></tr></thead><tbody>';
         course.participants.forEach(function (p) {
             var here = held.filter(function (o) { var s = cell(p.memberId, o.trainingId).state; return s === 'present' || s === 'checkedin'; }).length;
             var missed = course.occasions.filter(function (o) { return cell(p.memberId, o.trainingId).missed; });
             var b = (course.badges || {})[p.memberId] || {};
-            h += '<tr><td class="fw-semibold text-nowrap">' + badgeImg(b, 28) + (badgeImg(b, 28) ? ' ' : '') + esc(p.name) + '</td>' +
-                '<td class="text-center text-nowrap">' + here + ' av ' + held.length + '</td>' +
-                '<td>' + (missed.length ? '<span class="mk-missed">' + missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ') + '</span>' : '<span class="text-muted">–</span>') + '</td>' +
-                '<td class="small ' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + esc(b.text || '') + (b.readyForPistolskyttekort ? ' · klar för Pistolskyttekortet' : '') + '</td></tr>';
+            var items = [menuItem('data-mk="badge-series" data-member="' + p.memberId + '"', 'bi-award', 'Märkesserier i år…')];
+            if (canEnter) items.push(menuItem('data-mk="series" data-member="' + p.memberId + '"', 'bi-bullseye', 'Registrera serie…'));
+            if (current) items.push(menuItem('data-mk="note" data-member="' + p.memberId + '"', 'bi-pencil', 'Skriv anteckning…'));
+            var missedTxt = missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ');
+            var badgeTxt = esc(b.text || '') + (b.readyForPistolskyttekort ? ' · klar för Pistolskyttekortet' : '');
+            h += '<tr><td><div class="fw-semibold text-nowrap">' + badgeImg(b, 28) + (badgeImg(b, 28) ? ' ' : '') + esc(p.name) + '</div>' +
+                '<div class="d-md-none small">' +
+                (held.length ? '<div class="text-muted">Närvaro ' + here + ' av ' + held.length + '</div>' : '') +
+                (missed.length ? '<div class="mk-missed">Missade: ' + missedTxt + '</div>' : '') +
+                '<div class="' + (b.readyForPistolskyttekort ? 'mk-ready' : 'text-muted') + '">' + badgeTxt + '</div></div></td>' +
+                // "0 av 0" sa ingenting innan kursen börjat.
+                '<td class="text-center text-nowrap d-none d-md-table-cell">' + (held.length ? here + ' av ' + held.length : '<span class="text-muted">–</span>') + '</td>' +
+                '<td class="d-none d-md-table-cell">' + (missed.length ? '<span class="mk-missed">' + missedTxt + '</span>' : '<span class="text-muted">–</span>') + '</td>' +
+                '<td class="small d-none d-md-table-cell ' + (b.readyForPistolskyttekort ? 'mk-ready' : '') + '">' + badgeTxt + '</td>' +
+                '<td class="text-end">' + rowMenu(items) + '</td></tr>';
         });
         return h + '</tbody></table></div>';
     }
 
     // Tillfällen: kursens kopplade träningar med kursens krav och hur många som var där.
     function occasionsView() {
-        var h = '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">' +
-            '<span class="text-muted small">★ = obligatoriskt för kursen. Ändra ett tillfälles krav och namn med <em>Ändra</em>.</span>' +
-            '<button type="button" class="btn btn-sm btn-outline-primary" data-mk="link"><i class="bi bi-link-45deg me-1"></i>Koppla träningar till kursen…</button></div>';
+        // Förlagan (Träningar): förklarande rad, filter + antal ovanför listan, grå Åtgärder per rad.
+        var h = '<p class="text-muted small mb-2">Kursens kopplade träningar. ★ = obligatoriskt för kursen. ' +
+            'Koppla fler under <strong>Åtgärder → Koppla träningar till kursen…</strong></p>';
         if (!course.occasions.length) return h + '<div class="alert alert-info">Inga träningar är kopplade till kursen än.</div>';
-        h += '<div class="table-responsive"><table class="table align-middle"><thead><tr><th>Datum</th><th>Tid</th><th>Tillfälle</th><th>Krav</th><th class="text-center">Var där</th><th></th></tr></thead><tbody>';
-        course.occasions.forEach(function (o) {
+        var done = course.occasions.filter(function (o) { return o.isPast; }).length;
+        var shown = course.occasions.filter(function (o) { return showDone || !o.isPast; });
+        h += '<div class="d-flex align-items-center flex-wrap gap-3 mb-2">' +
+            '<div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" id="mkShowDone"' + (showDone ? ' checked' : '') + '>' +
+            '<label class="form-check-label small" for="mkShowDone">Visa genomförda (' + done + ')</label></div>' +
+            '<span class="text-muted small ms-auto">' + shown.length + ' av ' + course.occasions.length + ' tillfällen</span></div>';
+        if (!shown.length) return h + '<div class="alert alert-light border">Alla kursens tillfällen är genomförda. Slå på <em>Visa genomförda</em> för att se dem.</div>';
+        // ⚠️ På telefon döljs Tid, Krav och Var där och står i stället under namnet — med alla sex
+        // kolumner rullade radens Åtgärder ut ur bild.
+        var md = ' class="d-none d-md-table-cell"';
+        h += '<div class="table-responsive"><table class="table align-middle"><thead><tr><th class="d-none d-md-table-cell">Datum</th><th' + md + '>Tid</th><th>Tillfälle</th><th' + md + '>Krav</th><th class="text-center d-none d-md-table-cell">Var där</th><th></th></tr></thead><tbody>';
+        shown.forEach(function (o) {
             var here = course.participants.filter(function (p) { var s = cell(p.memberId, o.trainingId).state; return s === 'present' || s === 'checkedin'; }).length;
+            var loans = course.participants.filter(function (p) { return cell(p.memberId, o.trainingId).loanBooked; }).length;
             var req = (o.mandatoryForCourse ? '<span class="badge bg-warning text-dark me-1">★ Obligatoriskt</span>' : '') +
                 (o.registrationRequired ? '<span class="badge bg-secondary-subtle text-secondary-emphasis">Anmälan krävs</span>' : '');
+            var facts = occFacts(o);
+            var items = [menuItem('data-training-panel="' + o.trainingId + '"', 'bi-box-arrow-up-right', 'Visa tillfället'),
+                         menuItem('data-mk="occ" data-training="' + o.trainingId + '"', 'bi-pencil', 'Ändra kursens krav och namn…')];
             h += '<tr' + (o.isPast || o.isCancelled ? ' class="text-muted"' : '') + '>' +
-                '<td class="text-nowrap">' + esc(dayLabel(o.date, true)) + (o.isToday ? ' <span class="badge bg-success">I dag</span>' : '') + '</td>' +
-                '<td class="text-nowrap">' + esc(o.startTime || '') + '</td>' +
-                '<td>' + esc(o.note || o.name) + (o.note ? '<div class="small text-muted">' + esc(o.name) + '</div>' : '') +
-                (o.isCancelled ? ' <span class="badge bg-danger">Inställd</span>' : '') + '</td>' +
-                '<td>' + (req || '<span class="text-muted">–</span>') + '</td>' +
-                '<td class="text-center">' + (o.isPast || o.isToday ? here + ' av ' + course.participants.length : '–') + '</td>' +
-                '<td class="text-end"><button type="button" class="btn btn-sm btn-outline-secondary" data-mk="occ" data-training="' + o.trainingId + '">Ändra</button></td></tr>';
+                '<td class="text-nowrap d-none d-md-table-cell">' + esc(dayLabel(o.date, true)) + (o.isToday ? ' <span class="badge bg-success">I dag</span>' : '') + '</td>' +
+                '<td class="text-nowrap d-none d-md-table-cell">' + (o.startTime ? esc(o.startTime + (o.endTime ? '–' + o.endTime : '')) : '<span class="text-muted">–</span>') + '</td>' +
+                '<td class="mk-occ-cell"><div class="small fw-semibold d-md-none">' + esc(dayLabel(o.date, true)) + (o.isToday ? ' <span class="badge bg-success">I dag</span>' : '') + '</div>' +
+                esc(o.note || o.name) + (o.note ? '<div class="small text-muted">' + esc(o.name) + '</div>' : '') +
+                (o.isCancelled ? ' <span class="badge bg-danger">Inställd</span>' : '') +
+                (o.startTime ? '<div class="small text-muted d-md-none">' + esc(o.startTime + (o.endTime ? '–' + o.endTime : '')) + '</div>' : '') +
+                (facts ? '<div class="small text-muted mk-occ-facts">' + facts + '</div>' : '') +
+                (req ? '<div class="d-md-none mt-1">' + req + '</div>' : '') +
+                (o.isPast || o.isToday ? '<div class="small text-muted d-md-none">' + here + ' av ' + course.participants.length + ' var där</div>' : '') +
+                (loans && !o.isPast ? '<div class="small"><span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-safe2 me-1"></i>' + loans + ' lånevapen bokade</span></div>' : '') + '</td>' +
+                '<td class="d-none d-md-table-cell">' + (req || '<span class="text-muted">–</span>') + '</td>' +
+                '<td class="text-center d-none d-md-table-cell">' + (o.isPast || o.isToday ? here + ' av ' + course.participants.length : '<span class="text-muted">–</span>') + '</td>' +
+                '<td class="text-end">' + rowMenu(items) + '</td></tr>';
         });
         return h + '</tbody></table></div>';
     }
@@ -804,15 +894,19 @@
             return '<button type="button" class="btn btn-sm ' + (active ? 'btn-success' : 'btn-outline-secondary') + '" data-mk="att" data-member="' + p.memberId + '" data-status="' + status + '">' + label + '</button>';
         };
         var isHere = c.state === 'present', isAbsent = c.state === 'absent', isExcused = c.state === 'excused';
+        var future = !current.isToday && !current.isPast;
         // Två rader i stället för tre (UX-omgången 2026-10-06): namn + närvaro överst, märkesläget och
         // serie/anteckning under. Elva deltagare gav en 3 000 px lång sida på telefonen.
         return '<div class="mk-person" data-mk-person="' + p.memberId + '">' +
             '<div class="d-flex align-items-center gap-2">' +
             '<div class="mk-name me-auto text-truncate">' + badgeImg(b, 24) + (badgeImg(b, 24) ? ' ' : '') + esc(p.name) +
-            (c.state === 'checkedin' ? ' <span class="badge bg-info-subtle text-info-emphasis fw-normal">QR</span>' : '') + '</div>' +
+            (c.state === 'checkedin' ? ' <span class="badge bg-info-subtle text-info-emphasis fw-normal">QR</span>' : '') +
+            (c.loanBooked ? ' <span class="badge bg-info-subtle text-info-emphasis fw-normal"><i class="bi bi-safe2 me-1"></i>Lånevapen</span>' : '') + '</div>' +
+            // Närvaro tas på tillfällets dag eller i efterhand — inte för ett tillfälle i april.
+            (future ? '' :
             '<div class="btn-group mk-att flex-shrink-0" role="group" aria-label="Närvaro">' +
             btn('Present', 'Här', isHere) + btn('Absent', 'Ej här', isAbsent) + btn('Excused', 'Giltig', isExcused) +
-            '</div></div>' +
+            '</div>') + '</div>' +
             // Knapparna står ihop till höger (flex-shrink-0) och texten bryter i sin egen kolumn —
             // med flex-wrap hamnade "Anteckning" ensam på en tredje rad på telefonen.
             '<div class="d-flex align-items-start gap-1 mt-1">' +
@@ -829,7 +923,7 @@
                 (missed.length <= 2 ? missed.map(function (o) { return esc(dayLabel(o.date)); }).join(', ') : missed.length + ' obligatoriska') + '</span>' : '') +
             '</div>' +
             '<div class="d-flex flex-shrink-0">' +
-            '<button type="button" class="btn btn-sm btn-link px-1 py-0" data-mk="series" data-member="' + p.memberId + '"><i class="bi bi-bullseye me-1"></i>Serie</button>' +
+            (future ? '' : '<button type="button" class="btn btn-sm btn-link px-1 py-0" data-mk="series" data-member="' + p.memberId + '"><i class="bi bi-bullseye me-1"></i>Serie</button>') +
             '<button type="button" class="btn btn-sm btn-link px-1 py-0" data-mk="note" data-member="' + p.memberId + '"><i class="bi bi-pencil me-1"></i>Anteckning</button>' +
             '</div></div></div>';
     }
@@ -1224,6 +1318,10 @@
         else if (act === 'add-member') addMember(member);
         else if (act === 'rm-member') removeMember(member);
         else if (act === 'occ') openOcc(parseInt(b.getAttribute('data-training'), 10));
+        else if (act === 'badge-series') openBadgeSeries(member);
+    });
+    document.addEventListener('change', function (e) {
+        if (e.target && e.target.id === 'mkShowDone') { showDone = e.target.checked; render(); }
     });
     document.querySelectorAll('input[name="mkMode"]').forEach(function (r) {
         r.addEventListener('change', function () {

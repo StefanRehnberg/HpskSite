@@ -704,18 +704,28 @@ ORDER BY t.[Date] DESC, s.SeriesNumber", groupId, memberId)
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Deltagarens serier kunde inte läsas (kurs {Group})", groupId); }
 
+            v.BadgeSeries = BadgeSeriesFor(memberId, today.Year, v.Badge?.TargetLevel);
+            return v;
+        }
+
+        /// <summary>
+        /// Årets godkända märkesserier för en medlem — SAMMA urval som <see cref="BadgeStatusFor"/>, så
+        /// listan och märkesläget aldrig säger olika saker. Läses av deltagarens Mina serier och av
+        /// instruktörens dialog för en deltagare.
+        /// </summary>
+        public List<BadgeSeries> BadgeSeriesFor(int memberId, int year, string? targetLevel)
+        {
             try
             {
                 using var db = _databaseFactory.CreateDatabase();
-                var targetOrd = Marken.LevelOrdinal(v.Badge?.TargetLevel);
-                // Samma urval som BadgeStatusFor — annars kan listan och märkesläget säga olika saker.
-                v.BadgeSeries = db.Fetch<BadgeSeriesRow>(@"
+                var targetOrd = Marken.LevelOrdinal(targetLevel);
+                return db.Fetch<BadgeSeriesRow>(@"
 SELECT s.SeriesDate, s.SeriesType, s.Target, s.BadgeFamily, s.WeaponGroup, s.Total, s.ClaimedLevel,
        s.SourceCompetitionId, n.[text] AS CompetitionName, s.Notes
 FROM dbo.MarkenSeries s
 LEFT JOIN dbo.umbracoNode n ON n.id = s.SourceCompetitionId
 WHERE s.MemberId = @0 AND s.[Year] = @1 AND s.Status = 'Verified' AND s.CountsTowardGuldfodring = 1
-ORDER BY s.SeriesDate DESC, s.Id DESC", memberId, today.Year)
+ORDER BY s.SeriesDate DESC, s.Id DESC", memberId, year)
                     .Select(r => new BadgeSeries
                     {
                         Date = r.SeriesDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
@@ -729,8 +739,11 @@ ORDER BY s.SeriesDate DESC, s.Id DESC", memberId, today.Year)
                         CountsTowardTarget = targetOrd > 0 && Marken.LevelOrdinal(r.ClaimedLevel) >= targetOrd
                     }).ToList();
             }
-            catch (Exception ex) { _logger.LogWarning(ex, "Märkesserierna kunde inte läsas (medlem {Member})", memberId); }
-            return v;
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Märkesserierna kunde inte läsas (medlem {Member})", memberId);
+                return new List<BadgeSeries>();
+            }
         }
 
         /// <summary>Startsidans kort: kursen, min roll, nästa tillfälle och (för deltagaren) missade obligatoriska.</summary>
