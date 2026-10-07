@@ -1,0 +1,349 @@
+@* Flytt av klubbens gamla träningshändelser till Träningar — KLUBBENS yta (Stefan 2026-10-07:
+   "vi överlåter detta till klubbarna", eftersom klubben vet vilka "Träning"-händelser som
+   egentligen är något annat). Servern: TrainingMigrationController / TrainingMigrationService.
+
+   Var det syns (väl synligt, men bara när det finns något att flytta):
+   - #ctmEventsNotice överst på Händelser — där klubbadmin landar och där de gamla händelserna står.
+   - #ctmCard överst på Träningar.
+   - #ctmRailCount på rälsens Träningar-knapp.
+
+   Säkerheten:
+   - Klubben kryssar i vad som ska flyttas. Bara KOMMANDE är förkryssade; passerade kan stå kvar som
+     historik utan att något går förlorat (de syns i kalendern som förut).
+   - Uppgifter som träningen inte har plats för (kontaktperson, bild, extra innehåll …) visas på
+     raden INNAN flytten.
+   - Servern flyttar bara valda id:n i klubben och vägrar allt om läget ändrats.
+   - Flytten kan ångras per träning så länge den inte ändrats eller kopplats till en kurs.
+   - Inga confirm()/alert(). Modalerna ligger UTANFÖR flikpanelerna — en modal i en dold panel syns aldrig.
+
+   Id-prefix ctm*. Knappar bär index i data-attribut, aldrig text i onclick. *@
+@await Html.PartialAsync("_HtmlEscape")
+
+<div class="modal fade" id="ctmModal" tabindex="-1" aria-labelledby="ctmTitle" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="ctmTitle">Flytta träningar från Händelser</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng" id="ctmClose"></button>
+            </div>
+            <div class="modal-body" id="ctmBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" id="ctmBack">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="ctmNext">Fortsätt</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="ctmUndoModal" tabindex="-1" aria-labelledby="ctmUndoTitle" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="ctmUndoTitle">Ångra flytt av träningar</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng" id="ctmUndoClose"></button>
+            </div>
+            <div class="modal-body" id="ctmUndoBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="ctmUndoCancel">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="ctmUndoGo" disabled>Ångra</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    if (window.__ctmInit) return;
+    window.__ctmInit = true;
+    const $ = id => document.getElementById(id);
+    const esc = s => window.hpskEsc(s == null ? '' : String(s));
+    const token = () => (document.querySelector('input[name="__RequestVerificationToken"]') || {}).value || '';
+    const base = '/umbraco/surface/TrainingMigration/';
+    const clubId = () => { const el = $('ctrPanel'); return el ? (parseInt(el.getAttribute('data-club-id'), 10) || 0) : 0; };
+
+    let state = null;           // senaste förhandsgranskningen för klubben
+    let restorable = 0;         // antal flyttade som går att ångra
+    let step = 'list', busy = false, wrote = false, showPast = false;
+    let checked = new Set();    // valda händelse-id:n
+    let undoRows = [];
+
+    function getJson(url) {
+        return fetch(url, { credentials: 'same-origin' }).then(r => { if (!r.ok) throw new Error('Servern svarade ' + r.status); return r.json(); });
+    }
+    function postJson(action, body) {
+        return fetch(base + action, {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+            body: JSON.stringify(body)
+        }).then(r => { if (!r.ok) throw new Error('Servern svarade ' + r.status); return r.json(); });
+    }
+    function fmtDate(iso) {
+        if (!iso) return '–';
+        const d = new Date(iso);
+        if (isNaN(d)) return esc(iso);
+        const day = d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        return (d.getHours() || d.getMinutes()) ? day + ' ' + d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }) : day;
+    }
+    const runnable = r => r.action === 'migrera' || r.action === 'avpublicera';
+    const rows = () => (state && state.rows) || [];
+
+    // ── Läget: hämtas när adminpanelen öppnas, och efter varje flytt ──
+    function refresh() {
+        const id = clubId();
+        if (!id) return Promise.resolve();
+        return Promise.all([
+            getJson(base + 'Preview?clubId=' + id).catch(() => null),
+            getJson(base + 'UndoPreview?clubId=' + id).catch(() => null)
+        ]).then(([p, u]) => {
+            state = p && p.success ? p : null;
+            restorable = u && u.success ? (u.restorable || 0) : 0;
+            renderNotices();
+        });
+    }
+
+    // ⚠️ Uppmaningen räknar bara KOMMANDE träningar. Genomförda kan stå kvar som historik, och en
+    // gul ruta om dem hade aldrig gått att bli av med utan att flytta något klubben inte behöver flytta.
+    function renderNotices() {
+        const run = rows().filter(runnable);
+        const up = run.filter(r => r.upcoming).length;
+        const past = run.length - up;
+        const rail = $('ctmRailCount');
+        if (rail) { rail.textContent = up; rail.classList.toggle('d-none', up === 0); }
+
+        const undoLink = restorable > 0
+            ? ' <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ctm="undo">Ångra en tidigare flytt…</button>' : '';
+        const pastLink = past > 0
+            ? ' <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ctm="open">' + past + (past === 1 ? ' genomförd träning' : ' genomförda träningar') + ' ligger ' + (restorable > 0 || up > 0 ? 'också ' : '') + 'under Händelser — flytta dem…</button>' : '';
+        const card = $('ctmCard');
+        if (card) {
+            if (up > 0) {
+                card.className = 'alert alert-warning mb-3';
+                card.innerHTML =
+                    '<div class="d-flex flex-wrap align-items-center gap-2">' +
+                    '<div class="me-auto"><strong><i class="bi bi-arrow-left-right me-1"></i>' + up + (up === 1 ? ' kommande träning ligger' : ' kommande träningar ligger') + ' kvar under Händelser.</strong>' +
+                    '<br><span class="small">Flytta dem hit, så får de skjutledare, schema och kan kopplas till kurser. ' +
+                    'Ni väljer själva vilka — händelser som inte är träningar låter ni stå kvar.</span>' + undoLink + '</div>' +
+                    '<button type="button" class="btn btn-primary" data-ctm="open"><i class="bi bi-arrow-right-circle me-1"></i>Gå igenom och flytta…</button></div>';
+            } else if (past > 0 || restorable > 0) {
+                card.className = 'small text-muted mb-3';
+                card.innerHTML = (restorable > 0 ? '<i class="bi bi-check-circle me-1"></i>Klubbens kommande träningar har flyttats hit från Händelser.' : '') +
+                    (past > 0 ? (restorable > 0 ? '<br>' : '<i class="bi bi-clock-history me-1"></i>') + pastLink.trim() + ' <span>De kan också stå kvar som historik.</span>' : '') +
+                    undoLink;
+            } else {
+                card.className = 'd-none'; card.innerHTML = '';
+            }
+        }
+        const ev = $('ctmEventsNotice');
+        if (ev) {
+            if (up > 0) {
+                ev.className = 'alert alert-warning mb-3';
+                ev.innerHTML = '<div class="d-flex flex-wrap align-items-center gap-2"><div class="me-auto">' +
+                    '<strong>' + up + (up === 1 ? ' kommande händelse är en träning' : ' kommande händelser är träningar') + '</strong> och kan flyttas till <strong>Träningar</strong>, ' +
+                    'där de får skjutledare, schema och kurser.</div>' +
+                    '<button type="button" class="btn btn-primary btn-sm" data-ctm="open">Gå igenom och flytta…</button></div>';
+            } else { ev.className = 'd-none'; ev.innerHTML = ''; }
+        }
+    }
+
+    // ── Flytta: lista → bekräfta → resultat ──
+    function open() {
+        if (!state) return;
+        checked = new Set(rows().filter(r => runnable(r) && r.upcoming).map(r => r.eventId));
+        // Finns inga kommande öppnades rutan för de genomförda — visa dem direkt (ingen förkryssad).
+        showPast = checked.size === 0;
+        step = 'list';
+        renderStep();
+        bootstrap.Modal.getOrCreateInstance($('ctmModal')).show();
+    }
+
+    function renderStep() {
+        const back = $('ctmBack'), next = $('ctmNext');
+        next.classList.remove('d-none'); back.classList.remove('d-none');
+        if (step === 'list') {
+            const run = rows().filter(runnable);
+            const past = run.filter(r => !r.upcoming);
+            const skip = rows().filter(r => r.action === 'lämnas');
+            const visible = run.filter(r => r.upcoming || showPast);
+            $('ctmBody').innerHTML =
+                '<p class="mb-2">Kryssa i de händelser som är <strong>träningar</strong>. De flyttas till Träningar med sina anmälda och bokade lånevapen. ' +
+                'Det som inte är en träning — en tävling, en städdag, en kurskväll — låter ni stå kvar som händelse.</p>' +
+                '<p class="small text-muted mb-2">Kommande träningar är förkryssade. Genomförda behöver inte flyttas: de står kvar i kalendern som förut.</p>' +
+                (past.length ? '<div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="ctmShowPast"' + (showPast ? ' checked' : '') + '>' +
+                    '<label class="form-check-label small" for="ctmShowPast">Visa även genomförda (' + past.length + ')</label></div>' : '') +
+                (visible.length ? '<div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th style="width:2rem"></th><th>Datum</th><th>Händelse</th>' +
+                    '<th class="text-end">Anmälda</th><th class="text-end">Lånevapen</th></tr></thead><tbody>' +
+                    visible.map(r => {
+                        const i = rows().indexOf(r);
+                        const obs = [];
+                        if ((r.notCarried || []).length) obs.push('Visas inte efter flytten: ' + r.notCarried.map(esc).join(', ') + '.');
+                        (r.notes || []).forEach(x => obs.push(esc(x)));
+                        if (r.action === 'avpublicera') obs.push('Redan flyttad — den gamla händelsen döljs.');
+                        return '<tr><td><input type="checkbox" class="form-check-input" data-ctm-row="' + i + '"' + (checked.has(r.eventId) ? ' checked' : '') + ' aria-label="Flytta"></td>' +
+                            '<td class="text-nowrap">' + fmtDate(r.date) + '</td><td>' + esc(r.name) +
+                            (r.eventType && r.eventType !== 'Träning' ? ' <span class="badge text-bg-light border">' + esc(r.eventType) + '</span>' : '') +
+                            (obs.length ? '<div class="small text-warning-emphasis">' + obs.join(' ') + '</div>' : '') + '</td>' +
+                            '<td class="text-end">' + (r.participants || 0) + '</td><td class="text-end">' + (r.bookings || 0) + '</td></tr>';
+                    }).join('') + '</tbody></table></div>'
+                    : '<div class="alert alert-light border">Inga kommande träningar ligger kvar under Händelser.' + (past.length ? ' Kryssa i <em>Visa även genomförda</em> om du vill flytta dem.' : '') + '</div>') +
+                (skip.length ? '<details class="mt-2"><summary class="small">Kan inte flyttas (' + skip.length + ')</summary><ul class="small mt-2">' +
+                    skip.map(r => '<li>' + fmtDate(r.date) + ' · ' + esc(r.name) + ' — ' + esc(r.reason) + '</li>').join('') + '</ul></details>' : '');
+            back.textContent = 'Avbryt';
+            next.textContent = 'Fortsätt (' + checked.size + ' valda)';
+            next.disabled = checked.size === 0;
+        } else if (step === 'confirm') {
+            const sel = rows().filter(r => checked.has(r.eventId));
+            const parts = sel.reduce((s, r) => s + (r.participants || 0), 0);
+            const books = sel.reduce((s, r) => s + (r.bookings || 0), 0);
+            const lost = [...new Set(sel.flatMap(r => r.notCarried || []))];
+            $('ctmBody').innerHTML =
+                '<p>När du trycker <strong>Flytta ' + sel.length + '</strong> händer det här:</p><ul>' +
+                '<li><strong>' + sel.length + '</strong> ' + (sel.length === 1 ? 'händelse blir en träning' : 'händelser blir träningar') + ' under Träningar, med samma datum, tid, plats, beskrivning och anmälan.</li>' +
+                '<li><strong>' + parts + '</strong> anmälda och <strong>' + books + '</strong> bokade lånevapen följer med.</li>' +
+                '<li>De gamla händelserna <strong>döljs</strong>. De raderas inte.</li>' +
+                (lost.length ? '<li>Det här finns på några av händelsernas egna sidor men visas inte på träningen: <strong>' + lost.map(esc).join(', ') + '</strong>. Skriv in det i träningens beskrivning om det behövs.</li>' : '') +
+                '<li>Ångrar du dig går det att flytta tillbaka, så länge träningen inte har ändrats eller kopplats till en kurs.</li></ul>' +
+                '<div class="border rounded p-2 small" style="max-height:12rem;overflow:auto">' +
+                sel.map(r => '<div>' + fmtDate(r.date) + ' · ' + esc(r.name) + '</div>').join('') + '</div>' +
+                '<div id="ctmResult" class="mt-3" role="status"></div>';
+            back.textContent = 'Tillbaka';
+            next.textContent = 'Flytta ' + sel.length;
+            next.disabled = false;
+        } else {
+            back.classList.add('d-none');
+            next.textContent = 'Stäng';
+            next.disabled = false;
+        }
+    }
+
+    function run() {
+        const ids = [...checked];
+        if (busy || !ids.length) return;
+        busy = true; wrote = true;
+        $('ctmNext').disabled = true; $('ctmBack').disabled = true; $('ctmClose').disabled = true;
+        $('ctmResult').innerHTML = '<div class="alert alert-info mb-0"><span class="spinner-border spinner-border-sm me-2"></span>Flyttar … stäng inte sidan.</div>';
+        postJson('Run', { clubId: clubId(), apply: '1', eventIds: ids }).then(d => {
+            if (!d.success) {
+                $('ctmResult').innerHTML = '<div class="alert alert-warning mb-0">' + esc(d.message || 'Flytten gick inte.') + '</div>';
+                step = 'done'; renderStep(); return;
+            }
+            const res = d.rows || [];
+            const ok = res.filter(r => r.action === 'migrerad' || r.action === 'avpublicera').length;
+            const fail = res.filter(r => r.action === 'fel');
+            const hidden = res.filter(r => (r.notes || []).some(x => x.indexOf('avpubliceras') >= 0)).length;
+            $('ctmResult').innerHTML = '<div class="alert ' + (fail.length ? 'alert-danger' : 'alert-success') + ' mb-0">' +
+                '<strong>' + ok + (ok === 1 ? ' träning är flyttad' : ' träningar är flyttade') + '.</strong> Du hittar dem under Träningar.' +
+                (fail.length ? '<div class="mt-2">' + fail.length + ' kunde inte flyttas och står kvar som händelser:<ul class="mb-0">' + fail.map(r => '<li>' + esc(r.name) + ' — ' + esc(r.reason) + '</li>').join('') + '</ul></div>' : '') +
+                (hidden ? '<div class="mt-2">' + hidden + ' av de gamla händelserna gick inte att dölja. Öppna flytten igen — då görs bara det steget.</div>' : '') + '</div>';
+            step = 'done'; renderStep();
+        }).catch(e => {
+            $('ctmResult').innerHTML = '<div class="alert alert-danger mb-0">Svaret från servern uteblev (' + esc(e.message) + '). <strong>Flytten kan ha gått igenom ändå.</strong> Stäng rutan och titta under Träningar innan du försöker igen.</div>';
+            step = 'done'; renderStep();
+        }).finally(() => { busy = false; $('ctmBack').disabled = false; $('ctmClose').disabled = false; $('ctmNext').disabled = false; });
+    }
+
+    $('ctmNext').addEventListener('click', () => {
+        if (step === 'list') { step = 'confirm'; renderStep(); }
+        else if (step === 'confirm') run();
+        else bootstrap.Modal.getOrCreateInstance($('ctmModal')).hide();
+    });
+    $('ctmBack').addEventListener('click', () => {
+        if (step === 'confirm') { step = 'list'; renderStep(); }
+        else bootstrap.Modal.getOrCreateInstance($('ctmModal')).hide();
+    });
+    $('ctmBody').addEventListener('change', e => {
+        const t = e.target;
+        if (t.id === 'ctmShowPast') { showPast = t.checked; renderStep(); return; }
+        if (t.hasAttribute('data-ctm-row')) {
+            const r = rows()[+t.getAttribute('data-ctm-row')];
+            if (t.checked) checked.add(r.eventId); else checked.delete(r.eventId);
+            $('ctmNext').textContent = 'Fortsätt (' + checked.size + ' valda)';
+            $('ctmNext').disabled = checked.size === 0;
+        }
+    });
+
+    // ── Ångra ──
+    function openUndo() {
+        undoRows = [];
+        $('ctmUndoBody').innerHTML = '<div class="text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Hämtar flyttade träningar …</div>';
+        $('ctmUndoGo').disabled = true; $('ctmUndoGo').classList.remove('d-none');
+        $('ctmUndoCancel').textContent = 'Avbryt';
+        bootstrap.Modal.getOrCreateInstance($('ctmUndoModal')).show();
+        getJson(base + 'UndoPreview?clubId=' + clubId()).then(d => {
+            if (!d.success) { $('ctmUndoBody').innerHTML = '<div class="alert alert-warning mb-0">' + esc(d.message || 'Kunde inte hämtas.') + '</div>'; return; }
+            undoRows = d.rows || [];
+            renderUndo();
+        }).catch(e => { $('ctmUndoBody').innerHTML = '<div class="alert alert-danger mb-0">Kunde inte hämtas (' + esc(e.message) + ').</div>'; });
+    }
+    function renderUndo() {
+        const can = undoRows.filter(r => r.action === 'återställ');
+        $('ctmUndoBody').innerHTML = !undoRows.length ? '<div class="alert alert-light border mb-0">Klubben har inga flyttade träningar.</div>' :
+            '<p>Markerade träningar blir <strong>händelser igen</strong>, med sina anmälda och bokade lånevapen. ' +
+            'En träning som har ändrats eller kopplats till en kurs efter flytten kan inte flyttas tillbaka — skälet står på raden.</p>' +
+            '<div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th style="width:2rem"></th><th>Datum</th><th>Träning</th><th class="text-end">Anmälda</th></tr></thead><tbody>' +
+            undoRows.map((r, i) => {
+                const ok = r.action === 'återställ';
+                return '<tr' + (ok ? '' : ' class="text-muted"') + '><td>' + (ok ? '<input type="checkbox" class="form-check-input" data-ctm-undo="' + i + '" aria-label="Flytta tillbaka">' : '') + '</td>' +
+                    '<td class="text-nowrap">' + fmtDate(r.date) + (r.startTime ? ' ' + esc(r.startTime) : '') + '</td><td>' + esc(r.name) +
+                    (ok ? '' : '<div class="small">' + esc(r.reason) + '</div>') + '</td><td class="text-end">' + (r.participants || 0) + '</td></tr>';
+            }).join('') + '</tbody></table></div>' +
+            (can.length ? '' : '<div class="alert alert-light border mb-0">Ingen av träningarna kan flyttas tillbaka.</div>') +
+            '<div id="ctmUndoResult" class="mt-3" role="status"></div>';
+        syncUndo();
+    }
+    const undoSelected = () => [...document.querySelectorAll('#ctmUndoBody input[data-ctm-undo]')].filter(c => c.checked).map(c => undoRows[+c.getAttribute('data-ctm-undo')].trainingId);
+    function syncUndo() {
+        const n = undoSelected().length;
+        $('ctmUndoGo').textContent = n ? 'Flytta tillbaka ' + n : 'Flytta tillbaka';
+        $('ctmUndoGo').disabled = n === 0;
+    }
+    $('ctmUndoBody').addEventListener('change', e => { if (e.target.hasAttribute('data-ctm-undo')) syncUndo(); });
+    $('ctmUndoGo').addEventListener('click', () => {
+        const ids = undoSelected();
+        if (busy || !ids.length) return;
+        busy = true; wrote = true;
+        $('ctmUndoGo').disabled = true; $('ctmUndoCancel').disabled = true; $('ctmUndoClose').disabled = true;
+        $('ctmUndoResult').innerHTML = '<div class="alert alert-info mb-0"><span class="spinner-border spinner-border-sm me-2"></span>Flyttar tillbaka … stäng inte sidan.</div>';
+        postJson('Undo', { clubId: clubId(), apply: '1', trainingIds: ids }).then(d => {
+            if (!d.success) { $('ctmUndoResult').innerHTML = '<div class="alert alert-warning mb-0">' + esc(d.message || 'Det gick inte.') + '</div>'; return; }
+            const fail = (d.rows || []).filter(r => r.action === 'fel');
+            $('ctmUndoResult').innerHTML = '<div class="alert ' + (fail.length ? 'alert-danger' : 'alert-success') + ' mb-0"><strong>' + (d.restored || 0) +
+                ((d.restored || 0) === 1 ? ' är en händelse igen' : ' är händelser igen') + '.</strong>' +
+                (fail.length ? '<ul class="mb-0 mt-2">' + fail.map(r => '<li>' + esc(r.name) + ' — ' + esc(r.reason) + '</li>').join('') + '</ul>' : '') + '</div>';
+            $('ctmUndoGo').classList.add('d-none');
+            $('ctmUndoCancel').textContent = 'Stäng';
+        }).catch(e => {
+            $('ctmUndoResult').innerHTML = '<div class="alert alert-danger mb-0">Svaret från servern uteblev (' + esc(e.message) + '). <strong>Det kan ha gått igenom ändå.</strong> Stäng rutan och titta under Träningar.</div>';
+            $('ctmUndoGo').classList.add('d-none');
+            $('ctmUndoCancel').textContent = 'Stäng';
+        }).finally(() => { busy = false; $('ctmUndoCancel').disabled = false; $('ctmUndoClose').disabled = false; });
+    });
+
+    // Efter en körning: läs om läget, träningslistan och händelselistan.
+    ['ctmModal', 'ctmUndoModal'].forEach(id => $(id).addEventListener('hidden.bs.modal', () => {
+        if (!wrote) return;
+        wrote = false;
+        refresh();
+        if (window.hpskLoadClubTrainings) window.hpskLoadClubTrainings();
+        if (typeof window.loadEvents === 'function') window.loadEvents();
+    }));
+
+    document.addEventListener('click', e => {
+        const b = e.target.closest('[data-ctm]');
+        if (!b) return;
+        if (b.getAttribute('data-ctm') === 'open') open();
+        else if (b.getAttribute('data-ctm') === 'undo') openUndo();
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // Läget hämtas när adminpanelen öppnas (den är dold innan dess) och när Träningar öppnas.
+        let loaded = false;
+        const once = () => { if (!loaded) { loaded = true; refresh(); } };
+        const admin = $('clubAdmin-tab');
+        if (admin) admin.addEventListener('shown.bs.tab', once);
+        if ($('clubAdmin') && $('clubAdmin').classList.contains('active')) once();
+        const tr = $('clubTrainings-tab');
+        if (tr) tr.addEventListener('shown.bs.tab', () => { if (loaded) refresh(); else once(); });
+    });
+    window.hpskRefreshTrainingMigration = refresh;
+})();
+</script>

@@ -122,8 +122,9 @@
                 <button class="nav-link active" id="events-tab" data-bs-toggle="tab" data-bs-target="#eventsTab" type="button" role="tab" aria-controls="eventsTab" aria-selected="true">
                     <i class="bi bi-calendar-event me-2"></i>Händelser
                 </button>
-                <button class="nav-link" id="clubTrainings-tab" data-bs-toggle="tab" data-bs-target="#clubTrainingsTab" type="button" role="tab" aria-controls="clubTrainingsTab" aria-selected="false">
+                <button class="nav-link d-flex align-items-center" id="clubTrainings-tab" data-bs-toggle="tab" data-bs-target="#clubTrainingsTab" type="button" role="tab" aria-controls="clubTrainingsTab" aria-selected="false">
                     <i class="bi bi-bullseye me-2"></i>Träningar
+                    <span class="badge bg-warning text-dark ms-auto d-none" id="ctmRailCount" title="Träningar som ligger kvar under Händelser">0</span>
                 </button>
                 <button class="nav-link" id="competitions-tab" data-bs-toggle="tab" data-bs-target="#competitionsTab" type="button" role="tab" aria-controls="competitionsTab" aria-selected="false">
                     <i class="bi bi-trophy me-2"></i>Tävlingar
@@ -252,6 +253,8 @@
                     <i class="bi bi-plus-circle me-2"></i>Ny Händelse
                 </button>
             </div>
+            @* Träningar som ligger kvar som händelser — fylls av _TrainingMigrationClub. *@
+            <div id="ctmEventsNotice" class="d-none"></div>
             @* Kvitto efter en kopiering. Står kvar, till skillnad från en alert. *@
             <div id="eventsCopyNotice" style="display:none"></div>
 
@@ -508,6 +511,9 @@
 
         @* Fas B4: klubbens träningar. Partialen skriver ut sin egen tab-pane (#clubTrainingsTab). *@
         @await Html.PartialAsync("ClubAdminTrainings")
+        @* Flytt av klubbens gamla träningshändelser (2026-10-07). Bara modaler + skript; korten
+           (#ctmEventsNotice, #ctmCard, #ctmRailCount) står där de syns. *@
+        @await Html.PartialAsync("_TrainingMigrationClub")
 
         <!-- Aktivitet Tab -->
         @* ⚠️ Ren LÄSYTA. Utfärdandeblanketten (`ClubAdminActivityIntyg`) monteras i
