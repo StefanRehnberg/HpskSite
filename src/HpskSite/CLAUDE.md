@@ -3690,8 +3690,42 @@ roterande skjutledare, tak 400. `ClubTraining.IsMandatory` finns som kolumn men 
 `TrainingMigrationService`: händelser av typen Träning och grenarna Duell/Precision/Fältskjutning/IPSC
 flyttas till `ClubTraining` med deltagare och lånebokningar, en transaktion per händelse, noden
 **avpubliceras** (raderas aldrig), idempotent via `LegacyEventNodeId`. Lämnas: opublicerade, utan
-datum, och med betalningar i liggaren. `TrainingMigration/Preview` (läser) och `/Run` (`apply="1"`),
-bara sajtadmin, `clubId` begränsar. Torrkörning: `hpsk-verify/training-migration-preview.mjs`.
+datum, och med NÅGON rad i liggaren (betalning, avgift, verifikation, utkast, projekt, projektgrupp —
+i både `dbo` och `sbx`; förut bara betalningar i dbo). Torrkörning: `hpsk-verify/training-migration-preview.mjs`.
+
+**⚠️⚠️ KLUBBEN FLYTTAR SJÄLV** (Stefans beslut 2026-10-07 — klubben vet vilka "Träning"-händelser som
+egentligen är något annat; i prod fanns t.ex. *Familjefejden*, *Städdag*, *Tordagstävling* och *Riks HB*
+typade som Träning). En första version var en sajtadminflik på /admin-page; den är BORTTAGEN.
+Ytan är `_TrainingMigrationClub.cshtml` (bara modaler + skript, inkluderad i `ClubAdminPanel` UTANFÖR
+flikpanelerna — en modal i en dold panel syns aldrig). Den fyller tre platser:
+`#ctmEventsNotice` överst på Händelser (där klubbadmin landar), `#ctmCard` överst på Träningar och
+`#ctmRailCount` på rälsens Träningar. **⚠️ Uppmaningen och siffran räknar bara KOMMANDE** (`Row.Upcoming`):
+passerade kan stå kvar som historik, och en gul ruta om dem hade aldrig gått att bli av med. Passerade nås
+via en diskret länk på Träningar och "Visa även genomförda" i listan; bara kommande är förkryssade.
+`Row.NotCarried` namnger uppgifter på händelsens sida som träningen inte bär (kontaktperson, bild,
+utrustning, målgrupp, innehållsblock, snabblänkar, extern länk) — visas på raden och i bekräftelsen.
+Behörighet = samma som `ClubTrainingController.CanAdminAsync` (sajtadmin, klubbadmin, styrelseledamot);
+`clubId` krävs i varje anrop. Reglerna, alla på servern:
+- **En skarp körning flyttar BARA valda id:n i EN klubb** (`RunSelected`). `Run` med `apply="1"` utan
+  `EventIds` eller med `clubId = 0` vägras. Ett valt id som inte längre står som `migrera`/`avpublicera`
+  i klubben **vägrar hela anropet** — ingenting skrivs. Det som förhandsgranskades är det som körs.
+- **`Gate` (statisk `SemaphoreSlim(1,1)`)** släpper fram en flytt/ångra i taget; dessutom läses
+  `LegacyEventNodeId` med `UPDLOCK, HOLDLOCK` INNE i transaktionen, så två samtidiga körningar aldrig
+  skapar två träningar för samma händelse (mätt: två parallella anrop → en träning).
+- **Ångra per klubb** (`PreviewUndo` / `UndoSelected`, endpoints `UndoPreview` / `Undo`): händelsen
+  publiceras FÖRST (misslyckas det rörs ingenting), sedan flyttas deltagare och lånevapen tillbaka och
+  träningen tas bort i en transaktion (misslyckas den avpubliceras händelsen igen). Behålls: kopplad till
+  en kurs, kursanteckningar/-serier, liggarrader som träning, `ScheduleId` satt, eller ändrad efter
+  flytten (`UpdatedDate > CreatedDate + 5 s`). Reglerna prövas igen under lås i transaktionen.
+- **Ytan:** lista → bekräftelse (vad som händer, vad som inte visas efter flytten) → resultat. Inga
+  `confirm()`. Ett uteblivet svar säger att körningen kan ha gått igenom — aldrig ett automatiskt nytt
+  försök. Efter en körning läses kortet, Träningar (`hpskLoadClubTrainings`) och Händelser (`loadEvents`) om.
+- Varje skarp körning loggas som Warning med händelse → träning per rad.
+Svit: `hpsk-verify/training-migration-ui-verify.mjs` 68/68 (egen fixtur i klubb 2610 Kungsbacka-Wiske,
+`/halland/klubbar/kungsbacka-wiske/`, städar). Bilder: `training-migration-club-shot.mjs` (läser bara).
+⚠️ **Den äldre sviten `training-migration-verify.mjs` anropar `Run` utan `EventIds`** och vägras därför
+nu — den behöver skicka `eventIds`. ⚠️ **A/B ej körd** (stoppad av behörighetskontrollen) — sviten är
+inte bevisad att kunna falla.
 
 **Ytorna (B4/B5).** Klubbadmin → **Träningar** (`ClubAdminTrainings.cshtml`, `ClubTrainingController`):
 ny träning, byt skjutledare, ställ in.

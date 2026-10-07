@@ -1,3 +1,4 @@
+using HpskSite.Models;
 using HpskSite.Services;
 using HpskSite.Services.Training;
 using Microsoft.AspNetCore.Mvc;
@@ -13,17 +14,24 @@ using Umbraco.Cms.Web.Website.Controllers;
 namespace HpskSite.Controllers
 {
     /// <summary>
-    /// Fas B3: sajtadminens väg för att flytta klubbarnas gamla träningshändelser till
-    /// <c>ClubTraining</c>. Se <see cref="TrainingMigrationService"/> för vad som flyttas.
+    /// Fas B3: klubbens väg för att flytta sina gamla träningshändelser till <c>ClubTraining</c> —
+    /// ytan är klubbens Admin → Träningar (<c>_TrainingMigrationClub.cshtml</c>), Stefans beslut
+    /// 2026-10-07 (klubben vet vilka "Träning"-händelser som egentligen är något annat).
+    /// Se <see cref="TrainingMigrationService"/>.
     ///
-    /// <para><b>Två endpoints, och skillnaden är hela poängen.</b> <c>Preview</c> är en GET och
-    /// skriver ingenting. <c>Run</c> är en POST och skriver bara när <c>apply</c> uttryckligen är
-    /// "1" — ett utelämnat värde är en torrkörning, aldrig en skarp körning.</para>
+    /// <para><b>Behörigheten är densamma som för klubbens träningar</b> (<c>ClubTrainingController.
+    /// CanAdminAsync</c>): sajtadmin, klubbadmin eller styrelseledamot i klubben. Varje anrop gäller
+    /// EN klubb — <c>clubId</c> krävs.</para>
+    ///
+    /// <para><b>Läsning och skrivning är skilda endpoints.</b> <c>Preview</c>/<c>UndoPreview</c> är GET
+    /// och skriver ingenting. <c>Run</c>/<c>Undo</c> skriver bara när <c>apply</c> uttryckligen är "1"
+    /// — och bara för de id:n som skickas med.</para>
     /// </summary>
     public class TrainingMigrationController : SurfaceController
     {
         private readonly TrainingMigrationService _migration;
         private readonly AdminAuthorizationService _auth;
+        private readonly BoardRoleService _boardRoles;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
 
@@ -36,12 +44,14 @@ namespace HpskSite.Controllers
             IPublishedUrlProvider publishedUrlProvider,
             TrainingMigrationService migration,
             AdminAuthorizationService auth,
+            BoardRoleService boardRoles,
             IMemberManager memberManager,
             IMemberService memberService)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _migration = migration;
             _auth = auth;
+            _boardRoles = boardRoles;
             _memberManager = memberManager;
             _memberService = memberService;
         }
@@ -51,13 +61,24 @@ namespace HpskSite.Controllers
             public int ClubId { get; set; }
             /// <summary>"1" = skriv. Sträng, eftersom "1" inte binder till bool i ASP.NET Core.</summary>
             public string? Apply { get; set; }
+            /// <summary>Händelserna som ska flyttas. Krävs för en skarp körning.</summary>
+            public List<int>? EventIds { get; set; }
         }
 
-        [HttpGet]
-        public async Task<IActionResult> Preview(int clubId = 0)
+        public class UndoRequest
         {
-            var me = await SiteAdminIdAsync();
-            if (me == null) return Json(new { success = false, message = "Bara sajtadministratören kan flytta träningar." });
+            public int ClubId { get; set; }
+            public string? Apply { get; set; }
+            public List<int>? TrainingIds { get; set; }
+        }
+
+        private const string Denied = "Du har inte behörighet att flytta klubbens träningar.";
+
+        [HttpGet]
+        public async Task<IActionResult> Preview(int clubId)
+        {
+            var me = await AuthorizedMemberAsync(clubId);
+            if (me == null) return Json(new { success = false, message = Denied });
             return Json(Shape(_migration.Run(apply: false, me.Value, clubId)));
         }
 
@@ -65,10 +86,38 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Run([FromBody] RunRequest request)
         {
-            var me = await SiteAdminIdAsync();
-            if (me == null) return Json(new { success = false, message = "Bara sajtadministratören kan flytta träningar." });
-            var apply = request?.Apply == "1";
-            return Json(Shape(_migration.Run(apply, me.Value, request?.ClubId ?? 0)));
+            var clubId = request?.ClubId ?? 0;
+            var me = await AuthorizedMemberAsync(clubId);
+            if (me == null) return Json(new { success = false, message = Denied });
+            if (request?.Apply != "1")
+                return Json(Shape(_migration.Run(apply: false, me.Value, clubId)));
+
+            var result = _migration.RunSelected(me.Value, clubId, request.EventIds ?? new List<int>());
+            if (result.Refused != null) return Json(new { success = false, applied = false, message = result.Refused });
+            return Json(Shape(result));
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> UndoPreview(int clubId)
+        {
+            var me = await AuthorizedMemberAsync(clubId);
+            if (me == null) return Json(new { success = false, message = Denied });
+            return Json(ShapeUndo(_migration.PreviewUndo(clubId)));
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Undo([FromBody] UndoRequest request)
+        {
+            var clubId = request?.ClubId ?? 0;
+            var me = await AuthorizedMemberAsync(clubId);
+            if (me == null) return Json(new { success = false, message = Denied });
+            if (request?.Apply != "1")
+                return Json(ShapeUndo(_migration.PreviewUndo(clubId)));
+
+            var result = _migration.UndoSelected(me.Value, clubId, request.TrainingIds ?? new List<int>());
+            if (result.Refused != null) return Json(new { success = false, applied = false, message = result.Refused });
+            return Json(ShapeUndo(result));
         }
 
         private static object Shape(TrainingMigrationService.Result r) => new
@@ -80,15 +129,37 @@ namespace HpskSite.Controllers
             failed = r.Failed,
             participantsMoved = r.ParticipantsMoved,
             bookingsMoved = r.BookingsMoved,
-            rows = r.Rows
+            rows = r.Rows,
+            kept = r.Kept
         };
 
-        private async Task<int?> SiteAdminIdAsync()
+        private static object ShapeUndo(TrainingMigrationService.UndoResult r)
         {
-            if (!await _auth.IsCurrentUserAdminAsync()) return null;
+            if (r.Refused != null) return new { success = false, applied = false, message = r.Refused };
+            return new
+            {
+                success = true,
+                applied = r.Applied,
+                restorable = r.Rows.Count(x => x.Action == TrainingMigrationService.ActionRestore),
+                restored = r.Rows.Count(x => x.Action == TrainingMigrationService.ActionRestored),
+                failed = r.Rows.Count(x => x.Action == TrainingMigrationService.ActionFailed),
+                rows = r.Rows
+            };
+        }
+
+        /// <summary>Medlemmens id om hen får hantera klubbens träningar, annars null. Samma regel som
+        /// <c>ClubTrainingController.CanAdminAsync</c> — håll dem lika.</summary>
+        private async Task<int?> AuthorizedMemberAsync(int clubId)
+        {
+            if (clubId <= 0) return null;
             var current = await _memberManager.GetCurrentMemberAsync();
             if (current?.Email == null) return null;
-            return _memberService.GetByEmail(current.Email)?.Id;
+            var memberId = _memberService.GetByEmail(current.Email)?.Id ?? 0;
+            if (memberId <= 0) return null;
+            if (await _auth.IsCurrentUserAdminAsync()) return memberId;
+            if (await _auth.IsClubAdminForClub(clubId)) return memberId;
+            try { return _boardRoles.IsBoardMemberOf(DocumentOwnerType.Club, clubId, memberId) ? memberId : null; }
+            catch { return null; }
         }
     }
 }
