@@ -54,7 +54,9 @@
                 var clubNode = Umbraco.Content(primaryClubIdValue);
                 if (clubNode != null)
                 {
-                    memberClubs.Add((primaryClubIdValue, clubNode.Name, ClubUrl: clubNode.Url()));
+                    // clubName-egenskapen, inte nodnamnet: nodnamnen saknar ofta å/ä/ö ("Malmoe", "Halmstad Snostorp").
+                    var clubDisplayName = clubNode.Value<string>("clubName");
+                    memberClubs.Add((primaryClubIdValue, HpskSite.Helpers.ClubNameHelper.Shorten(string.IsNullOrWhiteSpace(clubDisplayName) ? clubNode.Name : clubDisplayName), ClubUrl: clubNode.Url()));
                 }
             }
 
@@ -69,7 +71,8 @@
                         var clubNode = Umbraco.Content(clubId);
                         if (clubNode != null)
                         {
-                            memberClubs.Add((clubId, clubNode.Name, ClubUrl: clubNode.Url()));
+                            var clubDisplayName = clubNode.Value<string>("clubName");
+                            memberClubs.Add((clubId, HpskSite.Helpers.ClubNameHelper.Shorten(string.IsNullOrWhiteSpace(clubDisplayName) ? clubNode.Name : clubDisplayName), ClubUrl: clubNode.Url()));
                         }
                     }
                 }
