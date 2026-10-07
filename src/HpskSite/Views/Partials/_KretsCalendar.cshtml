@@ -31,7 +31,13 @@
 <div class="kc-wrap" id="@(P)Root" data-region-id="@Model" data-kc-mode="@(kcPlanning ? "planning" : "public")">
     @if (kcPlanning)
     {
-        <p class="small text-muted mb-2">Planeringskalendern: tävlingar, ansökningar (också preliminära), Förbundets stomprogram och krockvarningar. Skyttarna ser kretsens publicerade kalender på kretssidan — utan preliminära ansökningar och krockar.</p>
+        <div class="d-flex align-items-start gap-2 mb-2">
+            <p class="small text-muted mb-0 flex-grow-1">Planeringskalendern: tävlingar, ansökningar (också preliminära), Förbundets stomprogram och krockvarningar. Skyttarna ser kretsens publicerade kalender på kretssidan — utan preliminära ansökningar och krockar.</p>
+            @* Instruktionsfilmen om ansökan och kretsens beslut — noden tutorial-kretsplanering under /tutorials. *@
+            <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" onclick="TutorialHelper.open('tutorial-kretsplanering')" title="Se instruktionsvideo om kretsens planering">
+                <i class="bi bi-play-circle me-1"></i>Guide
+            </button>
+        </div>
     }
     <div class="kc-head">
         <button type="button" class="btn btn-outline-secondary btn-sm" id="@(P)Prev" aria-label="Föregående"><i class="bi bi-chevron-left"></i></button>
