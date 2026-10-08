@@ -378,6 +378,8 @@ namespace HpskSite.Controllers
             byOwner = new List<object>()
         };
 
+        private static object ZeroMotionStats() => new { total = 0, thisYear = 0, toRegion = 0, owners = 0 };
+
         /// <summary>Zero-valued Fältkonfig stats — default and no-table fallback.</summary>
         private static object ZeroFaltkonfigStats() => new
         {
@@ -821,6 +823,7 @@ namespace HpskSite.Controllers
                     var storageByOwner = new List<dynamic>();
                     var storageQuotas = new List<DocumentStorageQuota>();
                     object styrelseStats = ZeroStyrelseStats();
+                    object motionStats = ZeroMotionStats();
                     object faltkonfigStats = ZeroFaltkonfigStats();
                     object firearmStats = ZeroFirearmStats();
                     object foreningsintygStats = ZeroForeningsintygStats();
@@ -1087,6 +1090,27 @@ namespace HpskSite.Controllers
                             };
                         }
                         catch { /* board tables not present — keep zero defaults */ }
+
+                        // ── Motioner (2026-10-08) — eget try-block: en okörd migrering får inte nolla
+                        // resten av styrelsearbetets siffror. Återkallade räknas inte som skrivna.
+                        try
+                        {
+                            var mo = db.Single<dynamic>(
+                                @"SELECT COUNT(*) AS Total,
+                                         SUM(CASE WHEN [Year] = @0 THEN 1 ELSE 0 END) AS ThisYear,
+                                         SUM(CASE WHEN OwnerType = @1 THEN 1 ELSE 0 END) AS ToRegion,
+                                         COUNT(DISTINCT CAST(OwnerType AS varchar(2)) + ':' + CAST(OwnerId AS varchar(12))) AS Owners
+                                  FROM BoardMotions WHERE IsActive = 1 AND WithdrawnDate IS NULL",
+                                DateTime.Today.Year, DocumentOwnerType.Region);
+                            motionStats = new
+                            {
+                                total = (int)(mo.Total ?? 0),
+                                thisYear = (int)(mo.ThisYear ?? 0),
+                                toRegion = (int)(mo.ToRegion ?? 0),
+                                owners = (int)(mo.Owners ?? 0)
+                            };
+                        }
+                        catch { /* BoardMotions not present — keep zero defaults */ }
 
                         // ── Fältkonfig (standalone Fältskytte configurations) usage ──
                         // Independent try blocks: the visibility columns are oldest; approval +
@@ -1540,6 +1564,7 @@ namespace HpskSite.Controllers
                             regionStorage = regionStorageList
                         },
                         styrelse = styrelseStats,
+                        motioner = motionStats,
                         faltkonfig = faltkonfigStats,
                         firearms = firearmStats,
                         foreningsintyg = foreningsintygStats,
@@ -1611,6 +1636,7 @@ namespace HpskSite.Controllers
                     regionStorage = new List<object>()
                 },
                 styrelse = ZeroStyrelseStats(),
+                motioner = ZeroMotionStats(),
                 faltkonfig = ZeroFaltkonfigStats(),
                 firearms = ZeroFirearmStats(),
                 aiChat = BuildAiChatStats()
