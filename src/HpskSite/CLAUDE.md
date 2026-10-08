@@ -10616,6 +10616,10 @@ ett möte, så utan dem faller hela styrelsearbetet. Startkontroll: `BoardWorkSc
 Körd i dev 2026-10-08. Fildeploy av KB `styrelsearbete.md` (omskriven) och `motioner.md` (ny).
 Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod (`/motion` är routad).
 
+**Statistik** (`/admin-page` → Statistik): sektionen Styrelsearbete står direkt före Ekonomi med
+fem kort; det femte, *Skrivna motioner*, kommer från `motioner` i statistiksvaret (eget try-block i
+`AdminStatisticsController`, återkallade räknas inte). Svit: `hpsk-verify/admin-stat-styrelse-verify.mjs`.
+
 Test: `BoardWorkRulesTests` (30). Svit: `hpsk-verify/styrelse-arenden-motioner-verify.mjs` **91/91**
 (ordförande, ledamot, motionär, stödjande medlem, medlem i annan klubb, kretsadmin; telefon 390 px för
 alla delar; inga JS-fel). ⚠️ Utskriftssidorna saknar antiforgery-token — gå tillbaka till /styrelse

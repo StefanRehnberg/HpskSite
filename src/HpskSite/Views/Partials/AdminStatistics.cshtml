@@ -619,94 +619,6 @@
             </div>
         </div>
 
-        <!-- Section I: Styrelsearbete -->
-        <h5 class="mt-4 mb-3"><i class="bi bi-clipboard-check me-2"></i>Styrelsearbete</h5>
-        <div class="row g-3 mb-3">
-            <div class="col-md-3 col-sm-6">
-                <div class="card h-100 border-primary">
-                    <div class="card-body text-center">
-                        <h6 class="card-subtitle mb-2 text-muted">
-                            Aktiva styrelser
-                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
-                               title="Antal klubbar/kretsar som har minst ett protokollfört möte i Styrelse-verktyget (någonsin). Visar hur många föreningar som faktiskt tagit verktyget i bruk."></i>
-                        </h6>
-                        <h2 class="card-title mb-1" id="statStyrelseBoards">—</h2>
-                        <small class="text-muted" id="statStyrelseBoardsSub"></small>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3 col-sm-6">
-                <div class="card h-100 border-success">
-                    <div class="card-body text-center">
-                        <h6 class="card-subtitle mb-2 text-muted">Möten i år</h6>
-                        <h2 class="card-title mb-1" id="statStyrelseMeetings">—</h2>
-                        <small class="text-muted" id="statStyrelseMeetingsSub"></small>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3 col-sm-6">
-                <div class="card h-100 border-info">
-                    <div class="card-body text-center">
-                        <h6 class="card-subtitle mb-2 text-muted">
-                            Protokoll justerade i år
-                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
-                               title="Antal möten i år med status Justerat. Siffran under visar hur många som skickats för digital justering och hur signeringen skedde (QR / webb / e-post)."></i>
-                        </h6>
-                        <h2 class="card-title mb-1" id="statStyrelseJusterat">—</h2>
-                        <small class="text-muted" id="statStyrelseJusteringSub"></small>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3 col-sm-6">
-                <div class="card h-100 border-warning">
-                    <div class="card-body text-center">
-                        <h6 class="card-subtitle mb-2 text-muted">
-                            Öppna åtgärder
-                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
-                               title="Åtgärder (att-göra-punkter) som ännu inte är klara. Röd siffra = förfallna (förbi sitt datum)."></i>
-                        </h6>
-                        <h2 class="card-title mb-1" id="statStyrelseActions">—</h2>
-                        <small class="text-danger" id="statStyrelseActionsSub"></small>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="row g-3 mb-3">
-            <div class="col-md-4">
-                <div class="card h-100">
-                    <div class="card-body">
-                        <h6 class="card-title">Årets aktivitet</h6>
-                        <ul class="list-unstyled mb-0 small">
-                            <li class="d-flex justify-content-between border-bottom py-1"><span>Årshjul avklarat</span><span class="fw-semibold" id="statStyrelseWheel">—</span></li>
-                            <li class="d-flex justify-content-between border-bottom py-1"><span>Kallelser utskickade</span><span class="fw-semibold" id="statStyrelseKallelser">—</span></li>
-                            <li class="d-flex justify-content-between border-bottom py-1"><span>Åtgärder avklarade</span><span class="fw-semibold" id="statStyrelseActionsDone">—</span></li>
-                            <li class="d-flex justify-content-between py-1"><span>Valberedningsförslag</span><span class="fw-semibold" id="statStyrelseNominations">—</span></li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-8">
-                <div class="card h-100">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <h6 class="card-title mb-0">
-                                Vilka klubbar &amp; kretsar använder Styrelse
-                                <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
-                                   title="Per förening: antal möten i år / totalt, öppna åtgärder och senaste mötesdatum. Sorterat på flest möten i år."></i>
-                            </h6>
-                            <button class="btn btn-sm btn-link text-decoration-none p-0 d-none" id="styrelseOwnersToggle" onclick="toggleStyrelseOwners()">Visa alla</button>
-                        </div>
-                        <div class="table-responsive mt-2" style="max-height:360px;overflow-y:auto">
-                            <table class="table table-sm table-hover mb-0">
-                                <thead><tr><th>Förening</th><th>Typ</th><th class="text-end">Möten i år</th><th class="text-end">Totalt</th><th class="text-end">Öppna åtg.</th><th class="text-end">Senaste möte</th></tr></thead>
-                                <tbody id="styrelseOwnersBody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Section J: Fältkonfigurator -->
         <h5 class="mt-4 mb-3"><i class="bi bi-bullseye me-2"></i>Fältkonfigurator</h5>
         <div class="row g-3 mb-3">
@@ -894,6 +806,107 @@
                         </h6>
                         <h2 class="card-title mb-1" id="statFiDocs">—</h2>
                         <small class="text-muted" id="statFiDocsSub"></small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section I: Styrelsearbete -->
+        <h5 class="mt-4 mb-3"><i class="bi bi-clipboard-check me-2"></i>Styrelsearbete</h5>
+        <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xl-5 g-3 mb-3">
+            <div class="col">
+                <div class="card h-100 border-primary">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Aktiva styrelser
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Antal klubbar/kretsar som har minst ett protokollfört möte i Styrelse-verktyget (någonsin). Visar hur många föreningar som faktiskt tagit verktyget i bruk."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statStyrelseBoards">—</h2>
+                        <small class="text-muted" id="statStyrelseBoardsSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="card h-100 border-success">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">Möten i år</h6>
+                        <h2 class="card-title mb-1" id="statStyrelseMeetings">—</h2>
+                        <small class="text-muted" id="statStyrelseMeetingsSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="card h-100 border-info">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Protokoll justerade i år
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Antal möten i år med status Justerat. Siffran under visar hur många som skickats för digital justering och hur signeringen skedde (QR / webb / e-post)."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statStyrelseJusterat">—</h2>
+                        <small class="text-muted" id="statStyrelseJusteringSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="card h-100 border-warning">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Öppna åtgärder
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Åtgärder (att-göra-punkter) som ännu inte är klara. Röd siffra = förfallna (förbi sitt datum)."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statStyrelseActions">—</h2>
+                        <small class="text-danger" id="statStyrelseActionsSub"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col">
+                <div class="card h-100 border-secondary">
+                    <div class="card-body text-center">
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            Skrivna motioner
+                            <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                               title="Motioner till klubbarnas och kretsarnas årsmöten (medlem → klubb och klubb → krets), även de som kom in på papper. Återkallade räknas inte."></i>
+                        </h6>
+                        <h2 class="card-title mb-1" id="statMotions">—</h2>
+                        <small class="text-muted" id="statMotionsSub"></small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">Årets aktivitet</h6>
+                        <ul class="list-unstyled mb-0 small">
+                            <li class="d-flex justify-content-between border-bottom py-1"><span>Årshjul avklarat</span><span class="fw-semibold" id="statStyrelseWheel">—</span></li>
+                            <li class="d-flex justify-content-between border-bottom py-1"><span>Kallelser utskickade</span><span class="fw-semibold" id="statStyrelseKallelser">—</span></li>
+                            <li class="d-flex justify-content-between border-bottom py-1"><span>Åtgärder avklarade</span><span class="fw-semibold" id="statStyrelseActionsDone">—</span></li>
+                            <li class="d-flex justify-content-between py-1"><span>Valberedningsförslag</span><span class="fw-semibold" id="statStyrelseNominations">—</span></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="card-title mb-0">
+                                Vilka klubbar &amp; kretsar använder Styrelse
+                                <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="top"
+                                   title="Per förening: antal möten i år / totalt, öppna åtgärder och senaste mötesdatum. Sorterat på flest möten i år."></i>
+                            </h6>
+                            <button class="btn btn-sm btn-link text-decoration-none p-0 d-none" id="styrelseOwnersToggle" onclick="toggleStyrelseOwners()">Visa alla</button>
+                        </div>
+                        <div class="table-responsive mt-2" style="max-height:360px;overflow-y:auto">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead><tr><th>Förening</th><th>Typ</th><th class="text-end">Möten i år</th><th class="text-end">Totalt</th><th class="text-end">Öppna åtg.</th><th class="text-end">Senaste möte</th></tr></thead>
+                                <tbody id="styrelseOwnersBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1865,6 +1878,12 @@
             document.getElementById('statStyrelseKallelser').textContent = s.kallelserThisYear;
             document.getElementById('statStyrelseActionsDone').textContent = s.actionsCompletedThisYear;
             document.getElementById('statStyrelseNominations').textContent = s.nominationsThisYear;
+
+            const mo = d.motioner || {};
+            document.getElementById('statMotions').textContent = mo.total ?? 0;
+            document.getElementById('statMotionsSub').textContent = (mo.total || 0) > 0
+                ? (mo.thisYear + ' i år · ' + mo.owners + ' föreningar' + (mo.toRegion ? ' · ' + mo.toRegion + ' till kretsar' : ''))
+                : '';
 
             window._styrelseOwners = s.byOwner || [];
             styrelseOwnersExpanded = false;
