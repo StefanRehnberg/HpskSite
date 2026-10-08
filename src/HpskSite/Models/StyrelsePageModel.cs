@@ -9,6 +9,12 @@ namespace HpskSite.Models
         public string Kind { get; set; } = "Klubb";   // "Klubb" / "Krets" (display)
         public bool CanManageRoles { get; set; }       // admin for this scope (role assignment)
         public bool ValberedningOnly { get; set; }     // member reaches this scope only via the valberedning → Valberedning tab only
+
+        // Rälsens rubrik (2026-10-08): vem man är här, och vart ← Tillbaka leder.
+        public string RoleTitle { get; set; } = "";
+        public string BackUrl { get; set; } = "/";
+        /// <summary>Sekreterare, ordförande eller administratör — placerar ärenden och skriver yttranden.</summary>
+        public bool CanPlace { get; set; }
     }
 
     /// <summary>View data for the /styrelse page (passed via ViewData; layout Model stays the site root).</summary>
@@ -32,6 +38,14 @@ namespace HpskSite.Models
         public string? SecretaryName { get; set; }
         public List<string> AdjusterNames { get; set; } = new();   // 0–2 justerare (varies per club/meeting type)
         public Dictionary<int, string> MemberNames { get; set; } = new();   // elected-member id → name (incl. non-attendees)
+
+        // Punkterna i läsordning med härlett paragrafnummer (§7, §7a, §7b …) — se BoardIssueRules.Ordered.
+        public List<(BoardMeetingAgendaItem Item, string Label, bool IsSub)> Ordered { get; set; } = new();
+        public Dictionary<int, BoardIssue> Issues { get; set; } = new();
+        public Dictionary<int, string> IssueSubmitters { get; set; } = new();
+        public Dictionary<int, BoardMotion> Motions { get; set; } = new();
+        /// <summary>Bilagornas filnamn per motion — skrivs ut så att läsaren vet att de finns.</summary>
+        public Dictionary<int, List<string>> MotionFiles { get; set; } = new();
     }
 
     /// <summary>Model for the formal "Valberedningens förslag" print. Chromeless, Layout=null.</summary>

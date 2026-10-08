@@ -37,7 +37,8 @@ namespace HpskSite.Controllers
             BoardMeetingService meetingService,
             BoardGovernanceService gov,
             ClubService clubService,
-            HpskSite.Services.Ledger.LedgerAuditorService auditors)
+            HpskSite.Services.Ledger.LedgerAuditorService auditors,
+            BoardWorkService work)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
@@ -48,7 +49,10 @@ namespace HpskSite.Controllers
             _gov = gov;
             _clubService = clubService;
             _auditors = auditors;
+            _work = work;
         }
+
+        private readonly BoardWorkService _work;
 
         [HttpGet("")]
         public async Task<IActionResult> Index(int? type, int? id)
@@ -105,6 +109,24 @@ namespace HpskSite.Controllers
             }
             model.Selected ??= model.Scopes.FirstOrDefault();
 
+            if (model.Selected != null)
+            {
+                var s = model.Selected;
+                var myRoles = _boardRoleService.GetBoardMembers(s.OwnerType, s.OwnerId)
+                    .Where(r => r.MemberId == memberId).ToList();
+                s.RoleTitle = myRoles.Count > 0
+                    ? string.Join(", ", myRoles.Select(r => r.DisplayTitle).Distinct())
+                    : (s.CanManageRoles ? "Administratör" : "Styrelsen");
+                s.CanPlace = s.CanManageRoles || (memberId > 0 && _boardRoleService.HasActiveRole(
+                    s.OwnerType, s.OwnerId, memberId, BoardWorkAccess.PlacerRoleKeys));
+                try
+                {
+                    var node = ctx.Content.GetById(s.OwnerId);
+                    if (node != null) s.BackUrl = node.Url();
+                }
+                catch { /* ← Tillbaka faller då på startsidan */ }
+            }
+
             ViewData["StyrelseData"] = model;
             return View("Styrelse", rootNode);
         }
@@ -155,8 +177,27 @@ namespace HpskSite.Controllers
                 memberNames[id] = string.IsNullOrEmpty(nm) ? mem.Name : nm;
             }
 
+            var issues = new Dictionary<int, BoardIssue>();
+            foreach (var iid in agenda.Where(a => a.IssueId.HasValue).Select(a => a.IssueId!.Value).Distinct())
+            {
+                var iss = _work.GetIssue(iid);
+                if (iss != null) issues[iid] = iss;
+            }
+            var motions = new Dictionary<int, BoardMotion>();
+            foreach (var mid in agenda.Where(a => a.MotionId.HasValue).Select(a => a.MotionId!.Value).Distinct())
+            {
+                var mo = _work.GetMotion(mid);
+                if (mo != null) motions[mid] = mo;
+            }
+            var motionFiles = motions.Keys.ToDictionary(id => id, id => _work.GetAttachments(id).Select(a => a.FileName).ToList());
+
             var pm = new StyrelsePrintModel
             {
+                Ordered = BoardIssueRules.Ordered(agenda),
+                Issues = issues,
+                IssueSubmitters = _work.ResolveNames(issues.Values.Select(i => i.SubmittedByMemberId)),
+                Motions = motions,
+                MotionFiles = motionFiles,
                 Mode = mode,
                 Meeting = meeting,
                 Agenda = agenda,

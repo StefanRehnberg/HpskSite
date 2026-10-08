@@ -10527,6 +10527,103 @@ KB: `KnowledgeBase/docs/dubbletter.md`.
 
 ## Board Work (Styrelsearbete) — dedicated /styrelse page
 
+### ⚠️ OMGJORD 2026-10-08: Ekonomins skal, ärendekön, underpunkter och motioner — läs det här först
+
+Förslag och mockup: https://claude.ai/artifact/1Lrk1ymq64X9oZJXsGqVUG (Stefans beslut nedan).
+Texten längre ned ("Four tabs …", "btn-xl", "svShow") beskriver den TIDIGARE formen; besluten och
+fällorna där gäller fortfarande, men ytan ser ut så här:
+
+- **Skalet = Ekonomins/Min kurs** (`Views/Styrelse.cshtml`, `.sv-page .sv-rail`): vänsterkort med
+  föreningen, rollen (`StyrelseScope.RoleTitle`), ← Tillbaka (`BackUrl` = klubb-/kretsnoden),
+  scope-väljaren och rälsen **Översikt · Möten · Ärenden · Motioner · Årshjul · Styrelsen och mandat ·
+  Valberedning** + länken Föreningens ekonomi ↗. All JS i **`wwwroot/js/styrelse.js`** (vyn har bara
+  skal, dialoger och `window.SV_CONFIG`). Delen står i adressen: `#vy=oversikt|moten|mote&id=N[&fas=forbered|under|efter]|mallar|arenden|motioner|arshjul|styrelsen|valberedning`;
+  gamla `?tab=styrelse` mappas. Rälsen = platser, blå Åtgärder = handlingar för delen (`setActions`),
+  grå radmeny (`rowMenu`). **Ingen confirm/alert/prompt** — `svConfirm`, `formModal`, `showMsg`.
+- **Ett möte**: stegrad (Planerat → Kallelse skickad → Genomfört → Väntar på justering → Justerat,
+  `meetingStep`), "Nästa steg"-ruta och tre faser: **Förbered** (dagordningens rubriker/ordning/bilagor,
+  väntande ärenden, kallelse, årsmötets motionsdag), **Under mötet** (närvaro + protokollfält),
+  **Efter mötet** (justering + uppgifter). Fas väljs efter läget (`defaultPhase`).
+  ⚠️ `UpdateAgendaItem` skriver ALLA tre fälten — `saveAgenda` skickar med anteckningar/beslut ur det
+  inlästa mötet när fälten inte finns på skärmen, annars tömde en rättad rubrik i Förbered beslutet
+  (A/B: 2 påståenden faller).
+- **Uppgifter** har ingen egen rälspost (Stefan) — listan står i Översikt (*Bara mina*).
+
+**Ärendekön** (`BoardIssue`, `BoardWorkService`, `BoardWorkController`): ledamoten anmäler (rubrik,
+underlag, Beslut/Information/Diskussion, önskat möte); **sekreteraren och ordföranden, plus klubbadmin**
+placerar (Stefans beslut; `BoardWorkAccess.PlacerRoleKeys`, härlett ur BoardRoles). **Revisorer anmäler
+INTE** (de sitter inte i styrelsen — grinden är `IsBoardMember`). Ledamoten ser bara sina egna ärenden.
+- **Placering = UNDERPUNKT**: `BoardMeetingAgendaItem.ParentItemId` + `IssueId`/`MotionId`.
+  **`BoardWorkService.PlaceOnMeeting` är ENDA vägen** för både ärenden och motioner. Bara EN nivå.
+  Numret (§8a) HÄRLEDS i `BoardIssueRules.Ordered` och lagras aldrig — används av mötesvyn, protokoll-
+  och dagordningsutskriften (`StyrelsePrintModel.Ordered`) och kallelsemejlet.
+- **⚠️ Ärendets läge lagras INTE** (`BoardIssueRules.StateOf`): placerat = aktiv punkt på aktivt möte,
+  behandlat = mötet Justerat. Tas punkten/mötet bort är ärendet tillbaka i kön av sig självt. Bara
+  återkallat/avvisat lagras (`ClosedStatus`). `RemoveAgendaItem` tar underpunkterna med.
+  `MoveAgendaItem` flyttar bland SYSKONEN (huvudpunkter resp. underpunkter inom sin huvudpunkt).
+- Placering på ett låst protokoll (VantarJustering/Justerat) vägras, och en punkt där flyttas aldrig.
+- **Besked**: nytt ärende → sekreterare + ordförande (fallback föreningens kontaktadress), Reply-To den
+  som anmälde; placerat/avvisat → den som anmälde. **När protokollet blir justerat** (sista
+  `ApproveByMember`, båda vägarna i `BoardMeetingController`) → `BoardWorkNotifier.DecisionsAsync`;
+  spärren mot dubbla besked är `DecisionNotifiedDate` (`ClaimDecisionNotices`). Alla mejl i
+  `BoardWorkNotifier`, en mall `EmailService.SendBoardWorkNoticeAsync`.
+
+**Motioner** (`BoardMotion`, `BoardMotionSupport`, `BoardMotionRules`): EN modell åt båda hållen —
+mottagaren `OwnerType/OwnerId` (klubb/krets), motionären `MotionerKind` Member/Club.
+- **Medlem → klubb**: `/motion?klubb=ID` (routad `MotionController`, `Views/Motion.cshtml`,
+  `wwwroot/js/motion.js`). Nås från kortet `_ClubMotionCard` på klubbsidans startflik och kallelsen
+  till årsmötet. ⚠️⚠️ **Kortet syns ALLTID** (inte bara med ett inlagt `Arsmote` — då hittade ingen
+  vägen, Stefans test) men **bara för rätt personer, och ADMINISTRATÖRER RÄKNAS INTE** (Stefan
+  2026-10-08; `CanAccessBoardWorkAsync` släpper in admins och fick sajtadmin att se allt):
+  klubbens motionskort = klubbens medlemmar · kretsens motionskort (`_RegionPublicContent`, direkt
+  under kretskortet) = styrelseledamöter i någon av kretsens klubbar, med knapp till klubbens
+  Motioner · kortet **Styrelsen/Kretsstyrelsen** = aktiv roll med `IsBoardMember` i just den
+  styrelsen (`GetBoardMembershipsForMember`), med *Anmäl ett ärende* →
+  `/styrelse?type=&id=#vy=arenden&ny=1` (öppnar dialogen en gång, tar bort `ny` ur adressen).
+  På /styrelse står *Anmäl ett ärende* SYNLIGT på Översikt och Ärenden (`newIssueBox`), inte bara i
+  Åtgärder — där hittade ingen ledamot den.
+- **Bilagor** (`BoardMotionAttachments`, högst 5): filen i dokumentarkivets lagring
+  (`DocumentService.ValidateFile/SaveFileAsync/GetFilePath` — samma filtyper och storlek), raden
+  gömms (`IsActive`) och raderas aldrig. Bifogas av motionären (medlemmen, eller klubbens
+  sekreterare/ordförande för en klubbmotion) och mottagarens sekreterare/ordförande, bara före beslut
+  (`AttachmentRefusalAsync`). Läses av samma krets som motionen (`CanReadMotionFilesAsync`), annars
+  403. Medlemmens formulär laddar upp EFTER inlämningen (bilagan hänger på motionens id) och namnger
+  filer som inte kom med. Dagordning/protokoll skriver ut filnamnen (`StyrelsePrintModel.MotionFiles`).
+- **Push** (utöver mejlen, `BoardWorkNotifier.Push` → `WebPushService.SendToMemberAsync`): nytt
+  ärende/ny motion → sekreterare+ordförande, placerat/avvisat/beslut → den som anmälde, årsmötets
+  beslut → motionären. Best effort; ⚠️ inte provad mot en riktig push (dev saknar VAPID-nycklar). Att-satser (`NormalizeProposals` sätter "att" framför),
+  nummer `M27-3`/`K27-3` (MAX+1 under UPDLOCK + unikt index), `Snapshot` vid inlämning, kvitto.
+- **Synliga för alla medlemmar med namn** (Stefan); andra medlemmar kan bli **medmotionär** eller ge
+  **tumme upp/ner** — EN rad per (motion, medlem) i `BoardMotionSupport`. Inte på sin egen motion,
+  bara före beslutet. Kretsmotioner: läsbara för medlemmar i kretsens klubbar, inga reaktioner.
+  ⚠️ **En tumme är aldrig anonym** (Stefan 2026-10-08): namnen visas (`MotionView.UpNames/DownNames`)
+  på motionssidan och i styrelsens vy, och där tummarna inte går att trycka på säger
+  `supportNote` varför (egen motion, inte medlem, avgjord).
+- **Sista dag = datum PER årsmöte** (`BoardMeetings.MotionDeadline`, Stefan). Dagen räknas med; sen
+  motion märks (`IsLate`), stoppas aldrig.
+- Styrelsen: yttrande + förslag (Bifall/Avslag/Besvarad/DelvisBifall), *Ta upp på ett styrelsemöte*
+  (skapar ett ärende med `SourceKind = Motion`), *Lägg motionerna på årsmötets dagordning* (under
+  punkten vars rubrik innehåller "motion"), motion på papper med inkomstdag. Årsmötets beslut läses ur
+  underpunktens `Decision` när protokollet är justerat.
+- **Klubb → krets KRÄVER en hänvisning till ett beslut** i klubbens protokoll (Stefan;
+  `SubmitClubMotion` vägrar utan en punkt med antecknat beslut på klubbens eget möte). Undertecknas av
+  ordföranden (`SignedByName`). Mottagaren = `KretsCalendarService.RegionIdForClub`. Kan startas från
+  ett beslut i ett justerat protokoll (*Gör beslutet till en motion till kretsen*).
+
+**Operatörssteg:** `Migrations/create-board-issues-and-motions.sql` **FÖRE deployen** (S1 i
+`PROD-KORORDNING`). NPoco skriver de nya kolumnerna vid VARJE uppdatering av en dagordningspunkt och
+ett möte, så utan dem faller hela styrelsearbetet. Startkontroll: `BoardWorkSchemaGuardHostedService`.
+Körd i dev 2026-10-08. Fildeploy av KB `styrelsearbete.md` (omskriven) och `motioner.md` (ny).
+Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod (`/motion` är routad).
+
+Test: `BoardWorkRulesTests` (30). Svit: `hpsk-verify/styrelse-arenden-motioner-verify.mjs` **91/91**
+(ordförande, ledamot, motionär, stödjande medlem, medlem i annan klubb, kretsadmin; telefon 390 px för
+alla delar; inga JS-fel). ⚠️ Utskriftssidorna saknar antiforgery-token — gå tillbaka till /styrelse
+före nästa POST i en svit. ⚠️ `page.goto` till samma adress med samma hash laddar inte om — gå via
+`about:blank`.
+
+---
+
 Senior-friendly board workspace for clubs & regions, built on the existing `BoardRoles` table.
 Lives at **`/styrelse`** (routed `StyrelseController`, **no Umbraco node** — grabs the site root like
 `SightPictureController`), reached from a **"Styrelse"** link in the user menu (Master.cshtml; shown to

@@ -44,6 +44,7 @@
         .meta .lbl { display: inline-block; min-width: 4.5cm; color: var(--muted); }
         .item { margin: .45cm 0; page-break-inside: avoid; }
         .item .h { font-weight: bold; }
+        .item.sub { margin-left: .8cm; }
         .item .body { white-space: pre-wrap; margin: .1cm 0; }
         .item .beslut { margin-top: .12cm; }
         .item .beslut b { text-decoration: underline; }
@@ -115,13 +116,47 @@
     }
 
     <h2>@(isProt ? "Ärenden" : "Dagordning")</h2>
-    @{ int n = 0; }
-    @foreach (var it in Model.Agenda)
+    @* Punkterna i läsordning med härlett paragrafnummer — underpunkter (ärenden, motioner) står
+       direkt under sin huvudpunkt som 7a, 7b. Numren räknas i BoardIssueRules.Ordered och lagras
+       aldrig. ⚠️ Loopvariabeln heter `entry`: hela vyn är EN metod, och `r`/`note` används redan. *@
+    @foreach (var entry in Model.Ordered)
     {
-        n++;
+        var it = entry.Item;
         var links = Model.Links.Where(l => l.AgendaItemId == it.Id).ToList();
-        <div class="item">
-            <div class="h">@(isProt ? $"§ {n}" : $"{n}.") @it.Heading</div>
+        var para = entry.Label.TrimStart('§');
+        var issue = it.IssueId.HasValue && Model.Issues.ContainsKey(it.IssueId.Value) ? Model.Issues[it.IssueId.Value] : null;
+        var motion = it.MotionId.HasValue && Model.Motions.ContainsKey(it.MotionId.Value) ? Model.Motions[it.MotionId.Value] : null;
+        <div class="item@(entry.IsSub ? " sub" : "")">
+            <div class="h">@(isProt ? $"§ {para}" : $"{para}.") @it.Heading</div>
+            @if (issue != null)
+            {
+                var who = Model.IssueSubmitters.ContainsKey(issue.SubmittedByMemberId) ? Model.IssueSubmitters[issue.SubmittedByMemberId] : "";
+                <div class="q">Anmält av @who@(string.IsNullOrWhiteSpace(issue.Body) ? "" : " — " + issue.Body)</div>
+            }
+            @if (motion != null)
+            {
+                <div class="body">Motionär: @motion.MotionerName@(string.IsNullOrWhiteSpace(motion.SignedByName) ? "" : $" (för styrelsen: {motion.SignedByName})")</div>
+                if (!isProt && !string.IsNullOrWhiteSpace(motion.Background))
+                {
+                    <div class="body">@motion.Background</div>
+                }
+                foreach (var prop in motion.ProposalList)
+                {
+                    <div class="body">– @prop</div>
+                }
+                if (Model.MotionFiles.TryGetValue(motion.Id, out var motionFileNames) && motionFileNames.Count > 0)
+                {
+                    <div class="body"><i>Bilagor: @string.Join(", ", motionFileNames)</i></div>
+                }
+                if (!string.IsNullOrWhiteSpace(motion.BoardProposal))
+                {
+                    <div class="body"><i>Styrelsens förslag: @HpskSite.Models.BoardMotionProposals.Label(motion.BoardProposal).</i></div>
+                }
+                if (!isProt && !string.IsNullOrWhiteSpace(motion.BoardOpinion))
+                {
+                    <div class="body">Styrelsens yttrande: @motion.BoardOpinion</div>
+                }
+            }
             @if (isProt && it.ItemType == "election")
             {
                 var who = ElectedNames(it);
@@ -195,8 +230,8 @@
                         <div class="q">@aw.UncalledCount rad(er) prickades inte av på mötet.</div>
                     }
                 }
-                @* ⚠️⚠️ LOOPVARIABELN FÅR INTE HETA `n`. Dagordningens radräknare heter redan `n`
-                   (`@@{ int n = 0; }` längre upp i samma vy), och hela vyn blir EN metod i den
+                @* ⚠️⚠️ LOOPVARIABELN FÅR INTE HETA `n` eller `entry`. Dagordningens radräknare hette `n`
+                   (nu är det loopen över Model.Ordered, `entry`), och hela vyn blir EN metod i den
                    genererade klassen — så `foreach (var n in ...)` här är CS0136, en lokal som
                    skuggar en lokal i ett omslutande scope.
 

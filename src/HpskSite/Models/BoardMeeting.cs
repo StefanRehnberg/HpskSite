@@ -26,8 +26,16 @@ namespace HpskSite.Models
         public DateTime CreatedDate { get; set; }
         public bool IsActive { get; set; } = true;
 
+        // Sista dag för motioner — bara för årsmöten, och ett datum PER årsmöte (Stefan 2026-10-08).
+        // Dagen räknas MED. En motion efter dagen tas emot och märks, den stoppas aldrig.
+        // ⚠️ Kolumnen kommer från create-board-issues-and-motions.sql, som måste köras FÖRE deploy.
+        public DateTime? MotionDeadline { get; set; }
+
         [Ignore]
         public string TypeLabel => BoardMeetingTemplates.GetLabel(MeetingType);
+
+        [Ignore]
+        public bool IsAnnualMeeting => MeetingType is "Arsmote" or "ExtraArsmote";
     }
 
     [TableName("BoardMeetingAgendaItems")]
@@ -63,6 +71,14 @@ namespace HpskSite.Models
         // because the ledger it came from keeps changing and a protokoll must not.
         // NULL = no list fetched yet; the read path then shows nothing rather than building one.
         public string? AwardsData { get; set; }
+
+        // Underpunkter (2026-10-08). En underpunkt ligger under en annan punkt (t.ex. 7b under
+        // §7 Beslutsärenden) och numreras med bokstav VID LÄSNING — numret lagras aldrig.
+        // IssueId/MotionId pekar på ärendet eller motionen som punkten behandlar; ett ärendes
+        // läge ("placerat", "behandlat") HÄRLEDS ur den här kopplingen och mötets status.
+        public int? ParentItemId { get; set; }
+        public int? IssueId { get; set; }
+        public int? MotionId { get; set; }
     }
 
     [TableName("BoardMeetingAttendees")]

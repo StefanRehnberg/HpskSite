@@ -1,0 +1,118 @@
+@inject HpskSite.Services.BoardWorkService BoardWork
+@inject HpskSite.Services.BoardWorkAccess BoardAccess
+@inject HpskSite.Services.BoardRoleService BoardRoles
+@{
+    // Kortet "Motioner och styrelsen" på klubbsidans och kretssidans startflik (2026-10-08).
+    //
+    // ⚠️ Första versionen syntes BARA när ett årsmöte var inlagt i Styrelsearbete, och då hittade
+    // ingen medlem vägen till motionerna (Stefans test). Nu syns kortet alltid för föreningens
+    // medlemmar; årsmötet och sista dagen står med när de finns.
+    //
+    // Styrelseledamöter får dessutom en synlig väg att anmäla ett ärende till nästa styrelsemöte —
+    // den låg förut bara i Åtgärder-menyn inne på /styrelse.
+    //
+    // Modell: ViewData["MotionCardOwnerType"] (0 klubb, 1 krets) och ["MotionCardOwnerId"].
+    // Bakåtkompatibelt: ["MotionCardClubId"] = klubb. Ett fel (t.ex. okörd migrering) döljer kortet.
+    var ownerType = ViewData["MotionCardOwnerType"] as int? ?? HpskSite.Models.DocumentOwnerType.Club;
+    var ownerId = ViewData["MotionCardOwnerId"] as int? ?? (ViewData["MotionCardClubId"] as int? ?? 0);
+    var isClub = ownerType == HpskSite.Models.DocumentOwnerType.Club;
+    HpskSite.Models.BoardMeeting? annual = null;
+    bool isMember = false, isBoard = false, failed = false;
+    int openMotions = 0, kretsClubId = 0;
+    // ⚠️⚠️ VEM SER VAD (Stefan 2026-10-08) — administratörer räknas INTE, varken sajt-, klubb- eller
+    // kretsadmin. Första versionen använde CanAccessBoardWorkAsync, som släpper in admins, och då såg
+    // en sajtadmin båda korten på varje klubb.
+    //  * Klubbens motionskort: klubbens medlemmar (de som får lämna en motion).
+    //  * Kretsens motionskort: styrelseledamöter i någon av kretsens klubbar — det är klubbarnas
+    //    styrelser som motionerar till kretsen.
+    //  * Styrelsekortet: den som sitter i just den här styrelsen (aktiv roll med IsBoardMember).
+    try
+    {
+        var me = ownerId > 0 ? await BoardAccess.CurrentMemberIdAsync() : 0;
+        if (me > 0)
+        {
+            var boards = BoardRoles.GetBoardMembershipsForMember(me);
+            isBoard = boards.Any(b => b.OwnerType == ownerType && b.OwnerId == ownerId);
+            if (isClub)
+                isMember = await BoardAccess.IsMemberOfOwnerAsync(ownerType, ownerId);
+            else
+            {
+                // Klubben vars styrelse ledamoten sitter i — kortets knapp leder till dess Motioner.
+                kretsClubId = boards.Where(b => b.OwnerType == HpskSite.Models.DocumentOwnerType.Club)
+                    .Select(b => b.OwnerId).FirstOrDefault(cid => BoardAccess.RegionIdForClub(cid) == ownerId);
+                isMember = kretsClubId > 0;
+            }
+            if (isMember || isBoard)
+            {
+                annual = BoardWork.GetUpcomingAnnualMeeting(ownerType, ownerId);
+                openMotions = BoardWork.GetMotions(ownerType, ownerId, 0)
+                    .Count(v => v.State != HpskSite.Models.BoardMotionState.Decided && v.State != HpskSite.Models.BoardMotionState.Withdrawn);
+            }
+        }
+    }
+    catch { failed = true; }
+    var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+    var motionUrl = $"/motion?{(isClub ? "klubb" : "krets")}={ownerId}";
+    var boardUrl = $"/styrelse?type={ownerType}&id={ownerId}";
+}
+@if (!failed && ownerId > 0 && (isMember || isBoard))
+{
+    var deadlinePassed = annual?.MotionDeadline != null && DateTime.Today > annual.MotionDeadline.Value.Date;
+    if (isMember)
+    {
+    <div class="card mb-4" id="clubMotionCard">
+        <div class="card-header"><h5 class="mb-0"><i class="bi bi-megaphone me-2"></i>@(isClub ? "Motioner till årsmötet" : "Motioner till kretsårsmötet")</h5></div>
+        <div class="card-body">
+            @if (annual != null)
+            {
+                <p class="mb-2">Årsmötet hålls <strong>@annual.MeetingDate.ToString("d MMMM yyyy", sv)</strong>.
+                    @if (annual.MotionDeadline.HasValue && !deadlinePassed)
+                    {
+                        <span>Sista dag för motioner är <strong>@annual.MotionDeadline.Value.ToString("d MMMM", sv)</strong>.</span>
+                    }
+                    else if (deadlinePassed)
+                    {
+                        <span>Sista dag för motioner har passerat.</span>
+                    }
+                </p>
+            }
+            @if (isClub)
+            {
+                <p class="mb-2">Har du ett förslag till klubben? Lämna en motion. Styrelsen yttrar sig, och årsmötet beslutar.</p>
+            }
+            else
+            {
+                <p class="mb-2">Som styrelseledamot kan din klubb lämna en motion till kretsårsmötet. Den skickas från klubbens Styrelsearbete under Motioner och hänvisar till ett beslut i klubbens protokoll.</p>
+            }
+            @if (openMotions > 0)
+            {
+                <p class="mb-2 small text-body-secondary">@openMotions @(openMotions == 1 ? "motion" : "motioner") inför årsmötet.</p>
+            }
+            <div class="d-flex flex-wrap gap-2">
+                @if (isClub)
+                {
+                    <a href="@motionUrl" class="btn btn-primary btn-sm">Lämna eller läs motioner</a>
+                }
+                else
+                {
+                    <a href="/styrelse?type=@HpskSite.Models.DocumentOwnerType.Club&amp;id=@kretsClubId#vy=motioner" class="btn btn-primary btn-sm">Skicka en motion från klubben</a>
+                    <a href="@motionUrl" class="btn btn-outline-secondary btn-sm">Läs motionerna</a>
+                }
+            </div>
+        </div>
+    </div>
+    }
+    @if (isBoard)
+    {
+        <div class="card mb-4" id="boardIssueCard">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-people me-2"></i>@(isClub ? "Styrelsen" : "Kretsstyrelsen")</h5></div>
+            <div class="card-body">
+                <p class="mb-2">Vill du ta upp något på ett styrelsemöte? Anmäl ärendet, så lägger sekreteraren eller ordföranden in det på dagordningen.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="@boardUrl#vy=arenden&amp;ny=1" class="btn btn-primary btn-sm"><i class="bi bi-inbox me-1"></i>Anmäl ett ärende</a>
+                    <a href="@boardUrl" class="btn btn-outline-secondary btn-sm">Styrelsearbete</a>
+                </div>
+            </div>
+        </div>
+    }
+}

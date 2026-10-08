@@ -1,0 +1,36 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Motioner";
+    var ownerType = ViewData["MotionOwnerType"] as int? ?? 0;
+    var ownerId = ViewData["MotionOwnerId"] as int? ?? 0;
+    var backUrl = ViewData["MotionBackUrl"] as string ?? "/";
+}
+@*
+    Medlemmarnas motionssida (2026-10-08). En kolumn, stor text, en sak i taget: lämna en motion,
+    läs föreningens motioner, sätt ditt namn på en eller tyck till. All logik i /js/motion.js.
+*@
+<style>
+    .mo-page { max-width: 860px; font-size: 1.05rem; padding-bottom: 5.5rem; }
+    .mo-page h1 { font-size: 1.8rem; font-weight: 700; }
+    .mo-card { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: .75rem; padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+    .mo-card h2 { font-size: 1.2rem; font-weight: 700; margin: 0 0 .4rem; }
+    .mo-help { color: var(--bs-secondary-color); font-size: .95rem; }
+    .mo-state { display: inline-flex; align-items: center; gap: .35rem; font-size: .8rem; font-weight: 600; padding: .12rem .55rem; border-radius: 1rem; white-space: nowrap; }
+    .mo-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .mo-state.wait { background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); }
+    .mo-state.blue { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); }
+    .mo-state.ok { background: var(--bs-success-bg-subtle); color: var(--bs-success-text-emphasis); }
+    .mo-state.off { background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); }
+    .mo-support .btn { min-width: 3.4rem; }
+    .mo-opinion { background: var(--bs-tertiary-bg); border-radius: .5rem; padding: .6rem .8rem; margin-top: .6rem; }
+</style>
+<div class="container mo-page py-4" id="moApp" data-owner-type="@ownerType" data-owner-id="@ownerId">
+    @Html.AntiForgeryToken()
+    <div class="mb-2"><a href="@backUrl" class="text-decoration-none">← Tillbaka</a></div>
+    <h1 id="moTitle">Motioner</h1>
+    <div class="mo-help mb-3" id="moSub"></div>
+    <div id="moMsg" aria-live="polite"></div>
+    <div id="moBody"><div class="text-center py-5"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
+</div>
+<script src="~/js/motion.js" asp-append-version="true"></script>

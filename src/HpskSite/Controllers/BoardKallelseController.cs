@@ -201,10 +201,11 @@ namespace HpskSite.Controllers
             if (!string.IsNullOrWhiteSpace(message))
                 sb.Append($"<p>{Enc(message).Replace("\n", "<br>")}</p>");
 
-            sb.Append("<h3>Dagordning</h3><ol>");
-            foreach (var a in agenda)
+            // Punkterna i läsordning med härlett nummer, underpunkterna (ärenden, motioner) indragna.
+            sb.Append("<h3>Dagordning</h3>");
+            foreach (var (a, label, isSub) in BoardIssueRules.Ordered(agenda))
             {
-                sb.Append($"<li>{Enc(a.Heading)}");
+                sb.Append($"<div style=\"margin:4px 0 4px {(isSub ? "28px" : "0")};\">{Enc(label.TrimStart('§'))}. {Enc(a.Heading)}");
                 var its = links.Where(l => l.AgendaItemId == a.Id).ToList();
                 if (its.Count > 0)
                 {
@@ -212,12 +213,20 @@ namespace HpskSite.Controllers
                     foreach (var l in its)
                         sb.Append($"<span style=\"font-size:13px;\">Bilaga: <a href=\"{LinkHref(l, m, baseUrl)}\">{Enc(l.Label)}</a></span><br>");
                 }
-                sb.Append("</li>");
+                sb.Append("</div>");
             }
-            sb.Append("</ol>");
 
             if (IsArsmote(m.MeetingType))
-                sb.Append("<p style=\"font-size:14px;color:#444;\">Motioner och övriga frågor anmäls till styrelsen före mötet. Kallelsen har utlysts i enlighet med stadgarna.</p>");
+            {
+                // Motionerna och styrelsens yttranden hör till årsmöteshandlingarna — länken går till
+                // medlemmarnas motionssida, där de också kan lämna en motion före sista dagen.
+                var motionLink = BoardWorkNotifier.MotionPageLink(baseUrl, m.OwnerType, m.OwnerId);
+                sb.Append($"<p style=\"font-size:14px;\">Motioner och styrelsens yttranden: <a href=\"{motionLink}\">{Enc(motionLink)}</a>");
+                if (m.MotionDeadline.HasValue)
+                    sb.Append($"<br>Sista dag för motioner: {m.MotionDeadline.Value:d MMMM yyyy}.");
+                sb.Append("</p>");
+                sb.Append("<p style=\"font-size:14px;color:#444;\">Kallelsen har utlysts i enlighet med stadgarna.</p>");
+            }
 
             sb.Append($"<p><a href=\"{baseUrl}/styrelse/dagordning/{m.Id}\" style=\"display:inline-block;padding:10px 16px;background:#0d6efd;color:#fff;text-decoration:none;border-radius:6px;\">Visa/skriv ut dagordningen</a></p>");
             sb.Append($"<p style=\"color:#888;font-size:12px;\">Detta är en kallelse från {Enc(orgName)} via pistol.nu.</p>");
