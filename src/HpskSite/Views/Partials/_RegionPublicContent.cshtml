@@ -85,6 +85,13 @@
             </div>
         </div>
 
+        @if (isLoggedIn)
+        {
+            @* Under kretskortet (Stefan 2026-10-08): kretsårsmötets motioner (styrelseledamöter i kretsens
+               klubbar) och kretsstyrelsens ärenden (kretsstyrelsen). Partialen renderar ingenting för övriga. *@
+            @await Html.PartialAsync("_ClubMotionCard", null, new ViewDataDictionary(ViewData) { { "MotionCardOwnerType", HpskSite.Models.DocumentOwnerType.Region }, { "MotionCardOwnerId", Model.Id } })
+        }
+
         <!-- Upcoming Events -->
         <div class="card mb-4">
             <div class="card-header">

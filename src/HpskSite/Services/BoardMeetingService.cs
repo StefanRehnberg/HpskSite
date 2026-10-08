@@ -327,9 +327,15 @@ namespace HpskSite.Services
             var item = db.SingleOrDefaultById<BoardMeetingAgendaItem>(agendaItemId);
             if (item == null) return false;
 
-            var list = db.Fetch<BoardMeetingAgendaItem>(
-                "SELECT * FROM BoardMeetingAgendaItems WHERE MeetingId = @0 AND IsActive = 1 ORDER BY SortOrder, Id",
-                item.MeetingId);
+            // ⚠️ Flytten sker bland SYSKONEN: huvudpunkter bland huvudpunkter, underpunkter inom sin
+            // huvudpunkt. Att normalisera alla punkter i en lista hade blandat ihop de två nivåerna.
+            var list = item.ParentItemId.HasValue
+                ? db.Fetch<BoardMeetingAgendaItem>(
+                    "SELECT * FROM BoardMeetingAgendaItems WHERE MeetingId = @0 AND IsActive = 1 AND ParentItemId = @1 ORDER BY SortOrder, Id",
+                    item.MeetingId, item.ParentItemId.Value)
+                : db.Fetch<BoardMeetingAgendaItem>(
+                    "SELECT * FROM BoardMeetingAgendaItems WHERE MeetingId = @0 AND IsActive = 1 AND ParentItemId IS NULL ORDER BY SortOrder, Id",
+                    item.MeetingId);
 
             var idx = list.FindIndex(x => x.Id == agendaItemId);
             var target = idx + (direction < 0 ? -1 : 1);
@@ -569,6 +575,9 @@ namespace HpskSite.Services
             if (item == null) return false;
             item.IsActive = false;
             db.Update(item);
+            // Underpunkterna följer med. Ärenden och motioner som låg där går då tillbaka till kön
+            // av sig själva — deras läge härleds ur en AKTIV punkt.
+            db.Execute("UPDATE BoardMeetingAgendaItems SET IsActive = 0 WHERE ParentItemId = @0", id);
             return true;
         }
 

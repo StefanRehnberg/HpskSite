@@ -30,6 +30,9 @@ namespace HpskSite.Controllers
         private readonly MedalHandoutService _medalHandout;
         private readonly IDataProtector _protector;
         private readonly ILogger<BoardMeetingController> _logger;
+        private readonly BoardWorkService _work;
+        private readonly BoardWorkNotifier _notify;
+        private readonly BoardWorkAccess _workAccess;
 
         public BoardMeetingController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -48,7 +51,10 @@ namespace HpskSite.Controllers
             MarkenOrderListService markenOrderList,
             MedalHandoutService medalHandout,
             IDataProtectionProvider dataProtection,
-            ILogger<BoardMeetingController> logger)
+            ILogger<BoardMeetingController> logger,
+            BoardWorkService work,
+            BoardWorkNotifier notify,
+            BoardWorkAccess workAccess)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _meetingService = meetingService;
@@ -62,6 +68,9 @@ namespace HpskSite.Controllers
             _medalHandout = medalHandout;
             _protector = dataProtection.CreateProtector("Board.Justering.v1");
             _logger = logger;
+            _work = work;
+            _notify = notify;
+            _workAccess = workAccess;
         }
 
         /// <summary>Protect/unprotect a meeting id into an opaque, non-enumerable QR/email token.</summary>
@@ -134,16 +143,55 @@ namespace HpskSite.Controllers
                 })
             };
 
+            // Ärenden och motioner som underpunkter: i läsordning, med härlett paragrafnummer (§7b).
+            var ordered = BoardIssueRules.Ordered(agenda);
+            var issueById = new Dictionary<int, BoardIssue>();
+            foreach (var iid in agenda.Where(a => a.IssueId.HasValue).Select(a => a.IssueId!.Value).Distinct())
+            {
+                var iss = _work.GetIssue(iid);
+                if (iss != null) issueById[iid] = iss;
+            }
+            var issueSubmitters = _work.ResolveNames(issueById.Values.Select(i => i.SubmittedByMemberId));
+            var motionById = new Dictionary<int, BoardMotion>();
+            foreach (var mid in agenda.Where(a => a.MotionId.HasValue).Select(a => a.MotionId!.Value).Distinct())
+            {
+                var mo = _work.GetMotion(mid);
+                if (mo != null) motionById[mid] = mo;
+            }
+            var canPlace = await _workAccess.CanPlaceAsync(meeting.OwnerType, meeting.OwnerId);
+            var waiting = canPlace && meeting.Status is not ("VantarJustering" or "Justerat")
+                ? _work.GetWaitingIssuesForMeeting(meeting) : new List<BoardWorkService.IssueView>();
+
             return Json(new
             {
                 success = true,
                 meeting = MeetingDetailDto(meeting),
                 justering,
-                agenda = agenda.Select(a =>
+                canPlace,
+                waitingIssues = waiting.Select(v => new { v.Issue.Id, v.Issue.Title, submittedBy = v.SubmittedByName, kindLabel = BoardIssueKinds.Label(v.Issue.Kind) }),
+                agenda = ordered.Select(x =>
                 {
+                    var a = x.Item;
                     var eids = ElectedIds(a);
+                    BoardIssue? iss = a.IssueId.HasValue ? issueById.GetValueOrDefault(a.IssueId.Value) : null;
+                    BoardMotion? mo = a.MotionId.HasValue ? motionById.GetValueOrDefault(a.MotionId.Value) : null;
                     return new
                     {
+                        paragraph = x.Label,
+                        isSub = x.IsSub,
+                        a.ParentItemId,
+                        a.IssueId,
+                        a.MotionId,
+                        issue = iss == null ? null : new
+                        {
+                            iss.Id, iss.Body, kindLabel = BoardIssueKinds.Label(iss.Kind), iss.SourceKind,
+                            submittedBy = issueSubmitters.GetValueOrDefault(iss.SubmittedByMemberId, "")
+                        },
+                        motion = mo == null ? null : new
+                        {
+                            mo.Id, number = mo.NumberLabel, mo.MotionerName, proposals = mo.ProposalList,
+                            mo.BoardOpinion, boardProposalLabel = BoardMotionProposals.Label(mo.BoardProposal)
+                        },
                         a.Id, a.SortOrder, a.Heading, a.Discussion, a.Decision,
                         a.ItemType, electionRole = a.ElectionRole ?? "", a.ElectionCount, a.ElectionSource,
                         electedMemberIds = eids,
@@ -257,7 +305,8 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var meId = await GetCurrentMemberId();
             var r = _meetingService.ApproveByMember(meetingId, meId, "web");
-            return Json(new { success = r.Ok, locked = r.Locked, approved = r.Approved, total = r.Total, message = r.Ok ? "" : r.Message });
+            int notified = r.Ok && r.Locked ? await _notify.DecisionsAsync(meetingId, $"{Request.Scheme}://{Request.Host}") : 0;
+            return Json(new { success = r.Ok, locked = r.Locked, approved = r.Approved, total = r.Total, notified, message = r.Ok ? "" : r.Message });
         }
 
         /// <summary>Approve via the QR/email token (identifies the meeting; the signer is the logged-in member).</summary>
@@ -270,6 +319,9 @@ namespace HpskSite.Controllers
             var meId = await GetCurrentMemberId();
             if (meId <= 0) return Json(new { success = false, message = "Inte inloggad" });
             var r = _meetingService.ApproveByMember(meetingId.Value, meId, "qr");
+            // Sista underskriften låser protokollet — då får den som anmälde ett ärende och
+            // motionären beslutet. Spärren mot dubbla besked ligger i ClaimDecisionNotices.
+            if (r.Ok && r.Locked) await _notify.DecisionsAsync(meetingId.Value, $"{Request.Scheme}://{Request.Host}");
             return Json(new { success = r.Ok, locked = r.Locked, approved = r.Approved, total = r.Total, message = r.Ok ? "" : r.Message });
         }
 
@@ -779,7 +831,9 @@ namespace HpskSite.Controllers
             m.Status,
             m.Location,
             meetingDate = m.MeetingDate.ToString("yyyy-MM-dd HH:mm"),
-            isPast = m.MeetingDate < DateTime.Now
+            isPast = m.MeetingDate < DateTime.Now,
+            isAnnual = m.IsAnnualMeeting,
+            kallelseSent = m.KallelseSentDate.HasValue
         };
 
         private static object MeetingDetailDto(BoardMeeting m) => new
@@ -798,7 +852,11 @@ namespace HpskSite.Controllers
             m.AdjusterMemberId,
             justifiedDate = m.JustifiedDate?.ToString("yyyy-MM-dd"),
             kallelseSentDate = m.KallelseSentDate?.ToString("yyyy-MM-dd"),
-            m.KallelseRecipientCount
+            m.KallelseRecipientCount,
+            isAnnual = m.IsAnnualMeeting,
+            motionDeadline = m.MotionDeadline?.ToString("yyyy-MM-dd"),
+            isPast = m.MeetingDate.Date < DateTime.Today,
+            isToday = m.MeetingDate.Date == DateTime.Today
         };
 
         /// <summary>

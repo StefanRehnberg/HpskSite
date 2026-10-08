@@ -126,6 +126,13 @@ namespace HpskSite.Composers
             // Board work Phase 3: Årshjul (annual cycle checklist) + Valberedning (nominations).
             builder.Services.AddScoped<BoardGovernanceService>();
 
+            // Styrelsearbete 2026-10-08: ärendekön, underpunkter och motioner.
+            // Run create-board-issues-and-motions.sql FÖRE deploy.
+            builder.Services.AddScoped<BoardWorkService>();
+            builder.Services.AddScoped<BoardWorkAccess>();
+            builder.Services.AddScoped<BoardWorkNotifier>();
+            builder.Services.AddHostedService<BoardWorkSchemaGuardHostedService>();
+
             // Tracks each club's electronic acceptance of the Personuppgiftsbiträdesavtal (DPA).
             // Backed by the ClubDpaAcceptance table — run create-club-dpa-acceptance-table.sql.
             builder.Services.AddScoped<DpaAcceptanceService>();

@@ -1482,6 +1482,33 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Besked i styrelsearbetet: ärendekön och motionerna (2026-10-08). En mall för alla, så att
+        /// beskeden ser likadana ut; innehållet är färdiga, redan HTML-kodade stycken.
+        ///
+        /// <para><b>⚠️ Svarsadressen väljs av anroparen och är MOTPARTEN:</b> ett besked till
+        /// sekreteraren om ett nytt ärende svarar till den som anmälde det, ett besked till den som
+        /// anmälde svarar till sekreteraren. Returnerar om mejlet faktiskt gick iväg.</para>
+        /// </summary>
+        public async Task<bool> SendBoardWorkNoticeAsync(string toEmail, string toName, string subject,
+            IEnumerable<string> htmlParagraphs, string? linkUrl, string? linkLabel, MailReplyTo replyTo)
+        {
+            if (string.IsNullOrWhiteSpace(toEmail)) return false;
+            var safeName = System.Web.HttpUtility.HtmlEncode(string.IsNullOrWhiteSpace(toName) ? "" : toName);
+            var sb = new System.Text.StringBuilder();
+            sb.Append("<html><head><style>body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }</style></head><body>");
+            sb.Append(safeName.Length > 0 ? $"<h2>Hej {safeName},</h2>" : "<h2>Hej,</h2>");
+            foreach (var p in htmlParagraphs) sb.Append("<p>").Append(p).Append("</p>");
+            if (!string.IsNullOrWhiteSpace(linkUrl))
+            {
+                var safeUrl = System.Web.HttpUtility.HtmlAttributeEncode(linkUrl);
+                var safeLabel = System.Web.HttpUtility.HtmlEncode(linkLabel ?? "Öppna på pistol.nu");
+                sb.Append($"<p><a href=\"{safeUrl}\" style=\"display:inline-block;background:#0d6efd;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;\">{safeLabel}</a></p>");
+            }
+            sb.Append("<p>Med vänliga hälsningar,<br/>Pistol.nu</p></body></html>");
+            return await SendEmailAsync(toEmail, subject, sb.ToString(), replyTo);
+        }
+
+        /// <summary>
         /// Send a single formatted HTML email through the site SMTP, but presented as coming from a
         /// club/region (display name) with replies routed to their own address. Lets clubs without
         /// Brevo still send nice HTML member mail. From address stays the authenticated site address

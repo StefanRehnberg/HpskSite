@@ -6,1640 +6,228 @@
     var data = ViewData["StyrelseData"] as StyrelsePageModel ?? new StyrelsePageModel();
     var sel = data.Selected;
 }
+@*
+    /styrelse i EKONOMINS SKAL (omgjord 2026-10-08).
 
+    Sidan byggdes i juni för äldre ledamöter (större text, stora klickytor, autospar) och hade egna
+    stora flikknappar. Den formen behålls i innehållet, men skalet är sajtens förlaga för en egen
+    sida (Ekonomi, Min kurs): vänsterkort med föreningen och rollen, ← Tillbaka, rälsens delar, och
+    allt innehåll i EN kolumn. Rälsen = platser, blå Åtgärder = handlingar för den del man står på.
+
+    Delen står i adressen (#vy=…&id=…) så att bakåtknappen, en omladdning och länkar i mejl landar
+    rätt. All logik ligger i /js/styrelse.js; här finns bara skalet, konfigurationen och dialogerna.
+*@
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
 <style>
-    /* Senior-friendly: larger text, generous spacing, big targets, calm layout. */
-    /* Width follows the standard site container (same as /utbildning); senior-friendly type/spacing kept. */
-    .styrelse-page { font-size: 1.12rem; padding-top: 1.5rem; padding-bottom: 4rem; }
-    .styrelse-page h1 { font-size: 2rem; font-weight: 700; }
-    .styrelse-page h2 { font-size: 1.5rem; font-weight: 700; margin-top: 0; }
-    .styrelse-page .btn { border-radius: .6rem; }
-    .styrelse-page .btn-xl { font-size: 1.2rem; padding: .85rem 1.4rem; font-weight: 600; }
-    /* Senior-friendly: lift the small secondary buttons (move/remove/edit) off Bootstrap's tiny btn-sm. */
-    .styrelse-page .btn-sm { font-size: 1rem; padding: .5rem .8rem; border-radius: .5rem; min-height: 42px; }
-    .styrelse-page .btn-sm .bi { font-size: 1.05rem; }
-    .sv-nav { display: flex; gap: .75rem; margin: 1.25rem 0 1.5rem; }
-    .sv-nav button { flex: 1; font-size: 1.25rem; font-weight: 600; padding: 1rem; border-radius: .8rem;
-        border: 2px solid var(--bs-border-color); background: var(--bs-body-bg); color: var(--bs-body-color); }
-    .sv-nav button.active { background: var(--bs-primary); color: #fff; border-color: var(--bs-primary); }
-    .sv-card { border: 1px solid var(--bs-border-color); border-radius: .9rem; padding: 1.25rem 1.35rem; margin-bottom: 1.1rem; background: var(--bs-body-bg); }
-    .sv-card.highlight { border-color: var(--bs-primary); border-width: 2px; }
+    /* ── Skalet: samma värden som Ekonomin (.ek-page .rail) och Min kurs. Ändras den ena, ändra de andra. */
+    .sv-page { padding-bottom: 5.5rem; }
+    .sv-page .sv-shell { display: flex; gap: 1.5rem; align-items: flex-start; }
+    .sv-page .sv-rail { width: 250px; flex-shrink: 0; position: sticky; top: 1rem;
+        background-color: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color);
+        border-radius: .5rem; padding: 8px; }
+    .sv-page .sv-rail .sv-org { font-size: 1.1rem; font-weight: 700; padding: 6px 12px 0; }
+    .sv-page .sv-rail .sv-role { font-size: .8rem; color: var(--bs-secondary-color); padding: 0 12px 10px; }
+    .sv-page .sv-rail a.sv-nav { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;
+        border-radius: 8px; color: var(--bs-body-color); text-decoration: none; border-left: 3px solid transparent; }
+    .sv-page .sv-rail a.sv-nav:hover { background-color: var(--bs-secondary-bg); }
+    .sv-page .sv-rail a.sv-nav.on { font-weight: 600; background-color: var(--bs-primary-bg-subtle);
+        color: var(--bs-primary-text-emphasis); border-left-color: var(--bs-primary); }
+    .sv-page .sv-rail a.sv-back { display: block; color: var(--bs-secondary-color); font-size: .9rem; padding: 6px 12px 10px;
+        margin-bottom: 6px; border-bottom: 1px solid var(--bs-border-color); text-decoration: none; }
+    .sv-page .sv-rail a.sv-back:hover { color: var(--bs-link-color); }
+    .sv-page .sv-rail .sv-ext { border-top: 1px solid var(--bs-border-color); margin-top: 6px; padding-top: 6px; }
+    .sv-page .sv-rail .sv-count { background: var(--bs-warning); color: #1b1206; font-size: .72rem; font-weight: 700;
+        border-radius: 1rem; padding: .05rem .5rem; }
+    .sv-page .sv-main { flex: 1 1 auto; min-width: 0; font-size: 1.05rem; }
+    .sv-page .sv-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;
+        flex-wrap: wrap; margin-bottom: 1rem; }
+    .sv-page h1 { font-size: 1.7rem; font-weight: 700; margin: 0; }
+    .sv-page .sv-sub { color: var(--bs-secondary-color); margin-top: .15rem; }
+    .sv-page .sv-crumb { margin-bottom: .35rem; font-size: .95rem; }
+    @@media (max-width: 991px) {
+        .sv-page .sv-shell { flex-direction: column; }
+        .sv-page .sv-rail { width: 100%; position: static; display: flex; flex-wrap: wrap; gap: .2rem; align-items: center; }
+        .sv-page .sv-rail .sv-org, .sv-page .sv-rail .sv-role, .sv-page .sv-rail .sv-back,
+        .sv-page .sv-rail #svScopeWrap, .sv-page .sv-rail .sv-ext { width: 100%; }
+        .sv-page .sv-rail a.sv-nav { border-left: 0; gap: .4rem; }
+        .sv-page .sv-rail a.sv-nav.on { border-left: 0; box-shadow: inset 0 -3px 0 var(--bs-primary); }
+        .sv-page .sv-main { width: 100%; }
+    }
+
+    /* ── Innehållet: kort, tonade rader för det som väntar, lägen som brickor. */
+    .sv-card { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: .75rem;
+        padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+    .sv-card > h2, .sv-cardh h2 { font-size: 1.2rem; font-weight: 700; margin: 0 0 .6rem; }
+    .sv-cardh { display: flex; justify-content: space-between; align-items: baseline; gap: .75rem; flex-wrap: wrap; margin-bottom: .6rem; }
+    .sv-cardh h2 { margin: 0; }
+    .sv-attn { background: var(--bs-warning-bg-subtle); border-color: var(--bs-warning-border-subtle); }
+    .sv-todo { display: flex; align-items: center; gap: .8rem; background: var(--bs-warning-bg-subtle);
+        border: 1px solid var(--bs-warning-border-subtle); border-radius: .5rem; padding: .55rem .85rem; margin-bottom: .5rem; }
+    .sv-todo .n { font-weight: 700; min-width: 1.6rem; text-align: right; }
+    .sv-todo .t { flex: 1; min-width: 0; }
+    .sv-todo.done { background: var(--bs-success-bg-subtle); border-color: var(--bs-success-border-subtle); }
+    .sv-help { color: var(--bs-secondary-color); font-size: .95rem; }
     .sv-label { font-weight: 600; margin-bottom: .25rem; display: block; }
-    .styrelse-page .form-control, .styrelse-page .form-select { font-size: 1.1rem; padding: .6rem .8rem; }
-    /* Reserve room for the caret so the dropdown arrow isn't obscured by the text (esp. width:auto selects). */
-    .styrelse-page .form-select { padding-right: 2.5rem; background-position: right .9rem center; }
-    .styrelse-page textarea.form-control { line-height: 1.5; }
-    .sv-help { color: var(--bs-secondary-color); font-size: .98rem; }
+    .sv-page .form-control, .sv-page .form-select, .sv-modal .form-control, .sv-modal .form-select { font-size: 1.05rem; }
+    .sv-page .form-select { padding-right: 2.5rem; background-position: right .9rem center; }
+    .sv-page textarea.form-control { line-height: 1.5; }
     .sv-person { display: flex; align-items: center; justify-content: space-between; gap: .75rem;
-        padding: .75rem .25rem; border-bottom: 1px solid var(--bs-border-color); }
+        padding: .6rem .25rem; border-bottom: 1px solid var(--bs-border-color); }
     .sv-person:last-child { border-bottom: 0; }
-    .sv-check { width: 1.5rem; height: 1.5rem; }
-    .sv-saved { color: var(--bs-success); font-weight: 600; opacity: 0; transition: opacity .2s; }
+    .sv-check { width: 1.4rem; height: 1.4rem; }
+    .sv-saved { color: var(--bs-success); font-weight: 600; opacity: 0; transition: opacity .2s; font-size: .9rem; }
     .sv-saved.show { opacity: 1; }
-    .sv-agenda-num { display:inline-flex; align-items:center; justify-content:center; width:2rem; height:2rem;
-        border-radius:50%; background:var(--bs-primary); color:#fff; font-weight:700; margin-right:.5rem; flex:none; }
-    .sv-quorum-ok { background: var(--bs-success-bg-subtle); border-color: var(--bs-success); }
-    .sv-quorum-no { background: var(--bs-warning-bg-subtle); border-color: var(--bs-warning); }
+    .sv-state { display: inline-flex; align-items: center; gap: .35rem; font-size: .8rem; font-weight: 600;
+        padding: .12rem .55rem; border-radius: 1rem; white-space: nowrap; }
+    .sv-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .sv-state.plan { background: var(--bs-secondary-bg); color: var(--bs-body-color); }
+    .sv-state.wait { background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); }
+    .sv-state.ok { background: var(--bs-success-bg-subtle); color: var(--bs-success-text-emphasis); }
+    .sv-state.blue { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); }
+    .sv-state.off { background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); }
+    .sv-quorum-ok { background: var(--bs-success-bg-subtle); border-color: var(--bs-success-border-subtle); }
+    .sv-quorum-no { background: var(--bs-warning-bg-subtle); border-color: var(--bs-warning-border-subtle); }
+    /* Mötets livscykel: fem lägen som en stegrad, det aktuella blått, de avklarade gröna. */
+    .sv-steps { display: flex; flex-wrap: wrap; margin: .2rem 0 .9rem; }
+    .sv-steps div { flex: 1 1 0; min-width: 110px; font-size: .82rem; padding: .4rem .5rem; border-top: 4px solid var(--bs-border-color);
+        color: var(--bs-secondary-color); }
+    .sv-steps div.done { border-top-color: var(--bs-success); color: var(--bs-body-color); }
+    .sv-steps div.now { border-top-color: var(--bs-primary); color: var(--bs-primary-text-emphasis); font-weight: 700; }
+    .sv-next { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); border-radius: .5rem;
+        padding: .65rem .9rem; margin-bottom: 1rem; display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+    .sv-next .t { flex: 1; min-width: 220px; }
+    /* Tre lika breda faser som ryms på en telefon (390 px) — en fast minbredd sköt ut sidan i sidled. */
+    .sv-phases { display: flex; width: 100%; max-width: 30rem; }
+    .sv-phases .btn { flex: 1 1 0; min-width: 0; white-space: nowrap; padding-left: .4rem; padding-right: .4rem; }
+    /* Dagordningen: huvudpunkt med numret, underpunkter indragna under den. */
+    .sv-ag { padding: .7rem 0; border-top: 1px solid var(--bs-border-color); }
+    .sv-ag:first-child { border-top: 0; }
+    .sv-ag .sv-no { flex: none; min-width: 2.6rem; font-weight: 700; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; }
+    .sv-sub-ag { margin: .5rem 0 0 2.6rem; padding: .55rem .75rem; border: 1px dashed var(--bs-border-color);
+        border-radius: .5rem; background: var(--bs-tertiary-bg); }
+    .sv-src { font-size: .88rem; color: var(--bs-secondary-color); }
+    .sv-table td, .sv-table th { vertical-align: top; }
+    .sv-table th { font-size: .75rem; letter-spacing: .04em; text-transform: uppercase; color: var(--bs-secondary-color); font-weight: 600; }
     @@media print {
-        .sv-nav, .sv-noprint, .navbar, footer { display: none !important; }
-        .styrelse-page { max-width: 100%; }
+        .sv-rail, .sv-noprint, .navbar, footer, #svActions { display: none !important; }
     }
 </style>
 
-<div class="styrelse-page container">
+<div class="sv-page container-fluid py-4" id="svApp">
     @Html.AntiForgeryToken()
 
     @if (sel == null)
     {
         <h1>Styrelsearbete</h1>
-        <div class="sv-card mt-3">
+        <div class="sv-card mt-3" style="max-width:720px;">
             <p class="mb-1" style="font-size:1.15rem;">Du sitter inte i någon styrelse just nu.</p>
             <p class="sv-help mb-0">När du väljs in i en klubbs eller krets styrelse dyker arbetsytan upp här automatiskt. Hör med din klubb om du tror att detta är fel.</p>
         </div>
     }
     else
     {
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 sv-noprint">
-            <h1 class="mb-0">Styrelsearbete</h1>
-            @if (data.Scopes.Count > 1)
-            {
-                <div>
-                    <label class="sv-help d-block mb-1" for="svScope">Välj klubb eller krets</label>
-                    <select id="svScope" class="form-select" style="min-width:240px;" onchange="svSwitchScope()">
-                        @foreach (var s in data.Scopes)
-                        {
-                            var selected = s.OwnerType == sel.OwnerType && s.OwnerId == sel.OwnerId;
-                            <option value="@s.OwnerType-@s.OwnerId" selected="@selected">@s.Kind: @s.Name</option>
-                        }
-                    </select>
+        <div class="sv-shell">
+            <nav class="sv-rail" aria-label="Styrelsearbetets delar">
+                <a href="@sel.BackUrl" class="sv-back" id="svBack">← Tillbaka</a>
+                <div class="sv-org">@sel.Name</div>
+                <div class="sv-role">@sel.RoleTitle · @sel.Kind</div>
+                @if (data.Scopes.Count > 1)
+                {
+                    <div class="mb-2 px-2" id="svScopeWrap">
+                        <label class="form-label small text-muted mb-1" for="svScope">Byt styrelse</label>
+                        <select id="svScope" class="form-select form-select-sm">
+                            @foreach (var s in data.Scopes)
+                            {
+                                var selected = s.OwnerType == sel.OwnerType && s.OwnerId == sel.OwnerId;
+                                <option value="@s.OwnerType-@s.OwnerId" selected="@selected">@s.Kind: @s.Name</option>
+                            }
+                        </select>
+                    </div>
+                }
+                <div id="svRailLinks" style="display:contents"></div>
+                @*
+                    ⚠️⚠️ VÄGEN IN TILL EKONOMIN. Utan den finns ingen för en ledamot: /ekonomi nås annars
+                    bara från klubbens adminpanel, som kräver klubbadmin. Styrelsen LÄSER, kassören
+                    SKRIVER (LedgerAccessService). Valberedningen har inget läge där.
+                *@
+                @if (!sel.ValberedningOnly)
+                {
+                    <div class="sv-ext">
+                        <a class="sv-nav" href="/ekonomi?type=@sel.OwnerType&id=@sel.OwnerId" target="_blank" rel="noopener"
+                           title="Budget, utfall och avgifter. Öppnas i en ny flik.">Föreningens ekonomi <span aria-hidden="true">↗</span></a>
+                    </div>
+                }
+            </nav>
+            <div class="sv-main">
+                <div class="sv-crumb d-none" id="svCrumb"></div>
+                <div class="sv-head">
+                    <div>
+                        <h1 id="svTitle">Styrelsearbete</h1>
+                        <div class="sv-sub" id="svSub"></div>
+                    </div>
+                    <div class="dropdown d-none sv-noprint" id="svActions">
+                        <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-sliders me-1"></i>Åtgärder
+                        </button>
+                        @* Menyn byggs PER DEL och bär bara handlingar för delen man står på — aldrig en plats rälsen redan har. *@
+                        <ul class="dropdown-menu dropdown-menu-end" style="min-width:270px" id="svActionsList"></ul>
+                    </div>
                 </div>
-            }
-        </div>
-        <p class="sv-help mt-1">@sel.Kind: <strong>@sel.Name</strong></p>
-
-        @*
-            ⚠️⚠️ VÄGEN IN TILL EKONOMIN. Utan den här länken finns ingen: /ekonomi nås annars bara
-            från klubbens adminpanel, som kräver klubbadmin — och mätt i dev 2026-09-22 var
-            10 av 12 aktiva styrelseledamöter INTE klubbadmin. Styrelsen kunde alltså inte se
-            föreningens ekonomi, trots att det är styrelsen som beviljas ansvarsfrihet.
-
-            Styrelsen LÄSER, kassören SKRIVER — grinden är LedgerAccessService, och sidan säger
-            själv vilken roll man är där. Valberedningen är utanför: de har IsBoardMember = 0 och
-            får inget läge alls.
-        *@
-        @if (!sel.ValberedningOnly)
-        {
-            <p class="sv-noprint">
-                <a href="/ekonomi?type=@sel.OwnerType&id=@sel.OwnerId" target="_blank" rel="noopener">
-                    <i class="bi bi-cash-coin me-1"></i>Föreningens ekonomi
-                </a>
-                <span class="sv-help ms-2">Budget, utfall och avgifter. Kassören bokför.</span>
-            </p>
-        }
-
-        <div class="sv-nav sv-noprint">
-            @if (!sel.ValberedningOnly)
-            {
-                <button id="svTabMoten" class="active" onclick="svShow('moten')"><i class="bi bi-calendar-event me-2"></i>Möten</button>
-                <button id="svTabStyrelse" onclick="svShow('styrelse')"><i class="bi bi-people me-2"></i>Styrelsen</button>
-                <button id="svTabArshjul" onclick="svShow('arshjul')"><i class="bi bi-arrow-repeat me-2"></i>Årshjul</button>
-            }
-            <button id="svTabValb" class="@(sel.ValberedningOnly ? "active" : "")" onclick="svShow('valberedning')"><i class="bi bi-person-check me-2"></i>Valberedning</button>
+                <div id="svMsg" aria-live="polite"></div>
+                <div id="svBody"><div class="text-center py-5"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
+            </div>
         </div>
 
-        <div id="svMoten"></div>
-        <div id="svStyrelse" style="display:none;"></div>
-        <div id="svMeeting" style="display:none;"></div>
-        <div id="svArshjul" style="display:none;"></div>
-        <div id="svValb" style="display:none;"></div>
+        @* EN dialog för frågor (i stället för confirm()) och EN för formulär (i stället för prompt()). *@
+        <div class="modal fade sv-modal" id="svConfirmModal" tabindex="-1" aria-hidden="true" aria-labelledby="svConfirmTitle">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header"><h2 class="modal-title h5" id="svConfirmTitle"></h2>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button></div>
+                    <div class="modal-body" id="svConfirmText" style="white-space:pre-line;"></div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="svConfirmOk">OK</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal fade sv-modal" id="svFormModal" tabindex="-1" aria-hidden="true" aria-labelledby="svFormTitle">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
+                <div class="modal-content">
+                    <div class="modal-header"><h2 class="modal-title h5" id="svFormTitle"></h2>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button></div>
+                    <div class="modal-body">
+                        <div class="alert alert-danger d-none" id="svFormErr" role="alert"></div>
+                        <div id="svFormBody"></div>
+                    </div>
+                    <div class="modal-footer" id="svFormFoot">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="svFormOk">Spara</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            window.SV_CONFIG = {
+                ownerType: @sel.OwnerType,
+                ownerId: @sel.OwnerId,
+                orgName: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(sel.Name)),
+                canManage: @(sel.CanManageRoles ? "true" : "false"),
+                canPlace: @(sel.CanPlace ? "true" : "false"),
+                valbOnly: @(sel.ValberedningOnly ? "true" : "false"),
+                startTab: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Context.Request.Query["tab"].ToString())),
+                kretsUppdrag: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+                    BoardRoleDefinitions.KretsUppdragRoleKeys.Select(k => new {
+                        key = k,
+                        label = BoardRoleDefinitions.GetLabel(k),
+                        task = BoardRoleDefinitions.KretsUppdragTask(k)
+                    })))
+            };
+        </script>
+        <script src="~/js/styrelse.js" asp-append-version="true"></script>
     }
 </div>
-
-@if (sel != null)
-{
-<!-- Flatpickr -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
-
-<script>
-(function () {
-    const OWNER_TYPE = @sel.OwnerType;
-    const OWNER_ID = @sel.OwnerId;
-    const CAN_MANAGE = @(sel.CanManageRoles ? "true" : "false");
-    const VALB_ONLY = @(sel.ValberedningOnly ? "true" : "false");
-    const IS_CLUB = OWNER_TYPE === 0;
-    const VALB_KEYS = ['Valberedning', 'ValberedningSammankallande'];
-    // Kretsens uppdrag ur BoardRoleDefinitions — nyckel, etikett och uppgift har EN källa.
-    const KRETS_UPPDRAG = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
-        BoardRoleDefinitions.KretsUppdragRoleKeys.Select(k => new {
-            key = k,
-            label = BoardRoleDefinitions.GetLabel(k),
-            task = BoardRoleDefinitions.KretsUppdragTask(k)
-        })));
-    let svMeetings = [], svActions = [], svYear = null, svDocs = null;
-    let svWheelYear = null, svNomYear = null, svWheelItems = [], svCatalog = [], svMeetingTypes = [];
-    let svMallType = null, svMallItems = [];
-    const POST_KEYS = [['Ordforande','Ordförande'],['ViceOrdforande','Vice ordförande'],['Sekreterare','Sekreterare'],['Kassor','Kassör'],['Ledamot','Ledamot'],['Suppleant','Suppleant'],['Revisor','Revisor'],['Valberedning','Valberedning']];
-    const NOM_STATUSES = ['Föreslagen','Tillfrågad','Tackat ja','Tackat nej'];
-
-    const $ = id => document.getElementById(id);
-    function token() { return document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''; }
-    // ⚠️⚠️ Ett anrop som inte gick fram får ALDRIG vara tyst. post()/get() gjorde tidigare
-    // `.then(r => r.json())`, så ett felsvar (400 när säkerhetstoken inte längre stämmer, 500,
-    // en inloggningssida i stället för JSON) blev ett avvisat löfte som ingen fångade: ingen ruta,
-    // inget fel, och knappen såg ut att ha fungerat. Så "skickades" en kallelse 2026-09-25 som
-    // aldrig nådde servern. Nu visas felet i klartext (hpskReportRequestFailure) OCH löftet avvisas,
-    // så att laddarnas egna .catch() fortsätter visa sin felruta i stället för en tom lista.
-    // Servern som svarar {success:false} är ett annat fall — det hanterar varje anropare själv.
-    function svRequest(url, opts) {
-        return fetch(url, opts).then(
-            r => r.text().then(text => {
-                let data = null;
-                try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
-                if (r.ok && data !== null) return data;
-                throw svRequestError(r.status, data);
-            }),
-            () => { throw svRequestError(0, null); }
-        );
-    }
-    // Texten och rutan kommer från _RequestFailureNet (Master) — EN felruta för hela sajten.
-    function svRequestError(status, data) {
-        const info = window.hpskRequestFailureMessage(status);
-        const msg = (data && data.message) ? data.message : info.msg;
-        window.hpskReportRequestFailure(msg, info.reload);
-        const err = new Error(msg); err.status = status; err.hpskShown = true;
-        return err;
-    }
-    function post(ctrl, action, params) {
-        return svRequest('/umbraco/surface/' + ctrl + '/' + action, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': token() },
-            body: new URLSearchParams(params).toString()
-        });
-    }
-    function get(ctrl, action, qs) {
-        return svRequest('/umbraco/surface/' + ctrl + '/' + action + '?' + new URLSearchParams(qs).toString());
-    }
-    function esc(s) {
-        if (s === null || s === undefined) return '';
-        const m = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
-        return s.toString().replace(/[&<>"']/g, c => m[c]);
-    }
-    function flash(el) { if (!el) return; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 1800); }
-
-    window.svSwitchScope = function () {
-        const v = $('svScope').value.split('-');
-        location.href = '/styrelse?type=' + v[0] + '&id=' + v[1];
-    };
-
-    window.svShow = function (which) {
-        $('svMeeting').style.display = 'none';
-        const panes = { moten: 'svMoten', styrelse: 'svStyrelse', arshjul: 'svArshjul', valberedning: 'svValb' };
-        const tabs = { moten: 'svTabMoten', styrelse: 'svTabStyrelse', arshjul: 'svTabArshjul', valberedning: 'svTabValb' };
-        // Tabs/panes may be absent (valberedning-only members see just the Valberedning tab) — guard.
-        Object.keys(panes).forEach(k => {
-            const p = $(panes[k]); if (p) p.style.display = (k === which) ? '' : 'none';
-            const t = $(tabs[k]); if (t) t.classList.toggle('active', k === which);
-        });
-        if (which === 'moten') loadMoten();
-        if (which === 'styrelse') loadStyrelse();
-        if (which === 'arshjul') loadArshjul();
-        if (which === 'valberedning') loadValberedning();
-    };
-
-    // =====================================================================
-    //  MÖTEN (list + create + my tasks)
-    // =====================================================================
-    function loadMoten() {
-        const c = $('svMoten');
-        c.innerHTML = spinner();
-        Promise.all([
-            get('BoardMeeting', 'GetMeetings', { ownerType: OWNER_TYPE, ownerId: OWNER_ID }),
-            get('BoardMeeting', 'GetOpenActions', { ownerType: OWNER_TYPE, ownerId: OWNER_ID })
-        ]).then(([m, a]) => {
-            renderMoten(c, (m.success && m.data) ? m.data : [], (a.success && a.data) ? a.data : []);
-        }).catch(() => c.innerHTML = errBox('Kunde inte hämta möten.'));
-    }
-
-    function renderMoten(c, meetings, actions) {
-        svMeetings = meetings; svActions = actions;
-        // Year list = years present in meetings + the current year, newest first.
-        const yrs = new Set(meetings.map(m => (m.meetingDate || '').slice(0, 4)).filter(Boolean));
-        yrs.add(String(new Date().getFullYear()));
-        const years = Array.from(yrs).sort().reverse();
-        if (svYear == null || !years.includes(svYear)) svYear = years[0];
-
-        let html = '';
-
-        // Next meeting (nearest future) — independent of the year filter.
-        const upcoming = meetings.filter(x => !x.isPast);
-        if (upcoming.length) {
-            const n = upcoming[upcoming.length - 1]; // meetings are date DESC, so last upcoming = soonest
-            html += `<div class="sv-card highlight">
-                <h2><i class="bi bi-calendar-event me-2"></i>Nästa möte</h2>
-                <p style="font-size:1.2rem;margin:.4rem 0 .2rem;"><strong>${esc(n.title)}</strong></p>
-                <p class="sv-help mb-3">${esc(n.meetingDate)}${n.location ? ' · ' + esc(n.location) : ''}</p>
-                <button class="btn btn-primary btn-xl" onclick="openMeeting(${n.id}, true)"><i class="bi bi-folder2-open me-2"></i>Öppna mötet</button>
-            </div>`;
-        }
-
-        // Create new meeting
-        html += `<div class="sv-card">
-            <h2><i class="bi bi-plus-circle me-2"></i>Skapa nytt möte</h2>
-            <p class="sv-help">Välj typ av möte. Dagordningen fylls i automatiskt åt dig och alla i styrelsen läggs till som närvarande – du kan ändra allt sedan.</p>
-            <label class="sv-label" for="svNewType">Typ av möte</label>
-            <select id="svNewType" class="form-select mb-3" style="max-width:420px;">
-                <option value="Styrelsemote">Vanligt styrelsemöte</option>
-                <option value="Konstituerande">Konstituerande möte (efter årsmötet)</option>
-                <option value="Arsmote">Årsmöte</option>
-                <option value="ExtraArsmote">Extra årsmöte</option>
-                <option value="Custom">Eget möte</option>
-            </select>
-            <label class="sv-label" for="svNewDate">Datum och tid</label>
-            <input type="text" id="svNewDate" class="form-control mb-3" style="max-width:420px;" placeholder="Välj datum och tid">
-            <div class="d-flex gap-2 flex-wrap">
-                <button class="btn btn-success btn-xl" id="svCreateBtn" onclick="createMeeting()"><i class="bi bi-plus-lg me-2"></i>Skapa möte</button>
-                ${CAN_MANAGE ? `<button class="btn btn-outline-secondary btn-xl" onclick="openMallar()"><i class="bi bi-sliders me-2"></i>Anpassa mötesmallar</button>` : ''}
-            </div>
-        </div>`;
-
-        // Att göra — ALL open tasks (incl. unfinished ones from earlier years), never year-filtered.
-        html += `<div class="sv-card">
-            <h2><i class="bi bi-check2-square me-2"></i>Att göra</h2>`;
-        if (!actions.length) {
-            html += `<p class="sv-help mb-0">Inga öppna uppgifter just nu.</p>`;
-        } else {
-            html += `<p class="sv-help">Uppgifter som styrelsen beslutat och som ännu inte är klara (oavsett år).</p>`;
-            actions.forEach(a => {
-                const who = a.assignedToName ? ` – ${esc(a.assignedToName)}` : '';
-                const due = a.dueDate ? `<span class="${a.isOverdue ? 'text-danger' : 'sv-help'}"> (senast ${esc(a.dueDate)})</span>` : '';
-                html += `<div class="sv-person" id="svTask_${a.id}">
-                    <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;">
-                        <input type="checkbox" class="form-check-input sv-check" onchange="markActionDone(${a.id}, this.checked, 'moten')">
-                        <span class="svTaskText">${esc(a.description)}<span class="sv-help">${who}</span>${due}</span>
-                    </label>
-                </div>`;
-            });
-        }
-        html += `</div>`;
-
-        // Meetings for the selected year (year selector lives here).
-        html += `<div class="sv-card">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <h2 class="mb-0"><i class="bi bi-calendar3 me-2"></i>Möten</h2>
-                <div><label class="sv-help me-1" for="svYear">Visa år</label>
-                    <select id="svYear" class="form-select d-inline-block" style="width:auto;" onchange="svChangeYear()">
-                        ${years.map(y => `<option value="${y}" ${y === svYear ? 'selected' : ''}>${y}</option>`).join('')}
-                    </select></div>
-            </div>
-            <div id="svMeetingList" class="mt-2"></div>
-        </div>`;
-
-        c.innerHTML = html;
-        // Pre-fill the new-meeting date with a sensible default (today 18:30) but let the user pick before creating.
-        if ($('svNewDate')) {
-            const def = new Date().toISOString().slice(0, 10) + ' 18:30';
-            if (typeof flatpickr !== 'undefined') {
-                flatpickr('#svNewDate', { locale: 'sv', enableTime: true, time_24hr: true, dateFormat: 'Y-m-d H:i', defaultDate: def });
-            } else {
-                $('svNewDate').value = def;
-            }
-        }
-        renderMeetingList();
-    }
-
-    function renderMeetingList() {
-        const list = $('svMeetingList'); if (!list) return;
-        const ofYear = svMeetings.filter(m => (m.meetingDate || '').slice(0, 4) === svYear);
-        if (!ofYear.length) { list.innerHTML = `<p class="sv-help mb-0">Inga möten ${svYear}.</p>`; return; }
-        let h = '';
-        ofYear.forEach(m => {
-            h += `<div class="sv-person">
-                <span><strong>${esc(m.title)}</strong><span class="sv-help d-block">${esc(m.meetingDate)}</span></span>
-                <span class="d-flex align-items-center gap-2">${statusBadge(m.status)}
-                    <button class="btn btn-outline-primary" onclick="openMeeting(${m.id}, true)">Öppna</button>
-                    <button class="btn btn-outline-danger sv-noprint" onclick="deleteMeeting(${m.id})" title="Ta bort möte"><i class="bi bi-trash"></i></button></span>
-            </div>`;
-        });
-        list.innerHTML = h;
-    }
-
-    window.svChangeYear = function () { svYear = $('svYear').value; renderMeetingList(); };
-
-    // ⚠️ "Skapa möte" is the only way a meeting is created. Without the busy guard a second press while the
-    // first request was still seeding agenda + attendees made a full copy; without the same-day check, so
-    // did using this card to "change the date" of a meeting that already existed.
-    let svCreating = false;
-    window.createMeeting = function (createDuplicate) {
-        if (svCreating) return;
-        const type = $('svNewType').value;
-        // Read the date the user picked in the create card; fall back to today 18:30 if left blank.
-        const def = new Date().toISOString().slice(0, 10) + ' 18:30';
-        const date = ($('svNewDate') && $('svNewDate').value.trim()) ? $('svNewDate').value.trim() : def;
-        const btn = $('svCreateBtn');
-        svCreating = true;
-        if (btn) btn.disabled = true;
-        return post('BoardMeeting', 'CreateMeeting', {
-            ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingType: type, title: '', meetingDate: date, location: '',
-            createDuplicate: createDuplicate ? '1' : '0'
-        })
-            .then(r => {
-                if (r.success) { openMeeting(r.data.id, true); return; }
-                if (r.duplicate) {
-                    const d = r.duplicate;
-                    if (confirm(`Det finns redan ett möte av den typen samma dag:\n\n${d.title} (${d.meetingDate})\n\nVill du öppna det i stället?`)) {
-                        openMeeting(d.id, true);
-                    } else if (confirm('Skapa ett nytt möte ändå? Då finns det två möten samma dag.')) {
-                        svCreating = false;
-                        return createMeeting(true);
-                    }
-                    return;
-                }
-                alert(r.message || 'Kunde inte skapa mötet');
-            })
-            .finally(() => { svCreating = false; if (btn) btn.disabled = false; });
-    };
-
-    // =====================================================================
-    //  ETT MÖTE (protokoll)
-    // =====================================================================
-    // scroll=true only when navigating in from the list/create; in-place refreshes keep the position.
-    window.openMeeting = function (meetingId, scroll) {
-        $('svMoten').style.display = 'none';
-        $('svStyrelse').style.display = 'none';
-        const c = $('svMeeting'); c.style.display = '';
-        if (scroll) c.innerHTML = spinner();
-        get('BoardMeeting', 'GetMeetingDetail', { meetingId }).then(d => {
-            if (!d.success) { c.innerHTML = errBox(d.message || 'Kunde inte öppna mötet.'); return; }
-            renderMeeting(c, d);
-            if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
-        }).catch(() => c.innerHTML = errBox('Kunde inte öppna mötet.'));
-    };
-
-    function renderMeeting(c, d) {
-        const m = d.meeting, q = d.quorum, j = d.justering || {};
-        // Edit-locked once sent for justering (and after). Approvals happen while VantarJustering.
-        const locked = m.status === 'Justerat' || m.status === 'VantarJustering';
-        let html = `<button class="btn btn-outline-secondary btn-xl mb-3 sv-noprint" onclick="svShow('moten')"><i class="bi bi-arrow-left me-2"></i>Tillbaka till möten</button>`;
-
-        // Header
-        html += `<div class="sv-card">`;
-        if (locked) {
-            const isJust = m.status === 'Justerat';
-            html += `<h2>${esc(m.title)}</h2>
-                <p class="sv-help">${esc(m.typeLabel)} · ${esc(m.meetingDate)}${m.location ? ' · ' + esc(m.location) : ''}</p>
-                ${isJust
-                    ? `<p class="text-success mb-0"><i class="bi bi-lock-fill me-1"></i>Protokollet är justerat och låst.${m.justifiedDate ? ' (' + esc(m.justifiedDate) + ')' : ''}</p>`
-                    : `<p class="text-primary mb-0"><i class="bi bi-hourglass-split me-1"></i>Protokollet är skickat för justering och låst för redigering.</p>`}`;
-        } else {
-            html += `<div class="row g-3">
-                <div class="col-12"><label class="sv-label">Rubrik</label>
-                    <input type="text" id="mTitle" class="form-control" value="${esc(m.title)}" onchange="saveMeeting()"></div>
-                <div class="col-12 col-md-6"><label class="sv-label">Datum och tid</label>
-                    <input type="text" id="mDate" class="form-control" value="${esc(m.meetingDate)}" onchange="saveMeeting()"></div>
-                <div class="col-12 col-md-6"><label class="sv-label">Plats</label>
-                    <input type="text" id="mLoc" class="form-control" value="${esc(m.location || '')}" onchange="saveMeeting()" placeholder="t.ex. Klubbstugan"></div>
-            </div>
-            <div class="mt-2"><span id="mSaved" class="sv-saved"><i class="bi bi-check-lg"></i> Sparat</span></div>`;
-        }
-        html += `</div>`;
-
-        // Kallelse (send the meeting notice by email)
-        const isArs = m.meetingType === 'Arsmote' || m.meetingType === 'ExtraArsmote';
-        html += `<div class="sv-card sv-noprint"><h2><i class="bi bi-envelope-paper me-2"></i>Kallelse</h2>`;
-        if (m.kallelseSentDate)
-            html += `<p class="text-success mb-2"><i class="bi bi-check-circle me-1"></i>Kallelse skickad ${esc(m.kallelseSentDate)}${m.kallelseRecipientCount != null ? ' till ' + m.kallelseRecipientCount + ' mottagare' : ''}.</p>`;
-        if (!locked) {
-            html += `<p class="sv-help">Skicka kallelse med dagordningen via e-post. ${isArs ? 'För årsmöte går kallelsen till <strong>alla medlemmar i klubben</strong>.' : 'Kallelsen går till <strong>styrelsen</strong>.'}</p>
-                <textarea id="kallelseMsg" class="form-control mb-2" rows="2" placeholder="Eget meddelande i kallelsen (frivilligt)…"></textarea>
-                <button class="btn btn-primary btn-xl" onclick="sendKallelse(${m.id})"><i class="bi bi-envelope-paper me-2"></i>${m.kallelseSentDate ? 'Skicka kallelse igen' : 'Skicka kallelse'}</button>`;
-        }
-        html += `</div>`;
-
-        // Quorum + attendance (toggling presence updates the banner in place — no reload/scroll)
-        html += `<div id="svQuorum" class="sv-card ${q.isMet ? 'sv-quorum-ok' : 'sv-quorum-no'}" data-required="${q.required}" data-total="${q.total}">
-            <h2><i class="bi bi-people me-2"></i>Närvaro</h2>
-            <p id="svQuorumMsg" style="font-size:1.15rem;margin-bottom:.75rem;">${quorumMsgHtml(q)}</p>`;
-        d.attendees.forEach(a => {
-            const roleTxt = a.roleTitle ? `<span class="sv-help">${esc(a.roleTitle)}</span>` : '';
-            if (locked) {
-                html += `<div class="sv-person"><span>${esc(a.memberName || '-')} ${roleTxt}</span><span>${esc(a.attendanceStatus)}</span></div>`;
-            } else {
-                html += `<div class="sv-person">
-                    <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;">
-                        <input type="checkbox" class="form-check-input sv-check svAttChk" ${a.attendanceStatus === 'Närvarande' ? 'checked' : ''} onchange="togglePresent(${a.id}, this.checked)">
-                        <span>${esc(a.memberName || '-')}<br>${roleTxt}</span>
-                    </label>
-                    <span class="sv-help" id="svAttStatus_${a.id}">${a.attendanceStatus === 'Närvarande' ? 'Närvarande' : 'Frånvarande'}</span>
-                </div>`;
-            }
-        });
-        if (!locked && CAN_MANAGE) {
-            html += `<button class="btn btn-link p-0 mt-2 sv-noprint" onclick="syncBoard(${m.id})">Saknas någon? Hämta styrelsen igen</button>`;
-        }
-        html += `</div>`;
-
-        // Agenda / protokoll
-        html += `<div class="sv-card">
-            <h2><i class="bi bi-list-ol me-2"></i>Dagordning och beslut</h2>`;
-        d.agenda.forEach((it, i) => html += agendaCard(it, i + 1, locked, d.links || [], d.attendees, d.agenda.length));
-        if (!locked) {
-            html += `<div class="mt-3 sv-noprint"><label class="sv-label">Lägg till en punkt</label>
-                <div class="row g-2" style="max-width:640px;">
-                    <div class="col-12 col-md-7"><select id="newAgendaType" class="form-select" onchange="onNewAgendaTypeChange()">${agendaCatalogOptions()}</select></div>
-                    <div class="col-12 col-md-5 d-none" id="newAgendaCustomWrap"><input type="text" id="newAgendaHeading" class="form-control" placeholder="Rubrik på punkten"></div>
-                    <div class="col-12"><button class="btn btn-outline-primary" onclick="addAgenda(${m.id})"><i class="bi bi-plus-lg me-1"></i>Lägg till punkt</button></div>
-                </div></div>`;
-        }
-        html += `</div>`;
-
-        // Actions
-        html += `<div class="sv-card">
-            <h2><i class="bi bi-check2-square me-2"></i>Uppgifter (att göra)</h2>`;
-        if (d.actions.length) {
-            d.actions.forEach(a => {
-                const who = a.assignedToName ? ` – ${esc(a.assignedToName)}` : '';
-                const due = a.dueDate ? `<span class="${a.isOverdue ? 'text-danger' : 'sv-help'}"> (senast ${esc(a.dueDate)})</span>` : '';
-                html += `<div class="sv-person" id="svAct_${a.id}">
-                    <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;">
-                        <input type="checkbox" class="form-check-input sv-check" ${a.isDone ? 'checked' : ''} ${locked ? 'disabled' : ''} onchange="markActionDone(${a.id}, this.checked, 'meeting')">
-                        <span class="svActText ${a.isDone ? 'text-decoration-line-through sv-help' : ''}">${esc(a.description)}<span class="sv-help">${who}</span>${due}</span>
-                    </label>
-                    ${locked ? '' : `<button class="btn btn-sm btn-outline-danger sv-noprint" onclick="removeAction(${a.id}, ${m.id})" title="Ta bort">Ta bort</button>`}
-                </div>`;
-            });
-        } else {
-            html += `<p class="sv-help">Inga uppgifter ännu.</p>`;
-        }
-        if (!locked) {
-            const opts = '<option value="">Ingen särskild person</option>' +
-                d.attendees.map(a => `<option value="${a.memberId}">${esc(a.memberName || '')}</option>`).join('');
-            html += `<div class="row g-2 mt-2" style="max-width:640px;">
-                <div class="col-12"><input type="text" id="actDesc" class="form-control" placeholder="Vad ska göras?"></div>
-                <div class="col-12 col-md-6"><label class="sv-help">Vem ansvarar?</label><select id="actWho" class="form-select">${opts}</select></div>
-                <div class="col-12 col-md-6"><label class="sv-help">Klart senast (frivilligt)</label><input type="text" id="actDue" class="form-control" placeholder="Välj datum"></div>
-                <div class="col-12"><button class="btn btn-primary" onclick="addAction(${m.id})"><i class="bi bi-plus-lg me-1"></i>Lägg till uppgift</button></div>
-            </div>`;
-        }
-        html += `</div>`;
-
-        // Justering — digital sign-off by ordförande + sekreterare + justerare (chosen in the agenda).
-        html += justeringCard(m, j, d.agenda || []);
-        html += `<div class="mt-3 d-flex gap-2 flex-wrap sv-noprint">
-            <a class="btn btn-outline-secondary btn-xl" href="/styrelse/dagordning/${m.id}" target="_blank"><i class="bi bi-card-list me-2"></i>Skriv ut dagordning</a>
-            <a class="btn btn-outline-secondary btn-xl" href="/styrelse/protokoll/${m.id}" target="_blank"><i class="bi bi-printer me-2"></i>Skriv ut protokoll</a>
-            <button class="btn btn-outline-danger btn-xl" onclick="deleteMeeting(${m.id})"><i class="bi bi-trash me-2"></i>Ta bort möte</button>
-        </div>`;
-
-        c.innerHTML = html;
-
-        if (typeof flatpickr !== 'undefined' && !locked) {
-            if ($('mDate')) flatpickr('#mDate', { locale: 'sv', enableTime: true, time_24hr: true, dateFormat: 'Y-m-d H:i', onChange: saveMeeting });
-            if ($('actDue')) flatpickr('#actDue', { locale: 'sv', dateFormat: 'Y-m-d' });
-        }
-        window._mId = m.id;
-        window._mType = m.meetingType || '';
-        window._mAgenda = d.agenda || [];
-        window._mYear = parseInt((m.meetingDate || '').slice(0, 4), 10) || new Date().getFullYear();
-
-        // Keep a just-moved agenda point in view so the board can keep tapping the arrow.
-        if (window._agFocus) {
-            const f = $('ag_h_' + window._agFocus);
-            window._agFocus = null;
-            if (f) f.scrollIntoView({ block: 'center' });
-        }
-    }
-
-    function agendaCard(it, num, locked, allLinks, attendees, total) {
-        const links = (allLinks || []).filter(l => l.agendaItemId === it.id);
-        const linksHtml = links.map(l => linkChip(l, locked)).join('');
-        const type = it.itemType || 'text';
-        const att = attendees || [];
-        const electedIds = it.electedMemberIds || [];
-        const electedNames = it.electedNames || [];   // server-resolved, aligned with electedIds
-        const electedDisplay = electedNames.filter(Boolean);
-
-        if (locked) {
-            let body;
-            if (type === 'election') {
-                body = electedDisplay.length ? `<div class="mt-1">Valda: <strong>${electedDisplay.map(esc).join(', ')}</strong></div>` : '';
-            } else if (type === 'awards') {
-                // Justerat protokoll: bara utfallet, inga knappar. Raderna hämtas som vanligt så
-                // listan går att läsa på skärmen — protokollutskriften renderar samma sak server-side.
-                const s = it.awardsSummary;
-                body = s
-                    ? `<div class="mt-1">Utdelning ${s.year}: <strong>${s.receivedCount}</strong> mottog`
-                      + `${s.absentCount ? `, ${s.absentCount} ej närvarande` : ''}`
-                      + `${s.laterCount ? `, ${s.laterCount} delas ut senare` : ''}`
-                      + `${s.uncalledCount ? `, ${s.uncalledCount} inte upplast` : ''}.</div>`
-                      + `<div id="aw_body_${it.id}" class="mt-2"></div>`
-                    : '<div class="mt-1 sv-help">Ingen utdelningslista hämtades till mötet.</div>';
-                if (s) setTimeout(() => loadAwards(it.id, null, false), 0);
-            } else {
-                body = `${it.discussion ? `<div class="mt-1" style="white-space:pre-wrap;">${esc(it.discussion)}</div>` : ''}`
-                    + `${type !== 'note' && it.decision ? `<div class="mt-1"><strong>Beslut:</strong> <span style="white-space:pre-wrap;">${esc(it.decision)}</span></div>` : ''}`;
-            }
-            return `<div class="mb-3 pb-2" style="border-bottom:1px solid var(--bs-border-color);">
-                <div style="font-size:1.15rem;font-weight:600;"><span class="sv-agenda-num">${num}</span>${esc(it.heading)}</div>
-                ${body}
-                ${linksHtml ? `<div class="mt-1">${linksHtml}</div>` : ''}
-            </div>`;
-        }
-
-        const n = total || num;
-        const head = `<div class="d-flex align-items-center mb-2">
-                <span class="sv-agenda-num">${num}</span>
-                <input type="text" class="form-control" style="font-weight:600;" value="${esc(it.heading)}" id="ag_h_${it.id}" onchange="saveAgenda(${it.id})">
-                <span class="d-flex gap-1 ms-2 sv-noprint">
-                    <button class="btn btn-sm btn-outline-secondary" onclick="moveAgenda(${it.id},-1)" ${num === 1 ? 'disabled' : ''} title="Flytta upp"><i class="bi bi-arrow-up"></i></button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="moveAgenda(${it.id},1)" ${num === n ? 'disabled' : ''} title="Flytta ner"><i class="bi bi-arrow-down"></i></button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="removeAgenda(${it.id})" title="Ta bort punkt">Ta bort</button>
-                </span>
-            </div>`;
-
-        let fields;
-        if (type === 'election' && it.electionSource === 'members') {
-            // Pick from any club/region member (e.g. justerare at an årsmöte). Searchable.
-            const count = it.electionCount || 1;
-            const chips = electedIds.map((id, i) => `<span class="badge bg-primary me-1 mb-1" style="font-size:.95rem;">${esc(electedNames[i] || ('#' + id))} <a href="#" onclick="event.preventDefault();elRemove(${it.id}, ${id})" style="color:#fff;text-decoration:none;">✕</a></span>`).join('');
-            fields = `<label class="sv-help">Välj ${count === 1 ? 'en person' : count + ' personer'} bland medlemmarna</label>
-                <div class="mb-1">${chips || '<span class="sv-help">Ingen vald ännu.</span>'}</div>
-                <input type="text" class="form-control" id="elsrch_${it.id}" placeholder="Sök medlem…" autocomplete="off" oninput="elSearch(${it.id}, this.value)" style="max-width:420px;">
-                <div id="elres_${it.id}" class="list-group mt-1" style="max-width:420px;"></div>`;
-        } else if (type === 'election') {
-            const count = it.electionCount || 1;
-            const present = att.filter(a => a.attendanceStatus === 'Närvarande');
-            const boxes = present.length
-                ? present.map(a => `<label class="d-flex align-items-center gap-2 mb-1" style="cursor:pointer;">
-                        <input type="checkbox" class="form-check-input sv-check svElect_${it.id}" value="${a.memberId}" ${electedIds.includes(a.memberId) ? 'checked' : ''} onchange="saveElection(event, ${it.id}, ${count})">
-                        <span>${esc(a.memberName || '-')}${a.isChairman ? ' (ordförande)' : a.isSecretary ? ' (sekreterare)' : ''}</span>
-                    </label>`).join('')
-                : '<p class="sv-help mb-0">Inga närvarande att välja – markera närvaro först.</p>';
-            fields = `<label class="sv-help">Välj ${count === 1 ? 'en person' : count + ' personer'} bland de närvarande</label>
-                <div class="mb-1">${boxes}</div>`;
-        } else if (type === 'awards') {
-            // Årets utdelningslista. Underlaget är färdigt sedan tidigare (märkesliggaren) — det som
-            // saknades var vägen in i protokollet. Raderna hämtas separat (de kan vara många) och
-            // ritas i #aw_body_.
-            const s = it.awardsSummary;
-            const yr = s ? s.year : (window._mYear || new Date().getFullYear()) - 1;
-            fields = `<div class="d-flex gap-2 flex-wrap align-items-center mb-2 sv-noprint">
-                    <label class="sv-help mb-0" for="aw_year_${it.id}">Verksamhetsår</label>
-                    <input type="number" class="form-control form-control-sm" style="width:100px;"
-                           id="aw_year_${it.id}" value="${yr}">
-                    <button class="btn btn-sm btn-outline-primary" onclick="loadAwards(${it.id}, null, true)">
-                        <i class="bi bi-arrow-repeat me-1"></i>${s ? 'Hämta om listan' : 'Hämta årets lista'}
-                    </button>
-                    <span class="sv-help">Årsmötet delar ut föregående års märken.</span>
-                </div>
-                <div id="aw_body_${it.id}">${s ? '' : '<p class="sv-help mb-0">Ingen lista hämtad än.</p>'}</div>`;
-            if (s) setTimeout(() => loadAwards(it.id, null, false), 0);
-        } else {
-            fields = `<label class="sv-help">Anteckningar</label>
-                <textarea class="form-control mb-2" rows="2" id="ag_disc_${it.id}" onchange="saveAgenda(${it.id})" placeholder="Vad sas under punkten?">${esc(it.discussion || '')}</textarea>`;
-            if (type !== 'note') {
-                fields += `<label class="sv-help">Beslut</label>
-                    <textarea class="form-control" rows="2" id="ag_dec_${it.id}" onchange="saveAgenda(${it.id})" placeholder="Vad beslutade styrelsen?">${esc(it.decision || '')}</textarea>`;
-            }
-        }
-
-        return `<div class="mb-3 pb-3" style="border-bottom:1px solid var(--bs-border-color);">
-            ${head}
-            ${fields}
-            <span id="ag_saved_${it.id}" class="sv-saved"><i class="bi bi-check-lg"></i> Sparat</span>
-            <div class="mt-2">${linksHtml}</div>
-            <div class="dropdown sv-noprint mt-1">
-                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown"
-                        data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false">
-                    <i class="bi bi-paperclip me-2"></i>Bifoga…
-                </button>
-                <ul class="dropdown-menu">
-                    <li><button class="dropdown-item" type="button" onclick="attachDoc(${it.id})"><i class="bi bi-file-earmark me-2 text-secondary"></i>Dokument</button></li>
-                    <li><button class="dropdown-item" type="button" onclick="attachMeeting(${it.id})"><i class="bi bi-calendar-event me-2 text-secondary"></i>Tidigare möte</button></li>
-                    <li><button class="dropdown-item" type="button" onclick="attachValforslag(${it.id})"><i class="bi bi-person-check me-2 text-secondary"></i>Valberedningens förslag</button></li>
-                    <li><button class="dropdown-item" type="button" onclick="attachUrl(${it.id})"><i class="bi bi-link-45deg me-2 text-secondary"></i>Länk (URL)</button></li>
-                </ul>
-            </div>
-        </div>`;
-    }
-
-    function agendaCatalogOptions() {
-        let o = '<option value="">Välj punkt att lägga till…</option>';
-        (svCatalog || []).forEach(c => {
-            const tag = c.itemType === 'election' ? ' (personval)' : '';
-            o += `<option value="${c.key}" data-heading="${esc(c.heading)}" data-type="${c.itemType}" data-role="${esc(c.electionRole || '')}" data-count="${c.electionCount || 1}" data-source="${esc(c.electionSource || 'attendees')}">${esc(c.heading)}${tag}</option>`;
-        });
-        return o;
-    }
-    window.onNewAgendaTypeChange = function () {
-        const sel = $('newAgendaType');
-        $('newAgendaCustomWrap').classList.toggle('d-none', sel.value !== 'ovrigt');
-    };
-    window.saveElection = function (ev, itemId, count) {
-        const boxes = Array.from(document.querySelectorAll('.svElect_' + itemId));
-        if (count === 1 && ev.target.checked) {
-            boxes.forEach(b => { if (b !== ev.target) b.checked = false; });
-        } else if (boxes.filter(b => b.checked).length > count) {
-            ev.target.checked = false;
-            alert('Välj högst ' + count + (count > 1 ? ' personer' : ' person'));
-        }
-        const ids = boxes.filter(b => b.checked).map(b => b.value);
-        post('BoardMeeting', 'SaveAgendaElection', { agendaItemId: itemId, memberIds: ids.join(',') })
-            .then(r => { if (r.success) flash($('ag_saved_' + itemId)); });
-    };
-    // ── Utdelning av märken och medaljer (ItemType "awards") ─────────────────
-    //
-    // ⚠️ Statusen sätts PER RAD mot servern, inte som en hel blob. Mötet prickar av en person i
-    // taget, och två sekreterare kan ha punkten öppen samtidigt — en helblobbskrivning från den ena
-    // hade skrivit över den andras avprickning.
-    window.loadAwards = function (itemId, year, refresh) {
-        const body = $('aw_body_' + itemId);
-        if (!body) return;
-        const yEl = $('aw_year_' + itemId);
-        const y = year || (yEl ? yEl.value : '') || '';
-        if (refresh) body.innerHTML = '<p class="sv-help mb-0">Hämtar listan…</p>';
-
-        get('BoardMeeting', 'GetAgendaAwards', { agendaItemId: itemId, year: y, refresh: !!refresh })
-            .then(r => {
-                if (!r.success) { body.innerHTML = `<p class="text-danger mb-0">${esc(r.message || 'Kunde inte hämta listan.')}</p>`; return; }
-                // En kretsstyrelse har ingen utdelningslista — märken hör till klubbens medlemmar.
-                if (r.supported === false) { body.innerHTML = `<p class="sv-help mb-0">${esc(r.message)}</p>`; return; }
-                renderAwards(itemId, r);
-            })
-            .catch(() => { body.innerHTML = '<p class="text-danger mb-0">Fel vid inläsning.</p>'; });
-    };
-
-    // ⚠️ Knappen bär ett INDEX, aldrig radens text. Ett onclick byggt av strängar med
-    // enkelfnutt-escaping är precis den lucka som gav kodexekvering i Fältskyttes "lägg till skytt"
-    // — ett dubbelfnutt avslutar attributet. Raderna ligger i window._awRows.
-    function awStatusBtn(itemId, idx, r, value, label, cls) {
-        const on = (r.status || null) === value;
-        // Klick på ett redan valt läge nollar det — tillbaka till "inte upplast", som är ett eget
-        // tillstånd och inte samma sak som frånvaro.
-        const send = on ? '' : value;
-        return `<button type="button" class="btn btn-sm ${on ? cls : 'btn-outline-secondary'}"
-                    onclick="setAwardStatus(${itemId}, ${idx}, '${send}')"
-                    title="${on ? 'Klicka igen för att nollställa' : esc(label)}">${esc(label)}</button>`;
-    }
-
-    function renderAwards(itemId, r) {
-        const body = $('aw_body_' + itemId);
-        const a = r.awards;
-        if (!a || !a.rows || !a.rows.length) {
-            // ⚠️ Förbehållen måste med även här. "Inga medaljer att dela ut" intill en tävling
-            // vars resultatlista inte räknats om är ett direkt felaktigt påstående, och det är
-            // just i det läget en tom lista är som farligast.
-            let empty = '';
-            (a && a.notes ? a.notes : []).forEach(n => {
-                empty += `<div class="alert alert-warning py-2 px-3 small mb-2">${esc(n)}</div>`;
-            });
-            empty += `<p class="sv-help mb-0">Inga märken eller medaljer att dela ut för ${esc(a ? a.year : '')}.</p>`;
-            body.innerHTML = empty;
-            return;
-        }
-        const locked = !!r.locked;
-
-        // Raderna behålls per punkt så knapparna kan referera dem med index i stället för att bära
-        // texten i ett attribut.
-        window._awRows = window._awRows || {};
-        window._awRows[itemId] = a.rows;
-
-        // ⚠️ Förbehållen står FÖRE listan. En oavgjord medaljplats eller ett mästerskap vars
-        // resultatlista inte räknats om betyder att listan är ofullständig, och det måste läsas
-        // innan någon prickar av — inte upptäckas när en medalj saknas i salen.
-        let html = '';
-        (a.notes || []).forEach(n => {
-            html += `<div class="alert alert-warning py-2 px-3 small mb-2">${esc(n)}</div>`;
-        });
-
-        html += `<div class="mb-2 sv-help">Hämtad ${esc(a.capturedAt)} · ${a.recipientCount} mottagare · `
-            + `${a.orderableCount} föremål`
-            + (a.uncalledCount ? ` · <strong>${a.uncalledCount} inte upplast</strong>` : '')
-            + `</div><div class="table-responsive"><table class="table table-sm align-middle mb-0"><tbody>`;
-
-        let lastMember = null;
-        a.rows.forEach((row, idx) => {
-            // Gruppera visuellt per person: det är en person som kallas fram, inte en rad.
-            const newMember = row.memberId !== lastMember;
-            lastMember = row.memberId;
-            html += `<tr${newMember ? ' style="border-top:2px solid var(--bs-border-color);"' : ''}>
-                <td style="min-width:150px;">${newMember ? `<strong>${esc(row.name)}</strong>` : ''}</td>
-                <td>${esc(row.item)}
-                    <div class="sv-help">${esc(row.group)}${row.detail ? ' · ' + esc(row.detail) : ''}</div>
-                    ${row.orderable ? '' : '<span class="badge bg-secondary-subtle text-secondary">inget märke</span> '}
-                    ${row.unverified ? '<span class="badge bg-warning-subtle text-warning-emphasis">ej granskad</span> ' : ''}
-                    ${row.noLongerInLedger ? '<span class="badge bg-danger-subtle text-danger">finns inte längre i liggaren</span>' : ''}
-                </td>
-                <td class="text-end" style="white-space:nowrap;">`;
-            if (locked) {
-                html += `<span class="badge ${row.status === 'Mottaget' ? 'bg-success' : row.status ? 'bg-secondary' : 'bg-light text-muted border'}">${esc(row.statusLabel)}</span>`;
-            } else {
-                html += `<span class="btn-group btn-group-sm sv-noprint">`
-                    + awStatusBtn(itemId, idx, row, 'Mottaget', 'Mottaget', 'btn-success')
-                    + awStatusBtn(itemId, idx, row, 'Franvarande', 'Ej närv.', 'btn-secondary')
-                    + awStatusBtn(itemId, idx, row, 'Senare', 'Senare', 'btn-warning')
-                    + `</span>`;
-            }
-            html += `</td></tr>`;
-        });
-        html += '</tbody></table></div>';
-        body.innerHTML = html;
-    }
-
-    window.setAwardStatus = function (itemId, idx, status) {
-        const row = ((window._awRows || {})[itemId] || [])[idx];
-        if (!row) { alert('Raden kunde inte läsas. Hämta listan igen.'); return; }
-        post('BoardMeeting', 'SetAgendaAwardStatus',
-             { agendaItemId: itemId, memberId: row.memberId, group: row.group, item: row.item, status: status || '' })
-            .then(rr => {
-                if (!rr.success) { alert(rr.message || 'Kunde inte spara.'); return; }
-                flash($('ag_saved_' + itemId));
-                loadAwards(itemId, null, false);
-            });
-    };
-
-    // "members"-source election: search any club/region member, then add/remove from the chosen set.
-    let elTimer = null;
-    window.elSearch = function (itemId, q) {
-        clearTimeout(elTimer);
-        const box = $('elres_' + itemId); if (!box) return;
-        q = (q || '').trim();
-        if (q.length < 2) { box.innerHTML = ''; return; }
-        elTimer = setTimeout(() => {
-            get('BoardMeeting', 'GetOwnerMembers', { meetingId: window._mId, q }).then(r => {
-                if (!r.success) { box.innerHTML = ''; return; }
-                box.innerHTML = (r.data || []).map(m =>
-                    `<button type="button" class="list-group-item list-group-item-action" onclick="elAdd(${itemId}, ${m.id})">${esc(m.name)}</button>`).join('')
-                    || '<div class="sv-help px-2">Inga träffar.</div>';
-            });
-        }, 300);
-    };
-    function elItem(itemId) { return (window._mAgenda || []).find(a => a.id === itemId); }
-    window.elAdd = function (itemId, memberId) {
-        const it = elItem(itemId); if (!it) return;
-        const cur = (it.electedMemberIds || []).map(Number);
-        if (cur.includes(memberId)) return;
-        const count = it.electionCount || 1;
-        if (cur.length >= count) { alert('Välj högst ' + count + (count > 1 ? ' personer' : ' person')); return; }
-        const ids = cur.concat(memberId);
-        post('BoardMeeting', 'SaveAgendaElection', { agendaItemId: itemId, memberIds: ids.join(',') })
-            .then(r => { if (r.success) openMeeting(window._mId); });
-    };
-    window.elRemove = function (itemId, memberId) {
-        const it = elItem(itemId); if (!it) return;
-        const ids = (it.electedMemberIds || []).map(Number).filter(x => x !== memberId);
-        post('BoardMeeting', 'SaveAgendaElection', { agendaItemId: itemId, memberIds: ids.join(',') })
-            .then(r => { if (r.success) openMeeting(window._mId); });
-    };
-
-    function linkChip(l, locked) {
-        const icon = l.kind === 'document' ? 'bi-file-earmark-text' : l.kind === 'meeting' ? 'bi-calendar-event'
-            : l.kind === 'valforslag' ? 'bi-person-check' : 'bi-link-45deg';
-        let href = '#', extra = 'target="_blank"';
-        if (l.kind === 'document') href = '/umbraco/surface/Document/DownloadDocument?id=' + l.refId;
-        else if (l.kind === 'meeting') { href = '#'; extra = `onclick="event.preventDefault();openMeeting(${l.refId}, true)"`; }
-        else if (l.kind === 'valforslag') href = `/styrelse/valforslag?type=${OWNER_TYPE}&id=${OWNER_ID}&year=${l.refId}`;
-        else href = l.url || '#';
-        const rm = locked ? '' : ` <a href="#" class="text-danger ms-1 sv-noprint" title="Ta bort" onclick="event.preventDefault();removeLink(${l.id})">✕</a>`;
-        return `<div class="sv-help" style="margin:.1rem 0;"><i class="bi ${icon} me-1"></i><a href="${href}" ${extra}>${esc(l.label)}</a>${rm}</div>`;
-    }
-
-    window.saveMeeting = function () {
-        post('BoardMeeting', 'UpdateMeeting', {
-            meetingId: window._mId, meetingType: window._mType || '', title: $('mTitle').value,
-            meetingDate: $('mDate').value, location: $('mLoc').value, notes: ''
-        }).then(r => { if (r.success) flash($('mSaved')); });
-    };
-    window.saveAgenda = function (id) {
-        // Note/election items have no Beslut (and election has no Anteckningar) — guard the missing fields.
-        const disc = $('ag_disc_' + id), dec = $('ag_dec_' + id);
-        post('BoardMeeting', 'UpdateAgendaItem', { agendaItemId: id, heading: $('ag_h_' + id).value, discussion: disc ? disc.value : '', decision: dec ? dec.value : '' })
-            .then(r => { if (r.success) flash($('ag_saved_' + id)); });
-    };
-    window.addAgenda = function (mid) {
-        const sel = $('newAgendaType'); const key = sel.value; if (!key) return;
-        const opt = sel.options[sel.selectedIndex];
-        let heading = opt.dataset.heading || opt.textContent;
-        const itemType = opt.dataset.type || 'text';
-        const electionRole = opt.dataset.role || '';
-        const electionCount = parseInt(opt.dataset.count || '1', 10);
-        const electionSource = opt.dataset.source || 'attendees';
-        if (key === 'ovrigt') { heading = $('newAgendaHeading').value.trim(); if (!heading) { alert('Skriv en rubrik'); return; } }
-        post('BoardMeeting', 'AddAgendaItem', { meetingId: mid, heading, itemType, electionRole, electionCount, electionSource })
-            .then(r => { if (r.success) openMeeting(mid); });
-    };
-    window.moveAgenda = function (id, dir) {
-        post('BoardMeeting', 'MoveAgendaItem', { agendaItemId: id, direction: dir })
-            .then(r => { if (r.success) { window._agFocus = id; openMeeting(window._mId); } });
-    };
-    window.removeAgenda = function (id) {
-        if (!confirm('Ta bort den här punkten?')) return;
-        post('BoardMeeting', 'RemoveAgendaItem', { agendaItemId: id }).then(r => { if (r.success) openMeeting(window._mId); });
-    };
-    // Presence toggle updates the beslutsför banner in place — no reload, no scroll jump.
-    window.togglePresent = function (id, present) {
-        const lbl = $('svAttStatus_' + id);
-        post('BoardMeeting', 'SetAttendance', { attendeeId: id, attendanceStatus: present ? 'Närvarande' : 'Frånvarande' })
-            .then(r => { if (r.success) { if (lbl) lbl.textContent = present ? 'Närvarande' : 'Frånvarande'; updateQuorum(); } });
-    };
-    function updateQuorum() {
-        const card = $('svQuorum'); if (!card) return;
-        const req = parseInt(card.dataset.required, 10) || 0;
-        const total = parseInt(card.dataset.total, 10) || 0;
-        const present = card.querySelectorAll('.svAttChk:checked').length;
-        const met = present >= req && req > 0;
-        card.classList.toggle('sv-quorum-ok', met);
-        card.classList.toggle('sv-quorum-no', !met);
-        $('svQuorumMsg').innerHTML = quorumMsgHtml({ isMet: met, present, total, required: req });
-    }
-    function quorumMsgHtml(q) {
-        return (q.isMet
-            ? `<i class="bi bi-check-circle-fill text-success me-1"></i><strong>Styrelsen är beslutsför.</strong>`
-            : `<i class="bi bi-exclamation-triangle-fill text-warning me-1"></i><strong>Styrelsen är inte beslutsför.</strong>`)
-            + `<span class="sv-help d-block">${q.present} av ${q.total} närvarande (minst ${q.required} krävs).</span>`;
-    }
-    window.syncBoard = function (mid) { post('BoardMeeting', 'SyncAttendees', { meetingId: mid }).then(r => { if (r.success) openMeeting(mid); }); };
-    window.deleteMeeting = function (mid) {
-        const m = svMeetings.find(x => x.id === mid);
-        const name = m ? m.title : 'mötet';
-        if (!confirm(`Ta bort ${name}? Detta går inte att ångra.`)) return;
-        post('BoardMeeting', 'DeleteMeeting', { meetingId: mid }).then(r => {
-            if (r.success) { svShow('moten'); } else { alert(r.message || 'Kunde inte ta bort mötet'); }
-        });
-    };
-    window.sendKallelse = function (mid) {
-        const msg = $('kallelseMsg') ? $('kallelseMsg').value : '';
-        get('BoardKallelse', 'GetKallelsePreview', { meetingId: mid }).then(p => {
-            if (!p.success) { alert(p.message || 'Kunde inte förbereda kallelsen'); return; }
-            if (p.count === 0) { alert('Inga mottagare med e-postadress hittades (' + p.audience + ').'); return; }
-            if (p.tooMany) { alert('För många mottagare (' + p.count + ') för direktutskick. Använd klubbens Brevo-utskick under Medlemmar.'); return; }
-            if (!confirm('Skicka kallelse till ' + p.count + ' mottagare (' + p.audience + ')?')) return;
-            post('BoardKallelse', 'SendKallelse', { meetingId: mid, message: msg }).then(r => {
-                if (r.success) { alert('Kallelsen skickades till ' + r.sent + ' mottagare' + (r.failed ? ' (' + r.failed + ' misslyckades)' : '') + '.'); openMeeting(mid, true); }
-                else alert(r.message || 'Utskicket misslyckades');
-            });
-        });
-    };
-    window.addAction = function (mid) {
-        const desc = $('actDesc').value.trim(); if (!desc) { alert('Skriv vad som ska göras'); return; }
-        post('BoardMeeting', 'AddAction', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingId: mid, agendaItemId: '', description: desc, assignedToMemberId: $('actWho').value || '', dueDate: $('actDue').value || '' })
-            .then(r => { if (r.success) openMeeting(mid); else alert(r.message || 'Kunde inte lägga till'); });
-    };
-    // Checking off a task updates the row in place — no reload, no scroll to top.
-    window.markActionDone = function (id, done, ctx) {
-        post('BoardMeeting', 'SetActionDone', { actionId: id, done }).then(r => {
-            if (!r.success) return;
-            const row = $((ctx === 'moten' ? 'svTask_' : 'svAct_') + id);
-            const txt = row && row.querySelector('.svTaskText, .svActText');
-            if (txt) { txt.classList.toggle('text-decoration-line-through', done); txt.classList.toggle('sv-help', done); }
-        });
-    };
-    window.removeAction = function (id, mid) {
-        if (!confirm('Ta bort uppgiften?')) return;
-        post('BoardMeeting', 'RemoveAction', { actionId: id }).then(r => { if (r.success) openMeeting(mid); });
-    };
-
-    // ---- Agenda attachments (dokument / tidigare möte / länk) ----------
-    function svChoose(title, options, cb) {
-        if (!options.length) { alert('Inget att välja.'); return; }
-        const ov = document.createElement('div');
-        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:3000;display:flex;align-items:center;justify-content:center;padding:1rem;';
-        ov.innerHTML = `<div style="background:var(--bs-body-bg);border-radius:.8rem;padding:1.2rem;max-width:480px;width:100%;max-height:80vh;overflow:auto;">
-            <h3 style="font-size:1.3rem;">${esc(title)}</h3><div id="svChooseList" class="mt-2"></div>
-            <div class="text-end mt-2"><button class="btn btn-outline-secondary btn-xl" id="svChooseCancel">Avbryt</button></div></div>`;
-        document.body.appendChild(ov);
-        const list = ov.querySelector('#svChooseList');
-        options.forEach(o => {
-            const b = document.createElement('button');
-            b.className = 'btn btn-outline-primary w-100 text-start mb-2'; b.style.padding = '.7rem 1rem';
-            b.textContent = o.label;
-            b.onclick = () => { document.body.removeChild(ov); cb(o); };
-            list.appendChild(b);
-        });
-        const close = () => document.body.removeChild(ov);
-        ov.querySelector('#svChooseCancel').onclick = close;
-        ov.onclick = e => { if (e.target === ov) close(); };
-    }
-    function loadDocs() {
-        if (svDocs) return Promise.resolve(svDocs);
-        return get('Document', 'GetPublicDocuments', { ownerType: OWNER_TYPE, ownerId: OWNER_ID })
-            .then(r => { svDocs = (r.success && r.data) ? r.data : []; return svDocs; });
-    }
-    function loadMeetingsForPicker() {
-        if (svMeetings.length) return Promise.resolve(svMeetings);
-        return get('BoardMeeting', 'GetMeetings', { ownerType: OWNER_TYPE, ownerId: OWNER_ID })
-            .then(r => { svMeetings = (r.success && r.data) ? r.data : []; return svMeetings; });
-    }
-    window.attachDoc = function (itemId) {
-        loadDocs().then(docs => {
-            if (!docs.length) { alert('Det finns inga dokument i arkivet för den här klubben/kretsen ännu. Lägg upp dokument under fliken Dokument först.'); return; }
-            svChoose('Välj dokument att bifoga', docs.map(d => ({ label: d.title + (d.fileName ? ' (' + d.fileName + ')' : ''), v: d })), o =>
-                post('BoardMeeting', 'AddAgendaLink', { agendaItemId: itemId, kind: 'document', refId: o.v.id, url: '', label: o.v.title })
-                    .then(r => { if (r.success) openMeeting(window._mId); }));
-        });
-    };
-    window.attachMeeting = function (itemId) {
-        loadMeetingsForPicker().then(ms => {
-            const opts = ms.filter(m => m.id !== window._mId).map(m => ({ label: m.title + ' (' + m.meetingDate + ')', v: m }));
-            if (!opts.length) { alert('Det finns inga andra möten att länka till.'); return; }
-            svChoose('Välj möte att länka', opts, o =>
-                post('BoardMeeting', 'AddAgendaLink', { agendaItemId: itemId, kind: 'meeting', refId: o.v.id, url: '', label: o.v.title })
-                    .then(r => { if (r.success) openMeeting(window._mId); }));
-        });
-    };
-    window.attachValforslag = function (itemId) {
-        // Links the valberedningens förslag for the meeting's year (årsmöte-året). Offer ±1 year too.
-        const y = window._mYear || new Date().getFullYear();
-        svChoose('Vilket års förslag?', [y, y - 1, y + 1].map(yr => ({ label: 'Valberedningens förslag ' + yr, v: yr })), o =>
-            post('BoardMeeting', 'AddAgendaLink', { agendaItemId: itemId, kind: 'valforslag', refId: o.v, url: '', label: 'Valberedningens förslag ' + o.v })
-                .then(r => { if (r.success) openMeeting(window._mId); }));
-    };
-    window.attachUrl = function (itemId) {
-        const label = prompt('Vad heter länken? (t.ex. Verksamhetsberättelse 2025)'); if (!label) return;
-        const url = prompt('Klistra in webbadressen (URL):'); if (!url) return;
-        post('BoardMeeting', 'AddAgendaLink', { agendaItemId: itemId, kind: 'url', refId: '', url, label })
-            .then(r => { if (r.success) openMeeting(window._mId); });
-    };
-    window.removeLink = function (id) {
-        post('BoardMeeting', 'RemoveAgendaLink', { linkId: id }).then(r => { if (r.success) openMeeting(window._mId); });
-    };
-    function justeringCard(m, j, agenda) {
-        const signers = j.signers || [];
-        const signerList = signers.map(s =>
-            `<div class="sv-person"><span><strong>${esc(s.memberName || '-')}</strong> <span class="sv-help">${esc(s.role)}</span></span>
-             <span>${s.approved
-                ? `<span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Justerat${s.approvedDate ? ' ' + esc(s.approvedDate) : ''}${s.via === 'qr' ? ' (QR)' : ''}</span>`
-                : '<span class="sv-help">Väntar</span>'}</span></div>`).join('');
-
-        if (m.status === 'VantarJustering') {
-            return `<div class="sv-card sv-noprint">
-                <h2><i class="bi bi-pen me-2"></i>Justering pågår</h2>
-                <p class="sv-help">Protokollet är låst. Ordförande, sekreterare och justerare godkänner det – på plats med QR-koden eller via en länk i e-post. (${j.approvedCount || 0}/${j.totalSigners || 0} klara)</p>
-                ${signerList || '<p class="sv-help">Inga justerare.</p>'}
-                ${j.canApprove ? `<button class="btn btn-success btn-xl mt-3" onclick="approveProtokoll(${m.id})"><i class="bi bi-check2-circle me-2"></i>Godkänn protokollet</button>` : ''}
-                <div class="d-flex gap-2 flex-wrap mt-3">
-                    <button class="btn btn-outline-primary btn-xl" onclick="showJusteringQr(${m.id})"><i class="bi bi-qr-code me-2"></i>Visa QR-kod</button>
-                    <button class="btn btn-outline-secondary btn-xl" onclick="sendJusteringMail(${m.id})"><i class="bi bi-envelope me-2"></i>Skicka länk via e-post</button>
-                    <button class="btn btn-outline-secondary btn-xl" onclick="reopenJustering(${m.id})"><i class="bi bi-arrow-counterclockwise me-2"></i>Återöppna för redigering</button>
-                </div>
-                <div id="justQr" class="mt-3"></div>
-            </div>`;
-        }
-        if (m.status === 'Justerat') {
-            return `<div class="sv-card sv-noprint">
-                <h2><i class="bi bi-check2-circle me-2"></i>Justerat</h2>
-                ${signerList}
-                <button class="btn btn-outline-secondary btn-xl mt-3" onclick="reopenJustering(${m.id})"><i class="bi bi-arrow-counterclockwise me-2"></i>Återöppna för redigering</button>
-            </div>`;
-        }
-        // editable → ready to send for justering.
-        // ⚠️ Ordförande and sekreterare are pre-filled from the board roster when the meeting is created;
-        // justerare never are. Listing all signers as one comma-separated "Justeras av" made the board's
-        // ordförande + sekreterare read as two justerare that nobody had chosen. Say each role, and say
-        // plainly when the agenda's "Val av justerare" has not been filled in.
-        const byRole = r => signers.filter(s => s.role === r).map(s => esc(s.memberName || '')).filter(Boolean);
-        const chair = byRole('Ordförande'), secr = byRole('Sekreterare'), adj = byRole('Justerare');
-        const hasAdjusterItem = agenda.some(a => a.itemType === 'election' && a.electionRole === 'adjuster');
-        const missingAdjuster = hasAdjusterItem && !adj.length;
-        const line = (label, names, missing) => `<div class="sv-person"><span class="sv-help">${label}</span>
-            <span>${names.length ? '<strong>' + names.join(', ') + '</strong>' : `<span class="text-warning">${missing}</span>`}</span></div>`;
-        const canSend = (chair.length || secr.length || adj.length) && !missingAdjuster;
-        return `<div class="sv-card sv-noprint">
-            <h2><i class="bi bi-lock me-2"></i>Klar med protokollet?</h2>
-            <p class="sv-help">När protokollet är klart skickas det för justering. Då låses det och de som skriver under godkänner det digitalt – på plats via QR-kod eller via e-post.</p>
-            <p class="mb-1">Protokollet skrivs under av:</p>
-            <div class="mb-3">
-                ${line('Ordförande', chair, 'ingen vald')}
-                ${line('Sekreterare', secr, 'ingen vald')}
-                ${hasAdjusterItem || adj.length ? line('Justerare', adj, 'ingen vald ännu – välj under punkten "Val av justerare" i dagordningen') : ''}
-            </div>
-            <button class="btn btn-success btn-xl" onclick="sendForJustering(${m.id})" ${canSend ? '' : 'disabled'}><i class="bi bi-send me-2"></i>Skicka för justering</button>
-            ${missingAdjuster ? '<p class="sv-help mt-2 mb-0">Välj justerare först.</p>' : ''}
-        </div>`;
-    }
-    window.sendForJustering = function (mid) {
-        if (!confirm('Skicka protokollet för justering? Det låses för redigering tills justerarna godkänt det.')) return;
-        post('BoardMeeting', 'SendForJustering', { meetingId: mid }).then(r => { if (r.success) openMeeting(mid); else alert(r.message || 'Kunde inte skicka'); });
-    };
-    window.approveProtokoll = function (mid) {
-        if (!confirm('Godkänn och justera protokollet? Detta är din digitala underskrift.')) return;
-        post('BoardMeeting', 'ApproveProtokoll', { meetingId: mid }).then(r => { if (r.success) openMeeting(mid); else alert(r.message || 'Kunde inte justera'); });
-    };
-    window.showJusteringQr = function (mid) {
-        const el = $('justQr'); if (!el) return;
-        el.innerHTML = `<p class="sv-help mb-1">Låt justerarna skanna koden med mobilen för att signera:</p>
-            <img src="/umbraco/surface/BoardMeeting/GetJusteringQr?meetingId=${mid}&_=${Date.now()}" alt="QR-kod" style="width:240px;height:240px;border:1px solid var(--bs-border-color);border-radius:.5rem;background:#fff;">`;
-    };
-    window.sendJusteringMail = function (mid) {
-        if (!confirm('Skicka en justeringslänk via e-post till de som inte signerat?')) return;
-        post('BoardMeeting', 'SendJusteringEmails', { meetingId: mid }).then(r => { if (r.success) alert('Länk skickad till ' + (r.sent || 0) + ' person(er).'); else alert(r.message || 'Kunde inte skicka'); });
-    };
-    window.reopenJustering = function (mid) {
-        if (!confirm('Återöppna protokollet för redigering? Gjorda godkännanden nollställs.')) return;
-        post('BoardMeeting', 'ReopenJustering', { meetingId: mid }).then(r => { if (r.success) openMeeting(mid); else alert(r.message || 'Kunde inte öppna'); });
-    };
-
-    // =====================================================================
-    //  MÖTESMALLAR (club/region-editable agenda template per meeting type)
-    // =====================================================================
-    window.openMallar = function () {
-        $('svMoten').style.display = 'none';
-        $('svStyrelse').style.display = 'none';
-        const c = $('svMeeting'); c.style.display = '';
-        if (!svMeetingTypes.length) { c.innerHTML = errBox('Kunde inte hämta mötestyper. Ladda om sidan.'); return; }
-        let html = `<button class="btn btn-outline-secondary btn-xl mb-3" onclick="svShow('moten')"><i class="bi bi-arrow-left me-2"></i>Tillbaka till möten</button>
-            <div class="sv-card">
-                <h2><i class="bi bi-sliders me-2"></i>Anpassa mötesmallar</h2>
-                <p class="sv-help">Välj mötestyp och anpassa dagordningen som föreslås när ni skapar ett möte av den typen. Ändringarna gäller bara er ${IS_CLUB ? 'klubb' : 'krets'}.</p>
-                <label class="sv-label">Mötestyp</label>
-                <select id="svMallType" class="form-select" style="max-width:420px;" onchange="svMallLoad(this.value)">
-                    ${svMeetingTypes.map(t => `<option value="${esc(t.key)}">${esc(t.label)}</option>`).join('')}
-                </select>
-                <div id="svMallStatus" class="sv-help mt-1"></div>
-            </div>
-            <div id="svMallEditor"></div>`;
-        c.innerHTML = html;
-        svMallLoad(svMeetingTypes[0].key);
-    };
-    window.svMallLoad = function (typeKey) {
-        svMallType = typeKey;
-        $('svMallEditor').innerHTML = spinner();
-        get('BoardMeetingTemplate', 'GetTemplate', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingTypeKey: typeKey }).then(r => {
-            if (!r.success) { $('svMallEditor').innerHTML = errBox(r.message || 'Fel'); return; }
-            svMallItems = (r.items || []).map(i => ({ itemType: i.itemType, heading: i.heading, electionRole: i.electionRole || '', electionCount: i.electionCount || 1 }));
-            $('svMallStatus').innerHTML = r.hasSaved ? '<i class="bi bi-pencil-square me-1"></i>Ni använder en egen anpassad mall.' : 'Ni använder standardmallen.';
-            renderMallEditor();
-        });
-    };
-    function renderMallEditor() {
-        const c = $('svMallEditor');
-        let html = `<div class="sv-card">`;
-        if (!svMallItems.length) html += `<p class="sv-help">Inga punkter. Lägg till nedan.</p>`;
-        svMallItems.forEach((it, idx) => {
-            const typeSel = `<select class="form-select form-select-sm d-inline-block" style="width:auto;" onchange="svMallSetType(${idx}, this.value)" title="Typ av punkt">
-                    <option value="note" ${it.itemType === 'note' ? 'selected' : ''}>Anteckningar</option>
-                    <option value="text" ${it.itemType === 'text' ? 'selected' : ''}>Beslut</option>
-                    <option value="election" ${it.itemType === 'election' ? 'selected' : ''}>Personval</option>
-                    @* ⚠️ Måste finnas här. Utan alternativet står väljaren på "Anteckningar" för en
-                       utdelningspunkt, och nästa sparning av mallen skulle TYST göra om den till en
-                       anteckning — punkten skulle se ut att finnas kvar men tappa hela listan. *@
-                    <option value="awards" ${it.itemType === 'awards' ? 'selected' : ''}>Utdelning av märken</option>
-                </select>`;
-            let electOpts = '';
-            if (it.itemType === 'election') {
-                electOpts = `<div class="w-100 mt-2 ps-4 d-flex gap-2 flex-wrap align-items-center sv-noprint">
-                    <label class="sv-help mb-0">Antal</label>
-                    <input type="number" min="1" max="9" class="form-control form-control-sm" style="width:72px;" value="${it.electionCount || 1}" onchange="svMallSetCount(${idx}, this.value)">
-                    <label class="sv-help mb-0">Välj bland</label>
-                    <select class="form-select form-select-sm d-inline-block" style="width:auto;" onchange="svMallSetSource(${idx}, this.value)">
-                        <option value="attendees" ${it.electionSource !== 'members' ? 'selected' : ''}>Närvarande</option>
-                        <option value="members" ${it.electionSource === 'members' ? 'selected' : ''}>Alla medlemmar</option>
-                    </select>
-                    <label class="sv-help mb-0">Roll på protokollet</label>
-                    <select class="form-select form-select-sm d-inline-block" style="width:auto;" onchange="svMallSetRole(${idx}, this.value)">
-                        <option value="" ${!it.electionRole ? 'selected' : ''}>— (ingen)</option>
-                        <option value="chairman" ${it.electionRole === 'chairman' ? 'selected' : ''}>Ordförande</option>
-                        <option value="secretary" ${it.electionRole === 'secretary' ? 'selected' : ''}>Sekreterare</option>
-                        <option value="adjuster" ${it.electionRole === 'adjuster' ? 'selected' : ''}>Justerare</option>
-                    </select>
-                </div>`;
-            }
-            html += `<div class="sv-person" style="flex-wrap:wrap;">
-                <span class="d-flex align-items-center gap-2 flex-wrap" style="flex:1 1 auto;">
-                    <strong>${idx + 1}.</strong>
-                    <input type="text" class="form-control d-inline-block" style="flex:1 1 240px;max-width:460px;" value="${esc(it.heading)}" onchange="svMallRename(${idx}, this.value)">
-                    ${typeSel}
-                </span>
-                <span class="d-flex gap-1 sv-noprint">
-                    <button class="btn btn-sm btn-outline-secondary" onclick="svMallMove(${idx},-1)" ${idx === 0 ? 'disabled' : ''} title="Flytta upp"><i class="bi bi-arrow-up"></i></button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="svMallMove(${idx},1)" ${idx === svMallItems.length - 1 ? 'disabled' : ''} title="Flytta ner"><i class="bi bi-arrow-down"></i></button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="svMallRemove(${idx})" title="Ta bort">Ta bort</button>
-                </span>
-                ${electOpts}
-            </div>`;
-        });
-        html += `<div class="row g-2 mt-2" style="max-width:640px;">
-                <div class="col-12 col-md-7"><select id="svMallAddType" class="form-select" onchange="svMallAddTypeChange()">${agendaCatalogOptions()}</select></div>
-                <div class="col-12 col-md-5 d-none" id="svMallAddCustomWrap"><input type="text" id="svMallAddHeading" class="form-control" placeholder="Rubrik"></div>
-                <div class="col-12"><button class="btn btn-outline-primary" onclick="svMallAddItem()"><i class="bi bi-plus-lg me-1"></i>Lägg till punkt</button></div>
-            </div></div>
-            <div class="d-flex gap-2 flex-wrap">
-                <button class="btn btn-success btn-xl" onclick="svMallSave()"><i class="bi bi-save me-2"></i>Spara mall</button>
-                <button class="btn btn-outline-secondary btn-xl" onclick="svMallReset()"><i class="bi bi-arrow-counterclockwise me-2"></i>Återställ till standard</button>
-            </div>`;
-        c.innerHTML = html;
-    }
-    window.svMallRename = function (idx, val) { if (svMallItems[idx]) svMallItems[idx].heading = val; };
-    window.svMallSetType = function (idx, val) {
-        const it = svMallItems[idx]; if (!it) return;
-        it.itemType = val;
-        if (val !== 'election') { it.electionRole = ''; it.electionCount = 1; it.electionSource = 'attendees'; }
-        else { if (!it.electionCount || it.electionCount < 1) it.electionCount = 1; if (!it.electionSource) it.electionSource = 'attendees'; }
-        renderMallEditor();
-    };
-    window.svMallSetCount = function (idx, val) { if (svMallItems[idx]) svMallItems[idx].electionCount = Math.max(1, parseInt(val, 10) || 1); };
-    window.svMallSetSource = function (idx, val) { if (svMallItems[idx]) svMallItems[idx].electionSource = val === 'members' ? 'members' : 'attendees'; };
-    window.svMallSetRole = function (idx, val) { if (svMallItems[idx]) svMallItems[idx].electionRole = val; };
-    window.svMallMove = function (idx, dir) {
-        const j = idx + dir; if (j < 0 || j >= svMallItems.length) return;
-        const t = svMallItems[idx]; svMallItems[idx] = svMallItems[j]; svMallItems[j] = t; renderMallEditor();
-    };
-    window.svMallRemove = function (idx) { svMallItems.splice(idx, 1); renderMallEditor(); };
-    window.svMallAddTypeChange = function () {
-        $('svMallAddCustomWrap').classList.toggle('d-none', $('svMallAddType').value !== 'ovrigt');
-    };
-    window.svMallAddItem = function () {
-        const sel = $('svMallAddType'); const key = sel.value; if (!key) return;
-        const opt = sel.options[sel.selectedIndex];
-        let heading = opt.dataset.heading || opt.textContent;
-        if (key === 'ovrigt') { heading = $('svMallAddHeading').value.trim(); if (!heading) { alert('Skriv en rubrik'); return; } }
-        svMallItems.push({ itemType: opt.dataset.type || 'text', heading, electionRole: opt.dataset.role || '', electionCount: parseInt(opt.dataset.count || '1', 10), electionSource: opt.dataset.source || 'attendees' });
-        renderMallEditor();
-    };
-    window.svMallSave = function () {
-        post('BoardMeetingTemplate', 'SaveTemplate', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingTypeKey: svMallType, itemsJson: JSON.stringify(svMallItems) })
-            .then(r => { if (r.success) { $('svMallStatus').innerHTML = '<i class="bi bi-check-lg text-success me-1"></i>Mall sparad. Ni använder en egen anpassad mall.'; } else alert(r.message || 'Kunde inte spara'); });
-    };
-    window.svMallReset = function () {
-        if (!confirm('Återställ mallen till standard? Era anpassningar för den här mötestypen tas bort.')) return;
-        post('BoardMeetingTemplate', 'ResetTemplate', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, meetingTypeKey: svMallType })
-            .then(r => { if (r.success) svMallLoad(svMallType); else alert(r.message || 'Kunde inte återställa'); });
-    };
-
-    // =====================================================================
-    //  STYRELSEN (roster + manage)
-    // =====================================================================
-    function loadStyrelse() {
-        const c = $('svStyrelse'); c.innerHTML = spinner();
-        Promise.all([
-            get('BoardRole', 'GetBoardMembers', { ownerType: OWNER_TYPE, ownerId: OWNER_ID }),
-            get('BoardRole', 'GetExpiringTerms', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, withinDays: 365 })
-        ]).then(([r, e]) => {
-            renderStyrelse(c, (r.success && r.data) ? r.data : [], (e.success && e.data) ? e.data : []);
-        }).catch(() => c.innerHTML = errBox('Kunde inte hämta styrelsen.'));
-    }
-
-    // ⚠️ Rollerna cachas per id för att knapparna ska kunna bära ETT HELTAL i sitt onclick.
-    // Tidigare byggdes `removeRole(id, 'namn', 'titel')` som JS-literaler i attributet, escapade
-    // med esc() — men esc mappar ' till &#039;, och en HTML-entitet avkodas INNE i attributvärdet
-    // innan JS parsar det. En styrelsemedlem som heter O'Brien slog alltså sönder knappen, och ett
-    // riggat namn körde kod i klubbadmins webbläsare. Samma lucka som redan åtgärdats i Fältskyttes
-    // "lägg till skytt" och i CompetitionStartListManagement. Bygg aldrig en JS-literal av
-    // användartext i ett attribut — bär ett id och slå upp resten.
-    let SV_ROLE_BY_ID = {};
-
-    function personRow(r) {
-        SV_ROLE_BY_ID[r.id] = r;
-        const term = r.termEndsDate
-            ? (r.isTermExpired
-                ? `<span class="text-danger">Mandat gick ut ${esc(r.termEndsDate)}</span>`
-                : `Vald t.o.m. ${esc(r.termEndsDate)}`)
-            : '<span class="sv-help">Ingen mandattid angiven</span>';
-        return `<div class="sv-person">
-            <span><strong style="font-size:1.1rem;">${esc(r.memberName || '-')}</strong>
-                <span class="d-block">${esc(r.title)}</span>
-                <span class="sv-help d-block">${term}</span></span>
-            ${CAN_MANAGE ? `<button class="btn btn-outline-danger btn-sm sv-noprint" onclick="removeRole(${r.id})">Ta bort</button>` : ''}
-        </div>`;
-    }
-
-    function renderStyrelse(c, roles, expiring) {
-        // Board members vs other elected functionaries (revisor m.fl.). Valberedning lives on its own tab.
-        const board = roles.filter(r => r.isBoardMember);
-        // Kretsens uppdrag har en egen rubrik så de inte blandas med ledamot och revisor.
-        const uppdrag = roles.filter(r => KRETS_UPPDRAG.some(u => u.key === r.roleKey));
-        const ovriga = roles.filter(r => !r.isBoardMember && !VALB_KEYS.includes(r.roleKey)
-                                         && !KRETS_UPPDRAG.some(u => u.key === r.roleKey));
-
-        let html = `<div class="sv-card"><h2><i class="bi bi-people me-2"></i>Styrelsen</h2>`;
-        html += board.length ? board.map(personRow).join('') : `<p class="sv-help">Inga styrelseledamöter är tilldelade ännu.</p>`;
-        html += `</div>`;
-
-        if (!IS_CLUB) {
-            html += `<div class="sv-card" id="svKretsUppdrag"><h2><i class="bi bi-clipboard-check me-2"></i>Kretsens uppdrag</h2>
-                <p class="sv-help">Granskar resultatlistor och banor och tar emot tävlingsansökningar. Uppdragen är inga styrelseplatser och räknas inte i beslutsförheten. Samma person kan ha flera uppdrag, och flera kan ha samma uppdrag.</p>`;
-            KRETS_UPPDRAG.forEach(u => {
-                const holders = uppdrag.filter(r => r.roleKey === u.key);
-                html += `<div class="mt-3"><div class="sv-label">${esc(u.label)}</div>
-                    <div class="sv-help mb-1">${esc(u.task)}</div>`;
-                html += holders.length
-                    ? holders.map(personRow).join('')
-                    : `<p class="text-warning-emphasis mb-1" data-uppdrag-missing="${u.key}"><i class="bi bi-exclamation-triangle me-1"></i>Ingen är utsedd. Ärendena går då till kretsens kontaktadress och kretsadministratören.</p>`;
-                html += `</div>`;
-            });
-            html += `</div>`;
-        }
-
-        if (ovriga.length) {
-            html += `<div class="sv-card"><h2><i class="bi bi-person-badge me-2"></i>Övriga förtroendevalda</h2>
-                <p class="sv-help">Valda på årsmötet men sitter inte i styrelsen – kallas inte till styrelsemöten.</p>`;
-            html += ovriga.map(personRow).join('');
-            html += `</div>`;
-        }
-
-        // Expiring terms
-        if (expiring.length) {
-            html += `<div class="sv-card sv-quorum-no"><h2><i class="bi bi-hourglass-split me-2"></i>Mandat som snart går ut</h2>
-                <p class="sv-help">Dags att förbereda val på årsmötet för dessa.</p>`;
-            expiring.forEach(r => {
-                html += `<div class="sv-person"><span>${esc(r.memberName || '-')} – ${esc(r.title)}</span>
-                    <span>${r.isTermExpired ? '<span class="text-danger">utgånget</span>' : 'till ' + esc(r.termEndsDate)}</span></div>`;
-            });
-            html += `</div>`;
-        }
-
-        // Manage (admins only)
-        if (CAN_MANAGE) {
-            html += `<div class="sv-card sv-noprint"><h2><i class="bi bi-person-plus me-2"></i>Lägg till förtroendevald</h2>
-                <p class="sv-help">Välj roll. Styrelseroller bockas i som "Sitter i styrelsen" automatiskt; revisor m.fl. lämnas obockade och kallas då inte till styrelsemöten.</p>
-                <div class="row g-3" style="max-width:640px;">
-                    <div class="col-12"><label class="sv-label">Person</label>${IS_CLUB
-                        ? `<select id="addMember" class="form-select"><option value="">Välj medlem…</option></select>`
-                        : `<input type="text" id="addMemberSearch" class="form-control" placeholder="Sök namn…" autocomplete="off"><select id="addMemberResults" class="form-select mt-1 d-none" size="4"></select>`}
-                    </div>
-                    <div class="col-12 col-md-6"><label class="sv-label">Roll</label>
-                        <select id="addRole" class="form-select" onchange="onRoleChange()"><option value="">Välj roll…</option></select>
-                        <div class="form-check mt-2">
-                            <input class="form-check-input" type="checkbox" id="addIsBoard" checked>
-                            <label class="form-check-label sv-help" for="addIsBoard">Sitter i styrelsen (kallas till styrelsemöten)</label>
-                        </div>
-                    </div>
-                    <div class="col-12 col-md-6 d-none" id="customWrap"><label class="sv-label">Egen titel</label>
-                        <input type="text" id="addCustom" class="form-control" placeholder="t.ex. Materialförvaltare"></div>
-                    <div class="col-6 col-md-4"><label class="sv-label">Vald datum</label><input type="text" id="addElected" class="form-control"></div>
-                    <div class="col-6 col-md-3"><label class="sv-label">Mandat (år)</label><input type="number" id="addYears" class="form-control" min="1" max="10" placeholder="2"></div>
-                    <div class="col-12 col-md-5"><label class="sv-label">Mandat t.o.m.</label><input type="text" id="addEnds" class="form-control"></div>
-                    <div class="col-12"><button class="btn btn-success btn-xl" onclick="assignRole()"><i class="bi bi-plus-lg me-2"></i>Lägg till</button></div>
-                </div></div>`;
-        }
-        c.innerHTML = html;
-        if (CAN_MANAGE) initManage();
-    }
-
-    function initManage() {
-        // roles dropdown — valberedning roles are managed on the Valberedning tab, so exclude them here.
-        // data-board carries each role's default so the "Sitter i styrelsen" checkbox follows the role.
-        // ⚠️ ownerType skickas så att en klubb aldrig erbjuds kretsens uppdrag. Servern vägrar ändå.
-        get('BoardRole', 'GetAvailableRoles', { ownerType: OWNER_TYPE }).then(r => {
-            if (!r.success) return;
-            const sel = $('addRole');
-            const opt = x => `<option value="${x.key}" data-board="${x.isBoardMember}">${esc(x.label)}</option>`;
-            r.data.filter(x => !VALB_KEYS.includes(x.key) && !x.isKretsUppdrag)
-                .forEach(x => sel.innerHTML += opt(x));
-            const krets = r.data.filter(x => x.isKretsUppdrag);
-            if (krets.length) sel.innerHTML += `<optgroup label="Kretsens uppdrag">${krets.map(opt).join('')}</optgroup>`;
-            sel.innerHTML += '<option value="Custom" data-board="false">Annat…</option>';
-        });
-        if (IS_CLUB) {
-            get('ClubAdmin', 'GetClubMembers', { clubId: OWNER_ID }).then(r => {
-                const sel = $('addMember'); if (!sel || !r.success) return;
-                (r.data || []).filter(m => m.isApproved !== false).forEach(m => sel.innerHTML += `<option value="${m.id}">${esc(m.memberName)}</option>`);
-            });
-        } else {
-            const inp = $('addMemberSearch');
-            let t = null;
-            inp?.addEventListener('input', e => {
-                clearTimeout(t); const q = e.target.value.trim();
-                if (q.length < 2) { $('addMemberResults').classList.add('d-none'); return; }
-                t = setTimeout(() => get('BoardRole', 'SearchMembers', { query: q, ownerType: OWNER_TYPE, ownerId: OWNER_ID }).then(r => {
-                    const s = $('addMemberResults'); s.innerHTML = '';
-                    (r.data || []).forEach(m => s.innerHTML += `<option value="${m.id}">${esc(m.name)}</option>`);
-                    s.classList.remove('d-none');
-                }), 300);
-            });
-            $('addMemberResults')?.addEventListener('change', function () {
-                const o = this.options[this.selectedIndex];
-                if (o?.value) { inp.value = o.textContent; this.dataset.id = o.value; this.classList.add('d-none'); }
-            });
-        }
-        if (typeof flatpickr !== 'undefined') {
-            let dirty = false;
-            const ends = flatpickr('#addEnds', { locale: 'sv', dateFormat: 'Y-m-d', onChange: () => dirty = true });
-            flatpickr('#addElected', { locale: 'sv', dateFormat: 'Y-m-d', onChange: fill });
-            $('addYears')?.addEventListener('input', fill);
-            function fill() {
-                if (dirty) return;
-                const el = $('addElected').value, y = parseInt($('addYears').value, 10);
-                if (!el || !y) return;
-                const d = new Date(el + 'T00:00:00'); if (isNaN(d)) return;
-                d.setFullYear(d.getFullYear() + y); ends.setDate(d.toISOString().slice(0, 10), false);
-            }
-        }
-    }
-
-    window.onRoleChange = function () {
-        const sel = $('addRole'), v = sel.value;
-        $('customWrap').classList.toggle('d-none', v !== 'Custom');
-        // Follow the role's default board-membership (revisor m.fl. default to off); admin can override.
-        const opt = sel.options[sel.selectedIndex];
-        if (opt && $('addIsBoard')) $('addIsBoard').checked = opt.dataset.board === 'true';
-    };
-    window.assignRole = function () {
-        const memberId = IS_CLUB ? $('addMember').value : ($('addMemberResults')?.dataset.id || '');
-        const roleKey = $('addRole').value;
-        const custom = $('addCustom') ? $('addCustom').value.trim() : '';
-        if (!memberId) { alert('Välj en person'); return; }
-        if (!roleKey) { alert('Välj en roll'); return; }
-        if (roleKey === 'Custom' && !custom) { alert('Skriv en titel'); return; }
-        post('BoardRole', 'AssignBoardRole', {
-            ownerType: OWNER_TYPE, ownerId: OWNER_ID, memberId, roleKey,
-            customTitle: roleKey === 'Custom' ? custom : '', isBoardMember: $('addIsBoard').checked,
-            electedDate: $('addElected').value || '', termEndsDate: $('addEnds').value || '', termYears: $('addYears').value || ''
-        }).then(r => { if (r.success) loadStyrelse(); else alert(r.message || 'Kunde inte lägga till'); });
-    };
-    window.removeRole = async function (id) {
-        const r = SV_ROLE_BY_ID[id];
-        const name = (r && r.memberName) || 'personen';
-        const title = (r && r.title) || '';
-
-        let msg = `Ta bort ${name}${title ? ` (${title})` : ''}?`;
-
-        // ⚠️ Vapenbehörigheten måste kontrolleras FÖRE borttagningen. Den är härledd ur det aktiva
-        // styrelseuppdraget, så efteråt är den redan borta och det går inte längre att se att den
-        // fanns — varningen skulle bli omöjlig att ge i efterhand.
-        //
-        // Bara för KLUBBAR: ett föreningsintyg är en klubbangelägenhet, och kretsstyrelser har
-        // ingen sådan behörighet.
-        if (IS_CLUB && r && r.memberId) {
-            try {
-                const impact = await get('FirearmAdmin', 'GetRemovalImpact',
-                                         { clubId: OWNER_ID, memberId: r.memberId });
-                if (impact.success && impact.isFirearmViewer) {
-                    msg += `\n\n${name} är klubbens föreningsintygsansvarige och kan läsa ` +
-                           `medlemmarnas vapeninnehav. Den behörigheten upphör OMEDELBART när ` +
-                           `personen tas bort ur styrelsen.`;
-                    if (impact.wouldLeaveClubWithout) {
-                        msg += `\n\nOBS: klubben har då INGEN som kan läsa vapeninnehav, och kan ` +
-                               `inte fylla i vapenuppgifterna på ett föreningsintyg. Utse en ` +
-                               `efterträdare i samma möte.`;
-                    }
-                }
-            } catch (e) {
-                // Ett misslyckat uppslag får inte blockera en helt legitim borttagning. Varningen
-                // uteblir då, vilket är sämre än att den kommer — men bättre än en knapp som
-                // slutar fungera för att en sidoförfrågan fallerade.
-            }
-        }
-
-        if (!confirm(msg)) return;
-
-        post('BoardRole', 'RemoveBoardRole', { boardRoleId: id }).then(res => {
-            if (!res.success) return;
-            // Refresh whichever roster is showing (the valberedning roster reuses this same button).
-            if ($('svValb') && $('svValb').style.display !== 'none') loadValberedning();
-            else loadStyrelse();
-        });
-    };
-
-    // =====================================================================
-    //  ÅRSHJUL (annual cycle checklist)
-    // =====================================================================
-    function loadArshjul() {
-        const c = $('svArshjul'); c.innerHTML = spinner();
-        const y = svWheelYear || new Date().getFullYear();
-        get('BoardGovernance', 'GetYearWheel', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, year: y })
-            .then(r => { if (!r.success) { c.innerHTML = errBox(r.message || 'Fel'); return; } svWheelYear = y; renderArshjul(c, r.data || [], r.years || [y]); })
-            .catch(() => c.innerHTML = errBox('Kunde inte hämta årshjulet.'));
-    }
-    function renderArshjul(c, items, years) {
-        svWheelItems = items;
-        if (!years.includes(svWheelYear)) years.unshift(svWheelYear);
-        let html = `<div class="sv-card">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <h2 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>Årshjul ${svWheelYear}</h2>
-                <div><label class="sv-help me-1">Visa år</label>
-                    <select class="form-select d-inline-block" style="width:auto;" onchange="svWheelSetYear(this.value)">
-                        ${years.map(y => `<option value="${y}" ${y == svWheelYear ? 'selected' : ''}>${y}</option>`).join('')}
-                    </select></div>
-            </div>
-            <p class="sv-help mt-1">Föreningens årliga uppgifter. Bocka av när de är klara. (Standarduppgifter fylls i automatiskt – ändra fritt.)</p>`;
-        items.forEach(it => {
-            const dt = it.targetDate ? `<span class="${it.isOverdue ? 'text-danger' : 'sv-help'}"> · ${esc(it.targetDate)}${it.isOverdue ? ' (försenat)' : ''}</span>` : '';
-            html += `<div class="sv-person" id="svWheel_${it.id}">
-                <label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;">
-                    <input type="checkbox" class="form-check-input sv-check" ${it.done ? 'checked' : ''} onchange="svWheelDone(${it.id}, this.checked)">
-                    <span class="svWheelText ${it.done ? 'text-decoration-line-through sv-help' : ''}">${esc(it.title)}${dt}</span>
-                </label>
-                ${CAN_MANAGE ? `<span class="d-flex gap-1 sv-noprint">
-                    <button class="btn btn-sm btn-outline-secondary" onclick="svWheelEdit(${it.id})" title="Ändra"><i class="bi bi-pencil"></i> Ändra</button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="svWheelRemove(${it.id})" title="Ta bort">Ta bort</button>
-                </span>` : ''}
-            </div>`;
-        });
-        html += `<div class="row g-2 mt-2" style="max-width:640px;">
-            <div class="col-12 col-md-7"><input type="text" id="svWheelNewTitle" class="form-control" placeholder="Lägg till egen uppgift…"></div>
-            <div class="col-6 col-md-3"><input type="text" id="svWheelNewDate" class="form-control" placeholder="Datum (frivilligt)"></div>
-            <div class="col-6 col-md-2"><button class="btn btn-primary w-100" onclick="svWheelAdd()"><i class="bi bi-plus-lg"></i></button></div>
-        </div></div>`;
-        c.innerHTML = html;
-        if (typeof flatpickr !== 'undefined' && $('svWheelNewDate')) flatpickr('#svWheelNewDate', { locale: 'sv', dateFormat: 'Y-m-d' });
-    }
-    window.svWheelSetYear = function (y) { svWheelYear = parseInt(y, 10); loadArshjul(); };
-    window.svWheelDone = function (id, done) {
-        post('BoardGovernance', 'SetWheelDone', { itemId: id, done }).then(r => {
-            if (!r.success) return;
-            const t = $('svWheel_' + id) && $('svWheel_' + id).querySelector('.svWheelText');
-            if (t) { t.classList.toggle('text-decoration-line-through', done); t.classList.toggle('sv-help', done); }
-        });
-    };
-    window.svWheelAdd = function () {
-        const title = $('svWheelNewTitle').value.trim(); if (!title) return;
-        post('BoardGovernance', 'AddWheelItem', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, year: svWheelYear, title, targetDate: $('svWheelNewDate').value || '' })
-            .then(r => { if (r.success) loadArshjul(); });
-    };
-    window.svWheelRemove = function (id) {
-        if (!confirm('Ta bort uppgiften från årshjulet?')) return;
-        post('BoardGovernance', 'RemoveWheelItem', { itemId: id }).then(r => { if (r.success) loadArshjul(); });
-    };
-    // In-place edit of an årshjul item — change the title and/or target date (e.g. just shift the date).
-    window.svWheelEdit = function (id) {
-        const it = svWheelItems.find(x => x.id === id); if (!it) return;
-        const row = $('svWheel_' + id); if (!row) return;
-        row.innerHTML = `<div class="row g-2 w-100" style="max-width:640px;">
-            <div class="col-12 col-md-7"><input type="text" id="svWheelEditTitle_${id}" class="form-control" value="${esc(it.title)}"></div>
-            <div class="col-7 col-md-3"><input type="text" id="svWheelEditDate_${id}" class="form-control" value="${esc(it.targetDate || '')}" placeholder="Datum (frivilligt)"></div>
-            <div class="col-5 col-md-2 d-flex gap-1">
-                <button class="btn btn-success" onclick="svWheelSave(${id})" title="Spara"><i class="bi bi-check-lg"></i></button>
-                <button class="btn btn-outline-secondary" onclick="loadArshjul()" title="Avbryt"><i class="bi bi-x-lg"></i></button>
-            </div></div>`;
-        if (typeof flatpickr !== 'undefined') flatpickr('#svWheelEditDate_' + id, { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true });
-    };
-    window.svWheelSave = function (id) {
-        const title = $('svWheelEditTitle_' + id).value.trim();
-        if (!title) { alert('Uppgiften måste ha en text'); return; }
-        post('BoardGovernance', 'UpdateWheelItem', { itemId: id, title, targetDate: $('svWheelEditDate_' + id).value || '' })
-            .then(r => { if (r.success) loadArshjul(); else alert(r.message || 'Kunde inte spara'); });
-    };
-
-    // =====================================================================
-    //  VALBEREDNING (committee roster + nominations)
-    // =====================================================================
-    // Reusable member picker (club dropdown / region search) — same plumbing as the Styrelsen add-form.
-    const VB_PICKER = { select: 'vbAddMember', search: 'vbAddMemberSearch', results: 'vbAddMemberResults' };
-    function memberPickerHtml(ids) {
-        return IS_CLUB
-            ? `<select id="${ids.select}" class="form-select"><option value="">Välj medlem…</option></select>`
-            : `<input type="text" id="${ids.search}" class="form-control" placeholder="Sök namn…" autocomplete="off"><select id="${ids.results}" class="form-select mt-1 d-none" size="4"></select>`;
-    }
-    function initMemberPicker(ids) {
-        if (IS_CLUB) {
-            get('ClubAdmin', 'GetClubMembers', { clubId: OWNER_ID }).then(r => {
-                const sel = $(ids.select); if (!sel || !r.success) return;
-                (r.data || []).filter(m => m.isApproved !== false).forEach(m => sel.innerHTML += `<option value="${m.id}">${esc(m.memberName)}</option>`);
-            });
-        } else {
-            const inp = $(ids.search); let t = null;
-            inp?.addEventListener('input', e => {
-                clearTimeout(t); const q = e.target.value.trim();
-                if (q.length < 2) { $(ids.results).classList.add('d-none'); return; }
-                t = setTimeout(() => get('BoardRole', 'SearchMembers', { query: q, ownerType: OWNER_TYPE, ownerId: OWNER_ID }).then(r => {
-                    const s = $(ids.results); s.innerHTML = '';
-                    (r.data || []).forEach(m => s.innerHTML += `<option value="${m.id}">${esc(m.name)}</option>`);
-                    s.classList.remove('d-none');
-                }), 300);
-            });
-            $(ids.results)?.addEventListener('change', function () {
-                const o = this.options[this.selectedIndex];
-                if (o?.value) { inp.value = o.textContent; this.dataset.id = o.value; this.classList.add('d-none'); }
-            });
-        }
-    }
-    function pickedMemberId(ids) {
-        return IS_CLUB ? ($(ids.select)?.value || '') : ($(ids.results)?.dataset.id || '');
-    }
-
-    function loadValberedning() {
-        const c = $('svValb'); c.innerHTML = spinner();
-        // Valberedningen arbetar inför NÄSTA årsmöte → utgå från nästa år (året går att byta i listan).
-        const y = svNomYear || (new Date().getFullYear() + 1);
-        Promise.all([
-            get('BoardGovernance', 'GetNominations', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, year: y }),
-            get('BoardRole', 'GetBoardMembers', { ownerType: OWNER_TYPE, ownerId: OWNER_ID })
-        ]).then(([r, roster]) => {
-            if (!r.success) { c.innerHTML = errBox(r.message || 'Fel'); return; }
-            svNomYear = y;
-            renderValberedning(c, r, (roster.success && roster.data) ? roster.data : []);
-        }).catch(() => c.innerHTML = errBox('Kunde inte hämta valberedningen.'));
-    }
-    function renderValberedning(c, r, roster) {
-        const noms = r.data || [], posts = r.postsUpForElection || [], years = r.years || [svNomYear];
-        if (!years.includes(svNomYear)) years.unshift(svNomYear);
-
-        // Valberedningens ledamöter (committee roster) — sammankallande first, then ledamöter.
-        const vbMembers = (roster || []).filter(x => VALB_KEYS.includes(x.roleKey))
-            .sort((a, b) => (a.roleKey === 'ValberedningSammankallande' ? 0 : 1) - (b.roleKey === 'ValberedningSammankallande' ? 0 : 1));
-        let html = `<div class="sv-card"><h2><i class="bi bi-people me-2"></i>Valberedningens ledamöter</h2>
-            <p class="sv-help">Valberedningen väljs på årsmötet och står utanför styrelsen. En av ledamöterna är sammankallande.</p>`;
-        html += vbMembers.length ? vbMembers.map(personRow).join('') : `<p class="sv-help">Inga ledamöter tillagda ännu.</p>`;
-        if (CAN_MANAGE) {
-            html += `<div class="row g-2 mt-2 sv-noprint" style="max-width:640px;">
-                <div class="col-12"><label class="sv-label">Lägg till ledamot</label>${memberPickerHtml(VB_PICKER)}</div>
-                <div class="col-12"><div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="vbSamman">
-                    <label class="form-check-label" for="vbSamman">Sammankallande</label></div></div>
-                <div class="col-12"><button class="btn btn-success btn-xl" onclick="vbAddMemberRole()"><i class="bi bi-plus-lg me-2"></i>Lägg till i valberedningen</button></div>
-            </div>`;
-        }
-        html += `</div>`;
-
-        html += `<div class="sv-card">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <h2 class="mb-0"><i class="bi bi-person-check me-2"></i>Inför årsmötet ${svNomYear}</h2>
-                <div class="d-flex gap-2 align-items-center">
-                    <label class="sv-help">Inför år</label>
-                    <select class="form-select d-inline-block" style="width:auto;" onchange="svNomSetYear(this.value)">
-                        ${years.map(y => `<option value="${y}" ${y == svNomYear ? 'selected' : ''}>${y}</option>`).join('')}
-                    </select>
-                    <a class="btn btn-outline-secondary sv-noprint" href="/styrelse/valforslag?type=${OWNER_TYPE}&id=${OWNER_ID}&year=${svNomYear}" target="_blank"><i class="bi bi-printer me-1"></i>Skriv ut förslag</a>
-                </div>
-            </div>`;
-
-        // Posts up for election
-        html += `<p class="sv-help mt-1"><strong>Poster på val (mandat t.o.m. ${svNomYear}):</strong> `;
-        html += posts.length
-            ? posts.map(p => `${esc(p.title)} (${esc(p.memberName || '')})`).join(', ')
-            : `inga mandat med slutdatum t.o.m. ${svNomYear}. Ange mandattider på fliken <strong>Styrelsen</strong> (eller välj ett annat år ovan) så listas posterna automatiskt.`;
-        html += `</p></div>`;
-
-        // Nominations
-        html += `<div class="sv-card"><h2><i class="bi bi-people me-2"></i>Förslag på kandidater</h2>`;
-        if (!noms.length) html += `<p class="sv-help">Inga förslag ännu.</p>`;
-        noms.forEach(n => {
-            html += `<div class="sv-person">
-                <span><strong>${esc(n.candidateName)}</strong> <span class="sv-help">till ${esc(n.postLabel)}</span>
-                    <span class="badge ${nomBadge(n.status)} ms-1">${esc(n.status)}</span>
-                    ${n.notes ? `<span class="sv-help d-block">${esc(n.notes)}</span>` : ''}</span>
-                <span class="d-flex gap-1 sv-noprint">
-                    <select class="form-select form-select-sm" style="width:auto;" onchange="svNomStatus(${n.id}, this.value)">
-                        ${NOM_STATUSES.map(s => `<option ${s === n.status ? 'selected' : ''}>${s}</option>`).join('')}
-                    </select>
-                    <button class="btn btn-sm btn-outline-danger" onclick="svNomRemove(${n.id})" title="Ta bort">✕</button>
-                </span>
-            </div>`;
-        });
-        // Add form
-        html += `<div class="row g-2 mt-2" style="max-width:720px;">
-            <div class="col-12 col-md-4"><label class="sv-help">Namn på kandidat</label><input type="text" id="svNomName" class="form-control" placeholder="För- och efternamn"></div>
-            <div class="col-12 col-md-4"><label class="sv-help">Föreslås till post</label>
-                <select id="svNomPost" class="form-select">${POST_KEYS.map(p => `<option value="${p[0]}">${p[1]}</option>`).join('')}<option value="">Annan…</option></select>
-                <input type="text" id="svNomPostCustom" class="form-control mt-1 d-none" placeholder="Egen post">
-            </div>
-            <div class="col-12 col-md-4"><label class="sv-help">Status</label><select id="svNomStatusNew" class="form-select">${NOM_STATUSES.map(s => `<option>${s}</option>`).join('')}</select></div>
-            <div class="col-12"><input type="text" id="svNomNotes" class="form-control" placeholder="Anteckning (frivilligt)"></div>
-            <div class="col-12"><button class="btn btn-success btn-xl" onclick="svNomAdd()"><i class="bi bi-plus-lg me-2"></i>Lägg till förslag</button></div>
-        </div></div>`;
-        c.innerHTML = html;
-        const postSel = $('svNomPost');
-        if (postSel) postSel.addEventListener('change', () => $('svNomPostCustom').classList.toggle('d-none', postSel.value !== ''));
-        if (CAN_MANAGE) initMemberPicker(VB_PICKER);
-    }
-    window.vbAddMemberRole = function () {
-        const memberId = pickedMemberId(VB_PICKER);
-        if (!memberId) { alert('Välj en person'); return; }
-        const roleKey = $('vbSamman').checked ? 'ValberedningSammankallande' : 'Valberedning';
-        post('BoardRole', 'AssignBoardRole', {
-            ownerType: OWNER_TYPE, ownerId: OWNER_ID, memberId, roleKey, customTitle: '', isBoardMember: false
-        }).then(r => { if (r.success) loadValberedning(); else alert(r.message || 'Kunde inte lägga till'); });
-    };
-    function nomBadge(s) { return s === 'Tackat ja' ? 'bg-success' : s === 'Tackat nej' ? 'bg-secondary' : s === 'Tillfrågad' ? 'bg-info text-dark' : 'bg-light text-dark'; }
-    window.svNomSetYear = function (y) { svNomYear = parseInt(y, 10); loadValberedning(); };
-    window.svNomAdd = function () {
-        const name = $('svNomName').value.trim();
-        const postKey = $('svNomPost').value;
-        const postLabel = postKey ? (POST_KEYS.find(p => p[0] === postKey)?.[1] || postKey) : $('svNomPostCustom').value.trim();
-        if (!name) { alert('Skriv kandidatens namn'); return; }
-        if (!postLabel) { alert('Ange vilken post'); return; }
-        post('BoardGovernance', 'AddNomination', { ownerType: OWNER_TYPE, ownerId: OWNER_ID, year: svNomYear, postKey, postLabel, candidateName: name, status: $('svNomStatusNew').value, notes: $('svNomNotes').value || '' })
-            .then(r => { if (r.success) loadValberedning(); else alert(r.message || 'Kunde inte lägga till'); });
-    };
-    window.svNomStatus = function (id, status) {
-        post('BoardGovernance', 'SetNominationStatus', { nominationId: id, status })
-            .then(r => { if (r.success) loadValberedning(); });
-    };
-    window.svNomRemove = function (id) {
-        if (!confirm('Ta bort förslaget?')) return;
-        post('BoardGovernance', 'RemoveNomination', { nominationId: id }).then(r => { if (r.success) loadValberedning(); });
-    };
-
-    // ---- shared ----
-    function statusBadge(s) {
-        const cls = { 'Planerat': 'bg-secondary', 'Genomfört': 'bg-info text-dark', 'VantarJustering': 'bg-primary', 'Justerat': 'bg-success' };
-        const lbl = { 'VantarJustering': 'Väntar på justering' };
-        return `<span class="badge ${cls[s] || 'bg-secondary'}">${esc(lbl[s] || s)}</span>`;
-    }
-    function spinner() { return '<div class="text-center text-muted py-4"><div class="spinner-border"></div><div class="mt-2">Hämtar…</div></div>'; }
-    function errBox(msg) { return `<div class="sv-card"><p class="text-danger mb-0">${esc(msg)}</p></div>`; }
-
-    // Ready-made typed agenda items for the "Lägg till punkt" dropdown + template editor.
-    get('BoardMeetingTemplate', 'GetCatalog', {}).then(r => { if (r.success) { svCatalog = r.items || []; svMeetingTypes = r.types || []; } });
-
-    // initial
-    // ?tab= lets other surfaces deep-link to a tab (the krets admin panel's warning links to
-    // Styrelsen). Unknown or not-allowed values fall back to the default.
-    const svStartTab = new URLSearchParams(location.search).get('tab');
-    svShow(VALB_ONLY ? 'valberedning'
-        : (['moten', 'styrelse', 'arshjul', 'valberedning'].includes(svStartTab) ? svStartTab : 'moten'));
-})();
-</script>
-}

@@ -228,6 +228,8 @@ window.currentClubId = clubId;
 
                         <!-- Sidebar Column -->
                         <div class="col-lg-4">
+                            @* Motionerna (för klubbens medlemmar) och styrelsens ärenden (för styrelseledamöter). *@
+                            @await Html.PartialAsync("_ClubMotionCard", null, new ViewDataDictionary(ViewData) { { "MotionCardClubId", clubId } })
                             <!-- Featured Items (Competitions and Series) -->
                             @if (featuredItems.Any() || isClubAdmin)
                             {
