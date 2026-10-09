@@ -49,7 +49,7 @@ namespace HpskSite.Services.Events
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var missing = new List<string>();
-            foreach (var t in new[] { "ClubEvent", "ClubEventUrl", "LandingPage", "CompetitionLandingPage", "SiteSetting" })
+            foreach (var t in new[] { "ClubEvent", "ClubEventUrl", "LandingPage", "SiteSetting" })
                 if (scope.Database.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(@0, 'U') IS NULL THEN 0 ELSE 1 END", "dbo." + t) == 0)
                     missing.Add(t);
             return missing;

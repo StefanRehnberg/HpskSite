@@ -1,0 +1,46 @@
+@using System.Globalization
+@*
+    Kortet "Tävlingen/Tävlingarna" på händelsesidan: de tävlingar händelsen är kopplad till, med en
+    knapp som följer tävlingens läge (CompetitionLinkCard). Renderas TVÅ gånger av ClubSimpleEvent —
+    överst i huvudspalten på telefon och i sidospalten på dator — så att "Anmäl dig" inte hamnar
+    under hela beskrivningen på en telefon. Därför bär kortet en klass, inte ett id.
+
+    ViewData:
+      Cards (List<CompetitionLinkCard>, obligatorisk)
+      CssClass (string, valfri)  synlighetsklasser, t.ex. "d-lg-none"
+*@
+@{
+    var cards = ViewData["Cards"] as List<HpskSite.Services.Events.CompetitionLinkCard> ?? new();
+    var css = ViewData["CssClass"] as string ?? "";
+    var sv = CultureInfo.GetCultureInfo("sv-SE");
+}
+@if (cards.Count > 0)
+{
+    <div class="card mb-4 event-competitions-card @css">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-trophy me-2"></i>@(cards.Count == 1 ? "Tävlingen" : "Tävlingarna")</h5>
+        </div>
+        <ul class="list-group list-group-flush">
+            @foreach (var lc in cards)
+            {
+                <li class="list-group-item" data-competition-id="@lc.Id">
+                    <div class="d-flex justify-content-between gap-2 flex-wrap">
+                        <span class="fw-semibold">@lc.Name</span>
+                        @if (lc.Date.HasValue)
+                        {
+                            <span class="text-body-secondary small">@lc.Date.Value.ToString("d MMM", sv)</span>
+                        }
+                    </div>
+                    <div class="small @(lc.StatusPositive ? "text-success" : "text-body-secondary") mb-2">@lc.Status</div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        @if (lc.PrimaryLabel != null)
+                        {
+                            <a class="btn btn-primary btn-sm" href="@lc.PrimaryUrl"><i class="bi @lc.PrimaryIcon me-1"></i>@lc.PrimaryLabel</a>
+                        }
+                        <a class="btn btn-outline-primary btn-sm" href="@lc.Url">Tävlingssidan</a>
+                    </div>
+                </li>
+            }
+        </ul>
+    </div>
+}

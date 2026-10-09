@@ -13,6 +13,7 @@
 @inject HpskSite.Services.CompetitionFees.CompetitionPaymentModelService PaymentModels
 @inject Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory DbFactory
 @inject HpskSite.Services.Registrations.ICompetitionRegistrationStore Registrations
+@inject HpskSite.Services.Events.CompetitionEventLinkService CompetitionLinks
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
 	Layout = "Master.cshtml";
@@ -31,6 +32,8 @@
 	}
 
     var competitionName = Model.Value<string>("competitionName") ?? "";
+    // Arrangörens händelsesida för tävlingen (sajtstrukturen fas 2) — en enda länkrad under rubriken.
+    var linkedEvent = CompetitionLinks.EventForCompetition(Model.Id);
     var description = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("description"));
     var competitionDate = Model.Value<DateTime>("competitionDate");
     var competitionEndDate = Model.Value<DateTime?>("competitionEndDate");
@@ -758,6 +761,12 @@
 			}
 			</div>
 			</div>
+			@if (linkedEvent != null && !string.IsNullOrEmpty(linkedEvent.Url))
+			{
+				<a href="@linkedEvent.Url" id="competitionEventLink" class="d-inline-flex align-items-center gap-1 small mt-2">
+					<i class="bi bi-info-circle"></i> Mer om @linkedEvent.DisplayName <i class="bi bi-arrow-right"></i>
+				</a>
+			}
 			</div>
 				<div class="card-body">
 					<div class="row">
