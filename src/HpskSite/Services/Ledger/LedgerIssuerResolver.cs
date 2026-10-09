@@ -30,14 +30,17 @@ namespace HpskSite.Services.Ledger
     public class LedgerIssuerResolver
     {
         private readonly IUmbracoContextFactory _contextFactory;
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
         private readonly ILogger<LedgerIssuerResolver> _logger;
 
         public LedgerIssuerResolver(
             IUmbracoContextFactory contextFactory,
-            ILogger<LedgerIssuerResolver> logger)
+            ILogger<LedgerIssuerResolver> logger,
+            HpskSite.Services.Events.IClubEventStore events)
         {
             _contextFactory = contextFactory;
             _logger = logger;
+            _events = events;
         }
 
         /// <summary>Utställaren, eller null när den inte går att avgöra.</summary>
@@ -54,17 +57,15 @@ namespace HpskSite.Services.Ledger
             var content = cref.UmbracoContext.Content;
             if (content is null) return null;
 
-            var node = content.GetById(eventNodeId);
-            if (node is null)
+            // Händelsen via händelselagringen (sajtstrukturen fas 2a): posten bär ägaren som (typ, id).
+            var e = _events.Get(eventNodeId);
+            if (e is null)
             {
-                _logger.LogWarning("Evenemangsnod {Id} hittades inte — utställaren kan inte avgöras.", eventNodeId);
+                _logger.LogWarning("Evenemang {Id} hittades inte — utställaren kan inte avgöras.", eventNodeId);
                 return null;
             }
 
-            // Ägaren avgörs av EventOwnerResolver (sajtstrukturen fas 0) — enda stället som svarar
-            // på "vem äger händelsen?". Den publicerade varianten används här eftersom utställaren
-            // också resolvas från bakgrundsarbete, där innehållstjänsten inte har någon begäran.
-            var ownerNode = HpskSite.Services.Events.EventOwnerResolver.PublishedOwnerNode(node);
+            var ownerNode = content.GetById(e.OwnerId);
             if (ownerNode is not null)
             {
                 var issuer = FromNode(ownerNode);

@@ -29,6 +29,7 @@ namespace HpskSite.Services
         private readonly AdminAuthorizationService _auth;
         private readonly BoardRoleService _boardRoles;
         private readonly HpskSite.Services.Events.EventOwnerResolver _owners;
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
         private readonly ILogger<ClubEventParticipationService> _logger;
 
         public ClubEventParticipationService(
@@ -39,7 +40,8 @@ namespace HpskSite.Services
             AdminAuthorizationService auth,
             BoardRoleService boardRoles,
             HpskSite.Services.Events.EventOwnerResolver owners,
-            ILogger<ClubEventParticipationService> logger)
+            ILogger<ClubEventParticipationService> logger,
+            HpskSite.Services.Events.IClubEventStore events)
         {
             _databaseFactory = databaseFactory;
             _contentService = contentService;
@@ -49,6 +51,7 @@ namespace HpskSite.Services
             _boardRoles = boardRoles;
             _owners = owners;
             _logger = logger;
+            _events = events;
         }
 
         // ── Event context ─────────────────────────────────────────────
@@ -144,23 +147,25 @@ namespace HpskSite.Services
         public ClubEventContext? GetEventContext(int eventId)
         {
             if (eventId <= 0) return null;
-            var node = _contentService.GetById(eventId);
-            if (node == null || node.ContentType.Alias != ClubEvents.EventAlias) return null;
+            // Via händelselagringen (sajtstrukturen fas 2a) — posten bär ägaren som (typ, id).
+            var e = _events.Get(eventId);
+            if (e == null) return null;
+            var support = _events.Support;
 
             // Ägaren går via EventOwnerResolver — enda stället som svarar på "vem äger händelsen?".
-            var owner = _owners.ForEventNode(node);
+            var owner = _owners.ForEventRecord(e);
 
             var ctx = new ClubEventContext
             {
                 EventId = eventId,
-                EventName = node.GetValue<string>("eventName") ?? node.Name ?? "",
-                EventDate = node.GetValue<DateTime?>("eventDate"),
-                EventEndDate = node.GetValue<DateTime?>("eventEndDate"),
-                Venue = node.GetValue<string>("venue") ?? "",
-                EventType = node.GetValue<string>("eventType") ?? "",
-                RegistrationRequired = node.GetValue<bool>("registrationRequired"),
-                MaxParticipants = node.GetValue<int>("maxParticipants"),
-                RegistrationUrl = node.GetValue<string>("registrationUrl") ?? "",
+                EventName = e.DisplayName,
+                EventDate = e.StartsAt,
+                EventEndDate = e.EndsAt,
+                Venue = e.Venue,
+                EventType = e.EventType,
+                RegistrationRequired = e.RegistrationRequired,
+                MaxParticipants = e.MaxParticipants,
+                RegistrationUrl = e.RegistrationUrl,
                 OwnerId = owner?.OwnerId ?? 0,
                 OwnerName = owner?.Name ?? "",
                 IsClubOwned = owner?.IsClub == true,
@@ -170,13 +175,13 @@ namespace HpskSite.Services
             // Both are operator-added properties. A missing property must degrade to "off" rather
             // than throw — GetValue on an unknown alias returns default, so this is safe by
             // construction, but the WRITE side is what silently no-ops (see the controller).
-            ctx.IsMandatory = node.GetValue<bool>(ClubEvents.MandatoryProperty);
+            ctx.IsMandatory = e.IsMandatory;
             // Vem som får anmäla sig. ⚠️ Saknad egenskap och oläsbart värde ger BÅDA
             // EventAudience.Club — se den klassens huvud för varför riktningen är enkelriktad.
             // `AudiencePropertyExists` skiljer de två åt, så gränssnittet kan säga "egenskapen
             // saknas" i stället för att visa en väljare vars val tyst inte sparas.
-            ctx.Audience = EventAudience.Normalise(node.GetValue<string>(EventAudience.Property));
-            ctx.AudiencePropertyExists = node.HasProperty(EventAudience.Property);
+            ctx.Audience = EventAudience.Normalise(e.Audience);
+            ctx.AudiencePropertyExists = support.Audience;
 
             // ── Swish-numret ────────────────────────────────────────────────────────────────
             // ⚠️ ÄGAREN ÄR STANDARD, händelsen är en ÅSIDOSÄTTNING. Klubben och kretsen bär redan
@@ -184,17 +189,17 @@ namespace HpskSite.Services
             // händelse hade tvingat varje arrangör att skriva om numret varje gång — och en
             // felskrivning skickar pengarna till fel konto, tyst, eftersom vi inte har någon
             // Swish-API som kan säga emot.
-            var ownSwish = (node.GetValue<string>(ClubEvents.SwishProperty) ?? "").Trim();
+            var ownSwish = (e.SwishNumber ?? "").Trim();
             ctx.SwishNumber = ownSwish.Length > 0
                 ? ownSwish
                 : (owner?.SwishNumber ?? "");
             ctx.SwishFromOwner = ownSwish.Length == 0 && ctx.SwishNumber.Length > 0;
-            ctx.SwishPropertyExists = node.HasProperty(ClubEvents.SwishProperty);
+            ctx.SwishPropertyExists = support.Swish;
             // Prisraderna. En lista, inte ett tal - se EventPrices for varfor.
-            ctx.Prices = EventPrices.Parse(node.GetValue<string>(EventPrices.Property));
+            ctx.Prices = EventPrices.Parse(e.PricesJson);
             // ⚠️ RealDate, inte råvärdet: en tom Umbraco-DateTime läses som DateTime.MinValue, och
             // en deadline år 1 hade stängt anmälan på varje händelse ingen satt en deadline på.
-            ctx.RegistrationDeadline = ClubEvents.RealDate(node.GetValue<DateTime?>(ClubEvents.DeadlineProperty));
+            ctx.RegistrationDeadline = e.RegistrationDeadline;
 
             if (ctx.IsClubOwned)
                 ctx.RegionCode = owner!.RegionCode;

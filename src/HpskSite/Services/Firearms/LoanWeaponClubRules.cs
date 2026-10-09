@@ -29,10 +29,14 @@ namespace HpskSite.Services.Firearms
         private readonly IContentService _contentService;
         private readonly ILogger<LoanWeaponClubRules> _logger;
 
-        public LoanWeaponClubRules(IContentService contentService, ILogger<LoanWeaponClubRules> logger)
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
+
+        public LoanWeaponClubRules(IContentService contentService, ILogger<LoanWeaponClubRules> logger,
+            HpskSite.Services.Events.IClubEventStore events)
         {
             _contentService = contentService;
             _logger = logger;
+            _events = events;
         }
 
         /// <summary>Klubbens inställningar, plus om egenskaperna alls finns på doctypen.</summary>
@@ -80,11 +84,12 @@ namespace HpskSite.Services.Firearms
             if (eventId <= 0) return (false, false);
             try
             {
-                var node = _contentService.GetById(eventId);
-                if (node is null) return (false, false);
+                // Via händelselagringen (sajtstrukturen fas 2a).
+                var e = _events.Get(eventId);
+                if (e is null) return (false, false);
 
-                var has = node.HasProperty(EventOfferedProperty);
-                return (has && node.GetValue<bool>(EventOfferedProperty), has);
+                var has = _events.Support.LanevapenOffered;
+                return (has && e.LanevapenOffered, has);
             }
             catch (Exception ex)
             {
