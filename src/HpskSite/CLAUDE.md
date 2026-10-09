@@ -1313,7 +1313,11 @@ the list isn't drowned by them. Krets defaults to `noInternal`, which preserves 
 behaviour of hiding klubbinterna — that used to be a hard client-side filter with no way back.
 
 **Anmälningar column:** counted in SQL, not from `comp.Children`. Public registrations are `Save()`d
-but never `Publish()`ed, so the published cache never saw them and the column read **0 on every row**.
+synchronously and published ~10 s later in the background (`CompetitionController.RegisterForCompetition`),
+and that publish fails silently under an unpublished hub — so the published cache only ever holds a
+subset (prod 2026-10-09: 753 of 955). Reading through it made the column read **0 on every row**.
+⚠️ Corrected 2026-10-09: this section used to say they are never published. Registrations move to SQL
+tables in the `sajtstruktur` plan (`notes/sajtstruktur-plan-2026-10-09.md`).
 The rows are cached 60 s under `admin_competitions_list_regcounts` — deliberately under the
 `admin_competitions_list_` prefix that `InvalidateCompetitionCaches()` already clears, so there are no
 new invalidation call sites. Verified 25/25 via `hpsk-verify/comptype-filter-verify.mjs` (all three
@@ -1619,7 +1623,7 @@ Each is a separate `WeaponClass` enum value (`A_M`, `A_P`, `A_G`) with 3 compete
 **Key Endpoints:**
 - GET GetCompetitionRegistrations - View registrations (Site Admin OR Competition Manager OR Club Admin)
 - POST RegisterForCompetition - Register member for competition
-- POST UnregisterFromCompetition - Remove registration
+- Removing a registration is `RegistrationAdmin/DeleteCompetitionRegistration` (there is no `UnregisterFromCompetition`; this list named one until 2026-10-09)
 
 ### Swish Payment System ✅ (2025-01-12)
 

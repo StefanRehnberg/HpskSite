@@ -157,7 +157,9 @@ namespace HpskSite.Services
                     var date = node.Value<DateTime?>("eventDate");
                     if (date == null || date.Value.Date < today || date.Value.Date > horizon) continue;
 
-                    var clubId = node.Parent?.Id ?? node.Value<int>("clubId");
+                    // Ägaren via EventOwnerResolver (sajtstrukturen fas 0).
+                    var clubId = HpskSite.Services.Events.EventOwnerResolver.PublishedOwnerNode(node)?.Id
+                                 ?? node.Value<int>("clubId");
                     var regionCode = "";
                     var clubName = "";
                     if (clubInfo.TryGetValue(clubId, out var ci)) { regionCode = ci.Region; clubName = ci.Name; }

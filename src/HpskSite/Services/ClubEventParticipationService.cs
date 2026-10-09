@@ -28,6 +28,7 @@ namespace HpskSite.Services
         private readonly MemberClubService _memberClubs;
         private readonly AdminAuthorizationService _auth;
         private readonly BoardRoleService _boardRoles;
+        private readonly HpskSite.Services.Events.EventOwnerResolver _owners;
         private readonly ILogger<ClubEventParticipationService> _logger;
 
         public ClubEventParticipationService(
@@ -37,6 +38,7 @@ namespace HpskSite.Services
             MemberClubService memberClubs,
             AdminAuthorizationService auth,
             BoardRoleService boardRoles,
+            HpskSite.Services.Events.EventOwnerResolver owners,
             ILogger<ClubEventParticipationService> logger)
         {
             _databaseFactory = databaseFactory;
@@ -45,6 +47,7 @@ namespace HpskSite.Services
             _memberClubs = memberClubs;
             _auth = auth;
             _boardRoles = boardRoles;
+            _owners = owners;
             _logger = logger;
         }
 
@@ -144,8 +147,8 @@ namespace HpskSite.Services
             var node = _contentService.GetById(eventId);
             if (node == null || node.ContentType.Alias != ClubEvents.EventAlias) return null;
 
-            var parent = node.ParentId > 0 ? _contentService.GetById(node.ParentId) : null;
-            var ownerAlias = parent?.ContentType.Alias ?? "";
+            // Ägaren går via EventOwnerResolver — enda stället som svarar på "vem äger händelsen?".
+            var owner = _owners.ForEventNode(node);
 
             var ctx = new ClubEventContext
             {
@@ -158,10 +161,10 @@ namespace HpskSite.Services
                 RegistrationRequired = node.GetValue<bool>("registrationRequired"),
                 MaxParticipants = node.GetValue<int>("maxParticipants"),
                 RegistrationUrl = node.GetValue<string>("registrationUrl") ?? "",
-                OwnerId = parent?.Id ?? 0,
-                OwnerName = parent?.Name ?? "",
-                IsClubOwned = ownerAlias == ClubEvents.OwnerClubAlias,
-                IsRegionOwned = ownerAlias == ClubEvents.OwnerRegionAlias
+                OwnerId = owner?.OwnerId ?? 0,
+                OwnerName = owner?.Name ?? "",
+                IsClubOwned = owner?.IsClub == true,
+                IsRegionOwned = owner?.IsRegion == true
             };
 
             // Both are operator-added properties. A missing property must degrade to "off" rather
@@ -184,7 +187,7 @@ namespace HpskSite.Services
             var ownSwish = (node.GetValue<string>(ClubEvents.SwishProperty) ?? "").Trim();
             ctx.SwishNumber = ownSwish.Length > 0
                 ? ownSwish
-                : (parent?.GetValue<string>(ClubEvents.SwishProperty) ?? "").Trim();
+                : (owner?.SwishNumber ?? "");
             ctx.SwishFromOwner = ownSwish.Length == 0 && ctx.SwishNumber.Length > 0;
             ctx.SwishPropertyExists = node.HasProperty(ClubEvents.SwishProperty);
             // Prisraderna. En lista, inte ett tal - se EventPrices for varfor.
@@ -194,9 +197,11 @@ namespace HpskSite.Services
             ctx.RegistrationDeadline = ClubEvents.RealDate(node.GetValue<DateTime?>(ClubEvents.DeadlineProperty));
 
             if (ctx.IsClubOwned)
-                ctx.RegionCode = parent?.GetValue<string>("regionalFederation") ?? "";
+                ctx.RegionCode = owner!.RegionCode;
             else if (ctx.IsRegionOwned)
-                ctx.RegionCode = parent?.GetValue<string>("regionCode") ?? parent?.Name ?? "";
+                // Kontexten har alltid fallit tillbaka på kretsens namn när koden saknas; behörigheten
+                // (EventOwner.RegionCode) gör det medvetet inte.
+                ctx.RegionCode = owner!.RegionCode.Length > 0 ? owner.RegionCode : owner.Name;
 
             return ctx;
         }
