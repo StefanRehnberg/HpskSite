@@ -243,9 +243,7 @@ GROUP BY CASE WHEN hubType.alias = @1 OR hub.text LIKE N'%Anm%lningar%' OR hub.t
                 ApplyChanges(node, r);
                 try
                 {
-                    var saved = _contentService.Save(node);
-                    if (!saved.Success)
-                        throw new InvalidOperationException($"Anmälan för {r.MemberName} kunde inte sparas.");
+                    SaveNode(node, r.MemberName);
                 }
                 catch (Exception ex) when (ex.Message.Contains("non-current", StringComparison.OrdinalIgnoreCase))
                 {
@@ -257,18 +255,41 @@ GROUP BY CASE WHEN hubType.alias = @1 OR hub.text LIKE N'%Anm%lningar%' OR hub.t
                         .FirstOrDefault(c => c.Id == r.Id)
                         ?? throw new InvalidOperationException($"Anmälan {r.Id} finns inte.");
                     ApplyChanges(fresh, r);
-                    if (!_contentService.Save(fresh).Success)
-                        throw new InvalidOperationException($"Anmälan för {r.MemberName} kunde inte sparas.");
+                    SaveNode(fresh, r.MemberName);
                 }
                 return r.Id;
             }
 
-            var result = _contentService.Save(node);
-            if (!result.Success)
-                throw new InvalidOperationException($"Anmälan för {r.MemberName} kunde inte sparas.");
+            SaveNode(node, r.MemberName);
 
             r.Id = node.Id;
             return node.Id;
+        }
+
+        /// <summary>
+        /// Sparar noden. ⚠️ Transaktionen är redan genomförd när Umbracos omräkning av URL-segmenten
+        /// körs, så en tidsgräns DÄR betyder att anmälan ÄR sparad — den får inte rapporteras som ett
+        /// misslyckande (då anmäler skytten sig en gång till). Samma regel som de gamla kopiorna i
+        /// controllrarna hade.
+        /// </summary>
+        private void SaveNode(IContent node, string memberName)
+        {
+            try
+            {
+                if (!_contentService.Save(node).Success)
+                    throw new InvalidOperationException($"Anmälan för {memberName} kunde inte sparas.");
+            }
+            catch (Exception ex) when (IsDocumentUrlTimeout(ex))
+            {
+                _logger.LogWarning("Anmälan {Id} sparad, men omräkningen av URL-segmenten tog för lång tid (ofarligt)", node.Id);
+            }
+        }
+
+        private static bool IsDocumentUrlTimeout(Exception ex)
+        {
+            var inner = ex is AggregateException agg ? agg.InnerException : ex;
+            return inner is Microsoft.Data.SqlClient.SqlException { Number: -2 }
+                   && (ex.ToString().Contains("DocumentUrlRepository") || ex.ToString().Contains("DocumentUrlService"));
         }
 
         /// <summary>Skriver bara de egenskaper som skiljer sig från nodens nuvarande värden.</summary>
