@@ -3,6 +3,7 @@ using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Extensions;
 using HpskSite.Models;
+using HpskSite.Models.Registrations;
 
 namespace HpskSite.Services
 {
@@ -18,11 +19,15 @@ namespace HpskSite.Services
         private readonly ClubService _clubService;
         private readonly ILogger<DirektplaceringStartListService> _logger;
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+
         public DirektplaceringStartListService(
             IContentService contentService,
             ClubService clubService,
-            ILogger<DirektplaceringStartListService> logger)
+            ILogger<DirektplaceringStartListService> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
+            _registrations = registrations;
             _contentService = contentService;
             _clubService = clubService;
             _logger = logger;
@@ -54,15 +59,6 @@ namespace HpskSite.Services
         public void Regenerate(int competitionId, IContent competition, DirektplaceringConfig dpConfig)
         {
             var competitionChildren = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
-            var registrationsHub = competitionChildren.FirstOrDefault(c =>
-                c.ContentType.Alias == "competitionRegistrationsHub"
-                || c.Name.Contains("Anmälningar")
-                || c.Name.Contains("Registration"));
-
-            var registrationDocs = registrationsHub != null
-                ? _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
-                    .Where(c => c.ContentType.Alias == "competitionRegistration").ToList()
-                : new List<IContent>();
 
             var shootersByTeam = new Dictionary<int, List<ShooterRow>>();
             foreach (var team in dpConfig.Teams)
@@ -80,19 +76,18 @@ namespace HpskSite.Services
             // shooter picked at registration is preserved (first-come, first-served within a
             // team). Sorting by name here would re-shuffle everyone whenever a new shooter
             // with an alphabetically-earlier name registers — the Egenbokning bug.
-            registrationDocs = registrationDocs.OrderBy(c => c.CreateDate).ThenBy(c => c.Id).ToList();
+            // Skapandeordningen = id-ordningen (för noder och för tabellrader, som behåller sina id:n).
+            var registrationDocs = RegistrationDocs(competitionId);
             var sortSeq = 0;
 
             foreach (var reg in registrationDocs)
             {
-                var classesJson = reg.GetValue<string>("shootingClasses");
-                if (string.IsNullOrWhiteSpace(classesJson)) continue;
-                var classes = CompetitionRegistrationDocument.DeserializeShootingClasses(classesJson);
-                var memberName = reg.GetValue<string>("memberName") ?? "Okänd";
-                var memberId = reg.GetValue<int>("memberId");
+                var classes = reg.Classes;
+                if (classes.Count == 0) continue;
+                var memberName = string.IsNullOrWhiteSpace(reg.MemberName) ? "Okänd" : reg.MemberName;
+                var memberId = reg.MemberId;
                 var clubName = "Okänd förening";
-                var clubId = reg.GetValue<int>("clubId");
-                if (clubId > 0) clubName = _clubService.GetClubNameById(clubId) ?? "Okänd förening";
+                if (reg.ClubId > 0) clubName = _clubService.GetClubNameById(reg.ClubId) ?? "Okänd förening";
 
                 foreach (var entry in classes)
                 {
@@ -201,24 +196,10 @@ namespace HpskSite.Services
         {
             var usage = new Dictionary<int, int>();
 
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null) return usage;
-
-            var competitionChildren = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
-            var registrationsHub = competitionChildren
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-            if (registrationsHub == null) return usage;
-
-            var registrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
-                .Where(c => c.ContentType.Alias == "competitionRegistration");
-
-            foreach (var reg in registrations)
+            foreach (var reg in _registrations.List(competitionId))
             {
                 if (excludeRegistrationId.HasValue && reg.Id == excludeRegistrationId.Value) continue;
-                var json = reg.GetValue<string>("shootingClasses");
-                if (string.IsNullOrWhiteSpace(json)) continue;
-                var classes = CompetitionRegistrationDocument.DeserializeShootingClasses(json);
-                foreach (var entry in classes)
+                foreach (var entry in reg.Classes)
                 {
                     if (!entry.TeamNumber.HasValue) continue;
                     var t = entry.TeamNumber.Value;
@@ -289,15 +270,15 @@ namespace HpskSite.Services
                 plan.StartListIsPublished = startList.Published;
             }
 
-            var registrations = RegistrationDocs(children);
+            var registrations = RegistrationDocs(competition.Id);
             var teams = dpConfig.Teams.OrderBy(t => t.TeamNumber).ToList();
             var used = teams.ToDictionary(t => t.TeamNumber, _ => 0);
             var registeredKeys = new HashSet<string>();
 
             foreach (var reg in registrations)
             {
-                var memberId = reg.GetValue<int>("memberId");
-                foreach (var entry in CompetitionRegistrationDocument.DeserializeShootingClasses(reg.GetValue<string>("shootingClasses") ?? ""))
+                var memberId = reg.MemberId;
+                foreach (var entry in reg.Classes)
                 {
                     registeredKeys.Add(PlacementKey(memberId, entry.Class));
                     if (entry.TeamNumber.HasValue && used.ContainsKey(entry.TeamNumber.Value))
@@ -307,12 +288,12 @@ namespace HpskSite.Services
 
             // Unbooked classes, in the order they should be seated: the current list's order
             // first (so nobody changes skjutlag or lane needlessly), then registration order.
-            var pending = new List<(IContent Reg, ShootingClassEntry Entry, int MemberId, Placement? Existing, int Seq)>();
+            var pending = new List<(RegistrationRecord Reg, ShootingClassEntry Entry, int MemberId, Placement? Existing, int Seq)>();
             var seq = 0;
             foreach (var reg in registrations)
             {
-                var memberId = reg.GetValue<int>("memberId");
-                foreach (var entry in CompetitionRegistrationDocument.DeserializeShootingClasses(reg.GetValue<string>("shootingClasses") ?? ""))
+                var memberId = reg.MemberId;
+                foreach (var entry in reg.Classes)
                 {
                     if (entry.TeamNumber.HasValue) continue;
                     existing.TryGetValue(PlacementKey(memberId, entry.Class), out var ex);
@@ -327,7 +308,7 @@ namespace HpskSite.Services
             {
                 // Two classes of one registration never share a skjutlag — the booking form
                 // refuses that too.
-                var taken = CompetitionRegistrationDocument.DeserializeShootingClasses(p.Reg.GetValue<string>("shootingClasses") ?? "")
+                var taken = p.Reg.Classes
                     .Where(c => c.TeamNumber.HasValue).Select(c => c.TeamNumber!.Value)
                     .Concat(plan.Rows.Where(r => r.RegistrationId == p.Reg.Id && r.TeamNumber.HasValue).Select(r => r.TeamNumber!.Value))
                     .ToHashSet();
@@ -350,7 +331,7 @@ namespace HpskSite.Services
                 plan.Rows.Add(new AssignmentRow
                 {
                     RegistrationId = p.Reg.Id,
-                    MemberName = p.Reg.GetValue<string>("memberName") ?? "Okänd",
+                    MemberName = string.IsNullOrWhiteSpace(p.Reg.MemberName) ? "Okänd" : p.Reg.MemberName,
                     ShootingClass = p.Entry.Class,
                     TeamNumber = chosen?.TeamNumber,
                     FromExistingList = fromList
@@ -382,28 +363,22 @@ namespace HpskSite.Services
 
             var plan = Plan(competition, dpConfig);
 
-            // ⚠️ Read the registrations through the paged query, NOT GetById: GetById can hand back
-            // a cached instance whose version is no longer current (a registration touched by the
-            // eager-invoice path moments earlier), and Save then throws "Cannot save a non-current
-            // version" — measured in dev on the third of three registrations.
-            var fresh = RegistrationDocs(_contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList())
-                .ToDictionary(r => r.Id);
+            // ⚠️ Lagringen hanterar "Cannot save a non-current version" (en anmälan som den ivriga
+            // fakturavägen nyss rört) — se NodeRegistrationStore.Save.
+            var fresh = RegistrationDocs(competitionId).ToDictionary(r => r.Id);
 
             foreach (var group in plan.Rows.Where(r => r.TeamNumber.HasValue).GroupBy(r => r.RegistrationId))
             {
                 if (!fresh.TryGetValue(group.Key, out var reg)) continue;
-                var classes = CompetitionRegistrationDocument.DeserializeShootingClasses(reg.GetValue<string>("shootingClasses") ?? "");
                 foreach (var row in group)
                 {
-                    var entry = classes.FirstOrDefault(c => !c.TeamNumber.HasValue
+                    var entry = reg.Classes.FirstOrDefault(c => !c.TeamNumber.HasValue
                         && ShootingClasses.NormalizeKey(c.Class) == ShootingClasses.NormalizeKey(row.ShootingClass));
                     if (entry != null) entry.TeamNumber = row.TeamNumber;
                 }
-                reg.SetValue("shootingClasses", CompetitionRegistrationDocument.SerializeShootingClasses(classes));
                 try
                 {
-                    // Registrations are saved unpublished everywhere else too.
-                    _contentService.Save(reg);
+                    _registrations.Save(reg);
                 }
                 catch (Exception ex)
                 {
@@ -429,18 +404,9 @@ namespace HpskSite.Services
             return team.AllowedWeaponClasses.Any(a => string.Equals(a, group, StringComparison.OrdinalIgnoreCase));
         }
 
-        private List<IContent> RegistrationDocs(List<IContent> competitionChildren)
-        {
-            var hub = competitionChildren.FirstOrDefault(c =>
-                c.ContentType.Alias == "competitionRegistrationsHub"
-                || c.Name.Contains("Anmälningar")
-                || c.Name.Contains("Registration"));
-            if (hub == null) return new List<IContent>();
-            return _contentService.GetPagedChildren(hub.Id, 0, 1000, out _)
-                .Where(c => c.ContentType.Alias == "competitionRegistration")
-                .OrderBy(c => c.CreateDate).ThenBy(c => c.Id)
-                .ToList();
-        }
+        /// <summary>Tävlingens anmälningar i skapandeordning (= id-ordning), via anmälningslagringen.</summary>
+        private List<RegistrationRecord> RegistrationDocs(int competitionId)
+            => _registrations.List(competitionId).OrderBy(r => r.Id).ToList();
 
         private sealed class Placement
         {

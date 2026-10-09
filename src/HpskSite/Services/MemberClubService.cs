@@ -31,12 +31,15 @@ namespace HpskSite.Services
         private readonly IMemberService _memberService;
         private readonly IContentService _contentService;
         private readonly ClubService _clubService;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
-        public MemberClubService(IMemberService memberService, IContentService contentService, ClubService clubService)
+        public MemberClubService(IMemberService memberService, IContentService contentService, ClubService clubService,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
             _memberService = memberService;
             _contentService = contentService;
             _clubService = clubService;
+            _registrations = registrations;
         }
 
         /// <summary>
@@ -131,22 +134,11 @@ namespace HpskSite.Services
 
             try
             {
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null) return map;
-
-                var hub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-                if (hub == null) return map;
-
-                // Deliberately NOT filtered on Published: RegisterForCompetition saves
-                // synchronously and defers publishing to an unreliable background task, so a
-                // freshly-registered shooter is Saved but not yet Published.
-                foreach (var reg in _contentService.GetPagedChildren(hub.Id, 0, 2000, out _)
-                                                   .Where(r => r.ContentType.Alias == "competitionRegistration"))
+                // Via lagringen (sajtstrukturen fas 1a), som läser alla anmälningar, publicerade
+                // eller inte.
+                foreach (var reg in _registrations.List(competitionId))
                 {
-                    var memberId = reg.GetValue<int>("memberId");
-                    var clubId = reg.GetValue<int>("clubId");
-                    if (memberId > 0 && clubId > 0) map[memberId] = clubId;
+                    if (reg.MemberId > 0 && reg.ClubId > 0) map[reg.MemberId] = reg.ClubId;
                 }
             }
             catch

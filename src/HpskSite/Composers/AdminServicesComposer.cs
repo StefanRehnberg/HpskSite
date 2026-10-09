@@ -174,6 +174,11 @@ namespace HpskSite.Composers
             // Enda stället som svarar på "vem äger händelsen?" (sajtstrukturen fas 0). I dag
             // föräldernoden, efter fas 2 raden i ClubEvent-tabellen.
             builder.Services.AddScoped<HpskSite.Services.Events.EventOwnerResolver>();
+            // Enda vägen in till tävlingsanmälningarna (sajtstrukturen fas 1a). Nodimplementationen
+            // byts mot SQL i fas 1b; ingen kod utanför lagringen läser anmälningsnoderna.
+            builder.Services.AddScoped<HpskSite.Services.Registrations.NodeRegistrationStore>();
+            builder.Services.AddScoped<HpskSite.Services.Registrations.ICompetitionRegistrationStore>(
+                sp => sp.GetRequiredService<HpskSite.Services.Registrations.NodeRegistrationStore>());
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingMigrationService>();
             builder.Services.AddScoped<HpskSite.Services.Training.ClubTrainingService>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingCourseService>();
