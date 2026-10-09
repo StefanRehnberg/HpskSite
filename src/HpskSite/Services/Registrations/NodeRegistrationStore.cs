@@ -298,7 +298,12 @@ GROUP BY CASE WHEN hubType.alias = @1 OR hub.text LIKE N'%Anm%lningar%' OR hub.t
             {
                 var current = Map(node, r.CompetitionId);
                 if (current.MemberId != r.MemberId) node.SetValue("memberId", r.MemberId);
-                if (current.MemberName != r.MemberName) node.SetValue("memberName", r.MemberName);
+                if (current.MemberName != r.MemberName)
+                {
+                    node.SetValue("memberName", r.MemberName);
+                    // Transfer to another shooter: the backoffice tree shows the new name too.
+                    node.Name = $"{r.MemberName} - {DateTime.Now:yyyy-MM-dd}";
+                }
                 // 0 betyder "inte satt" — en klubb tas aldrig bort av en sparning som bara inte bar den.
                 if (r.ClubId > 0 && current.ClubId != r.ClubId) node.SetValue("clubId", r.ClubId);
                 if (!SameClasses(current, r)) WriteClasses(node, r);
