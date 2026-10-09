@@ -56,6 +56,7 @@ namespace HpskSite.Controllers
         // Results live in SQL (SpringskytteResultEntry), unlike registrations which are content nodes,
         // so the results seeder needs the database factory the base class doesn't expose.
         private readonly IUmbracoDatabaseFactory _databaseFactory;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
         public SpringskytteSimulationController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -68,7 +69,8 @@ namespace HpskSite.Controllers
             IContentService contentService,
             AdminAuthorizationService authService,
             ClubService clubService,
-            PaymentService paymentService)
+            PaymentService paymentService,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -77,6 +79,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _paymentService = paymentService;
             _databaseFactory = databaseFactory;
+            _registrations = registrations;
         }
 
         // Obviously-fake Kalle Anka (Ankeborg) universe names. Combined with the surnames below +
@@ -177,11 +180,8 @@ namespace HpskSite.Controllers
             paidRatio = Math.Clamp(paidRatio, 0d, 1d);
             policeRatio = Math.Clamp(policeRatio, 0d, 1d);
 
-            var hub = GetOrCreateRegistrationsHub(competition);
-            var existing = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                .Where(c => c.ContentType.Alias == "competitionRegistration")
-                .ToList();
-            var alreadyRegistered = new HashSet<int>(existing.Select(r => r.GetValue<int>("memberId")));
+            var existing = _registrations.List(competitionId);
+            var alreadyRegistered = new HashSet<int>(existing.Select(r => r.MemberId));
 
             int membersCreated = 0, registeredShooters = 0, skipped = 0;
             int shootersInC = 0, shootersInA = 0, shootersInBoth = 0, polisSmParticipants = 0;
@@ -256,28 +256,27 @@ namespace HpskSite.Controllers
                 var createdRegIds = new List<int>();
                 foreach (var (comps, isSub) in plannedNodes)
                 {
-                    var reg = _contentService.Create($"{member.Name} - övning", hub.Id, "competitionRegistration");
-                    reg.SetValue("competitionId", competitionId);
-                    reg.SetValue("memberId", member.Id);
-                    reg.SetValue("memberName", member.Name);
-                    reg.SetValue("clubId", clubInfo.Id);
                     var entries = comps
                         .Select(c => new HpskSite.Models.ShootingClassEntry { Class = c, StartPreference = "Inget", TeamNumber = null })
                         .ToList();
-                    reg.SetValue("shootingClasses",
-                        HpskSite.Models.CompetitionRegistrationDocument.SerializeShootingClasses(entries));
-                    reg.SetValue("registrationDate", DateTime.Now);
-                    reg.SetValue("registeredBy", SeedTag);
-                    reg.SetValue("isActive", true);
-                    if (reg.HasProperty("isSubCompetition"))
-                        reg.SetValue("isSubCompetition", isSub);
-                    _contentService.Save(reg);
-                    _contentService.Publish(reg, new[] { "*" }, -1);
-                    createdRegIds.Add(reg.Id);
+                    // Lagringen publicerar aldrig en anmälan (den gamla vägen publicerade).
+                    var regId = _registrations.Save(new HpskSite.Models.Registrations.RegistrationRecord
+                    {
+                        CompetitionId = competitionId,
+                        MemberId = member.Id,
+                        MemberName = member.Name ?? "",
+                        ClubId = clubInfo.Id,
+                        Classes = entries,
+                        RegistrationDate = DateTime.Now,
+                        RegisteredBy = SeedTag,
+                        IsActive = true,
+                        IsSubCompetition = isSub
+                    });
+                    createdRegIds.Add(regId);
                     nodesCreated++;
 
                     // Eager Pending invoice — exactly like a real registration.
-                    await _paymentService.EnsureRegistrationInvoiceAsync(competitionId, reg.Id);
+                    await _paymentService.EnsureRegistrationInvoiceAsync(competitionId, regId);
                 }
 
                 bool inC = plannedNodes.Any(n => n.Comps.Any(c => c.StartsWith("C", StringComparison.OrdinalIgnoreCase)));
@@ -294,7 +293,7 @@ namespace HpskSite.Controllers
                 // practices both "already paid → check in" and "not paid → take payment".
                 if (rnd.NextDouble() < paidRatio)
                 {
-                    foreach (var rid in createdRegIds) TryMarkInvoicePaid(rid);
+                    foreach (var rid in createdRegIds) TryMarkInvoicePaid(competitionId, rid);
                     paidShooters++;
                 }
             }
@@ -348,20 +347,18 @@ namespace HpskSite.Controllers
             if (!isClubOnly && !LooksLikePractice(name))
                 return Json(new { success = false, message = "Säkerhetsspärr: vägrar rensa en publik tävling." });
 
-            var children = _contentService.GetPagedChildren(competition.Id, 0, 20, out _);
-            var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-            if (hub == null)
+            var all = _registrations.List(competition.Id);
+            if (all.Count == 0)
                 return Json(new { success = true, message = "Inga anmälningar att rensa.", removed = 0 });
 
-            var regs = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                .Where(c => c.ContentType.Alias == "competitionRegistration"
-                         && string.Equals(c.GetValue<string>("registeredBy"), SeedTag, StringComparison.Ordinal))
+            var regs = all
+                .Where(r => string.Equals(r.RegisteredBy, SeedTag, StringComparison.Ordinal))
                 .ToList();
 
             int removed = 0, invoicesRemoved = 0;
             foreach (var reg in regs)
             {
-                var invoiceId = reg.GetValue<int>("invoiceId");
+                var invoiceId = reg.InvoiceId ?? 0;
                 if (invoiceId > 0)
                 {
                     var invoice = _contentService.GetById(invoiceId);
@@ -371,7 +368,7 @@ namespace HpskSite.Controllers
                         invoicesRemoved++;
                     }
                 }
-                _contentService.Delete(reg);
+                _registrations.Delete(competition.Id, reg.Id);
                 removed++;
             }
 
@@ -421,36 +418,21 @@ namespace HpskSite.Controllers
                             + "ELLER ha ÖVNING/TEST/SIM i tävlingsnamnet innan du kör."
                 });
 
-            var children = _contentService.GetPagedChildren(competition.Id, 0, 20, out _);
-            var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-            if (hub == null)
-                return Json(new { success = false, message = "Inga anmälningar — kör SeedSimulation först." });
-
             // One result row per (member, weapon class). A shooter registered in both C and A gets two,
             // which is the normal shape here (most simulation shooters register in both).
-            var regs = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                .Where(c => c.ContentType.Alias == "competitionRegistration")
-                .ToList();
+            var regs = _registrations.List(competition.Id);
+            if (regs.Count == 0)
+                return Json(new { success = false, message = "Inga anmälningar — kör SeedSimulation först." });
 
-            // Classes live in `shootingClasses` as a serialized ShootingClassEntry LIST — NOT a plain
-            // `shootingClass` string — and a single registration node can carry SEVERAL classes, so every
-            // entry has to be walked. Reading the wrong property yields an empty list on every node and
-            // the seeder silently finds no starters at all.
+            // A single registration can carry SEVERAL classes, so every entry has to be walked. The
+            // store already falls back to the legacy single-class scalar, so Classes is complete.
             var starters = new List<(int MemberId, string Weapon, string AgeGender)>();
             foreach (var reg in regs)
             {
-                var memberId = reg.GetValue<int>("memberId");
+                var memberId = reg.MemberId;
                 if (memberId <= 0) continue;
 
-                var entries = HpskSite.Models.CompetitionRegistrationDocument
-                    .DeserializeShootingClasses(reg.GetValue<string>("shootingClasses") ?? "");
-                var composites = entries.Select(e => e.Class ?? "").Where(c => c.Length > 0).ToList();
-                // Fallback for any registration written by an older/other path as a single string.
-                if (composites.Count == 0)
-                {
-                    var single = reg.GetValue<string>("shootingClass") ?? "";
-                    if (single.Length > 0) composites.Add(single);
-                }
+                var composites = reg.Classes.Select(e => e.Class ?? "").Where(c => c.Length > 0).ToList();
 
                 foreach (var composite in composites)
                 {
@@ -684,10 +666,10 @@ namespace HpskSite.Controllers
             return (first, last);
         }
 
-        private bool TryMarkInvoicePaid(int registrationId)
+        private bool TryMarkInvoicePaid(int competitionId, int registrationId)
         {
-            var reg = _contentService.GetById(registrationId);
-            var invoiceId = reg?.GetValue<int>("invoiceId") ?? 0;
+            var reg = _registrations.Get(competitionId, registrationId);
+            var invoiceId = reg?.InvoiceId ?? 0;
             if (invoiceId <= 0) return false;
 
             var invoice = _contentService.GetById(invoiceId);
@@ -703,19 +685,6 @@ namespace HpskSite.Controllers
             _contentService.Save(invoice);
             _contentService.Publish(invoice, new[] { "*" }, -1);
             return true;
-        }
-
-        private IContent GetOrCreateRegistrationsHub(IContent competition)
-        {
-            var children = _contentService.GetPagedChildren(competition.Id, 0, 20, out _);
-            var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-            if (hub == null)
-            {
-                hub = _contentService.Create("Anmälningar", competition.Id, "competitionRegistrationsHub");
-                _contentService.Save(hub);
-                _contentService.Publish(hub, new[] { "*" }, -1);
-            }
-            return hub;
         }
 
         private static List<string> ParseCompositeClasses(string raw)
