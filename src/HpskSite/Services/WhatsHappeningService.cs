@@ -21,6 +21,7 @@ namespace HpskSite.Services
         private readonly IScopeProvider _scopeProvider;
         private readonly ILogger<WhatsHappeningService> _logger;
         private readonly AppCaches _appCaches;
+        private readonly IServiceScopeFactory _scopeFactory;
 
         private const string CacheKey = "WhatsHappening:Data:v1";
         private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
@@ -30,12 +31,14 @@ namespace HpskSite.Services
             IUmbracoContextFactory umbracoContextFactory,
             IScopeProvider scopeProvider,
             AppCaches appCaches,
-            ILogger<WhatsHappeningService> logger)
+            ILogger<WhatsHappeningService> logger,
+            IServiceScopeFactory scopeFactory)
         {
             _umbracoContextFactory = umbracoContextFactory;
             _scopeProvider = scopeProvider;
             _appCaches = appCaches;
             _logger = logger;
+            _scopeFactory = scopeFactory;
         }
 
         public WhatsHappeningData GetData()
@@ -149,22 +152,29 @@ namespace HpskSite.Services
                 }
 
                 // club events (always masked for anonymous)
-                foreach (var node in all)
+                // Genom händelselagringen (sajtstrukturen fas 2a). Tjänsten är singleton och lagringen
+                // scoped, så den löses i ett eget scope — inne i Umbraco-kontexten ovan.
+                IReadOnlyList<HpskSite.Models.Events.ClubEventRecord> clubEvents;
+                using (var serviceScope = _scopeFactory.CreateScope())
                 {
-                    if (node.ContentType.Alias != "clubSimpleEvent") continue;
-                    if (!node.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true)) continue;
+                    clubEvents = serviceScope.ServiceProvider
+                        .GetRequiredService<HpskSite.Services.Events.IClubEventStore>()
+                        .ListAllPublished();
+                }
+                foreach (var ev in clubEvents)
+                {
+                    if (!ev.IsActive) continue;
 
-                    var date = node.Value<DateTime?>("eventDate");
+                    var date = ev.StartsAt;
                     if (date == null || date.Value.Date < today || date.Value.Date > horizon) continue;
 
-                    // Ägaren via EventOwnerResolver (sajtstrukturen fas 0).
-                    var clubId = HpskSite.Services.Events.EventOwnerResolver.PublishedOwnerNode(node)?.Id
-                                 ?? node.Value<int>("clubId");
+                    // Ägaren = klubben (eller kretsen) som händelsen hör till.
+                    var clubId = ev.OwnerId;
                     var regionCode = "";
                     var clubName = "";
                     if (clubInfo.TryGetValue(clubId, out var ci)) { regionCode = ci.Region; clubName = ci.Name; }
 
-                    var eventType = node.Value<string>("eventType") ?? "Träning";
+                    var eventType = string.IsNullOrEmpty(ev.EventType) ? "Träning" : ev.EventType;
 
                     data.Items.Add(new FeedItem
                     {
@@ -179,10 +189,10 @@ namespace HpskSite.Services
                         SourceLabel = "Klubbhändelse",
                         TypeLabel = eventType,
                         MaskedTypeLabel = NeutralEventLabel(eventType),
-                        Title = node.Value<string>("eventName") ?? node.Name ?? "",
+                        Title = ev.DisplayName,
                         ClubName = clubName,
-                        Venue = node.Value<string>("venue") ?? "",
-                        Url = node.Url()
+                        Venue = ev.Venue,
+                        Url = ev.Url
                     });
                 }
 

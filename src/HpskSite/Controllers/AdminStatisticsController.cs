@@ -49,6 +49,7 @@ namespace HpskSite.Controllers
         private const string SimulationSeedTag = "Simulering (seed)";
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
         public AdminStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -64,7 +65,8 @@ namespace HpskSite.Controllers
             IConfiguration configuration,
             IWebHostEnvironment env,
             HpskSite.Services.Training.ClubTrainingService trainings,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Events.IClubEventStore events)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
@@ -78,6 +80,7 @@ namespace HpskSite.Controllers
             _documentService = documentService;
             _configuration = configuration;
             _env = env;
+            _events = events;
         }
 
         [HttpGet]
@@ -648,13 +651,8 @@ namespace HpskSite.Controllers
                     int activeClubs = allClubNodes.Count(club =>
                     {
                         if (!membersByClub.ContainsKey(club.Id)) return false;
-                        var hasRecentEvent = club.Children
-                            .Where(c => c.ContentType.Alias == "clubSimpleEvent")
-                            .Any(e =>
-                            {
-                                var eventDate = e.Value<DateTime?>("eventDate");
-                                return eventDate.HasValue && eventDate.Value >= threeMonthsAgo;
-                            })
+                        var hasRecentEvent = _events.ListForOwner(club.Id)
+                            .Any(e => e.StartsAt.HasValue && e.StartsAt.Value >= threeMonthsAgo)
                             // Fas B5: en träning är också aktivitet i klubben.
                             || (recentTrainings.TryGetValue(club.Id, out var td) && td.Count > 0);
                         var hasRecentClubComp = clubIdsWithRecentComp.Contains(club.Id);
@@ -724,14 +722,13 @@ namespace HpskSite.Controllers
 
                     // ── 3b. Club activities (events) ──────────────────
                     var allClubEvents = allClubNodes
-                        .SelectMany(club => club.Children
-                            .Where(c => c.ContentType.Alias == "clubSimpleEvent")
+                        .SelectMany(club => _events.ListForOwner(club.Id)
                             .Select(e => new
                             {
                                 clubId = club.Id,
                                 clubName = club.Name ?? "",
-                                eventType = e.Value<string>("eventType") ?? "Annat",
-                                eventDate = e.Value<DateTime?>("eventDate")
+                                eventType = string.IsNullOrEmpty(e.EventType) ? "Annat" : e.EventType,
+                                eventDate = e.StartsAt
                             }))
                         .ToList();
                     // Fas B5: klubbarnas träningar räknas in som typen Träning.

@@ -29,6 +29,7 @@ namespace HpskSite.Controllers
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly IMemoryCache _memoryCache;
         private readonly ILogger<RegionalStatisticsController> _logger;
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
 
         public RegionalStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -42,7 +43,8 @@ namespace HpskSite.Controllers
             ClubComparisonService comparisonService,
             IMemoryCache memoryCache,
             ILogger<RegionalStatisticsController> logger,
-            HpskSite.Services.Training.ClubTrainingService trainings)
+            HpskSite.Services.Training.ClubTrainingService trainings,
+            HpskSite.Services.Events.IClubEventStore events)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _trainings = trainings;
@@ -53,6 +55,7 @@ namespace HpskSite.Controllers
             _databaseFactory = databaseFactory;
             _memoryCache = memoryCache;
             _logger = logger;
+            _events = events;
         }
 
         [HttpGet]
@@ -239,13 +242,8 @@ namespace HpskSite.Controllers
             var recentTrainings = _trainings.DatesByClub(ninetyDaysAgo);
             foreach (var club in clubNodes)
             {
-                var hasRecentEvent = club.Children
-                    .Where(c => c.ContentType.Alias == "clubSimpleEvent")
-                    .Any(e =>
-                    {
-                        var d = e.Value<DateTime?>("eventDate");
-                        return d.HasValue && d.Value >= ninetyDaysAgo;
-                    })
+                var hasRecentEvent = _events.ListForOwner(club.Id)
+                    .Any(e => e.StartsAt.HasValue && e.StartsAt.Value >= ninetyDaysAgo)
                     // Fas B5: en träning räknas också — annars ser en klubb som bara har träningar
                     // ut att sakna verksamhet.
                     || (recentTrainings.TryGetValue(club.Id, out var td) && td.Count > 0);

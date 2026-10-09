@@ -36,9 +36,11 @@ namespace HpskSite.Services.Kretsgranskning
         private readonly ClubService _clubs;
         private readonly StomprogramService _stomprogram;
         private readonly ILogger<KretsCalendarService> _logger;
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
 
         public KretsCalendarService(IUmbracoContextFactory contextFactory, AppCaches caches,
-            CompetitionApplicationService applications, ClubService clubs, StomprogramService stomprogram, ILogger<KretsCalendarService> logger)
+            CompetitionApplicationService applications, ClubService clubs, StomprogramService stomprogram, ILogger<KretsCalendarService> logger,
+            HpskSite.Services.Events.IClubEventStore events)
         {
             _contextFactory = contextFactory;
             _caches = caches;
@@ -46,6 +48,7 @@ namespace HpskSite.Services.Kretsgranskning
             _clubs = clubs;
             _stomprogram = stomprogram;
             _logger = logger;
+            _events = events;
         }
 
         public record RegionInfo(int Id, string Code, string Name, string Url);
@@ -303,14 +306,12 @@ namespace HpskSite.Services.Kretsgranskning
                         idx.ClubRegion[club.Id] = code;
                         idx.ClubName[club.Id] = club.Value<string>("clubName") ?? club.Name ?? "";
                     }
-                    foreach (var ev in r.Children().Where(c => c.ContentType.Alias == "clubSimpleEvent"))
+                    // Kretsens egna händelser genom händelselagringen (sajtstrukturen fas 2a).
+                    foreach (var ev in _events.ListForOwner(r.Id))
                     {
-                        var d = ev.Value<DateTime?>("eventDate");
-                        if (d is null || d.Value == DateTime.MinValue) continue;
-                        var endRaw = ev.Value<DateTime?>("eventEndDate");
-                        idx.Events.Add(new EventRow(r.Id, ev.Id, ev.Value<string>("eventName") ?? ev.Name ?? "",
-                            d.Value, endRaw is { } x && x != DateTime.MinValue ? x : null,
-                            ev.Value<string>("venue") ?? "", ev.Url()));
+                        if (ev.StartsAt is not { } d) continue;
+                        idx.Events.Add(new EventRow(r.Id, ev.Id, ev.DisplayName,
+                            d, ev.EndsAt, ev.Venue, ev.Url));
                     }
                 }
 

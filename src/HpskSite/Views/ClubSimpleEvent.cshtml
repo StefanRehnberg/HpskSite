@@ -4,47 +4,51 @@
 @using Umbraco.Cms.Core.Services;
 @inject IMemberManager MemberManager
 @inject HpskSite.Services.AdminAuthorizationService AuthorizationService
+@inject HpskSite.Services.Events.IClubEventStore Events
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
 
-    // Event properties from Umbraco content
-    var eventName = Model.Value<string>("eventName") ?? Model.Name;
-    var description = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("description"));
-    var eventDateRaw = Model.Value<DateTime?>("eventDate");
+    // Händelsen via händelselagringen (sajtstrukturen fas 2a). På årsadressen är modellen ÄGARNODEN
+    // och händelsen ligger i HttpContext.Items; på den gamla trädadressen är modellen händelsenoden.
+    var ev = Context.Items[HpskSite.Routing.ClubEventRoute.ItemKey] as HpskSite.Models.Events.ClubEventRecord
+             ?? Events.Get(Model.Id)
+             ?? new HpskSite.Models.Events.ClubEventRecord { Id = Model.Id, PageName = Model.Name ?? "" };
+    var eventId = ev.Id;
+    var eventName = ev.DisplayName;
+    var description = HpskSite.Extensions.RteHelper.ExtractMarkup(ev.Description);
+    var eventDateRaw = ev.StartsAt;
     var hasDate = eventDateRaw.HasValue && eventDateRaw.Value.Year > 1900;
     var eventDate = eventDateRaw ?? DateTime.MinValue;
-    var eventEndDate = Model.Value<DateTime?>("eventEndDate");
-    var eventType = Model.Value<string>("eventType") ?? "Träning";
-    var venue = Model.Value<string>("venue") ?? "";
-    var contactPerson = Model.Value<string>("contactPerson") ?? "";
-    var contactEmail = Model.Value<string>("contactEmail") ?? "";
-    var contactPhone = Model.Value<string>("contactPhone") ?? "";
-    var isActive = Model.Value<bool>("isActive");
+    var eventEndDate = ev.EndsAt;
+    var eventType = string.IsNullOrEmpty(ev.EventType) ? "Träning" : ev.EventType;
+    var venue = ev.Venue ?? "";
+    var contactPerson = ev.ContactPerson ?? "";
+    var contactEmail = ev.ContactEmail ?? "";
+    var contactPhone = ev.ContactPhone ?? "";
+    var isActive = ev.IsActive;
 
     // New landing page properties
-    var eventImage = Model.Value<IPublishedContent>("eventImage");
-    var registrationRequired = Model.Value<bool>("registrationRequired");
-    var registrationUrl = Model.Value<string>("registrationUrl") ?? "";
+    var eventImageUrl = ev.ImageUrl ?? "";
+    var registrationRequired = ev.RegistrationRequired;
+    var registrationUrl = ev.RegistrationUrl ?? "";
     // Sista anmälningsdag — inklusive dagen själv. Grinden bor i
     // ClubEventParticipationService.IsSignupOpen; här visas den bara.
-    var registrationDeadline = HpskSite.Models.ClubEvents.RealDate(
-        Model.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty));
+    var registrationDeadline = ev.RegistrationDeadline;
     @* ⚠️ Avgiften läses ur PRISRADERNA, inte ur den gamla fritexten feeAmount och inte ur ett
        enskilt tal. Ett evenemang kan ha flera priser ("Vuxen 180, Barn 90, under 7 år gratis"),
        och två fält som båda påstår vad det kostar blir förr eller senare oense — så fort en
        betalning drivs av det ena läser medlemmen det andra.
        ⚠️ Oläsbara rader får ALDRIG renderas som "ingen avgift". Se EventPriceList. *@
-    var priceList = HpskSite.Models.EventPrices.Parse(
-        Model.Value<string>(HpskSite.Models.EventPrices.Property));
+    var priceList = HpskSite.Models.EventPrices.Parse(ev.PricesJson);
     var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
     string PriceText(decimal a) => a == 0m ? "Gratis" : a.ToString("#,##0", sv) + " kr";
-    var equipmentRequired = Model.Value<string>("equipmentRequired") ?? "";
-    var targetAudience = Model.Value<string>("targetAudience") ?? "";
+    var equipmentRequired = ev.EquipmentRequired ?? "";
+    var targetAudience = ev.TargetAudience ?? "";
 
-    // Content blocks and quick links (JSON stored as Textarea)
-    var contentBlocksJson = Model.Value<string>("contentBlocks") ?? "[]";
-    var quickLinksJson = Model.Value<string>("quickLinks") ?? "[]";
+    // Content blocks and quick links (JSON)
+    var contentBlocksJson = string.IsNullOrWhiteSpace(ev.ContentBlocksJson) ? "[]" : ev.ContentBlocksJson;
+    var quickLinksJson = string.IsNullOrWhiteSpace(ev.QuickLinksJson) ? "[]" : ev.QuickLinksJson;
 
     // Event type display helpers
     string GetEventTypeColor(string type) => type switch
@@ -123,7 +127,7 @@
 
     // Ägarnoden (klubb eller krets) via EventOwnerResolver — enda stället som svarar på
     // "vem äger händelsen?" (sajtstrukturen fas 0).
-    var parentNode = HpskSite.Services.Events.EventOwnerResolver.PublishedOwnerNode(Model);
+    var parentNode = ev.OwnerId > 0 ? Umbraco.Content(ev.OwnerId) : null;
     var isRegionEvent = parentNode?.ContentType.Alias == "regionalPage";
 
     // Club-specific properties (only if parent is a club)
@@ -170,7 +174,7 @@
         : (clubsPage?.Parent?.ContentType.Alias == "regionalPage" ? clubsPage?.Parent : null);
 
     // Hero image (event image or fall back to owner banner)
-    var heroImage = eventImage ?? ownerBannerImage;
+    var heroImageUrl = !string.IsNullOrEmpty(eventImageUrl) ? eventImageUrl : (ownerBannerImage?.Url() ?? "");
 
     // Short description for meta (strip HTML and truncate)
     var shortDescription = System.Text.RegularExpressions.Regex.Replace(description, "<[^>]*>", "");
@@ -210,7 +214,7 @@
     {
         @Html.AntiForgeryToken()
         <script>
-            var eventPageId = @Model.Id;
+            var eventPageId = @eventId;
             var isRegionEvent = @(isRegionEvent ? "true" : "false");
             var parentId = @(parentNode?.Id ?? 0);
         </script>
@@ -224,7 +228,7 @@
                        fyra nivåer ner i en adminpanel — samma sorts återvändsgränd som gjorde att
                        valvet behövde en QR-affisch på dörren. Speglar "Administrera tävling" på
                        en tävlingssida, så den som kan den ena känner igen den andra. *@
-                    <a href="/evenemang/deltagare?e=@Model.Id" class="btn btn-sm btn-primary">
+                    <a href="/evenemang/deltagare?e=@eventId" class="btn btn-sm btn-primary">
                         <i class="bi bi-people me-1"></i>Deltagare och betalning
                     </a>
                     <button type="button" class="btn btn-sm btn-outline-primary" onclick="openEditDetailsModal()">
@@ -278,10 +282,10 @@
     <!-- Hero Banner -->
     <div class="row mb-4">
         <div class="col-12">
-            @if (heroImage != null)
+            @if (!string.IsNullOrEmpty(heroImageUrl))
             {
                 <div class="position-relative rounded overflow-hidden event-hero">
-                    <img src="@heroImage.Url()" alt="@eventName" class="w-100 h-100" style="object-fit: cover;">
+                    <img src="@heroImageUrl" alt="@eventName" class="w-100 h-100" style="object-fit: cover;">
                     <div class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-end"
                          style="background: linear-gradient(135deg, rgba(@colorR, @colorG, @colorB, 0.7) 0%, rgba(@colorDarkR, @colorDarkG, @colorDarkB, 0.85) 100%);">
                         <div class="container pb-4 pt-5">
@@ -317,7 +321,7 @@
                                         else
                                         {
                                             <i class="bi bi-clock me-2"></i>
-                                            <text>Publicerad @Model.CreateDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</text>
+                                            <text>Publicerad @ev.CreatedDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</text>
                                         }
                                         @if (!string.IsNullOrEmpty(venue))
                                         {
@@ -374,7 +378,7 @@
                                 else
                                 {
                                     <i class="bi bi-clock me-2"></i>
-                                    <text>Publicerad @Model.CreateDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</text>
+                                    <text>Publicerad @ev.CreatedDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</text>
                                 }
                                 @if (!string.IsNullOrEmpty(venue))
                                 {
@@ -450,7 +454,7 @@
                                     <i class="bi bi-clock fs-4 me-3" style="color: @eventTypeColor;"></i>
                                     <div>
                                         <small class="text-secondary d-block">Publicerad</small>
-                                        <strong>@Model.CreateDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+                                        <strong>@ev.CreatedDate.ToString("d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
                                     </div>
                                 </div>
                             </div>
@@ -605,7 +609,7 @@
                inte tar anmälningar (eller pekar på en extern länk), så det behöver ingen grind här. *@
             @await Html.PartialAsync("_ClubEventSignup", new ViewDataDictionary(ViewData)
             {
-                ["EventId"] = Model.Id,
+                ["EventId"] = eventId,
                 ["Accent"] = eventTypeColor
             })
 

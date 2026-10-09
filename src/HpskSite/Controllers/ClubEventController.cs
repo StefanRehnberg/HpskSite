@@ -1523,8 +1523,13 @@ namespace HpskSite.Controllers
             string? organiserEmail = null;
             try
             {
-                var node = UmbracoContext.Content?.GetById(ctx.EventId);
-                organiserEmail = node?.Value<string>("contactEmail");
+                // Händelsens kontakt ur händelselagringen (sajtstrukturen fas 2a). En träning har ingen.
+                if (!ctx.IsTraining)
+                {
+                    var events = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Events.IClubEventStore))
+                        as HpskSite.Services.Events.IClubEventStore;
+                    organiserEmail = events?.Get(ctx.EventId)?.ContactEmail;
+                }
                 if (string.IsNullOrWhiteSpace(organiserEmail))
                     organiserEmail = UmbracoContext.Content?.GetById(ctx.OwnerId)?.Value<string>("contactEmail");
             }

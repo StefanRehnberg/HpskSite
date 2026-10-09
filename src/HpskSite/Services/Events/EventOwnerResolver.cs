@@ -26,15 +26,10 @@ namespace HpskSite.Services.Events
     /// <b>ENDA stället som svarar på "vem äger händelsen?"</b> (sajtstrukturen, fas 0 —
     /// <c>notes/sajtstruktur-plan-2026-10-09.md</c>).
     ///
-    /// <para>⚠️ I dag är svaret händelsens FÖRÄLDERNOD — klubbens och kretsens händelser delar
-    /// doctype (<c>clubSimpleEvent</c>), så föräldern är det enda som skiljer dem. När händelserna
-    /// flyttar till en egen tabell (fas 2) bär raden ägaren som (typ, id), och då är det bara den
-    /// här klassen som byter källa. Läs därför aldrig <c>ParentId</c>/<c>.Parent</c> på en händelse
-    /// för att ta reda på ägaren — gå hit.</para>
-    ///
-    /// <para><b>Läser innehållstjänsten, inte den publicerade cachen</b>, eftersom en händelse kan
-    /// vara ett opublicerat utkast som administratören fortfarande ska få redigera. Ytor som bara
-    /// har publicerat innehåll (vyn, flödet) använder <see cref="PublishedOwnerNode"/>.</para>
+    /// <para>Händelsen kommer ur <see cref="IClubEventStore"/> (fas 2a), och posten bär ägaren som
+    /// (typ, id) — oavsett om händelsen är en nod eller en tabellrad. Läs aldrig <c>ParentId</c>/
+    /// <c>.Parent</c> på en händelse för att ta reda på ägaren; gå hit, eller till postens
+    /// <c>OwnerId</c>.</para>
     /// </summary>
     public class EventOwnerResolver
     {
@@ -59,14 +54,6 @@ namespace HpskSite.Services.Events
 
         /// <summary>Ägaren till en redan inläst händelse.</summary>
         public EventOwner? ForEventRecord(HpskSite.Models.Events.ClubEventRecord e) => ForOwnerId(e.OwnerId);
-
-        /// <summary>Ägaren till en redan inläst händelsenod.</summary>
-        public EventOwner? ForEventNode(IContent eventNode)
-        {
-            if (eventNode.ParentId <= 0) return null;
-            var parent = _contentService.GetById(eventNode.ParentId);
-            return parent is null ? null : FromOwnerNode(parent);
-        }
 
         /// <summary>
         /// En ägarnod (klubb eller krets) som <see cref="EventOwner"/>, eller null om noden är
@@ -106,18 +93,6 @@ namespace HpskSite.Services.Events
                 return !string.IsNullOrEmpty(owner.RegionCode)
                     && await _auth.IsRegionalAdminForRegion(owner.RegionCode);
             return await _auth.IsClubAdminForClub(owner.OwnerId);
-        }
-
-        /// <summary>
-        /// Ägarnoden för en PUBLICERAD händelse — för vyer och flöden som bara har den publicerade
-        /// cachen (händelsesidans sidhuvud, logga, brödsmulor). Null när föräldern inte är en klubb
-        /// eller krets.
-        /// </summary>
-        public static IPublishedContent? PublishedOwnerNode(IPublishedContent eventNode)
-        {
-            var parent = eventNode.Parent;
-            var alias = parent?.ContentType.Alias;
-            return alias == ClubEvents.OwnerClubAlias || alias == ClubEvents.OwnerRegionAlias ? parent : null;
         }
     }
 }

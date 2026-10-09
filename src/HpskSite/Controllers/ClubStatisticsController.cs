@@ -32,6 +32,7 @@ namespace HpskSite.Controllers
         private readonly ILogger<ClubStatisticsController> _logger;
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
         public ClubStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -45,7 +46,8 @@ namespace HpskSite.Controllers
             IMemoryCache memoryCache,
             ILogger<ClubStatisticsController> logger,
             HpskSite.Services.Training.ClubTrainingService trainings,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Events.IClubEventStore events)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
@@ -57,6 +59,7 @@ namespace HpskSite.Controllers
             _databaseFactory = databaseFactory;
             _memoryCache = memoryCache;
             _logger = logger;
+            _events = events;
         }
 
         [HttpGet]
@@ -204,12 +207,11 @@ namespace HpskSite.Controllers
 
             if (clubNode != null)
             {
-                var clubEvents = clubNode.Children
-                    .Where(c => c.ContentType.Alias == "clubSimpleEvent")
+                var clubEvents = _events.ListForOwner(clubNode.Id)
                     .Select(e => new
                     {
-                        eventType = e.Value<string>("eventType") ?? "Annat",
-                        eventDate = e.Value<DateTime?>("eventDate")
+                        eventType = string.IsNullOrEmpty(e.EventType) ? "Annat" : e.EventType,
+                        eventDate = e.StartsAt
                     })
                     .ToList();
                 // Fas B5: klubbens träningar är inte längre händelser — räkna in dem som typen Träning.

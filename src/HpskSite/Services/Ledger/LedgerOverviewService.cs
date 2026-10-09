@@ -21,6 +21,7 @@ namespace HpskSite.Services.Ledger
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly IUmbracoContextFactory _contextFactory;
         private readonly IContentService _contentService;
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
         private readonly ILogger<LedgerOverviewService> _logger;
 
         /// <summary>Hur många mottagna betalningar panel 2 visar. Den är en puls, inte ett arkiv.</summary>
@@ -33,12 +34,14 @@ namespace HpskSite.Services.Ledger
             IUmbracoDatabaseFactory databaseFactory,
             IUmbracoContextFactory contextFactory,
             IContentService contentService,
-            ILogger<LedgerOverviewService> logger)
+            ILogger<LedgerOverviewService> logger,
+            HpskSite.Services.Events.IClubEventStore events)
         {
             _databaseFactory = databaseFactory;
             _contextFactory = contextFactory;
             _contentService = contentService;
             _logger = logger;
+            _events = events;
         }
 
         public LedgerOverview Build(int issuerType, int issuerId)
@@ -189,6 +192,23 @@ namespace HpskSite.Services.Ledger
         private string NameForSource(string sourceType, int? sourceId)
         {
             if (sourceId is not > 0) return LabelForSourceType(sourceType);
+
+            // Händelser via händelselagringen (sajtstrukturen fas 2a) — ett id från en händelse får
+            // aldrig slås upp som en innehållsnod, den kan vara en tabellrad.
+            if (sourceType == LedgerSourceType.Event)
+            {
+                try
+                {
+                    var ev = _events.Get(sourceId.Value);
+                    if (ev is not null && !string.IsNullOrWhiteSpace(ev.DisplayName))
+                        return ev.IsPublished ? ev.DisplayName : $"{ev.DisplayName} (opublicerad)";
+                }
+                catch
+                {
+                    // Faller vidare till det namngivna bortfallet.
+                }
+                return $"Borttagen händelse (#{sourceId})";
+            }
 
             try
             {

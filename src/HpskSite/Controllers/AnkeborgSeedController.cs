@@ -83,6 +83,7 @@ namespace HpskSite.Controllers
         private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment _env;
         private readonly ILogger<AnkeborgSeedController> _logger;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
 
         public AnkeborgSeedController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -105,11 +106,13 @@ namespace HpskSite.Controllers
             Microsoft.AspNetCore.Hosting.IWebHostEnvironment env,
             ILogger<AnkeborgSeedController> logger,
             HpskSite.Services.Training.ClubTrainingService trainings,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Events.IClubEventStore events)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _trainings = trainings;
             _registrations = registrations;
+            _events = events;
             _memberService = memberService;
             _contentService = contentService;
             _clubMembershipService = clubMembershipService;
@@ -591,7 +594,7 @@ VALUES
         /// så fort en av delarna behöver rättas, och då får de övriga inte skriva en gång till —
         /// märkesserierna lärde oss det genom att bli åtta i stället för fyra.
         /// </summary>
-        public IActionResult SeedProgram(string confirm = "", bool dryRun = true)
+        public async Task<IActionResult> SeedProgram(string confirm = "", bool dryRun = true)
         {
             var guard = Guard(confirm);
             if (guard != null) return guard;
@@ -624,9 +627,10 @@ VALUES
             var today = DateTime.Now.Date;
 
             // ── Händelser ────────────────────────────────────────────────────────────
-            var existingEvents = _contentService.GetPagedChildren(club.Id, 0, int.MaxValue, out _)
-                .Where(c => c.ContentType.Alias == "clubSimpleEvent")
-                .ToDictionary(c => c.Name ?? "", c => c, StringComparer.OrdinalIgnoreCase);
+            // Genom händelselagringen (sajtstrukturen fas 2a). Nyckeln är sidnamnet, som förut.
+            var existingEvents = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var existing in _events.ListForOwner(club.Id, publishedOnly: false))
+                existingEvents.TryAdd(existing.PageName ?? "", existing.Id);
 
             // ⚠️ Städdagen ligger i DÅTID med ett taget upprop. Aktivitetssammanställningen
             // (bild 8) läser närvaro, och ett framtida evenemang har ingen att läsa.
@@ -638,46 +642,50 @@ VALUES
                               "Ordinarie årsmöte i klubbstugan.", true, 0, 0m, false, true),
             };
 
-            var eventNodes = new Dictionary<string, IContent>(StringComparer.OrdinalIgnoreCase);
+            var eventIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in eventPlan)
             {
                 try
                 {
-                    if (existingEvents.TryGetValue(e.Name, out var found))
+                    if (existingEvents.TryGetValue(e.Name, out var foundId))
                     {
-                        eventNodes[e.Name] = found;
+                        eventIds[e.Name] = foundId;
                         continue;
                     }
 
-                    var node = _contentService.Create(e.Name, club.Id, "clubSimpleEvent");
-                    node.SetValue("eventName", e.Name);
-                    node.SetValue("eventType", e.Type);
-                    node.SetValue("eventDate", e.Date);
-                    node.SetValue("description", e.Description);
-                    node.SetValue("venue", "Ankeborgs skjutbana");
-                    node.SetValue("contactPerson", "Sigrid Almkvist");
-                    node.SetValue("contactEmail", $"styrelsen@{MailDomain}");
-                    node.SetValue("isActive", true);
-                    node.SetValue("registrationRequired", e.Registration);
-                    if (e.MaxParticipants > 0) node.SetValue("maxParticipants", e.MaxParticipants);
-                    // Prisraderna, inte fritexten. Seed-data som skriver det gamla faltet hade
-                    // gjort varje ny demoklubb till en ny migrering att kora.
-                    if (e.Fee > 0)
-                        node.SetValue(HpskSite.Models.EventPrices.Property,
-                            HpskSite.Models.EventPrices.Serialize(
-                                new[] { new HpskSite.Models.EventPrice("avgift", "Avgift", e.Fee) }));
-                    node.SetValue("lanevapenOffered", e.LoanWeapons);
-                    node.SetValue("isMandatory", e.Mandatory);
-                    if (e.Registration && e.Date > today)
-                        node.SetValue("registrationDeadline", e.Date.AddDays(-3).Date);
-
-                    if (!_contentService.Save(node).Success)
+                    var (newId, error) = await _events.SaveAsync(new HpskSite.Models.Events.ClubEventRecord
                     {
-                        failures.Add($"Händelse '{e.Name}': kunde inte sparas.");
+                        OwnerType = HpskSite.Models.Events.ClubEventRecord.OwnerClub,
+                        OwnerId = club.Id,
+                        PageName = e.Name,
+                        Name = e.Name,
+                        EventType = e.Type,
+                        StartsAt = e.Date,
+                        Description = e.Description,
+                        Venue = "Ankeborgs skjutbana",
+                        ContactPerson = "Sigrid Almkvist",
+                        ContactEmail = $"styrelsen@{MailDomain}",
+                        IsActive = true,
+                        RegistrationRequired = e.Registration,
+                        MaxParticipants = e.MaxParticipants > 0 ? e.MaxParticipants : 0,
+                        // Prisraderna, inte fritexten. Seed-data som skriver det gamla faltet hade
+                        // gjort varje ny demoklubb till en ny migrering att kora.
+                        PricesJson = e.Fee > 0
+                            ? HpskSite.Models.EventPrices.Serialize(
+                                new[] { new HpskSite.Models.EventPrice("avgift", "Avgift", e.Fee) })
+                            : "",
+                        LanevapenOffered = e.LoanWeapons,
+                        IsMandatory = e.Mandatory,
+                        RegistrationDeadline = e.Registration && e.Date > today ? e.Date.AddDays(-3).Date : null,
+                        IsPublished = true
+                    });
+
+                    if (error != null || newId == 0)
+                    {
+                        failures.Add($"Händelse '{e.Name}': {error ?? "kunde inte sparas."}");
                         continue;
                     }
-                    _contentService.Publish(node, new[] { "*" }, -1);
-                    eventNodes[e.Name] = node;
+                    eventIds[e.Name] = newId;
                     events++;
                 }
                 catch (Exception ex) { failures.Add($"Händelse '{e.Name}': {ex.Message}"); }
@@ -691,8 +699,8 @@ VALUES
                 if (courseId > 0)
                     signups += SeedParticipants(db, courseId, ClubEvents.OccasionTraining, 7, false, failures).Item1;
                 // Upprop på städdagen.
-                var stad = eventNodes.TryGetValue("Städdag på banan", out var stadNode)
-                    ? SeedParticipants(db, stadNode.Id, ClubEvents.OccasionEvent, 14, true, failures)
+                var stad = eventIds.TryGetValue("Städdag på banan", out var stadId)
+                    ? SeedParticipants(db, stadId, ClubEvents.OccasionEvent, 14, true, failures)
                     : (0, 0);
                 signups += stad.Item1;
                 attendance += stad.Item2;
