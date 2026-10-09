@@ -40,6 +40,7 @@ namespace HpskSite.Controllers
         // ContentService.Publish + orphaned ContentTree write locks (id -333) that
         // freeze the whole site. EnqueueBackground builds a fresh scope per task.
         private readonly IServiceScopeFactory _scopeFactory;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
         public CompetitionController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -59,7 +60,8 @@ namespace HpskSite.Controllers
             InvoiceAuditService auditService,
             MemberClubService memberClubService,
             RegistrationClubPropagationService clubPropagationService,
-            IServiceScopeFactory scopeFactory)
+            IServiceScopeFactory scopeFactory,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberClubService = memberClubService;
@@ -74,6 +76,7 @@ namespace HpskSite.Controllers
             _dpStartListService = dpStartListService;
             _auditService = auditService;
             _scopeFactory = scopeFactory;
+            _registrations = registrations;
         }
 
         /// <summary>
@@ -378,56 +381,6 @@ namespace HpskSite.Controllers
                     return RedirectToCurrentUmbracoPage();
                 }
 
-                IContent registrationsHub;
-                var competitionChildren = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
-                var existingHub = competitionChildren.FirstOrDefault(c =>
-                    c.ContentType.Alias == "competitionRegistrationsHub" ||
-                    c.Name.Contains("Anmälningar") ||
-                    c.Name.Contains("Registration"));
-
-                if (existingHub != null)
-                {
-                    registrationsHub = existingHub;
-                }
-                else
-                {
-                    try
-                    {
-                        var hubContentType = _contentTypeService.Get("competitionRegistrationsHub")
-                                          ?? _contentTypeService.Get("contentPage");
-
-                        var newHub = _contentService.Create("Anmälningar", competition, hubContentType.Alias);
-
-                        if (hubContentType.Alias == "contentPage")
-                        {
-                            newHub.SetValue("pageTitle", "Anmälningar");
-                            newHub.SetValue("bodyText", "<p>Alla anmälningar för denna tävling.</p>");
-                        }
-
-                        try { _contentService.Save(newHub); }
-                        catch (Exception ex) when (IsDocumentUrlTimeout(ex))
-                        {
-                            _logger.LogWarning("Hub saved but URL segment rebuild timed out (non-critical)");
-                        }
-                        registrationsHub = newHub;
-                        // Publish hub in background. Runs in a fresh DI scope so the
-                        // IContentService isn't the disposed request-scoped one (that
-                        // path leaks ContentTree write locks — see EnqueueBackground).
-                        var hubId = newHub.Id;
-                        EnqueueBackground(TimeSpan.FromSeconds(10), sp =>
-                        {
-                            var contentService = sp.GetRequiredService<IContentService>();
-                            var hub = contentService.GetById(hubId);
-                            if (hub != null) contentService.Publish(hub, new[] { "*" }, -1);
-                        }, $"publish registrationsHub {hubId}");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "REGISTRATION: Exception during hub creation, falling back to competition");
-                        registrationsHub = competition;
-                    }
-                }
-
                 // Parse start preferences (support both single preference and per-class preferences)
                 var startPreferencesDict = new Dictionary<string, string>();
                 if (!string.IsNullOrEmpty(startPreferencesJson))
@@ -504,20 +457,11 @@ namespace HpskSite.Controllers
                     TeamNumber = teamAssignments.TryGetValue(sc, out var tn) ? tn : null
                 }).ToList();
 
-                var shootingClassesJson = CompetitionRegistrationDocument.SerializeShootingClasses(shootingClassEntries);
+                // Befintlig anmälan — via anmälningslagringen (sajtstrukturen fas 1a), som läser alla
+                // anmälningar oavsett om de publicerats.
+                var existingRegistration = _registrations.FindForMember(competitionId, targetMember.Id);
 
-                // Check if registration already exists — reuse the hub we already found
-                IContent existingRegistration = null;
-                if (registrationsHub.Id != competition.Id)
-                {
-                    var hubRegistrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, 500, out _);
-                    existingRegistration = hubRegistrations.FirstOrDefault(r =>
-                        r.ContentType.Alias == "competitionRegistration" &&
-                        r.GetValue<int>("memberId") == targetMember.Id &&
-                        r.GetValue<int>("competitionId") == competitionId);
-                }
-
-                IContent registration;
+                HpskSite.Models.Registrations.RegistrationRecord registration;
                 bool isUpdate = false;
                 decimal oldFee = 0;
                 decimal newFee = 0;
@@ -530,30 +474,13 @@ namespace HpskSite.Controllers
 
                 if (existingRegistration != null)
                 {
-                    // Update existing registration
                     _logger.LogInformation("Found existing registration (ID: {RegId}) for member {MemberId}. Updating with classes: {Classes}",
                         existingRegistration.Id, targetMember.Id, string.Join(", ", selectedClassesList));
 
-                    // Calculate old fee from existing classes + stored isSubCompetition flag
-                    var oldClassesJson = existingRegistration.GetValue<string>("shootingClasses");
-                    if (!string.IsNullOrEmpty(oldClassesJson))
-                    {
-                        try
-                        {
-                            var oldClassEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(oldClassesJson);
-                            var oldClassNames = oldClassEntries
-                                .Select(e => e.Class)
-                                .Where(c => !string.IsNullOrEmpty(c))
-                                .ToList();
-                            var oldIsSubCompetition = existingRegistration.GetValue<bool>("isSubCompetition");
-                            oldFee = RegistrationFeeCalculator.Calculate(competition, oldClassNames, oldIsSubCompetition);
-                        }
-                        catch
-                        {
-                            _logger.LogWarning("Failed to parse old shooting classes JSON for registration {RegId}", existingRegistration.Id);
-                            oldFee = 0;
-                        }
-                    }
+                    // Old fee from the existing classes + stored isSubCompetition flag
+                    var oldClassNames = existingRegistration.ClassIds;
+                    if (oldClassNames.Count > 0)
+                        oldFee = RegistrationFeeCalculator.Calculate(competition, oldClassNames, existingRegistration.IsSubCompetition);
 
                     // A paid registration is NO LONGER blocked from changes. Adding/swapping/removing
                     // classes is reconciled after save via PaymentService.ReconcileRegistrationInvoiceAsync
@@ -563,50 +490,41 @@ namespace HpskSite.Controllers
                     // handled manually by the organizer). The client is told the outstanding amount via
                     // `amountDue` in the response so it can offer a Swish top-up.
 
-                    registration = existingRegistration;
+                    registration = existingRegistration.Clone();
                     isUpdate = true;
                 }
                 else
                 {
-                    // Create new registration
-                    var registrationName = $"{memberName} - {DateTime.Now:yyyy-MM-dd}";
-                    registration = _contentService.Create(registrationName, registrationsHub, "competitionRegistration");
+                    registration = new HpskSite.Models.Registrations.RegistrationRecord
+                    {
+                        CompetitionId = competitionId,
+                        MemberId = targetMember.Id,
+                        MemberName = memberName,
+                        IsActive = true,
+                        ClubId = clubId ?? 0
+                    };
                     _logger.LogInformation("Creating new registration for member {MemberId} with classes: {Classes}",
                         targetMember.Id, string.Join(", ", selectedClassesList));
-
-                    // Set properties that don't change (only set on creation)
-                    registration.SetValue("competitionId", competitionId);
-                    registration.SetValue("memberId", targetMember.Id);
-                    registration.SetValue("memberName", memberName);
-                    registration.SetValue("isActive", true); // Set registration as active by default
-                    if (clubId.HasValue)
-                    {
-                        registration.SetValue("clubId", clubId.Value);
-                    }
                 }
 
-                // Set/update properties that can change.
-                //
                 // clubId is re-applied on the UPDATE path too, but ONLY when the caller actually
                 // asked for a club. Re-registering (adding a class, say) must not silently drag a
                 // shooter who was correctly filed under their second club back to their primary
                 // one — which is exactly what stamping the resolved default here unconditionally
                 // would do, because the resolver falls back to primary whenever nothing is asked for.
-                if (isUpdate && representingClubId is > 0 && clubId.HasValue)
+                if (isUpdate && representingClubId is > 0 && clubId.HasValue && registration.ClubId != clubId.Value)
                 {
-                    var previousClubId = registration.GetValue<int>("clubId");
-                    if (previousClubId != clubId.Value)
-                    {
-                        registration.SetValue("clubId", clubId.Value);
-                        registrationClubChangedTo = clubId.Value;
-                    }
+                    registration.ClubId = clubId.Value;
+                    registrationClubChangedTo = clubId.Value;
                 }
 
-                registration.SetValue("shootingClasses", shootingClassesJson);
-                registration.SetValue("registrationDate", DateTime.Now); // Update to current timestamp
-                registration.SetValue("registeredBy", currentMemberData.Name); // Track who performed the registration/update
-                if (registration.HasProperty("isSubCompetition"))
-                    registration.SetValue("isSubCompetition", isSubCompetition);
+                // A re-registration always writes the class LIST (as it always has), even when the
+                // old registration carried a single legacy scalar class.
+                registration.Classes = shootingClassEntries;
+                registration.ClassesFromLegacyScalar = false;
+                registration.RegistrationDate = DateTime.Now; // Update to current timestamp
+                registration.RegisteredBy = currentMemberData.Name; // Track who performed the registration/update
+                registration.IsSubCompetition = isSubCompetition;
 
                 // Direktplacering: validate team availability under lock before saving
                 if (dpConfig != null)
@@ -639,13 +557,9 @@ namespace HpskSite.Controllers
                                         var remaining = teamEl.GetProperty("positionsRemaining").GetInt32();
                                         // If updating, the existing registration's spots are already counted,
                                         // so we get an extra spot per class that was in the same team
-                                        var existingInSameTeam = 0;
-                                        if (isUpdate && existingRegistration != null)
-                                        {
-                                            var oldClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(
-                                                existingRegistration.GetValue<string>("shootingClasses") ?? "");
-                                            existingInSameTeam = oldClasses.Count(c => c.TeamNumber == entry.TeamNumber.Value);
-                                        }
+                                        var existingInSameTeam = isUpdate && existingRegistration != null
+                                            ? existingRegistration.Classes.Count(c => c.TeamNumber == entry.TeamNumber.Value)
+                                            : 0;
 
                                         if (remaining + existingInSameTeam <= 0)
                                         {
@@ -662,11 +576,7 @@ namespace HpskSite.Controllers
                         }
 
                         // Save inside lock to prevent race conditions
-                        try { _contentService.Save(registration); }
-                        catch (Exception ex) when (IsDocumentUrlTimeout(ex))
-                        {
-                            _logger.LogWarning("Registration saved but URL segment rebuild timed out (non-critical) for regId={RegId}", registration.Id);
-                        }
+                        _registrations.Save(registration);
 
                         InvalidateDirektplaceringCache(competitionId);
 
@@ -689,33 +599,13 @@ namespace HpskSite.Controllers
                 }
                 else
                 {
-                // Save content — the DB transaction commits before notifications fire,
-                // so even if DocumentUrlService times out, the data IS persisted.
-                try
-                {
-                    _contentService.Save(registration);
+                    _registrations.Save(registration);
                 }
-                catch (Exception ex) when (IsDocumentUrlTimeout(ex))
-                {
-                    // SqlBulkCopy timeout in DocumentUrlService — data was saved, URL rebuild is non-critical
-                    _logger.LogWarning("Registration saved but URL segment rebuild timed out (non-critical) for regId={RegId}", registration.Id);
-                }
-                }
-                // Delayed fire-and-forget publish. Runs in a fresh DI scope (the previous
-                // capture-_contentService pattern is what was leaking ContentTree write
-                // locks (-333) on Simply.com — confirmed by the production trace log).
-                var registrationId_forPublish = registration.Id;
-                EnqueueBackground(TimeSpan.FromSeconds(10), sp =>
-                {
-                    var contentService = sp.GetRequiredService<IContentService>();
-                    var logger = sp.GetRequiredService<ILogger<CompetitionController>>();
-                    var content = contentService.GetById(registrationId_forPublish);
-                    if (content != null)
-                    {
-                        contentService.Publish(content, new[] { "*" }, -1);
-                        logger.LogInformation("Background publish completed for registration {RegId}", registrationId_forPublish);
-                    }
-                }, $"publish registration {registrationId_forPublish}");
+
+                // ⚠️ Ingen publicering längre (sajtstrukturen fas 1a). Anmälan publicerades förut
+                // 10 s senare i bakgrunden, och det misslyckades tyst under en opublicerad hubb — så
+                // den publicerade cachen höll bara en delmängd. Alla läsare går nu via lagringen.
+                var registrationIdForInvoice = registration.Id;
 
                 // Eager invoice: every new fee-bearing registration gets its Pending invoice
                 // up front (instead of one being lazily minted when a payment option is chosen).
@@ -736,9 +626,9 @@ namespace HpskSite.Controllers
                         var contextFactory = sp.GetRequiredService<IUmbracoContextFactory>();
                         using var contextRef = contextFactory.EnsureUmbracoContext();
                         var paymentService = sp.GetRequiredService<PaymentService>();
-                        paymentService.EnsureRegistrationInvoiceAsync(compIdForInvoice, registrationId_forPublish)
+                        paymentService.EnsureRegistrationInvoiceAsync(compIdForInvoice, registrationIdForInvoice)
                             .GetAwaiter().GetResult();
-                    }, $"ensure invoice for registration {registrationId_forPublish}");
+                    }, $"ensure invoice for registration {registrationIdForInvoice}");
                 }
                 else if (oldFee != newFee)
                 {
@@ -752,9 +642,9 @@ namespace HpskSite.Controllers
                         var contextFactory = sp.GetRequiredService<IUmbracoContextFactory>();
                         using var contextRef = contextFactory.EnsureUmbracoContext();
                         var paymentService = sp.GetRequiredService<PaymentService>();
-                        paymentService.ReconcileRegistrationInvoiceAsync(compIdForInvoice, registrationId_forPublish)
+                        paymentService.ReconcileRegistrationInvoiceAsync(compIdForInvoice, registrationIdForInvoice)
                             .GetAwaiter().GetResult();
-                    }, $"reconcile invoice for registration {registrationId_forPublish}");
+                    }, $"reconcile invoice for registration {registrationIdForInvoice}");
                 }
 
                 // A club correction on an existing registration must reach the start lists that
@@ -1649,15 +1539,8 @@ namespace HpskSite.Controllers
 
                 // PERFORMANCE FIX: Direct query to competition children instead of full tree traversal
                 var competitionChildren = _contentService.GetPagedChildren(competitionId.Value, 0, 100, out _).ToList();
-                var registrationsHub = competitionChildren
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-
-                // Get registrations directly from the hub (single query)
-                var registrationContents = registrationsHub != null
-                    ? _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
-                        .Where(c => c.ContentType.Alias == "competitionRegistration")
-                        .ToList()
-                    : new List<Umbraco.Cms.Core.Models.IContent>();
+                // Anmälningarna via anmälningslagringen (sajtstrukturen fas 1a).
+                var registrationContents = _registrations.List(competitionId.Value);
 
                 // PERFORMANCE FIX: Batch load payment status - pre-load all invoices once
                 var invoicesHub = competitionChildren
@@ -1829,25 +1712,25 @@ namespace HpskSite.Controllers
 
                 // PERFORMANCE FIX: Batch load club names - collect all unique club IDs first
                 var clubIdsToLoad = new HashSet<int>();
-                var memberIdsNeedingClubLookup = new List<(Umbraco.Cms.Core.Models.IContent content, int memberId)>();
+                var memberIdsNeedingClubLookup = new List<(HpskSite.Models.Registrations.RegistrationRecord content, int memberId)>();
 
                 foreach (var content in registrationContents)
                 {
-                    var clubId = content.GetValue<int>("clubId");
+                    var clubId = content.ClubId;
                     if (clubId > 0)
                     {
                         clubIdsToLoad.Add(clubId);
                     }
                     else
                     {
-                        var memberClubStr = content.GetValue<string>("memberClub");
+                        var memberClubStr = content.LegacyClubText;
                         if (!string.IsNullOrWhiteSpace(memberClubStr) && int.TryParse(memberClubStr, out var legacyClubId))
                         {
                             clubIdsToLoad.Add(legacyClubId);
                         }
                         else if (string.IsNullOrWhiteSpace(memberClubStr))
                         {
-                            var memberId = content.GetValue<int>("memberId");
+                            var memberId = content.MemberId;
                             if (memberId > 0)
                             {
                                 memberIdsNeedingClubLookup.Add((content, memberId));
@@ -1886,7 +1769,7 @@ namespace HpskSite.Controllers
                     if (webPush != null)
                     {
                         pushEnabledMemberIds = webPush.GetMemberIdsWithSubscriptions(
-                            registrationContents.Select(c => c.GetValue<int>("memberId")));
+                            registrationContents.Select(c => c.MemberId));
                     }
                 }
                 catch (Exception ex)
@@ -1899,11 +1782,11 @@ namespace HpskSite.Controllers
                 var registrations = registrationContents
                     .Select(content =>
                     {
-                        var memberId = content.GetValue<int>("memberId");
+                        var memberId = content.MemberId;
 
                         // Get club name from pre-loaded map
                         string clubName = "Unknown Club";
-                        var clubId = content.GetValue<int>("clubId");
+                        var clubId = content.ClubId;
 
                         if (clubId > 0)
                         {
@@ -1911,7 +1794,7 @@ namespace HpskSite.Controllers
                         }
                         else
                         {
-                            var memberClubStr = content.GetValue<string>("memberClub");
+                            var memberClubStr = content.LegacyClubText;
                             if (!string.IsNullOrWhiteSpace(memberClubStr) && int.TryParse(memberClubStr, out var legacyClubId))
                             {
                                 clubName = clubNameMap.TryGetValue(legacyClubId, out var name) ? name : $"Club {legacyClubId}";
@@ -1956,9 +1839,8 @@ namespace HpskSite.Controllers
                             reminderCount = remInfo.count;
                         }
 
-                        // Get shooting classes (new JSON array format)
-                        var shootingClassesJson = content.GetValue<string>("shootingClasses");
-                        var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
+                        // Klasserna, redan tolkade av lagringen (alla lagrade former).
+                        var shootingClasses = content.Classes;
 
                         // Fallback for "Saknar betalning" rows: when no invoice exists yet
                         // the maps don't carry an amount, so the manage-payment modal shows
@@ -1966,7 +1848,7 @@ namespace HpskSite.Controllers
                         // shows the real fee. Surface the expected fee here so both surfaces
                         // agree — the invoice gets created lazily on QR-generate / mark-paid.
                         var classIdsForFee = shootingClasses.Select(sc => sc.Class).ToList();
-                        var isSubCompForFee = content.GetValue<bool>("isSubCompetition");
+                        var isSubCompForFee = content.IsSubCompetition;
                         var fullFee = RegistrationFeeCalculator.Calculate(competition, classIdsForFee, isSubCompForFee);
 
                         if (paymentAmount == 0m && invoiceId == 0)
@@ -2044,15 +1926,15 @@ namespace HpskSite.Controllers
                         {
                             id = content.Id,
                             memberId = memberId,
-                            memberName = content.GetValue<string>("memberName") ?? "Unknown Member",
+                            memberName = string.IsNullOrEmpty(content.MemberName) ? "Unknown Member" : content.MemberName,
                             memberClub = clubName,
                             // The stored club id (0 on legacy rows whose club was only ever derived
                             // at read time). The Redigera-anmälan club dropdown needs the ID, not
                             // just the resolved name, to know which option is currently selected.
                             memberClubId = clubId,
                             shootingClasses = shootingClassesWithNames,
-                            registrationDate = content.GetValue<DateTime>("registrationDate"),
-                            isActive = content.GetValue<bool>("isActive"),
+                            registrationDate = content.RegistrationDate,
+                            isActive = content.IsActive,
                             paymentStatus = paymentStatus,
                             invoiceId = invoiceId,
                             paymentAmount = paymentAmount,
@@ -2066,8 +1948,8 @@ namespace HpskSite.Controllers
                             outstandingAmount = outstandingAmount,
                             fullFee = fullFee,
                             hasVariance = hasVariance,
-                            isCheckedIn = content.GetValue<bool>("isCheckedIn"),
-                            isSubCompetition = content.HasProperty("isSubCompetition") && content.GetValue<bool>("isSubCompetition"),
+                            isCheckedIn = content.IsCheckedIn,
+                            isSubCompetition = content.IsSubCompetition,
                             paymentSentDate = paymentSentDate,
                             paymentSentBy = paymentSentBy,
                             lastReminderSentDate = lastReminderSentDate,
@@ -2149,33 +2031,23 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Competition not found" });
                 }
 
-                // Direct child query (no full-tree traversal). No r.Published filter —
-                // registrations are Save()d synchronously and Publish() is deferred, so
-                // requiring Published would hide freshly-registered shooters here too.
-                var competitionChildren = _contentService.GetPagedChildren(competitionId, 0, 100, out _).ToList();
-                var registrationsHub = competitionChildren
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-
-                var registrationContents = registrationsHub != null
-                    ? _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
-                        .Where(c => c.ContentType.Alias == "competitionRegistration")
-                        .ToList()
-                    : new List<IContent>();
+                // Via anmälningslagringen (sajtstrukturen fas 1a) — alla anmälningar, publicerade eller inte.
+                var registrationContents = _registrations.List(competitionId);
 
                 // Batch-resolve club names (same precedence as the admin endpoint:
                 // explicit clubId → legacy memberClub → member's primaryClubId).
                 var clubIdsToLoad = new HashSet<int>();
-                var memberIdsNeedingClubLookup = new List<(IContent content, int memberId)>();
+                var memberIdsNeedingClubLookup = new List<(HpskSite.Models.Registrations.RegistrationRecord content, int memberId)>();
                 foreach (var content in registrationContents)
                 {
-                    var clubId = content.GetValue<int>("clubId");
+                    var clubId = content.ClubId;
                     if (clubId > 0) { clubIdsToLoad.Add(clubId); continue; }
-                    var memberClubStr = content.GetValue<string>("memberClub");
+                    var memberClubStr = content.LegacyClubText;
                     if (!string.IsNullOrWhiteSpace(memberClubStr) && int.TryParse(memberClubStr, out var legacyClubId))
                         clubIdsToLoad.Add(legacyClubId);
                     else if (string.IsNullOrWhiteSpace(memberClubStr))
                     {
-                        var memberId = content.GetValue<int>("memberId");
+                        var memberId = content.MemberId;
                         if (memberId > 0) memberIdsNeedingClubLookup.Add((content, memberId));
                     }
                 }
@@ -2192,17 +2064,17 @@ namespace HpskSite.Controllers
 
                 var registrations = registrationContents.Select(content =>
                 {
-                    var memberId = content.GetValue<int>("memberId");
+                    var memberId = content.MemberId;
 
                     string clubName = "Okänd klubb";
-                    var clubId = content.GetValue<int>("clubId");
+                    var clubId = content.ClubId;
                     if (clubId > 0)
                     {
                         clubName = clubNameMap.TryGetValue(clubId, out var name) ? name : $"Club {clubId}";
                     }
                     else
                     {
-                        var memberClubStr = content.GetValue<string>("memberClub");
+                        var memberClubStr = content.LegacyClubText;
                         if (!string.IsNullOrWhiteSpace(memberClubStr) && int.TryParse(memberClubStr, out var legacyClubId))
                             clubName = clubNameMap.TryGetValue(legacyClubId, out var name) ? name : $"Club {legacyClubId}";
                         else if (!string.IsNullOrWhiteSpace(memberClubStr))
@@ -2216,8 +2088,7 @@ namespace HpskSite.Controllers
                         }
                     }
 
-                    var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(
-                        content.GetValue<string>("shootingClasses"));
+                    var shootingClasses = content.Classes;
 
                     var shootingClassesWithNames = shootingClasses.Select(sc => new
                     {
@@ -2230,7 +2101,7 @@ namespace HpskSite.Controllers
                     return new
                     {
                         memberId = memberId,
-                        memberName = content.GetValue<string>("memberName") ?? "Okänd",
+                        memberName = string.IsNullOrEmpty(content.MemberName) ? "Okänd" : content.MemberName,
                         memberClub = clubName,
                         shootingClasses = shootingClassesWithNames
                     };
@@ -2360,260 +2231,7 @@ namespace HpskSite.Controllers
 
         #endregion
 
-        #region Hub Testing
-
-        [HttpGet]
-        [HttpPost]
-        public IActionResult TestHubCreation(int competitionId)
-        {
-            try
-            {
-                _logger.LogInformation("TEST: TestHubCreation called with competitionId: {CompetitionId}", competitionId);
-
-                if (competitionId <= 0)
-                {
-                    _logger.LogWarning("TEST: Invalid competition ID provided: {CompetitionId}", competitionId);
-                    return Json(new { success = false, message = "Invalid competition ID" });
-                }
-
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null)
-                {
-                    _logger.LogWarning("TEST: Competition not found: {CompetitionId}", competitionId);
-                    return Json(new { success = false, message = "Competition not found" });
-                }
-
-                _logger.LogInformation("TEST: Starting hub creation test for competition {CompetitionId}", competitionId);
-
-                // First check if document type exists
-                var hubDocType = _contentTypeService.Get("competitionRegistrationsHub");
-                var contentPageDocType = _contentTypeService.Get("contentPage");
-
-                // Check for existing hub
-                var children = _contentService.GetPagedChildren(competition.Id, 0, 100, out _);
-                var existingHub = children.FirstOrDefault(c =>
-                    c.ContentType.Alias == "competitionRegistrationsHub" ||
-                    c.Name.Contains("Anmälningar") ||
-                    c.Name.Contains("Registration"));
-
-                var debugInfo = new {
-                    competitionId = competition.Id,
-                    competitionName = competition.Name,
-                    competitionAlias = competition.ContentType.Alias,
-                    childrenCount = children.Count(),
-                    hubDocTypeFound = hubDocType != null,
-                    contentPageDocTypeFound = contentPageDocType != null,
-                    existingHubFound = existingHub != null,
-                    existingHubId = existingHub?.Id,
-                    existingHubName = existingHub?.Name,
-                    existingHubAlias = existingHub?.ContentType.Alias
-                };
-
-                // Clean up any existing test hub
-                var testHub = children.FirstOrDefault(c => c.Name == "TEST-Anmälningar");
-                if (testHub != null)
-                {
-                    _contentService.Delete(testHub);
-                }
-
-                var hub = GetOrCreateRegistrationsHub(competition);
-
-                if (hub == null)
-                {
-                    return Json(new { success = false, message = "Failed to create hub", debug = debugInfo });
-                }
-
-                var isActualHub = hub.Id != competition.Id;
-
-                return Json(new {
-                    success = true,
-                    message = $"Hub created/found: {hub.Name} (ID: {hub.Id})",
-                    hubId = hub.Id,
-                    hubName = hub.Name,
-                    hubAlias = hub.ContentType.Alias,
-                    isActualHub = isActualHub,
-                    isCompetitionFallback = !isActualHub,
-                    debug = debugInfo
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in TestHubCreation");
-                return Json(new { success = false, message = ex.Message });
-            }
-        }
-
-        #endregion
-
         #region Hub Management
-
-        private IContent? GetOrCreateRegistrationsHub(IContent competition)
-        {
-            try
-            {
-                _logger.LogInformation("Looking for registrations hub under competition {CompetitionId}", competition.Id);
-
-                // First, check if a registrations hub already exists
-                var children = _contentService.GetPagedChildren(competition.Id, 0, 100, out _);
-                _logger.LogInformation("Found {ChildCount} children under competition", children.Count());
-
-                var existingHub = children.FirstOrDefault(c =>
-                    c.ContentType.Alias == "competitionRegistrationsHub" ||
-                    c.Name.Contains("Anmälningar") ||
-                    c.Name.Contains("Registration"));
-
-                if (existingHub != null)
-                {
-                    _logger.LogInformation("Found existing registrations hub: {HubName} (ID: {HubId}, Alias: {Alias})", existingHub.Name, existingHub.Id, existingHub.ContentType.Alias);
-                    return existingHub;
-                }
-
-                // Check if hub document type exists
-                _logger.LogInformation("Checking for document type 'competitionRegistrationsHub'");
-                var hubContentType = _contentTypeService.Get("competitionRegistrationsHub");
-                if (hubContentType == null)
-                {
-                    // Create hub as a simple content page if specific type doesn't exist
-                    _logger.LogWarning("Document type 'competitionRegistrationsHub' not found, using 'contentPage'");
-                    hubContentType = _contentTypeService.Get("contentPage");
-
-                    if (hubContentType == null)
-                    {
-                        _logger.LogError("No suitable document type found for registrations hub - RETURNING COMPETITION AS FALLBACK");
-                        return competition; // Fall back to creating directly under competition
-                    }
-                }
-                else
-                {
-                    _logger.LogInformation("Found document type 'competitionRegistrationsHub'");
-                }
-
-                // Create the hub
-                var hubName = "Anmälningar";
-                _logger.LogInformation("Creating hub '{HubName}' with document type '{Alias}' under competition {CompetitionId}", hubName, hubContentType.Alias, competition.Id);
-                var hub = _contentService.Create(hubName, competition, hubContentType.Alias);
-
-                // Set properties if it's a content page
-                if (hubContentType.Alias == "contentPage")
-                {
-                    _logger.LogInformation("Setting properties for contentPage hub");
-                    hub.SetValue("pageTitle", "Anmälningar");
-                    hub.SetValue("bodyText", "<p>Alla anmälningar för denna tävling.</p>");
-                }
-                else
-                {
-                    _logger.LogInformation("Setting properties for competitionRegistrationsHub");
-                    // Set hub-specific properties if using proper hub document type
-                    hub.SetValue("description", "Alla anmälningar för denna tävling.");
-                    hub.SetValue("registrationDeadline", DateTime.Now.AddDays(30)); // Example deadline
-                    hub.SetValue("maxParticipants", 100); // Example limit
-                }
-
-                _logger.LogInformation("Saving hub...");
-                var saveResult = _contentService.Save(hub);
-                if (saveResult.Success)
-                {
-                    _logger.LogInformation("Hub saved successfully, publishing...");
-                    var publishResult = _contentService.Publish(hub, new[] { "*" }, -1);
-                    if (publishResult.Success)
-                    {
-                        _logger.LogInformation("Created registrations hub '{HubName}' (ID: {HubId}) for competition {CompetitionId}", hubName, hub.Id, competition.Id);
-                        return hub;
-                    }
-                    else
-                    {
-                        _logger.LogError("Failed to publish registrations hub - but returning saved hub anyway");
-                        // Return the saved hub even if publishing failed
-                        return hub;
-                    }
-                }
-                else
-                {
-                    _logger.LogError("Failed to save registrations hub with {MessageCount} errors - returning competition as fallback", saveResult.EventMessages?.Count ?? 0);
-                }
-
-                _logger.LogError("Failed to create or publish registrations hub for competition {CompetitionId} - RETURNING COMPETITION AS FALLBACK", competition.Id);
-                return competition; // Fall back to creating directly under competition
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error creating registrations hub for competition {CompetitionId} - RETURNING COMPETITION AS FALLBACK", competition.Id);
-                return competition; // Fall back to creating directly under competition
-            }
-        }
-
-        /// <summary>
-        /// Checks if an exception is a SqlBulkCopy timeout from DocumentUrlService.
-        /// This occurs during Save() but the content data IS committed (transaction commits before notifications).
-        /// </summary>
-        private static bool IsDocumentUrlTimeout(Exception ex)
-        {
-            // AggregateException wrapping SqlException with error -2 (timeout)
-            var inner = ex is AggregateException agg ? agg.InnerException : ex;
-            if (inner is Microsoft.Data.SqlClient.SqlException sqlEx && sqlEx.Number == -2)
-            {
-                // Verify it's from DocumentUrlService by checking stack trace
-                return ex.ToString().Contains("DocumentUrlRepository") || ex.ToString().Contains("DocumentUrlService");
-            }
-            return false;
-        }
-
-        /// <summary>
-        /// Finds an existing registration for a member in a specific shooting class
-        /// Returns null if no registration exists
-        /// </summary>
-        private IContent FindExistingRegistration(int competitionId, int memberId, string shootingClass = null)
-        {
-            try
-            {
-                // Get competition
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null) return null;
-
-                // Find registrations hub
-                var children = _contentService.GetPagedChildren(competition.Id, 0, 100, out _);
-                var registrationsHub = children.FirstOrDefault(c =>
-                    c.ContentType.Alias == "competitionRegistrationsHub" ||
-                    c.Name.Contains("Anmälningar") ||
-                    c.Name.Contains("Registration"));
-
-                if (registrationsHub == null) return null;
-
-                // Get registration nodes under the hub with pagination to avoid timeout
-                // Use reasonable page size and check multiple pages if needed
-                const int pageSize = 500;
-                int pageIndex = 0;
-                long totalRecords;
-
-                do
-                {
-                    var pageRegistrations = _contentService.GetPagedChildren(registrationsHub.Id, pageIndex, pageSize, out totalRecords);
-
-                    // Find matching registration in this page
-                    // NEW: Match by competitionId + memberId only (one registration per user per competition)
-                    var existingRegistration = pageRegistrations
-                        .FirstOrDefault(r =>
-                            r.ContentType.Alias == "competitionRegistration" &&
-                            r.GetValue<int>("memberId") == memberId &&
-                            r.GetValue<int>("competitionId") == competitionId);
-
-                    if (existingRegistration != null)
-                    {
-                        return existingRegistration;
-                    }
-
-                    pageIndex++;
-                } while ((pageIndex * pageSize) < totalRecords);
-
-                return null;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error finding existing registration for member {MemberId}, competition {CompetitionId}, class {ShootingClass}",
-                    memberId, competitionId, shootingClass);
-                return null;
-            }
-        }
 
         /// <summary>
         /// Gets existing registrations for a specific member in a competition
@@ -2698,55 +2316,16 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
                 }
 
-                // Find registrations hub
-                var children = _contentService.GetPagedChildren(competition.Id, 0, 100, out _);
-                var registrationsHub = children.FirstOrDefault(c =>
-                    c.ContentType.Alias == "competitionRegistrationsHub" ||
-                    c.Name.Contains("Anmälningar") ||
-                    c.Name.Contains("Registration"));
-
-                var existingRegistrations = new List<object>();
-
-                if (registrationsHub != null)
-                {
-                    // Get all registration nodes under the hub (including unpublished)
-                    // GetPagedChildren only returns published nodes, so we query all descendants
-                    var allPublishedRegistrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, int.MaxValue, out _);
-
-                    // Get unpublished registrations by querying all descendants
-                    var allDescendants = _contentService.GetPagedDescendants(registrationsHub.Id, 0, int.MaxValue, out _);
-
-                    // Combine published and unpublished, then deduplicate by Id
-                    var allRegistrations = allPublishedRegistrations
-                        .Union(allDescendants)
-                        .Where(r => r.ContentType.Alias == "competitionRegistration")
-                        .GroupBy(r => r.Id)
-                        .Select(g => g.First())
-                        .ToList();
-
-                    // Filter by memberId and competitionId
-                    existingRegistrations = allRegistrations
-                        .Where(r => r.GetValue<int>("memberId") == targetMemberId &&
-                                   r.GetValue<int>("competitionId") == competitionId)
-                        .Select(r =>
-                        {
-                            // Get the NEW shootingClasses JSON array
-                            var shootingClassesJson = r.GetValue<string>("shootingClasses");
-                            var shootingClasses = string.IsNullOrEmpty(shootingClassesJson)
-                                ? new List<ShootingClassEntry>()
-                                : CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
-
-                            return new
-                            {
-                                id = r.Id,
-                                shootingClasses = shootingClasses,  // ✅ Returns array of class objects
-                                registrationDate = r.GetValue<DateTime>("registrationDate"),
-                                isPublished = r.Published,
-                                isSubCompetition = r.HasProperty("isSubCompetition") && r.GetValue<bool>("isSubCompetition")
-                            };
-                        })
-                        .ToList<object>();
-                }
+                // Via anmälningslagringen (sajtstrukturen fas 1a) — alla anmälningar, publicerade eller inte.
+                var existingRegistrations = _registrations.ListForMemberInCompetition(competitionId, targetMemberId)
+                    .Select(r => (object)new
+                    {
+                        id = r.Id,
+                        shootingClasses = r.Classes,
+                        registrationDate = r.RegistrationDate,
+                        isSubCompetition = r.IsSubCompetition
+                    })
+                    .ToList();
 
                 return Json(new
                 {
@@ -2758,244 +2337,6 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting member registrations for competition {CompetitionId}", competitionId);
-                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
-            }
-        }
-
-        /// <summary>
-        /// Replaces an existing registration with a new shooting class
-        /// Used when user wants to change from one class to another within same weapon type
-        /// </summary>
-        [HttpPost]
-        public async Task<IActionResult> ReplaceRegistration(int registrationIdToDelete, int competitionId, int? memberId, string newShootingClass, string startPreference)
-        {
-            try
-            {
-                // Get current member
-                var currentMember = await _memberManager.GetCurrentMemberAsync();
-                if (currentMember == null)
-                {
-                    return Json(new { success = false, message = "Du måste vara inloggad." });
-                }
-
-                var currentMemberData = _memberService.GetById(currentMember.Key);
-
-                // Determine target member
-                IMember targetMember = currentMemberData; // Default to current member
-                if (memberId.HasValue && memberId.Value > 0)
-                {
-                    // Check authorization for registering on behalf of another member
-                    bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                    bool canRegisterForMember = isSiteAdmin;
-
-                    // Get the target member
-                    var requestedMember = _memberService.GetById(memberId.Value);
-                    if (requestedMember == null)
-                    {
-                        return Json(new { success = false, message = "Målmedlemmen kunde inte hittas." });
-                    }
-
-                    if (!isSiteAdmin)
-                    {
-                        // Club admins can register for members in their clubs
-                        var targetMemberClubId = requestedMember.GetValue<string>("primaryClubId");
-                        if (!string.IsNullOrEmpty(targetMemberClubId) && int.TryParse(targetMemberClubId, out int targetClubId))
-                        {
-                            canRegisterForMember = await _authorizationService.IsClubAdminForClub(targetClubId);
-                        }
-                    }
-
-                    if (!canRegisterForMember)
-                    {
-                        return Json(new { success = false, message = "Du har inte behörighet att ersätta denna anmälan." });
-                    }
-
-                    targetMember = requestedMember;
-                }
-
-                // Get the registration to delete
-                var oldRegistration = _contentService.GetById(registrationIdToDelete);
-                if (oldRegistration == null)
-                {
-                    return Json(new { success = false, message = "Den befintliga anmälan kunde inte hittas." });
-                }
-
-                // Verify ownership
-                var regMemberId = oldRegistration.GetValue<int>("memberId");
-                if (regMemberId != targetMember.Id)
-                {
-                    return Json(new { success = false, message = "Du kan inte ersätta en annan medlems anmälan." });
-                }
-
-                var oldShootingClass = oldRegistration.GetValue<string>("shootingClass");
-
-                // Delete old registration
-                _contentService.Unpublish(oldRegistration);
-                _contentService.Delete(oldRegistration);
-
-                // Create new registration (reuse logic from RegisterForCompetition)
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null)
-                {
-                    return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
-                }
-
-                // Get or create registrations hub
-                var registrationsHub = GetOrCreateRegistrationsHub(competition);
-                if (registrationsHub == null)
-                {
-                    return Json(new { success = false, message = "Kunde inte skapa anmälningshub." });
-                }
-
-                // Create new registration
-                var memberName = $"{targetMember.GetValue<string>("firstName")} {targetMember.GetValue<string>("lastName")}";
-                var registrationName = $"{memberName} - {HpskSite.Models.ShootingClasses.DisplayName(newShootingClass)} - {DateTime.Now:yyyy-MM-dd}";
-                var newRegistration = _contentService.Create(registrationName, registrationsHub, "competitionRegistration");
-
-                // Set properties
-                newRegistration.SetValue("competitionId", competitionId);
-                newRegistration.SetValue("memberId", targetMember.Id);
-                newRegistration.SetValue("memberName", memberName);
-                newRegistration.SetValue("shootingClass", newShootingClass);
-                newRegistration.SetValue("startPreference", startPreference ?? "Inget");
-                newRegistration.SetValue("registrationDate", DateTime.Now);
-                newRegistration.SetValue("registeredBy", currentMemberData.Name);
-
-                // Save and publish
-                _contentService.Save(newRegistration);
-                _contentService.Publish(newRegistration, new[] { "*" }, -1);
-
-                return Json(new
-                {
-                    success = true,
-                    message = $"Anmälan ersatt: {HpskSite.Models.ShootingClasses.DisplayName(oldShootingClass)} → {HpskSite.Models.ShootingClasses.DisplayName(newShootingClass)}",
-                    oldClass = oldShootingClass,
-                    newClass = newShootingClass,
-                    registrationId = newRegistration.Id
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error replacing registration {RegistrationId} with new class {NewClass}",
-                    registrationIdToDelete, newShootingClass);
-                return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
-            }
-        }
-
-        /// <summary>
-        /// Admin endpoint to cleanup duplicate registrations
-        /// Keeps the most recent registration for each (competitionId, memberId, shootingClass) combination
-        /// </summary>
-        [HttpPost]
-        public async Task<IActionResult> CleanupDuplicateRegistrations(int? competitionId = null)
-        {
-            try
-            {
-                // Check if user is site admin
-                var isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                if (!isSiteAdmin)
-                {
-                    return Json(new { success = false, message = "Du måste vara administratör för att köra denna funktion." });
-                }
-
-                var duplicatesFound = 0;
-                var duplicatesRemoved = 0;
-                var errors = new List<string>();
-
-                // Get all competitions or specific competition
-                IEnumerable<IContent> competitions;
-                if (competitionId.HasValue)
-                {
-                    var comp = _contentService.GetById(competitionId.Value);
-                    if (comp == null)
-                    {
-                        return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
-                    }
-                    competitions = new[] { comp };
-                }
-                else
-                {
-                    // Get all competitions (this could be optimized with proper query)
-                    var competitionType = _contentTypeService.Get("competition");
-                    if (competitionType == null)
-                    {
-                        return Json(new { success = false, message = "Competition document type not found." });
-                    }
-                    var allContent = _contentService.GetPagedOfType(competitionType.Id, 0, int.MaxValue, out var total, null);
-                    competitions = allContent;
-                }
-
-                foreach (var competition in competitions)
-                {
-                    // Find registrations hub
-                    var children = _contentService.GetPagedChildren(competition.Id, 0, 100, out _);
-                    var registrationsHub = children.FirstOrDefault(c =>
-                        c.ContentType.Alias == "competitionRegistrationsHub" ||
-                        c.Name.Contains("Anmälningar") ||
-                        c.Name.Contains("Registration"));
-
-                    if (registrationsHub == null) continue;
-
-                    // Get all registration nodes under the hub
-                    var allRegistrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, int.MaxValue, out _)
-                        .Where(r => r.ContentType.Alias == "competitionRegistration")
-                        .ToList();
-
-                    // Group by (competitionId, memberId) only - NEW: One registration per user per competition
-                    var registrationGroups = allRegistrations
-                        .GroupBy(r => new
-                        {
-                            CompetitionId = r.GetValue<int>("competitionId"),
-                            MemberId = r.GetValue<int>("memberId")
-                        })
-                        .Where(g => g.Count() > 1); // Only groups with duplicates
-
-                    foreach (var group in registrationGroups)
-                    {
-                        duplicatesFound += group.Count() - 1;
-
-                        // Sort by registrationDate descending (most recent first)
-                        var orderedRegistrations = group
-                            .OrderByDescending(r => r.GetValue<DateTime>("registrationDate"))
-                            .ToList();
-
-                        // Keep the first (most recent), delete the rest
-                        var toKeep = orderedRegistrations.First();
-                        var toDelete = orderedRegistrations.Skip(1).ToList();
-
-                        foreach (var duplicate in toDelete)
-                        {
-                            try
-                            {
-                                _logger.LogInformation("Deleting duplicate registration ID {RegId} for member {MemberId} (keeping ID {KeepId})",
-                                    duplicate.Id, group.Key.MemberId, toKeep.Id);
-
-                                // Unpublish first, then delete
-                                _contentService.Unpublish(duplicate);
-                                _contentService.Delete(duplicate);
-                                duplicatesRemoved++;
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogError(ex, "Error deleting duplicate registration ID {RegId}", duplicate.Id);
-                                errors.Add($"Failed to delete registration ID {duplicate.Id}: {ex.Message}");
-                            }
-                        }
-                    }
-                }
-
-                return Json(new
-                {
-                    success = true,
-                    duplicatesFound = duplicatesFound,
-                    duplicatesRemoved = duplicatesRemoved,
-                    errors = errors,
-                    message = $"Cleanup complete. Found {duplicatesFound} duplicates, removed {duplicatesRemoved}."
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during cleanup of duplicate registrations");
                 return Json(new { success = false, message = "Ett fel uppstod: " + ex.Message });
             }
         }
@@ -3035,13 +2376,7 @@ namespace HpskSite.Controllers
 
         private object BuildTeamAvailability(int competitionId, IContent competition, DirektplaceringConfig config)
         {
-            // Find registrations hub and count occupancy per team
-            var competitionChildren = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
-            var registrationsHub = competitionChildren.FirstOrDefault(c =>
-                c.ContentType.Alias == "competitionRegistrationsHub" ||
-                c.Name.Contains("Anmälningar") ||
-                c.Name.Contains("Registration"));
-
+            // Occupancy per team, counted from the registrations (via the registration store).
             // Count team assignments from existing registrations
             var teamCounts = new Dictionary<int, Dictionary<string, int>>(); // teamNumber -> { weaponGroup -> count }
             foreach (var team in config.Teams)
@@ -3049,19 +2384,12 @@ namespace HpskSite.Controllers
                 teamCounts[team.TeamNumber] = new Dictionary<string, int>();
             }
 
-            if (registrationsHub != null)
             {
-                var registrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
-                    .Where(c => c.ContentType.Alias == "competitionRegistration")
-                    .ToList();
+                var registrations = _registrations.List(competitionId);
 
                 foreach (var reg in registrations)
                 {
-                    var classesJson = reg.GetValue<string>("shootingClasses");
-                    if (string.IsNullOrWhiteSpace(classesJson)) continue;
-
-                    var classes = CompetitionRegistrationDocument.DeserializeShootingClasses(classesJson);
-                    foreach (var entry in classes)
+                    foreach (var entry in reg.Classes)
                     {
                         if (!entry.TeamNumber.HasValue) continue;
                         var teamNum = entry.TeamNumber.Value;

@@ -3946,67 +3946,6 @@ function openBokforingsUnderlagWithMode(includeOutstanding) {
     window.open(url, '_blank');
 }
 
-function testHubCreation() {
-    const currentCompetitionId = $('.competition-registration-management').data('competition-id');
-
-    if (!currentCompetitionId) {
-        alert('Competition ID not found');
-        return;
-    }
-
-    // Show loading
-    const button = event.target;
-    const originalText = button.innerHTML;
-    button.innerHTML = '<i class="bi bi-gear-fill"></i> Testing...';
-    button.disabled = true;
-
-    // Test hub creation - try GET first to avoid CSRF issues
-    fetch(`/umbraco/surface/Competition/TestHubCreation?competitionId=${currentCompetitionId}`, {
-        method: 'GET'
-    })
-    .then(response => response.json())
-    .then(data => {
-        console.log('=== HUB TEST RESULT ===');
-        console.log('Full Response:', data);
-        console.log('Success:', data.success);
-        console.log('Message:', data.message);
-        console.log('Hub ID:', data.hubId);
-        console.log('Hub Name:', data.hubName);
-        console.log('Hub Alias:', data.hubAlias);
-        console.log('Is Actual Hub:', data.isActualHub);
-        console.log('Is Competition Fallback:', data.isCompetitionFallback);
-        console.log('=== DEBUG INFO ===');
-        console.log('Competition ID:', data.debug?.competitionId);
-        console.log('Competition Name:', data.debug?.competitionName);
-        console.log('Children Count:', data.debug?.childrenCount);
-        console.log('Hub Doc Type Found:', data.debug?.hubDocTypeFound);
-        console.log('ContentPage Doc Type Found:', data.debug?.contentPageDocTypeFound);
-        console.log('Existing Hub Found:', data.debug?.existingHubFound);
-        console.log('Existing Hub ID:', data.debug?.existingHubId);
-        console.log('Existing Hub Name:', data.debug?.existingHubName);
-        console.log('Existing Hub Alias:', data.debug?.existingHubAlias);
-        console.log('==================');
-
-        if (data.success) {
-            alert(`✅ SUCCESS!\n\nHub: ${data.hubName}\nID: ${data.hubId}\nType: ${data.hubAlias}\n\nMessage: ${data.message}\n\nCheck console for detailed logs.`);
-        } else {
-            alert(`❌ FAILED!\n\nError: ${data.message}\n\nCheck console for details.`);
-        }
-
-        // Reset button
-        button.innerHTML = originalText;
-        button.disabled = false;
-    })
-    .catch(error => {
-        console.error('Test Error:', error);
-        alert('❌ Test failed - check console for details');
-
-        // Reset button
-        button.innerHTML = originalText;
-        button.disabled = false;
-    });
-}
-
 // ──────────────────────────────────────────────────────────────────────
 // Tävlar för — which of the shooter's clubs a registration is filed under
 //
