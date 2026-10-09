@@ -5863,7 +5863,8 @@ function renderClubTrainingGroups() {
         '<th>Namn</th><th>Start</th><th class="text-center">Deltagare</th><th>Instruktörer</th><th>Nästa tillfälle</th><th></th></tr></thead><tbody>';
     list.forEach(g => {
         const s = clubTgSummaries[g.id] || {};
-        const participants = Math.max(0, (g.memberCount || 0) - (g.trainerCount || 0));
+        // memberCount räknar redan bara deltagare (Role = 'Member') — dra inte av instruktörerna.
+        const participants = g.memberCount || 0;
         const trainers = (s.trainers || []).length ? hpskEsc(s.trainers.join(', ')) : '<span class="text-muted">ingen utsedd</span>';
         const next = s.nextDate
             ? `<div class="text-nowrap">${hpskEsc(clubTgDay(s.nextDate))}${s.nextTime ? ' ' + hpskEsc(s.nextTime) : ''}</div><div class="small text-muted">${hpskEsc(s.nextName || '')}</div>`
