@@ -75,12 +75,16 @@ namespace HpskSite.Services
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+
         public MemberMergeService(
             IMemberService memberService,
             IContentService contentService,
             IScopeProvider scopeProvider,
-            ILogger<MemberMergeService> logger)
+            ILogger<MemberMergeService> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
+            _registrations = registrations;
             _memberService = memberService;
             _contentService = contentService;
             _scopeProvider = scopeProvider;
@@ -554,50 +558,24 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Competition registrations are Umbraco content nodes carrying a memberId property, not
-        /// rows — and they are saved unpublished, so they are re-saved, never published.
-        ///
-        /// LEFT(..., 20) är inte kosmetik. TRY_CONVERT(INT, x) returnerar INTE NULL när x är längre
-        /// än 4000 tecken — den kastar 8152 "String or binary data would be truncated", och TRY_
-        /// sväljer bara misslyckade konverteringar, aldrig trunkeringsfel. Optimeraren får dessutom
-        /// utvärdera villkoret FÖRE filtret på pt.Alias, så ETT enda överstort textValue var som
-        /// helst i umbracoPropertyData (en RTE-text, en block list) slog ut hela sammanslagningen
-        /// — i prod, aldrig i dev där ingen rad var så lång. Att korta strängen först gör
-        /// konverteringen omöjlig att spränga. Vanligaste vägen är ändå intValue, som jämförs direkt.
+        /// Flyttar förlorarens tävlingsanmälningar till överlevaren, via anmälningslagringen
+        /// (sajtstrukturen fas 1a). Bara medlems-id:t skrivs om — namnet på anmälan är en ögonblicksbild
+        /// av vem som anmälde sig, som förut. En anmälan som inte går att flytta (till exempel för att
+        /// överlevaren redan är anmäld till samma tävling) räknas som ett fel och namnges.
         /// </summary>
         private void MoveRegistrations(int survivorId, int loserId, MergeResult result)
         {
-            List<int> nodeIds;
-            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
-            {
-                nodeIds = scope.Database.Fetch<int>(
-                    @"SELECT n.id
-                      FROM umbracoNode n
-                      JOIN umbracoContent c         ON c.nodeId = n.id
-                      JOIN cmsContentType ct        ON ct.nodeId = c.contentTypeId AND ct.alias = 'competitionRegistration'
-                      JOIN umbracoContentVersion cv ON cv.nodeId = n.id AND cv.[current] = 1
-                      JOIN umbracoPropertyData pd   ON pd.versionId = cv.id
-                      JOIN cmsPropertyType pt       ON pt.id = pd.propertyTypeId AND pt.Alias = 'memberId'
-                      WHERE n.trashed = 0
-                        AND (pd.intValue = @0
-                             OR (pd.intValue IS NULL
-                                 AND TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20)) = @0))",
-                    loserId);
-            }
-
-            foreach (var nodeId in nodeIds)
+            foreach (var reg in _registrations.ListForMember(loserId))
             {
                 try
                 {
-                    var node = _contentService.GetById(nodeId);
-                    if (node == null) continue;
-                    node.SetValue("memberId", survivorId);
-                    _contentService.Save(node);
+                    reg.MemberId = survivorId;
+                    _registrations.Save(reg);
                     result.RegistrationsMoved++;
                 }
                 catch (Exception ex)
                 {
-                    result.Errors.Add($"Anmälan {nodeId}: {ex.Message}");
+                    result.Errors.Add($"Anmälan {reg.Id}: {ex.Message}");
                 }
             }
         }

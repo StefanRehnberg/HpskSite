@@ -44,13 +44,17 @@ namespace HpskSite.Services
         private readonly ClubEventParticipationService _events;
         private readonly ILogger<MemberActivitySummaryService> _logger;
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+
         public MemberActivitySummaryService(
             IScopeProvider scopeProvider,
             IContentService contentService,
             IMemberService memberService,
             ClubEventParticipationService events,
-            ILogger<MemberActivitySummaryService> logger)
+            ILogger<MemberActivitySummaryService> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
+            _registrations = registrations;
             _scopeProvider = scopeProvider;
             _contentService = contentService;
             _memberService = memberService;
@@ -201,21 +205,10 @@ namespace HpskSite.Services
 
                 // 2) Tävlingar: anmälningar och resultat, plus DNS. Datumet kommer ur tävlingsnoden,
                 //    så id:na samlas först och noderna läses batchat efteråt.
-                var regs = db.Fetch<MemberCompetitionRow>(
-                    $@"SELECT DISTINCT
-                              COALESCE(pd.intValue, TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20))) AS MemberId,
-                              COALESCE(cd.intValue, TRY_CONVERT(INT, LEFT(COALESCE(cd.varcharValue, cd.textValue), 20))) AS CompetitionId
-                       FROM umbracoNode n
-                       JOIN umbracoContent c          ON c.nodeId = n.id
-                       JOIN cmsContentType ct         ON ct.nodeId = c.contentTypeId AND ct.alias = 'competitionRegistration'
-                       JOIN umbracoContentVersion cv  ON cv.nodeId = n.id AND cv.[current] = 1
-                       JOIN cmsPropertyType pt        ON pt.contentTypeId = ct.nodeId AND pt.Alias = 'memberId'
-                       JOIN umbracoPropertyData pd    ON pd.versionId = cv.id AND pd.propertyTypeId = pt.id
-                       JOIN cmsPropertyType ctp       ON ctp.contentTypeId = ct.nodeId AND ctp.Alias = 'competitionId'
-                       JOIN umbracoPropertyData cd    ON cd.versionId = cv.id AND cd.propertyTypeId = ctp.id
-                       WHERE n.trashed = 0
-                         AND COALESCE(pd.intValue, TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20))) IN ({inList})",
-                    args);
+                // Anmälningarna via anmälningslagringen (sajtstrukturen fas 1a).
+                var regs = _registrations.CompetitionsForMembers(batch)
+                    .Select(p => new MemberCompetitionRow { MemberId = p.MemberId, CompetitionId = p.CompetitionId })
+                    .ToList();
 
                 var results = db.Fetch<MemberCompetitionRow>(
                     $@"SELECT DISTINCT MemberId, CompetitionId FROM (
@@ -542,76 +535,36 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Tävlings-id ur medlemmens anmälningsnoder. Anmälningar sparas OPUBLICERADE, så det här
-        /// måste gå via SQL — <c>Umbraco.Content</c> mot den publicerade cachen ger tyst noll.
-        /// <c>LEFT(...,20)</c> är inte kosmetik, se klasskommentaren.
+        /// Tävlings-id ur medlemmens anmälningar, via anmälningslagringen (sajtstrukturen fas 1a) —
+        /// alla anmälningar, publicerade eller inte.
         /// </summary>
         private List<int> GetCompetitionIdsForMember(int memberId)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.Fetch<int?>(
-                @"SELECT DISTINCT COALESCE(cd.intValue,
-                         TRY_CONVERT(INT, LEFT(COALESCE(cd.varcharValue, cd.textValue), 20))) AS CompetitionId
-                  FROM umbracoNode n
-                  JOIN umbracoContent c          ON c.nodeId = n.id
-                  JOIN cmsContentType ct         ON ct.nodeId = c.contentTypeId AND ct.alias = 'competitionRegistration'
-                  JOIN umbracoContentVersion cv  ON cv.nodeId = n.id AND cv.[current] = 1
-                  JOIN umbracoPropertyData pd    ON pd.versionId = cv.id
-                  JOIN cmsPropertyType pt        ON pt.id = pd.propertyTypeId AND pt.Alias = 'memberId'
-                  JOIN cmsPropertyType ctp       ON ctp.contentTypeId = ct.nodeId AND ctp.Alias = 'competitionId'
-                  JOIN umbracoPropertyData cd    ON cd.versionId = cv.id AND cd.propertyTypeId = ctp.id
-                  WHERE n.trashed = 0
-                    AND (pd.intValue = @0
-                         OR (pd.intValue IS NULL
-                             AND TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20)) = @0))",
-                memberId)
-                .Where(id => id is > 0).Select(id => id!.Value).ToList();
-        }
+            => _registrations.ListForMember(memberId)
+                .Select(r => r.CompetitionId)
+                .Where(id => id > 0)
+                .Distinct()
+                .ToList();
 
         /// <summary>
         /// Vapengrupperna medlemmen är ANMÄLD i, per tävling. Behövs för de tävlingar som saknar
         /// resultatrader — utan dem hade en anmäld-men-oskjuten tävling ingen vapengrupp och fallit
         /// bort ur varje filter, vilket är precis de poster ett intyg behöver förklara.
         ///
-        /// Klasserna ligger som JSON på anmälningsnoden (<c>[{"class":"A1", ...}]</c>) och en anmälan
-        /// kan bära flera — dev-data har A1 och L_Vet_A på samma tävling.
+        /// En anmälan kan bära flera klasser — dev-data har A1 och L_Vet_A på samma tävling. Klasserna
+        /// läses via anmälningslagringen, som tolkar alla klasslistans former.
         /// </summary>
         private Dictionary<int, HashSet<string>> GetRegisteredWeaponGroups(int memberId)
         {
             var result = new Dictionary<int, HashSet<string>>();
 
-            List<RegistrationClassRow> rows;
-            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            foreach (var reg in _registrations.ListForMember(memberId))
             {
-                rows = scope.Database.Fetch<RegistrationClassRow>(
-                    @"SELECT COALESCE(cd.intValue,
-                             TRY_CONVERT(INT, LEFT(COALESCE(cd.varcharValue, cd.textValue), 20))) AS CompetitionId,
-                             COALESCE(sd.textValue, sd.varcharValue) AS ClassesJson
-                      FROM umbracoNode n
-                      JOIN umbracoContent c          ON c.nodeId = n.id
-                      JOIN cmsContentType ct         ON ct.nodeId = c.contentTypeId AND ct.alias = 'competitionRegistration'
-                      JOIN umbracoContentVersion cv  ON cv.nodeId = n.id AND cv.[current] = 1
-                      JOIN umbracoPropertyData pd    ON pd.versionId = cv.id
-                      JOIN cmsPropertyType pt        ON pt.id = pd.propertyTypeId AND pt.Alias = 'memberId'
-                      JOIN cmsPropertyType ctp       ON ctp.contentTypeId = ct.nodeId AND ctp.Alias = 'competitionId'
-                      JOIN umbracoPropertyData cd    ON cd.versionId = cv.id AND cd.propertyTypeId = ctp.id
-                      LEFT JOIN cmsPropertyType stp  ON stp.contentTypeId = ct.nodeId AND stp.Alias = 'shootingClasses'
-                      LEFT JOIN umbracoPropertyData sd ON sd.versionId = cv.id AND sd.propertyTypeId = stp.id
-                      WHERE n.trashed = 0
-                        AND (pd.intValue = @0
-                             OR (pd.intValue IS NULL
-                                 AND TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20)) = @0))",
-                    memberId);
-            }
-
-            foreach (var row in rows)
-            {
-                if (row.CompetitionId is not > 0) continue;
-                var set = result.TryGetValue(row.CompetitionId.Value, out var existing)
+                if (reg.CompetitionId <= 0) continue;
+                var set = result.TryGetValue(reg.CompetitionId, out var existing)
                     ? existing
-                    : result[row.CompetitionId.Value] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    : result[reg.CompetitionId] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                foreach (var cls in ParseRegistrationClasses(row.ClassesJson))
+                foreach (var cls in reg.ClassIds)
                 {
                     var group = ResolveWeaponGroup(cls);
                     if (!string.IsNullOrWhiteSpace(group)) set.Add(group);
