@@ -759,7 +759,7 @@ namespace HpskSite.Controllers
                                 toPay = toPay.Select(r => new { id = r.Id, amount = r.Amount, reference = HpskSite.Services.CompetitionFees.CompetitionFeeService.ReferenceFor(r) }),
                                 clubPart = open.Where(r => r.FeePart == HpskSite.Models.CompetitionFees.CompetitionFeePart.Club).Sum(r => r.Amount),
                                 canChooseClubPays = HpskSite.Services.CompetitionFees.CompetitionFeePlanner.AnyClubPayable(selectedClassesList, settings.ClubPayable),
-                                clubPays = fees.GetClubPaysChoice(registrationId)
+                                clubPays = fees.GetClubPaysChoice(competitionId, registrationId)
                             };
                         }
                         else

@@ -94,12 +94,12 @@ namespace HpskSite.Services.CompetitionFees
             return GetSettings(competitionId);
         }
 
-        public bool GetClubPaysChoice(int registrationId)
+        public bool GetClubPaysChoice(int competitionId, int registrationId)
         {
             using var db = _databaseFactory.CreateDatabase();
             return db.ExecuteScalar<int>(
-                "SELECT COUNT(1) FROM dbo.CompetitionFeeChoice WHERE RegistrationId = @0 AND ClubPays = 1",
-                registrationId) > 0;
+                "SELECT COUNT(1) FROM dbo.CompetitionFeeChoice WHERE CompetitionId = @0 AND RegistrationId = @1 AND ClubPays = 1",
+                competitionId, registrationId) > 0;
         }
 
         public void SetClubPaysChoice(int competitionId, int registrationId, bool clubPays, int byMemberId)
@@ -107,7 +107,8 @@ namespace HpskSite.Services.CompetitionFees
             using var db = _databaseFactory.CreateDatabase();
             db.Execute(
                 @"MERGE dbo.CompetitionFeeChoice AS t
-                  USING (SELECT @0 AS RegistrationId) AS s ON t.RegistrationId = s.RegistrationId
+                  USING (SELECT @0 AS RegistrationId, @1 AS CompetitionId) AS s
+                        ON t.CompetitionId = s.CompetitionId AND t.RegistrationId = s.RegistrationId
                   WHEN MATCHED THEN UPDATE SET ClubPays = @2, ChosenByMemberId = @3, ChosenUtc = GETUTCDATE()
                   WHEN NOT MATCHED THEN INSERT (RegistrationId, CompetitionId, ClubPays, ChosenByMemberId, ChosenUtc)
                        VALUES (@0, @1, @2, @3, GETUTCDATE());",
@@ -323,7 +324,7 @@ namespace HpskSite.Services.CompetitionFees
             var settings = GetSettings(competitionId);
             var desired = reg == null
                 ? new List<FeePartAmount>()
-                : DesiredForRegistration(competition, reg, settings, GetClubPaysChoice(registrationId));
+                : DesiredForRegistration(competition, reg, settings, GetClubPaysChoice(competitionId, registrationId));
 
             var rows = LoadFeeRows(competitionId)
                 .Where(r => r.SourceType == LedgerSourceType.CompetitionRegistration && r.SourceItemId == registrationId)

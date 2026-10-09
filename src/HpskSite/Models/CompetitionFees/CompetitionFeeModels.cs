@@ -62,7 +62,7 @@ namespace HpskSite.Models.CompetitionFees
     /// klasser arrangören tillåtit; arrangören fakturerar sedan klubben i efterhand — eller inte.</para>
     /// </summary>
     [TableName("CompetitionFeeChoice")]
-    [PrimaryKey("RegistrationId", AutoIncrement = false)]
+    [PrimaryKey("CompetitionId,RegistrationId", AutoIncrement = false)]
     public class CompetitionFeeChoice
     {
         public int RegistrationId { get; set; }

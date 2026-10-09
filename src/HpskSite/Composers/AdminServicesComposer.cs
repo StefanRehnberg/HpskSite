@@ -176,9 +176,15 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Events.EventOwnerResolver>();
             // Enda vägen in till tävlingsanmälningarna (sajtstrukturen fas 1a). Nodimplementationen
             // byts mot SQL i fas 1b; ingen kod utanför lagringen läser anmälningsnoderna.
+            // Växeln väljer nod- eller tabellagring per anrop (SiteSetting Registrations:Store, fas 1c)
+            // och vägrar skrivningar under frysning (fas 1d).
+            builder.Services.AddSingleton<HpskSite.Services.SiteSettings.SiteSettingService>();
             builder.Services.AddScoped<HpskSite.Services.Registrations.NodeRegistrationStore>();
+            builder.Services.AddScoped<HpskSite.Services.Registrations.SqlRegistrationStore>();
+            builder.Services.AddScoped<HpskSite.Services.Registrations.SwitchingRegistrationStore>();
             builder.Services.AddScoped<HpskSite.Services.Registrations.ICompetitionRegistrationStore>(
-                sp => sp.GetRequiredService<HpskSite.Services.Registrations.NodeRegistrationStore>());
+                sp => sp.GetRequiredService<HpskSite.Services.Registrations.SwitchingRegistrationStore>());
+            builder.Services.AddHostedService<HpskSite.Services.Registrations.CompetitionRegistrationSchemaGuardHostedService>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingMigrationService>();
             builder.Services.AddScoped<HpskSite.Services.Training.ClubTrainingService>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingCourseService>();
