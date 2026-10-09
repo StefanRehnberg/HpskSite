@@ -177,8 +177,7 @@ WHERE Id = @0",
             var n = scope.Database.Execute("DELETE FROM dbo.ClubEvent WHERE Id = @0", id);
             if (n > 0 && page.HasValue)
                 scope.Database.Execute(@"DELETE FROM dbo.LandingPage WHERE Id = @0
-                    AND NOT EXISTS (SELECT 1 FROM dbo.ClubEvent WHERE LandingPageId = @0)
-                    AND NOT EXISTS (SELECT 1 FROM dbo.CompetitionLandingPage WHERE LandingPageId = @0)", page.Value);
+                    AND NOT EXISTS (SELECT 1 FROM dbo.ClubEvent WHERE LandingPageId = @0)", page.Value);
             scope.Complete();
             return n > 0;
         }

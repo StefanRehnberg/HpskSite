@@ -5,6 +5,7 @@
 @inject IMemberManager MemberManager
 @inject HpskSite.Services.AdminAuthorizationService AuthorizationService
 @inject HpskSite.Services.Events.IClubEventStore Events
+@inject HpskSite.Services.Events.CompetitionEventLinkService CompetitionLinks
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -48,6 +49,13 @@
 
     // Content blocks and quick links (JSON)
     var contentBlocksJson = string.IsNullOrWhiteSpace(ev.ContentBlocksJson) ? "[]" : ev.ContentBlocksJson;
+    // Tävlingarna händelsen är kopplad till (kortet i sidospalten).
+    var linkedCards = CompetitionLinks.CompetitionsForEvent(ev.Id)
+        .Select(id => Umbraco.Content(id))
+        .Where(c => c != null && c.ContentType.Alias == "competition")
+        .Select(c => HpskSite.Services.Events.CompetitionLinkCard.Describe(c!, DateTime.Now))
+        .OrderBy(c => c.Date ?? DateTime.MaxValue).ThenBy(c => c.Name)
+        .ToList();
     var quickLinksJson = string.IsNullOrWhiteSpace(ev.QuickLinksJson) ? "[]" : ev.QuickLinksJson;
 
     // Event type display helpers
@@ -403,6 +411,8 @@
     <div class="row">
         <!-- Main Content Column -->
         <div class="col-lg-8">
+            @* Tävlingskortet överst på telefon — i sidospalten hamnar det annars under hela beskrivningen. *@
+            @await Html.PartialAsync("_EventCompetitionsCard", new ViewDataDictionary(ViewData) { ["Cards"] = linkedCards, ["CssClass"] = "d-lg-none" })
             <!-- Status Badge (if not upcoming) -->
             @if (statusDisplay != "Kommande")
             {
@@ -605,6 +615,10 @@
 
         <!-- Sidebar Column -->
         <div class="col-lg-4">
+            @* Tävlingarna händelsen är kopplad till (sajtstrukturen fas 2). Knappen följer tävlingens
+               läge: Anmäl dig, sedan Startlista, sist Resultat — se CompetitionLinkCard. *@
+            @await Html.PartialAsync("_EventCompetitionsCard", new ViewDataDictionary(ViewData) { ["Cards"] = linkedCards, ["CssClass"] = "d-none d-lg-block" })
+
             @* Anmälningskortet hämtar sitt eget tillstånd och göms av sig självt när evenemanget
                inte tar anmälningar (eller pekar på en extern länk), så det behöver ingen grind här. *@
             @await Html.PartialAsync("_ClubEventSignup", new ViewDataDictionary(ViewData)

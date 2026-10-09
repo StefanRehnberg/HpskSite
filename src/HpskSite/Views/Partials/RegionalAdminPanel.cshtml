@@ -87,6 +87,7 @@
                     </div>
 
                     @await Html.PartialAsync("_EventRegistrationFields", new ViewDataDictionary(ViewData) { ["Prefix"] = "regEvent" })
+                    @await Html.PartialAsync("_EventCompetitionLinks", new ViewDataDictionary(ViewData) { ["Prefix"] = "regEvent" })
                 </form>
             </div>
             @* Se klubbdialogens sidfot — samma indelning, samma regler. *@
@@ -932,6 +933,7 @@
         document.getElementById('regionEventModalTitle').textContent = 'Ny Händelse';
         document.getElementById('regionEventForm').reset();
         hpskEventRegClear('regEvent');
+        hpskEventCompLoad('regEvent', 0);
         document.getElementById('regionEventId').value = '';
         document.getElementById('regionEventCustomType').style.display = 'none';
         document.getElementById('regionEventCustomType').required = false;
@@ -1000,6 +1002,7 @@
         }
 
         hpskEventRegFill('regEvent', event);
+        hpskEventCompLoad('regEvent', eventId);
 
         document.getElementById('regionEventModal').dataset.hpskMode = 'tabs';
         new bootstrap.Modal(document.getElementById('regionEventModal')).show();
@@ -1110,13 +1113,16 @@
         formData.append('__RequestVerificationToken', getAntiForgeryToken());
 
         regionPostFormWithTokenRetry(url, formData)
-        .then(function(res) {
+        .then(async function(res) {
             var data = null;
             try { data = JSON.parse(res.text); } catch (e) { /* not JSON — server error page */ }
             if (data && data.success) {
+                // Tävlingskopplingen sparas efter händelsen (bara vid redigering — en ny händelse har inget id än).
+                var links = eventId ? await hpskEventCompSave('regEvent', eventId) : { ok: true };
                 bootstrap.Modal.getInstance(document.getElementById('regionEventModal')).hide();
                 loadRegionEvents();
-                alert('Händelse sparad!');
+                alert(links.ok ? 'Händelse sparad!'
+                    : 'Händelsen sparades, men kopplingen till tävlingarna gick inte att spara: ' + (links.message || 'okänt fel'));
             } else if (data) {
                 alert('Fel: ' + data.message);
             } else if (res.status === 400 || res.status === 401 || res.status === 403) {

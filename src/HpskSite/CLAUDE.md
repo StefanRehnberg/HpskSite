@@ -11010,10 +11010,34 @@ sajtadmin): **Preview → Freeze → Run → Verify → Switch → avfrys → Un
 - Innehållsblock och snabblänkar ligger i **`LandingPage`** ("Sida"), skapas vid första blocket och
   tas bort med händelsen. Befintliga block-/snabblänksredigeraren skriver dit via storen.
 
+### Händelse kopplad till tävling (Stefans beslut 2026-10-09)
+
+Tävlingens "mer om"-sida är INTE ett nytt innehåll på tävlingssidan (den är full) utan arrangörens
+vanliga händelse, kopplad till de tävlingar den beskriver. Ersätter arbetsgången med en handskriven
+"Anmäl dig här"-snabblänk. Skiss: https://claude.ai/artifact/U1b33E3hUciVJJLA5rNRrp
+- **`CompetitionEventLink`** (CompetitionId PK → EventId): **en tävling har högst en händelse**,
+  en händelse kan ha flera tävlingar (en helg med precision och fält). `CompetitionEventLinkService`
+  är enda vägen; en koppling till en borttagen händelse räknas som ingen koppling (därför städar
+  inte händelseborttagningen här).
+- **Vilka tävlingar som får kopplas:** klubbens händelse → klubbens egna tävlingar, även
+  klubbinterna. Kretsens händelse → kretsens egna och klubbarnas i kretsen (`GetCompetitionsInRegion`,
+  båda värdformerna + seriearvet), **men inte klubbinterna**. Servern prövar varje id; en tävling som
+  hör till en annan levande händelse vägras och svaret namnger den händelsen.
+- **Ytor:** fliken **Tävling** i alla tre händelsedialogerna (`_EventCompetitionLinks`, prefix-
+  parametriserad; syns bara vid redigering — en ny händelse har inget id), endpoints
+  `ClubEventCompetitionLink/GetLinks` + `SaveLinks` (behörighet via `EventOwnerResolver`).
+  Händelsesidan: kortet **Tävlingen/Tävlingarna** (`_EventCompetitionsCard`, renderas två gånger:
+  överst i huvudspalten på telefon, i sidospalten på dator — därför en klass, inget id), knappen
+  följer tävlingens läge via `CompetitionLinkCard.Describe` (Anmäl dig → Startlista → Resultat, samma
+  regler som tävlingssidan). Tävlingssidan: **en enda rad** under rubriken, `#competitionEventLink`.
+- Svit: `hpsk-verify/event-competition-link-verify.mjs` 26/26 i båda lagringslägena;
+  `event-competition-link-shot.mjs` för telefon/dator.
+
 ### Operatörssteg vid deployen (i ordning, FÖRE deployen)
 
 1. `Migrations/create-competition-registration-tables.sql`
 2. `Migrations/create-club-event-tables.sql`
+3. `Migrations/create-competition-event-link-table.sql`
 
 Båda har filtrerade index → `QUOTED_IDENTIFIER ON` i varje sqlcmd-skript som skriver i tabellerna.
 Efter deployen: underhållsfönstret för anmälningar, sedan för händelser. Körda i dev, **EJ i prod**.

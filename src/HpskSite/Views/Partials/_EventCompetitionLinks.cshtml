@@ -1,0 +1,161 @@
+@*
+    Avsnittet "Tävling" i händelsedialogerna: koppla händelsen till de tävlingar den beskriver
+    (sajtstrukturen fas 2, Stefans beslut 2026-10-09). Tävlingssidan får då en länkrad hit.
+
+    Renderas av alla tre dialogerna (klubbens adminpanel, kretsens adminpanel, händelsens egen sida),
+    samma regel som _EventRegistrationFields: tre kopior glider isär.
+
+    ViewData:
+      Prefix (string, obligatorisk)  id-prefix, t.ex. "edit" -> editCompLinks
+
+    API (definieras EN gång):
+      hpskEventCompLoad(prefix, eventId)  — eventId 0 (ny händelse) döljer avsnittet; då faller fliken
+                                             bort av sig själv (_ModalSectionNav mäter höjden).
+      hpskEventCompSave(prefix, eventId)  — Promise<{ ok, message }>. Sparar bara när listan lästs in,
+                                             så ett misslyckat inläsande aldrig tömmer kopplingarna.
+*@
+@{
+    var linkPrefix = ViewData["Prefix"] as string ?? "edit";
+}
+
+<h6 class="text-primary">Tävling</h6>
+<div id="@(linkPrefix)CompLinks" class="hpsk-complinks" style="display:none">
+    <p class="small text-body-secondary mb-2">
+        Välj de tävlingar som den här händelsen beskriver. Tävlingssidan får då en länk hit, och händelsesidan
+        visar tävlingarnas knappar (anmälan, startlista, resultat).
+    </p>
+    <input type="search" class="form-control form-control-sm mb-2" id="@(linkPrefix)CompLinksSearch"
+           placeholder="Sök tävling" autocomplete="off" aria-label="Sök tävling">
+    <div id="@(linkPrefix)CompLinksList" class="list-group small" style="max-height:320px;overflow-y:auto">
+        <div class="list-group-item text-body-secondary">Laddar tävlingar…</div>
+    </div>
+    <p class="small text-body-secondary mt-2 mb-0" id="@(linkPrefix)CompLinksHelp">
+        En tävling kan bara höra till en händelse. Är den redan kopplad till en annan står det vilken.
+    </p>
+</div>
+
+<script>
+(function () {
+    if (window.hpskEventCompLoad) return;
+    var state = {};   // prefix -> { eventId, loaded, items }
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c];
+        });
+    }
+    function fmtDate(iso) {
+        if (!iso) return 'Datum saknas';
+        var d = new Date(iso + 'T00:00:00');
+        return d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    function render(prefix) {
+        var st = state[prefix];
+        var list = document.getElementById(prefix + 'CompLinksList');
+        if (!list || !st) return;
+        var q = (document.getElementById(prefix + 'CompLinksSearch') || {}).value || '';
+        q = q.trim().toLowerCase();
+        var items = st.items.filter(function (c) {
+            return !q || (c.name + ' ' + c.host).toLowerCase().indexOf(q) >= 0;
+        });
+        if (!st.items.length) {
+            list.innerHTML = '<div class="list-group-item text-body-secondary">Det finns inga tävlingar att koppla. '
+                + 'Tävlingar skapas under fliken Tävlingar i adminpanelen.</div>';
+            return;
+        }
+        if (!items.length) {
+            list.innerHTML = '<div class="list-group-item text-body-secondary">Ingen tävling matchar sökningen.</div>';
+            return;
+        }
+        // ⚠ Knappar bär bara ett index i data-attributet — aldrig tävlingens namn i ett attribut.
+        list.innerHTML = items.map(function (c) {
+            var idx = st.items.indexOf(c);
+            var taken = !!c.otherEventName && !c.checked;
+            var meta = fmtDate(c.date) + (st.ownerType === 'Region' ? ' · ' + esc(c.host) : '')
+                + (c.isClubOnly ? ' · endast klubbens medlemmar' : '');
+            return '<label class="list-group-item d-flex gap-2 align-items-start' + (taken ? ' text-body-secondary' : '') + '">'
+                + '<input class="form-check-input mt-1 flex-shrink-0" type="checkbox" data-cl-idx="' + idx + '"'
+                + (c.checked ? ' checked' : '') + (taken ? ' disabled' : '') + '>'
+                + '<span class="flex-grow-1" style="min-width:0"><span class="d-block">' + esc(c.name) + '</span>'
+                + '<span class="d-block text-body-secondary">' + meta + '</span>'
+                + (c.otherEventName ? '<span class="d-block text-warning-emphasis">Kopplad till händelsen '
+                    + esc(c.otherEventName) + '</span>' : '')
+                + '</span></label>';
+        }).join('');
+    }
+
+    document.addEventListener('change', function (e) {
+        var t = e.target;
+        if (!t || !t.matches || !t.matches('[data-cl-idx]')) return;
+        var box = t.closest('.hpsk-complinks');
+        if (!box) return;
+        var prefix = box.id.replace(/CompLinks$/, '');
+        var st = state[prefix];
+        if (!st) return;
+        var item = st.items[+t.getAttribute('data-cl-idx')];
+        if (item) item.checked = t.checked;
+    });
+    document.addEventListener('input', function (e) {
+        var t = e.target;
+        if (!t || !t.id || !/CompLinksSearch$/.test(t.id)) return;
+        render(t.id.replace(/CompLinksSearch$/, ''));
+    });
+
+    window.hpskEventCompLoad = function (prefix, eventId) {
+        var box = document.getElementById(prefix + 'CompLinks');
+        if (!box) return Promise.resolve();
+        eventId = +eventId || 0;
+        state[prefix] = { eventId: eventId, loaded: false, items: [], ownerType: '' };
+        var search = document.getElementById(prefix + 'CompLinksSearch');
+        if (search) search.value = '';
+        if (!eventId) {
+            box.style.display = 'none';
+            return Promise.resolve();
+        }
+        box.style.display = '';
+        var list = document.getElementById(prefix + 'CompLinksList');
+        list.innerHTML = '<div class="list-group-item text-body-secondary">Laddar tävlingar…</div>';
+        return fetch('/umbraco/surface/ClubEventCompetitionLink/GetLinks?eventId=' + eventId)
+            .then(function (r) {
+                if (!r.ok) throw new Error((window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status)) || ('HTTP ' + r.status));
+                return r.json();
+            })
+            .then(function (d) {
+                var st = state[prefix];
+                if (!st || st.eventId !== eventId) return;   // dialogen har öppnats för en annan händelse
+                if (!d.success) {
+                    list.innerHTML = '<div class="list-group-item text-danger">' + esc(d.message || 'Tävlingarna kunde inte läsas.') + '</div>';
+                    return;
+                }
+                st.ownerType = d.ownerType;
+                st.items = (d.candidates || []).map(function (c) { c.checked = !!c.linkedHere; return c; });
+                st.loaded = true;
+                render(prefix);
+            })
+            .catch(function (err) {
+                list.innerHTML = '<div class="list-group-item text-danger">Tävlingarna kunde inte läsas: '
+                    + esc(err && err.message) + '</div>';
+            });
+    };
+
+    window.hpskEventCompSave = function (prefix, eventId) {
+        var st = state[prefix];
+        eventId = +eventId || 0;
+        if (!st || !st.loaded || st.eventId !== eventId) return Promise.resolve({ ok: true, skipped: true });
+        var ids = st.items.filter(function (c) { return c.checked; }).map(function (c) { return c.id; });
+        var fd = new FormData();
+        fd.append('eventId', String(eventId));
+        fd.append('competitionIds', ids.join(','));
+        var tokenEl = document.querySelector('input[name="__RequestVerificationToken"]');
+        fd.append('__RequestVerificationToken', tokenEl ? tokenEl.value : '');
+        return fetch('/umbraco/surface/ClubEventCompetitionLink/SaveLinks', { method: 'POST', body: fd })
+            .then(function (r) {
+                if (!r.ok) throw new Error((window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status)) || ('HTTP ' + r.status));
+                return r.json();
+            })
+            .then(function (d) { return { ok: !!d.success, message: d.message }; })
+            .catch(function (err) { return { ok: false, message: err && err.message }; });
+    };
+})();
+</script>

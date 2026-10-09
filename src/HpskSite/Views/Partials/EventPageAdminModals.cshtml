@@ -104,6 +104,7 @@
                 </div>
                 @* Delad med klubbens och kretsens händelsedialoger — se partialens huvud. *@
                 @await Html.PartialAsync("_EventRegistrationFields", new ViewDataDictionary(ViewData) { ["Prefix"] = "edit" })
+                @await Html.PartialAsync("_EventCompetitionLinks", new ViewDataDictionary(ViewData) { ["Prefix"] = "edit" })
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
@@ -414,6 +415,7 @@ function setEditEventType(typeValue) {
 
 function openEditDetailsModal() {
     hpskEventRegToggle('edit');
+    hpskEventCompLoad('edit', eventPageId);
     document.getElementById('editPageNameGroup').style.display = 'none';
     var modal = new bootstrap.Modal(document.getElementById('editDetailsModal'));
     modal.show();
@@ -471,8 +473,10 @@ function saveEventDetails() {
         body: formData
     })
     .then(function(r) { return r.json(); })
-    .then(function(result) {
+    .then(async function(result) {
         if (result.success) {
+            var links = await hpskEventCompSave('edit', eventPageId);
+            if (!links.ok) alert('Händelsen sparades, men kopplingen till tävlingarna gick inte att spara: ' + (links.message || 'okänt fel'));
             bootstrap.Modal.getInstance(document.getElementById('editDetailsModal')).hide();
             location.reload();
         } else {
