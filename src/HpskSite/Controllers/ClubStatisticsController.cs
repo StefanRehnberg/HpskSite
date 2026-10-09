@@ -31,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly IMemoryCache _memoryCache;
         private readonly ILogger<ClubStatisticsController> _logger;
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         public ClubStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -43,9 +44,11 @@ namespace HpskSite.Controllers
             ClubComparisonService comparisonService,
             IMemoryCache memoryCache,
             ILogger<ClubStatisticsController> logger,
-            HpskSite.Services.Training.ClubTrainingService trainings)
+            HpskSite.Services.Training.ClubTrainingService trainings,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _trainings = trainings;
             _memberService = memberService;
             _authService = authService;
@@ -275,20 +278,10 @@ namespace HpskSite.Controllers
                     // Scoped to this club's comps via IN; recycled/deleted regs excluded (their
                     // parent becomes the recycle bin, not the reg hub).
                     var compIds = clubCompsThisYear.Select(c => c.Id).ToList();
-                    var regCountByCompetition = new Dictionary<int, int>();
-                    if (compIds.Count > 0)
-                    {
-                        using var db = _databaseFactory.CreateDatabase();
-                        var regRows = db.Fetch<RegCountRow>(@"
-                            SELECT hub.parentId AS CompetitionId, COUNT(*) AS Cnt
-                            FROM umbracoNode reg
-                            JOIN umbracoContent c ON c.nodeId = reg.id
-                            JOIN umbracoNode hub ON hub.id = reg.parentId
-                            WHERE c.contentTypeId IN (SELECT nodeId FROM cmsContentType WHERE alias = 'competitionRegistration')
-                              AND hub.parentId IN (@0)
-                            GROUP BY hub.parentId", compIds);
-                        foreach (var r in regRows) regCountByCompetition[r.CompetitionId] = r.Cnt;
-                    }
+                    // Antalet via anmälningslagringen (sajtstrukturen fas 1a).
+                    var regCountByCompetition = compIds.Count > 0
+                        ? new Dictionary<int, int>(_registrations.CountByCompetition(compIds))
+                        : new Dictionary<int, int>();
 
                     topCompetitions = clubCompsThisYear
                         .Select(c => new

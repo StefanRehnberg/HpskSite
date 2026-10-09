@@ -37,6 +37,7 @@ namespace HpskSite.Controllers
         private readonly IAntiforgery _antiforgery;
         private readonly HpskSite.Services.Training.ClubTrainingService _trainings;
         private readonly HpskSite.Services.Events.EventOwnerResolver _eventOwners;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly ILogger<ClubController> _logger;
 
         public ClubController(
@@ -56,9 +57,11 @@ namespace HpskSite.Controllers
             IAntiforgery antiforgery,
             HpskSite.Services.Training.ClubTrainingService trainings,
             HpskSite.Services.Events.EventOwnerResolver eventOwners,
-            ILogger<ClubController> logger)
+            ILogger<ClubController> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _antiforgery = antiforgery;
             _trainings = trainings;
             _eventOwners = eventOwners;
@@ -119,48 +122,31 @@ namespace HpskSite.Controllers
 
                 if (UmbracoContext.Content != null)
                 {
-                    // Get all competition registrations
-                    var registrations = GetAllDescendants(UmbracoContext.Content.GetAtRoot().FirstOrDefault())
-                        .Where(c => c.ContentType.Alias == "competitionRegistration")
+                    // Klubbens medlemmar med en anmälan, via anmälningslagringen (sajtstrukturen fas 1a)
+                    // i EN fråga — förut en vandring genom hela den publicerade trädstrukturen, som
+                    // dessutom bara såg de anmälningar som råkat publiceras. Samma regel som förut:
+                    // en klubbintern tävling räknas bara när den är den här klubbens.
+                    var clubMemberIds = allMembers
+                        .Where(m => m.GetValue("primaryClubId")?.ToString() == clubId.ToString() ||
+                                    (m.GetValue("memberClubIds")?.ToString()?.Split(',')
+                                        .Select(s => s.Trim())
+                                        .Contains(clubId.ToString()) ?? false))
+                        .Select(m => m.Id)
                         .ToList();
 
                     var activeClubMemberIds = new HashSet<int>();
-
-                    foreach (var reg in registrations)
+                    var compCache = new Dictionary<int, IPublishedContent?>();
+                    foreach (var (memberId, compId) in _registrations.CompetitionsForMembers(clubMemberIds))
                     {
-                        // Cast to IPublishedContent to access proper extension methods
-                        var registration = reg as IPublishedContent;
-                        if (registration == null) continue;
+                        if (activeClubMemberIds.Contains(memberId)) continue;
+                        if (!compCache.TryGetValue(compId, out var competition))
+                            compCache[compId] = competition = UmbracoContext.Content.GetById(compId);
+                        if (competition == null) continue;
 
-                        var compId = registration.Value<int?>("competitionId");
-                        var memberId = registration.Value<int?>("memberId");
-
-                        if (compId.HasValue && memberId.HasValue)
-                        {
-                            // Get competition to check if it's for this club and in future
-                            var competitionContent = UmbracoContext.Content.GetById(compId.Value);
-                            // Cast to IPublishedContent to access extension methods
-                            var competition = competitionContent as IPublishedContent;
-                            if (competition != null)
-                            {
-                                var compDate = competition.Value<DateTime?>("competitionDate");
-                                var isClubOnly = competition.Value<bool>("isClubOnly");
-                                var compClubId = competition.Value<int>("clubId");
-
-                                // Check if member is from this club
-                                var member = allMembers.FirstOrDefault(m => m.Id == memberId.Value);
-                                if (member != null &&
-                                    (member.GetValue("primaryClubId")?.ToString() == clubId.ToString() ||
-                                     member.GetValue("memberClubIds")?.ToString()?.Contains(clubId.ToString()) == true))
-                                {
-                                    // If not club-only competition, or if it is and matches this club
-                                    if (!isClubOnly || compClubId == clubId)
-                                    {
-                                        activeClubMemberIds.Add(memberId.Value);
-                                    }
-                                }
-                            }
-                        }
+                        var isClubOnly = competition.Value<bool>("isClubOnly");
+                        var compClubId = competition.Value<int>("clubId");
+                        if (!isClubOnly || compClubId == clubId)
+                            activeClubMemberIds.Add(memberId);
                     }
 
                     activeMembers = activeClubMemberIds.Count;

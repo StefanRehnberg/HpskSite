@@ -48,6 +48,7 @@ namespace HpskSite.Controllers
         private static readonly string[] DemoRegionNeedles = { "ankeland" };
         private const string SimulationSeedTag = "Simulering (seed)";
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         public AdminStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -62,9 +63,11 @@ namespace HpskSite.Controllers
             DocumentService documentService,
             IConfiguration configuration,
             IWebHostEnvironment env,
-            HpskSite.Services.Training.ClubTrainingService trainings)
+            HpskSite.Services.Training.ClubTrainingService trainings,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _trainings = trainings;
             _memberService = memberService;
             _authService = authService;
@@ -495,13 +498,17 @@ namespace HpskSite.Controllers
 
             // A competition is excluded when it is hosted by the demo club OR carries any
             // simulation-seeded registration (the seeder tags them registeredBy="Simulering (seed)").
+            // Anmälningarna via anmälningslagringen (sajtstrukturen fas 1a), en gång per tävling. Den
+            // publicerade cachen såg bara de anmälningar som råkat publiceras.
+            var seededByCompetition = new Dictionary<int, bool>();
             bool IsExcludedCompetition(IPublishedContent c)
             {
                 var cid = c.Value<int>("clubId");
                 if (cid > 0 && excludedClubIds.Contains(cid)) return true;
-                return c.Descendants().Any(d =>
-                    d.ContentType.Alias == "competitionRegistration"
-                    && string.Equals(d.Value<string>("registeredBy"), SimulationSeedTag, StringComparison.Ordinal));
+                if (!seededByCompetition.TryGetValue(c.Id, out var seeded))
+                    seededByCompetition[c.Id] = seeded = _registrations.List(c.Id).Any(r =>
+                        string.Equals(r.RegisteredBy, SimulationSeedTag, StringComparison.Ordinal));
+                return seeded;
             }
 
             int totalMembers = approvedMembers.Count;
@@ -700,18 +707,8 @@ namespace HpskSite.Controllers
                     // excluded automatically (their parent becomes the recycle bin, not the reg hub).
                     // Grouping by hub.parentId keys the count to the owning competition; only this
                     // year's (and non-excluded — see IsExcludedCompetition) comps consume the counts.
-                    var regCountByCompetition = new Dictionary<int, int>();
-                    using (var db = _databaseFactory.CreateDatabase())
-                    {
-                        var regRows = db.Fetch<RegistrationCountRow>(@"
-                            SELECT hub.parentId AS CompetitionId, COUNT(*) AS Cnt
-                            FROM umbracoNode reg
-                            JOIN umbracoContent c ON c.nodeId = reg.id
-                            JOIN umbracoNode hub ON hub.id = reg.parentId
-                            WHERE c.contentTypeId IN (SELECT nodeId FROM cmsContentType WHERE alias = 'competitionRegistration')
-                            GROUP BY hub.parentId");
-                        foreach (var r in regRows) regCountByCompetition[r.CompetitionId] = r.Cnt;
-                    }
+                    // Antalet per tävling via anmälningslagringen (sajtstrukturen fas 1a).
+                    var regCountByCompetition = new Dictionary<int, int>(_registrations.CountByCompetition());
 
                     var topCompetitions = competitionsThisYear
                         .Select(c => new
