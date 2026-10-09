@@ -34,6 +34,8 @@ namespace HpskSite.Services
         private readonly HpskSite.Services.CompetitionFees.CompetitionPaymentModelService _paymentModels;
         private readonly HpskSite.Services.CompetitionFees.CompetitionFeeService _competitionFees;
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+
         public PaymentService(ILogger<PaymentService> logger,
             IContentService contentService,
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -45,8 +47,10 @@ namespace HpskSite.Services
             ClubService clubService,
             Umbraco.Cms.Core.Cache.AppCaches appCaches,
             HpskSite.Services.CompetitionFees.CompetitionPaymentModelService paymentModels,
-            HpskSite.Services.CompetitionFees.CompetitionFeeService competitionFees)
+            HpskSite.Services.CompetitionFees.CompetitionFeeService competitionFees,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
+            _registrations = registrations;
             _appCaches = appCaches;
             _paymentModels = paymentModels;
             _competitionFees = competitionFees;
@@ -906,15 +910,14 @@ namespace HpskSite.Services
 
             try
             {
-                var registration = _contentService.GetById(registrationId);
-                if (registration == null || registration.ContentType.Alias != "competitionRegistration")
-                    return null;
+                var registration = _registrations.GetById(registrationId);
+                if (registration == null) return null;
 
                 var competition = _contentService.GetById(competitionId);
                 if (competition == null || competition.GetValue<bool>("isExternal"))
                     return null;
 
-                var memberId = registration.GetValue<int>("memberId");
+                var memberId = registration.MemberId;
                 if (memberId <= 0) return null;
 
                 // Idempotent: reuse an existing non-cancelled invoice for this registration.
@@ -926,17 +929,10 @@ namespace HpskSite.Services
                 }
 
                 // Compute the fee the registration owes.
-                var classEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(
-                    registration.GetValue<string>("shootingClasses") ?? "");
-                var classCodes = classEntries.Select(c => c.Class).Where(c => !string.IsNullOrEmpty(c)).ToList();
-                var isSub = registration.HasProperty("isSubCompetition") && registration.GetValue<bool>("isSubCompetition");
-                var classesForCalc = classCodes.Count > 0
-                    ? (IReadOnlyCollection<string>)classCodes
-                    : new[] { string.Empty };
-                var fee = RegistrationFeeCalculator.Calculate(competition, classesForCalc, isSub);
+                var fee = FeeFor(competition, registration);
                 if (fee <= 0) return null; // free registration → no invoice (status shows "Ingen avgift")
 
-                var memberName = registration.GetValue<string>("memberName") ?? "";
+                var memberName = registration.MemberName;
                 var invoice = await CreateInvoiceAsync(competitionId, memberId.ToString(), memberName, registrationId, fee, "Swish");
                 if (invoice == null) return null;
 
@@ -970,13 +966,12 @@ namespace HpskSite.Services
         {
             try
             {
-                var current = _contentService.GetById(registrationId);
-                if (current == null || current.ContentType.Alias != "competitionRegistration") return;
-                if (current.GetValue<int>("invoiceId") == invoiceId) return;
+                // Läses om direkt före skrivningen (lagringen hanterar en inaktuell version).
+                var current = _registrations.GetById(registrationId);
+                if (current == null || current.InvoiceId == invoiceId) return;
 
-                current.SetValue("invoiceId", invoiceId);
-                if (_contentService.Save(current).Success)
-                    _contentService.Publish(current, new[] { "*" }, -1);
+                current.InvoiceId = invoiceId;
+                _registrations.Save(current);
             }
             catch (Exception ex)
             {
@@ -1010,26 +1005,18 @@ namespace HpskSite.Services
 
             try
             {
-                var registration = _contentService.GetById(registrationId);
-                if (registration == null || registration.ContentType.Alias != "competitionRegistration")
-                    return false;
+                var registration = _registrations.GetById(registrationId);
+                if (registration == null) return false;
 
                 var competition = _contentService.GetById(competitionId);
                 if (competition == null || competition.GetValue<bool>("isExternal"))
                     return false;
 
-                var memberId = registration.GetValue<int>("memberId");
+                var memberId = registration.MemberId;
                 if (memberId <= 0) return false;
 
                 // Fee owed by the registration as it now stands.
-                var classEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(
-                    registration.GetValue<string>("shootingClasses") ?? "");
-                var classCodes = classEntries.Select(c => c.Class).Where(c => !string.IsNullOrEmpty(c)).ToList();
-                var isSub = registration.HasProperty("isSubCompetition") && registration.GetValue<bool>("isSubCompetition");
-                var classesForCalc = classCodes.Count > 0
-                    ? (IReadOnlyCollection<string>)classCodes
-                    : new[] { string.Empty };
-                var newFee = RegistrationFeeCalculator.Calculate(competition, classesForCalc, isSub);
+                var newFee = FeeFor(competition, registration);
 
                 var allInvoices = GetAllNonCancelledInvoicesForRegistration(competition, registrationId);
 
@@ -1061,7 +1048,7 @@ namespace HpskSite.Services
                     {
                         // No outstanding invoice — create one for what's owed. Paid invoices (if
                         // any) stay as the historical record; the new one is a top-up for the rest.
-                        var memberName = registration.GetValue<string>("memberName") ?? "";
+                        var memberName = registration.MemberName;
                         var created = await CreateInvoiceAsync(competitionId, memberId.ToString(), memberName, registrationId, delta, "Swish");
                         if (created != null && sumPaid == 0m)
                         {
@@ -1106,19 +1093,11 @@ namespace HpskSite.Services
         {
             var result = new RegistrationInvoiceTotals();
             var competition = _contentService.GetById(competitionId);
-            var registration = _contentService.GetById(registrationId);
-            if (competition == null || registration == null ||
-                registration.ContentType.Alias != "competitionRegistration")
+            var registration = _registrations.GetById(registrationId);
+            if (competition == null || registration == null)
                 return result;
 
-            var classEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(
-                registration.GetValue<string>("shootingClasses") ?? "");
-            var classCodes = classEntries.Select(c => c.Class).Where(c => !string.IsNullOrEmpty(c)).ToList();
-            var isSub = registration.HasProperty("isSubCompetition") && registration.GetValue<bool>("isSubCompetition");
-            var classesForCalc = classCodes.Count > 0
-                ? (IReadOnlyCollection<string>)classCodes
-                : new[] { string.Empty };
-            result.FullFee = RegistrationFeeCalculator.Calculate(competition, classesForCalc, isSub);
+            result.FullFee = FeeFor(competition, registration);
 
             foreach (var inv in GetAllNonCancelledInvoicesForRegistration(competition, registrationId))
             {
@@ -1182,26 +1161,27 @@ namespace HpskSite.Services
                 }
             }
 
-            var registrationsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-            if (registrationsHub == null) return result;
-
-            foreach (var registration in _contentService.GetPagedChildren(registrationsHub.Id, 0, 2000, out _))
+            foreach (var registration in _registrations.List(competitionId))
             {
-                if (registration.ContentType.Alias != "competitionRegistration") continue;
-
-                var classEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(
-                    registration.GetValue<string>("shootingClasses") ?? "");
-                var classCodes = classEntries.Select(c => c.Class).Where(c => !string.IsNullOrEmpty(c)).ToList();
-                var isSub = registration.HasProperty("isSubCompetition") && registration.GetValue<bool>("isSubCompetition");
-                var classesForCalc = classCodes.Count > 0
-                    ? (IReadOnlyCollection<string>)classCodes
-                    : new[] { string.Empty };
-
-                var fee = RegistrationFeeCalculator.Calculate(competition, classesForCalc, isSub);
+                var fee = FeeFor(competition, registration);
                 result[registration.Id] = Math.Max(0m, fee - paidBilled.GetValueOrDefault(registration.Id));
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Vad anmälan kostar som den står nu: dess klasser och deltävlingsvalet genom
+        /// <see cref="RegistrationFeeCalculator"/>. En anmälan utan klasser räknas som en anmälan med
+        /// en tom klass, samma regel som förut.
+        /// </summary>
+        private static decimal FeeFor(IContent competition, HpskSite.Models.Registrations.RegistrationRecord registration)
+        {
+            var classCodes = registration.ClassIds;
+            var classesForCalc = classCodes.Count > 0
+                ? (IReadOnlyCollection<string>)classCodes
+                : new[] { string.Empty };
+            return RegistrationFeeCalculator.Calculate(competition, classesForCalc, registration.IsSubCompetition);
         }
 
         /// <summary>
@@ -1490,13 +1470,9 @@ namespace HpskSite.Services
                 var registrationId = invoice.GetValue<int>("registrationId");
                 if (registrationId > 0)
                 {
-                    var reg = _contentService.GetById(registrationId);
+                    var reg = _registrations.GetById(registrationId);
                     if (reg != null)
-                    {
-                        var json = reg.GetValue<string>("shootingClasses") ?? "";
-                        var entries = CompetitionRegistrationDocument.DeserializeShootingClasses(json);
-                        classes = string.Join(", ", entries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)).Select(HpskSite.Models.ShootingClasses.DisplayName));
-                    }
+                        classes = string.Join(", ", reg.ClassIds.Select(HpskSite.Models.ShootingClasses.DisplayName));
                 }
 
                 // Operator-entered transactionId wins when present (it's the Swish-app
@@ -1595,11 +1571,12 @@ namespace HpskSite.Services
             try
             {
                 var umbracoContext = _umbracoContextAccessor.GetRequiredUmbracoContext();
-                var registration = umbracoContext.Content.GetById(registrationId);
-                
+                // Anmälan via lagringen (alla anmälningar, publicerade eller inte).
+                var registration = _registrations.GetById(registrationId);
+
                 if (registration == null) return "Unknown";
 
-                var invoiceId = registration.Value<int?>("invoiceId");
+                var invoiceId = registration.InvoiceId;
                 if (!invoiceId.HasValue) return "No Invoice";
 
                 var invoice = umbracoContext.Content.GetById(invoiceId.Value);
@@ -1658,72 +1635,9 @@ namespace HpskSite.Services
             }
         }
 
-        /// <summary>
-        /// Calculate total amount for a registration based on number of classes
-        /// </summary>
-        public decimal CalculateRegistrationTotal(int competitionId, int registrationId)
-        {
-            try
-            {
-                var umbracoContext = _umbracoContextAccessor.GetRequiredUmbracoContext();
-                var competition = umbracoContext.Content.GetById(competitionId);
-
-                if (competition == null) return 0;
-
-                var registrationFee = competition.Value<decimal>("registrationFee");
-
-                // Get registration and count shooting classes
-                var registration = _contentService.GetById(registrationId);
-                if (registration == null) return 0;
-
-                var shootingClassesJson = registration.GetValue<string>("shootingClasses");
-                var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
-
-                // Calculate: fee × number of classes
-                return registrationFee * shootingClasses.Count;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error calculating registration total for registration {RegistrationId}", registrationId);
-                return 0;
-            }
-        }
-
-
-        /// <summary>
-        /// Link a registration to an invoice (NEW: updated for single registration)
-        /// </summary>
-        private void LinkRegistrationToInvoice(int registrationId, int invoiceId)
-        {
-            try
-            {
-                _logger.LogInformation("Linking registration {RegistrationId} to invoice {InvoiceId}", registrationId, invoiceId);
-
-                var registration = _contentService.GetById(registrationId);
-                if (registration != null)
-                {
-                    registration.SetValue("invoiceId", invoiceId);
-                    var saveResult = _contentService.Save(registration);
-                    if (saveResult.Success)
-                    {
-                        _contentService.Publish(registration, new[] { "*" }, -1);
-                        _logger.LogInformation("Successfully linked registration {RegistrationId} to invoice {InvoiceId}", registrationId, invoiceId);
-                    }
-                    else
-                    {
-                        _logger.LogError("Failed to save registration {RegistrationId} when linking to invoice {InvoiceId}", registrationId, invoiceId);
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning("Registration {RegistrationId} not found when linking to invoice {InvoiceId}", registrationId, invoiceId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error linking registration {RegistrationId} to invoice {InvoiceId}", registrationId, invoiceId);
-            }
-        }
+        // CalculateRegistrationTotal() och LinkRegistrationToInvoice() BORTTAGNA 2026-10-09: inga
+        // anropare. Avgiften räknas av RegistrationFeeCalculator (se FeeFor) och fakturalänken skrivs av
+        // LinkInvoiceToRegistration via anmälningslagringen.
 
         /// <summary>
         /// Create an invoice for a team registration (no individual registration link).
