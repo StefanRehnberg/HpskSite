@@ -1,7 +1,8 @@
 using HpskSite.Models;
+using HpskSite.Models.Events;
 using HpskSite.Models.Training;
+using HpskSite.Services.Events;
 using HpskSite.Services.Firearms;
-using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Infrastructure.Persistence;
 
@@ -50,6 +51,7 @@ namespace HpskSite.Services.Training
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly IContentService _contentService;
         private readonly ILogger<TrainingMigrationService> _logger;
+        private readonly IClubEventStore _events;
 
         /// <summary>En skarp körning (flytt eller ångra) i taget i hela appen.</summary>
         private static readonly SemaphoreSlim Gate = new(1, 1);
@@ -57,11 +59,13 @@ namespace HpskSite.Services.Training
         public TrainingMigrationService(
             IUmbracoDatabaseFactory databaseFactory,
             IContentService contentService,
-            ILogger<TrainingMigrationService> logger)
+            ILogger<TrainingMigrationService> logger,
+            IClubEventStore events)
         {
             _databaseFactory = databaseFactory;
             _contentService = contentService;
             _logger = logger;
+            _events = events;
         }
 
         public const string ActionMigrate = "migrera";
@@ -99,20 +103,19 @@ namespace HpskSite.Services.Training
 
         /// <summary>Händelsens fält som träningen inte bär, med namnen klubben känner igen.
         /// Uppgifterna raderas inte — de ligger kvar på den avpublicerade händelsen.</summary>
-        private static readonly (string Alias, string Label)[] NotCarriedFields =
+        private static readonly (Func<ClubEventRecord, string?> Read, string Label)[] NotCarriedFields =
         {
-            ("contactPerson", "kontaktperson"), ("contactEmail", "kontaktens e-post"), ("contactPhone", "kontaktens telefon"),
-            ("eventImage", "bild"), ("equipmentRequired", "utrustning"), ("targetAudience", "målgrupp"),
-            ("contentBlocks", "extra innehåll på sidan"), ("quickLinks", "snabblänkar"), ("registrationUrl", "extern anmälningslänk"),
+            (e => e.ContactPerson, "kontaktperson"), (e => e.ContactEmail, "kontaktens e-post"), (e => e.ContactPhone, "kontaktens telefon"),
+            (e => e.ImageRef, "bild"), (e => e.EquipmentRequired, "utrustning"), (e => e.TargetAudience, "målgrupp"),
+            (e => e.ContentBlocksJson, "extra innehåll på sidan"), (e => e.QuickLinksJson, "snabblänkar"), (e => e.RegistrationUrl, "extern anmälningslänk"),
         };
 
-        private static List<string> ReadNotCarried(IContent node)
+        private static List<string> ReadNotCarried(ClubEventRecord ev)
         {
             var list = new List<string>();
-            foreach (var (alias, label) in NotCarriedFields)
+            foreach (var (read, label) in NotCarriedFields)
             {
-                if (!node.HasProperty(alias)) continue;
-                var v = node.GetValue(alias)?.ToString()?.Trim();
+                var v = read(ev)?.Trim();
                 if (!string.IsNullOrEmpty(v) && v != "[]" && v != "{}" && v != "null") list.Add(label);
             }
             return list;
@@ -169,13 +172,6 @@ namespace HpskSite.Services.Training
             public int V { get; set; }
         }
 
-        private class EventNodeRow
-        {
-            public int EventId { get; set; }
-            public int OwnerId { get; set; }
-            public string OwnerType { get; set; } = "";
-        }
-
         // ══ Flytt ══════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
@@ -221,22 +217,18 @@ namespace HpskSite.Services.Training
         {
             var result = new Result { Applied = apply };
 
-            List<EventNodeRow> nodes;
+            List<ClubEventRecord> events;
             Dictionary<int, int> migrated;   // legacy node id → training id
             Dictionary<int, int> participants;
             Dictionary<int, int> bookings;
             HashSet<int> withLedger;
             using (var db = _databaseFactory.CreateDatabase())
             {
-                nodes = db.Fetch<EventNodeRow>(@"
-SELECT n.id AS EventId, n.parentId AS OwnerId, pct.alias AS OwnerType
-FROM umbracoNode n
-JOIN umbracoContent c ON c.nodeId = n.id
-JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId AND ct.alias = 'clubSimpleEvent'
-JOIN umbracoNode pn ON pn.id = n.parentId
-JOIN umbracoContent pc ON pc.nodeId = pn.id
-JOIN cmsContentType pct ON pct.nodeId = pc.contentTypeId
-WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clubId);
+                events = (clubId == 0
+                        ? _events.ListAllForOwnerType(ClubEventRecord.OwnerClub)
+                        : _events.ListForOwner(clubId, publishedOnly: false))
+                    .Where(e => e.IsClubOwned)
+                    .ToList();
 
                 migrated = db.Fetch<IdPair>(
                         "SELECT LegacyEventNodeId AS K, Id AS V FROM dbo.ClubTraining WHERE LegacyEventNodeId IS NOT NULL")
@@ -248,26 +240,24 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
                 bookings = CountBookings(db);
                 withLedger = SourcesInLedger(db, HpskSite.Models.Ledger.LedgerSourceType.Event);
             }
-            if (onlyEventIds != null) nodes = nodes.Where(n => onlyEventIds.Contains(n.EventId)).ToList();
+            if (onlyEventIds != null) events = events.Where(e => onlyEventIds.Contains(e.Id)).ToList();
 
             var clubNames = new Dictionary<int, string>();
             var kept = new Dictionary<(int Club, string Type), int>();
 
-            foreach (var n in nodes.OrderBy(n => n.OwnerId).ThenBy(n => n.EventId))
+            foreach (var ev in events.OrderBy(e => e.OwnerId).ThenBy(e => e.Id))
             {
-                var node = _contentService.GetById(n.EventId);
-                if (node == null) continue;
-                var row = Describe(node, n.OwnerId, clubNames);
+                var row = Describe(ev, ev.OwnerId, clubNames);
 
                 // Redan flyttad: bara avpubliceringen kan saknas.
-                if (migrated.TryGetValue(n.EventId, out var existingId))
+                if (migrated.TryGetValue(ev.Id, out var existingId))
                 {
                     row.TrainingId = existingId;
-                    if (node.Published)
+                    if (ev.IsPublished)
                     {
                         row.Action = ActionUnpublishOnly;
                         row.Reason = "Redan flyttad men står kvar publicerad";
-                        if (apply) TryUnpublish(node, row, actingMemberId);
+                        if (apply) TryUnpublish(ev.Id, row, actingMemberId);
                     }
                     else
                     {
@@ -285,7 +275,7 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
                     // Händelser som inte är träning listas inte rad för rad — de är majoriteten och
                     // inget händer med dem. De summeras per typ (bara publicerade; en opublicerad syns
                     // ingenstans ändå).
-                    if (node.Published)
+                    if (ev.IsPublished)
                     {
                         var key = (row.ClubId, row.EventType.Trim().Length > 0 ? row.EventType.Trim() : "(ingen typ)");
                         kept[key] = kept.GetValueOrDefault(key) + 1;
@@ -293,16 +283,16 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
                     continue;
                 }
 
-                row.Participants = participants.GetValueOrDefault(n.EventId);
-                row.Bookings = bookings.GetValueOrDefault(n.EventId);
-                row.NotCarried = ReadNotCarried(node);
+                row.Participants = participants.GetValueOrDefault(ev.Id);
+                row.Bookings = bookings.GetValueOrDefault(ev.Id);
+                row.NotCarried = ReadNotCarried(ev);
 
-                if (!node.Published)
+                if (!ev.IsPublished)
                 {
                     row.Action = ActionSkip;
                     row.Reason = "Opublicerad — syns redan inte, lämnas som den är";
                 }
-                else if (withLedger.Contains(n.EventId))
+                else if (withLedger.Contains(ev.Id))
                 {
                     row.Action = ActionSkip;
                     row.Reason = "Har rader i liggaren (betalning, avgift, verifikation eller projekt) — flyttas inte";
@@ -318,12 +308,12 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
                     row.Reason = cls.Reason;
                     // Sägs redan i torrkörningen — det är där klubben ser vilka tillfällen som ska
                     // kopplas till en kurs.
-                    if (node.GetValue<bool>(ClubEvents.MandatoryProperty))
+                    if (ev.IsMandatory)
                         row.Notes.Add("Var markerad som obligatorisk. Det togs inte med — gäller kravet en kurs, koppla träningen till kursen och sätt närvaron som krävd där.");
-                    var end = ClubEvents.RealDate(node.GetValue<DateTime?>("eventEndDate"));
+                    var end = ev.EndsAt;
                     if (TrainingMigrationRules.SplitTimes(row.Date.Value, end).EndDropped)
                         row.Notes.Add("Sluttiden ligger på en annan dag och tas inte med");
-                    if (apply) Migrate(node, row, actingMemberId);
+                    if (apply) Migrate(ev, row, actingMemberId);
                 }
                 result.Rows.Add(row);
             }
@@ -349,17 +339,16 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
             return name;
         }
 
-        private Row Describe(IContent node, int clubId, Dictionary<int, string> clubNames)
+        private Row Describe(ClubEventRecord ev, int clubId, Dictionary<int, string> clubNames)
         {
-            var start = ClubEvents.RealDate(node.GetValue<DateTime?>("eventDate"));
             return new Row
             {
-                EventId = node.Id,
+                EventId = ev.Id,
                 ClubId = clubId,
                 ClubName = ClubName(clubId, clubNames),
-                Name = node.GetValue<string>("eventName") is { Length: > 0 } nm ? nm : (node.Name ?? ""),
-                EventType = node.GetValue<string>("eventType") ?? "",
-                Date = start
+                Name = ev.Name is { Length: > 0 } nm ? nm : (ev.PageName ?? ""),
+                EventType = ev.EventType ?? "",
+                Date = ev.StartsAt
             };
         }
 
@@ -368,14 +357,15 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
         /// Avpubliceringen sker EFTER, eftersom den går genom innehållstjänstens egen scope och inte
         /// får köras inne i en annan anslutnings transaktion.
         /// </summary>
-        private void Migrate(IContent node, Row row, int actingMemberId)
+        private void Migrate(ClubEventRecord ev, Row row, int actingMemberId)
         {
             var start = row.Date!.Value;
-            var end = ClubEvents.RealDate(node.GetValue<DateTime?>("eventEndDate"));
+            var end = ev.EndsAt;
             var (date, startTime, endTime, _) = TrainingMigrationRules.SplitTimes(start, end);
 
-            var maxParticipants = node.GetValue<int>("maxParticipants");
-            var rangeId = node.HasProperty("rangeId") ? node.GetValue<int>("rangeId") : 0;
+            var maxParticipants = ev.MaxParticipants;
+            // Händelsen bär ingen skjutbana (rangeId är inte en del av ClubEventRecord).
+            var rangeId = 0;
             var now = DateTime.Now;
             var training = new ClubTraining
             {
@@ -385,22 +375,22 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
                 EndTime = endTime,
                 Discipline = row.Discipline,
                 Name = row.Name.Length > 0 ? row.Name : "Träning",
-                Venue = Blank(node.GetValue<string>("venue")),
+                Venue = Blank(ev.Venue),
                 RangeId = rangeId > 0 ? rangeId : null,
-                Description = Blank(node.GetValue<string>("description")),
+                Description = Blank(ev.Description),
                 IsCancelled = false,
-                RegistrationRequired = node.GetValue<bool>("registrationRequired"),
+                RegistrationRequired = ev.RegistrationRequired,
                 MaxParticipants = maxParticipants > 0 ? maxParticipants : null,
-                RegistrationDeadline = ClubEvents.RealDate(node.GetValue<DateTime?>(ClubEvents.DeadlineProperty)),
-                Prices = Blank(node.GetValue<string>(EventPrices.Property)),
+                RegistrationDeadline = ev.RegistrationDeadline,
+                Prices = Blank(ev.PricesJson),
                 // Bara händelsens EGET nummer — ett tomt fält ärver klubbens, precis som förut.
-                SwishNumber = Blank(node.GetValue<string>(ClubEvents.SwishProperty)),
-                Audience = Blank(node.GetValue<string>(EventAudience.Property)),
-                LoanWeaponsOffered = node.GetValue<bool>(LoanWeaponClubRules.EventOfferedProperty),
+                SwishNumber = Blank(ev.SwishNumber),
+                Audience = Blank(ev.Audience),
+                LoanWeaponsOffered = ev.LanevapenOffered,
                 // En träning är aldrig obligatorisk för alla (Stefan 2026-10-06). Flaggan förs inte
                 // över; en kurs krav sätts på kursens koppling — se noten i torrkörningen.
                 IsMandatory = false,
-                LegacyEventNodeId = node.Id,
+                LegacyEventNodeId = ev.Id,
                 CreatedByMemberId = actingMemberId,
                 CreatedDate = now,
                 UpdatedDate = now
@@ -415,7 +405,7 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
                     // samtidiga körningar båda se "inte flyttad" och skapa var sin träning, varav
                     // den andra står utan deltagare.
                     var already = db.ExecuteScalar<int?>(
-                        "SELECT TOP 1 Id FROM dbo.ClubTraining WITH (UPDLOCK, HOLDLOCK) WHERE LegacyEventNodeId = @0", node.Id);
+                        "SELECT TOP 1 Id FROM dbo.ClubTraining WITH (UPDLOCK, HOLDLOCK) WHERE LegacyEventNodeId = @0", ev.Id);
                     if (already is > 0)
                     {
                         row.TrainingId = already;
@@ -426,11 +416,11 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
                     db.Insert(training);
                     row.Participants = db.Execute(
                         "UPDATE dbo.ClubEventParticipant SET OccasionKind = @0, EventId = @1 WHERE OccasionKind = @2 AND EventId = @3",
-                        ClubEvents.OccasionTraining, training.Id, ClubEvents.OccasionEvent, node.Id);
+                        ClubEvents.OccasionTraining, training.Id, ClubEvents.OccasionEvent, ev.Id);
                     if (TableExists(db, "dbo", "FirearmBooking"))
                         row.Bookings = db.Execute(
                             "UPDATE dbo.FirearmBooking SET OccasionKind = @0, OccasionId = @1 WHERE OccasionKind = @2 AND OccasionId = @3",
-                            FirearmOccasionKind.Training, training.Id, FirearmOccasionKind.Event, node.Id);
+                            FirearmOccasionKind.Training, training.Id, FirearmOccasionKind.Event, ev.Id);
                     tx.Complete();
                 }
                 row.TrainingId = training.Id;
@@ -438,26 +428,25 @@ WHERE n.trashed = 0 AND pct.alias = 'club' AND (@0 = 0 OR n.parentId = @0)", clu
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Träningsflytt: händelse {Event} kunde inte flyttas", node.Id);
+                _logger.LogError(ex, "Träningsflytt: händelse {Event} kunde inte flyttas", ev.Id);
                 row.Action = ActionFailed;
                 row.Reason = "Kunde inte flyttas: " + ex.Message;
                 return;
             }
 
-            TryUnpublish(node, row, actingMemberId);
+            TryUnpublish(ev.Id, row, actingMemberId);
         }
 
-        private void TryUnpublish(IContent node, Row row, int actingMemberId)
+        private void TryUnpublish(int eventId, Row row, int actingMemberId)
         {
             try
             {
-                var r = _contentService.Unpublish(node);
-                if (!r.Success)
+                if (!_events.SetPublished(eventId, false))
                     row.Notes.Add("Den gamla händelsen kunde inte avpubliceras — förhandsgranska och flytta igen, så görs bara det steget");
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Träningsflytt: händelse {Event} kunde inte avpubliceras", node.Id);
+                _logger.LogWarning(ex, "Träningsflytt: händelse {Event} kunde inte avpubliceras", eventId);
                 row.Notes.Add("Den gamla händelsen kunde inte avpubliceras — förhandsgranska och flytta igen, så görs bara det steget");
             }
         }
@@ -516,8 +505,7 @@ FROM dbo.ClubTraining WHERE ClubId = @0 AND LegacyEventNodeId IS NOT NULL ORDER 
                 var reason = KeepReason(t, courseLinked, courseNotes, courseSeries, ledger);
                 if (reason == null)
                 {
-                    var node = _contentService.GetById(t.LegacyEventNodeId);
-                    if (node == null || node.Trashed) reason = "Den gamla händelsen finns inte längre";
+                    if (_events.Get(t.LegacyEventNodeId) == null) reason = "Den gamla händelsen finns inte längre";
                 }
                 row.Action = reason == null ? ActionRestore : ActionKeep;
                 row.Reason = reason ?? "Blir en händelse igen, med sina anmälda och lånevapen";
@@ -581,16 +569,14 @@ FROM dbo.ClubTraining WHERE ClubId = @0 AND LegacyEventNodeId IS NOT NULL ORDER 
 
         private void Restore(UndoRow row, int actingMemberId)
         {
-            var node = _contentService.GetById(row.EventId);
-            if (node == null || node.Trashed) { row.Action = ActionFailed; row.Reason = "Den gamla händelsen finns inte längre"; return; }
+            if (_events.Get(row.EventId) == null) { row.Action = ActionFailed; row.Reason = "Den gamla händelsen finns inte längre"; return; }
 
             try
             {
-                var pub = _contentService.Publish(node, new[] { "*" }, actingMemberId > 0 ? -1 : -1);
-                if (!pub.Success)
+                if (!_events.SetPublished(row.EventId, true))
                 {
                     row.Action = ActionFailed;
-                    row.Reason = "Händelsen kunde inte publiceras igen (" + pub.Result + ") — ingenting ändrades";
+                    row.Reason = "Händelsen kunde inte publiceras igen — ingenting ändrades";
                     return;
                 }
             }
@@ -633,7 +619,11 @@ FROM dbo.ClubTraining WITH (UPDLOCK, HOLDLOCK) WHERE Id = @0 AND LegacyEventNode
                 _logger.LogError(ex, "Ångra träningsflytt: träning {Training} kunde inte återställas", row.TrainingId);
                 row.Action = ActionFailed;
                 row.Reason = "Kunde inte återställas: " + ex.Message + " — träningen står kvar";
-                try { _contentService.Unpublish(node); }
+                try
+                {
+                    if (!_events.SetPublished(row.EventId, false))
+                        throw new InvalidOperationException("Avpubliceringen gick inte igenom");
+                }
                 catch (Exception ex2)
                 {
                     _logger.LogError(ex2, "Ångra träningsflytt: händelse {Event} kunde inte avpubliceras igen", row.EventId);

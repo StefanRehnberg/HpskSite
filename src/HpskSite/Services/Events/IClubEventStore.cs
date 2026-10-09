@@ -29,6 +29,12 @@ namespace HpskSite.Services.Events
         IReadOnlyList<ClubEventRecord> ListAllPublished();
 
         /// <summary>
+        /// Alla händelser med en ägare av typen <paramref name="ownerType"/>, publicerade eller inte
+        /// (träningsflytten går igenom klubbarnas samtliga händelser).
+        /// </summary>
+        IReadOnlyList<ClubEventRecord> ListAllForOwnerType(string ownerType);
+
+        /// <summary>
         /// Sparar: skapar när <see cref="ClubEventRecord.Id"/> är 0, annars uppdateras den.
         /// Publicerar när <see cref="ClubEventRecord.IsPublished"/> är satt. Returnerar id:t, eller ett
         /// färdigt felmeddelande (och sparar då ingenting).
