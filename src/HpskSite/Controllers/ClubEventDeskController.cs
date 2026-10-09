@@ -51,6 +51,7 @@ namespace HpskSite.Controllers
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IPublishedUrlProvider _urls;
         private readonly AdminAuthorizationService _auth;
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
 
         public ClubEventDeskController(
             IMemberManager memberManager,
@@ -58,9 +59,11 @@ namespace HpskSite.Controllers
             ClubEventParticipationService participation,
             IUmbracoContextAccessor umbracoContextAccessor,
             IPublishedUrlProvider urls,
-            AdminAuthorizationService auth)
+            AdminAuthorizationService auth,
+            HpskSite.Services.Events.IClubEventStore events)
         {
             _auth = auth;
+            _events = events;
             _memberManager = memberManager;
             _memberService = memberService;
             _participation = participation;
@@ -124,8 +127,16 @@ namespace HpskSite.Controllers
             // En träning har ingen egen sida — vägen tillbaka är klubbens.
             try
             {
-                var node = uctx.Content.GetById(ctx.IsTraining ? ctx.OwnerId : e);
-                if (node != null) model.EventUrl = _urls.GetUrl(node) ?? "";
+                if (ctx.IsTraining)
+                {
+                    var node = uctx.Content.GetById(ctx.OwnerId);
+                    if (node != null) model.EventUrl = _urls.GetUrl(node) ?? "";
+                }
+                else
+                {
+                    // Händelsens adress ur händelselagringen (sajtstrukturen fas 2a).
+                    model.EventUrl = _events.Get(e)?.Url ?? "";
+                }
             }
             catch (Exception)
             {

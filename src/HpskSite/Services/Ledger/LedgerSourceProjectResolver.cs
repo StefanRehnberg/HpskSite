@@ -28,17 +28,20 @@ namespace HpskSite.Services.Ledger
         private readonly LedgerProjectGroupService _groups;
         private readonly IContentService _contentService;
         private readonly ILogger<LedgerSourceProjectResolver> _logger;
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
 
         public LedgerSourceProjectResolver(
             LedgerProjectService projects,
             LedgerProjectGroupService groups,
             IContentService contentService,
-            ILogger<LedgerSourceProjectResolver> logger)
+            ILogger<LedgerSourceProjectResolver> logger,
+            HpskSite.Services.Events.IClubEventStore events)
         {
             _projects = projects;
             _groups = groups;
             _contentService = contentService;
             _logger = logger;
+            _events = events;
         }
 
         /// <summary>
@@ -54,18 +57,22 @@ namespace HpskSite.Services.Ledger
 
             try
             {
-                var node = _contentService.GetById(id);
+                // Händelser via händelselagringen (sajtstrukturen fas 2a); tävlingar är fortfarande noder.
+                var isEvent = kind == LedgerProjectSource.Event;
+                var ev = isEvent ? _events.Get(id) : null;
+                var node = isEvent ? null : _contentService.GetById(id);
 
                 // ⚠️ En RADERAD tävling har fortfarande pengar — det vanliga fallet är en betalning
                 //    som bekräftades innan händelsen togs bort och bokförs i efterhand. Den får ett
                 //    namn som SÄGER det, med id:t, samma form som översikten redan använder. Utan
                 //    det hette den bara "Evenemang", och två sådana gick inte att skilja åt.
-                var candidates = node is null
-                    ? new List<string>
-                    {
-                        kind == LedgerProjectSource.Event ? $"Borttagen händelse (#{id})" : $"Borttagen tävling (#{id})"
-                    }
-                    : LedgerProjectSource.NameCandidates(NameOf(node, kind), DateOf(node, kind), kind, id);
+                var candidates = isEvent
+                    ? (ev is null
+                        ? new List<string> { $"Borttagen händelse (#{id})" }
+                        : LedgerProjectSource.NameCandidates(ev.DisplayName, ev.StartsAt, kind, id))
+                    : node is null
+                        ? new List<string> { $"Borttagen tävling (#{id})" }
+                        : LedgerProjectSource.NameCandidates(NameOf(node, kind), DateOf(node, kind), kind, id);
 
                 var ensured = _projects.EnsureForSource(
                     issuerType, issuerId, kind, id, candidates, byMemberId);

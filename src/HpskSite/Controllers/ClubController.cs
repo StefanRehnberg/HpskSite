@@ -38,6 +38,9 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Training.ClubTrainingService _trainings;
         private readonly HpskSite.Services.Events.EventOwnerResolver _eventOwners;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        // Sajtstrukturen fas 2a: varje läsning och skrivning av klubbens och kretsens händelser går
+        // genom lagringen — aldrig direkt mot clubSimpleEvent-noderna.
+        private readonly HpskSite.Services.Events.IClubEventStore _events;
         private readonly ILogger<ClubController> _logger;
 
         public ClubController(
@@ -58,10 +61,12 @@ namespace HpskSite.Controllers
             HpskSite.Services.Training.ClubTrainingService trainings,
             HpskSite.Services.Events.EventOwnerResolver eventOwners,
             ILogger<ClubController> logger,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Events.IClubEventStore events)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
+            _events = events;
             _antiforgery = antiforgery;
             _trainings = trainings;
             _eventOwners = eventOwners;
@@ -242,16 +247,14 @@ namespace HpskSite.Controllers
                     // in the calendar (see competition filter below).
                     var clubRegion = clubNode.Value<string>("regionalFederation") ?? "";
 
-                    // Get club simple events (children of club node)
-                    var simpleEvents = clubNode.Children
-                        .Where(c => c.ContentType.Alias == "clubSimpleEvent")
-                        .ToList();
+                    // Klubbens händelser — genom lagringen (fas 2a), bara publicerade.
+                    var simpleEvents = _events.ListForOwner(clubId);
 
                     foreach (var evt in simpleEvents)
                     {
-                        var eventDate = evt.Value<DateTime?>("eventDate");
-                        var eventName = evt.Value<string>("eventName") ?? evt.Name;
-                        var eventType = evt.Value<string>("eventType") ?? "Träning";
+                        var eventDate = evt.StartsAt;
+                        var eventName = evt.DisplayName;
+                        var eventType = string.IsNullOrEmpty(evt.EventType) ? "Träning" : evt.EventType;
                         // Kalenderns filter (fas C): träning är en egen kategori, allt annat klubben
                         // ordnar (städdag, möte, socialt) är "övrigt i klubben".
                         var scope = eventType.Contains("Träning", StringComparison.OrdinalIgnoreCase)
@@ -268,21 +271,19 @@ namespace HpskSite.Controllers
                                 date = eventDate.Value,
                                 type = eventType,
                                 scope,
-                                description = evt.Value<string>("description") ?? "",
-                                venue = evt.Value<string>("venue") ?? "",
-                                contactPerson = evt.Value<string>("contactPerson") ?? "",
-                                url = evt.Url(),
+                                description = evt.Description,
+                                venue = evt.Venue,
+                                contactPerson = evt.ContactPerson,
+                                url = evt.Url,
                                 // Kalendern badgar obligatoriska händelser — deltagandet påverkar
                                 // medlemmens Föreningsintyg, så det ska synas där man planerar,
                                 // inte först när man öppnat händelsens egen sida.
-                                isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
+                                isMandatory = evt.IsMandatory,
                                 // ⚠️ Samma skäl för sista anmälningsdag: en deadline som bara syns
                                 // inne på händelsens sida hinner passera för den som planerar i
                                 // kalendern. Badgen bor i _EventBadges, delad av alla tre vyerna.
-                                registrationRequired = evt.Value<bool>("registrationRequired"),
-                                registrationDeadline = HpskSite.Models.ClubEvents.RealDate(
-                                        evt.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty))
-                                    ?.ToString("yyyy-MM-dd") ?? ""
+                                registrationRequired = evt.RegistrationRequired,
+                                registrationDeadline = evt.RegistrationDeadline?.ToString("yyyy-MM-dd") ?? ""
                             });
                         }
                     }
@@ -433,28 +434,26 @@ namespace HpskSite.Controllers
                     && clubForRegion.Parent?.Parent is IPublishedContent regionNode
                     && regionNode.ContentType.Alias == "regionalPage")
                 {
-                    foreach (var evt in regionNode.Children.Where(c => c.ContentType.Alias == "clubSimpleEvent"))
+                    foreach (var evt in _events.ListForOwner(regionNode.Id))
                     {
-                        var eventDate = evt.Value<DateTime?>("eventDate");
+                        var eventDate = evt.StartsAt;
                         if (!eventDate.HasValue || eventDate.Value.Date < startDate.Date || eventDate.Value.Date > endDate.Date)
                             continue;
                         events.Add(new
                         {
                             id = evt.Id,
-                            name = evt.Value<string>("eventName") ?? evt.Name,
+                            name = evt.DisplayName,
                             date = eventDate.Value,
-                            type = evt.Value<string>("eventType") ?? "Annat",
+                            type = string.IsNullOrEmpty(evt.EventType) ? "Annat" : evt.EventType,
                             scope = CalendarScopeOutside,
                             owner = regionNode.Name,
-                            description = evt.Value<string>("description") ?? "",
-                            venue = evt.Value<string>("venue") ?? "",
-                            contactPerson = evt.Value<string>("contactPerson") ?? "",
-                            url = evt.Url(),
-                            isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
-                            registrationRequired = evt.Value<bool>("registrationRequired"),
-                            registrationDeadline = HpskSite.Models.ClubEvents.RealDate(
-                                    evt.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty))
-                                ?.ToString("yyyy-MM-dd") ?? ""
+                            description = evt.Description,
+                            venue = evt.Venue,
+                            contactPerson = evt.ContactPerson,
+                            url = evt.Url,
+                            isMandatory = evt.IsMandatory,
+                            registrationRequired = evt.RegistrationRequired,
+                            registrationDeadline = evt.RegistrationDeadline?.ToString("yyyy-MM-dd") ?? ""
                         });
                     }
                 }
@@ -592,65 +591,42 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Club not found" });
                 }
 
-                // Create new event content as child of club
-                // Use pageName for the node name (URL slug) if provided, otherwise fall back to eventName
-                var nodeName = !string.IsNullOrWhiteSpace(pageName) ? pageName : eventName;
-                var newEvent = _contentService.Create(
-                    nodeName,
-                    clubId,  // Parent is the club node
-                    "clubSimpleEvent"
-                );
-
-                // Set properties
-                newEvent.SetValue("eventName", eventName);
-                newEvent.SetValue("eventType", eventType);
-                newEvent.SetValue("description", description);
-                newEvent.SetValue("venue", venue);
-                newEvent.SetValue("contactPerson", contactPerson);
-                newEvent.SetValue("contactEmail", contactEmail);
-                newEvent.SetValue("contactPhone", contactPhone);
-                var regFieldError = ApplyEventRegistrationFields(newEvent, registrationRequired,
+                // Ny händelse under klubben, genom lagringen (fas 2a). pageName blir sidnamnet
+                // (adressens sista del) om det angetts, annars händelsens namn.
+                var newEvent = new HpskSite.Models.Events.ClubEventRecord
+                {
+                    OwnerType = HpskSite.Models.Events.ClubEventRecord.OwnerClub,
+                    OwnerId = clubId,
+                    PageName = !string.IsNullOrWhiteSpace(pageName) ? pageName : eventName,
+                    Name = eventName,
+                    EventType = eventType ?? "",
+                    Description = description ?? "",
+                    Venue = venue ?? "",
+                    ContactPerson = contactPerson ?? "",
+                    ContactEmail = contactEmail ?? "",
+                    ContactPhone = contactPhone ?? "",
+                    IsActive = true,
+                    IsPublished = true
+                };
+                var regFieldError = HpskSite.Models.Events.ClubEventInput.ApplyRegistrationFields(newEvent, registrationRequired,
                     maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
                 if (regFieldError != null)
                 {
-                    // Avbryts FÖRE save/publish, så noden aldrig blir till. Ett halvsparat
+                    // Avbryts FÖRE sparningen, så händelsen aldrig blir till. Ett halvsparat
                     // evenemang utan sin deadline är värre än inget: det är publikt och öppet.
                     return Ok(new { success = false, message = regFieldError });
                 }
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
-                    newEvent.SetValue("eventDate", parsedEventDate);
+                    newEvent.StartsAt = parsedEventDate;
                 }
-                newEvent.SetValue("isActive", true);
 
-                // Save and publish (retries transient DB timeouts — see ContentPublishHelper)
-                var (published, publishError) = await ContentPublishHelper.SaveAndPublishAsync(_contentService, newEvent);
-                if (!published)
+                // Lagringen sparar och publicerar, och lämnar inget opublicerat föräldralöst utkast
+                // efter sig om publiceringen misslyckas (ett nytt försök hade annars skapat dubbletter).
+                var (newId, saveError) = await _events.SaveAsync(newEvent);
+                if (saveError != null)
                 {
-                    // Don't leave a saved-but-unpublished orphan behind: it is invisible on the
-                    // club page, so a retry from the admin would silently create duplicates.
-                    // Re-read first — a client-side timeout can hide a publish that did commit.
-                    var persisted = _contentService.GetById(newEvent.Id);
-                    if (persisted != null && !persisted.Published)
-                    {
-                        try { _contentService.Delete(persisted); } catch { /* best effort */ }
-                    }
-                    else if (persisted != null)
-                    {
-                        // It actually published after all.
-                        return Ok(new
-                        {
-                            success = true,
-                            message = "Event created successfully",
-                            data = new { id = newEvent.Id, name = eventName, date = eventDate, type = eventType }
-                        });
-                    }
-
-                    return Ok(new
-                    {
-                        success = false,
-                        message = $"Kunde inte spara händelsen: {publishError} Ingenting sparades — försök igen om en liten stund."
-                    });
+                    return Ok(new { success = false, message = saveError });
                 }
 
                 return Ok(new
@@ -659,7 +635,7 @@ namespace HpskSite.Controllers
                     message = "Event created successfully",
                     data = new
                     {
-                        id = newEvent.Id,
+                        id = newId,
                         name = eventName,
                         date = eventDate,
                         type = eventType
@@ -684,8 +660,9 @@ namespace HpskSite.Controllers
         /// <c>EditEventDetails</c> som skrev över <c>lanevapenOffered</c>), och en lista i JavaScript
         /// kan alltid glömma nästa fält.
         ///
-        /// Här itereras källnodens EGNA egenskaper i stället. Ett fält som läggs till på doctypen
-        /// följer då med utan att någon behöver komma ihåg den här metoden.
+        /// Här klonas källans post (<c>ClubEventRecord.Clone</c>) i stället, och lagringen skriver alla
+        /// kända fält (sajtstrukturen fas 2a). Ett fält som läggs till på posten följer då med utan att
+        /// någon behöver komma ihåg den här metoden.
         ///
         /// Deltagarrader följer aldrig med: <c>ClubEventParticipant</c> är nycklad på EventId, och
         /// kopian är en ny nod — den nya händelsen börjar alltså med tom anmälningslista, vilket är
@@ -726,8 +703,8 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Källhändelsens id saknas." });
                 }
 
-                var source = _contentService.GetById(sourceEventId);
-                if (source == null || source.ContentType.Alias != "clubSimpleEvent")
+                var source = _events.Get(sourceEventId);
+                if (source == null)
                 {
                     return Ok(new { success = false, message = "Källhändelsen hittades inte." });
                 }
@@ -738,13 +715,11 @@ namespace HpskSite.Controllers
                 // kretsadministratören från hennes EGEN händelse. Att det inte syntes här beror på
                 // att en sajtadmin släpps igenom av klubbkontrollen ändå — samma förväxling som
                 // redan kostat fyra rundor på tävlingssidan.
-                var sourceOwner = _eventOwners.ForEventNode(source);
+                var sourceOwner = _eventOwners.ForEventRecord(source);
                 if (!await _eventOwners.CanManageAsync(sourceOwner))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
-                // Kopian hamnar hos samma ägare (i dag: under samma föräldernod).
-                var parentId = sourceOwner!.OwnerId;
 
                 if (!DateTime.TryParse(eventDate, out var parsedDate))
                 {
@@ -753,21 +728,21 @@ namespace HpskSite.Controllers
 
                 var newName = !string.IsNullOrWhiteSpace(eventName)
                     ? eventName.Trim()
-                    : (source.GetValue<string>("eventName") ?? source.Name ?? "Kopia");
+                    : (!string.IsNullOrWhiteSpace(source.DisplayName) ? source.DisplayName : "Kopia");
                 var nodeName = !string.IsNullOrWhiteSpace(pageName) ? pageName.Trim() : newName;
 
-                var copy = _contentService.Create(nodeName, parentId, "clubSimpleEvent");
-
-                // Varje egenskap källan bär, utan en fältlista att glömma. Namnet och datumet sätts
-                // efteråt — de är de två sakerna som per definition ska skilja sig.
-                foreach (var prop in source.Properties)
-                {
-                    copy.SetValue(prop.Alias, source.GetValue(prop.Alias));
-                }
-
-                copy.SetValue("eventName", newName);
-                copy.SetValue("eventDate", parsedDate);
-                copy.SetValue("isActive", true);
+                // Varje fält källan bär, utan en fältlista att glömma: posten klonas, och lagringen
+                // skriver alla kända fält. Kopian hamnar hos samma ägare (posten bär ägaren).
+                // Namnet och datumet sätts efteråt — de är de två sakerna som per definition ska skilja sig.
+                var copy = source.Clone();
+                copy.Id = 0;
+                copy.IsPublished = true;
+                copy.PageName = nodeName;
+                copy.Name = newName;
+                copy.StartsAt = parsedDate;
+                copy.IsActive = true;
+                copy.Url = "";
+                copy.ImageUrl = "";
 
                 // ⚠️ DE ANDRA DATUMEN MÅSTE FLYTTAS MED, inte kopieras rakt. Ett slutdatum eller en
                 // sista anmälningsdag från källan ligger i förhållande till KÄLLANS datum: kopierade
@@ -775,49 +750,115 @@ namespace HpskSite.Controllers
                 // hade stängt anmälan direkt på en händelse som ser komplett ut. Samma antal dagar
                 // före/efter start bevaras därför, och saknas källans startdatum nollas de i stället
                 // — ett datum vi inte kan räkna om är sämre än inget.
-                var sourceStart = HpskSite.Models.ClubEvents.RealDate(source.GetValue<DateTime?>("eventDate"));
+                var sourceStart = source.StartsAt;
                 TimeSpan? shift = sourceStart.HasValue ? parsedDate.Date - sourceStart.Value.Date : null;
 
-                DateTime? Shifted(string alias)
+                DateTime? Shifted(DateTime? v)
                 {
-                    var v = HpskSite.Models.ClubEvents.RealDate(source.GetValue<DateTime?>(alias));
                     if (v == null || shift == null) return null;
                     return v.Value.Add(shift.Value);
                 }
 
-                copy.SetValue("eventEndDate", Shifted("eventEndDate"));
-                if (copy.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty))
-                    copy.SetValue(HpskSite.Models.ClubEvents.DeadlineProperty,
-                        Shifted(HpskSite.Models.ClubEvents.DeadlineProperty));
+                copy.EndsAt = Shifted(source.EndsAt);
+                copy.RegistrationDeadline = Shifted(source.RegistrationDeadline);
 
-                var (published, publishError) = await ContentPublishHelper.SaveAndPublishAsync(_contentService, copy);
-                if (!published)
+                // Lagringen sparar och publicerar, och städar själv bort en sparad men opublicerad
+                // kopia — den är osynlig på klubbsidan, så ett nytt försök hade skapat dubbletter i tysthet.
+                var (copyId, saveError) = await _events.SaveAsync(copy);
+                if (saveError != null)
                 {
-                    // Samma städning som i CreateClubEvent: en sparad men opublicerad kopia är
-                    // osynlig på klubbsidan, så ett nytt försök hade skapat dubbletter i tysthet.
-                    var persisted = _contentService.GetById(copy.Id);
-                    if (persisted != null && !persisted.Published)
-                    {
-                        try { _contentService.Delete(persisted); } catch { /* best effort */ }
-                    }
-                    else if (persisted != null)
-                    {
-                        return Ok(new { success = true, message = "Händelse kopierad", data = new { id = copy.Id } });
-                    }
-
-                    return Ok(new
-                    {
-                        success = false,
-                        message = $"Kunde inte spara kopian: {publishError} Ingenting sparades — försök igen om en liten stund."
-                    });
+                    return Ok(new { success = false, message = saveError });
                 }
 
-                return Ok(new { success = true, message = "Händelse kopierad", data = new { id = copy.Id } });
+                return Ok(new { success = true, message = "Händelse kopierad", data = new { id = copyId } });
             }
             catch (Exception ex)
             {
                 return Ok(new { success = false, message = "Error copying event: " + ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Händelseformulärets grundfält på posten (klubbens och kretsens redigeringsdialog).
+        /// Anmälningsfälten går genom <see cref="HpskSite.Models.Events.ClubEventInput.ApplyRegistrationFields"/>.
+        /// </summary>
+        private static void ApplyEventFormFields(HpskSite.Models.Events.ClubEventRecord e,
+            string eventName, string? eventType, string? description, string? venue,
+            string? contactPerson, string? contactEmail, string? contactPhone, string? pageName)
+        {
+            // Sidnamnet (adressens sista del) = pageName om det angetts, annars händelsens namn.
+            e.PageName = !string.IsNullOrWhiteSpace(pageName) ? pageName : eventName;
+            e.Name = eventName;
+            e.EventType = eventType ?? "";
+            e.Description = description ?? "";
+            e.Venue = venue ?? "";
+            e.ContactPerson = contactPerson ?? "";
+            e.ContactEmail = contactEmail ?? "";
+            e.ContactPhone = contactPhone ?? "";
+        }
+
+        /// <summary>
+        /// En händelse som rad i klubbens eller kretsens administrationslista (GetClubEvents /
+        /// GetRegionEvents). EN projektion för båda — de låg i två kopior som var tvungna att hållas
+        /// lika fält för fält. Egenskapsnamn och värdeformer är oförändrade mot nodtiden.
+        /// </summary>
+        private object EventEditListRow(HpskSite.Models.Events.ClubEventRecord evt)
+        {
+            var support = _events.Support;
+            var displayName = evt.DisplayName;
+            var prices = HpskSite.Models.EventPrices.Parse(evt.PricesJson);
+            return new
+            {
+                id = evt.Id,
+                name = displayName,
+                pageName = evt.PageName != displayName ? evt.PageName : "",
+                date = evt.StartsAt?.ToString("yyyy-MM-ddTHH:mm:ss"),
+                type = string.IsNullOrEmpty(evt.EventType) ? "Träning" : evt.EventType,
+                description = evt.Description,
+                venue = evt.Venue,
+                contactPerson = evt.ContactPerson,
+                contactEmail = evt.ContactEmail,
+                // ⚠️⚠️ SAKNADES, och det RADERADE numret. Redigeringsdialogen fyller
+                // `eventContactPhone` ur den här projektionen; utan raden fylldes den
+                // med tomt, och sparningen skriver kontakttelefonen villkorslöst.
+                // Alltså försvann kontakttelefonen varje gång någon redigerade en händelse
+                // från klubb- eller kretspanelen — tyst. Samma fältlista-som-glömmer som
+                // Luleå PK rapporterade om lånevapen, fjärde instansen på den här ytan.
+                contactPhone = evt.ContactPhone,
+                isActive = evt.IsActive,
+                url = evt.Url,
+                // Anmälningsinställningarna, så redigera-dialogen kan förfyllas utan ett
+                // extra anrop per rad. `*PropertyExists` följer med för att klienten ska kunna
+                // stänga av kontrollen när lagringen inte kan bära fältet (_events.Support).
+                registrationRequired = evt.RegistrationRequired,
+                registrationUrl = evt.RegistrationUrl,
+                maxParticipants = evt.MaxParticipants,
+                isMandatory = evt.IsMandatory,
+                lanevapenOffered = support.LanevapenOffered && evt.LanevapenOffered,
+                lanevapenPropertyExists = support.LanevapenOffered,
+                // ⚠️ Vem som får anmäla sig. Utan raden kan dialogen inte förfylla
+                // väljaren, och nästa sparning skickar tillbaka standard — alltså
+                // STÄNGER tyst en händelse arrangören öppnat. Exakt samma fälla som
+                // lanevapenOffered gick i, rapporterad av Luleå PK.
+                eventAudience = HpskSite.Models.EventAudience.Normalise(evt.Audience),
+                audiencePropertyExists = support.Audience,
+                // Åsidosättningen. Tomt = ägarens nummer används — det avgörs vid
+                // läsning i ClubEventParticipationService, inte här.
+                eventSwishNumber = support.Swish ? evt.SwishNumber : "",
+                swishPropertyExists = support.Swish,
+                mandatoryPropertyExists = support.Mandatory,
+                // Sista anmälningsdag. Bara datumdelen: fältet ÄR en dag, och en
+                // klockslagsdel i strängen hade flatpickr skrivit tillbaka som text.
+                registrationDeadline = support.Deadline
+                    ? evt.RegistrationDeadline?.ToString("yyyy-MM-dd") ?? ""
+                    : "",
+                deadlinePropertyExists = support.Deadline,
+                // Avgiften. null = ingen avgift angiven, 0 = arrangoren har sagt gratis.
+                // De far INTE slas ihop - se hpskEventRegFill i _EventRegistrationFields.
+                eventPrices = prices.Rows,
+                eventPricesUnreadable = prices.Unreadable,
+                eventPricesPropertyExists = support.Prices
+            };
         }
 
         /// <summary>
@@ -844,78 +885,14 @@ namespace HpskSite.Controllers
                         return Ok(new { success = false, message = "Club not found" });
                     }
 
-                    // Get all clubSimpleEvent children
-                    var allEvents = clubNode.Children
-                        .Where(c => c.ContentType.Alias == "clubSimpleEvent")
-                        .OrderBy(c => c.Value<DateTime?>("eventDate") ?? DateTime.MinValue)
+                    // Klubbens händelser genom lagringen (fas 2a) — bara publicerade, som förut.
+                    var allEvents = _events.ListForOwner(clubId)
+                        .OrderBy(e => e.StartsAt ?? DateTime.MinValue)
                         .ToList();
 
                     foreach (var evt in allEvents)
                     {
-                        var displayName = evt.Value<string>("eventName") ?? evt.Name;
-                        events.Add(new
-                        {
-                            id = evt.Id,
-                            name = displayName,
-                            pageName = evt.Name != displayName ? evt.Name : "",
-                            date = evt.Value<DateTime?>("eventDate")?.ToString("yyyy-MM-ddTHH:mm:ss"),
-                            type = evt.Value<string>("eventType") ?? "Träning",
-                            description = evt.Value<string>("description") ?? "",
-                            venue = evt.Value<string>("venue") ?? "",
-                            contactPerson = evt.Value<string>("contactPerson") ?? "",
-                            contactEmail = evt.Value<string>("contactEmail") ?? "",
-                            // ⚠️⚠️ SAKNADES, och det RADERADE numret. Redigeringsdialogen fyller
-                            // `eventContactPhone` ur den här projektionen; utan raden fylldes den
-                            // med tomt, och sparningen skriver `SetValue("contactPhone", "")`
-                            // villkorslöst. Alltså försvann kontakttelefonen varje gång någon
-                            // redigerade en händelse från klubb- eller kretspanelen — tyst, och
-                            // utan att fältet ens såg tomt ut för den som inte visste vad som stod
-                            // där förut. Samma fältlista-som-glömmer som Luleå PK rapporterade om
-                            // lånevapen, fjärde instansen på den här ytan.
-                            contactPhone = evt.Value<string>("contactPhone") ?? "",
-                            isActive = evt.Value<bool>("isActive"),
-                            url = evt.Url(),
-                            // Anmälningsinställningarna, så redigera-dialogen kan förfyllas utan ett
-                            // extra anrop per rad. `mandatoryPropertyExists` följer med för att
-                            // klienten ska kunna stänga av kryssrutan när doctypen saknar
-                            // egenskapen — SetValue på en saknad egenskap är en tyst no-op.
-                            registrationRequired = evt.Value<bool>("registrationRequired"),
-                            registrationUrl = evt.Value<string>("registrationUrl") ?? "",
-                            maxParticipants = evt.Value<int>("maxParticipants"),
-                            isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
-                            lanevapenOffered = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
-                                && evt.Value<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
-                            lanevapenPropertyExists = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
-                            // ⚠️ Vem som får anmäla sig. Utan raden kan dialogen inte förfylla
-                            // väljaren, och nästa sparning skickar tillbaka standard — alltså
-                            // STÄNGER tyst en händelse arrangören öppnat. Exakt samma fälla som
-                            // lanevapenOffered gick i, rapporterad av Luleå PK.
-                            eventAudience = HpskSite.Models.EventAudience.Normalise(
-                                evt.Value<string>(HpskSite.Models.EventAudience.Property)),
-                            audiencePropertyExists = evt.HasProperty(HpskSite.Models.EventAudience.Property),
-                            // Åsidosättningen. Tomt = ägarens nummer används — det avgörs vid
-                            // läsning i ClubEventParticipationService, inte här.
-                            eventSwishNumber = evt.HasProperty(HpskSite.Models.ClubEvents.SwishProperty)
-                                ? (evt.Value<string>(HpskSite.Models.ClubEvents.SwishProperty) ?? "")
-                                : "",
-                            swishPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.SwishProperty),
-                            mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty),
-                            // Sista anmälningsdag. Bara datumdelen: fältet ÄR en dag, och en
-                            // klockslagsdel i strängen hade flatpickr skrivit tillbaka som text.
-                            registrationDeadline = evt.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty)
-                                ? HpskSite.Models.ClubEvents.RealDate(
-                                        evt.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty))
-                                    ?.ToString("yyyy-MM-dd") ?? ""
-                                : "",
-                            deadlinePropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty),
-                            // Avgiften. null = ingen avgift angiven, 0 = arrangoren har sagt gratis.
-                            // De far INTE slas ihop - se hpskEventRegFill i _EventRegistrationFields.
-                            eventPrices = HpskSite.Models.EventPrices
-                                .Parse(evt.Value<string>(HpskSite.Models.EventPrices.Property)).Rows,
-                            eventPricesUnreadable = HpskSite.Models.EventPrices
-                                .Parse(evt.Value<string>(HpskSite.Models.EventPrices.Property)).Unreadable,
-                            eventPricesPropertyExists = evt.HasProperty(HpskSite.Models.EventPrices.Property)
-                        });
+                        events.Add(EventEditListRow(evt));
                     }
                 }
 
@@ -1071,58 +1048,39 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Event ID and name are required" });
                 }
 
-                var eventContent = _contentService.GetById(eventId);
-                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                var e = _events.Get(eventId);
+                if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
                 // Behörigheten går via ägaren (EventOwnerResolver). En kretshändelse som når den här
-                // klubbendpointen får nu kretsens regel i stället för ett klubbuppslag på kretsnoden.
-                var owner = _eventOwners.ForEventNode(eventContent);
-                if (!await _eventOwners.CanManageAsync(owner))
+                // klubbendpointen får kretsens regel i stället för ett klubbuppslag på kretsnoden.
+                if (!await _eventOwners.CanManageAsync(_eventOwners.ForEventRecord(e)))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
-                int clubId = owner!.OwnerId;
 
-                // Update node name (URL slug) if pageName provided
-                var nodeName = !string.IsNullOrWhiteSpace(pageName) ? pageName : eventName;
-                eventContent.Name = nodeName;
-
-                // Update properties
-                eventContent.SetValue("eventName", eventName);
-                eventContent.SetValue("eventType", eventType);
-                eventContent.SetValue("description", description);
-                eventContent.SetValue("venue", venue);
-                eventContent.SetValue("contactPerson", contactPerson);
-                eventContent.SetValue("contactEmail", contactEmail);
-                eventContent.SetValue("contactPhone", contactPhone);
-                var regFieldError = ApplyEventRegistrationFields(eventContent, registrationRequired,
+                ApplyEventFormFields(e, eventName, eventType, description, venue, contactPerson,
+                    contactEmail, contactPhone, pageName);
+                var regFieldError = HpskSite.Models.Events.ClubEventInput.ApplyRegistrationFields(e, registrationRequired,
                     maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
                 if (regFieldError != null)
                 {
-                    // Avbryts FÖRE save/publish — det som ligger publicerat är orört.
+                    // Avbryts FÖRE sparningen — det som ligger publicerat är orört.
                     return Ok(new { success = false, message = regFieldError });
                 }
-                if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
-                {
-                    eventContent.SetValue("eventDate", parsedEventDate);
-                }
-                else
-                {
-                    eventContent.SetValue("eventDate", null);
-                }
+                // Ett tomt eller oläsbart datum tar bort datumet, som förut.
+                e.StartsAt = !string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate)
+                    ? parsedEventDate
+                    : null;
 
-                // Save and publish (retries transient DB timeouts — see ContentPublishHelper)
-                var (published, publishError) = await ContentPublishHelper.SaveAndPublishAsync(_contentService, eventContent);
-                if (!published)
+                // Redigeringen publicerar alltid, som förut.
+                e.IsPublished = true;
+                var (_, saveError) = await _events.SaveAsync(e);
+                if (saveError != null)
                 {
-                    return Ok(new
-                    {
-                        success = false,
-                        message = $"Kunde inte publicera ändringen: {publishError} Ändringen ligger kvar som utkast — spara igen om en liten stund."
-                    });
+                    return Ok(new { success = false, message = saveError });
                 }
 
                 return Ok(new { success = true, message = "Event updated successfully" });
@@ -1147,21 +1105,20 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Event ID is required" });
                 }
 
-                var eventContent = _contentService.GetById(eventId);
-                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                var e = _events.Get(eventId);
+                if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
                 // Behörigheten går via ägaren (EventOwnerResolver).
-                if (!await _eventOwners.CanManageAsync(_eventOwners.ForEventNode(eventContent)))
+                if (!await _eventOwners.CanManageAsync(_eventOwners.ForEventRecord(e)))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
 
-                // Unpublish and delete
-                _contentService.Unpublish(eventContent);
-                _contentService.Delete(eventContent);
+                // Lagringen avpublicerar och tar bort.
+                _events.Delete(e.Id);
 
                 return Ok(new { success = true, message = "Event deleted successfully" });
             }
@@ -2295,7 +2252,7 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Get region events (children of region node with type clubSimpleEvent)
+        /// Get region events (the region's events, read through IClubEventStore)
         /// </summary>
         [HttpGet]
         public IActionResult GetRegionEvents(int regionId)
@@ -2317,77 +2274,14 @@ namespace HpskSite.Controllers
                         return Ok(new { success = false, message = "Region not found" });
                     }
 
-                    var allEvents = regionNode.Children
-                        .Where(c => c.ContentType.Alias == "clubSimpleEvent")
-                        .OrderBy(c => c.Value<DateTime?>("eventDate") ?? DateTime.MinValue)
+                    // Kretsens händelser genom lagringen (fas 2a) — bara publicerade, som förut.
+                    var allEvents = _events.ListForOwner(regionId)
+                        .OrderBy(e => e.StartsAt ?? DateTime.MinValue)
                         .ToList();
 
                     foreach (var evt in allEvents)
                     {
-                        var displayName = evt.Value<string>("eventName") ?? evt.Name;
-                        events.Add(new
-                        {
-                            id = evt.Id,
-                            name = displayName,
-                            pageName = evt.Name != displayName ? evt.Name : "",
-                            date = evt.Value<DateTime?>("eventDate")?.ToString("yyyy-MM-ddTHH:mm:ss"),
-                            type = evt.Value<string>("eventType") ?? "Träning",
-                            description = evt.Value<string>("description") ?? "",
-                            venue = evt.Value<string>("venue") ?? "",
-                            contactPerson = evt.Value<string>("contactPerson") ?? "",
-                            contactEmail = evt.Value<string>("contactEmail") ?? "",
-                            // ⚠️⚠️ SAKNADES, och det RADERADE numret. Redigeringsdialogen fyller
-                            // `eventContactPhone` ur den här projektionen; utan raden fylldes den
-                            // med tomt, och sparningen skriver `SetValue("contactPhone", "")`
-                            // villkorslöst. Alltså försvann kontakttelefonen varje gång någon
-                            // redigerade en händelse från klubb- eller kretspanelen — tyst, och
-                            // utan att fältet ens såg tomt ut för den som inte visste vad som stod
-                            // där förut. Samma fältlista-som-glömmer som Luleå PK rapporterade om
-                            // lånevapen, fjärde instansen på den här ytan.
-                            contactPhone = evt.Value<string>("contactPhone") ?? "",
-                            isActive = evt.Value<bool>("isActive"),
-                            url = evt.Url(),
-                            // Anmälningsinställningarna, så redigera-dialogen kan förfyllas utan ett
-                            // extra anrop per rad. `mandatoryPropertyExists` följer med för att
-                            // klienten ska kunna stänga av kryssrutan när doctypen saknar
-                            // egenskapen — SetValue på en saknad egenskap är en tyst no-op.
-                            registrationRequired = evt.Value<bool>("registrationRequired"),
-                            registrationUrl = evt.Value<string>("registrationUrl") ?? "",
-                            maxParticipants = evt.Value<int>("maxParticipants"),
-                            isMandatory = evt.Value<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
-                            lanevapenOffered = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
-                                && evt.Value<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
-                            lanevapenPropertyExists = evt.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
-                            // ⚠️ Vem som får anmäla sig. Utan raden kan dialogen inte förfylla
-                            // väljaren, och nästa sparning skickar tillbaka standard — alltså
-                            // STÄNGER tyst en händelse arrangören öppnat. Exakt samma fälla som
-                            // lanevapenOffered gick i, rapporterad av Luleå PK.
-                            eventAudience = HpskSite.Models.EventAudience.Normalise(
-                                evt.Value<string>(HpskSite.Models.EventAudience.Property)),
-                            audiencePropertyExists = evt.HasProperty(HpskSite.Models.EventAudience.Property),
-                            // Åsidosättningen. Tomt = ägarens nummer används — det avgörs vid
-                            // läsning i ClubEventParticipationService, inte här.
-                            eventSwishNumber = evt.HasProperty(HpskSite.Models.ClubEvents.SwishProperty)
-                                ? (evt.Value<string>(HpskSite.Models.ClubEvents.SwishProperty) ?? "")
-                                : "",
-                            swishPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.SwishProperty),
-                            mandatoryPropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty),
-                            // Sista anmälningsdag. Bara datumdelen: fältet ÄR en dag, och en
-                            // klockslagsdel i strängen hade flatpickr skrivit tillbaka som text.
-                            registrationDeadline = evt.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty)
-                                ? HpskSite.Models.ClubEvents.RealDate(
-                                        evt.Value<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty))
-                                    ?.ToString("yyyy-MM-dd") ?? ""
-                                : "",
-                            deadlinePropertyExists = evt.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty),
-                            // Avgiften. null = ingen avgift angiven, 0 = arrangoren har sagt gratis.
-                            // De far INTE slas ihop - se hpskEventRegFill i _EventRegistrationFields.
-                            eventPrices = HpskSite.Models.EventPrices
-                                .Parse(evt.Value<string>(HpskSite.Models.EventPrices.Property)).Rows,
-                            eventPricesUnreadable = HpskSite.Models.EventPrices
-                                .Parse(evt.Value<string>(HpskSite.Models.EventPrices.Property)).Unreadable,
-                            eventPricesPropertyExists = evt.HasProperty(HpskSite.Models.EventPrices.Property)
-                        });
+                        events.Add(EventEditListRow(evt));
                     }
                 }
 
@@ -2440,48 +2334,34 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
 
-                var nodeName = !string.IsNullOrWhiteSpace(pageName) ? pageName : eventName;
-                var newEvent = _contentService.Create(
-                    nodeName,
-                    regionId,
-                    "clubSimpleEvent"
-                );
-
-                newEvent.SetValue("eventName", eventName);
-                newEvent.SetValue("eventType", eventType);
-                newEvent.SetValue("description", description);
-                newEvent.SetValue("venue", venue);
-                newEvent.SetValue("contactPerson", contactPerson);
-                newEvent.SetValue("contactEmail", contactEmail);
-                newEvent.SetValue("contactPhone", contactPhone);
-                var regFieldError = ApplyEventRegistrationFields(newEvent, registrationRequired,
+                // Ny händelse under kretsen, genom lagringen (fas 2a).
+                var newEvent = new HpskSite.Models.Events.ClubEventRecord
+                {
+                    OwnerType = HpskSite.Models.Events.ClubEventRecord.OwnerRegion,
+                    OwnerId = regionId,
+                    IsActive = true,
+                    IsPublished = true
+                };
+                ApplyEventFormFields(newEvent, eventName, eventType, description, venue, contactPerson,
+                    contactEmail, contactPhone, pageName);
+                var regFieldError = HpskSite.Models.Events.ClubEventInput.ApplyRegistrationFields(newEvent, registrationRequired,
                     maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
                 if (regFieldError != null)
                 {
-                    // Avbryts FÖRE save/publish, så noden aldrig blir till. Ett halvsparat
+                    // Avbryts FÖRE sparningen, så händelsen aldrig blir till. Ett halvsparat
                     // evenemang utan sin deadline är värre än inget: det är publikt och öppet.
                     return Ok(new { success = false, message = regFieldError });
                 }
                 if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
                 {
-                    newEvent.SetValue("eventDate", parsedEventDate);
+                    newEvent.StartsAt = parsedEventDate;
                 }
-                newEvent.SetValue("isActive", true);
 
-                // Save and publish (retries transient DB timeouts — see ContentPublishHelper)
-                var (regionPublished, regionPublishError) = await ContentPublishHelper.SaveAndPublishAsync(_contentService, newEvent);
-                if (!regionPublished)
+                // Lagringen sparar och publicerar, och lämnar inget opublicerat utkast efter sig.
+                var (newId, saveError) = await _events.SaveAsync(newEvent);
+                if (saveError != null)
                 {
-                    var persisted = _contentService.GetById(newEvent.Id);
-                    if (persisted != null && !persisted.Published)
-                    {
-                        try { _contentService.Delete(persisted); } catch { /* best effort */ }
-                        return Ok(new
-                        {
-                            success = false,
-                            message = $"Kunde inte spara händelsen: {regionPublishError} Ingenting sparades — försök igen om en liten stund."
-                        });
-                    }
+                    return Ok(new { success = false, message = saveError });
                 }
 
                 return Ok(new
@@ -2490,7 +2370,7 @@ namespace HpskSite.Controllers
                     message = "Event created successfully",
                     data = new
                     {
-                        id = newEvent.Id,
+                        id = newId,
                         name = eventName,
                         date = eventDate,
                         type = eventType
@@ -2523,15 +2403,15 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Event ID and name are required" });
                 }
 
-                var eventContent = _contentService.GetById(eventId);
-                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                var e = _events.Get(eventId);
+                if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
                 // Behörigheten går via ägaren (EventOwnerResolver). Den här endpointen gäller
                 // kretsens händelser, så en klubbhändelse vägras här som förut.
-                var regionOwner = _eventOwners.ForEventNode(eventContent);
+                var regionOwner = _eventOwners.ForEventRecord(e);
                 if (regionOwner is null || !regionOwner.IsRegion)
                 {
                     return Ok(new { success = false, message = "Parent region not found" });
@@ -2541,42 +2421,26 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
 
-                // Update node name (URL slug) if pageName provided
-                var nodeName = !string.IsNullOrWhiteSpace(pageName) ? pageName : eventName;
-                eventContent.Name = nodeName;
-
-                eventContent.SetValue("eventName", eventName);
-                eventContent.SetValue("eventType", eventType);
-                eventContent.SetValue("description", description);
-                eventContent.SetValue("venue", venue);
-                eventContent.SetValue("contactPerson", contactPerson);
-                eventContent.SetValue("contactEmail", contactEmail);
-                eventContent.SetValue("contactPhone", contactPhone);
-                var regFieldError = ApplyEventRegistrationFields(eventContent, registrationRequired,
+                ApplyEventFormFields(e, eventName, eventType, description, venue, contactPerson,
+                    contactEmail, contactPhone, pageName);
+                var regFieldError = HpskSite.Models.Events.ClubEventInput.ApplyRegistrationFields(e, registrationRequired,
                     maxParticipants, isMandatory, registrationUrl, lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
                 if (regFieldError != null)
                 {
-                    // Avbryts FÖRE save/publish — det som ligger publicerat är orört.
+                    // Avbryts FÖRE sparningen — det som ligger publicerat är orört.
                     return Ok(new { success = false, message = regFieldError });
                 }
-                if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
-                {
-                    eventContent.SetValue("eventDate", parsedEventDate);
-                }
-                else
-                {
-                    eventContent.SetValue("eventDate", null);
-                }
+                // Ett tomt eller oläsbart datum tar bort datumet, som förut.
+                e.StartsAt = !string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate)
+                    ? parsedEventDate
+                    : null;
 
-                // Save and publish (retries transient DB timeouts — see ContentPublishHelper)
-                var (regionPublished, regionPublishError) = await ContentPublishHelper.SaveAndPublishAsync(_contentService, eventContent);
-                if (!regionPublished)
+                // Redigeringen publicerar alltid, som förut.
+                e.IsPublished = true;
+                var (_, saveError) = await _events.SaveAsync(e);
+                if (saveError != null)
                 {
-                    return Ok(new
-                    {
-                        success = false,
-                        message = $"Kunde inte publicera ändringen: {regionPublishError} Ändringen ligger kvar som utkast — spara igen om en liten stund."
-                    });
+                    return Ok(new { success = false, message = saveError });
                 }
 
                 return Ok(new { success = true, message = "Event updated successfully" });
@@ -2601,15 +2465,15 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Event ID is required" });
                 }
 
-                var eventContent = _contentService.GetById(eventId);
-                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                var e = _events.Get(eventId);
+                if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
                 // Behörigheten går via ägaren (EventOwnerResolver). Den här endpointen gäller
                 // kretsens händelser, så en klubbhändelse vägras här som förut.
-                var regionOwner = _eventOwners.ForEventNode(eventContent);
+                var regionOwner = _eventOwners.ForEventRecord(e);
                 if (regionOwner is null || !regionOwner.IsRegion)
                 {
                     return Ok(new { success = false, message = "Parent region not found" });
@@ -2619,8 +2483,8 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
 
-                _contentService.Unpublish(eventContent);
-                _contentService.Delete(eventContent);
+                // Lagringen avpublicerar och tar bort.
+                _events.Delete(e.Id);
 
                 return Ok(new { success = true, message = "Event deleted successfully" });
             }
@@ -2638,8 +2502,8 @@ namespace HpskSite.Controllers
         /// Unified auth check for event page endpoints. Works for both club and region events.
         /// Returns true if authorized, false otherwise.
         /// </summary>
-        private Task<bool> IsEventAdminAsync(IContent eventContent)
-            => _eventOwners.CanManageAsync(_eventOwners.ForEventNode(eventContent));
+        private Task<bool> IsEventAdminAsync(HpskSite.Models.Events.ClubEventRecord e)
+            => _eventOwners.CanManageAsync(_eventOwners.ForEventRecord(e));
 
         /// <summary>
         /// Get current editable data for an event page (detail fields, image URL, content blocks, quick links)
@@ -2654,28 +2518,19 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
 
-                var eventContent = _contentService.GetById(eventId);
-                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                var e = _events.Get(eventId);
+                if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
-                if (!await IsEventAdminAsync(eventContent))
+                if (!await IsEventAdminAsync(e))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
 
-                // Get event image URL if set
-                var eventImageUrl = "";
-                if (UmbracoContext.Content != null)
-                {
-                    var publishedEvent = UmbracoContext.Content.GetById(eventId);
-                    if (publishedEvent != null)
-                    {
-                        var eventImage = publishedEvent.Value<IPublishedContent>("eventImage");
-                        eventImageUrl = eventImage?.Url() ?? "";
-                    }
-                }
+                var support = _events.Support;
+                var prices = HpskSite.Models.EventPrices.Parse(e.PricesJson);
 
                 return Ok(new
                 {
@@ -2683,55 +2538,48 @@ namespace HpskSite.Controllers
                     data = new
                     {
                         // Basic fields
-                        eventName = eventContent.GetValue<string>("eventName") ?? "",
-                        pageName = eventContent.Name ?? "",
-                        eventType = eventContent.GetValue<string>("eventType") ?? "",
-                        eventDate = eventContent.GetValue<DateTime?>("eventDate")?.ToString("yyyy-MM-dd HH:mm") ?? "",
-                        venue = eventContent.GetValue<string>("venue") ?? "",
-                        description = eventContent.GetValue<string>("description") ?? "",
-                        contactPerson = eventContent.GetValue<string>("contactPerson") ?? "",
-                        contactEmail = eventContent.GetValue<string>("contactEmail") ?? "",
-                        contactPhone = eventContent.GetValue<string>("contactPhone") ?? "",
+                        eventName = e.Name,
+                        pageName = e.PageName,
+                        eventType = e.EventType,
+                        eventDate = e.StartsAt?.ToString("yyyy-MM-dd HH:mm") ?? "",
+                        venue = e.Venue,
+                        description = e.Description,
+                        contactPerson = e.ContactPerson,
+                        contactEmail = e.ContactEmail,
+                        contactPhone = e.ContactPhone,
                         // Extended fields
                         // feeAmount returneras INTE langre - fritextavgiften ar ersatt av eventPrices.
-                        equipmentRequired = eventContent.GetValue<string>("equipmentRequired") ?? "",
-                        targetAudience = eventContent.GetValue<string>("targetAudience") ?? "",
-                        registrationRequired = eventContent.GetValue<bool>("registrationRequired"),
-                        registrationUrl = eventContent.GetValue<string>("registrationUrl") ?? "",
-                        eventEndDate = eventContent.GetValue<DateTime?>("eventEndDate")?.ToString("yyyy-MM-dd") ?? "",
-                        eventImageUrl = eventImageUrl,
-                        contentBlocks = eventContent.GetValue<string>("contentBlocks") ?? "[]",
-                        quickLinks = eventContent.GetValue<string>("quickLinks") ?? "[]",
+                        equipmentRequired = e.EquipmentRequired,
+                        targetAudience = e.TargetAudience,
+                        registrationRequired = e.RegistrationRequired,
+                        registrationUrl = e.RegistrationUrl,
+                        eventEndDate = e.EndsAt?.ToString("yyyy-MM-dd") ?? "",
+                        // Bildens adress är upplöst av lagringen (ur den publicerade händelsen).
+                        eventImageUrl = e.ImageUrl,
+                        contentBlocks = string.IsNullOrEmpty(e.ContentBlocksJson) ? "[]" : e.ContentBlocksJson,
+                        quickLinks = string.IsNullOrEmpty(e.QuickLinksJson) ? "[]" : e.QuickLinksJson,
                         // Operator-added; the client needs to know whether it may offer the switch
                         // at all, since saving to a missing property is a silent no-op.
-                        isMandatory = eventContent.GetValue<bool>(HpskSite.Models.ClubEvents.MandatoryProperty),
-                        mandatoryPropertyExists = eventContent.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty),
-                        maxParticipants = eventContent.GetValue<int>("maxParticipants"),
-                        registrationDeadline = eventContent.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty)
-                            ? HpskSite.Models.ClubEvents.RealDate(
-                                    eventContent.GetValue<DateTime?>(HpskSite.Models.ClubEvents.DeadlineProperty))
-                                ?.ToString("yyyy-MM-dd") ?? ""
+                        isMandatory = e.IsMandatory,
+                        mandatoryPropertyExists = support.Mandatory,
+                        maxParticipants = e.MaxParticipants,
+                        registrationDeadline = support.Deadline
+                            ? e.RegistrationDeadline?.ToString("yyyy-MM-dd") ?? ""
                             : "",
-                        deadlinePropertyExists = eventContent.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty),
+                        deadlinePropertyExists = support.Deadline,
                         // ⚠️ Måste med, annars kan dialogen inte förfylla kryssrutan — och en
                         // urkryssad ruta som postas tillbaka SLÄCKER klubbens val.
-                        lanevapenOffered = eventContent.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty)
-                            && eventContent.GetValue<bool>(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
-                        lanevapenPropertyExists = eventContent.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty),
-                        // ⚠️ Se kommentaren i GetClubEvents — samma fälla, samma skäl.
-                        eventAudience = HpskSite.Models.EventAudience.Normalise(
-                            eventContent.GetValue<string>(HpskSite.Models.EventAudience.Property)),
-                        audiencePropertyExists = eventContent.HasProperty(HpskSite.Models.EventAudience.Property),
-                        eventSwishNumber = eventContent.HasProperty(HpskSite.Models.ClubEvents.SwishProperty)
-                            ? (eventContent.GetValue<string>(HpskSite.Models.ClubEvents.SwishProperty) ?? "")
-                            : "",
-                        swishPropertyExists = eventContent.HasProperty(HpskSite.Models.ClubEvents.SwishProperty),
+                        lanevapenOffered = support.LanevapenOffered && e.LanevapenOffered,
+                        lanevapenPropertyExists = support.LanevapenOffered,
+                        // ⚠️ Se kommentaren i EventEditListRow — samma fälla, samma skäl.
+                        eventAudience = HpskSite.Models.EventAudience.Normalise(e.Audience),
+                        audiencePropertyExists = support.Audience,
+                        eventSwishNumber = support.Swish ? e.SwishNumber : "",
+                        swishPropertyExists = support.Swish,
                         // Avgiften. ⚠️ null och 0 är olika svar — se hpskEventRegFill.
-                        eventPrices = HpskSite.Models.EventPrices
-                            .Parse(eventContent.GetValue<string>(HpskSite.Models.EventPrices.Property)).Rows,
-                        eventPricesUnreadable = HpskSite.Models.EventPrices
-                            .Parse(eventContent.GetValue<string>(HpskSite.Models.EventPrices.Property)).Unreadable,
-                        eventPricesPropertyExists = eventContent.HasProperty(HpskSite.Models.EventPrices.Property)
+                        eventPrices = prices.Rows,
+                        eventPricesUnreadable = prices.Unreadable,
+                        eventPricesPropertyExists = support.Prices
                     }
                 });
             }
@@ -2741,166 +2589,6 @@ namespace HpskSite.Controllers
             }
         }
 
-
-        /// <summary>
-        /// Skriver anmälningsinställningarna på en händelsenod. Delad av klubbens och kretsens
-        /// skapa/redigera-endpoints så de tre dialogerna inte kan glida isär.
-        ///
-        /// ⚠️ <c>isMandatory</c>, <c>lanevapenOffered</c> och <c>registrationDeadline</c> är
-        /// operatörstillagda doctype-egenskaper. <c>SetValue</c> på en egenskap doctypen inte bär är en
-        /// TYST no-op, så fältet hade sett ut att fungera och gått tillbaka vid nästa laddning.
-        /// <b>Returnerar ett färdigt felmeddelande</b> när arrangören faktiskt försökte sätta ett
-        /// fält som inte går att spara — den som aldrig använder funktionen ska inte gnatas på.
-        /// Ett meddelande betyder att ANROPAREN ska avbryta sparningen; ingenting är publicerat än.
-        /// </summary>
-        /// <summary>
-        /// Prisraden som klienten skickar. <b>Id kan vara tomt</b> — servern genererar det for en ny
-        /// rad. Egen typ sa deserialiseringen inte hanger pa EventPrice-recordets konstruktor.
-        /// </summary>
-        private sealed class IncomingPrice
-        {
-            public string? Id { get; set; }
-            public string? Label { get; set; }
-            public decimal? Amount { get; set; }
-        }
-
-        private static string? ApplyEventRegistrationFields(
-            Umbraco.Cms.Core.Models.IContent eventContent,
-            bool registrationRequired, int maxParticipants, bool isMandatory, string registrationUrl,
-            bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "",
-            string eventAudience = "", string eventSwishNumber = "")
-        {
-            eventContent.SetValue("registrationRequired", registrationRequired);
-            eventContent.SetValue("registrationUrl", registrationUrl ?? "");
-            eventContent.SetValue("maxParticipants", maxParticipants > 0 ? maxParticipants : 0);
-
-            // ⚠️ EN skrivväg för alla anmälningsfält, och det är inte städning. Fälten redigeras
-            // från TRE dialoger (klubbens panel, kretsens panel, händelsens egen sida), och en
-            // egenskap som bara skrivs i en av dem försvinner tyst vid nästa sparning från en
-            // annan. Lägg aldrig ett anmälningsfält i bara en dialog igen.
-            var missing = new List<string>();
-
-            if (eventContent.HasProperty(HpskSite.Models.ClubEvents.MandatoryProperty))
-                eventContent.SetValue(HpskSite.Models.ClubEvents.MandatoryProperty, isMandatory);
-            else if (isMandatory)
-                missing.Add(HpskSite.Models.ClubEvents.MandatoryProperty);
-
-            // ⚠️ Saknas egenskapen rapporteras det bara när någon FÖRSÖKTE slå på den. Att larma
-            // om ett avslaget val ingen gjort vore brus — och `SetValue` på en saknad egenskap är
-            // en tyst no-op, så utan raden hade switchen sett ut att spara och återgått.
-            if (eventContent.HasProperty(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty))
-                eventContent.SetValue(
-                    HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty, lanevapenOffered);
-            else if (lanevapenOffered)
-                missing.Add(HpskSite.Services.Firearms.LoanWeaponClubRules.EventOfferedProperty);
-
-            // Sista anmälningsdag. Tom sträng = ingen deadline, och den ska kunna TAS BORT igen —
-            // därför skrivs null i stället för att raden hoppas över när fältet är tomt.
-            // ⚠️ Ett oparsbart datum skrivs INTE som null. Det hade sett ut som "arrangören tog
-            // bort deadlinen" och tyst öppnat anmälan igen.
-            DateTime? deadline = null;
-            if (!string.IsNullOrWhiteSpace(registrationDeadline))
-            {
-                if (!DateTime.TryParse(registrationDeadline, out var parsedDeadline))
-                    return $"\"{registrationDeadline}\" går inte att läsa som ett datum. "
-                         + "Skriv sista anmälningsdag som ÅÅÅÅ-MM-DD, eller lämna fältet tomt. "
-                         + "Ingenting sparades.";
-                deadline = parsedDeadline.Date;
-            }
-
-            if (eventContent.HasProperty(HpskSite.Models.ClubEvents.DeadlineProperty))
-                eventContent.SetValue(HpskSite.Models.ClubEvents.DeadlineProperty, deadline);
-            else if (deadline != null)
-                missing.Add(HpskSite.Models.ClubEvents.DeadlineProperty);
-
-            // Prisraderna. Tom lista = ingen avgift, och den ska kunna TAS BORT igen - darfor
-            // skrivs tom strang i stallet for att raden hoppas over.
-            //
-            // ATERANVAND ALDRIG EventFeeMigration.Parse HAR. Den tolken finns for att lasa GAMMAL
-            // fritext en gang ("300 kr", "Gratis") och ar medvetet tolerant. Slapps den in i
-            // formularet blir fritexten en permanent ingang igen, och "Gratis for juniorer" kan
-            // skrivas in pa nytt i ett falt som ska debitera.
-            //
-            // SERVERN AGER ID-GENERERINGEN. Klienten skickar tomt id for en NY rad och behaller
-            // id:t pa en befintlig. Tva uppsattningar slug-regler hade glidit isar, och id:t ar
-            // det som binder en redan gjord anmalan till sin prisrad - flyttar det, tappar
-            // deltagaren vad hen valde.
-            //
-            // En ogiltig lista skrivs INTE som tom. Det hade sett ut som "arrangoren tog bort
-            // avgiften" och tyst gjort evenemanget gratis. Samma regel som deadlinen ovan.
-            var priceRows = new List<HpskSite.Models.EventPrice>();
-            if (!string.IsNullOrWhiteSpace(eventPrices))
-            {
-                List<IncomingPrice>? incoming;
-                try
-                {
-                    incoming = System.Text.Json.JsonSerializer.Deserialize<List<IncomingPrice>>(
-                        eventPrices,
-                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                }
-                catch (System.Text.Json.JsonException)
-                {
-                    return "Prisraderna kunde inte lasas. Ladda om sidan och forsok igen. Ingenting sparades.";
-                }
-
-                foreach (var row in incoming ?? new List<IncomingPrice>())
-                {
-                    var label = (row.Label ?? "").Trim();
-                    if (label.Length == 0 && row.Amount == null) continue;   // helt tom rad = struken
-
-                    var id = string.IsNullOrWhiteSpace(row.Id)
-                        ? HpskSite.Models.EventPrices.NewId(label, priceRows.Select(x => x.Id))
-                        : row.Id.Trim();
-
-                    priceRows.Add(new HpskSite.Models.EventPrice(id, label, row.Amount ?? 0m));
-                }
-
-                var priceError = HpskSite.Models.EventPrices.Validate(priceRows);
-                if (priceError != null) return priceError + " Ingenting sparades.";
-            }
-
-            if (eventContent.HasProperty(HpskSite.Models.EventPrices.Property))
-                eventContent.SetValue(HpskSite.Models.EventPrices.Property,
-                    priceRows.Count == 0 ? "" : HpskSite.Models.EventPrices.Serialize(priceRows));
-            else if (priceRows.Count > 0)
-                missing.Add(HpskSite.Models.EventPrices.Property);
-
-            // Swish-numret. ⚠️ TOMT ÄR ETT GILTIGT VÄRDE och betyder "använd ägarens nummer" —
-            // därför skrivs tom sträng i stället för att raden hoppas över. Utan det gick en
-            // åsidosättning inte att TA BORT igen.
-            //
-            // ⚠️ Numret valideras INTE hårt här: en klubb kan ha ett företagsnummer (123…) eller
-            // ett mobilnummer, och formatkontrollen bor i SwishQrCodeGenerator. Ett felaktigt
-            // nummer fångas när betalningen begärs, med ett besked som säger vad som är fel — att
-            // vägra sparningen hade hindrat arrangören från att skriva klart resten av formuläret.
-            if (eventContent.HasProperty(HpskSite.Models.ClubEvents.SwishProperty))
-                eventContent.SetValue(HpskSite.Models.ClubEvents.SwishProperty, (eventSwishNumber ?? "").Trim());
-            else if (!string.IsNullOrWhiteSpace(eventSwishNumber))
-                missing.Add(HpskSite.Models.ClubEvents.SwishProperty);
-
-            // Vem som får anmäla sig.
-            //
-            // ⚠️⚠️ ETT OKÄNT VÄRDE FÅR ALDRIG SKRIVAS. `Normalise` faller till "klubbens
-            // medlemmar", alltså SMALAST — men att tyst skriva den smalaste nivån när arrangören
-            // valde en bredare är också fel, bara åt andra hållet: hen tror att grannklubben är
-            // inbjuden. Ett värde vi inte känner igen är ett trasigt formulär, inte ett val.
-            var audience = HpskSite.Models.EventAudience.Normalise(eventAudience);
-            if (!string.IsNullOrWhiteSpace(eventAudience)
-                && !string.Equals(audience, eventAudience.Trim(), StringComparison.OrdinalIgnoreCase))
-                return $"\"{eventAudience}\" är inte ett giltigt val för vem som får anmäla sig. "
-                     + "Ladda om sidan och välj igen. Ingenting sparades.";
-
-            // ⚠️ Rapporteras bara när någon försökte välja något ANNAT än standard — annars hade
-            // varje sparning på en händelsetyp utan egenskapen larmat om ett val ingen gjorde.
-            if (eventContent.HasProperty(HpskSite.Models.EventAudience.Property))
-                eventContent.SetValue(HpskSite.Models.EventAudience.Property, audience);
-            else if (audience != HpskSite.Models.EventAudience.Club)
-                missing.Add(HpskSite.Models.EventAudience.Property);
-
-            if (missing.Count == 0) return null;
-            return $"Egenskapen '{string.Join("' och '", missing)}' saknas på händelsetypen i "
-                 + "Umbraco — kontakta en administratör. Ingenting sparades.";
-        }
 
         /// <summary>
         /// Edit event detail fields (fee, equipment, audience, registration required)
@@ -2924,13 +2612,13 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
 
-                var eventContent = _contentService.GetById(eventId);
-                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                var e = _events.Get(eventId);
+                if (e == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
-                if (!await IsEventAdminAsync(eventContent))
+                if (!await IsEventAdminAsync(e))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
@@ -2938,40 +2626,35 @@ namespace HpskSite.Controllers
                 // Save basic fields
                 if (!string.IsNullOrWhiteSpace(eventName))
                 {
-                    eventContent.SetValue("eventName", eventName);
+                    e.Name = eventName;
                 }
-                // Only update URL slug (node name) when pageName is explicitly provided
+                // Only update URL slug (page name) when pageName is explicitly provided
                 if (!string.IsNullOrWhiteSpace(pageName))
                 {
-                    eventContent.Name = pageName;
+                    e.PageName = pageName;
                 }
-                eventContent.SetValue("eventType", eventType);
-                eventContent.SetValue("venue", venue);
-                eventContent.SetValue("description", description);
-                eventContent.SetValue("contactPerson", contactPerson);
-                eventContent.SetValue("contactEmail", contactEmail);
-                eventContent.SetValue("contactPhone", contactPhone);
+                e.EventType = eventType ?? "";
+                e.Venue = venue ?? "";
+                e.Description = description ?? "";
+                e.ContactPerson = contactPerson ?? "";
+                e.ContactEmail = contactEmail ?? "";
+                e.ContactPhone = contactPhone ?? "";
 
-                if (!string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate))
-                {
-                    eventContent.SetValue("eventDate", parsedEventDate);
-                }
-                else
-                {
-                    eventContent.SetValue("eventDate", null);
-                }
+                e.StartsAt = !string.IsNullOrEmpty(eventDate) && DateTime.TryParse(eventDate, out var parsedEventDate)
+                    ? parsedEventDate
+                    : null;
 
                 // Save extended fields
                 // feeAmount skrivs INTE langre - fritextavgiften ar ersatt av prisraderna
-                // (eventPrices), som ApplyEventRegistrationFields ager. Lagg aldrig tillbaka en
-                // avgiftsskrivning har: da finns tva falt som bada pastar vad det kostar.
-                eventContent.SetValue("equipmentRequired", equipmentRequired);
-                eventContent.SetValue("targetAudience", targetAudience);
+                // (eventPrices), som ClubEventInput.ApplyRegistrationFields ager. Lagg aldrig tillbaka
+                // en avgiftsskrivning har: da finns tva falt som bada pastar vad det kostar.
+                e.EquipmentRequired = equipmentRequired ?? "";
+                e.TargetAudience = targetAudience ?? "";
                 // ⚠️ `lanevapenOffered` MÅSTE skickas med. Utan den skrev den här dialogen false
                 // över klubbens val varje gång någon sparade från händelsens egen sida — precis
-                // den tysta glidningen ApplyEventRegistrationFields finns för att förhindra.
-                var regFieldError = ApplyEventRegistrationFields(
-                    eventContent, registrationRequired, maxParticipants, isMandatory, registrationUrl,
+                // den tysta glidningen ClubEventInput.ApplyRegistrationFields finns för att förhindra.
+                var regFieldError = HpskSite.Models.Events.ClubEventInput.ApplyRegistrationFields(
+                    e, registrationRequired, maxParticipants, isMandatory, registrationUrl,
                     lanevapenOffered, registrationDeadline, eventPrices, eventAudience, eventSwishNumber);
 
                 if (regFieldError != null)
@@ -2979,17 +2662,16 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = regFieldError });
                 }
 
-                if (!string.IsNullOrEmpty(eventEndDate) && DateTime.TryParse(eventEndDate, out var parsedEndDate))
-                {
-                    eventContent.SetValue("eventEndDate", parsedEndDate);
-                }
-                else
-                {
-                    eventContent.SetValue("eventEndDate", null);
-                }
+                e.EndsAt = !string.IsNullOrEmpty(eventEndDate) && DateTime.TryParse(eventEndDate, out var parsedEndDate)
+                    ? parsedEndDate
+                    : null;
 
-                _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, new[] { "*" }, -1);
+                e.IsPublished = true;
+                var (_, saveError) = await _events.SaveAsync(e);
+                if (saveError != null)
+                {
+                    return Ok(new { success = false, message = saveError });
+                }
 
                 return Ok(new { success = true, message = "Event details updated successfully" });
             }
@@ -3013,13 +2695,13 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
 
-                var eventContent = _contentService.GetById(eventId);
-                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                var eventRecord = _events.Get(eventId);
+                if (eventRecord == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
-                if (!await IsEventAdminAsync(eventContent))
+                if (!await IsEventAdminAsync(eventRecord))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
@@ -3084,10 +2766,14 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Failed to save image to media library" });
                 }
 
-                // Link media to event content property via UDI
-                eventContent.SetValue("eventImage", mediaItem.GetUdi().ToString());
-                _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, new[] { "*" }, -1);
+                // Link media to the event via UDI — genom lagringen (fas 2a).
+                eventRecord.ImageRef = mediaItem.GetUdi().ToString();
+                eventRecord.IsPublished = true;
+                var (_, saveError) = await _events.SaveAsync(eventRecord);
+                if (saveError != null)
+                {
+                    return Ok(new { success = false, message = saveError });
+                }
 
                 return Ok(new
                 {
@@ -3116,20 +2802,24 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
 
-                var eventContent = _contentService.GetById(eventId);
-                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                var eventRecord = _events.Get(eventId);
+                if (eventRecord == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
-                if (!await IsEventAdminAsync(eventContent))
+                if (!await IsEventAdminAsync(eventRecord))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
 
-                eventContent.SetValue("contentBlocks", contentBlocksJson ?? "[]");
-                _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, new[] { "*" }, -1);
+                eventRecord.ContentBlocksJson = contentBlocksJson ?? "[]";
+                eventRecord.IsPublished = true;
+                var (_, saveError) = await _events.SaveAsync(eventRecord);
+                if (saveError != null)
+                {
+                    return Ok(new { success = false, message = saveError });
+                }
 
                 return Ok(new { success = true, message = "Content blocks saved successfully" });
             }
@@ -3153,20 +2843,24 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
 
-                var eventContent = _contentService.GetById(eventId);
-                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                var eventRecord = _events.Get(eventId);
+                if (eventRecord == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
-                if (!await IsEventAdminAsync(eventContent))
+                if (!await IsEventAdminAsync(eventRecord))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
 
-                eventContent.SetValue("quickLinks", quickLinksJson ?? "[]");
-                _contentService.Save(eventContent);
-                _contentService.Publish(eventContent, new[] { "*" }, -1);
+                eventRecord.QuickLinksJson = quickLinksJson ?? "[]";
+                eventRecord.IsPublished = true;
+                var (_, saveError) = await _events.SaveAsync(eventRecord);
+                if (saveError != null)
+                {
+                    return Ok(new { success = false, message = saveError });
+                }
 
                 return Ok(new { success = true, message = "Quick links saved successfully" });
             }
@@ -3190,13 +2884,13 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
 
-                var eventContent = _contentService.GetById(eventId);
-                if (eventContent == null || eventContent.ContentType.Alias != "clubSimpleEvent")
+                var eventRecord = _events.Get(eventId);
+                if (eventRecord == null)
                 {
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
-                if (!await IsEventAdminAsync(eventContent))
+                if (!await IsEventAdminAsync(eventRecord))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
