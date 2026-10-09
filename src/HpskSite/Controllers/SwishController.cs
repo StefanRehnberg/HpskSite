@@ -57,9 +57,11 @@ namespace HpskSite.Controllers
             InvoiceAuditService auditService,
             ConsolidatedInvoiceService consolidatedService,
             AdminAuthorizationService authorizationService,
-            ILogger<SwishController> logger)
+            ILogger<SwishController> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _memberManager = memberManager ?? throw new ArgumentNullException(nameof(memberManager));
             _memberService = memberService ?? throw new ArgumentNullException(nameof(memberService));
             _paymentService = paymentService ?? throw new ArgumentNullException(nameof(paymentService));
@@ -72,6 +74,18 @@ namespace HpskSite.Controllers
             _databaseFactory = databaseFactory ?? throw new ArgumentNullException(nameof(databaseFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
+
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+
+        /// <summary>
+        /// Medlemmens aktiva anmälan till tävlingen, via anmälningslagringen (sajtstrukturen fas 1a).
+        /// Medlemmen anges som text — så kommer id:t från klienten — och ett id som inte är ett tal
+        /// ger ingen anmälan.
+        /// </summary>
+        private HpskSite.Models.Registrations.RegistrationRecord? FindActiveRegistration(int competitionId, string? memberId)
+            => int.TryParse(memberId, out var id) && id > 0
+                ? _registrations.ListForMemberInCompetition(competitionId, id).FirstOrDefault(r => r.IsActive)
+                : null;
 
         // TestSimplePost / TestJsonBinding / DebugInvoiceDetection / TestRoute deleted
         // 2026-08-05: ungated test + debug endpoints with no caller anywhere.
@@ -167,113 +181,17 @@ namespace HpskSite.Controllers
                 _logger.LogInformation("Searching for registration for member {SearchMemberId} (targetMemberId param: '{TargetMemberId}', currentMember: {CurrentMemberId})",
                     searchMemberId, targetMemberId ?? "null", currentMember.Id);
 
-                // First: try published content (fast, cached)
-                var registrationsHub = competition.Children()
-                    .FirstOrDefault(x => x.ContentType?.Alias == "competitionRegistrationsHub");
-
-                if (registrationsHub != null)
+                // Anmälan via anmälningslagringen (sajtstrukturen fas 1a) — alla anmälningar,
+                // publicerade eller inte. Ersätter "publicerad cache först, sedan innehållstjänsten".
+                var found = FindActiveRegistration(competitionId, searchMemberId);
+                if (found != null)
                 {
-                    var registrations = registrationsHub.Children()
-                        .Where(x => x.ContentType.Alias == "competitionRegistration");
-
-                    foreach (var registration in registrations)
-                    {
-                        var registrationMemberId = registration.Value<string>("memberId");
-                        if (registrationMemberId == searchMemberId)
-                        {
-                            var isActive = registration.Value<bool>("isActive", fallback: Umbraco.Cms.Core.Models.PublishedContent.Fallback.ToDefaultValue, defaultValue: true);
-                            if (isActive)
-                            {
-                                userRegistrationId = registration.Id;
-                                registeredMemberId = registrationMemberId;
-                                registeredMemberName = registration.Value<string>("memberName");
-                                registeredIsSubCompetition = registration.Value<bool>("isSubCompetition",
-                                    fallback: Umbraco.Cms.Core.Models.PublishedContent.Fallback.ToDefaultValue, defaultValue: false);
-
-                                try
-                                {
-                                    var shootingClassesJson = registration.Value<string>("shootingClasses");
-                                    if (!string.IsNullOrEmpty(shootingClassesJson))
-                                    {
-                                        var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
-                                        foreach (var classEntry in shootingClasses)
-                                        {
-                                            if (!string.IsNullOrEmpty(classEntry.Class) && !userShootingClasses.Contains(classEntry.Class))
-                                            {
-                                                userShootingClasses.Add(classEntry.Class);
-                                            }
-                                        }
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "Error reading shootingClasses from registration {RegistrationId}", registration.Id);
-                                }
-
-                                _logger.LogInformation("Registration {RegistrationId} found in published content", registration.Id);
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // Fallback: check unpublished content via IContentService
-                // (Registration may be saved but not yet published due to background publish delay)
-                if (!userRegistrationId.HasValue)
-                {
-                    _logger.LogInformation("Registration not found in published content, checking via IContentService fallback");
-                    var contentService = Services.ContentService;
-                    var competitionContent = contentService.GetById(competitionId);
-                    if (competitionContent != null)
-                    {
-                        long totalHub;
-                        var hubChildren = contentService.GetPagedChildren(competitionContent.Id, 0, 100, out totalHub);
-                        var hubContent = hubChildren.FirstOrDefault(x => x.ContentType.Alias == "competitionRegistrationsHub");
-
-                        if (hubContent != null)
-                        {
-                            long totalRegs;
-                            var regChildren = contentService.GetPagedChildren(hubContent.Id, 0, 500, out totalRegs);
-                            foreach (var reg in regChildren)
-                            {
-                                if (reg.ContentType.Alias != "competitionRegistration") continue;
-                                var regMemberId = reg.GetValue<string>("memberId");
-                                if (regMemberId != searchMemberId) continue;
-
-                                // Default isActive to true if property not explicitly set to false
-                                var hasIsActive = reg.Properties.Any(p => p.Alias == "isActive");
-                                var isActive = !hasIsActive || reg.GetValue<bool>("isActive");
-                                if (isActive)
-                                {
-                                    userRegistrationId = reg.Id;
-                                    registeredMemberId = regMemberId;
-                                    registeredMemberName = reg.GetValue<string>("memberName");
-                                    registeredIsSubCompetition = reg.GetValue<bool>("isSubCompetition");
-
-                                    try
-                                    {
-                                        var shootingClassesJson = reg.GetValue<string>("shootingClasses");
-                                        if (!string.IsNullOrEmpty(shootingClassesJson))
-                                        {
-                                            var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
-                                            foreach (var classEntry in shootingClasses)
-                                            {
-                                                if (!string.IsNullOrEmpty(classEntry.Class) && !userShootingClasses.Contains(classEntry.Class))
-                                                    userShootingClasses.Add(classEntry.Class);
-                                            }
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogWarning(ex, "Error reading shootingClasses from unpublished registration {RegistrationId}", reg.Id);
-                                    }
-
-                                    _logger.LogInformation("Found unpublished registration {RegistrationId} via IContentService fallback", reg.Id);
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                    userRegistrationId = found.Id;
+                    registeredMemberId = found.MemberId.ToString();
+                    registeredMemberName = found.MemberName;
+                    registeredIsSubCompetition = found.IsSubCompetition;
+                    foreach (var cls in found.ClassIds)
+                        if (!userShootingClasses.Contains(cls)) userShootingClasses.Add(cls);
                 }
 
                 if (!userRegistrationId.HasValue)
@@ -505,15 +423,9 @@ namespace HpskSite.Controllers
                 // If the member is registered but has no invoice at all, include a "no invoice" entry
                 if (!hasIndividualInvoice && registrationFee > 0)
                 {
-                    var registrationsHub = competition.Children()
-                        .FirstOrDefault(c => c.ContentType?.Alias == "competitionRegistrationsHub");
-
-                    if (registrationsHub != null)
+                    // Anmälan via anmälningslagringen (sajtstrukturen fas 1a).
                     {
-                        var userReg = registrationsHub.Children()
-                            .FirstOrDefault(r => r.ContentType?.Alias == "competitionRegistration"
-                                && (r.Value<string>("memberId") ?? "") == memberId
-                                && r.Value<bool>("isActive", fallback: Umbraco.Cms.Core.Models.PublishedContent.Fallback.ToDefaultValue, defaultValue: true));
+                        var userReg = FindActiveRegistration(competitionId, memberId);
 
                         if (userReg != null)
                         {
@@ -529,7 +441,7 @@ namespace HpskSite.Controllers
                                 amount = registrationFee,
                                 memberName = memberName.Trim(),
                                 status = "Ej fakturerad",
-                                createdDate = userReg.CreateDate.ToString("yyyy-MM-dd"),
+                                createdDate = userReg.RegistrationDate.ToString("yyyy-MM-dd"),
                                 isTeam = false,
                                 noInvoice = true
                             });
@@ -878,25 +790,14 @@ namespace HpskSite.Controllers
                                         .Select(int.Parse)
                                         .ToList();
                                     
-                                    // Get shooting classes for these registrations
-                                    var registrationsHub = competition.Children()
-                                        .FirstOrDefault(x => x.ContentType?.Alias == "competitionRegistrationsHub");
-                                    
-                                    if (registrationsHub != null)
+                                    // Klasserna för de här anmälningarna, via anmälningslagringen.
+                                    foreach (var regId in registrationIds)
                                     {
-                                        var registrations = registrationsHub.Children()
-                                            .Where(x => x.ContentType.Alias == "competitionRegistration")
-                                            .Where(x => registrationIds.Contains(x.Id))
-                                            .ToList();
-                                        
-                                        foreach (var reg in registrations)
-                                        {
-                                            var shootingClass = reg.Value<string>("shootingClass");
-                                            if (!string.IsNullOrEmpty(shootingClass) && !shootingClasses.Contains(shootingClass))
-                                            {
+                                        var reg = _registrations.Get(request.CompetitionId, regId);
+                                        if (reg == null) continue;
+                                        foreach (var shootingClass in reg.ClassIds)
+                                            if (!shootingClasses.Contains(shootingClass))
                                                 shootingClasses.Add(shootingClass);
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -996,37 +897,22 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Tävling kunde inte hittas." });
                 }
 
-                // Find registrations hub under the competition
-                var registrationsHub = competitionForPayment.Children()
-                    .FirstOrDefault(x => x.ContentType?.Alias == "competitionRegistrationsHub");
-
-                if (registrationsHub != null)
+                // Medlemmens anmälningar via anmälningslagringen (sajtstrukturen fas 1a).
+                if (int.TryParse(currentMember.Id, out var currentMemberIntId))
                 {
-                    // Get all registrations under the hub
-                    var registrations = registrationsHub.Children()
-                        .Where(x => x.ContentType.Alias == "competitionRegistration");
-
-                    foreach (var registration in registrations)
+                    foreach (var registration in _registrations.ListForMemberInCompetition(competitionId, currentMemberIntId)
+                                 .Where(r => r.IsActive))
                     {
-                        // Check if this registration belongs to the current user
-                        var registrationMemberId = registration.Value<string>("memberId");
-                        if (registrationMemberId == currentMember.Id.ToString())
-                        {
-                            var isActive = registration.Value<bool>("isActive", fallback: Umbraco.Cms.Core.Models.PublishedContent.Fallback.ToDefaultValue, defaultValue: true);
-                            if (isActive)
-                            {
-                                var invoiceId = registration.Value<int?>("invoiceId");
-                                var paymentStatus = invoiceId.HasValue ? _paymentService.GetRegistrationPaymentStatus(registration.Id) : "No Invoice";
+                        var invoiceId = registration.InvoiceId;
+                        var paymentStatus = invoiceId.HasValue ? _paymentService.GetRegistrationPaymentStatus(registration.Id) : "No Invoice";
 
-                                userRegistrations.Add(new
-                                {
-                                    registrationId = registration.Id,
-                                    shootingClass = registration.Value<string>("shootingClass"),
-                                    paymentStatus = paymentStatus,
-                                    invoiceId = invoiceId
-                                });
-                            }
-                        }
+                        userRegistrations.Add(new
+                        {
+                            registrationId = registration.Id,
+                            shootingClass = string.Join(", ", registration.ClassIds),
+                            paymentStatus = paymentStatus,
+                            invoiceId = invoiceId
+                        });
                     }
                 }
 
@@ -1105,103 +991,19 @@ namespace HpskSite.Controllers
                 string searchMemberId = null; // Declare outside the if block so it's accessible later
                 bool registeredIsSubCompetition = false;
 
-                // First: try published content (fast, cached)
                 searchMemberId = !string.IsNullOrEmpty(targetMemberId) ? targetMemberId : currentMember.Id.ToString();
 
-                var registrationsHub = competition.Children()
-                    .FirstOrDefault(x => x.ContentType?.Alias == "competitionRegistrationsHub");
-
-                if (registrationsHub != null)
+                // Anmälan via anmälningslagringen (sajtstrukturen fas 1a) — alla anmälningar,
+                // publicerade eller inte. Ersätter "publicerad cache först, sedan innehållstjänsten".
+                var found = FindActiveRegistration(competitionId, searchMemberId);
+                if (found != null)
                 {
-                    var registrations = registrationsHub.Children()
-                        .Where(x => x.ContentType.Alias == "competitionRegistration");
-
-                    foreach (var registration in registrations)
-                    {
-                        var registrationMemberId = registration.Value<string>("memberId");
-                        if (registrationMemberId == searchMemberId)
-                        {
-                            var isActive = registration.Value<bool>("isActive", fallback: Umbraco.Cms.Core.Models.PublishedContent.Fallback.ToDefaultValue, defaultValue: true);
-                            if (isActive)
-                            {
-                                userRegistrationId = registration.Id;
-                                targetMemberIdFromReg = registrationMemberId;
-                                targetMemberNameFromReg = registration.Value<string>("memberName");
-                                registeredIsSubCompetition = registration.Value<bool>("isSubCompetition",
-                                    fallback: Umbraco.Cms.Core.Models.PublishedContent.Fallback.ToDefaultValue, defaultValue: false);
-
-                                var shootingClassesJson = registration.Value<string>("shootingClasses");
-                                var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
-
-                                foreach (var classEntry in shootingClasses)
-                                {
-                                    if (!string.IsNullOrEmpty(classEntry.Class) && !userShootingClasses.Contains(classEntry.Class))
-                                    {
-                                        userShootingClasses.Add(classEntry.Class);
-                                    }
-                                }
-
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // Fallback: check unpublished content via IContentService
-                if (!userRegistrationId.HasValue)
-                {
-                    _logger.LogInformation("SendQRCodeEmail: Registration not found in published content, checking via IContentService fallback");
-                    var contentService = Services.ContentService;
-                    var competitionContent = contentService.GetById(competitionId);
-                    if (competitionContent != null)
-                    {
-                        long totalHub;
-                        var hubChildren = contentService.GetPagedChildren(competitionContent.Id, 0, 100, out totalHub);
-                        var hubContent = hubChildren.FirstOrDefault(x => x.ContentType.Alias == "competitionRegistrationsHub");
-
-                        if (hubContent != null)
-                        {
-                            long totalRegs;
-                            var regChildren = contentService.GetPagedChildren(hubContent.Id, 0, 500, out totalRegs);
-                            foreach (var reg in regChildren)
-                            {
-                                if (reg.ContentType.Alias != "competitionRegistration") continue;
-                                var regMemberId = reg.GetValue<string>("memberId");
-                                if (regMemberId != searchMemberId) continue;
-
-                                var hasIsActive = reg.Properties.Any(p => p.Alias == "isActive");
-                                var isActive = !hasIsActive || reg.GetValue<bool>("isActive");
-                                if (isActive)
-                                {
-                                    userRegistrationId = reg.Id;
-                                    targetMemberIdFromReg = regMemberId;
-                                    targetMemberNameFromReg = reg.GetValue<string>("memberName");
-                                    registeredIsSubCompetition = reg.GetValue<bool>("isSubCompetition");
-
-                                    try
-                                    {
-                                        var shootingClassesJson = reg.GetValue<string>("shootingClasses");
-                                        if (!string.IsNullOrEmpty(shootingClassesJson))
-                                        {
-                                            var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
-                                            foreach (var classEntry in shootingClasses)
-                                            {
-                                                if (!string.IsNullOrEmpty(classEntry.Class) && !userShootingClasses.Contains(classEntry.Class))
-                                                    userShootingClasses.Add(classEntry.Class);
-                                            }
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogWarning(ex, "Error reading shootingClasses from unpublished registration {RegistrationId}", reg.Id);
-                                    }
-
-                                    _logger.LogInformation("SendQRCodeEmail: Found unpublished registration {RegistrationId} via IContentService fallback", reg.Id);
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                    userRegistrationId = found.Id;
+                    targetMemberIdFromReg = found.MemberId.ToString();
+                    targetMemberNameFromReg = found.MemberName;
+                    registeredIsSubCompetition = found.IsSubCompetition;
+                    foreach (var cls in found.ClassIds)
+                        if (!userShootingClasses.Contains(cls)) userShootingClasses.Add(cls);
                 }
 
                 if (!userRegistrationId.HasValue)
