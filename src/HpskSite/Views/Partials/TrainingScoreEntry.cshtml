@@ -983,9 +983,17 @@ function submitTrainingScore() {
     if (trainingSubmitInFlight) return;
     const form = document.getElementById('trainingScoreForm');
 
-    // Validate basic form fields
-    if (!form.checkValidity()) {
-        form.reportValidity();
+    // ⚠️ Kontrollera bara fält som SYNS. form.checkValidity() prövade även de dolda inmatningssätten,
+    // och ett ogiltigt värde där (t.ex. 93 i en serie-total, kvar sedan skytten bytte till "Bara
+    // totalt") stoppade sparningen helt tyst: webbläsaren kan inte visa felbubblan på ett dolt fält.
+    // Utkastet sparade dessutom det dolda värdet, så felet överlevde en omladdning och bara
+    // "Börja om med tomt pass" hjälpte (Falkenbergs PK, 2026-10-08). Bara det valda sättets data
+    // skickas, så ett dolt fält har inget att säga till om.
+    const invalidVisible = Array.from(form.elements).find(el =>
+        el.willValidate && el.offsetParent !== null && !el.checkValidity());
+    if (invalidVisible) {
+        invalidVisible.scrollIntoView({ block: 'center' });
+        invalidVisible.reportValidity();
         return;
     }
 
