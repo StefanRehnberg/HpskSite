@@ -62,8 +62,6 @@ namespace HpskSite.Services
         {
             public List<IContent> Competitions { get; init; } = new();
             public List<IContent> InvoiceHubs { get; init; } = new();
-            public List<IContent> TeamRegistrations { get; init; } = new();
-            public List<IContent> RegistrationHubs { get; init; } = new();
             public List<IContent> Clubs { get; init; } = new();
         }
 
@@ -90,16 +88,14 @@ namespace HpskSite.Services
                     {
                         case "competition": scan.Competitions.Add(node); break;
                         case "registrationInvoicesHub": scan.InvoiceHubs.Add(node); break;
-                        case "competitionTeamRegistration": scan.TeamRegistrations.Add(node); break;
-                        case "competitionRegistrationsHub": scan.RegistrationHubs.Add(node); break;
                         case "club": scan.Clubs.Add(node); break;
                     }
                 }
             }
 
             _logger.LogInformation(
-                "Invoice content scan: {Competitions} competitions, {Hubs} invoice hubs, {Teams} team registrations, {Clubs} clubs in {Ms} ms",
-                scan.Competitions.Count, scan.InvoiceHubs.Count, scan.TeamRegistrations.Count, scan.Clubs.Count,
+                "Invoice content scan: {Competitions} competitions, {Hubs} invoice hubs, {Clubs} clubs in {Ms} ms",
+                scan.Competitions.Count, scan.InvoiceHubs.Count, scan.Clubs.Count,
                 (int)(DateTime.UtcNow - started).TotalMilliseconds);
 
             _appCaches.RuntimeCache.Insert(TreeScanCacheKey, () => scan, ScanCacheDuration);
@@ -123,8 +119,6 @@ namespace HpskSite.Services
                 var scan = GetContentScan();
                 var allCompetitions = scan.Competitions;
                 var allInvoicesHubs = scan.InvoiceHubs;
-                var allTeamRegDocs = scan.TeamRegistrations;
-                var allRegistrationHubs = scan.RegistrationHubs;
 
                 _logger.LogInformation("Found {CompetitionCount} competitions and {HubCount} invoice hubs",
                     allCompetitions.Count, allInvoicesHubs.Count);
@@ -219,8 +213,7 @@ namespace HpskSite.Services
                 if (filters.ViewType == "outgoing" && filters.ClubId.HasValue && filters.ClubId.Value > 0)
                 {
                     // "Fakturor att betala" — team invoices the club needs to pay
-                    allInvoices = GetOutgoingTeamInvoices(filteredCompetitions, hubsByCompetition,
-                        allTeamRegDocs, allRegistrationHubs, filters.ClubId.Value);
+                    allInvoices = GetOutgoingTeamInvoices(filteredCompetitions, hubsByCompetition, filters.ClubId.Value);
                 }
                 else if (filters.ViewType == "members" && filters.ClubId.HasValue && filters.ClubId.Value > 0)
                 {
@@ -294,37 +287,33 @@ namespace HpskSite.Services
 
         /// <summary>
         /// Get team invoices the club needs to pay (outgoing).
-        /// Finds team registration docs for the club, then matches invoices with memberId="team-{teamId}".
+        /// The club's teams come from the CompetitionTeam TABLE (sajtstrukturen fas 1c) — the
+        /// competitionTeamRegistration mirror nodes are no longer created, so they cannot be the
+        /// source. Then invoices with memberId="team-{teamId}" are matched.
         /// </summary>
         private List<InvoiceInfo> GetOutgoingTeamInvoices(
             List<IContent> competitions,
             Dictionary<int, List<IContent>> hubsByCompetition,
-            List<IContent> allTeamRegDocs,
-            List<IContent> allRegistrationHubs,
             int clubId)
         {
             var result = new List<InvoiceInfo>();
-
-            // Map registration hub ID -> competition ID
-            var regHubToCompetitionId = allRegistrationHubs.ToDictionary(h => h.Id, h => h.ParentId);
             var competitionLookup = competitions.ToDictionary(c => c.Id);
 
-            // Find team IDs belonging to this club and their competitions
             var clubTeamIds = new HashSet<int>();
             var teamCompetitionIds = new HashSet<int>();
-
-            foreach (var teamReg in allTeamRegDocs)
+            try
             {
-                if (teamReg.GetValue<int>("clubId") != clubId) continue;
-
-                var teamId = teamReg.GetValue<int>("teamId");
-                if (teamId > 0) clubTeamIds.Add(teamId);
-
-                if (regHubToCompetitionId.TryGetValue(teamReg.ParentId, out var compId)
-                    && competitionLookup.ContainsKey(compId))
+                using var db = _databaseFactory.CreateDatabase();
+                foreach (var t in db.Fetch<TeamRow>("SELECT Id, CompetitionId FROM dbo.CompetitionTeam WHERE ClubId = @0", clubId))
                 {
-                    teamCompetitionIds.Add(compId);
+                    clubTeamIds.Add(t.Id);
+                    if (competitionLookup.ContainsKey(t.CompetitionId)) teamCompetitionIds.Add(t.CompetitionId);
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Klubb {ClubId}s lag kunde inte läsas", clubId);
+                return result;
             }
 
             if (clubTeamIds.Count == 0) return result;
@@ -564,8 +553,7 @@ namespace HpskSite.Services
 
         /// <summary>
         /// Node types the scan records but never descends into: nothing the aggregation collects
-        /// (competition · registrationInvoicesHub · competitionTeamRegistration ·
-        /// competitionRegistrationsHub · club) can live underneath any of them.
+        /// (competition · registrationInvoicesHub · club) can live underneath any of them.
         ///
         /// Each entry saves one GetPagedChildren per node of that type, and the counts are what
         /// matter: ~500 clubs each with their events and news, plus a start list, finals start list
@@ -575,8 +563,16 @@ namespace HpskSite.Services
         /// ⚠ Adding a type here is a claim that NOTHING the aggregation needs can appear below it.
         /// Check against the five aliases collected in GetContentScan before extending this.
         /// </summary>
+        private sealed class TeamRow
+        {
+            public int Id { get; set; }
+            public int CompetitionId { get; set; }
+        }
+
         private static readonly HashSet<string> DoNotDescend = new(StringComparer.OrdinalIgnoreCase)
         {
+            // Registrations and team mirrors are not read from the tree any more (sajtstrukturen fas 1).
+            "competitionRegistrationsHub",
             // Invoices are read per hub, on demand, by GetInvoicesFromHub.
             "registrationInvoicesHub",
             "registrationInvoice",
@@ -601,13 +597,8 @@ namespace HpskSite.Services
         ///   registrationInvoicesHub  — its children are the invoices, and those are read on demand
         ///                              per hub by GetInvoicesFromHub. Walking them here bought
         ///                              nothing and cost one query per invoice.
-        ///   competitionRegistrationsHub — the aggregation needs the competitionTeamRegistration
-        ///                              children (for club/team mapping) but nothing below them.
-        ///                              Registrations are leaves; enqueuing them cost one query each
-        ///                              to discover they have no children.
-        ///
-        /// ⚠ The team-registration children are added straight to the result and NOT enqueued.
-        /// Doing both would add them twice, and every downstream lookup is keyed on their ids.
+        ///   competitionRegistrationsHub — nothing below it is read from the tree any more; the
+        ///                              club's teams come from the CompetitionTeam table.
         /// </summary>
         private List<IContent> GetFlatDescendants(IContent root)
         {
@@ -626,18 +617,6 @@ namespace HpskSite.Services
                 }
 
                 var children = _contentService.GetPagedChildren(current.Id, 0, int.MaxValue, out _);
-
-                if (current.ContentType.Alias == "competitionRegistrationsHub")
-                {
-                    foreach (var child in children)
-                    {
-                        if (child.ContentType.Alias == "competitionTeamRegistration")
-                        {
-                            result.Add(child);
-                        }
-                    }
-                    continue;
-                }
 
                 foreach (var child in children)
                 {

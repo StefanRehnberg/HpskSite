@@ -227,19 +227,8 @@ namespace HpskSite.Services
                 });
             }
 
-            // Create Umbraco registration doc for backoffice visibility and invoice linking
-            try
-            {
-                var clubName = _clubService.GetClubNameById(clubId) ?? "Okänd förening";
-                var memberNames = nonSpareIds.Select(id => GetName(id)).ToList();
-                if (spareIds.Length > 0) memberNames.AddRange(spareIds.Select(id => $"{GetName(id)} (reserv)"));
-
-                CreateTeamRegistrationDoc(competitionId, teamId, trimmedName, teamClass, clubId, clubName, memberNames, isRelay);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to create team registration doc for team {TeamId}, continuing anyway", teamId);
-            }
+            // (No competitionTeamRegistration mirror node any more — sajtstrukturen fas 1c. The team IS
+            //  the CompetitionTeam row; nothing reads the mirror.)
 
             // Eager team invoice: create the Pending team/relay fee invoice now (best-effort) so
             // the team carries it from creation and shows a payment status on the Anmälningar desk
@@ -373,15 +362,6 @@ namespace HpskSite.Services
             // Den nya modellen: lagets öppna avgift makuleras (laget finns inte längre).
             _paymentService.SyncLedgerFees(team.CompetitionId, teamId: teamId, byMemberId: actorMemberId ?? 0);
 
-            // Remove the Umbraco registration doc
-            try
-            {
-                DeleteTeamRegistrationDoc(team.CompetitionId, teamId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to delete team registration doc for team {TeamId}", teamId);
-            }
 
             return (true, "Laget har tagits bort.");
         }
@@ -592,39 +572,6 @@ namespace HpskSite.Services
                 });
             }
 
-            // Update the Umbraco registration doc
-            try
-            {
-                Dictionary<int, string> nameLookup;
-                if (team.IsRelay)
-                {
-                    // Relay members aren't individually registered — resolve names directly.
-                    nameLookup = new Dictionary<int, string>();
-                    foreach (var id in memberIds)
-                    {
-                        var member = _memberService.GetById(id);
-                        nameLookup[id] = member != null
-                            ? $"{member.GetValue<string>("firstName")} {member.GetValue<string>("lastName")}"
-                            : $"Medlem #{id}";
-                    }
-                }
-                else
-                {
-                    var compatClasses = TeamClassHelper.GetCompatibleIndividualClasses(team.TeamClass, isSpringskytteComp);
-                    var regMembers = GetRegisteredMembersInClasses(team.CompetitionId, compatClasses, isSpringskytteComp);
-                    nameLookup = regMembers.ToDictionary(r => r.MemberId, r => r.Name);
-                }
-                string MemberName(int id) => nameLookup.GetValueOrDefault(id, $"Medlem #{id}");
-
-                var memberNames = nonSpareIds.Select(id => MemberName(id)).ToList();
-                if (spareIds.Length > 0) memberNames.AddRange(spareIds.Select(id => $"{MemberName(id)} (reserv)"));
-
-                UpdateTeamRegistrationDoc(team.CompetitionId, teamId, team.TeamName, memberNames);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to update team registration doc for team {TeamId}", teamId);
-            }
 
             return (true, editWarning == null ? "Laget har uppdaterats." : $"Laget har uppdaterats. {editWarning}");
         }
@@ -1756,138 +1703,10 @@ namespace HpskSite.Services
             }
 
             var clubName = _clubService.GetClubNameById(clubId) ?? "Okänd förening";
-            var teamRegDoc = FindTeamRegistrationDoc(competitionId, teamId);
             return await _paymentService.CreateTeamInvoiceAsync(
-                competitionId, teamId, teamName, clubName, fee, teamRegDoc?.Id ?? 0);
+                competitionId, teamId, teamName, clubName, fee, 0);
         }
 
-        /// <summary>
-        /// Creates a competitionTeamRegistration Umbraco doc under the competition's registrations hub.
-        /// </summary>
-        private void CreateTeamRegistrationDoc(int competitionId, int teamId, string teamName, string teamClass,
-            int clubId, string clubName, List<string> memberNames, bool isRelay = false)
-        {
-            _logger.LogInformation("CreateTeamRegistrationDoc called - CompetitionId: {CompetitionId}, TeamId: {TeamId}", competitionId, teamId);
-
-            var competitionContent = _contentService.GetById(competitionId);
-            if (competitionContent == null)
-            {
-                _logger.LogWarning("Competition content {CompetitionId} not found", competitionId);
-                return;
-            }
-
-            long totalChildren;
-            var children = _contentService.GetPagedChildren(competitionContent.Id, 0, 100, out totalChildren).ToList();
-            _logger.LogInformation("Competition has {Count} children: {Children}",
-                children.Count, string.Join(", ", children.Select(c => $"{c.Name} ({c.ContentType.Alias})")));
-
-            var registrationsHub = children.FirstOrDefault(c =>
-                c.ContentType.Alias == "competitionRegistrationsHub");
-
-            if (registrationsHub == null)
-            {
-                _logger.LogInformation("No registrations hub found, creating one");
-                registrationsHub = _contentService.Create("Anmälningar", competitionContent.Id, "competitionRegistrationsHub");
-                var hubSave = _contentService.Save(registrationsHub);
-                if (!hubSave.Success)
-                {
-                    _logger.LogError("Failed to save registrations hub");
-                    return;
-                }
-                _contentService.Publish(registrationsHub, new[] { "*" }, -1);
-            }
-
-            _logger.LogInformation("Using registrations hub {HubId} ({HubName})", registrationsHub.Id, registrationsHub.Name);
-
-            var docName = $"Lag: {teamName} ({clubName})";
-            var doc = _contentService.Create(docName, registrationsHub.Id, "competitionTeamRegistration");
-
-            if (doc == null)
-            {
-                _logger.LogError("Failed to create competitionTeamRegistration doc. Check that the doc type exists and is an allowed child of competitionRegistrationsHub.");
-                return;
-            }
-
-            doc.SetValue("teamId", teamId);
-            doc.SetValue("teamName", teamName);
-            doc.SetValue("teamClass", teamClass);
-            doc.SetValue("clubId", clubId);
-            doc.SetValue("clubName", clubName);
-            doc.SetValue("members", string.Join(", ", memberNames));
-            doc.SetValue("isRelay", isRelay);
-
-            var saveResult = _contentService.Save(doc);
-            _logger.LogInformation("Save result: {Success}", saveResult.Success);
-
-            if (saveResult.Success)
-            {
-                var publishResult = _contentService.Publish(doc, new[] { "*" }, -1);
-                _logger.LogInformation("Publish result: {Success}", publishResult.Success);
-                if (!publishResult.Success)
-                {
-                    _logger.LogWarning("Publish failed for team registration doc {DocId}. Reasons: {Reasons}",
-                        doc.Id, string.Join(", ", publishResult.EventMessages?.GetAll()?.Select(m => m.Message) ?? new[] { "*" }, -1));
-                }
-            }
-            else
-            {
-                _logger.LogError("Save failed for team registration doc. Reasons: {Reasons}",
-                    string.Join(", ", saveResult.EventMessages?.GetAll()?.Select(m => m.Message) ?? new[] { "*" }, -1));
-            }
-        }
-
-        /// <summary>
-        /// Updates the team registration doc when team name or members change.
-        /// </summary>
-        private void UpdateTeamRegistrationDoc(int competitionId, int teamId, string teamName, List<string> memberNames)
-        {
-            var doc = FindTeamRegistrationDoc(competitionId, teamId);
-            if (doc == null) return;
-
-            var clubName = doc.GetValue<string>("clubName") ?? "";
-            doc.Name = $"Lag: {teamName} ({clubName})";
-            doc.SetValue("teamName", teamName);
-            doc.SetValue("members", string.Join(", ", memberNames));
-
-            var saveResult = _contentService.Save(doc);
-            if (saveResult.Success)
-                _contentService.Publish(doc, new[] { "*" }, -1);
-        }
-
-        /// <summary>
-        /// Deletes (unpublishes + deletes) the team registration doc.
-        /// </summary>
-        private void DeleteTeamRegistrationDoc(int competitionId, int teamId)
-        {
-            var doc = FindTeamRegistrationDoc(competitionId, teamId);
-            if (doc == null) return;
-
-            _contentService.Unpublish(doc);
-            _contentService.Delete(doc);
-            _logger.LogInformation("Deleted team registration doc for team {TeamId}", teamId);
-        }
-
-        /// <summary>
-        /// Finds the competitionTeamRegistration doc for a given team.
-        /// </summary>
-        private Umbraco.Cms.Core.Models.IContent? FindTeamRegistrationDoc(int competitionId, int teamId)
-        {
-            var competitionContent = _contentService.GetById(competitionId);
-            if (competitionContent == null) return null;
-
-            long totalChildren;
-            var children = _contentService.GetPagedChildren(competitionContent.Id, 0, 100, out totalChildren).ToList();
-            var registrationsHub = children.FirstOrDefault(c =>
-                c.ContentType.Alias == "competitionRegistrationsHub");
-
-            if (registrationsHub == null) return null;
-
-            var registrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out totalChildren)
-                .Where(r => r.ContentType.Alias == "competitionTeamRegistration")
-                .ToList();
-
-            return registrations.FirstOrDefault(r => r.GetValue<int>("teamId") == teamId);
-        }
 
         #endregion
     }
