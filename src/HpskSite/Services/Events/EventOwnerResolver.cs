@@ -40,20 +40,25 @@ namespace HpskSite.Services.Events
     {
         private readonly IContentService _contentService;
         private readonly AdminAuthorizationService _auth;
+        private readonly IClubEventStore _events;
 
-        public EventOwnerResolver(IContentService contentService, AdminAuthorizationService auth)
+        public EventOwnerResolver(IContentService contentService, AdminAuthorizationService auth, IClubEventStore events)
         {
             _contentService = contentService;
             _auth = auth;
+            _events = events;
         }
 
-        /// <summary>Ägaren till händelsen med det id:t, eller null om den inte går att avgöra.</summary>
+        /// <summary>Ägaren till händelsen med det id:t, eller null om den inte går att avgöra.
+        /// Händelsen läses via <see cref="IClubEventStore"/> (sajtstrukturen fas 2a): posten bär ägaren.</summary>
         public EventOwner? ForEvent(int eventId)
         {
-            if (eventId <= 0) return null;
-            var node = _contentService.GetById(eventId);
-            return node is null || node.ContentType.Alias != ClubEvents.EventAlias ? null : ForEventNode(node);
+            var e = eventId > 0 ? _events.Get(eventId) : null;
+            return e is null ? null : ForOwnerId(e.OwnerId);
         }
+
+        /// <summary>Ägaren till en redan inläst händelse.</summary>
+        public EventOwner? ForEventRecord(HpskSite.Models.Events.ClubEventRecord e) => ForOwnerId(e.OwnerId);
 
         /// <summary>Ägaren till en redan inläst händelsenod.</summary>
         public EventOwner? ForEventNode(IContent eventNode)
