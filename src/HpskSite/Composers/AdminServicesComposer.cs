@@ -185,6 +185,9 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Registrations.ICompetitionRegistrationStore>(
                 sp => sp.GetRequiredService<HpskSite.Services.Registrations.SwitchingRegistrationStore>());
             builder.Services.AddHostedService<HpskSite.Services.Registrations.CompetitionRegistrationSchemaGuardHostedService>();
+            builder.Services.AddScoped<HpskSite.Services.Registrations.RegistrationMigrationService>();
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
+                HpskSite.Services.Registrations.RegistrationNodeGuard>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingMigrationService>();
             builder.Services.AddScoped<HpskSite.Services.Training.ClubTrainingService>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingCourseService>();
