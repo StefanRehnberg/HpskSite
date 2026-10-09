@@ -54,6 +54,8 @@ namespace HpskSite.Controllers
         /// </summary>
         public const string DefaultReminderMessage = EmailService.DefaultPaymentIntroMessage;
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+
         public InvoiceAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -72,9 +74,11 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             IMemberManager memberManager,
             ConsolidatedInvoiceService consolidatedService,
-            MemberClubService memberClubService)
+            MemberClubService memberClubService,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _consolidatedService = consolidatedService;
             _memberClubService = memberClubService;
             _databaseFactory = databaseFactory;
@@ -2106,16 +2110,11 @@ namespace HpskSite.Controllers
             if (!authorized) return Forbid();
 
             var competitionChildren = _contentService.GetPagedChildren(competitionId, 0, 100, out _).ToList();
-            var registrationsHub = competitionChildren
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
             var invoicesHub = competitionChildren
                 .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
 
-            var registrations = registrationsHub != null
-                ? _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
-                    .Where(c => c.ContentType.Alias == "competitionRegistration")
-                    .ToList()
-                : new List<IContent>();
+            // Anmälningarna via anmälningslagringen (sajtstrukturen fas 1a).
+            var registrations = _registrations.List(competitionId).ToList();
 
             var allInvoiceNodes = invoicesHub != null
                 ? _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
@@ -2159,17 +2158,13 @@ namespace HpskSite.Controllers
             var regClubByMemberId = new Dictionary<string, string?>();
             foreach (var reg in registrations)
             {
-                var memberIdStr = reg.GetValue<string>("memberId");
-                if (string.IsNullOrEmpty(memberIdStr)) continue;
+                if (reg.MemberId <= 0) continue;
+                var memberIdStr = reg.MemberId.ToString();
                 if (regClubByMemberId.ContainsKey(memberIdStr)) continue;
 
-                var clubId = reg.GetValue<int>("clubId");
-                string? clubName = clubId > 0 ? _clubService.GetClubNameById(clubId) : null;
-                if (string.IsNullOrEmpty(clubName))
-                {
-                    var legacy = reg.GetValue<string>("memberClub");
-                    if (!string.IsNullOrEmpty(legacy)) clubName = legacy;
-                }
+                string? clubName = reg.ClubId > 0 ? _clubService.GetClubNameById(reg.ClubId) : null;
+                if (string.IsNullOrEmpty(clubName) && !string.IsNullOrEmpty(reg.LegacyClubText))
+                    clubName = reg.LegacyClubText;
                 regClubByMemberId[memberIdStr] = clubName;
             }
 
@@ -2203,14 +2198,8 @@ namespace HpskSite.Controllers
             decimal SubPortionForRegistration(int registrationId)
             {
                 if (!regById.TryGetValue(registrationId, out var reg)) return 0m;
-                var isSub = reg.HasProperty("isSubCompetition") && reg.GetValue<bool>("isSubCompetition");
-                if (!isSub) return 0m;
-                var classes = CompetitionRegistrationDocument
-                    .DeserializeShootingClasses(reg.GetValue<string>("shootingClasses") ?? "")
-                    .Select(c => c.Class)
-                    .Where(c => !string.IsNullOrEmpty(c))
-                    .ToList();
-                return RegistrationFeeCalculator.CalculateSubCompetitionPortion(competition, classes, true);
+                if (!reg.IsSubCompetition) return 0m;
+                return RegistrationFeeCalculator.CalculateSubCompetitionPortion(competition, reg.ClassIds, true);
             }
 
             // invoices are already ordered oldest-first, so the representative pick is stable.

@@ -344,8 +344,17 @@ GROUP BY CASE WHEN hubType.alias = @1 OR hub.text LIKE N'%Anm%lningar%' OR hub.t
                 ShooterNotes = n.GetValue<string>("shooterNotes") ?? ""
             };
 
-            var classes = CompetitionRegistrationDocument.DeserializeShootingClasses(
-                n.GetValue<string>("shootingClasses") ?? "");
+            var classesJson = n.GetValue<string>("shootingClasses") ?? "";
+            var classes = CompetitionRegistrationDocument.DeserializeShootingClasses(classesJson);
+            if (classes.Count == 0 && !string.IsNullOrWhiteSpace(classesJson))
+            {
+                // ⚠️ Springskyttets äldre form är en array av STRÄNGAR (["C-H 50"]), som
+                // DeserializeShootingClasses inte kan läsa och tyst svarar tomt på. ReadClassIds läser
+                // båda formerna och alla skiftlägen av "class" — utan reserven försvann de skyttarna.
+                classes = CompetitionRegistrationDocument.ReadClassIds(classesJson)
+                    .Select(id => new ShootingClassEntry { Class = id })
+                    .ToList();
+            }
             if (classes.Count == 0)
             {
                 var legacy = n.GetValue<string>("shootingClass");

@@ -24,17 +24,32 @@ namespace HpskSite.Services
         private readonly IMemberService _memberService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IPublishedUrlProvider _publishedUrlProvider;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
         public ReceiptModelBuilder(
             IContentService contentService,
             IMemberService memberService,
             IUmbracoContextAccessor umbracoContextAccessor,
-            IPublishedUrlProvider publishedUrlProvider)
+            IPublishedUrlProvider publishedUrlProvider,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
+            _registrations = registrations;
             _contentService = contentService;
             _memberService = memberService;
             _umbracoContextAccessor = umbracoContextAccessor;
             _publishedUrlProvider = publishedUrlProvider;
+        }
+
+        /// <summary>
+        /// Anmälans klasser som visningsnamn, via anmälningslagringen. Ett id som inte är en anmälan
+        /// (en lagfakturas registrationId pekar på lagspegeln) ger en tom sträng, som förut.
+        /// </summary>
+        private string ClassesOf(int registrationId)
+        {
+            var reg = _registrations.GetById(registrationId);
+            return reg == null
+                ? ""
+                : string.Join(", ", reg.ClassIds.Select(HpskSite.Models.ShootingClasses.DisplayName));
         }
 
         /// <summary>
@@ -104,15 +119,7 @@ namespace HpskSite.Services
             // --- Classes from the linked registration. ---
             var classes = "";
             if (registrationId > 0)
-            {
-                var reg = _contentService.GetById(registrationId);
-                if (reg != null)
-                {
-                    var json = reg.GetValue<string>("shootingClasses") ?? "";
-                    var entries = CompetitionRegistrationDocument.DeserializeShootingClasses(json);
-                    classes = string.Join(", ", entries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)).Select(HpskSite.Models.ShootingClasses.DisplayName));
-                }
-            }
+                classes = ClassesOf(registrationId);
 
             // --- Consolidated payment: itemise what the one payment covered. ---
             // A club paying for N shooters cannot reconcile a single lump-sum "Anmälningsavgift" line,
@@ -127,17 +134,7 @@ namespace HpskSite.Services
                     if (child == null || child.ContentType.Alias != "registrationInvoice") continue;
 
                     var childRegId = child.GetValue<int>("registrationId");
-                    var childClasses = "";
-                    if (childRegId > 0)
-                    {
-                        var childReg = _contentService.GetById(childRegId);
-                        var childJson = childReg?.GetValue<string>("shootingClasses") ?? "";
-                        if (!string.IsNullOrWhiteSpace(childJson))
-                        {
-                            var childEntries = CompetitionRegistrationDocument.DeserializeShootingClasses(childJson);
-                            childClasses = string.Join(", ", childEntries.Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)).Select(HpskSite.Models.ShootingClasses.DisplayName));
-                        }
-                    }
+                    var childClasses = childRegId > 0 ? ClassesOf(childRegId) : "";
 
                     coveredLines.Add(new ReceiptLine
                     {
