@@ -477,33 +477,6 @@ namespace HpskSite.Controllers
         /// amount, producing today's (possibly wrong) QR still beats leaving the registration desk with
         /// no way to take payment at all. That case is logged, because it means bad invoice data.
         /// </summary>
-        /// <summary>
-        /// The <c>competitionTeamRegistration</c> node for a team, or 0 when there is none.
-        ///
-        /// <para><b>⚠️ Reads DRAFTS via <see cref="IContentService"/>, and must keep doing so.</b> Both
-        /// call sites used to walk the PUBLISHED cache (<c>competition.Children()</c>) — but a team
-        /// registration cannot publish while its <c>competitionRegistrationsHub</c> is unpublished, and
-        /// Umbraco refuses to publish a child under an unpublished parent. In prod (2026-09-02) 8 of 82
-        /// hubs are unpublished, including SM Springskytte 2026's, which leaves 52 team registrations
-        /// permanently invisible to the published cache. The lookup then returned 0, the invoice was
-        /// minted with no <c>registrationId</c>, and nothing said so. Same tree as
-        /// <c>CompetitionTeamService.FindTeamRegistrationDoc</c>, which had it right.</para>
-        /// </summary>
-        private int FindTeamRegistrationDocId(int competitionId, int teamId)
-        {
-            var competition = Services.ContentService.GetById(competitionId);
-            if (competition == null) return 0;
-
-            var hub = Services.ContentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-            if (hub == null) return 0;
-
-            var doc = Services.ContentService.GetPagedChildren(hub.Id, 0, 1000, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionTeamRegistration"
-                                     && c.GetValue<int>("teamId") == teamId);
-            return doc?.Id ?? 0;
-        }
-
         private (bool ok, decimal amount, string? refusal) ResolveTeamQrAmount(int invoiceId, decimal feeFallback)
         {
             // The rule itself lives in ConsolidatedInvoiceService.ResolveQrAmount — this method used
@@ -568,8 +541,8 @@ namespace HpskSite.Controllers
 
                 var clubName = _clubService.GetClubNameById(team.ClubId) ?? "Okänd förening";
 
-                // Find the team registration doc for invoice linking
-                int teamRegistrationDocId = FindTeamRegistrationDocId(competitionId, teamId);
+                // Team invoices are identified by memberId "team-{id}"; the mirror node link is gone (fas 1c).
+                int teamRegistrationDocId = 0;
 
                 // Check for existing team invoice
                 var teamMemberId = $"team-{teamId}";
@@ -1205,8 +1178,7 @@ namespace HpskSite.Controllers
                 var clubName = _clubService.GetClubNameById(team.ClubId) ?? "Okänd förening";
                 var teamMemberId = $"team-{teamId}";
 
-                // Find team registration doc for invoice linking
-                int teamRegDocId = FindTeamRegistrationDocId(competitionId, teamId);
+                int teamRegDocId = 0; // no mirror node any more (sajtstrukturen fas 1c)
 
                 // Get or create invoice
                 var existingInvoice = await _paymentService.GetExistingInvoiceForMember(competitionId, teamMemberId);

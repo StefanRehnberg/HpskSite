@@ -113,6 +113,7 @@ namespace HpskSite.Services.Registrations
             public int CompetitionsFailed { get; init; }
             public List<string> Errors { get; init; } = new();
             public int Reseed { get; init; }
+            public int TeamDocsLinked { get; init; }
         }
 
         /// <summary>
@@ -198,14 +199,44 @@ VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, @10, @11, @12, @13, @14, @15, @1
             }
 
             var reseed = Reseed();
+            var teamDocs = LinkTeamMirrorDocs();
             _logger.LogWarning("Anmälningsflytten: {Inserted} skrivna, {Skipped} fanns redan, {Legacy} sammanslagna id:n, {Failed} tävlingar misslyckades, RESEED {Reseed}",
                 inserted, skipped, legacy, failed, reseed);
             return new ApplyResult
             {
                 Ok = failed == 0,
                 Message = failed == 0 ? "Flytten är klar." : $"{failed} tävlingar kunde inte flyttas — se felen. Kör om när de är åtgärdade.",
-                Inserted = inserted, Skipped = skipped, LegacyIdsWritten = legacy, CompetitionsFailed = failed, Errors = errors, Reseed = reseed
+                Inserted = inserted, Skipped = skipped, LegacyIdsWritten = legacy, CompetitionsFailed = failed, Errors = errors, Reseed = reseed,
+                TeamDocsLinked = teamDocs
             };
+        }
+
+        /// <summary>
+        /// Lagspeglarna (<c>competitionTeamRegistration</c>) skapas inte längre. Gamla lagfakturor bär
+        /// spegelns nod-id i <c>registrationId</c>, så id:t sparas på laget innan noderna avpubliceras.
+        /// Idempotent: bara lag som saknar värdet.
+        /// </summary>
+        private int LinkTeamMirrorDocs()
+        {
+            using var scope = _scopeProvider.CreateScope();
+            var n = scope.Database.Execute(@"
+UPDATE t SET LegacyRegistrationDocId = d.NodeId
+FROM dbo.CompetitionTeam t
+JOIN (
+    SELECT MIN(n.id) AS NodeId,
+           COALESCE(pd.intValue, TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20))) AS TeamId
+    FROM umbracoNode n
+    JOIN umbracoContent c          ON c.nodeId = n.id
+    JOIN cmsContentType ct         ON ct.nodeId = c.contentTypeId AND ct.alias = 'competitionTeamRegistration'
+    JOIN umbracoContentVersion v   ON v.nodeId = n.id AND v.[current] = 1
+    JOIN cmsPropertyType pt        ON pt.contentTypeId = ct.nodeId AND pt.Alias = 'teamId'
+    JOIN umbracoPropertyData pd    ON pd.versionId = v.id AND pd.propertyTypeId = pt.id
+    WHERE n.trashed = 0
+    GROUP BY COALESCE(pd.intValue, TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20)))
+) d ON d.TeamId = t.Id
+WHERE t.LegacyRegistrationDocId IS NULL");
+            scope.Complete();
+            return n;
         }
 
         /// <summary>
@@ -313,9 +344,9 @@ SELECT n.id FROM umbracoNode n
 JOIN umbracoContent c ON c.nodeId = n.id
 JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
 JOIN umbracoDocument d ON d.nodeId = n.id
-WHERE ct.alias IN (@0, @1) AND d.published = 1 AND n.trashed = 0
-ORDER BY CASE WHEN ct.alias = @0 THEN 0 ELSE 1 END, n.id",
-                    NodeRegistrationStore.RegistrationAlias, NodeRegistrationStore.HubAlias);
+WHERE ct.alias IN (@0, @1, @2) AND d.published = 1 AND n.trashed = 0
+ORDER BY CASE WHEN ct.alias = @1 THEN 1 ELSE 0 END, n.id",
+                    NodeRegistrationStore.RegistrationAlias, NodeRegistrationStore.HubAlias, "competitionTeamRegistration");
             }
 
             int done = 0;
