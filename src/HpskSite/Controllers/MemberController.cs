@@ -43,6 +43,7 @@ namespace HpskSite.Controllers
         private readonly FaltskytteStatsService _faltskytteStatsService;
         private readonly MemberDataPresenceService _presenceService;
         private const string ClubMemberTypeAlias = "hpskClub";
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
         public MemberController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -65,9 +66,11 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             UnifiedResultsService unifiedResultsService,
             FaltskytteStatsService faltskytteStatsService,
-            MemberDataPresenceService presenceService)
+            MemberDataPresenceService presenceService,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _memberService = memberService;
             _memberGroupService = memberGroupService;
             _memberManager = memberManager;
@@ -1789,73 +1792,14 @@ namespace HpskSite.Controllers
                     return Json(new { success = true, registrations = filtered });
                 }
 
-                // 2. PHASE 1 OPTIMIZATION: Direct traversal from competitions hub
-                // Find competitions hub
-                var competitionsHub = GetCompetitionsHub();
-                if (competitionsHub == null)
-                {
-                    return Json(new { success = true, registrations = new List<object>() });
-                }
+                // 2. Medlemmens anmälningar i EN fråga via anmälningslagringen (sajtstrukturen fas 1a).
+                //    Ersätter en vandring genom varje tävling på sajten och deras hubbar.
+                var myRegistrations = _registrations.ListForMember(memberIdInt).ToList();
 
-                // Get all competitions and their series (including year folders)
-                var allCompetitions = new List<IContent>();
-                var hubChildren = _contentService.GetPagedChildren(competitionsHub.Id, 0, int.MaxValue, out _);
-
-                foreach (var child in hubChildren)
-                {
-                    if (child.ContentType.Alias == "competition")
-                    {
-                        allCompetitions.Add(child);
-                    }
-                    else if (child.ContentType.Alias == "competitionSeries")
-                    {
-                        // Series can contain competitions
-                        var seriesChildren = _contentService.GetPagedChildren(child.Id, 0, int.MaxValue, out _);
-                        var competitionsInSeries = seriesChildren.Where(c => c.ContentType.Alias == "competition").ToList();
-                        allCompetitions.AddRange(competitionsInSeries);
-                    }
-                    else
-                    {
-                        // Could be a year folder or other container - check its children
-                        var containerChildren = _contentService.GetPagedChildren(child.Id, 0, int.MaxValue, out _);
-
-                        foreach (var containerChild in containerChildren)
-                        {
-                            if (containerChild.ContentType.Alias == "competition")
-                            {
-                                allCompetitions.Add(containerChild);
-                            }
-                            else if (containerChild.ContentType.Alias == "competitionSeries")
-                            {
-                                // Series inside year folder
-                                var nestedSeriesChildren = _contentService.GetPagedChildren(containerChild.Id, 0, int.MaxValue, out _);
-                                var nestedCompetitions = nestedSeriesChildren.Where(c => c.ContentType.Alias == "competition").ToList();
-                                allCompetitions.AddRange(nestedCompetitions);
-                            }
-                        }
-                    }
-                }
-
-                // Collect registrations from all competitions
-                var myRegistrations = new List<IContent>();
-
-                foreach (var competition in allCompetitions)
-                {
-                    var registrationsHub = GetRegistrationsHubForCompetition(competition.Id);
-                    if (registrationsHub != null)
-                    {
-                        var registrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, int.MaxValue, out _)
-                            .Where(r => r.ContentType.Alias == "competitionRegistration" &&
-                                       r.GetValue<int>("memberId") == memberIdInt)
-                            .ToList();
-
-                        myRegistrations.AddRange(registrations);
-                    }
-                }
-
-                // 3. PHASE 2 OPTIMIZATION: Batch load all competitions into dictionary
+                // 3. Tävlingarna, en gång var. En tävling i papperskorgen visas inte — den gamla
+                //    vandringen utgick från tävlingsnavet och såg därför aldrig sådana.
                 var competitionIds = myRegistrations
-                    .Select(r => r.GetValue<int>("competitionId"))
+                    .Select(r => r.CompetitionId)
                     .Where(id => id > 0)
                     .Distinct()
                     .ToList();
@@ -1866,7 +1810,7 @@ namespace HpskSite.Controllers
                     try
                     {
                         var comp = _contentService.GetById(compId);
-                        if (comp != null)
+                        if (comp != null && !comp.Trashed && comp.ContentType.Alias == "competition")
                         {
                             competitionDict[compId] = comp;
                         }
@@ -1894,7 +1838,7 @@ namespace HpskSite.Controllers
                 {
                     try
                     {
-                        var competitionId = reg.GetValue<int>("competitionId");
+                        var competitionId = reg.CompetitionId;
 
                         // Use batch-loaded competition from dictionary
                         if (!competitionDict.TryGetValue(competitionId, out var competition))
@@ -1902,9 +1846,8 @@ namespace HpskSite.Controllers
                             continue; // Skip if competition not found
                         }
 
-                        // Parse shooting classes JSON
-                        var shootingClassesJson = reg.GetValue<string>("shootingClasses") ?? "[]";
-                        var classes = ParseShootingClasses(shootingClassesJson);
+                        // Klasserna, redan tolkade av lagringen (alla former och skiftlägen).
+                        var classes = reg.ClassIds;
 
                         // Determine competition status
                         var competitionDate = competition.GetValue<DateTime?>("competitionDate") ?? DateTime.MinValue;
@@ -1937,8 +1880,7 @@ namespace HpskSite.Controllers
                             var mine = lr.Rows.Where(r => r.SourceType == HpskSite.Models.Ledger.LedgerSourceType.CompetitionRegistration
                                                           && r.SourceItemId == reg.Id).ToList();
                             var classIds = classes;
-                            var fee = RegistrationFeeCalculator.Calculate(competition, classIds,
-                                reg.HasProperty("isSubCompetition") && reg.GetValue<bool>("isSubCompetition"));
+                            var fee = RegistrationFeeCalculator.Calculate(competition, classIds, reg.IsSubCompetition);
                             var st = HpskSite.Services.CompetitionFees.FeeItemStatus.For(fee, mine, lr.Cover);
                             feeLabel = HpskSite.Services.CompetitionFees.FeeStatusKeys.Label(st.Key);
                             var toPay = mine.Where(r => r.VoidedUtc == null && r.ConfirmedUtc == null && r.ClaimedUtc == null
@@ -1974,7 +1916,7 @@ namespace HpskSite.Controllers
                             IsPayable = isPayable,
                             RegistrationFee = compFee,
                             CanUnregister = CanUnregister(competitionDate, paymentInfo.Item1),
-                            RegistrationDate = reg.CreateDate,
+                            RegistrationDate = reg.CreatedDate,
                             PaymentModel = paymentModel,
                             ReceiptId = receiptId,
                             FeeStatusLabel = feeLabel
@@ -2038,17 +1980,6 @@ namespace HpskSite.Controllers
                 .OrderByDescending(r => r.CompetitionStatus == "upcoming")
                 .ThenBy(r => r.CompetitionDate)
                 .ToList();
-        }
-
-        /// <summary>
-        /// Parse shooting classes JSON array to simple class names
-        /// </summary>
-        private List<string> ParseShootingClasses(string shootingClassesJson)
-        {
-            // Den handskrivna läsningen här missade två former: "Class" med versal (klassbytet
-            // skrev så) och varje post med ett numeriskt teamNumber — Dictionary<string,string>
-            // kastar på ett tal, och catch gav då en tom klasslista. Gå via den delade läsaren.
-            return HpskSite.Models.CompetitionRegistrationDocument.ReadClassIds(shootingClassesJson);
         }
 
         /// <summary>
@@ -2229,76 +2160,9 @@ namespace HpskSite.Controllers
             return result;
         }
 
-        /// <summary>
-        /// PHASE 1 OPTIMIZATION: Find competitions hub node
-        /// PHASE 4 OPTIMIZATION: Cached for 10 minutes to avoid repeated lookups
-        /// Returns the competitionsHub node or null if not found
-        /// </summary>
-        private IContent? GetCompetitionsHub()
-        {
-            try
-            {
-                // PHASE 4: Check cache first
-                var cacheKey = "competitions_hub_node";
-                var cached = _appCaches.RuntimeCache.GetCacheItem<IContent?>(cacheKey);
-                if (cached != null)
-                {
-                    return cached;
-                }
-
-                // Cache miss - load from database
-                var rootContent = _contentService.GetRootContent();
-                IContent? hub = null;
-
-                foreach (var root in rootContent)
-                {
-                    // Check direct children for competitions hub
-                    var children = _contentService.GetPagedChildren(root.Id, 0, 100, out _);
-                    hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
-                    if (hub != null)
-                    {
-                        break;
-                    }
-                }
-
-                // Store in cache for 10 minutes (even if null to prevent repeated failed lookups)
-                _appCaches.RuntimeCache.InsertCacheItem(cacheKey, () => hub, TimeSpan.FromMinutes(10));
-
-                return hub;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error finding competitions hub: {ex.Message}");
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// PHASE 1 OPTIMIZATION: Get registrations hub for a specific competition
-        /// Returns the competitionRegistrationsHub node or null if not found
-        /// </summary>
-        private IContent? GetRegistrationsHubForCompetition(int competitionId)
-        {
-            try
-            {
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null)
-                {
-                    return null;
-                }
-
-                // Check first 20 children for registrations hub (hub is usually near top)
-                var children = _contentService.GetPagedChildren(competition.Id, 0, 20, out _);
-                var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-
-                return hub;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error finding registrations hub for competition {competitionId}: {ex.Message}");
-                return null;
-            }
-        }
+        // GetCompetitionsHub() och GetRegistrationsHubForCompetition() BORTTAGNA 2026-10-09: Min sida
+        // läser medlemmens anmälningar via anmälningslagringen (sajtstrukturen fas 1a) i stället för
+        // att vandra genom tävlingsnavet.
 
         /// <summary>
         /// Upload a profile picture for the current member

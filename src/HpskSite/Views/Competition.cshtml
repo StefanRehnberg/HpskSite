@@ -12,6 +12,7 @@
 @inject Umbraco.Cms.Core.Services.IContentService ContentService
 @inject HpskSite.Services.CompetitionFees.CompetitionPaymentModelService PaymentModels
 @inject Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory DbFactory
+@inject HpskSite.Services.Registrations.ICompetitionRegistrationStore Registrations
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
 	Layout = "Master.cshtml";
@@ -460,41 +461,16 @@
     // Server-side sidebar data (replaces 3 slow AJAX calls with in-memory published content cache lookups)
     var competitionChildren = Model.Children()?.ToList() ?? new List<IPublishedContent>();
 
-    // 1. Registration counts — use IContentService to include saved-but-unpublished registrations
-    long _regHubTotal;
-    var competitionContentChildren = ContentService.GetPagedChildren(Model.Id, 0, 100, out _regHubTotal);
-    var regHub = competitionContentChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-    var registrationContents = new List<Umbraco.Cms.Core.Models.IContent>();
-    if (regHub != null)
-    {
-        long totalRegs;
-        registrationContents = ContentService.GetPagedChildren(regHub.Id, 0, 1000, out totalRegs)
-            .Where(c => c.ContentType.Alias == "competitionRegistration")
-            .ToList();
-    }
+    // 1. Registration counts — via anmälningslagringen (sajtstrukturen fas 1a), som läser alla
+    //    anmälningar, publicerade eller inte.
+    var registrationContents = Registrations.List(Model.Id);
     var uniqueShooterCount = registrationContents
-        .Select(r => r.GetValue<string>("memberId") ?? "")
-        .Where(id => !string.IsNullOrEmpty(id))
+        .Where(r => r.MemberId > 0)
+        .Select(r => r.MemberId)
         .Distinct()
         .Count();
-    var totalStartsCount = 0;
-    foreach (var reg in registrationContents)
-    {
-        var classesJson = reg.GetValue<string>("shootingClasses") ?? "";
-        if (!string.IsNullOrEmpty(classesJson))
-        {
-            try
-            {
-                using var doc = System.Text.Json.JsonDocument.Parse(classesJson);
-                totalStartsCount += doc.RootElement.GetArrayLength();
-            }
-            catch { totalStartsCount += 1; }
-        }
-        else
-        {
-            totalStartsCount += 1;
-        }
-    }
+    // En anmälan utan läsbar klasslista räknas som en start, som förut.
+    var totalStartsCount = registrationContents.Sum(r => r.Classes.Count > 0 ? r.Classes.Count : 1);
 
     // 2. Start list availability from published content.
     //    New architecture: precisionStartList is a DIRECT child of the competition

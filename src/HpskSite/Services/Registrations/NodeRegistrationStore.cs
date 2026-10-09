@@ -333,6 +333,7 @@ GROUP BY CASE WHEN hubType.alias = @1 OR hub.text LIKE N'%Anm%lningar%' OR hub.t
                 ClubId = ReadInt(n, "clubId"),
                 LegacyClubText = n.GetValue<string>("memberClub") ?? "",
                 RegistrationDate = n.GetValue<DateTime>("registrationDate"),
+                CreatedDate = n.CreateDate,
                 RegisteredBy = n.GetValue<string>("registeredBy") ?? "",
                 // Saknat värde = aktiv, samma regel som CompetitionRegistrationDocument.IsActive.
                 IsActive = n.GetValue("isActive") is null || n.GetValue<bool>("isActive"),

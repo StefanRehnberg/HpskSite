@@ -37,7 +37,11 @@ namespace HpskSite.Models.Registrations
         /// </summary>
         public bool ClassesFromLegacyScalar { get; set; }
 
+        /// <summary>Senast anmälan registrerades eller uppdaterades av skytten (skrivs om vid varje ny anmälan).</summary>
         public DateTime RegistrationDate { get; set; }
+
+        /// <summary>När anmälan skapades första gången. Sätts av lagringen, ändras aldrig.</summary>
+        public DateTime CreatedDate { get; set; }
         public string RegisteredBy { get; set; } = "";
         public bool IsActive { get; set; } = true;
         public bool IsSubCompetition { get; set; }
@@ -64,7 +68,7 @@ namespace HpskSite.Models.Registrations
                 Class = c.Class, StartPreference = c.StartPreference, TeamNumber = c.TeamNumber
             }).ToList(),
             ClassesFromLegacyScalar = ClassesFromLegacyScalar,
-            RegistrationDate = RegistrationDate, RegisteredBy = RegisteredBy, IsActive = IsActive,
+            RegistrationDate = RegistrationDate, CreatedDate = CreatedDate, RegisteredBy = RegisteredBy, IsActive = IsActive,
             IsSubCompetition = IsSubCompetition, IsCheckedIn = IsCheckedIn, InvoiceId = InvoiceId,
             MemberEmail = MemberEmail, Notes = Notes, ShooterNotes = ShooterNotes
         };
