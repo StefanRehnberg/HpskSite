@@ -44,6 +44,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         private readonly PrecisionFinalsStartListBuilder _finalsBuilder;
         private readonly BrokenLaneService _brokenLanes;
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         public PrecisionStartListController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -66,9 +67,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             PrecisionFinalsQualificationService finalsQualificationService,
             PrecisionQualifyingResultsService qualifyingResultsService,
             PrecisionFinalsStartListBuilder finalsBuilder,
-            BrokenLaneService brokenLanes)
+            BrokenLaneService brokenLanes,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _memberManager = memberManager;
             _memberService = memberService;
             _contentService = contentService;
@@ -2333,69 +2336,35 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                // Find the competition
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null)
-                {
-                    _logger.LogWarning("Competition {CompetitionId} not found when updating registration", competitionId);
-                    return false;
-                }
+                // Via anmälningslagringen (sajtstrukturen fas 1a). Matcha exakt klass först, sedan på
+                // vapengruppens kod (så att "A" träffar "A1"/"A2"/"A3" och "A_Opt" träffar
+                // "A_opt_1"/"A_opt_2"/"A_opt_3" — utan att korsa grupper).
+                var oldGroup = ShootingClasses.GetWeaponClassCode(oldWeaponClass);
+                bool Matches(ShootingClassEntry c) =>
+                    c.Class.Equals(oldWeaponClass, StringComparison.OrdinalIgnoreCase) ||
+                    (!string.IsNullOrEmpty(oldGroup) && ShootingClasses.GetWeaponClassCode(c.Class) == oldGroup);
 
-                // Find the registrations hub
-                var children = _contentService.GetPagedChildren(competition.Id, 0, 20, out _);
-                var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-                if (hub == null)
-                {
-                    _logger.LogWarning("Registrations hub not found for competition {CompetitionId}", competitionId);
-                    return false;
-                }
-
-                // Find the member's registration
-                var registrations = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                    .Where(c => c.ContentType.Alias == "competitionRegistration")
-                    .ToList();
-
-                var memberRegistration = registrations.FirstOrDefault(r => r.GetValue<int>("memberId") == memberId);
-                if (memberRegistration == null)
+                var registrations = _registrations.ListForMemberInCompetition(competitionId, memberId);
+                if (registrations.Count == 0)
                 {
                     _logger.LogWarning("Registration not found for member {MemberId} in competition {CompetitionId}", memberId, competitionId);
-                    return false;
+                    return await Task.FromResult(false);
                 }
 
-                // Get current shooting classes
-                var shootingClassesJson = memberRegistration.GetValue<string>("shootingClasses");
-                var shootingClasses = HpskSite.Models.CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
+                // Äldre data har en anmälan per klass — ta den som bär klassen.
+                var memberRegistration = registrations.FirstOrDefault(r => r.Classes.Any(Matches)) ?? registrations[0];
 
-                if (!shootingClasses.Any())
+                ShootingClassEntry? classEntry;
+                if (memberRegistration.ClassesFromLegacyScalar)
                 {
-                    // Try legacy format
-                    var legacyClass = memberRegistration.GetValue<string>("shootingClass");
-                    if (!string.IsNullOrWhiteSpace(legacyClass))
-                    {
-                        // Update legacy format directly
-                        if (legacyClass.Equals(oldWeaponClass, StringComparison.OrdinalIgnoreCase))
-                        {
-                            memberRegistration.SetValue("shootingClass", newWeaponClass);
-                            var legacyResult = _contentService.Save(memberRegistration);
-                            if (legacyResult.Success)
-                            {
-                                _contentService.Publish(memberRegistration, new[] { "*" }, -1);
-                                _logger.LogInformation("Updated legacy registration weapon class for member {MemberId}: {OldClass} -> {NewClass}",
-                                    memberId, oldWeaponClass, newWeaponClass);
-                                return true;
-                            }
-                        }
-                    }
-                    return false;
+                    // Den äldre enkla formen uppdateras bara vid exakt träff, som förut.
+                    classEntry = memberRegistration.Classes.FirstOrDefault(c =>
+                        c.Class.Equals(oldWeaponClass, StringComparison.OrdinalIgnoreCase));
                 }
-
-                // Find and update the specific class entry.
-                // Match by exact class first, then by weapon group code (so "A" matches "A1"/"A2"/"A3"
-                // and "A_Opt" matches "A_opt_1"/"A_opt_2"/"A_opt_3" — without crossing groups).
-                var oldGroup = ShootingClasses.GetWeaponClassCode(oldWeaponClass);
-                var classEntry = shootingClasses.FirstOrDefault(c =>
-                    c.Class.Equals(oldWeaponClass, StringComparison.OrdinalIgnoreCase) ||
-                    (!string.IsNullOrEmpty(oldGroup) && ShootingClasses.GetWeaponClassCode(c.Class) == oldGroup));
+                else
+                {
+                    classEntry = memberRegistration.Classes.FirstOrDefault(Matches);
+                }
 
                 if (classEntry == null)
                 {
@@ -2403,24 +2372,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return false;
                 }
 
-                // Update the class
                 classEntry.Class = newWeaponClass;
-
-                // Serialize and save
-                var updatedJson = HpskSite.Models.CompetitionRegistrationDocument.SerializeShootingClasses(shootingClasses);
-                memberRegistration.SetValue("shootingClasses", updatedJson);
-
-                var saveResult = _contentService.Save(memberRegistration);
-                if (saveResult.Success)
-                {
-                    _contentService.Publish(memberRegistration, new[] { "*" }, -1);
-                    _logger.LogInformation("Updated registration weapon class for member {MemberId}: {OldClass} -> {NewClass}",
-                        memberId, oldWeaponClass, newWeaponClass);
-                    return true;
-                }
-
-                _logger.LogError("Failed to save registration update for member {MemberId}", memberId);
-                return false;
+                _registrations.Save(memberRegistration);
+                _logger.LogInformation("Updated registration weapon class for member {MemberId}: {OldClass} -> {NewClass}",
+                    memberId, oldWeaponClass, newWeaponClass);
+                return true;
             }
             catch (Exception ex)
             {
@@ -4046,18 +4002,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
         private StartListConfiguration BuildDirektplaceringStartListData(IContent competition, DirektplaceringConfig dpConfig)
         {
-            // Get all registrations
-            var competitionChildren = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
-            var registrationsHub = competitionChildren.FirstOrDefault(c =>
-                c.ContentType.Alias == "competitionRegistrationsHub" ||
-                c.Name.Contains("Anmälningar") ||
-                c.Name.Contains("Registration"));
-
-            var registrationDocs = registrationsHub != null
-                ? _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out _)
-                    .Where(c => c.ContentType.Alias == "competitionRegistration")
-                    .ToList()
-                : new List<IContent>();
+            // Alla anmälningar via anmälningslagringen (sajtstrukturen fas 1a).
+            var registrationDocs = _registrations.List(competition.Id).ToList();
 
             // Build shooters per team from registration data
             var shootersByTeam = new Dictionary<int, List<StartListShooter>>();
@@ -4066,21 +4012,20 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
             // Preserve the order shooters registered (first-come within a team) instead of
             // sorting by name, which would re-shuffle existing positions on every regeneration.
-            registrationDocs = registrationDocs.OrderBy(c => c.CreateDate).ThenBy(c => c.Id).ToList();
+            registrationDocs = registrationDocs.OrderBy(c => c.CreatedDate).ThenBy(c => c.Id).ToList();
             var sortSeq = 0;
 
             foreach (var reg in registrationDocs)
             {
-                var classesJson = reg.GetValue<string>("shootingClasses");
-                if (string.IsNullOrWhiteSpace(classesJson)) continue;
+                var classes = reg.Classes;
+                if (classes.Count == 0) continue;
 
-                var classes = CompetitionRegistrationDocument.DeserializeShootingClasses(classesJson);
-                var memberName = reg.GetValue<string>("memberName") ?? "Okänd";
-                var memberId = reg.GetValue<int>("memberId");
+                var memberName = string.IsNullOrWhiteSpace(reg.MemberName) ? "Okänd" : reg.MemberName;
+                var memberId = reg.MemberId;
 
                 // Get club name
                 var clubName = "Okänd förening";
-                var clubId = reg.GetValue<int>("clubId");
+                var clubId = reg.ClubId;
                 if (clubId > 0)
                 {
                     clubName = _clubService.GetClubNameById(clubId) ?? "Okänd förening";
