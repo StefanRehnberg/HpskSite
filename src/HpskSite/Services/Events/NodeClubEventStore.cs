@@ -4,6 +4,7 @@ using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Web;
+using Umbraco.Cms.Infrastructure.Scoping;
 using Umbraco.Extensions;
 
 namespace HpskSite.Services.Events
@@ -25,15 +26,18 @@ namespace HpskSite.Services.Events
         private readonly IContentService _contentService;
         private readonly IContentTypeService _contentTypeService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
+        private readonly IScopeProvider _scopeProvider;
         private readonly ILogger<NodeClubEventStore> _logger;
         private ClubEventFieldSupport? _support;
 
         public NodeClubEventStore(IContentService contentService, IContentTypeService contentTypeService,
-            IUmbracoContextAccessor umbracoContextAccessor, ILogger<NodeClubEventStore> logger)
+            IUmbracoContextAccessor umbracoContextAccessor, ILogger<NodeClubEventStore> logger,
+            IScopeProvider scopeProvider)
         {
             _contentService = contentService;
             _contentTypeService = contentTypeService;
             _umbracoContextAccessor = umbracoContextAccessor;
+            _scopeProvider = scopeProvider;
             _logger = logger;
         }
 
@@ -118,6 +122,42 @@ namespace HpskSite.Services.Events
                 }
             }
             return result;
+        }
+
+        public IReadOnlyList<ClubEventRecord> ListAllForOwnerType(string ownerType)
+        {
+            var ownerAlias = ownerType == ClubEventRecord.OwnerRegion ? ClubEvents.OwnerRegionAlias : ClubEvents.OwnerClubAlias;
+            List<(int Id, int ParentId)> ids;
+            try
+            {
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                ids = scope.Database.Fetch<IdParent>(@"
+SELECT n.id AS Id, n.parentId AS ParentId
+FROM umbracoNode n
+JOIN umbracoContent c ON c.nodeId = n.id
+JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId AND ct.alias = @0
+JOIN umbracoNode pn ON pn.id = n.parentId
+JOIN umbracoContent pc ON pc.nodeId = pn.id
+JOIN cmsContentType pct ON pct.nodeId = pc.contentTypeId AND pct.alias = @1
+WHERE n.trashed = 0", ClubEvents.EventAlias, ownerAlias).Select(r => (r.Id, r.ParentId)).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Händelserna för ägartypen {OwnerType} kunde inte läsas", ownerType);
+                return Array.Empty<ClubEventRecord>();
+            }
+            if (ids.Count == 0) return Array.Empty<ClubEventRecord>();
+            var parentOf = ids.ToDictionary(x => x.Id, x => x.ParentId);
+            return _contentService.GetByIds(ids.Select(x => x.Id))
+                .Where(n => !n.Trashed && n.ContentType.Alias == ClubEvents.EventAlias)
+                .Select(n => Map(n, ownerType, parentOf[n.Id]))
+                .ToList();
+        }
+
+        private sealed class IdParent
+        {
+            public int Id { get; set; }
+            public int ParentId { get; set; }
         }
 
         // ── Skrivning ──────────────────────────────────────────────────────────────────────
