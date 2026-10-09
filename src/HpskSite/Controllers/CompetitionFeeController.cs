@@ -228,7 +228,7 @@ namespace HpskSite.Controllers
                     clubId = r.ClubId,
                     clubName = r.ClubId > 0 ? _clubService.GetClubNameById(r.ClubId) : "",
                     status = StatusJson(status),
-                    clubPays = _fees.GetClubPaysChoice(r.Id),
+                    clubPays = _fees.GetClubPaysChoice(competitionId, r.Id),
                     canChooseClubPays = CompetitionFeePlanner.AnyClubPayable(r.Classes, settings.ClubPayable),
                     // Det skytten själv ska betala. Klubbens del väntar på arrangörens faktura.
                     toPay = open.Where(x => x.FeePart != CompetitionFeePart.Club).Select(RowJson),
