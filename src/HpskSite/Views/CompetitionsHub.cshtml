@@ -9,6 +9,7 @@
 @inject IMemberManager _memberManager
 @inject IMemberService _memberService
 @inject HpskSite.Services.MemberClubService _memberClubService
+@inject HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations
 @{
     Layout = "Master.cshtml";
 
@@ -157,14 +158,14 @@
 
     // Batch registration check — load all user registrations into a HashSet for O(1) lookups.
     // currentMember is resolved further up, because the competition list itself depends on it.
+    // Via anmälningslagringen (sajtstrukturen fas 1a): EN fråga, och alla anmälningar — den
+    // publicerade cachen såg bara de anmälningar som råkat publiceras.
     var userRegisteredCompetitionIds = new HashSet<int>();
-    if (currentMember != null)
+    if (currentMember != null && int.TryParse(currentMember.Id, out var currentMemberIntId))
     {
-        userRegisteredCompetitionIds = allContent
-            .Where(x => x.ContentType.Alias == "competitionRegistration"
-                && x.Value<string>("memberId") == currentMember.Id.ToString()
-                && x.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true))
-            .Select(x => x.Value<int>("competitionId"))
+        userRegisteredCompetitionIds = _registrations.ListForMember(currentMemberIntId)
+            .Where(r => r.IsActive)
+            .Select(r => r.CompetitionId)
             .ToHashSet();
     }
 
