@@ -178,6 +178,9 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Events.NodeClubEventStore>();
             builder.Services.AddScoped<HpskSite.Services.Events.SqlClubEventStore>();
             builder.Services.AddScoped<HpskSite.Services.Events.SwitchingClubEventStore>();
+            builder.Services.AddScoped<HpskSite.Services.Events.ClubEventMigrationService>();
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
+                HpskSite.Services.Events.ClubEventNodeGuard>();
             builder.Services.AddScoped<HpskSite.Services.Events.IClubEventStore>(
                 sp => sp.GetRequiredService<HpskSite.Services.Events.SwitchingClubEventStore>());
             // Enda vägen in till tävlingsanmälningarna (sajtstrukturen fas 1a). Nodimplementationen
