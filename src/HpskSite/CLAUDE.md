@@ -1319,7 +1319,8 @@ under an unpublished hub — so the published cache only ever holds a subset (pr
 ⚠️⚠️ **On the `sajtstruktur` branch (fas 1a) every read and write goes through
 `ICompetitionRegistrationStore`** (`Services/Registrations/`), and registrations are **never published**
 any more — the deferred publish and the five Save+Publish endpoints are gone. Never read a
-`competitionRegistration` node, its hub or the published cache directly; that is the seam the SQL
+`competitionRegistration` node, its hub or the published cache directly (see the section
+*Sajtstrukturen* near the end of this file); that is the seam the SQL
 tables replace in fas 1b (`notes/sajtstruktur-plan-2026-10-09.md`).
 The rows are cached 60 s under `admin_competitions_list_regcounts` — deliberately under the
 `admin_competitions_list_` prefix that `InvalidateCompetitionCaches()` already clears, so there are no
@@ -10958,6 +10959,64 @@ radens meny går att klicka på). Regression: row-action-menus 60/60, region-ser
 complist-shared-renderer 23/23, staffing-grid 41/41, grid-fixes 19/19, personpanel 16/16*,
 behorighet 13/13*, epost 10/10, consolidated-invoice 42/42, organiser-consolidation 31/31,
 region-receivable 19/19. (*uppdaterade till menyn — samma dialog, ny väg in.)
+
+## ⚠️⚠️ Sajtstrukturen — anmälningar och händelser i egna tabeller (branch `sajtstruktur`, 2026-10-09)
+
+Plan: `notes/sajtstruktur-plan-2026-10-09.md`. **Byggt på branchen, INTE deployat.** Umbracos globala
+skrivlås (-333) tål inte 50 000–75 000 nya noder om året, så det användarna skapar i mängd flyttas
+ur innehållsträdet. Umbraco behåller redaktionellt innehåll (klubbar, kretsar, sidor, tävlingarna
+tills fas 4).
+
+### Sömmen — läs och skriv ALDRIG noderna direkt
+
+| Typ | Interface | Implementationer | Växel |
+|---|---|---|---|
+| Anmälningar | `ICompetitionRegistrationStore` (`Services/Registrations/`) | `NodeRegistrationStore`, `SqlRegistrationStore` | `Registrations:Store`, `Registrations:WriteFreeze` |
+| Händelser | `IClubEventStore` (`Services/Events/`) | `NodeClubEventStore`, `SqlClubEventStore` | `Events:Store`, `Events:WriteFreeze` |
+
+- **Växeln är en databasrad** (`SiteSetting`, `SiteSettingService`, cachad 60 s) — ingen omstart.
+  `Switching*Store` väljer per anrop. `node` är standard.
+- **Ny kod läser aldrig en `competitionRegistration`-, `competitionTeamRegistration`- eller
+  `clubSimpleEvent`-nod**, varken via content service, publicerad cache eller SQL mot
+  `umbracoPropertyData`. Gå genom storen.
+- En anmälan identifieras av **(tävling, id)** — `Get(competitionId, id)`. Anmälningar publiceras
+  aldrig på branchen (den uppskjutna publiceringen och Save+Publish-endpointsen är borta).
+- Lagspeglar (`competitionTeamRegistration`) skapas inte längre; `CompetitionTeam` är källan och
+  `CompetitionTeam.LegacyRegistrationDocId` bär spegelns gamla id för gamla lagfakturor.
+- `CompetitionFeeChoice` har nyckeln (CompetitionId, RegistrationId).
+- Händelsens ägare: `EventOwnerResolver` — läs aldrig `ParentId`/`.Parent`.
+
+### Flytten — bevarade id:n, ett underhållsfönster
+
+`RegistrationMigrationService` / `ClubEventMigrationService` med varsin controller (bara
+sajtadmin): **Preview → Freeze → Run → Verify → Switch → avfrys → Unpublish** (i portioner).
+- `IDENTITY_INSERT` med nodens id, idempotent, `RESEED` efteråt. Gamla referenser (liggaren,
+  fakturor, QR-affischer, `ClubEventParticipant`) pekar därför rätt utan omskrivning.
+- `Switch("table")` vägras utan frysning och utan ren jämförelse; `Switch("node")` går alltid.
+  Noderna ligger orörda tills avpubliceringen — återställning = växla tillbaka.
+- `RegistrationNodeGuard` / `ClubEventNodeGuard` vägrar NYA noder av typen när tabellen gäller.
+- **⚠️ Dev-databasen delas med `main`:** lämna aldrig dev på `table`. Sviterna
+  `hpsk-verify/registration-migration-verify.mjs` och `club-event-migration-verify.mjs` kör hela
+  fönstret; `--restore` växlar tillbaka och tömmer tabellerna.
+
+### Händelsernas adress: `/{klubb eller krets}/{år}/{slug}/`
+
+- `ClubEvent.UrlYear` (startdatumets år, annars skapandeåret) + `Slug`; unikt per (ägare, år, slug),
+  krock → `-2`. `ClubEventUrl` är adresshistoriken: ny aktuell adress bara när år eller grundslug
+  ändras; äldre adresser och den gamla trädadressen (`UrlYear NULL`) 301:as.
+- `Routing/ClubEventUrlContentFinder` (först i kedjan, bara i tabelläget) visar ägarnoden med en mall
+  som bara finns i minnet (`new Template(_, "ClubSimpleEvent", "ClubSimpleEvent")`) och lägger
+  händelsen i `HttpContext.Items[ClubEventRoute.ItemKey]`; `ClubSimpleEvent.cshtml` läser den därifrån.
+- Innehållsblock och snabblänkar ligger i **`LandingPage`** ("Sida"), skapas vid första blocket och
+  tas bort med händelsen. Befintliga block-/snabblänksredigeraren skriver dit via storen.
+
+### Operatörssteg vid deployen (i ordning, FÖRE deployen)
+
+1. `Migrations/create-competition-registration-tables.sql`
+2. `Migrations/create-club-event-tables.sql`
+
+Båda har filtrerade index → `QUOTED_IDENTIFIER ON` i varje sqlcmd-skript som skriver i tabellerna.
+Efter deployen: underhållsfönstret för anmälningar, sedan för händelser. Körda i dev, **EJ i prod**.
 
 ## Common Patterns
 
