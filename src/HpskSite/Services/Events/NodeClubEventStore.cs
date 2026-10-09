@@ -150,7 +150,15 @@ WHERE n.trashed = 0", ClubEvents.EventAlias, ownerAlias).Select(r => (r.Id, r.Pa
             var parentOf = ids.ToDictionary(x => x.Id, x => x.ParentId);
             return _contentService.GetByIds(ids.Select(x => x.Id))
                 .Where(n => !n.Trashed && n.ContentType.Alias == ClubEvents.EventAlias)
-                .Select(n => Map(n, ownerType, parentOf[n.Id]))
+                .Select(n =>
+                {
+                    // Trädadressen behövs av flytten: den blir den gamla adressen som 301:as.
+                    var r = Map(n, ownerType, parentOf[n.Id]);
+                    var p = PublishedNode(n.Id);
+                    r.Url = p?.Url() ?? "";
+                    r.ImageUrl = ImageUrlOf(p);
+                    return r;
+                })
                 .ToList();
         }
 
