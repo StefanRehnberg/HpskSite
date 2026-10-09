@@ -30,11 +30,14 @@ namespace HpskSite.Services.Kretsgranskning
         private readonly EmailService _email;
         private readonly IConfiguration _config;
         private readonly ILogger<CourseReviewAccess> _logger;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
         public CourseReviewAccess(CourseReviewService reviews, CompetitionApplicationService apps, KretsUppdragService uppdrag,
             KretsLinkTokenService tokens, KretsCalendarService calendar, AdminAuthorizationService auth, IContentService content,
-            EmailService email, IConfiguration config, ClubService clubs, ILogger<CourseReviewAccess> logger)
+            EmailService email, IConfiguration config, ClubService clubs, ILogger<CourseReviewAccess> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
+            _registrations = registrations;
             _reviews = reviews;
             _apps = apps;
             _uppdrag = uppdrag;
@@ -88,18 +91,13 @@ namespace HpskSite.Services.Kretsgranskning
             return (await AuthorityAsync(r.RegionId, memberId)).Allowed;
         }
 
-        /// <summary>Är medlemmen anmäld som skytt i tävlingen? (anmälningarna är opublicerade noder)</summary>
+        /// <summary>Är medlemmen anmäld som skytt i tävlingen? (via anmälningslagringen, fas 1a)</summary>
         public bool IsRegistered(int competitionId, int memberId)
         {
             if (memberId <= 0) return false;
             try
             {
-                var hub = _content.GetPagedChildren(competitionId, 0, 100, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-                if (hub == null) return false;
-                return _content.GetPagedChildren(hub.Id, 0, 5000, out _)
-                    .Where(r => r.ContentType.Alias == "competitionRegistration")
-                    .Any(r => r.GetValue<int>("memberId") == memberId);
+                return _registrations.FindForMember(competitionId, memberId) != null;
             }
             catch (Exception ex)
             {

@@ -13,10 +13,13 @@ namespace HpskSite.Services.Staffing
     public class MaterielEstimateService
     {
         private readonly IContentService _contentService;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
-        public MaterielEstimateService(IContentService contentService)
+        public MaterielEstimateService(IContentService contentService,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
             _contentService = contentService;
+            _registrations = registrations;
         }
 
         private static readonly string[] PrecisionFamily =
@@ -30,27 +33,17 @@ namespace HpskSite.Services.Staffing
             var discipline = comp.GetValue<string>("competitionType") ?? "";
             var series = comp.GetValue<int>("numberOfSeriesOrStations");
 
-            // Registrations (unpublished nodes) live under the competitionRegistrationsHub child.
+            // Anmälningarna via lagringen (sajtstrukturen fas 1a).
             int participants = 0, starts = 0;
             var classes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                var children = _contentService.GetPagedChildren(competitionId, 0, 200, out _).ToList();
-                var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-                if (hub != null)
+                foreach (var reg in _registrations.List(competitionId))
                 {
-                    var regs = _contentService.GetPagedChildren(hub.Id, 0, 5000, out _)
-                        .Where(c => c.ContentType.Alias == "competitionRegistration").ToList();
-                    foreach (var reg in regs)
-                    {
-                        var json = reg.GetValue<string>("shootingClasses");
-                        if (string.IsNullOrWhiteSpace(json)) continue;
-                        var entries = CompetitionRegistrationDocument.DeserializeShootingClasses(json);
-                        if (entries.Count == 0) continue;
-                        participants++;
-                        starts += entries.Count;
-                        foreach (var e in entries) if (!string.IsNullOrWhiteSpace(e.Class)) classes.Add(e.Class);
-                    }
+                    if (reg.Classes.Count == 0) continue;
+                    participants++;
+                    starts += reg.Classes.Count;
+                    foreach (var e in reg.Classes) if (!string.IsNullOrWhiteSpace(e.Class)) classes.Add(e.Class);
                 }
             }
             catch { /* counts stay 0 → estimate still renders with formulas */ }

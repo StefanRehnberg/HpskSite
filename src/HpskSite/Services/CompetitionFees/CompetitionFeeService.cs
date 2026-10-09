@@ -38,6 +38,7 @@ namespace HpskSite.Services.CompetitionFees
         private readonly CompetitionPaymentModelService _models;
         private readonly MemberClubService _memberClubs;
         private readonly ILogger<CompetitionFeeService> _logger;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
         public CompetitionFeeService(
             IUmbracoDatabaseFactory databaseFactory,
@@ -48,8 +49,10 @@ namespace HpskSite.Services.CompetitionFees
             LedgerIssuerResolver issuers,
             CompetitionPaymentModelService models,
             MemberClubService memberClubs,
-            ILogger<CompetitionFeeService> logger)
+            ILogger<CompetitionFeeService> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
+            _registrations = registrations;
             _memberClubs = memberClubs;
             _databaseFactory = databaseFactory;
             _contentService = contentService;
@@ -135,16 +138,13 @@ namespace HpskSite.Services.CompetitionFees
         }
 
         /// <summary>
-        /// Anmälan ur INNEHÅLLSTJÄNSTEN, inte den publicerade cachen.
-        /// <para>⚠️ Anmälan publiceras i bakgrunden tio sekunder efter att den sparats, och avgiften
-        /// ska finnas från första sekunden. Samma skäl som resten av anmälningslistorna läser
-        /// utkastträdet (se <c>competition-registrations-unpublished</c>).</para>
+        /// En anmälan via anmälningslagringen (sajtstrukturen fas 1a), som läser alla anmälningar —
+        /// publicerade eller inte. Avgiften ska finnas från första sekunden.
         /// </summary>
         public RegistrationInfo? LoadRegistration(int registrationId)
         {
-            var reg = _contentService.GetById(registrationId);
-            if (reg == null || reg.Trashed || reg.ContentType.Alias != "competitionRegistration") return null;
-            return WithPrimaryClubFallback(new List<RegistrationInfo> { ToInfo(reg) })[0];
+            var reg = _registrations.GetById(registrationId);
+            return reg == null ? null : WithPrimaryClubFallback(new List<RegistrationInfo> { ToInfo(reg) })[0];
         }
 
         /// <summary>
@@ -171,63 +171,23 @@ namespace HpskSite.Services.CompetitionFees
                 .ToList();
         }
 
-        private static RegistrationInfo ToInfo(IContent reg)
+        private static RegistrationInfo ToInfo(HpskSite.Models.Registrations.RegistrationRecord reg) => new()
         {
-            var classes = new List<string>();
-            try
-            {
-                classes = CompetitionRegistrationDocument
-                    .DeserializeShootingClasses(reg.GetValue<string>("shootingClasses") ?? "")
-                    .Select(e => e.Class)
-                    .Where(c => !string.IsNullOrWhiteSpace(c))
-                    .ToList();
-            }
-            catch
-            {
-                // En oläsbar klasslista ger ingen avgift — och det syns som "Ingen avgift" på raden.
-            }
+            Id = reg.Id,
+            CompetitionId = reg.CompetitionId,
+            MemberId = reg.MemberId,
+            MemberName = reg.MemberName,
+            // ⚠️ ClubId är ANMÄLANS klubb, inte medlemmens primärklubb — se PayerClubId.
+            ClubId = reg.ClubId,
+            // En klasslista som inte gick att läsa är tom och ger ingen avgift — det syns som
+            // "Ingen avgift" på raden.
+            Classes = reg.ClassIds,
+            IsSubCompetition = reg.IsSubCompetition
+        };
 
-            return new RegistrationInfo
-            {
-                Id = reg.Id,
-                CompetitionId = ReadInt(reg, "competitionId"),
-                MemberId = ReadInt(reg, "memberId"),
-                MemberName = reg.GetValue<string>("memberName") ?? reg.Name ?? "",
-                // ⚠️ clubId är ANMÄLANS klubb, inte medlemmens primärklubb — se PayerClubId.
-                ClubId = ReadInt(reg, "clubId"),
-                Classes = classes,
-                IsSubCompetition = reg.HasProperty("isSubCompetition") && reg.GetValue<bool>("isSubCompetition")
-            };
-        }
-
-        /// <summary>
-        /// Alla anmälningar på tävlingen. <b>⚠️ Utkastträdet</b> — se <see cref="LoadRegistration"/>.
-        /// </summary>
+        /// <summary>Alla anmälningar på tävlingen, via anmälningslagringen.</summary>
         public List<RegistrationInfo> LoadRegistrations(int competitionId)
-        {
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null) return new List<RegistrationInfo>();
-
-            var hubs = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                .Where(c => c.ContentType.Alias == "competitionRegistrationsHub")
-                .ToList();
-
-            var list = new List<RegistrationInfo>();
-            foreach (var hub in hubs)
-            {
-                long page = 0;
-                while (true)
-                {
-                    var children = _contentService.GetPagedChildren(hub.Id, page, 500, out var total).ToList();
-                    list.AddRange(children
-                        .Where(c => c.ContentType.Alias == "competitionRegistration" && !c.Trashed)
-                        .Select(ToInfo));
-                    if ((page + 1) * 500 >= total || children.Count == 0) break;
-                    page++;
-                }
-            }
-            return WithPrimaryClubFallback(list);
-        }
+            => WithPrimaryClubFallback(_registrations.List(competitionId).Select(ToInfo).ToList());
 
         public List<TeamInfo> LoadTeams(int competitionId)
         {
