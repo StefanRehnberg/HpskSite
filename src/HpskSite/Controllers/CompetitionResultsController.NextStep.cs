@@ -55,18 +55,9 @@ namespace HpskSite.Controllers
             int qual = PrecisionFamilyResultReader.QualifyingSeriesCount(numSeries, finalSeries);
 
             // ── Anmälningar ────────────────────────────────────────────────────────────
-            // ⚠️ Anmälningsnoderna är OPUBLICERADE (Save, aldrig Publish) — räknas i SQL.
-            int registrations;
-            using (var db = _umbracoDatabaseFactory.CreateDatabase())
-            {
-                registrations = db.ExecuteScalar<int>(@"
-                    SELECT COUNT(*) FROM umbracoNode reg
-                    JOIN umbracoContent c ON c.nodeId = reg.id
-                    JOIN umbracoNode hub ON hub.id = reg.parentId
-                    WHERE hub.parentId = @0 AND reg.trashed = 0
-                      AND c.contentTypeId IN (SELECT nodeId FROM cmsContentType WHERE alias = 'competitionRegistration')",
-                    competitionId);
-            }
+            // Antalet via anmälningslagringen (sajtstrukturen fas 1a), som räknar alla anmälningar.
+            int registrations = _registrations.CountByCompetition(new[] { competitionId })
+                .GetValueOrDefault(competitionId);
             DateTime? closes = null;
             try
             {

@@ -31,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly Microsoft.Extensions.Logging.ILogger<CompetitionEditController> _logger;
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         public CompetitionEditController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -41,9 +42,11 @@ namespace HpskSite.Controllers
             IContentService contentService,
             IPublishedContentQuery publishedContentQuery,
             HpskSite.Services.AdminAuthorizationService authorizationService,
-            Microsoft.Extensions.Logging.ILogger<CompetitionEditController> logger)
+            Microsoft.Extensions.Logging.ILogger<CompetitionEditController> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _contentService = contentService;
             _publishedContentQuery = publishedContentQuery;
             _authorizationService = authorizationService;
@@ -888,17 +891,10 @@ namespace HpskSite.Controllers
 
             using var db = _databaseFactory.CreateDatabase();
 
-            // ⚠ Anmalningar ar Umbraco-NODER som sparas OPUBLICERADE, sa den
-            // publicerade cachen ser dem inte — de maste raknas i SQL. Samma sak som
-            // gjorde att kolumnen "Anmalningar" visade 0 pa varje rad fore 2026-08-18.
-            // De ligger under en registrationsHub som i sin tur ligger under tavlingen.
-            state.RegistrationCount = db.ExecuteScalar<int>(@"
-                SELECT COUNT(*)
-                FROM umbracoNode reg
-                JOIN umbracoContent c ON c.nodeId = reg.id
-                JOIN umbracoNode hub ON hub.id = reg.parentId
-                WHERE c.contentTypeId IN (SELECT nodeId FROM cmsContentType WHERE alias = 'competitionRegistration')
-                  AND (reg.parentId = @0 OR hub.parentId = @0)", competitionId);
+            // Antalet via anmälningslagringen (sajtstrukturen fas 1a), som räknar alla anmälningar,
+            // publicerade eller inte.
+            state.RegistrationCount = _registrations.CountByCompetition(new[] { competitionId })
+                .GetValueOrDefault(competitionId);
 
             // ⚠ Rakna i ALLA disciplintabeller, inte bara den nuvarande grenens. En
             // tavling som redan bytt gren en gang, eller som skapades som fel gren och

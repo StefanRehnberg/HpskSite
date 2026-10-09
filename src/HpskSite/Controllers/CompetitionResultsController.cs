@@ -61,6 +61,7 @@ namespace HpskSite.Controllers
         private readonly ParticipantStatusService _participantStatusService;
         private readonly StandardMedalMaterializationService _medalMaterialization;
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -82,9 +83,11 @@ namespace HpskSite.Controllers
             ReplyContactResolver replyContacts,
             ShootOffService shootOffService,
             ParticipantStatusService participantStatusService,
-            StandardMedalMaterializationService medalMaterialization)
+            StandardMedalMaterializationService medalMaterialization,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _contentService = contentService;
             _memberService = memberService;
             _contentTypeService = contentTypeService;

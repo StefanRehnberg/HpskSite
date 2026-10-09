@@ -52,6 +52,7 @@ namespace HpskSite.Controllers
         private const string RegistrationCountsCacheKey = "admin_competitions_list_regcounts";
         private static readonly TimeSpan RegistrationCountsCacheDuration = TimeSpan.FromSeconds(60);
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         public CompetitionAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -65,9 +66,11 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             IMediaService mediaService,
             MediaFileManager mediaFileManager,
-            SeriesCalculationService seriesCalculationService)
+            SeriesCalculationService seriesCalculationService,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _contentService = contentService;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -636,32 +639,16 @@ namespace HpskSite.Controllers
                 var regCountByCompetition = new Dictionary<int, int>();
                 try
                 {
-                    var regRows = _appCaches.RuntimeCache.GetCacheItem(
+                    // Antalet per tävling via anmälningslagringen (sajtstrukturen fas 1a).
+                    var allCounts = _appCaches.RuntimeCache.GetCacheItem(
                         RegistrationCountsCacheKey,
-                        () =>
-                        {
-                            using var db = _databaseFactory.CreateDatabase();
-                            return db.Fetch<RegistrationParentCountRow>(@"
-                                SELECT reg.parentId AS ParentId, hub.parentId AS GrandParentId, COUNT(*) AS Cnt
-                                FROM umbracoNode reg
-                                JOIN umbracoContent c ON c.nodeId = reg.id
-                                JOIN umbracoNode hub ON hub.id = reg.parentId
-                                WHERE c.contentTypeId IN (SELECT nodeId FROM cmsContentType WHERE alias = 'competitionRegistration')
-                                GROUP BY reg.parentId, hub.parentId");
-                        },
-                        RegistrationCountsCacheDuration) as List<RegistrationParentCountRow>;
+                        () => new Dictionary<int, int>(_registrations.CountByCompetition()),
+                        RegistrationCountsCacheDuration) as Dictionary<int, int>;
 
-                    if (regRows != null)
+                    if (allCounts != null)
                     {
-                        var competitionIdSet = filteredCompetitions.Select(c => c.Id).ToHashSet();
-                        foreach (var r in regRows)
-                        {
-                            var owner = competitionIdSet.Contains(r.ParentId)
-                                ? r.ParentId
-                                : (competitionIdSet.Contains(r.GrandParentId) ? r.GrandParentId : 0);
-                            if (owner == 0) continue;
-                            regCountByCompetition[owner] = regCountByCompetition.GetValueOrDefault(owner) + r.Cnt;
-                        }
+                        foreach (var c in filteredCompetitions)
+                            if (allCounts.TryGetValue(c.Id, out var cnt)) regCountByCompetition[c.Id] = cnt;
                     }
                 }
                 catch
@@ -2613,18 +2600,9 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var rootContent = _contentService.GetRootContent();
-                var count = 0;
-
-                foreach (var root in rootContent)
-                {
-                    count += GetAllDescendants(root)
-                        .Where(c => c.ContentType.Alias == "competitionRegistration")
-                        .AsEnumerable()
-                        .Count(c => c.GetValue<int>("competitionId") == competitionId);
-                }
-
-                return count;
+                // Via anmälningslagringen (sajtstrukturen fas 1a) — förut en vandring genom hela
+                // innehållsträdet för att räkna en tävlings anmälningar.
+                return _registrations.CountByCompetition(new[] { competitionId }).GetValueOrDefault(competitionId);
             }
             catch
             {
@@ -3494,103 +3472,10 @@ namespace HpskSite.Controllers
             return "Active";
         }
 
-        /// <summary>
-        /// Migrate legacy memberClub (string) data to new clubId (numeric) property - BATCHED VERSION
-        /// Usage:
-        /// - Preview: /umbraco/surface/CompetitionAdmin/MigrateRegistrationClubIds
-        /// - Migrate: /umbraco/surface/CompetitionAdmin/MigrateRegistrationClubIds?confirm=true&batchSize=50
-        /// Run multiple times until complete
-        /// </summary>
-        [HttpGet]
-        public IActionResult MigrateRegistrationClubIds(bool confirm = false, int batchSize = 50)
-        {
-            try
-            {
-                // Get all competitionRegistration nodes
-                var allContent = _contentService.GetRootContent().SelectMany(GetAllDescendants);
-                var allRegistrations = allContent
-                    .Where(c => c.ContentType.Alias == "competitionRegistration")
-                    .ToList();
-
-                // Find registrations that need migration
-                var needMigration = allRegistrations
-                    .Where(reg =>
-                    {
-                        var existingClubId = reg.GetValue<int>("clubId");
-                        var memberClub = reg.GetValue<string>("memberClub");
-                        return existingClubId == 0 && !string.IsNullOrEmpty(memberClub) && int.TryParse(memberClub, out _);
-                    })
-                    .ToList();
-
-                var alreadyMigrated = allRegistrations.Count - needMigration.Count;
-
-                if (!confirm)
-                {
-                    // Preview mode - just show status
-                    return Json(new
-                    {
-                        success = true,
-                        preview = true,
-                        totalRegistrations = allRegistrations.Count,
-                        alreadyMigrated = alreadyMigrated,
-                        needMigration = needMigration.Count,
-                        message = $"Status: {alreadyMigrated} already migrated, {needMigration.Count} remaining. Add ?confirm=true&batchSize=50 to migrate next batch."
-                    });
-                }
-
-                // Process in batches to avoid timeout
-                var batch = needMigration.Take(batchSize).ToList();
-
-                int migratedCount = 0;
-                var errors = new List<string>();
-
-                foreach (var reg in batch)
-                {
-                    try
-                    {
-                        var memberClub = reg.GetValue<string>("memberClub");
-                        if (!string.IsNullOrEmpty(memberClub) && int.TryParse(memberClub, out var clubId))
-                        {
-                            reg.SetValue("clubId", clubId);
-                            var result = _contentService.Save(reg);
-                            if (result.Success)
-                            {
-                                migratedCount++;
-                            }
-                            else
-                            {
-                                errors.Add($"Failed to save registration {reg.Id}: {string.Join(", ", result.EventMessages)}");
-                            }
-                        }
-                    }
-                    catch (Exception regEx)
-                    {
-                        errors.Add($"Error processing registration {reg.Id}: {regEx.Message}");
-                    }
-                }
-
-                var remaining = needMigration.Count - batch.Count;
-
-                return Json(new
-                {
-                    success = true,
-                    batchMigrated = migratedCount,
-                    batchSize = batch.Count,
-                    totalAlreadyMigrated = alreadyMigrated + migratedCount,
-                    totalRemaining = remaining,
-                    totalRegistrations = allRegistrations.Count,
-                    isComplete = remaining == 0,
-                    errors = errors,
-                    message = remaining > 0
-                        ? $"Migrated {migratedCount} registrations. {remaining} remaining. Run again to continue."
-                        : $"Migration complete! All {allRegistrations.Count} registrations processed."
-                });
-            }
-            catch (Exception ex)
-            {
-                return Json(new { success = false, message = ex.Message });
-            }
-        }
+        // MigrateRegistrationClubIds BORTTAGEN 2026-10-09 (sajtstrukturen fas 1a): en äldre
+        // engångsflytt av memberClub-text till clubId som vandrade genom hela innehållsträdet.
+        // Samma omräkning görs i anmälningsflytten till tabellen (fas 1d), där en klubb som bara
+        // finns som memberClub-id blir ClubId på raden.
 
         /// <summary>
         /// Clear invalid invitation file references
