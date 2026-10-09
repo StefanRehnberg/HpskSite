@@ -34,6 +34,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         private readonly CompetitionTeamService _teamService;
         private readonly MemberClubService _memberClubService;
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         public SpringskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -51,9 +52,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             AdminAuthorizationService adminAuthorizationService,
             StandardMedalMaterializationService medalMaterialization,
             CompetitionTeamService teamService,
-            MemberClubService memberClubService)
+            MemberClubService memberClubService,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _memberClubService = memberClubService;
             _contentService = contentService;
             _memberService = memberService;
@@ -3353,17 +3356,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     return Json(new { success = false, message = "Fel tävlingstyp." });
 
                 // Check-in map — informational only (never frees a slot).
+                // Via anmälningslagringen (sajtstrukturen fas 1a).
                 var checkedIn = new Dictionary<int, bool>();
-                var regHub = _contentService.GetPagedChildren(competition.Id, 0, 200, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-                if (regHub != null)
-                    foreach (var reg in _contentService.GetPagedChildren(regHub.Id, 0, 5000, out _)
-                                 .Where(c => c.ContentType.Alias == "competitionRegistration"))
-                    {
-                        var midRaw = reg.GetValue<string>("memberId");
-                        if (!int.TryParse(midRaw, out var mid) || mid <= 0) continue;
-                        checkedIn[mid] = reg.HasProperty("isCheckedIn") && reg.GetValue<bool>("isCheckedIn");
-                    }
+                foreach (var reg in _registrations.List(competitionId))
+                {
+                    if (reg.MemberId <= 0) continue;
+                    checkedIn[reg.MemberId] = reg.IsCheckedIn;
+                }
 
                 // Saved results (keyed member|weaponClass) so the timing view can restore an
                 // already-entered måltid/löptid on every re-render — never silently blanking a

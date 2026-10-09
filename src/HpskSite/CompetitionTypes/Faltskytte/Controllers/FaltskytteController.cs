@@ -38,6 +38,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly FaltskytteResultArtifactService _resultArtifact;
         private readonly HpskSite.Services.Kretsgranskning.CourseReviewAccess _courseReviewAccess;
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -57,9 +58,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             StandardMedalMaterializationService medalMaterialization,
             FaltskytteResultsBuilder resultsBuilder,
             FaltskytteResultArtifactService resultArtifact,
-            HpskSite.Services.Kretsgranskning.CourseReviewAccess courseReviewAccess)
+            HpskSite.Services.Kretsgranskning.CourseReviewAccess courseReviewAccess,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _registrations = registrations;
             _contentService = contentService;
             _memberService = memberService;
             _memberManager = memberManager;
@@ -2425,21 +2428,21 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
-            var registration = _contentService.GetById(request.RegistrationId);
+            // Via anmälningslagringen (sajtstrukturen fas 1a). Anmälan måste höra till den här
+            // tävlingen — en anmälan identifieras av (tävling, id).
+            var registration = _registrations.Get(request.CompetitionId, request.RegistrationId);
             if (registration == null)
                 return Json(new { success = false, message = "Anmälan hittades inte." });
 
-            var shootingClassesJson = registration.GetValue<string>("shootingClasses") ?? "";
-            var shootingClasses = CompetitionRegistrationDocument.DeserializeShootingClasses(shootingClassesJson);
-            var validClasses = shootingClasses
+            var validClasses = registration.Classes
                 .Where(sc => !string.IsNullOrEmpty(sc.Class))
                 .ToList();
             if (validClasses.Count == 0)
                 return Json(new { success = false, message = "Anmälan saknar vapenklass." });
 
-            var memberId = registration.GetValue<int>("memberId");
-            var memberName = registration.GetValue<string>("memberName") ?? "";
-            var clubId = registration.GetValue<int>("clubId");
+            var memberId = registration.MemberId;
+            var memberName = registration.MemberName;
+            var clubId = registration.ClubId;
             var clubName = clubId > 0 ? (_clubService.GetClubNameById(clubId) ?? "") : "";
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
