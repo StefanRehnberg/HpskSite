@@ -24,6 +24,8 @@ namespace HpskSite.Services
         private readonly MemberClubService _memberClubService;
         private readonly ILogger<CompetitionTeamService> _logger;
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+
         public CompetitionTeamService(
             IUmbracoDatabaseFactory databaseFactory,
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -33,8 +35,10 @@ namespace HpskSite.Services
             IContentService contentService,
             PaymentService paymentService,
             MemberClubService memberClubService,
-            ILogger<CompetitionTeamService> logger)
+            ILogger<CompetitionTeamService> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
+            _registrations = registrations;
             _memberClubService = memberClubService;
             _databaseFactory = databaseFactory;
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -1056,44 +1060,25 @@ namespace HpskSite.Services
 
             try
             {
-                var competitionContent = _contentService.GetById(competitionId);
-                if (competitionContent == null) return result;
-
-                long totalChildren;
-                var children = _contentService.GetPagedChildren(competitionContent.Id, 0, 100, out totalChildren).ToList();
-                var registrationsHub = children.FirstOrDefault(c =>
-                    c.ContentType.Alias == "competitionRegistrationsHub");
-
-                if (registrationsHub == null) return result;
-
-                // Do NOT filter on r.Published. RegisterForCompetition Save()s the
-                // registration synchronously (data is committed there) but defers Publish()
-                // to a best-effort background task ~10s later that is unreliable on the
-                // production host. Every other registration read works off the Saved node;
-                // requiring Published here made freshly-registered shooters invisible in the
-                // team builder ("Skapa lag") even though they show in the public list.
-                var registrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out totalChildren)
-                    .Where(r => r.ContentType.Alias == "competitionRegistration")
-                    .ToList();
-
-                foreach (var reg in registrations)
+                // Alla anmälningar via anmälningslagringen (sajtstrukturen fas 1a) — publicerade
+                // eller inte, så en nyss anmäld skytt syns direkt i "Skapa lag".
+                foreach (var reg in _registrations.List(competitionId))
                 {
-                    var memberId = reg.GetValue<int>("memberId");
+                    var memberId = reg.MemberId;
                     if (memberId <= 0) continue;
 
                     // Same rule as GetRegisteredMembersInClasses: the club on the REGISTRATION
                     // decides which club's team may claim this shooter, falling back to their
                     // primary club only for registrations predating a stored clubId.
-                    var memberClubId = reg.GetValue<int>("clubId");
+                    var memberClubId = reg.ClubId;
                     if (memberClubId <= 0)
                         memberClubId = _memberClubService.GetPrimaryClubId(_memberService.GetById(memberId));
 
                     if (memberClubId != clubId) continue;
 
-                    var memberName = reg.GetValue<string>("memberName") ?? "";
-                    var classesJson = reg.GetValue<string>("shootingClasses") ?? "[]";
-                    // Skiftlägesokänslig läsning — se CompetitionRegistrationDocument.ReadClassIds.
-                    var classes = CompetitionRegistrationDocument.ReadClassIds(classesJson);
+                    var memberName = reg.MemberName;
+                    // Lagringen läser alla former och skiftlägen av klasslistan.
+                    var classes = reg.ClassIds;
 
                     result.Add(new RegisteredMemberInfo
                     {
@@ -1668,41 +1653,21 @@ namespace HpskSite.Services
 
             try
             {
-                // Find registrations hub under competition
-                var competitionContent = _contentService.GetById(competitionId);
-                if (competitionContent == null) return result;
-
-                long totalChildren;
-                var children = _contentService.GetPagedChildren(competitionContent.Id, 0, 100, out totalChildren).ToList();
-                var registrationsHub = children.FirstOrDefault(c =>
-                    c.ContentType.Alias == "competitionRegistrationsHub");
-
-                if (registrationsHub == null) return result;
-
-                // Do NOT filter on r.Published. RegisterForCompetition Save()s the
-                // registration synchronously (data is committed there) but defers Publish()
-                // to a best-effort background task ~10s later that is unreliable on the
-                // production host. Every other registration read works off the Saved node;
-                // requiring Published here made freshly-registered shooters invisible in the
-                // team builder ("Skapa lag") even though they show in the public list.
-                var registrations = _contentService.GetPagedChildren(registrationsHub.Id, 0, 1000, out totalChildren)
-                    .Where(r => r.ContentType.Alias == "competitionRegistration")
-                    .ToList();
-
-                foreach (var reg in registrations)
+                // Alla anmälningar via anmälningslagringen (sajtstrukturen fas 1a) — publicerade
+                // eller inte, så en nyss anmäld skytt syns direkt i "Skapa lag".
+                foreach (var reg in _registrations.List(competitionId))
                 {
-                    var memberId = reg.GetValue<int>("memberId");
+                    var memberId = reg.MemberId;
                     if (memberId <= 0) continue;
 
-                    var classesJson = reg.GetValue<string>("shootingClasses") ?? "[]";
-                    var memberName = reg.GetValue<string>("memberName") ?? "";
-                    var memberClub = reg.GetValue<string>("memberClub") ?? "";
+                    var memberName = reg.MemberName;
+                    var memberClub = reg.LegacyClubText;
 
                     // Which club's team may pick this shooter. The REGISTRATION's club decides,
                     // not the member's primary one: a shooter who is primary at X but entered this
                     // competition for Y belongs in Y's lag here — reading the primary club offered
                     // them to the wrong club and hid them from the right one.
-                    var clubId = reg.GetValue<int>("clubId");
+                    var clubId = reg.ClubId;
                     if (clubId <= 0)
                         clubId = _memberClubService.GetPrimaryClubId(_memberService.GetById(memberId));
 
@@ -1716,7 +1681,7 @@ namespace HpskSite.Services
                     //
                     // Jämförelsen viker dessutom ihop klassens id och visningsnamn (C_Vet_Y /
                     // C Vet Y), som klassbytet historiskt också blandat.
-                    foreach (var classId in CompetitionRegistrationDocument.ReadClassIds(classesJson))
+                    foreach (var classId in reg.ClassIds)
                     {
                         var key = ShootingClasses.NormalizeKey(classId);
                         var match = compatibleClasses.FirstOrDefault(c =>
