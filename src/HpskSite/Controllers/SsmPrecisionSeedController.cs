@@ -57,6 +57,7 @@ namespace HpskSite.Controllers
         private readonly IConfiguration _configuration;
         private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment _env;
         private readonly ILogger<SsmPrecisionSeedController> _logger;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
         public SsmPrecisionSeedController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -74,7 +75,8 @@ namespace HpskSite.Controllers
             ParticipantStatusService participantStatusService,
             IConfiguration configuration,
             Microsoft.AspNetCore.Hosting.IWebHostEnvironment env,
-            ILogger<SsmPrecisionSeedController> logger)
+            ILogger<SsmPrecisionSeedController> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberService = memberService;
@@ -88,6 +90,7 @@ namespace HpskSite.Controllers
             _configuration = configuration;
             _env = env;
             _logger = logger;
+            _registrations = registrations;
         }
 
         // ── CSV-klass → ShootingClasses.Id ───────────────────────────────────────────
@@ -140,12 +143,7 @@ namespace HpskSite.Controllers
             var comp = FindCompetition();
             if (comp == null) return Json(new { success = true, competition = (object?)null, message = "Tävlingen finns inte." });
 
-            var hub = _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-            var regs = hub == null
-                ? new List<IContent>()
-                : _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                    .Where(c => c.ContentType.Alias == "competitionRegistration").ToList();
+            var regs = _registrations.List(comp.Id);
 
             return Json(new
             {
@@ -159,8 +157,7 @@ namespace HpskSite.Controllers
                 isAwardingStandardMedals = comp.GetValue<bool>("isAwardingStandardMedals"),
                 shootingClassIds = comp.GetValue<string>("shootingClassIds"),
                 registrations = regs.Count,
-                classEntries = regs.Sum(r => CompetitionRegistrationDocument
-                    .DeserializeShootingClasses(r.GetValue<string>("shootingClasses") ?? "").Count)
+                classEntries = regs.Sum(r => r.Classes.Count)
             });
         }
 
@@ -321,20 +318,10 @@ namespace HpskSite.Controllers
 
             var competitionId = competition.Id;
 
-            // ── Anmälningshubb (Save, ALDRIG Publish) ────────────────────────────────
-            var regHub = _contentService.GetPagedChildren(competitionId, 0, 50, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-            if (regHub == null)
-            {
-                regHub = _contentService.Create("Anmälningar", competitionId, "competitionRegistrationsHub");
-                _contentService.Save(regHub);
-            }
-
-            var existingRegs = _contentService.GetPagedChildren(regHub.Id, 0, int.MaxValue, out _)
-                .Where(c => c.ContentType.Alias == "competitionRegistration")
-                .ToList();
+            // ── Befintliga anmälningar (lagringen skapar hubben och publicerar aldrig) ──
+            var existingRegs = _registrations.List(competitionId);
             var regByMemberId = existingRegs
-                .GroupBy(r => r.GetValue<int>("memberId"))
+                .GroupBy(r => r.MemberId)
                 .ToDictionary(g => g.Key, g => g.First());
 
             // ── Skyttar ──────────────────────────────────────────────────────────────
@@ -404,31 +391,34 @@ namespace HpskSite.Controllers
                     var entries = s.Classes
                         .Select(c => new ShootingClassEntry { Class = c, StartPreference = "Inget", TeamNumber = null })
                         .ToList();
-                    var json = CompetitionRegistrationDocument.SerializeShootingClasses(entries);
-
-                    if (regByMemberId.TryGetValue(member.Id, out var reg))
+                    if (regByMemberId.TryGetValue(member.Id, out var existingReg))
                     {
-                        reg.SetValue("shootingClasses", json);
-                        reg.SetValue("clubId", clubId);
-                        reg.SetValue("isActive", true);
-                        _contentService.Save(reg);
+                        var updated = existingReg.Clone();
+                        updated.Classes = entries;
+                        updated.ClassesFromLegacyScalar = false;   // alltid klasslistan, som förut
+                        updated.ClubId = clubId;
+                        updated.IsActive = true;
+                        _registrations.Save(updated);
+                        regByMemberId[member.Id] = updated;
                         regsUpdated++;
                     }
                     else
                     {
-                        reg = _contentService.Create($"{s.Name} - 2026-09-19", regHub.Id, "competitionRegistration");
-                        reg.SetValue("competitionId", competitionId);
-                        reg.SetValue("memberId", member.Id);
-                        reg.SetValue("memberName", s.Name);
-                        reg.SetValue("clubId", clubId);
-                        reg.SetValue("shootingClasses", json);
-                        reg.SetValue("registrationDate", new DateTime(2026, 6, 15, 12, 0, 0));
-                        reg.SetValue("registeredBy", SeedTag);
-                        reg.SetValue("isActive", true);
-                        if (reg.HasProperty("isSubCompetition")) reg.SetValue("isSubCompetition", false);
-                        // Save utan Publish — så gör den publika anmälningsvägen också.
-                        _contentService.Save(reg);
-                        regByMemberId[member.Id] = reg;
+                        var created = new HpskSite.Models.Registrations.RegistrationRecord
+                        {
+                            CompetitionId = competitionId,
+                            MemberId = member.Id,
+                            MemberName = s.Name,
+                            ClubId = clubId,
+                            Classes = entries,
+                            RegistrationDate = new DateTime(2026, 6, 15, 12, 0, 0),
+                            RegisteredBy = SeedTag,
+                            IsActive = true,
+                            IsSubCompetition = false
+                        };
+                        // Lagringen publicerar aldrig — så gör den publika anmälningsvägen också.
+                        _registrations.Save(created);
+                        regByMemberId[member.Id] = created;
                         regsCreated++;
                     }
 
@@ -648,17 +638,11 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "CSV:n går inte att tolka.", parseProblems });
 
             // ── Skyttar och deras plats i den BEFINTLIGA startlistan ─────────────────
-            var hub = _contentService.GetPagedChildren(competitionId, 0, 50, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
             var memberIdByName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            if (hub != null)
+            foreach (var reg in _registrations.List(competitionId))
             {
-                foreach (var reg in _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                             .Where(c => c.ContentType.Alias == "competitionRegistration"))
-                {
-                    var nm = (reg.GetValue<string>("memberName") ?? "").Trim();
-                    if (nm.Length > 0) memberIdByName[nm] = reg.GetValue<int>("memberId");
-                }
+                var nm = (reg.MemberName ?? "").Trim();
+                if (nm.Length > 0) memberIdByName[nm] = reg.MemberId;
             }
 
             // (medlem|kanonisk klass) -> (skjutlag, plats) ur startlistan. Läses BARA.
@@ -973,16 +957,12 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "CSV:n går inte att tolka.", parseProblems });
 
             // ── Skyttar och deras plats i FINALstartlistan ───────────────────────────
-            var hub = _contentService.GetPagedChildren(competitionId, 0, 50, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
             var memberIdByName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            if (hub != null)
-                foreach (var reg in _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                             .Where(c => c.ContentType.Alias == "competitionRegistration"))
-                {
-                    var nm = (reg.GetValue<string>("memberName") ?? "").Trim();
-                    if (nm.Length > 0) memberIdByName[nm] = reg.GetValue<int>("memberId");
-                }
+            foreach (var reg in _registrations.List(competitionId))
+            {
+                var nm = (reg.MemberName ?? "").Trim();
+                if (nm.Length > 0) memberIdByName[nm] = reg.MemberId;
+            }
 
             var placement = new Dictionary<string, (int Team, int Pos)>(StringComparer.OrdinalIgnoreCase);
             foreach (var fsl in _contentService.GetPagedChildren(competitionId, 0, 50, out _)
@@ -1202,26 +1182,20 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = $"Hittade ingen tävling som heter \"{CompetitionNodeName}\"." });
             var competitionId = competition.Id;
 
-            var hub = _contentService.GetPagedChildren(competitionId, 0, 50, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-            if (hub == null)
-                return Json(new { success = false, message = "Tävlingen har ingen anmälningshubb." });
+            var registrations = _registrations.List(competitionId);
+            if (registrations.Count == 0)
+                return Json(new { success = false, message = "Tävlingen har inga anmälningar." });
 
-            var registrations = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                .Where(c => c.ContentType.Alias == "competitionRegistration")
-                .ToList();
-
-            var withInvoice = registrations.Count(r => r.GetValue<int?>("invoiceId") is > 0);
+            var withInvoice = registrations.Count(r => r.InvoiceId is > 0);
 
             // Samma uträkning appen gör, så torrkörningen kan säga vad det BORDE bli.
             decimal expectedTotal = 0;
             var byAmount = new Dictionary<decimal, int>();
             foreach (var reg in registrations)
             {
-                var classes = CompetitionRegistrationDocument
-                    .DeserializeShootingClasses(reg.GetValue<string>("shootingClasses") ?? "")
+                var classes = reg.Classes
                     .Select(e => e.Class).Where(c => !string.IsNullOrEmpty(c)).ToList();
-                var isSub = reg.HasProperty("isSubCompetition") && reg.GetValue<bool>("isSubCompetition");
+                var isSub = reg.IsSubCompetition;
                 var fee = RegistrationFeeCalculator.Calculate(
                     competition, classes.Count > 0 ? classes : new List<string> { "" }, isSub);
                 expectedTotal += fee;
@@ -1251,7 +1225,7 @@ namespace HpskSite.Controllers
 
             foreach (var reg in registrations)
             {
-                var before = reg.GetValue<int?>("invoiceId") ?? 0;
+                var before = reg.InvoiceId ?? 0;
                 try
                 {
                     if (reconcile)
@@ -1267,7 +1241,7 @@ namespace HpskSite.Controllers
                 catch (Exception ex)
                 {
                     failed++;
-                    failures.Add($"{reg.GetValue<string>("memberName")}: {ex.Message}");
+                    failures.Add($"{reg.MemberName}: {ex.Message}");
                     _logger.LogError(ex, "Fakturabackfill misslyckades för anmälan {RegId}", reg.Id);
                 }
             }
@@ -1358,21 +1332,13 @@ namespace HpskSite.Controllers
             foreach (var c in _clubService.GetAllClubs()) clubByName.TryAdd(c.Name.Trim(), c.Id);
 
             // Anmälda skyttar i tävlingen: namn -> medlems-id, plus deras klasser.
-            var hub = _contentService.GetPagedChildren(competitionId, 0, 50, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
             var registered = new Dictionary<string, (int MemberId, List<string> Classes)>(StringComparer.OrdinalIgnoreCase);
-            if (hub != null)
+            foreach (var reg in _registrations.List(competitionId))
             {
-                foreach (var reg in _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                             .Where(c => c.ContentType.Alias == "competitionRegistration"))
-                {
-                    var nm = (reg.GetValue<string>("memberName") ?? "").Trim();
-                    if (nm.Length == 0) continue;
-                    var classes = CompetitionRegistrationDocument
-                        .DeserializeShootingClasses(reg.GetValue<string>("shootingClasses") ?? "")
-                        .Select(e => e.Class).ToList();
-                    registered[nm] = (reg.GetValue<int>("memberId"), classes);
-                }
+                var nm = (reg.MemberName ?? "").Trim();
+                if (nm.Length == 0) continue;
+                var classes = reg.Classes.Select(e => e.Class).ToList();
+                registered[nm] = (reg.MemberId, classes);
             }
 
             var existingTeams = await _teamService.GetTeamsForCompetitionAsync(competitionId);

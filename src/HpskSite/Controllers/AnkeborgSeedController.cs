@@ -82,6 +82,7 @@ namespace HpskSite.Controllers
         private readonly IConfiguration _configuration;
         private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment _env;
         private readonly ILogger<AnkeborgSeedController> _logger;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
         public AnkeborgSeedController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -103,10 +104,12 @@ namespace HpskSite.Controllers
             IConfiguration configuration,
             Microsoft.AspNetCore.Hosting.IWebHostEnvironment env,
             ILogger<AnkeborgSeedController> logger,
-            HpskSite.Services.Training.ClubTrainingService trainings)
+            HpskSite.Services.Training.ClubTrainingService trainings,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _trainings = trainings;
+            _registrations = registrations;
             _memberService = memberService;
             _contentService = contentService;
             _clubMembershipService = clubMembershipService;
@@ -1026,16 +1029,7 @@ VALUES (@0, @9, @1, @2, @3, @1, @4, @5, @6, @7, @8, @8)",
         private int SeedRegistrations(IContent comp, int clubId, int count, DateTime compDate,
                                       List<string> failures)
         {
-            var regHub = _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-            if (regHub == null)
-            {
-                regHub = _contentService.Create("Anmälningar", comp.Id, "competitionRegistrationsHub");
-                _contentService.Save(regHub);
-            }
-
-            var existing = _contentService.GetPagedChildren(regHub.Id, 0, int.MaxValue, out _)
-                .Count(c => c.ContentType.Alias == "competitionRegistration");
+            var existing = _registrations.List(comp.Id).Count;
             if (existing > 0) return 0;
 
             var classes = new[] { "C1", "C2", "C3", "A1", "A2", "B2", "C2", "C3", "A3", "B1" };
@@ -1059,19 +1053,18 @@ VALUES (@0, @9, @1, @2, @3, @1, @4, @5, @6, @7, @8, @8)",
                             TeamNumber = null
                         }
                     };
-                    var reg = _contentService.Create(
-                        $"{name} - {compDate:yyyy-MM-dd}", regHub.Id, "competitionRegistration");
-                    reg.SetValue("competitionId", comp.Id);
-                    reg.SetValue("memberId", m.Id);
-                    reg.SetValue("memberName", name);
-                    reg.SetValue("clubId", clubId);
-                    reg.SetValue("shootingClasses",
-                        CompetitionRegistrationDocument.SerializeShootingClasses(entries));
-                    reg.SetValue("registrationDate", compDate.AddDays(-20));
-                    reg.SetValue("registeredBy", SeedTag);
-                    reg.SetValue("isActive", true);
-                    if (reg.HasProperty("isSubCompetition")) reg.SetValue("isSubCompetition", false);
-                    _contentService.Save(reg);
+                    _registrations.Save(new HpskSite.Models.Registrations.RegistrationRecord
+                    {
+                        CompetitionId = comp.Id,
+                        MemberId = m.Id,
+                        MemberName = name,
+                        ClubId = clubId,
+                        Classes = entries,
+                        RegistrationDate = compDate.AddDays(-20),
+                        RegisteredBy = SeedTag,
+                        IsActive = true,
+                        IsSubCompetition = false
+                    });
                     created++;
                 }
                 catch (Exception ex) { failures.Add($"Anmälan {name}: {ex.Message}"); }
@@ -1715,23 +1708,14 @@ WHERE MemberId=@1 AND Notes=@2 AND TrainingMatchId IS NULL",
             // HÄR och bara här.
             db.Execute($"DELETE FROM [{table}] WHERE CompetitionId = @0", comp.Id);
 
-            var regHub = _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionRegistrationsHub");
-            if (regHub == null)
-            {
-                regHub = _contentService.Create("Anmälningar", comp.Id, "competitionRegistrationsHub");
-                _contentService.Save(regHub);
-            }
-            foreach (var old in _contentService.GetPagedChildren(regHub.Id, 0, int.MaxValue, out _)
-                         .Where(c => c.ContentType.Alias == "competitionRegistration"
-                                  && string.Equals(c.GetValue<string>("registeredBy"), SeedTag, StringComparison.Ordinal))
+            foreach (var old in _registrations.List(comp.Id)
+                         .Where(r => string.Equals(r.RegisteredBy, SeedTag, StringComparison.Ordinal))
                          .ToList())
             {
-                _contentService.Delete(old);
+                _registrations.Delete(comp.Id, old.Id);
             }
-            var alreadyRegistered = _contentService.GetPagedChildren(regHub.Id, 0, int.MaxValue, out _)
-                .Where(c => c.ContentType.Alias == "competitionRegistration")
-                .Select(c => c.GetValue<int>("memberId"))
+            var alreadyRegistered = _registrations.List(comp.Id)
+                .Select(r => r.MemberId)
                 .ToHashSet();
 
             var now = DateTime.Now;
@@ -1794,30 +1778,27 @@ WHERE MemberId=@1 AND Notes=@2 AND TrainingMatchId IS NULL",
                         try
                         {
                             var name = $"{person.First} {person.Last}";
-                            var reg = _contentService.Create(
-                                $"{name} - {date:yyyy-MM-dd}", regHub.Id, "competitionRegistration");
-                            reg.SetValue("competitionId", comp.Id);
-                            reg.SetValue("memberId", member.Id);
-                            reg.SetValue("memberName", name);
-                            reg.SetValue("clubId", clubId);
-                            reg.SetValue("shootingClasses",
-                                CompetitionRegistrationDocument.SerializeShootingClasses(
-                                    new List<ShootingClassEntry>
+                            // Lagringen publicerar aldrig en anmälan.
+                            _registrations.Save(new HpskSite.Models.Registrations.RegistrationRecord
+                            {
+                                CompetitionId = comp.Id,
+                                MemberId = member.Id,
+                                MemberName = name,
+                                ClubId = clubId,
+                                Classes = new List<ShootingClassEntry>
+                                {
+                                    new ShootingClassEntry
                                     {
-                                        new ShootingClassEntry
-                                        {
-                                            Class = canonical,
-                                            StartPreference = "Inget",
-                                            TeamNumber = team
-                                        }
-                                    }));
-                            reg.SetValue("registrationDate", date.AddDays(-14));
-                            reg.SetValue("registeredBy", SeedTag);
-                            reg.SetValue("isActive", true);
-                            if (reg.HasProperty("isSubCompetition")) reg.SetValue("isSubCompetition", false);
-                            // ⚠️ Save, aldrig Publish — en publicerad anmälningshubb är en ogrindad
-                            // publik sida med namn, klubb och skytteklass.
-                            _contentService.Save(reg);
+                                        Class = canonical,
+                                        StartPreference = "Inget",
+                                        TeamNumber = team
+                                    }
+                                },
+                                RegistrationDate = date.AddDays(-14),
+                                RegisteredBy = SeedTag,
+                                IsActive = true,
+                                IsSubCompetition = false
+                            });
                             alreadyRegistered.Add(member.Id);
                             regs++;
                         }
