@@ -56,6 +56,8 @@ namespace HpskSite.Services.Schedule
         /// </summary>
         private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(30);
 
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+
         public MyScheduleService(
             IUmbracoContextFactory ctxFactory,
             IScopeProvider scopeProvider,
@@ -63,8 +65,10 @@ namespace HpskSite.Services.Schedule
             AppCaches appCaches,
             HpskSite.Services.Staffing.RoleCatalogService roles,
             IConfiguration configuration,
-            ILogger<MyScheduleService> logger)
+            ILogger<MyScheduleService> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
+            _registrations = registrations;
             _ctxFactory = ctxFactory;
             _scopeProvider = scopeProvider;
             _audience = audience;
@@ -918,34 +922,21 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
         }
 
         /// <summary>
-        /// Which of the candidate competitions this member is registered in. Registrations are
-        /// Save()-only nodes, so the published cache would undercount — this is the inverse of
-        /// ParticipantAudienceResolver's projection, filtered by member instead of by competition.
+        /// Which of the candidate competitions this member is registered in — via
+        /// anmälningslagringen (sajtstrukturen fas 1a), which reads every registration whether or not
+        /// it was published.
         /// </summary>
         private List<int> RegisteredCompetitionIds(int memberId, List<int> candidateIds)
         {
             if (candidateIds.Count == 0) return new List<int>();
-            var inList = string.Join(",", candidateIds.Select(i => i.ToString(CultureInfo.InvariantCulture)));
-            var sql = $@"
-SELECT DISTINCT comp.id AS CompetitionId
-FROM umbracoNode comp
-JOIN umbracoNode hub        ON hub.parentId = comp.id
-JOIN umbracoContent hc      ON hc.nodeId = hub.id
-JOIN cmsContentType hct     ON hct.nodeId = hc.contentTypeId AND hct.alias = 'competitionRegistrationsHub'
-JOIN umbracoNode n          ON n.parentId = hub.id AND n.trashed = 0
-JOIN umbracoContent rc      ON rc.nodeId = n.id
-JOIN cmsContentType rct     ON rct.nodeId = rc.contentTypeId AND rct.alias = 'competitionRegistration'
-JOIN umbracoContentVersion cv ON cv.nodeId = n.id AND cv.[current] = 1
-JOIN umbracoPropertyData pd ON pd.versionId = cv.id
-JOIN cmsPropertyType pt     ON pt.id = pd.propertyTypeId AND pt.Alias = 'memberId'
-WHERE comp.id IN ({inList})
-  AND COALESCE(CAST(pd.intValue AS nvarchar(50)), pd.varcharValue, pd.textValue) = @0";
-
+            var candidates = candidateIds.ToHashSet();
             try
             {
-                using var scope = _scopeProvider.CreateScope(autoComplete: true);
-                return scope.Database.Fetch<RegRow>(sql, memberId.ToString(CultureInfo.InvariantCulture))
-                    .Select(r => r.CompetitionId).ToList();
+                return _registrations.ListForMember(memberId)
+                    .Select(r => r.CompetitionId)
+                    .Where(candidates.Contains)
+                    .Distinct()
+                    .ToList();
             }
             catch (Exception ex)
             {

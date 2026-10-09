@@ -43,6 +43,12 @@ namespace HpskSite.Services.Registrations
         /// <summary>Alla medlemmens anmälningar, över alla tävlingar.</summary>
         IReadOnlyList<RegistrationRecord> ListForMember(int memberId);
 
+        /// <summary>
+        /// Vilka tävlingar medlemmarna är anmälda till, som (medlem, tävling)-par — för listor över
+        /// många medlemmar (aktivitetsmärkena). Lätt med flit: laddar inga hela anmälningar.
+        /// </summary>
+        IReadOnlyList<(int MemberId, int CompetitionId)> CompetitionsForMembers(IReadOnlyCollection<int> memberIds);
+
         /// <summary>Antal anmälningar per tävling. Utan lista: alla tävlingar.</summary>
         IReadOnlyDictionary<int, int> CountByCompetition(IReadOnlyCollection<int>? competitionIds = null);
 

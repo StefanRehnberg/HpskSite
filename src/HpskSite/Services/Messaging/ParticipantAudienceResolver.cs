@@ -27,10 +27,14 @@ namespace HpskSite.Services.Messaging
         // A short TTL makes those interactions instant without going stale for long.
         private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(30);
 
-        public ParticipantAudienceResolver(IScopeProvider scopeProvider, AppCaches appCaches)
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+
+        public ParticipantAudienceResolver(IScopeProvider scopeProvider, AppCaches appCaches,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
         {
             _scopeProvider = scopeProvider;
             _appCaches = appCaches;
+            _registrations = registrations;
         }
 
         /// <summary>Distinct member ids in the audience for the given scope.</summary>
@@ -139,57 +143,24 @@ namespace HpskSite.Services.Messaging
 
         private List<Registration> LoadRegistrations(int competitionId)
         {
-            const string sql = @"
-SELECT n.id AS NodeId,
-  MAX(CASE WHEN pt.Alias = 'memberId'        THEN COALESCE(CAST(pd.intValue AS nvarchar(50)), pd.varcharValue, pd.textValue) END) AS MemberIdRaw,
-  MAX(CASE WHEN pt.Alias = 'shootingClasses' THEN COALESCE(pd.textValue, pd.varcharValue) END) AS ShootingClasses,
-  MAX(CASE WHEN pt.Alias = 'shootingClass'   THEN COALESCE(pd.varcharValue, pd.textValue) END) AS ShootingClass,
-  MAX(CASE WHEN pt.Alias = 'isActive'        THEN pd.intValue END) AS IsActive
-FROM umbracoNode comp
-JOIN umbracoNode hub        ON hub.parentId = comp.id
-JOIN umbracoContent hc      ON hc.nodeId = hub.id
-JOIN cmsContentType hct     ON hct.nodeId = hc.contentTypeId AND hct.alias = 'competitionRegistrationsHub'
-JOIN umbracoNode n          ON n.parentId = hub.id AND n.trashed = 0
-JOIN umbracoContent rc      ON rc.nodeId = n.id
-JOIN cmsContentType rct     ON rct.nodeId = rc.contentTypeId AND rct.alias = 'competitionRegistration'
-JOIN umbracoContentVersion cv ON cv.nodeId = n.id AND cv.[current] = 1
-JOIN umbracoPropertyData pd ON pd.versionId = cv.id
-JOIN cmsPropertyType pt     ON pt.id = pd.propertyTypeId
-                            AND pt.Alias IN ('memberId','shootingClasses','shootingClass','isActive')
-WHERE comp.id = @0
-GROUP BY n.id";
-
-            List<RegProjectionRow> rows;
+            // Via anmälningslagringen (sajtstrukturen fas 1a). Lagringen tolkar alla klasslistans
+            // former, inklusive den äldre enkla klassen.
             try
             {
-                using var scope = _scopeProvider.CreateScope(autoComplete: true);
-                rows = scope.Database.Fetch<RegProjectionRow>(sql, competitionId);
+                return _registrations.List(competitionId)
+                    .Where(r => r.IsActive && r.MemberId > 0)
+                    .Select(r => new Registration
+                    {
+                        MemberId = r.MemberId,
+                        Classes = r.Classes.Where(c => !string.IsNullOrWhiteSpace(c.Class)).ToList()
+                    })
+                    .ToList();
             }
             catch
             {
                 // Never throw to the caller — an empty audience surfaces as "0 mottagare" in the composer.
                 return new List<Registration>();
             }
-
-            var result = new List<Registration>(rows.Count);
-            foreach (var row in rows)
-            {
-                // isActive defaults true when the property row is absent (matches the doctype default).
-                if (row.IsActive == 0) continue;
-                if (!int.TryParse(row.MemberIdRaw, out var memberId) || memberId <= 0) continue;
-
-                var classes = CompetitionRegistrationDocument
-                    .DeserializeShootingClasses(row.ShootingClasses ?? "")
-                    .Where(c => !string.IsNullOrWhiteSpace(c.Class))
-                    .ToList();
-
-                // Legacy single-class fallback.
-                if (classes.Count == 0 && !string.IsNullOrWhiteSpace(row.ShootingClass))
-                    classes.Add(new ShootingClassEntry { Class = row.ShootingClass });
-
-                result.Add(new Registration { MemberId = memberId, Classes = classes });
-            }
-            return result;
         }
     }
 }

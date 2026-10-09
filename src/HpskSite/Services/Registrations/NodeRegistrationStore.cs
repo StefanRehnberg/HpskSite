@@ -2,7 +2,7 @@ using HpskSite.Models;
 using HpskSite.Models.Registrations;
 using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Services;
-using Umbraco.Cms.Infrastructure.Persistence;
+using Umbraco.Cms.Infrastructure.Scoping;
 
 namespace HpskSite.Services.Registrations
 {
@@ -33,18 +33,18 @@ namespace HpskSite.Services.Registrations
 
         private readonly IContentService _contentService;
         private readonly IContentTypeService _contentTypeService;
-        private readonly IUmbracoDatabaseFactory _databaseFactory;
+        private readonly IScopeProvider _scopeProvider;
         private readonly ILogger<NodeRegistrationStore> _logger;
 
         public NodeRegistrationStore(
             IContentService contentService,
             IContentTypeService contentTypeService,
-            IUmbracoDatabaseFactory databaseFactory,
+            IScopeProvider scopeProvider,
             ILogger<NodeRegistrationStore> logger)
         {
             _contentService = contentService;
             _contentTypeService = contentTypeService;
-            _databaseFactory = databaseFactory;
+            _scopeProvider = scopeProvider;
             _logger = logger;
         }
 
@@ -93,7 +93,8 @@ namespace HpskSite.Services.Registrations
             List<int> ids;
             try
             {
-                using var db = _databaseFactory.CreateDatabase();
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                var db = scope.Database;
                 ids = db.Fetch<int>(@"
 SELECT DISTINCT n.id
 FROM umbracoNode n
@@ -120,12 +121,56 @@ WHERE ct.alias = @0 AND n.trashed = 0 AND pt.Alias = 'memberId'
                     .ToList();
         }
 
+        public IReadOnlyList<(int MemberId, int CompetitionId)> CompetitionsForMembers(IReadOnlyCollection<int> memberIds)
+        {
+            var result = new List<(int, int)>();
+            var ids = memberIds.Where(i => i > 0).Distinct().ToList();
+            if (ids.Count == 0) return result;
+            try
+            {
+                // I portioner: IN (@0) blir en parameter per id, och SQL Server tar slut vid ~2100.
+                foreach (var batch in ids.Chunk(1000))
+                {
+                    var inList = string.Join(",", batch.Select((_, i) => "@" + (i + 1)));
+                    var args = new object[] { RegistrationAlias }.Concat(batch.Cast<object>()).ToArray();
+                    using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                    var rows = scope.Database.Fetch<PairRow>($@"
+SELECT DISTINCT
+       COALESCE(pd.intValue, TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20))) AS MemberId,
+       COALESCE(cd.intValue, TRY_CONVERT(INT, LEFT(COALESCE(cd.varcharValue, cd.textValue), 20))) AS CompetitionId
+FROM umbracoNode n
+JOIN umbracoContent c          ON c.nodeId = n.id
+JOIN cmsContentType ct         ON ct.nodeId = c.contentTypeId AND ct.alias = @0
+JOIN umbracoContentVersion cv  ON cv.nodeId = n.id AND cv.[current] = 1
+JOIN cmsPropertyType pt        ON pt.contentTypeId = ct.nodeId AND pt.Alias = 'memberId'
+JOIN umbracoPropertyData pd    ON pd.versionId = cv.id AND pd.propertyTypeId = pt.id
+JOIN cmsPropertyType ctp       ON ctp.contentTypeId = ct.nodeId AND ctp.Alias = 'competitionId'
+JOIN umbracoPropertyData cd    ON cd.versionId = cv.id AND cd.propertyTypeId = ctp.id
+WHERE n.trashed = 0
+  AND COALESCE(pd.intValue, TRY_CONVERT(INT, LEFT(COALESCE(pd.varcharValue, pd.textValue), 20))) IN ({inList})", args);
+                    result.AddRange(rows.Where(r => r.CompetitionId > 0).Select(r => (r.MemberId, r.CompetitionId)));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Medlemmarnas anmälningar kunde inte läsas");
+            }
+            return result;
+        }
+
+        private sealed class PairRow
+        {
+            public int MemberId { get; set; }
+            public int CompetitionId { get; set; }
+        }
+
         public IReadOnlyDictionary<int, int> CountByCompetition(IReadOnlyCollection<int>? competitionIds = null)
         {
             var result = new Dictionary<int, int>();
             try
             {
-                using var db = _databaseFactory.CreateDatabase();
+                using var scope = _scopeProvider.CreateScope(autoComplete: true);
+                var db = scope.Database;
                 // Föräldern till anmälans förälder är tävlingen (hubben ligger emellan). En anmälan som
                 // ligger DIREKT under tävlingen (äldre reservväg när hubben inte gick att skapa) räknas
                 // via sin egen förälder.
