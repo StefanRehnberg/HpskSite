@@ -171,6 +171,9 @@ namespace HpskSite.Composers
             // Anmälan + närvaro på klubbens och kretsens evenemang (samma clubSimpleEvent-doctype
             // för båda scopen; ägaren är evenemangets föräldranod).
             builder.Services.AddScoped<ClubEventParticipationService>();
+            // Enda stället som svarar på "vem äger händelsen?" (sajtstrukturen fas 0). I dag
+            // föräldernoden, efter fas 2 raden i ClubEvent-tabellen.
+            builder.Services.AddScoped<HpskSite.Services.Events.EventOwnerResolver>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingMigrationService>();
             builder.Services.AddScoped<HpskSite.Services.Training.ClubTrainingService>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingCourseService>();

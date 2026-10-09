@@ -61,11 +61,13 @@ namespace HpskSite.Services.Ledger
                 return null;
             }
 
-            // Klättra uppåt: ett evenemang ligger direkt under sin klubb eller krets, men en
-            // mellannod i framtiden ska inte göra uppslagningen fel.
-            for (var n = node.Parent; n is not null; n = n.Parent)
+            // Ägaren avgörs av EventOwnerResolver (sajtstrukturen fas 0) — enda stället som svarar
+            // på "vem äger händelsen?". Den publicerade varianten används här eftersom utställaren
+            // också resolvas från bakgrundsarbete, där innehållstjänsten inte har någon begäran.
+            var ownerNode = HpskSite.Services.Events.EventOwnerResolver.PublishedOwnerNode(node);
+            if (ownerNode is not null)
             {
-                var issuer = FromNode(n);
+                var issuer = FromNode(ownerNode);
                 if (issuer is not null) return issuer;
             }
 

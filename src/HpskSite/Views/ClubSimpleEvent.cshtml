@@ -121,8 +121,9 @@
         _ => "#9E9E9E"
     };
 
-    // Parent access - detect if parent is a club or a region
-    var parentNode = Model.Parent;
+    // Ägarnoden (klubb eller krets) via EventOwnerResolver — enda stället som svarar på
+    // "vem äger händelsen?" (sajtstrukturen fas 0).
+    var parentNode = HpskSite.Services.Events.EventOwnerResolver.PublishedOwnerNode(Model);
     var isRegionEvent = parentNode?.ContentType.Alias == "regionalPage";
 
     // Club-specific properties (only if parent is a club)

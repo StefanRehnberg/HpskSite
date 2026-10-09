@@ -36,6 +36,7 @@ namespace HpskSite.Controllers
         private readonly ClubMembershipService _clubMembershipService;
         private readonly IAntiforgery _antiforgery;
         private readonly HpskSite.Services.Training.ClubTrainingService _trainings;
+        private readonly HpskSite.Services.Events.EventOwnerResolver _eventOwners;
         private readonly ILogger<ClubController> _logger;
 
         public ClubController(
@@ -54,11 +55,13 @@ namespace HpskSite.Controllers
             ClubMembershipService clubMembershipService,
             IAntiforgery antiforgery,
             HpskSite.Services.Training.ClubTrainingService trainings,
+            HpskSite.Services.Events.EventOwnerResolver eventOwners,
             ILogger<ClubController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _antiforgery = antiforgery;
             _trainings = trainings;
+            _eventOwners = eventOwners;
             _logger = logger;
             _contentService = contentService;
             _memberService = memberService;
@@ -717,17 +720,12 @@ namespace HpskSite.Controllers
         private async Task<bool> CanManageEventParentAsync(int parentId)
         {
             if (parentId <= 0) return false;
-
-            var parent = UmbracoContext.Content?.GetById(parentId);
-            if (parent != null && parent.ContentType.Alias == "regionalPage")
-            {
-                var regionCode = parent.Value<string>("regionCode") ?? "";
-                return !string.IsNullOrEmpty(regionCode)
-                    && await _authorizationService.IsRegionalAdminForRegion(regionCode);
-            }
-
-            // Klubbformen (och sajtadmin, som klubbkontrollen släpper igenom).
-            return await _authorizationService.IsClubAdminForClub(parentId);
+            // Regeln bor i EventOwnerResolver (sajtstrukturen fas 0). En förälder som varken är
+            // klubb eller krets behandlas som förut: klubbkontrollen, som släpper igenom sajtadmin.
+            var owner = _eventOwners.ForOwnerId(parentId);
+            return owner is not null
+                ? await _eventOwners.CanManageAsync(owner)
+                : await _authorizationService.IsClubAdminForClub(parentId);
         }
 
         [HttpPost]
@@ -754,11 +752,13 @@ namespace HpskSite.Controllers
                 // kretsadministratören från hennes EGEN händelse. Att det inte syntes här beror på
                 // att en sajtadmin släpps igenom av klubbkontrollen ändå — samma förväxling som
                 // redan kostat fyra rundor på tävlingssidan.
-                var parentId = source.ParentId;
-                if (!await CanManageEventParentAsync(parentId))
+                var sourceOwner = _eventOwners.ForEventNode(source);
+                if (!await _eventOwners.CanManageAsync(sourceOwner))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
+                // Kopian hamnar hos samma ägare (i dag: under samma föräldernod).
+                var parentId = sourceOwner!.OwnerId;
 
                 if (!DateTime.TryParse(eventDate, out var parsedDate))
                 {
@@ -1091,12 +1091,14 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
-                // Authorization check - get parent club ID and verify user is club admin
-                int clubId = eventContent.ParentId;
-                if (!await _authorizationService.IsClubAdminForClub(clubId))
+                // Behörigheten går via ägaren (EventOwnerResolver). En kretshändelse som når den här
+                // klubbendpointen får nu kretsens regel i stället för ett klubbuppslag på kretsnoden.
+                var owner = _eventOwners.ForEventNode(eventContent);
+                if (!await _eventOwners.CanManageAsync(owner))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
+                int clubId = owner!.OwnerId;
 
                 // Update node name (URL slug) if pageName provided
                 var nodeName = !string.IsNullOrWhiteSpace(pageName) ? pageName : eventName;
@@ -1165,9 +1167,8 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
-                // Authorization check - get parent club ID and verify user is club admin
-                int clubId = eventContent.ParentId;
-                if (!await _authorizationService.IsClubAdminForClub(clubId))
+                // Behörigheten går via ägaren (EventOwnerResolver).
+                if (!await _eventOwners.CanManageAsync(_eventOwners.ForEventNode(eventContent)))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
@@ -2542,21 +2543,14 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
-                // Get parent region node for auth
-                var parentId = eventContent.ParentId;
-                if (UmbracoContext.Content == null)
-                {
-                    return Ok(new { success = false, message = "Umbraco context not available" });
-                }
-
-                var regionNode = UmbracoContext.Content.GetById(parentId);
-                if (regionNode == null || regionNode.ContentType.Alias != "regionalPage")
+                // Behörigheten går via ägaren (EventOwnerResolver). Den här endpointen gäller
+                // kretsens händelser, så en klubbhändelse vägras här som förut.
+                var regionOwner = _eventOwners.ForEventNode(eventContent);
+                if (regionOwner is null || !regionOwner.IsRegion)
                 {
                     return Ok(new { success = false, message = "Parent region not found" });
                 }
-
-                var regionCode = regionNode.Value<string>("regionCode") ?? "";
-                if (string.IsNullOrEmpty(regionCode) || !await _authorizationService.IsRegionalAdminForRegion(regionCode))
+                if (!await _eventOwners.CanManageAsync(regionOwner))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
@@ -2627,21 +2621,14 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Event not found" });
                 }
 
-                // Get parent region node for auth
-                var parentId = eventContent.ParentId;
-                if (UmbracoContext.Content == null)
-                {
-                    return Ok(new { success = false, message = "Umbraco context not available" });
-                }
-
-                var regionNode = UmbracoContext.Content.GetById(parentId);
-                if (regionNode == null || regionNode.ContentType.Alias != "regionalPage")
+                // Behörigheten går via ägaren (EventOwnerResolver). Den här endpointen gäller
+                // kretsens händelser, så en klubbhändelse vägras här som förut.
+                var regionOwner = _eventOwners.ForEventNode(eventContent);
+                if (regionOwner is null || !regionOwner.IsRegion)
                 {
                     return Ok(new { success = false, message = "Parent region not found" });
                 }
-
-                var regionCode = regionNode.Value<string>("regionCode") ?? "";
-                if (string.IsNullOrEmpty(regionCode) || !await _authorizationService.IsRegionalAdminForRegion(regionCode))
+                if (!await _eventOwners.CanManageAsync(regionOwner))
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
@@ -2665,24 +2652,8 @@ namespace HpskSite.Controllers
         /// Unified auth check for event page endpoints. Works for both club and region events.
         /// Returns true if authorized, false otherwise.
         /// </summary>
-        private async Task<bool> IsEventAdminAsync(IContent eventContent)
-        {
-            var parent = _contentService.GetById(eventContent.ParentId);
-            if (parent == null) return false;
-
-            if (parent.ContentType.Alias == "club")
-            {
-                return await _authorizationService.IsClubAdminForClub(parent.Id);
-            }
-            else if (parent.ContentType.Alias == "regionalPage")
-            {
-                var regionCode = parent.GetValue<string>("regionCode") ?? "";
-                if (string.IsNullOrEmpty(regionCode)) return false;
-                return await _authorizationService.IsRegionalAdminForRegion(regionCode);
-            }
-
-            return false;
-        }
+        private Task<bool> IsEventAdminAsync(IContent eventContent)
+            => _eventOwners.CanManageAsync(_eventOwners.ForEventNode(eventContent));
 
         /// <summary>
         /// Get current editable data for an event page (detail fields, image URL, content blocks, quick links)
