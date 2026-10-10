@@ -118,7 +118,7 @@
         list.innerHTML = '<div class="list-group-item text-body-secondary">Laddar tävlingar…</div>';
         return fetch('/umbraco/surface/ClubEventCompetitionLink/GetLinks?eventId=' + eventId)
             .then(function (r) {
-                if (!r.ok) throw new Error((window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status)) || ('HTTP ' + r.status));
+                if (!r.ok) throw new Error((window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status).msg) || ('HTTP ' + r.status));
                 return r.json();
             })
             .then(function (d) {
@@ -151,7 +151,7 @@
         fd.append('__RequestVerificationToken', tokenEl ? tokenEl.value : '');
         return fetch('/umbraco/surface/ClubEventCompetitionLink/SaveLinks', { method: 'POST', body: fd })
             .then(function (r) {
-                if (!r.ok) throw new Error((window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status)) || ('HTTP ' + r.status));
+                if (!r.ok) throw new Error((window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status).msg) || ('HTTP ' + r.status));
                 return r.json();
             })
             .then(function (d) { return { ok: !!d.success, message: d.message }; })
