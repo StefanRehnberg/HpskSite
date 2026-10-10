@@ -10990,6 +10990,12 @@ tills fas 4).
 
 `RegistrationMigrationService` / `ClubEventMigrationService` med varsin controller (bara
 sajtadmin): **Preview → Freeze → Run → Verify → Switch → avfrys → Unpublish** (i portioner).
+**I prod körs fönstret från `/admin-page` → fliken Underhåll** (`SajtstrukturMigrationPanel`):
+Torrkör, Flytta (två tryck; fryser, flyttar, jämför, byter, släpper frysningen och stannar vid första
+fel med noderna gällande), Avpublicera (några dagar senare), Tillbaka till noderna och Töm tabellen
+(`Clear`, bara när noderna gäller — för ett nytt försök). Körordning: `PROD-KORORDNING`, T1–T8;
+läskontroll i prod: `Migrations/check-prod-sajtstruktur-2026-10-10.sql`. Svit:
+`hpsk-verify/underhall-panel-verify.mjs` 18/18. Fliken tas bort i contract-steget.
 - `IDENTITY_INSERT` med nodens id, idempotent, `RESEED` efteråt. Gamla referenser (liggaren,
   fakturor, QR-affischer, `ClubEventParticipant`) pekar därför rätt utan omskrivning.
 - `Switch("table")` vägras utan frysning och utan ren jämförelse; `Switch("node")` går alltid.

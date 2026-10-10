@@ -84,6 +84,15 @@ namespace HpskSite.Controllers
             return Json(new { success = ok, message, problems });
         }
 
+        /// <summary>Tömmer tabellerna inför ett nytt försök. Bara när nodlagringen gäller.</summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> Clear()
+        {
+            if (await DenyAsync() is { } deny) return deny;
+            var (ok, message) = _migration.ClearTables(await ActorAsync());
+            return Json(new { success = ok, message });
+        }
+
         [HttpPost, ValidateAntiForgeryToken]
         public async Task<IActionResult> Unpublish(int batch = 50)
         {

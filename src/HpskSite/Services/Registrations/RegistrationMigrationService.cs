@@ -100,6 +100,29 @@ namespace HpskSite.Services.Registrations
             };
         }
 
+        /// <summary>
+        /// Tömmer anmälningstabellerna inför ett nytt försök. Bara när nodlagringen gäller — då läser
+        /// ingen tabellerna. Anmälningar som gjorts i tabellen efter en flytt (och sedan återställts)
+        /// försvinner; de finns inte på noderna. Övriga referenser (avgiftsval, liggaren) bär
+        /// anmälans id, som flytten återskapar.
+        /// </summary>
+        public (bool Ok, string Message) ClearTables(int? byMemberId)
+        {
+            if (!string.Equals(CurrentStore, RegistrationStoreSettings.StoreNode, StringComparison.OrdinalIgnoreCase))
+                return (false, "Tabellen gäller — gå tillbaka till noderna först.");
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+            var rows = db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.CompetitionRegistration");
+            db.Execute(@"DELETE FROM dbo.CompetitionRegistrationLegacyId;
+DELETE FROM dbo.CompetitionRegistrationClass;
+DELETE FROM dbo.CompetitionRegistration;
+DBCC CHECKIDENT('dbo.CompetitionRegistration', RESEED, 0) WITH NO_INFOMSGS;
+UPDATE dbo.CompetitionTeam SET LegacyRegistrationDocId = NULL;");
+            scope.Complete();
+            _logger.LogWarning("Anmälningstabellerna tömda ({Rows} rader) av medlem {MemberId}", rows, byMemberId);
+            return (true, $"Tabellen tömd ({rows} rader). Flytten kan köras igen.");
+        }
+
         public void SetWriteFreeze(bool on, int? byMemberId)
             => _settings.Set(RegistrationStoreSettings.WriteFreezeKey, on ? "1" : "0", byMemberId);
 

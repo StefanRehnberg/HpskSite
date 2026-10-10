@@ -42,6 +42,29 @@ namespace HpskSite.Services.Events
         public string CurrentStore => _settings.Get(ClubEventStoreSettings.StoreKey, ClubEventStoreSettings.StoreNode);
         public bool IsWriteFrozen => _settings.Get(ClubEventStoreSettings.WriteFreezeKey, "0") == "1";
 
+        /// <summary>
+        /// Tömmer händelsetabellerna inför ett nytt försök. Bara när nodlagringen gäller. Händelser
+        /// som skapats i tabellen efter en flytt (och sedan återställts) försvinner. Kopplingar till
+        /// tävlingar, deltagare och liggaren bär händelsens id, som flytten återskapar.
+        /// </summary>
+        public (bool Ok, string Message) ClearTables(int? byMemberId)
+        {
+            if (ClubEventStoreSettings.UsesTable(_settings))
+                return (false, "Tabellen gäller — gå tillbaka till noderna först.");
+            using var scope = _scopeProvider.CreateScope();
+            var db = scope.Database;
+            var rows = db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.ClubEvent");
+            db.Execute(@"DELETE FROM dbo.ClubEventUrl;
+UPDATE dbo.ClubEvent SET LandingPageId = NULL;
+DELETE FROM dbo.ClubEvent;
+DELETE FROM dbo.LandingPage;
+DBCC CHECKIDENT('dbo.ClubEvent', RESEED, 0) WITH NO_INFOMSGS;
+DBCC CHECKIDENT('dbo.LandingPage', RESEED, 0) WITH NO_INFOMSGS;");
+            scope.Complete();
+            _logger.LogWarning("Händelsetabellerna tömda ({Rows} rader) av medlem {MemberId}", rows, byMemberId);
+            return (true, $"Tabellen tömd ({rows} rader). Flytten kan köras igen.");
+        }
+
         public void SetWriteFreeze(bool on, int? byMemberId)
             => _settings.Set(ClubEventStoreSettings.WriteFreezeKey, on ? "1" : "0", byMemberId);
 

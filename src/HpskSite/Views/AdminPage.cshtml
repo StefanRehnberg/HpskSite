@@ -150,6 +150,10 @@
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="utbildning-tab" data-bs-toggle="tab" data-bs-target="#utbildning" type="button" role="tab">Utbildning</button>
             </li>
+            @* Sajtstrukturens underhållsfönster (2026-10-10) — tas bort i contract-steget. *@
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="underhall-tab" data-bs-toggle="tab" data-bs-target="#underhall" type="button" role="tab">Underhåll</button>
+            </li>
         }
         @if (isSiteAdmin || isRegionalAdmin)
         {
@@ -247,6 +251,13 @@
                 <div class="card mt-3">
                     <div class="card-body">
                         @await Html.PartialAsync("UtbildningManagement")
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="underhall" role="tabpanel">
+                <div class="card mt-3">
+                    <div class="card-body">
+                        @await Html.PartialAsync("SajtstrukturMigrationPanel")
                     </div>
                 </div>
             </div>
