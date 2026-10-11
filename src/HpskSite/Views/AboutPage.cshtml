@@ -399,10 +399,22 @@
             <p class="lead prose-wide mx-auto mb-0">
                 En plattform av skyttar, för skyttar, klubbar och kretsar. Sponsrad av Hallands Pistolskyttekrets — gratis för skyttar nu och alltid.
             </p>
-            @* Kartan på /allt visar bredden bättre än någon lista här nere kan. *@
-            <a class="btn btn-primary btn-lg mt-4" href="/allt">
-                <i class="bi bi-bullseye me-2"></i>Se allt som ryms i pistol.nu
-            </a>
+            @* Presentationen för klubbstyrelsen (statiska filer i wwwroot/visa-styrelsen, byggs ur
+               HpskSite.Courses/Presentationer/styrelse-demo). Kartan på /allt visar bredden bättre än
+               någon lista här nere kan — och den här knappen är den enda vägen dit, så den får inte försvinna. *@
+            <div class="d-flex flex-wrap justify-content-center gap-2 mt-4">
+                <a class="btn btn-primary btn-lg" href="/visa-styrelsen/index.html">
+                    <i class="bi bi-easel me-2"></i>Visa pistol.nu för din styrelse
+                </a>
+                <a class="btn btn-outline-primary btn-lg" href="/allt">
+                    <i class="bi bi-bullseye me-2"></i>Se allt som ryms i pistol.nu
+                </a>
+                @* Klubbguiden (Tutorial 07, 6:42) — allt en klubb får på pistol.nu. *@
+                <a class="btn btn-outline-primary btn-lg" href="/tutorials?tutorial=tutorial-07">
+                    <i class="bi bi-play-circle me-2"></i>Se filmen: allt klubben får
+                </a>
+            </div>
+            <p class="small text-muted mt-2 mb-0">En färdig presentation att visa på styrelsemötet (fungerar också utan internet och som PDF), kartan över allt i pistol.nu, och en film på knappt sju minuter om vad klubben får.</p>
         </div>
 
         <div class="row g-3 mt-4 justify-content-center">
