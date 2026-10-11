@@ -216,6 +216,15 @@ VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18,@19,@2
         {
             var plan = BuildPlan();
             var problems = new List<string>();
+            // ⚠ Två syskonnoder kan dela trädadress när namnen bara skiljer sig på något som inte syns i
+            // adressen (prod 2026-10-11: "Klubbträning " och "Klubbträning" hos samma klubb). Umbraco
+            // visade då bara EN av dem på adressen, och flytten ger adressen till den första. Det är rätt
+            // — den gamla adressen kan bara leda till en händelse — så kontrollen godtar vilken som helst
+            // av de händelser som delar den.
+            var sharedLegacy = plan.Rows
+                .Where(r => r.LegacySlug.Length > 0)
+                .GroupBy(r => (r.Row.OwnerId, Slug: r.LegacySlug.ToLowerInvariant()))
+                .ToDictionary(g => g.Key, g => g.Select(r => r.Row.Id).ToHashSet());
             foreach (var p in plan.Rows)
             {
                 var n = p.Row;
@@ -245,7 +254,9 @@ VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18,@19,@2
                 if (p.LegacySlug.Length > 0)
                 {
                     var hit = _table.FindByAddress(n.OwnerId, null, p.LegacySlug);
-                    if (hit?.EventId != n.Id) problems.Add($"{n.Id}: den gamla adressen {p.LegacySlug} leder inte hit");
+                    var sharers = sharedLegacy[(n.OwnerId, p.LegacySlug.ToLowerInvariant())];
+                    if (hit == null || !sharers.Contains(hit.Value.EventId))
+                        problems.Add($"{n.Id}: den gamla adressen {p.LegacySlug} leder inte hit");
                 }
             }
             return (plan.Rows.Count, problems);
