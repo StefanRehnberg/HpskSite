@@ -148,6 +148,23 @@ namespace HpskSite.Models
         }
 
         public static string Hhmm(TimeSpan t) => t.ToString(@"hh\:mm", CultureInfo.InvariantCulture);
+
+        /// <summary>
+        /// Vad på banan en incheckning just nu kan ge närvaro på (Michael, Luleå 2026-10-11: "banans QR
+        /// aktiverar närvaro på aktiviteten"). Bara träningar och händelser — en tävling har sin egen
+        /// incheckning, en fast tid och en extern bokning har ingen närvaro. Inställt räknas inte.
+        /// Samma tidsfönster som kursens upprop (<see cref="Training.TrainingCourseRules.CheckInCounts"/>):
+        /// en timme före start till en timme efter slut, så "incheckad" och "närvarande" aldrig säger emot
+        /// varandra. Vem som FÅR registreras avgörs av anroparen.
+        /// </summary>
+        public static List<RangeCalendarItem> OngoingForCheckIn(IEnumerable<RangeCalendarItem> items, DateTime now)
+        {
+            var today = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            return items.Where(i => (i.Kind == RangeCalendarKind.Training || i.Kind == RangeCalendarKind.Event)
+                                    && !i.IsCancelled && i.Date == today
+                                    && Training.TrainingCourseRules.CheckInCounts(now, now.Date, i.Start, i.End))
+                        .ToList();
+        }
     }
 
     public enum TimeRelation { None, SameDay, Overlap }

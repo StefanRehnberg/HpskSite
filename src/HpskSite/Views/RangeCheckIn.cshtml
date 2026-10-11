@@ -70,7 +70,7 @@
             document.getElementById('ciRangeName').textContent = d.rangeName || '';
 
             if (d.checkedIn) {
-                el.innerHTML = `
+                el.innerHTML = activitiesHtml(d.activities) + `
                     <div class="text-center mb-3">
                         <span class="badge bg-success mb-2">Incheckad${d.since ? ' sedan ' + d.since : ''}</span>
                         <p class="mb-1">Hur många skott sköt du?</p>
@@ -84,17 +84,46 @@
                         <i class="bi bi-box-arrow-in-right me-1"></i>Checka in</button>`;
             }
         }
+        // Närvaro på det som pågår på banan (Michael, Luleå 2026-10-11). Servern registrerar själv när
+        // EN aktivitet pågår; pågår flera väljer medlemmen här. Bara aktiviteter medlemmen får delta i.
+        function activitiesHtml(list) {
+            if (!list || !list.length) return '';
+            const rows = list.map(a => {
+                const when = a.start ? ' · ' + esc(a.start) + (a.end ? '–' + esc(a.end) : '') : '';
+                const right = a.present
+                    ? '<span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-check2 me-1"></i>Närvaro registrerad</span>'
+                    : `<button class="btn btn-sm btn-primary" data-ci-att="${a.id}" data-ci-kind="${esc(a.occasionKind)}">Registrera min närvaro</button>`;
+                return `<li class="list-group-item d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                    <div><div class="fw-semibold">${esc(a.name)}</div><div class="small text-muted">${esc(a.owner)}${when}</div></div>${right}</li>`;
+            }).join('');
+            const head = list.length > 1 && list.some(a => !a.present)
+                ? 'Flera aktiviteter pågår på banan. Välj den du är på.'
+                : 'Pågår på banan nu';
+            return `<div class="mb-3" id="ciActivities"><div class="small text-muted mb-1">${head}</div><ul class="list-group">${rows}</ul></div>`;
+        }
+        function showError(msg) {
+            const old = document.getElementById('ciErr'); if (old) old.remove();
+            el.insertAdjacentHTML('afterbegin', `<div class="alert alert-danger py-2 small" id="ciErr">${esc(msg || 'Något gick fel.')}</div>`);
+        }
+        el.addEventListener('click', async e => {
+            const b = e.target.closest('[data-ci-att]'); if (!b) return;
+            b.disabled = true; b.textContent = 'Registrerar…';
+            const d = await postJson('/umbraco/surface/ShootingRange/RangeAttendance',
+                { rangeId: RANGE_ID, id: parseInt(b.dataset.ciAtt, 10), kind: b.dataset.ciKind });
+            if (!d.success) { showError(d.message); b.disabled = false; b.textContent = 'Registrera min närvaro'; return; }
+            load();
+        });
         async function doCheckIn() {
             const btn = document.getElementById('ciInBtn'); btn.disabled = true;
             const d = await postJson('/umbraco/surface/ShootingRange/CheckIn', { id: RANGE_ID });
-            if (!d.success) { alert(d.message || 'Fel'); btn.disabled = false; return; }
+            if (!d.success) { showError(d.message); btn.disabled = false; return; }
             load();
         }
         async function doCheckOut(sessionId) {
             const shots = parseInt(document.getElementById('ciShots').value) || 0;
             const btn = document.getElementById('ciOutBtn'); btn.disabled = true;
             const d = await postJson('/umbraco/surface/ShootingRange/CheckOut', { sessionId, shotCount: shots });
-            if (!d.success) { alert(d.message || 'Fel'); btn.disabled = false; return; }
+            if (!d.success) { showError(d.message); btn.disabled = false; return; }
             el.innerHTML = `<div class="text-center py-3">
                 <i class="bi bi-check-circle-fill text-success" style="font-size:2.5rem"></i>
                 <p class="mt-2 mb-0">Tack! Utcheckad${shots ? ' – ' + shots + ' skott registrerade' : ''}.</p></div>`;
