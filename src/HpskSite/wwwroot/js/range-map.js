@@ -1,10 +1,8 @@
 /*
  * En skjutbanas karta — samma form som tävlingssidans (Views/Competition.cshtml, "Skjutbana:"):
  * OpenStreetMap, en röd punkt, zoom 14 och en Vägbeskrivning-länk till Google Maps.
- * Används av banans egen sida (/skjutbana/{id}) och klubbsidans flik Banor (2026-10-11).
- *
- * ⚠️ Tävlingssidan har kvar sin egen kopia tills branchen sajtstruktur är sammanslagen (den filen är
- * ändrad där). Byt den då till hpskRangeMap.render — en tredje kopia ska inte uppstå.
+ * Används av banans egen sida (/skjutbana/{id}), klubbsidans flik Banor, tävlingssidan och
+ * händelsesidan (2026-10-11). Skriv ingen egen kopia av kartan — anropa render.
  *
  * Kräver Leaflet (L). Kartan ritas först när behållaren syns: Leaflet räknar fel i en dold ruta,
  * så anroparen kallar refresh() när fliken eller delen visas.

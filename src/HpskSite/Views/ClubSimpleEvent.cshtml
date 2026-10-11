@@ -6,6 +6,7 @@
 @inject HpskSite.Services.AdminAuthorizationService AuthorizationService
 @inject HpskSite.Services.Events.IClubEventStore Events
 @inject HpskSite.Services.Events.CompetitionEventLinkService CompetitionLinks
+@inject HpskSite.Services.RangeCalendarService RangeCalendar
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -57,6 +58,9 @@
         .OrderBy(c => c.Date ?? DateTime.MaxValue).ThenBy(c => c.Name)
         .ToList();
     var quickLinksJson = string.IsNullOrWhiteSpace(ev.QuickLinksJson) ? "[]" : ev.QuickLinksJson;
+    // Skjutbanan (ClubEventRange, banans kalender). Länken leder till banans egen sida.
+    var eventRangeId = 0;
+    try { eventRangeId = RangeCalendar.GetEventRange(ev.Id)?.RangeId ?? 0; } catch { }
 
     // Event type display helpers
     string GetEventTypeColor(string type) => type switch
@@ -471,14 +475,21 @@
                         }
 
                         <!-- Venue -->
-                        @if (!string.IsNullOrEmpty(venue))
+                        @if (!string.IsNullOrEmpty(venue) || eventRangeId > 0)
                         {
                             <div class="col-md-6 mb-3">
                                 <div class="d-flex align-items-start">
                                     <i class="bi bi-geo-alt fs-4 me-3" style="color: @eventTypeColor;"></i>
                                     <div>
                                         <small class="text-secondary d-block">Plats</small>
-                                        <strong>@venue</strong>
+                                        @if (!string.IsNullOrEmpty(venue))
+                                        {
+                                            <strong>@venue</strong>
+                                        }
+                                        @if (eventRangeId > 0)
+                                        {
+                                            <a id="eventRangeLink" href="/skjutbana/@eventRangeId" class="d-block small mt-1"><i class="bi bi-bullseye me-1"></i>Om banan och banans kalender</a>
+                                        }
                                     </div>
                                 </div>
                             </div>
