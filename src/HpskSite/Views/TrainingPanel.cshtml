@@ -62,7 +62,16 @@
                     <dt>När</dt>
                     <dd>@WhenText(m, sv)</dd>
                 }
-                @if (!string.IsNullOrEmpty(m.Venue)) { <dt>Var</dt><dd>@m.Venue</dd> }
+                @* Träningens bana leder till banans egen sida (2026-10-11). Panelen är en iframe — länken öppnas i hela fönstret. *@
+                @if (m.RangeId > 0)
+                {
+                    <dt>Var</dt>
+                    <dd>
+                        @(string.IsNullOrEmpty(m.Venue) ? m.RangeName : m.Venue)@(string.IsNullOrEmpty(m.RangeSectionLabel) ? "" : " · " + m.RangeSectionLabel)
+                        <a class="ms-1" href="/skjutbana/@m.RangeId" target="_top" id="tpRangeLink">Om banan</a>
+                    </dd>
+                }
+                else if (!string.IsNullOrEmpty(m.Venue)) { <dt>Var</dt><dd>@m.Venue</dd> }
                 @if (!string.IsNullOrEmpty(m.Discipline)) { <dt>Gren</dt><dd>@m.Discipline</dd> }
                 <dt>Skjutledare</dt><dd>@(string.IsNullOrEmpty(m.SkjutledareName) ? "Ingen utsedd än" : m.SkjutledareName)</dd>
                 @if (!string.IsNullOrEmpty(m.ClubName)) { <dt>Klubb</dt><dd>@m.ClubName</dd> }
@@ -129,8 +138,12 @@
     <script>
         // Höjden till dialogen, så att panelen aldrig får en egen rullningslist inne i en annan.
         (function () {
+            // ⚠️ INNEHÅLLETS höjd, inte documentElement.scrollHeight: den är aldrig mindre än ramen
+            // själv, så dialogen kunde bara växa — drog man i textrutan blev den längre och längre
+            // och krympte aldrig igen (Anders, Hästveda, 2026-10-11).
             function send() {
-                try { parent.postMessage({ hpskTrainingPanelHeight: document.documentElement.scrollHeight }, location.origin); } catch (e) { }
+                var h = Math.ceil(document.body.getBoundingClientRect().height);
+                try { parent.postMessage({ hpskTrainingPanelHeight: h }, location.origin); } catch (e) { }
             }
             if (window.ResizeObserver) new ResizeObserver(send).observe(document.body);
             window.addEventListener('load', send);

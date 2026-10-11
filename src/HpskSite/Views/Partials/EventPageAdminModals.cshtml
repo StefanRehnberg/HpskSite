@@ -57,9 +57,11 @@
                     <input type="text" class="form-control" id="editEventDate">
                 </div>
                 <h6 class="text-primary">Plats och beskrivning</h6>
+                @await Html.PartialAsync("_RangePlaceField", "editDetails")
                 <div class="mb-3">
-                    <label for="editVenue" class="form-label">Plats</label>
+                    <label for="editVenue" class="form-label">Plats (text)</label>
                     <input type="text" class="form-control" id="editVenue">
+                    <div class="form-text">Visas på händelsens sida. Fylls i med banans namn när du väljer en skjutbana.</div>
                 </div>
                 <div class="mb-3">
                     <label for="editDescription" class="form-label">Beskrivning</label>
@@ -311,6 +313,17 @@ function loadEventAdminData() {
             document.getElementById('editTargetAudience').value = d.targetAudience || '';
             document.getElementById('editEquipmentRequired').value = d.equipmentRequired || '';
             hpskEventRegFill('edit', d);
+            // Skjutbanan: ägarens banor (en klubbs händelse) eller sök (kretsens). Det lagrade valet.
+            if (window.hpskRangePlace) {
+                window.hpskRangePlace.mount('editDetails', {
+                    clubId: d.ownerClubId || 0, venueId: 'editVenue', kind: 'event', watchIds: ['editEventDate'],
+                    read: function () {
+                        var raw = (document.getElementById('editEventDate').value || '').trim();
+                        return { date: raw.substring(0, 10), start: raw.length > 10 ? raw.substring(11, 16) : '' };
+                    }
+                });
+                window.hpskRangePlace.set('editDetails', { rangeId: d.rangeId || 0, sectionId: d.rangeSectionId, isNew: false, excludeId: eventPageId });
+            }
             // Säg ifrån i förväg i stället för att låta kryssrutan se ut att fungera och tyst
             // återgå vid nästa laddning: SetValue på en saknad egenskap gör ingenting.
             if (d.mandatoryPropertyExists === false) {
@@ -465,6 +478,12 @@ function saveEventDetails() {
     formData.append('eventEndDate', document.getElementById('editEventEndDate').value);
     formData.append('equipmentRequired', document.getElementById('editEquipmentRequired').value);
     formData.append('targetAudience', document.getElementById('editTargetAudience').value);
+    // Skjutbanan. Inte inläst (null) → skickas inte, och servern rör inte den lagrade banan.
+    var place = window.hpskRangePlace ? window.hpskRangePlace.value('editDetails') : { rangeId: null };
+    if (place.rangeId !== null) {
+        formData.append('rangeId', getEditEventTypeValue() === 'Nyhet' ? 0 : place.rangeId);
+        if (place.sectionId) formData.append('rangeSectionId', place.sectionId);
+    }
     hpskEventRegAppend('edit', formData);
     formData.append('__RequestVerificationToken', getAntiForgeryToken());
 

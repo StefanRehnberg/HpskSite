@@ -171,9 +171,23 @@ else
                 <label class="btn btn-outline-secondary" for="fNotRec">Ej avprickade</label>
             </div>
             <span class="text-muted small ms-auto" id="deskShowing"></span>
-            <button type="button" class="btn btn-sm btn-primary" onclick="deskAddOpen()">
-                <i class="bi bi-person-plus me-1"></i>Lägg till deltagare
-            </button>
+            @* Sidans åtgärder i EN blå meny. ⚠️ Närvaro-QR:n stod förr i den gamla listan och försvann
+               med den (56b8364, 2026-09-20) — funktionen fanns, men ingen kunde nå den. *@
+            <div class="dropdown" id="deskActions">
+                <button type="button" class="btn btn-sm btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-sliders me-1"></i>Åtgärder
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><button class="dropdown-item" type="button" onclick="deskAddOpen()">
+                        <i class="bi bi-person-plus me-2"></i>Lägg till deltagare</button></li>
+                    <li><a class="dropdown-item" id="deskQrLink" target="_blank" rel="noopener"
+                           href="/umbraco/surface/ClubEvent/PrintAttendanceQr?eventId=@desk.EventId&kind=@desk.Kind">
+                        <i class="bi bi-qr-code me-2"></i>Skriv ut närvaro-QR</a></li>
+                    <li><span class="dropdown-item-text small text-muted" style="white-space:normal;max-width:18rem">
+                        Deltagarna skannar affischen och registrerar sin närvaro själva. Har tillfället en
+                        skjutbana fungerar även banans egen QR-kod.</span></li>
+                </ul>
+            </div>
         </div>
 
         <div class="card">

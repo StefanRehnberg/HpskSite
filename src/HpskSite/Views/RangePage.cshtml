@@ -1,0 +1,274 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Skjutbana";
+    var rangeId = ViewData["RangePageId"] as int? ?? 0;
+}
+@*
+    Banans egen sida, /skjutbana/{id} (2026-10-11). Ersätter modalen över kartan på /skjutbanor, som
+    hade sex flikar och inte gick att länka till.
+
+    SKALET = Ekonomins och Min kurs (samma värden som .ek-page .rail och /styrelse): vänsterkort med
+    banans namn och din roll, ← Skjutbanor och delarna. Rälsen = platser, blå Åtgärder = handlingar
+    för den del man står på, grå Åtgärder per rad. Delen står i adressen (#vy=…), så bakåtknappen och
+    länkar i mejl landar rätt. All logik i /js/range-page.js; kalendern i /js/range-calendar.js.
+
+    ⚠️ Kalenderns markup finns ALLTID i sidan (#rpCalPart), bara dold: range-calendar.js binder sina
+    lyssnare när skriptet laddas, och elementen måste finnas då.
+*@
+<link rel="stylesheet" href="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+@await Html.PartialAsync("_CalendarShared")
+<style>
+    /* ── Skalet: samma värden som Ekonomin (.ek-page .rail), Min kurs och /styrelse. */
+    .rp-page { padding-bottom: 5.5rem; }
+    .rp-page .rp-shell { display: flex; gap: 1.5rem; align-items: flex-start; }
+    .rp-page .rp-rail { width: 250px; flex-shrink: 0; position: sticky; top: 1rem;
+        background-color: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color);
+        border-radius: .5rem; padding: 8px; }
+    .rp-page .rp-rail .rp-org { font-size: 1.1rem; font-weight: 700; padding: 6px 12px 0; overflow-wrap: anywhere; }
+    .rp-page .rp-rail .rp-role { font-size: .8rem; color: var(--bs-secondary-color); padding: 0 12px 10px; }
+    .rp-page .rp-rail a.rp-nav { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;
+        border-radius: 8px; color: var(--bs-body-color); text-decoration: none; border-left: 3px solid transparent; }
+    .rp-page .rp-rail a.rp-nav:hover { background-color: var(--bs-secondary-bg); }
+    .rp-page .rp-rail a.rp-nav.on { font-weight: 600; background-color: var(--bs-primary-bg-subtle);
+        color: var(--bs-primary-text-emphasis); border-left-color: var(--bs-primary); }
+    .rp-page .rp-rail a.rp-back { display: block; color: var(--bs-secondary-color); font-size: .9rem; padding: 6px 12px 10px;
+        margin-bottom: 6px; border-bottom: 1px solid var(--bs-border-color); text-decoration: none; }
+    .rp-page .rp-rail a.rp-back:hover { color: var(--bs-link-color); }
+    .rp-page .rp-rail .rp-group { font-size: .72rem; letter-spacing: .04em; text-transform: uppercase;
+        color: var(--bs-secondary-color); padding: 10px 12px 2px; border-top: 1px solid var(--bs-border-color); margin-top: 6px; }
+    .rp-page .rp-rail .rp-count { background: var(--bs-warning); color: #1b1206; font-size: .72rem; font-weight: 700;
+        border-radius: 1rem; padding: .05rem .5rem; }
+    .rp-page .rp-main { flex: 1 1 auto; min-width: 0; }
+    .rp-page .rp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;
+        flex-wrap: wrap; margin-bottom: 1rem; }
+    .rp-page h1 { font-size: 1.6rem; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
+    .rp-page .rp-sub { color: var(--bs-secondary-color); margin-top: .15rem; }
+    @@media (max-width: 991px) {
+        .rp-page .rp-shell { flex-direction: column; }
+        .rp-page .rp-rail { width: 100%; position: static; display: flex; flex-wrap: wrap; gap: .2rem; align-items: center; }
+        .rp-page .rp-rail .rp-org, .rp-page .rp-rail .rp-role, .rp-page .rp-rail .rp-back, .rp-page .rp-rail .rp-group { width: 100%; }
+        .rp-page .rp-rail .rp-group { border-top: 0; margin-top: 0; padding-top: 4px; }
+        .rp-page .rp-rail a.rp-nav { border-left: 0; gap: .4rem; }
+        .rp-page .rp-rail a.rp-nav.on { border-left: 0; box-shadow: inset 0 -3px 0 var(--bs-primary); }
+        .rp-page .rp-main { width: 100%; }
+    }
+
+    /* ── Innehållet */
+    .rp-card { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: .75rem;
+        padding: 1rem 1.15rem; margin-bottom: 1rem; }
+    .rp-cardh { display: flex; justify-content: space-between; align-items: baseline; gap: .75rem; flex-wrap: wrap; margin-bottom: .6rem; }
+    /* Alla kortrubriker, även de som står inuti en flexrad (incheckningskortet). */
+    .rp-card h2 { font-size: 1.1rem; font-weight: 700; margin: 0 0 .5rem; }
+    .rp-cardh h2 { margin: 0; }
+    .rp-help { color: var(--bs-secondary-color); }
+    .rp-todo { display: flex; align-items: center; gap: .8rem; border-radius: .5rem; padding: .5rem .8rem; margin-bottom: .45rem;
+        border: 1px solid var(--bs-border-color); background: var(--bs-tertiary-bg); }
+    .rp-todo.warn { background: var(--bs-warning-bg-subtle); border-color: var(--bs-warning-border-subtle); }
+    .rp-todo.danger { background: var(--bs-danger-bg-subtle); border-color: var(--bs-danger-border-subtle); }
+    .rp-todo .t { flex: 1; min-width: 0; }
+    .rp-facts dt { font-weight: 600; font-size: .85rem; color: var(--bs-secondary-color); }
+    .rp-facts dd { margin-bottom: .6rem; }
+    .rp-map { height: 260px; border-radius: .5rem; border: 1px solid var(--bs-border-color); }
+    .rp-state { display: inline-flex; align-items: center; gap: .35rem; font-size: .8rem; font-weight: 600;
+        padding: .12rem .55rem; border-radius: 1rem; white-space: nowrap; background: var(--bs-secondary-bg); }
+    .rp-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .rp-state.ok { background: var(--bs-success-bg-subtle); color: var(--bs-success-text-emphasis); }
+    .rp-state.wait { background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); }
+    .rp-state.bad { background: var(--bs-danger-bg-subtle); color: var(--bs-danger-text-emphasis); }
+    .rp-table th { font-size: .75rem; letter-spacing: .04em; text-transform: uppercase; color: var(--bs-secondary-color); font-weight: 600; }
+    .rp-week-day { font-weight: 600; margin-top: .6rem; }
+    .rp-week-row { display: flex; gap: .6rem; padding: .25rem 0; }
+    .rp-week-row .tm { flex: none; width: 6.2rem; font-variant-numeric: tabular-nums; color: var(--bs-secondary-color); }
+    .rp-week-row .rc-sw { margin-top: .25rem; }
+    .rp-hours { display: flex; align-items: flex-end; height: 64px; gap: 1px; border-bottom: 1px solid var(--bs-border-color); }
+
+    /* ── Kalendern (flyttad hit från den fristående kalendersidan) */
+    .rc-chip { border-left: 3px solid var(--rc-c, var(--bs-secondary)); background: color-mix(in srgb, var(--rc-c, var(--bs-secondary)) 16%, var(--bs-body-bg)); }
+    .rc-chip.rc-alloc { border-left-style: dashed; background: transparent; color: var(--bs-secondary-color); }
+    .rc-chip i { margin-right: .2rem; }
+    .rc-more { font-size: .72rem; color: var(--bs-secondary-color); margin-top: .1rem; }
+    .rc-sw { display: inline-block; width: .9rem; height: .9rem; border-radius: .2rem; border-left: 3px solid var(--rc-c); background: color-mix(in srgb, var(--rc-c) 16%, var(--bs-body-bg)); box-shadow: 0 0 0 1px var(--bs-border-color); vertical-align: -2px; flex: none; }
+    .rc-legend span { display: inline-flex; align-items: center; gap: .3rem; margin: 0 .9rem .3rem 0; font-size: .85rem; }
+    .rc-day-row { display: flex; gap: .75rem; padding: .55rem 0; border-top: 1px solid var(--bs-border-color); align-items: flex-start; }
+    .rc-day-time { flex: none; width: 6.5rem; font-variant-numeric: tabular-nums; }
+    .rc-day-row .rc-sw { margin-top: .2rem; }
+    .rc-filters .form-check { margin-right: 1rem; }
+    .rc-cancel { text-decoration: line-through; opacity: .65; }
+    @@media (max-width: 575.98px) { .rc-day-time { width: 4.6rem; } .rp-week-row .tm { width: 4.6rem; } }
+</style>
+
+<div class="rp-page container-fluid py-4" id="rpApp" data-range-id="@rangeId">
+    @Html.AntiForgeryToken()
+    <div class="rp-shell">
+        <nav class="rp-rail" aria-label="Banans delar">
+            <a href="/skjutbanor" class="rp-back">← Skjutbanor</a>
+            <div class="rp-org" id="rpName">Skjutbana</div>
+            <div class="rp-role" id="rpRole">&nbsp;</div>
+            <div id="rpRail" style="display:contents"></div>
+        </nav>
+        <div class="rp-main">
+            <div class="rp-head">
+                <div>
+                    <h1 id="rpTitle">Skjutbana</h1>
+                    <div class="rp-sub" id="rpSub"></div>
+                </div>
+                <div class="dropdown d-none" id="rpActions">
+                    <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-sliders me-1"></i>Åtgärder
+                    </button>
+                    @* Menyn byggs PER DEL och bär bara handlingar för delen man står på — aldrig en plats rälsen redan har. *@
+                    <ul class="dropdown-menu dropdown-menu-end" style="min-width:270px" id="rpActionsList"></ul>
+                </div>
+            </div>
+            <div id="rpMsg" aria-live="polite"></div>
+            <div id="rpBody"><div class="text-center py-5"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
+
+            @* ── Delen Kalender (range-calendar.js). Dold tills delen väljs. *@
+            <div id="rpCalPart" class="d-none">
+                <div id="rcApp" data-range-id="@rangeId">
+                    <div id="rcMsg" aria-live="polite"></div>
+                    <div class="rp-card kc-wrap">
+                        <div class="kc-head">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-rc="prev" aria-label="Föregående månad">‹</button>
+                            <h3 id="rcMonthLabel">&nbsp;</h3>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-rc="next" aria-label="Nästa månad">›</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-rc="today">I dag</button>
+                            <div class="btn-group btn-group-sm ms-auto" role="group" aria-label="Visning">
+                                <input type="radio" class="btn-check" name="rcView" id="rcViewMonth" value="month" checked>
+                                <label class="btn btn-outline-primary" for="rcViewMonth">Månad</label>
+                                <input type="radio" class="btn-check" name="rcView" id="rcViewList" value="list">
+                                <label class="btn btn-outline-primary" for="rcViewList">Lista</label>
+                            </div>
+                        </div>
+                        <div class="rc-filters d-flex flex-wrap align-items-center mb-2" id="rcFilters">
+                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="rcK_competition" checked><label class="form-check-label" for="rcK_competition"><i class="bi bi-trophy me-1"></i>Tävlingar</label></div>
+                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="rcK_training" checked><label class="form-check-label" for="rcK_training"><i class="bi bi-bullseye me-1"></i>Träningar</label></div>
+                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="rcK_event" checked><label class="form-check-label" for="rcK_event"><i class="bi bi-calendar-event me-1"></i>Händelser</label></div>
+                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="rcK_allocation" checked><label class="form-check-label" for="rcK_allocation"><i class="bi bi-clock me-1"></i>Fasta tider</label></div>
+                            <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="rcK_external" checked><label class="form-check-label" for="rcK_external"><i class="bi bi-person-badge me-1"></i>Andras bokningar</label></div>
+                            <div class="form-check form-switch d-none" id="rcMineWrap"><input class="form-check-input" type="checkbox" id="rcMine"><label class="form-check-label" for="rcMine">Bara min klubb</label></div>
+                            <div class="d-none ms-sm-auto" id="rcSectionWrap">
+                                <label class="visually-hidden" for="rcSection">Bana / vall</label>
+                                <select class="form-select form-select-sm" id="rcSection"></select>
+                            </div>
+                        </div>
+                        <div class="rc-legend mb-2" id="rcLegend"></div>
+                        <div id="rcBody"><div class="text-center py-5"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
+                        <div id="rcDay" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* EN dialog för frågor (i stället för confirm()) och EN för formulär. *@
+<div class="modal fade" id="rpConfirmModal" tabindex="-1" aria-hidden="true" aria-labelledby="rpConfirmTitle">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header"><h2 class="modal-title h5" id="rpConfirmTitle"></h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button></div>
+            <div class="modal-body" id="rpConfirmText" style="white-space:pre-line;"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="rpConfirmOk">OK</button>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="rpFormModal" tabindex="-1" aria-hidden="true" aria-labelledby="rpFormTitle">
+    <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header"><h2 class="modal-title h5" id="rpFormTitle"></h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button></div>
+            <div class="modal-body">
+                <div class="alert alert-danger d-none" id="rpFormErr" role="alert"></div>
+                <div id="rpFormBody"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="rpFormOk">Spara</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Kalenderns två dialoger: prenumerera och bokning för andra. *@
+<div class="modal fade" id="rcIcsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5">Prenumerera på banans kalender</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p>Lägg in banans kalender i telefonens eller datorns kalender. Den uppdateras av sig själv några gånger om dygnet.</p>
+                <ul class="small text-muted">
+                    <li>Tävlingar, träningar, händelser och andras bokningar tas med. Klubbarnas fasta tider gör det inte — de hade fyllt varje vardag.</li>
+                    <li>Dela länken bara med medlemmar: den visar vad som händer på banan.</li>
+                </ul>
+                <div id="rcIcsBody"><div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"></div></div></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="rcExtModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="rcExtTitle">Lägg in en bokning för andra</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">För dem som använder banan utan pistol.nu — jaktskytteklubben, polisen, en kurs utifrån.
+                    Bokningen syns i banans kalender, så klubbarna ser att banan är upptagen.</p>
+                <input type="hidden" id="rcExtId">
+                <div class="mb-3">
+                    <label class="form-label" for="rcExtWho">Vem har bokat?</label>
+                    <input class="form-control" id="rcExtWho" maxlength="200" autocomplete="off" placeholder="Jaktskytteklubben">
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-12 col-sm-5">
+                        <label class="form-label" for="rcExtDate">Datum</label>
+                        <input class="form-control" id="rcExtDate" autocomplete="off">
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label" for="rcExtStart">Från</label>
+                        <input class="form-control" id="rcExtStart" autocomplete="off" placeholder="10" data-hpsk-time inputmode="decimal">
+                    </div>
+                    <div class="col-6 col-sm-4">
+                        <label class="form-label" for="rcExtEnd">Till</label>
+                        <input class="form-control" id="rcExtEnd" autocomplete="off" placeholder="14" data-hpsk-time inputmode="decimal">
+                    </div>
+                </div>
+                <div class="form-text mb-3">Utan tider gäller bokningen hela dagen.</div>
+                <div class="mb-3 d-none" id="rcExtSectionWrap">
+                    <label class="form-label" for="rcExtSection">Bana / vall</label>
+                    <select class="form-select" id="rcExtSection"></select>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label" for="rcExtNote">Anteckning (valfri)</label>
+                    <input class="form-control" id="rcExtNote" maxlength="500" autocomplete="off">
+                </div>
+                <div id="rcExtErr" class="text-danger small"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="rcExtSave">Spara bokningen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@await Html.PartialAsync("_RangeEditModal")
+<script src="~/js/range-map.js" asp-append-version="true"></script>
+<script src="~/js/range-calendar.js" asp-append-version="true"></script>
+<script src="~/js/range-page.js" asp-append-version="true"></script>
