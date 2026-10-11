@@ -4762,8 +4762,14 @@ let _faltSelectedYear = null;
 
 function _faltHeadline(row) {
     return row.mode === 'Poangfalt'
-        ? `${row.totalHits + row.totalFigures} p`
+        ? `${row.points ?? (row.totalHits + row.totalFigures)} p`
         : `${row.totalHits}/${row.totalFigures}`;
+}
+// Bara poäng känd → ingen procent. Visa ett streck, aldrig 0 %.
+function _faltPct(v) {
+    return (v === null || v === undefined)
+        ? '<span class="text-muted" title="Bara poäng angiven — träff och figurer är okända">—</span>'
+        : `${v.toFixed(1)} %`;
 }
 function _faltSourceIcon(row) {
     return row.source === 'Hosted'
@@ -4855,8 +4861,8 @@ function renderFaltskytteResultsTable(rows) {
                             <td>${compLink}<span class="ms-1 text-muted small">· ${_faltModeLabel(r.mode)}</span></td>
                             <td><span class="badge bg-secondary">${escapeHtml(r.shootingClassName || r.shootingClass)}</span></td>
                             <td class="text-end fw-semibold">${_faltHeadline(r)}</td>
-                            <td class="text-end ${hitClass}">${r.hitPercent.toFixed(1)} %</td>
-                            <td class="text-end">${r.figurePercent.toFixed(1)} %</td>
+                            <td class="text-end ${hitClass}">${_faltPct(r.hitPercent)}</td>
+                            <td class="text-end">${_faltPct(r.figurePercent)}</td>
                             <td class="text-center">${_faltPlacementChip(r.placement, r.participants)}</td>
                             <td class="text-center">${_faltMedalIcon(r.standardMedal)}${_faltProofCue(r)}</td>
                             <td class="text-center">${actions}</td>
@@ -4939,6 +4945,7 @@ function renderFaltskytteDashboard(data) {
                                 <div class="pct-bar mb-1"><div style="width:${Math.min(100, w.hitPercent)}%"></div></div>
                             `).join('') || '<div class="text-muted text-center py-2">—</div>'}
                         </div>
+                        ${stats.pointsOnlyCount > 0 ? `<small class="text-muted d-block mt-1">${stats.pointsOnlyCount} tävl. med bara poäng ingår inte</small>` : ''}
                         ${trendHtml ? '<hr class="my-2">' + trendHtml : ''}
                     </div>
                 </div>
@@ -5050,7 +5057,9 @@ function renderFaltskytteChart(metric, btn) {
     // Filter to selected year and points where metric is available.
     const points = (dashboardData.chartData || [])
         .filter(p => p.year === _faltSelectedYear)
-        .filter(p => metric !== 'placement' || p.placementPercent !== null);
+        .filter(p => metric !== 'placement' || p.placementPercent !== null)
+        // Bara poäng känd → ingen träff-/figurprocent att rita.
+        .filter(p => metric === 'placement' || (metric === 'hit' ? p.hitPercent != null : p.figurePercent != null));
 
     // Group by weapon group → one dataset per group, scatter style.
     const groupColors = { 'C': '#0d6efd', 'A': '#dc3545', 'A_Opt': '#fd7e14', 'B': '#198754', 'R': '#6f42c1', 'M': '#20c997' };
