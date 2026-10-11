@@ -529,7 +529,7 @@ window.currentClubId = clubId;
                                     const times = r.allocations.length
                                         ? r.allocations.map(a => `<span class="badge bg-info-subtle text-info-emphasis me-1 mb-1">${DAYS[a.dayOfWeek]} ${a.startTime}–${a.endTime}${a.note ? ' (' + esc(a.note) + ')' : ''}</span>`).join('')
                                         : '<span class="text-muted small">Inga tider angivna.</span>';
-                                    return `<div class="mb-2"><a href="/skjutbanor?range=${r.id}" class="fw-semibold text-decoration-none" onclick="return crNameClick(${r.id})">${esc(r.name)}</a>${r.city ? ' <span class="text-muted small">· ' + esc(r.city) + '</span>' : ''}<div class="mt-1">${times}</div></div>`;
+                                    return `<div class="mb-2"><a href="/skjutbanor?range=${r.id}" class="fw-semibold text-decoration-none" onclick="return crNameClick(${r.id})">${esc(r.name)}</a>${r.city ? ' <span class="text-muted small">· ' + esc(r.city) + '</span>' : ''}<a href="/skjutbana/kalender?r=${r.id}" class="btn btn-sm btn-outline-primary ms-2 py-0"><i class="bi bi-calendar3 me-1"></i>Banans kalender</a><div class="mt-1">${times}</div></div>`;
                                 }).join('');
                                 // Build immediately if the Banor tab is already active; otherwise on first show
                                 // (Leaflet needs a sized, visible container to zoom correctly).

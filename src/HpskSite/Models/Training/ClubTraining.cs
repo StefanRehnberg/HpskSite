@@ -38,6 +38,8 @@ namespace HpskSite.Models.Training
         public string Name { get; set; } = "";
         public string? Venue { get; set; }
         public int? RangeId { get; set; }
+        /// <summary>Bana/vall på skjutbanan (RangeSection). NULL = hela banan. Syns i banans kalender.</summary>
+        public int? RangeSectionId { get; set; }
         public int? SkjutledareMemberId { get; set; }
         public string? Description { get; set; }
         public bool IsCancelled { get; set; }

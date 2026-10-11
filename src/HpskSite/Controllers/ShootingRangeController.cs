@@ -783,6 +783,8 @@ namespace HpskSite.Controllers
                 comp.SetValue("rangeId", req.RangeId > 0 ? req.RangeId : 0);
                 _contentService.Save(comp);
                 if (comp.Published) _contentService.Publish(comp, new[] { "*" }, -1);
+                // Banans kalender läser tävlingarna ur ett index som annars lever två minuter.
+                AppCaches.RuntimeCache.Clear(RangeCalendarService.CompetitionIndexKey);
 
                 return Json(new { success = true });
             }

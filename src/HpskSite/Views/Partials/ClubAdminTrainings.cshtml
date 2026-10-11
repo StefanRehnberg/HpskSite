@@ -124,9 +124,11 @@
                     <label class="form-label" for="ctrDiscipline">Gren</label>
                     <select class="form-select" id="ctrDiscipline" data-ctr-disciplines></select>
                 </div>
+                @await Html.PartialAsync("_RangePlaceField", "ctr")
                 <div class="mb-3">
-                    <label class="form-label" for="ctrVenue">Plats</label>
+                    <label class="form-label" for="ctrVenue">Plats (text)</label>
                     <input class="form-control" id="ctrVenue" autocomplete="off" placeholder="Inomhushallen, bana 1–10">
+                    <div class="form-text">Visas för medlemmarna. Fylls i med banans namn — skriv gärna mer exakt var ni är.</div>
                 </div>
                 <div class="mb-3">
                     <label class="form-label" for="ctrLeader">Skjutledare</label>
@@ -536,7 +538,29 @@
             fb.classList.toggle('d-none', following === 0);
             fb.textContent = 'Spara den här och ' + following + ' kommande';
             document.getElementById('ctrSaveTraining').textContent = following > 0 ? 'Spara bara den här' : 'Spara';
-            bootstrap.Modal.getOrCreateInstance(document.getElementById('ctrTrainingModal')).show();
+            // Skjutbanan: förvald för en ny träning, det lagrade valet vid redigering. Dialogen visas
+            // först när valet är inläst — annars kan en snabb sparning skicka "ingen bana".
+            mountPlace();
+            var placeReady = window.hpskRangePlace
+                ? window.hpskRangePlace.set('ctr', { rangeId: t ? (t.rangeId || 0) : 0, sectionId: t ? t.rangeSectionId : null, isNew: !t, excludeId: t ? t.id : 0 })
+                : Promise.resolve();
+            placeReady.then(function () {
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('ctrTrainingModal')).show();
+            });
+        });
+    }
+    function mountPlace() {
+        if (!window.hpskRangePlace) return;
+        window.hpskRangePlace.mount('ctr', {
+            clubId: clubId(), venueId: 'ctrVenue', kind: 'training',
+            watchIds: ['ctrDate', 'ctrStart', 'ctrEnd'],
+            read: function () {
+                return {
+                    date: document.getElementById('ctrDate').value,
+                    start: document.getElementById('ctrStart').value,
+                    end: document.getElementById('ctrEnd').value
+                };
+            }
         });
     }
     // Lånevapen bokas på anmälningskortet, så de kräver anmälan. Saknar klubben lånebara vapen sägs det.
@@ -552,7 +576,11 @@
         var btn = document.getElementById(scope === 'following' ? 'ctrSaveFollowing' : 'ctrSaveTraining');
         btn.disabled = true;
         var max = document.getElementById('ctrMax').value;
+        // null = valet hann inte läsas in → servern rör inte banan.
+        var place = window.hpskRangePlace ? window.hpskRangePlace.value('ctr') : { rangeId: null, sectionId: null };
         post('/umbraco/surface/ClubTraining/Save', {
+            rangeId: place.rangeId,
+            rangeSectionId: place.sectionId,
             id: parseInt(document.getElementById('ctrId').value, 10) || 0,
             clubId: clubId(),
             name: document.getElementById('ctrName').value,

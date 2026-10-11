@@ -45,6 +45,10 @@ namespace HpskSite.Services.Training
             public string? Discipline { get; set; }
             public string DisciplineLabel { get; set; } = "";
             public string? Venue { get; set; }
+            /// <summary>Skjutbanan (banans kalender). null = ingen bana vald.</summary>
+            public int? RangeId { get; set; }
+            /// <summary>Bana/vall på skjutbanan. null = hela banan.</summary>
+            public int? RangeSectionId { get; set; }
             public string? Description { get; set; }
             public int? SkjutledareMemberId { get; set; }
             public string SkjutledareName { get; set; } = "";
@@ -172,6 +176,8 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
                 Discipline = t.Discipline,
                 DisciplineLabel = ActivityDiscipline.Label(t.Discipline),
                 Venue = t.Venue,
+                RangeId = t.RangeId,
+                RangeSectionId = t.RangeSectionId,
                 Description = t.Description,
                 SkjutledareMemberId = t.SkjutledareMemberId,
                 SkjutledareName = NameOf(t.SkjutledareMemberId),
@@ -198,6 +204,14 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             public string? EndTime { get; set; }
             public string? Discipline { get; set; }
             public string? Venue { get; set; }
+            /// <summary>
+            /// Skjutbanan. ⚠️ null = RÖR INTE (en äldre klient som inte känner fältet får aldrig nolla
+            /// ett val); 0 = ingen bana; &gt; 0 = den banan. Kontrollern prövar att banan finns och att
+            /// vallen hör till den innan något sparas.
+            /// </summary>
+            public int? RangeId { get; set; }
+            /// <summary>Bana/vall. Läses bara när <see cref="RangeId"/> skickas; 0/null = hela banan.</summary>
+            public int? RangeSectionId { get; set; }
             public string? Description { get; set; }
             public int? SkjutledareMemberId { get; set; }
             /// <summary>Strängar ("1"/"0"), eftersom "1" inte binder till bool i ASP.NET Core.</summary>
@@ -250,6 +264,11 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             t.EndTime = end;
             t.Discipline = NormaliseDiscipline(input.Discipline);
             t.Venue = Blank(input.Venue);
+            if (input.RangeId != null)
+            {
+                t.RangeId = input.RangeId > 0 ? input.RangeId : null;
+                t.RangeSectionId = t.RangeId != null && input.RangeSectionId is > 0 ? input.RangeSectionId : null;
+            }
             t.Description = Blank(input.Description);
             t.SkjutledareMemberId = input.SkjutledareMemberId is > 0 ? input.SkjutledareMemberId : null;
             t.RegistrationRequired = IsTrue(input.RegistrationRequired);
@@ -539,7 +558,7 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
                 {
                     ClubId = src.ClubId, ScheduleId = seriesId, Date = day,
                     StartTime = src.StartTime, EndTime = src.EndTime, Discipline = src.Discipline, Name = src.Name,
-                    Venue = src.Venue, RangeId = src.RangeId,
+                    Venue = src.Venue, RangeId = src.RangeId, RangeSectionId = src.RangeSectionId,
                     SkjutledareMemberId = leader is > 0 ? leader : src.SkjutledareMemberId,
                     Description = src.Description, IsCancelled = false,
                     RegistrationRequired = src.RegistrationRequired, MaxParticipants = src.MaxParticipants,
@@ -615,12 +634,13 @@ WHERE s.Id = @0", seriesId);
             using var db = _databaseFactory.CreateDatabase();
             var t = db.SingleOrDefault<ClubTraining>("WHERE Id = @0", trainingId);
             if (t?.ScheduleId is not > 0) return 0;
+            // Banan och vallen följer med: en serie flyttar till en annan bana i sin helhet.
             return db.Execute(@"UPDATE dbo.ClubTraining SET Name = @2, StartTime = @3, EndTime = @4, Discipline = @5,
     Venue = @6, Description = @7, RegistrationRequired = @8, MaxParticipants = @9, LoanWeaponsOffered = @10,
-    IsMandatory = @11, UpdatedDate = GETDATE()
+    IsMandatory = @11, RangeId = @12, RangeSectionId = @13, UpdatedDate = GETDATE()
 WHERE ScheduleId = @0 AND [Date] > @1 AND [Date] >= CAST(GETDATE() AS date)",
                 t.ScheduleId, t.Date.Date, t.Name, t.StartTime, t.EndTime, t.Discipline, t.Venue, t.Description,
-                t.RegistrationRequired, t.MaxParticipants, t.LoanWeaponsOffered, t.IsMandatory);
+                t.RegistrationRequired, t.MaxParticipants, t.LoanWeaponsOffered, t.IsMandatory, t.RangeId, t.RangeSectionId);
         }
 
         /// <summary>Klubbens träningar att kopiera från: en rad per serie (senaste tillfället) och varje fristående träning.</summary>

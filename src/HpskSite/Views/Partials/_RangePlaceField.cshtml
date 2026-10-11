@@ -1,0 +1,39 @@
+@model string
+@{
+    // Model = id-prefix, så två dialoger på samma sida inte delar element (t.ex. "ctr", "clubEvent").
+    var p = (Model ?? "").ToString();
+}
+@*
+    Skjutbana + bana/vall för en träning eller händelse (banans kalender, 2026-10-11).
+
+    ⚠️ FÖRVALT, inte ett extra steg: klubbens ägda bana eller huvudbana — eller den enda banan — är
+    vald redan när dialogen öppnas för en NY träning/händelse. De flesta klubbar har en eller två banor,
+    och då kostar kopplingen inget klick. Vid redigering visas det lagrade valet, även "Ingen skjutbana".
+
+    ⚠️ Krock är en VARNING, aldrig en spärr: rutan under väljaren visar vad annat som händer på banan
+    samma dag, och markerar det som går omlott i tid och vall. pistol.nu ser bara det som läggs in här.
+
+    Dolda fält med name="rangeId"/"rangeSectionId" följer med en FormData(form) av sig själva; en
+    dialog som bygger sin begäran för hand läser hpskRangePlace.value(prefix). JS: /js/range-place.js.
+*@
+<div class="mb-3 hpsk-rp" id="@(p)rpWrap">
+    <label class="form-label" for="@(p)rpRange"><i class="bi bi-geo-alt me-1"></i>Skjutbana</label>
+    <select class="form-select" id="@(p)rpRange">
+        <option value="0">Laddar…</option>
+    </select>
+    <div class="mt-2 d-none" id="@(p)rpSearchWrap">
+        <div class="position-relative">
+            <input type="search" class="form-control" id="@(p)rpSearch" placeholder="Sök skjutbana på namn, ort eller kommun" autocomplete="off">
+            <div class="list-group position-absolute w-100 shadow d-none" id="@(p)rpResults" style="z-index:1090;max-height:240px;overflow:auto"></div>
+        </div>
+    </div>
+    <div class="mt-2 d-none" id="@(p)rpSectionWrap">
+        <label class="form-label small mb-1" for="@(p)rpSection">Bana / vall</label>
+        <select class="form-select form-select-sm" id="@(p)rpSection"></select>
+    </div>
+    <div class="form-text" id="@(p)rpHint"></div>
+    <div id="@(p)rpDay" class="mt-2" aria-live="polite"></div>
+    <input type="hidden" name="rangeId" id="@(p)rangeId" value="">
+    <input type="hidden" name="rangeSectionId" id="@(p)rangeSectionId" value="">
+</div>
+<script src="~/js/range-place.js" asp-append-version="true"></script>

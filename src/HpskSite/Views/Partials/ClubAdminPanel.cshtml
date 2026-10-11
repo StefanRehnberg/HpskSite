@@ -1046,9 +1046,11 @@
                         <small class="form-text" id="eventDateHint" style="display: none;">Valfritt för nyheter. Lämna tomt för att visa utan datum.</small>
                     </div>
                     <h6 class="text-primary">Plats och beskrivning</h6>
+                    @await Html.PartialAsync("_RangePlaceField", "clubEvent")
                     <div class="mb-3">
-                        <label class="form-label">Plats</label>
+                        <label class="form-label">Plats (text)</label>
                         <input type="text" class="form-control" id="event_venue" name="venue">
+                        <div class="form-text">Visas på händelsens sida. Fylls i med banans namn när du väljer en skjutbana.</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Beskrivning</label>
@@ -4181,6 +4183,9 @@ function toggleEventDateRequired() {
     dateInput.required = !isNyhet;
     dateLabel.textContent = isNyhet ? 'Datum (valfritt)' : 'Datum *';
     dateHint.style.display = isNyhet ? '' : 'none';
+    // En nyhet händer inte på en skjutbana — den ska aldrig hamna i banans kalender.
+    const placeWrap = document.getElementById('clubEventrpWrap');
+    if (placeWrap) placeWrap.classList.toggle('d-none', isNyhet);
 }
 
 function showCreateEventModal() {
@@ -4201,7 +4206,23 @@ function showCreateEventModal() {
     // Läget sätts FÖRE .show() och läses av shown.bs.modal-lyssnaren — samma dialog bär
     // båda presentationerna, så det går inte att avgöra ur markupen vilken som gäller.
     document.getElementById('eventModal').dataset.hpskMode = 'wizard';
-    new bootstrap.Modal(document.getElementById('eventModal')).show();
+    clubEventPlace({ isNew: true }).then(function () {
+        new bootstrap.Modal(document.getElementById('eventModal')).show();
+    });
+}
+
+// Skjutbanan i händelsedialogen (banans kalender). Klubbens förval på en ny händelse, det lagrade
+// valet vid redigering. Dialogen visas först när valet är inläst.
+function clubEventPlace(v) {
+    if (!window.hpskRangePlace) return Promise.resolve();
+    window.hpskRangePlace.mount('clubEvent', {
+        clubId: clubId, venueId: 'event_venue', kind: 'event', watchIds: ['eventDate'],
+        read: function () {
+            var raw = (document.getElementById('eventDate').value || '').trim();
+            return { date: raw.substring(0, 10), start: raw.length > 10 ? raw.substring(11, 16) : '' };
+        }
+    });
+    return window.hpskRangePlace.set('clubEvent', v);
 }
 
 function editEvent(eventId) {
@@ -4268,7 +4289,9 @@ function editEvent(eventId) {
 
     // Show modal
     document.getElementById('eventModal').dataset.hpskMode = 'tabs';
-    new bootstrap.Modal(document.getElementById('eventModal')).show();
+    clubEventPlace({ rangeId: event.rangeId || 0, sectionId: event.rangeSectionId, isNew: false, excludeId: event.id }).then(function () {
+        new bootstrap.Modal(document.getElementById('eventModal')).show();
+    });
 }
 
 function saveEvent() {
@@ -4302,6 +4325,7 @@ function saveEvent() {
 
     // Add clubId and anti-forgery token
     formData.append('clubId', clubId);
+    if (resolvedType === 'Nyhet') formData.set('rangeId', '0');
     hpskEventRegAppend('clubEvent', formData);
     formData.append('__RequestVerificationToken', getAntiForgeryToken());
 
