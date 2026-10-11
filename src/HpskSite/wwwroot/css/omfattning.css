@@ -97,3 +97,6 @@ text.l.p{font-family:var(--font-d);font-weight:700}
   .tb-btn{padding:7px 10px;font-size:13px}
   .tb-short{display:none}
 }
+
+/* Knappen Visa-for-styrelsen gor raden for bred pa de smalaste telefonerna - loggan racker som hemlank dar. */
+@media (max-width:420px){ .brand span{display:none} }

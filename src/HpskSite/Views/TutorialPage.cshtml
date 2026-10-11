@@ -144,6 +144,7 @@
                 // Load watched status, then render
                 loadWatched(function() {
                     renderGrid(allTutorials);
+                    openFromAddress();
                 });
             })
             .catch(function() {
@@ -202,6 +203,15 @@
 
             grid.appendChild(col);
         });
+    }
+
+    // /tutorials?tutorial=tutorial-07 öppnar den filmen direkt. Om pistol.nu länkar hit så,
+    // och utan det här landade man bara på listan. Bara ett id som finns i listan öppnas.
+    function openFromAddress() {
+        var id = new URLSearchParams(location.search).get('tutorial');
+        if (!id || !window.TutorialHelper) return;
+        if (!allTutorials.some(function(t) { return t.tutorialId === id; })) return;
+        TutorialHelper.open(id);
     }
 
     function escapeHtml(str) {
