@@ -7905,6 +7905,25 @@ som "PrimaryUser") är borta. Förslaget och Stefans fyra beslut: https://claude
 Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod. Adds C# → full ombyggnad. Fildeploy av KB
 `skjutbanor.md`. Svit: `hpsk-verify/range-page-verify.mjs`.
 
+### Klockslag skrivs utan kolon (2026-10-11, Anders/Hästveda)
+
+- **Server: `Models/ClockTime.cs`** — `TryNormalize(text, out hhmm)` (tomt → true/null) och `ToTimeSpan`.
+  Godtar "11", "930", "1130", "11:30", "11.30", "11,30", "11 30"; vägrar timme > 23, minut > 59 och
+  "11:5" (11:05 eller 11:50?). **⚠️ Använd ALDRIG `TimeSpan.TryParse` på ett klockslag** — "18" blir
+  18 DYGN (det var ett riktigt fel i banans fasta tider). Används av träningar, banans tider/tillstånd/
+  aktivitet, kalenderns externa bokningar och bemanningens delning av pass. `ClockTimeTests`.
+- **Webbläsare: `wwwroot/js/time-input.js`** (laddas i `Master.cshtml`) — `window.hpskNormalizeTime` med
+  SAMMA regler, och varje `<input data-hpsk-time>` skrivs om när man lämnar fältet (oläsligt → `is-invalid`,
+  lämnas orört). Ett nytt tidsfält: `type="text" data-hpsk-time inputmode="decimal"` (komma på telefonen).
+  Felmeddelandena ger ett exempel: "Skriv till exempel 18 eller 18:30."
+- **Träningspanelens höjd** mäts på `body.getBoundingClientRect()`, inte `documentElement.scrollHeight` —
+  den blir aldrig mindre än ramen, så dialogen kunde bara växa. Anteckningsrutan har `max-height`.
+- **Menyn:** en klubbsida ligger under kretsen — `myClubActive` räknas FÖRE Kretsar-menyn och tar
+  företräde. **⚠️ Ladda aldrig en andra bootstrap-icons-version i en vy** — Master har 1.11.3; 1.10.0
+  ovanpå saknar nyare glyfer (vit ruta i menyn).
+
+Svit: `hpsk-verify/anders-batch-verify.mjs`.
+
 ## Mitt schema — personal competition itinerary (2026-07-25)
 
 A member's own competition day in one timeline: what they **shoot** + what they **work** + the day's

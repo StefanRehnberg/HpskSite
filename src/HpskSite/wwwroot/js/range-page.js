@@ -607,14 +607,15 @@
             title: (a ? 'Ändra tiden' : 'Ny fast tid') + ' — ' + c.clubName,
             html: `<div class="row g-3">
                 <div class="col-12"><label class="form-label" for="aDay">Veckodag</label><select class="form-select" id="aDay">${[1, 2, 3, 4, 5, 6, 7].map(d => `<option value="${d}"${a && a.dayOfWeek === d ? ' selected' : ''}>${DAYS[d]}</option>`).join('')}</select></div>
-                <div class="col-6"><label class="form-label" for="aStart">Från</label><input class="form-control" id="aStart" placeholder="18:00" value="${esc(a ? a.startTime : '')}" autocomplete="off" inputmode="numeric"></div>
-                <div class="col-6"><label class="form-label" for="aEnd">Till</label><input class="form-control" id="aEnd" placeholder="21:00" value="${esc(a ? a.endTime : '')}" autocomplete="off" inputmode="numeric"></div>
+                <div class="col-6"><label class="form-label" for="aStart">Från</label><input class="form-control" id="aStart" placeholder="18" value="${esc(a ? a.startTime : '')}" autocomplete="off" data-hpsk-time inputmode="decimal"></div>
+                <div class="col-6"><label class="form-label" for="aEnd">Till</label><input class="form-control" id="aEnd" placeholder="21" value="${esc(a ? a.endTime : '')}" autocomplete="off" data-hpsk-time inputmode="decimal"></div>
                 ${secs.length ? `<div class="col-12"><label class="form-label" for="aSec">Bana / vall</label><select class="form-select" id="aSec"><option value="">Hela banan</option>${secs.map(s => `<option value="${s.id}"${a && a.rangeSectionId === s.id ? ' selected' : ''}>${esc(s.label)}</option>`).join('')}</select></div>` : ''}
                 <div class="col-12"><label class="form-label" for="aNote">Notering (valfri)</label><input class="form-control" id="aNote" value="${esc(a ? a.note || '' : '')}" placeholder="Till exempel Juniorträning" autocomplete="off"></div></div>`,
             onOk: async b => {
-                const t = s => /^\d{1,2}[:.]\d{2}$/.test(s) ? s.replace('.', ':').padStart(5, '0') : null;
+                // Samma tolkning som servern (time-input.js / ClockTime): "18", "1830", "18.30".
+                const t = s => window.hpskNormalizeTime ? window.hpskNormalizeTime(s) : s;
                 const start = t(val(b, '#aStart')), end = t(val(b, '#aEnd'));
-                if (!start || !end) return 'Skriv tiderna som 18:00.';
+                if (!start || !end) return 'Skriv tiderna, till exempel 18 och 21 eller 18:30 och 21:00.';
                 const sec = val(b, '#aSec');
                 const res = await post('ShootingRange/AddAllocation', {
                     id: a ? a.id : 0, clubRangeLinkId: c.linkId, rangeSectionId: sec ? parseInt(sec, 10) : null,
@@ -672,8 +673,8 @@
     function windowRow(w) {
         return `<div class="input-group input-group-sm mb-1 rp-win">
             <select class="form-select rp-w-day" aria-label="Veckodag">${[1, 2, 3, 4, 5, 6, 7].map(d => `<option value="${d}"${w && w.day === d ? ' selected' : ''}>${DAYS[d]}</option>`).join('')}</select>
-            <input class="form-control rp-w-start" placeholder="09:00" aria-label="Från" value="${esc(w ? w.start : '')}">
-            <input class="form-control rp-w-end" placeholder="21:00" aria-label="Till" value="${esc(w ? w.end : '')}">
+            <input class="form-control rp-w-start" placeholder="9" aria-label="Från" data-hpsk-time inputmode="decimal" value="${esc(w ? w.start : '')}">
+            <input class="form-control rp-w-end" placeholder="21" aria-label="Till" data-hpsk-time inputmode="decimal" value="${esc(w ? w.end : '')}">
             <button class="btn btn-outline-secondary rp-w-del" type="button" aria-label="Ta bort raden"><i class="bi bi-x-lg"></i></button></div>`;
     }
     function permitDialog(p) {
@@ -790,8 +791,8 @@
             title: 'Registrera aktivitet',
             html: `<p class="rp-help">För det som inte räknas in av sig självt: gästskyttar, andra klubbar, evenemang.</p><div class="row g-3">
                 <div class="col-12 col-sm-6"><label class="form-label" for="acDate">Datum</label><input class="form-control" id="acDate" value="${ymd(new Date())}" autocomplete="off"></div>
-                <div class="col-6 col-sm-3"><label class="form-label" for="acStart">Från</label><input class="form-control" id="acStart" placeholder="09:00" autocomplete="off"></div>
-                <div class="col-6 col-sm-3"><label class="form-label" for="acEnd">Till</label><input class="form-control" id="acEnd" placeholder="12:00" autocomplete="off"></div>
+                <div class="col-6 col-sm-3"><label class="form-label" for="acStart">Från</label><input class="form-control" id="acStart" placeholder="9" autocomplete="off" data-hpsk-time inputmode="decimal"></div>
+                <div class="col-6 col-sm-3"><label class="form-label" for="acEnd">Till</label><input class="form-control" id="acEnd" placeholder="12" autocomplete="off" data-hpsk-time inputmode="decimal"></div>
                 <div class="col-6"><label class="form-label" for="acShots">Antal skott</label><input type="number" min="0" class="form-control" id="acShots"></div>
                 <div class="col-6"><label class="form-label" for="acShooters">Antal skyttar</label><input type="number" min="1" class="form-control" id="acShooters" value="1"></div>
                 <div class="col-12"><label class="form-label" for="acNote">Notering (valfri)</label><input class="form-control" id="acNote" placeholder="Till exempel gästskytte" autocomplete="off"></div></div>`,
