@@ -90,7 +90,7 @@
         var what = st.kind === 'training' ? 'träningen' : 'händelsen';
         if (st.rangeId > 0) {
             hint.innerHTML = 'Syns i banans kalender, där klubbarna som delar banan ser vad som händer. ' +
-                '<a href="/skjutbana/kalender?r=' + st.rangeId + '" target="_blank" rel="noopener">Öppna banans kalender</a>';
+                '<a href="/skjutbana/' + st.rangeId + '#vy=kalender" target="_blank" rel="noopener">Öppna banans kalender</a>';
         } else {
             hint.textContent = 'Välj en skjutbana så syns ' + what + ' i banans kalender. Skriv platsen nedan om den inte är en skjutbana.';
         }

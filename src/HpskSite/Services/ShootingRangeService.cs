@@ -203,6 +203,13 @@ namespace HpskSite.Services
             return await db.FetchAsync<ClubRangeLink>("WHERE RangeId = @0 ORDER BY Id", rangeId);
         }
 
+        /// <summary>Alla kopplingar mellan klubbar och banor — för katalogen, som annars hade frågat per bana.</summary>
+        public async Task<List<ClubRangeLink>> GetAllLinksAsync()
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<ClubRangeLink>("SELECT * FROM ClubRangeLink");
+        }
+
         public async Task<ClubRangeLink?> GetLinkAsync(int linkId)
         {
             using var db = _databaseFactory.CreateDatabase();
@@ -293,6 +300,20 @@ namespace HpskSite.Services
             slot.CreatedAt = DateTime.Now;
             await db.InsertAsync(slot);
             return slot.Id;
+        }
+
+        public async Task<ClubRangeAllocation?> GetAllocationAsync(int allocationId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.SingleOrDefaultAsync<ClubRangeAllocation>("WHERE Id = @0", allocationId);
+        }
+
+        /// <summary>Ändrar en fast tid på plats (banans sida: "Ändra tiden…"). Länken flyttas aldrig —
+        /// en tid byter inte klubb.</summary>
+        public async Task UpdateAllocationAsync(ClubRangeAllocation slot)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            await db.UpdateAsync(slot);
         }
 
         public async Task DeleteAllocationAsync(int allocationId)

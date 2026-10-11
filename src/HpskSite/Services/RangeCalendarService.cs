@@ -591,7 +591,7 @@ GROUP BY RangeId ORDER BY COUNT(*) DESC, MAX([Date]) DESC", clubId) ?? 0;
             sb.Append("PRODID:-//pistol.nu//Banans kalender//SV\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n");
             ScheduleIcsBuilder.AppendLine(sb, "X-WR-CALNAME", rangeName);
             sb.Append("REFRESH-INTERVAL;VALUE=DURATION:PT6H\r\nX-PUBLISHED-TTL:PT6H\r\n");
-            var page = $"{siteBaseUrl.TrimEnd('/')}/skjutbana/kalender?r={rangeId}";
+            var page = $"{siteBaseUrl.TrimEnd('/')}/skjutbana/{rangeId}#vy=kalender";
 
             foreach (var i in items)
             {

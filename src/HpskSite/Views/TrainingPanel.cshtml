@@ -62,7 +62,16 @@
                     <dt>När</dt>
                     <dd>@WhenText(m, sv)</dd>
                 }
-                @if (!string.IsNullOrEmpty(m.Venue)) { <dt>Var</dt><dd>@m.Venue</dd> }
+                @* Träningens bana leder till banans egen sida (2026-10-11). Panelen är en iframe — länken öppnas i hela fönstret. *@
+                @if (m.RangeId > 0)
+                {
+                    <dt>Var</dt>
+                    <dd>
+                        @(string.IsNullOrEmpty(m.Venue) ? m.RangeName : m.Venue)@(string.IsNullOrEmpty(m.RangeSectionLabel) ? "" : " · " + m.RangeSectionLabel)
+                        <a class="ms-1" href="/skjutbana/@m.RangeId" target="_top" id="tpRangeLink">Om banan</a>
+                    </dd>
+                }
+                else if (!string.IsNullOrEmpty(m.Venue)) { <dt>Var</dt><dd>@m.Venue</dd> }
                 @if (!string.IsNullOrEmpty(m.Discipline)) { <dt>Gren</dt><dd>@m.Discipline</dd> }
                 <dt>Skjutledare</dt><dd>@(string.IsNullOrEmpty(m.SkjutledareName) ? "Ingen utsedd än" : m.SkjutledareName)</dd>
                 @if (!string.IsNullOrEmpty(m.ClubName)) { <dt>Klubb</dt><dd>@m.ClubName</dd> }
