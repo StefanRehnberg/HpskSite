@@ -6,7 +6,10 @@
 *@
 
 <!-- Competition Wizard Modal -->
-<div class="modal fade" id="competitionWizardModal" tabindex="-1" aria-labelledby="wizardModalLabel" aria-hidden="true">
+@* ⚠ Statisk bakgrund och ingen Esc: ett klick utanför guiden stängde den och kastade allt som
+   fyllts i, utan varning (Anders, Hästveda PSK, 2026-10-11). Krysset frågar i stället först
+   (wizardRequestClose). Kodens egna hide() efter skapandet påverkas inte. *@
+<div class="modal fade" id="competitionWizardModal" tabindex="-1" aria-labelledby="wizardModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <!-- Modal Header -->
@@ -14,7 +17,7 @@
                 <h5 class="modal-title" id="wizardModalLabel">
                     <i class="bi bi-plus-circle me-2"></i>Skapa Ny Tävling
                 </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+                <button type="button" class="btn-close" id="wizard_btnClose" onclick="wizardRequestClose()" aria-label="Stäng"></button>
             </div>
 
             <!-- Progress Indicator -->
@@ -1025,6 +1028,22 @@ function springSeriesChanged() {
     seriesInput.value = document.getElementById('wizard_springskytteClassASeries').value;
 }
 
+// Har användaren skrivit eller valt något sedan guiden öppnades? Styr om krysset frågar innan
+// det stänger. Sätts av användarens egna inmatningar (input/change bubblar hit), nollas vid öppning.
+window._wizardDirty = false;
+document.getElementById('competitionWizardModal').addEventListener('input', function (e) {
+    if (e.isTrusted) window._wizardDirty = true;
+});
+document.getElementById('competitionWizardModal').addEventListener('change', function (e) {
+    if (e.isTrusted) window._wizardDirty = true;
+});
+
+window.wizardRequestClose = function () {
+    if (window._wizardDirty && !confirm('Vill du stänga guiden? Det du har fyllt i sparas inte.')) return;
+    window._wizardDirty = false;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('competitionWizardModal')).hide();
+};
+
 // Initialize wizard when modal opens
 document.getElementById('competitionWizardModal').addEventListener('show.bs.modal', function() {
     // Skip reset when re-opening from station configurator (preserves wizard data)
@@ -1032,6 +1051,7 @@ document.getElementById('competitionWizardModal').addEventListener('show.bs.moda
         window._wizardSkipReset = false;
         return;
     }
+    window._wizardDirty = false;
     wizardCurrentStep = 0;
     resetWizard();
     if (window.hpskClubPays) hpskClubPays.reset('wizard_');
