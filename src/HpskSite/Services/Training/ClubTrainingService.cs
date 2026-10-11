@@ -23,15 +23,28 @@ namespace HpskSite.Services.Training
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly IMemberService _memberService;
         private readonly ILogger<ClubTrainingService> _logger;
+        private readonly HpskSite.Services.WhatsHappeningService _feed;
 
         public ClubTrainingService(
             IUmbracoDatabaseFactory databaseFactory,
             IMemberService memberService,
-            ILogger<ClubTrainingService> logger)
+            ILogger<ClubTrainingService> logger,
+            HpskSite.Services.WhatsHappeningService feed)
         {
             _databaseFactory = databaseFactory;
             _memberService = memberService;
             _logger = logger;
+            _feed = feed;
+        }
+
+        /// <summary>
+        /// Startsidans flöde ("Det här händer") cachas i fem minuter. Utan tömning syntes en ny träning
+        /// först efter upp till fem minuter, och en borttagen låg kvar och svarade "Träningen finns inte
+        /// längre" (Anders, Hästveda PSK, 2026-10-11). Anropas efter varje lyckad skrivning.
+        /// </summary>
+        private void FeedChanged()
+        {
+            try { _feed.ClearCache(); } catch { /* en cache som inte går att tömma får aldrig fälla sparningen */ }
         }
 
         public class TrainingRow
@@ -282,6 +295,7 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             t.UpdatedDate = DateTime.Now;
 
             if (t.Id > 0) db.Update(t); else db.Insert(t);
+            FeedChanged();
             return (t.Id, null);
         }
 
@@ -433,6 +447,7 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
                 }
                 tx.Complete();
             }
+            FeedChanged();
             return (schedule.Id, plan.Count, null);
         }
 
@@ -577,6 +592,7 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
 FROM dbo.ClubTrainingSchedule s CROSS APPLY (SELECT MIN([Date]) f, MAX([Date]) t FROM dbo.ClubTraining WHERE ScheduleId = s.Id) x
 WHERE s.Id = @0", seriesId);
             tx.Complete();
+            FeedChanged();
             return result;
         }
 
@@ -635,12 +651,14 @@ WHERE s.Id = @0", seriesId);
             var t = db.SingleOrDefault<ClubTraining>("WHERE Id = @0", trainingId);
             if (t?.ScheduleId is not > 0) return 0;
             // Banan och vallen följer med: en serie flyttar till en annan bana i sin helhet.
-            return db.Execute(@"UPDATE dbo.ClubTraining SET Name = @2, StartTime = @3, EndTime = @4, Discipline = @5,
+            var changed = db.Execute(@"UPDATE dbo.ClubTraining SET Name = @2, StartTime = @3, EndTime = @4, Discipline = @5,
     Venue = @6, Description = @7, RegistrationRequired = @8, MaxParticipants = @9, LoanWeaponsOffered = @10,
     IsMandatory = @11, RangeId = @12, RangeSectionId = @13, UpdatedDate = GETDATE()
 WHERE ScheduleId = @0 AND [Date] > @1 AND [Date] >= CAST(GETDATE() AS date)",
                 t.ScheduleId, t.Date.Date, t.Name, t.StartTime, t.EndTime, t.Discipline, t.Venue, t.Description,
                 t.RegistrationRequired, t.MaxParticipants, t.LoanWeaponsOffered, t.IsMandatory, t.RangeId, t.RangeSectionId);
+            FeedChanged();
+            return changed;
         }
 
         /// <summary>Klubbens träningar att kopiera från: en rad per serie (senaste tillfället) och varje fristående träning.</summary>
@@ -658,6 +676,7 @@ WHERE ScheduleId = @0 AND [Date] > @1 AND [Date] >= CAST(GETDATE() AS date)",
             using var db = _databaseFactory.CreateDatabase();
             var n = db.Execute("UPDATE dbo.ClubTraining SET SkjutledareMemberId = @1, UpdatedDate = GETDATE() WHERE Id = @0",
                 trainingId, memberId is > 0 ? memberId : null);
+            FeedChanged();
             return n == 1 ? null : "Träningen finns inte.";
         }
 
@@ -666,6 +685,7 @@ WHERE ScheduleId = @0 AND [Date] > @1 AND [Date] >= CAST(GETDATE() AS date)",
             using var db = _databaseFactory.CreateDatabase();
             var n = db.Execute("UPDATE dbo.ClubTraining SET IsCancelled = @1, UpdatedDate = GETDATE() WHERE Id = @0",
                 trainingId, cancelled);
+            FeedChanged();
             return n == 1 ? null : "Träningen finns inte.";
         }
 
@@ -729,6 +749,7 @@ WHERE ScheduleId = @0 AND [Date] > @1 AND [Date] >= CAST(GETDATE() AS date)",
             if (n == 1 && !impact.IsEmpty)
                 _logger.LogInformation("Träning {Id} borttagen med {People} anmälda och {Bookings} lånevapenbokningar av medlem {Actor}",
                     trainingId, impact.People, impact.Bookings, actorMemberId);
+            FeedChanged();
             return n == 1 ? null : "Träningen finns inte.";
         }
 

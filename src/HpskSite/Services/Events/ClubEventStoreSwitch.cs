@@ -35,12 +35,24 @@ namespace HpskSite.Services.Events
         private readonly NodeClubEventStore _node;
         private readonly SqlClubEventStore _sql;
         private readonly SiteSettingService _settings;
+        private readonly WhatsHappeningService _feed;
 
-        public SwitchingClubEventStore(NodeClubEventStore node, SqlClubEventStore sql, SiteSettingService settings)
+        public SwitchingClubEventStore(NodeClubEventStore node, SqlClubEventStore sql, SiteSettingService settings, WhatsHappeningService feed)
         {
             _node = node;
             _sql = sql;
             _settings = settings;
+            _feed = feed;
+        }
+
+        /// <summary>
+        /// Startsidans flöde ("Det här händer") cachas i fem minuter. Utan tömning syntes en ny händelse
+        /// först efter upp till fem minuter, och en borttagen låg kvar och svarade "finns inte längre"
+        /// (Anders, Hästveda PSK, 2026-10-11). Alla skrivningar går hit, oavsett lagring.
+        /// </summary>
+        private void FeedChanged()
+        {
+            try { _feed.ClearCache(); } catch { /* en cache som inte går att tömma får aldrig fälla sparningen */ }
         }
 
         private IClubEventStore Current => ClubEventStoreSettings.UsesTable(_settings) ? _sql : _node;
@@ -52,19 +64,28 @@ namespace HpskSite.Services.Events
         public IReadOnlyList<ClubEventRecord> ListAllPublished() => Current.ListAllPublished();
         public IReadOnlyList<ClubEventRecord> ListAllForOwnerType(string ownerType) => Current.ListAllForOwnerType(ownerType);
 
-        public Task<(int Id, string? Error)> SaveAsync(ClubEventRecord record)
-            => Frozen ? Task.FromResult((0, (string?)ClubEventStoreSettings.WriteFreezeMessage)) : Current.SaveAsync(record);
+        public async Task<(int Id, string? Error)> SaveAsync(ClubEventRecord record)
+        {
+            if (Frozen) return (0, ClubEventStoreSettings.WriteFreezeMessage);
+            var result = await Current.SaveAsync(record);
+            if (result.Error == null) FeedChanged();
+            return result;
+        }
 
         public bool Delete(int id)
         {
             if (Frozen) throw new ClubEventWriteFrozenException();
-            return Current.Delete(id);
+            var ok = Current.Delete(id);
+            FeedChanged();
+            return ok;
         }
 
         public bool SetPublished(int id, bool published)
         {
             if (Frozen) throw new ClubEventWriteFrozenException();
-            return Current.SetPublished(id, published);
+            var ok = Current.SetPublished(id, published);
+            FeedChanged();
+            return ok;
         }
     }
 }
