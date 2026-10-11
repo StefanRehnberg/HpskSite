@@ -9,7 +9,7 @@ namespace HpskSite.Services
         public string Label { get; set; } = "";   // "Tillstånd" / "Besiktning" / ...
         public DateTime Due { get; set; }
         public bool Overdue { get; set; }
-        public string Url { get; set; } = "";      // /skjutbanor?range={id}
+        public string Url { get; set; } = "";      // /skjutbana/{id}#vy=tillstand
     }
 
     public class RangeHubSummary
@@ -73,7 +73,7 @@ namespace HpskSite.Services
                                 Label = "Tillstånd",
                                 Due = p.ExpiryDate.Value,
                                 Overdue = p.ExpiryDate.Value.Date < today,
-                                Url = $"/skjutbanor?range={r.Id}"
+                                Url = $"/skjutbana/{r.Id}#vy=tillstand"
                             });
 
                     foreach (var d in await _ranges.GetDocumentsAsync(r.Id))
@@ -84,7 +84,7 @@ namespace HpskSite.Services
                                 Label = DocLabel(d.DocType),
                                 Due = d.ValidUntil.Value,
                                 Overdue = d.ValidUntil.Value.Date < today,
-                                Url = $"/skjutbanor?range={r.Id}"
+                                Url = $"/skjutbana/{r.Id}#vy=tillstand"
                             });
                 }
 

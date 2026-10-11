@@ -1,0 +1,214 @@
+@*
+    Dialogen "Ny skjutbana" / "Ändra banans uppgifter" — EN dialog för katalogen (/skjutbanor) och banans
+    egen sida (/skjutbana/{id}), 2026-10-11. Värdsidan laddar Leaflet och har en antiforgery-token.
+
+    window.hpskRangeEdit.open(range | null, coords | null, onSaved(id))
+      range   = GetRange-svarets range-objekt (null = ny bana)
+      coords  = { lat, lng } när en ny bana placeras på kartan
+
+    ⚠️ Inga alert()/confirm(): fel visas i dialogen (#rngEditErr).
+*@
+@if (Context.Items["hpskRangeEditModal"] == null)
+{
+    Context.Items["hpskRangeEditModal"] = true;
+<div class="modal fade" id="rngEditModal" tabindex="-1" aria-hidden="true" aria-labelledby="rngEditTitle">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="rngEditTitle">Skjutbana</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-danger d-none" id="rngEditErr" role="alert"></div>
+        <input type="hidden" id="rngEditId">
+        <div class="row g-3">
+            <div class="col-md-8">
+                <label class="form-label" for="rngEditName">Namn *</label>
+                <input type="text" class="form-control" id="rngEditName" autocomplete="off">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="rngEditSensitivity">Vem ser var banan ligger?</label>
+                <select class="form-select" id="rngEditSensitivity">
+                    <option value="Members">Alla inloggade medlemmar</option>
+                    <option value="Restricted">Bara banans förvaltare</option>
+                </select>
+            </div>
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
+                    <span class="form-label mb-0">Var ligger banan? <span class="text-muted small">Klicka på kartan eller dra punkten.</span></span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="rngEditFetch">
+                        <i class="bi bi-pin-map me-1"></i>Hämta adressen från punkten
+                    </button>
+                </div>
+                <div id="rngEditMap" style="height:260px;border-radius:.5rem;border:1px solid var(--bs-border-color)"></div>
+                <div class="small text-muted mt-1" id="rngEditCoords"></div>
+                <input type="hidden" id="rngEditLat"><input type="hidden" id="rngEditLon">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="rngEditAddress">Adress</label>
+                <input type="text" class="form-control" id="rngEditAddress" autocomplete="off">
+            </div>
+            <div class="col-5 col-md-2">
+                <label class="form-label" for="rngEditPostcode">Postnr</label>
+                <input type="text" class="form-control" id="rngEditPostcode" autocomplete="off">
+            </div>
+            <div class="col-7 col-md-4">
+                <label class="form-label" for="rngEditCity">Ort</label>
+                <input type="text" class="form-control" id="rngEditCity" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="rngEditMunicipality">Kommun</label>
+                <input type="text" class="form-control" id="rngEditMunicipality" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="rngEditCounty">Län</label>
+                <input type="text" class="form-control" id="rngEditCounty" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="rngEditHuvudmanType">Vem äger banan?</label>
+                <select class="form-select" id="rngEditHuvudmanType">
+                    <option value="">Vet inte</option>
+                    <option value="ClubOnPlatform">En klubb på pistol.nu</option>
+                    <option value="ExternalParty">En annan förening eller ett företag</option>
+                    <option value="Municipality">Kommunen</option>
+                    <option value="Private">En privatperson</option>
+                    <option value="Federation">Ett förbund</option>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="rngEditHuvudmanName">Ägarens namn</label>
+                <input type="text" class="form-control" id="rngEditHuvudmanName" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="rngEditChefName">Skjutbanechef</label>
+                <input type="text" class="form-control" id="rngEditChefName" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label" for="rngEditChefContact">Skjutbanechefens telefon eller e-post</label>
+                <input type="text" class="form-control" id="rngEditChefContact" autocomplete="off">
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="rngEditDescription">Beskrivning</label>
+                <textarea class="form-control" id="rngEditDescription" rows="3"></textarea>
+                <div class="form-text">Till exempel hur man hittar, var man parkerar och vad som gäller på banan. Visas för alla medlemmar.</div>
+            </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+        <button type="button" class="btn btn-primary" id="rngEditSave">Spara</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+    'use strict';
+    const $ = id => document.getElementById(id);
+    let map = null, marker = null, point = null, onSaved = null;
+
+    function token() { return document.querySelector('input[name="__RequestVerificationToken"]')?.value || ''; }
+    function err(text) { const e = $('rngEditErr'); e.textContent = text || ''; e.classList.toggle('d-none', !text); }
+    function setCoords(lat, lng) {
+        $('rngEditLat').value = lat == null ? '' : (+lat).toFixed(6);
+        $('rngEditLon').value = lng == null ? '' : (+lng).toFixed(6);
+        $('rngEditCoords').textContent = lat == null ? 'Ingen punkt vald ännu.' : 'Vald punkt: ' + (+lat).toFixed(5) + ', ' + (+lng).toFixed(5);
+    }
+    function place(lat, lng) {
+        point = { lat, lng };
+        setCoords(lat, lng);
+        if (!map) return;
+        if (marker) marker.setLatLng([lat, lng]);
+        else {
+            marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+            marker.on('dragend', () => { const p = marker.getLatLng(); point = { lat: p.lat, lng: p.lng }; setCoords(p.lat, p.lng); });
+        }
+    }
+    function initMap() {
+        const start = point || { lat: 62.5, lng: 16.5 };
+        const zoom = point ? 14 : 5;
+        if (!map) {
+            map = L.map('rngEditMap').setView([start.lat, start.lng], zoom);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+            map.on('click', e => place(e.latlng.lat, e.latlng.lng));
+        } else map.setView([start.lat, start.lng], zoom);
+        if (marker) { map.removeLayer(marker); marker = null; }
+        if (point) place(point.lat, point.lng);
+        setTimeout(() => map.invalidateSize(), 80);
+    }
+
+    function open(r, coords, saved) {
+        onSaved = saved || null;
+        err('');
+        $('rngEditId').value = r ? r.id : 0;
+        $('rngEditTitle').textContent = r ? 'Ändra banans uppgifter' : 'Ny skjutbana';
+        const set = (id, v) => { $(id).value = v == null ? '' : v; };
+        set('rngEditName', r?.name);
+        set('rngEditSensitivity', r?.locationSensitivity || 'Members');
+        set('rngEditAddress', r?.address); set('rngEditPostcode', r?.postcode); set('rngEditCity', r?.city);
+        set('rngEditMunicipality', r?.municipality); set('rngEditCounty', r?.county);
+        set('rngEditHuvudmanType', r?.huvudmanType || ''); set('rngEditHuvudmanName', r?.huvudmanName);
+        set('rngEditChefName', r?.skjutbanechefName); set('rngEditChefContact', r?.skjutbanechefContact);
+        set('rngEditDescription', r?.description);
+        const lat = coords ? coords.lat : r?.latitude, lng = coords ? coords.lng : r?.longitude;
+        point = lat != null && lng != null ? { lat: +lat, lng: +lng } : null;
+        setCoords(point ? point.lat : null, point ? point.lng : null);
+        bootstrap.Modal.getOrCreateInstance($('rngEditModal')).show();
+    }
+
+    async function fetchAddress() {
+        if (!point) { err('Välj banans plats på kartan först.'); return; }
+        try {
+            const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=16&addressdetails=1&lat=${point.lat}&lon=${point.lng}`,
+                { headers: { 'Accept-Language': 'sv' } });
+            const a = ((await r.json()) || {}).address || {};
+            const fill = (id, v) => { const e = $(id); if (v && !e.value) e.value = v; };
+            fill('rngEditCity', a.city || a.town || a.village || a.hamlet);
+            fill('rngEditMunicipality', (a.municipality || '').replace(/s? kommun$/, ''));
+            fill('rngEditCounty', (a.county || '').replace(/s? län$/, ''));
+            fill('rngEditPostcode', a.postcode);
+            fill('rngEditAddress', [a.road, a.house_number].filter(Boolean).join(' '));
+            err('');
+        } catch (e) { err('Adressen kunde inte hämtas just nu. Skriv in den själv.'); }
+    }
+
+    async function save() {
+        const name = $('rngEditName').value.trim();
+        if (!name) { err('Skriv banans namn.'); $('rngEditName').focus(); return; }
+        const num = id => { const v = $(id).value; return v === '' ? null : parseFloat(v); };
+        const body = {
+            id: parseInt($('rngEditId').value, 10) || 0,
+            name,
+            locationSensitivity: $('rngEditSensitivity').value,
+            address: $('rngEditAddress').value, postcode: $('rngEditPostcode').value, city: $('rngEditCity').value,
+            municipality: $('rngEditMunicipality').value, county: $('rngEditCounty').value,
+            latitude: num('rngEditLat'), longitude: num('rngEditLon'),
+            huvudmanType: $('rngEditHuvudmanType').value, huvudmanName: $('rngEditHuvudmanName').value,
+            skjutbanechefName: $('rngEditChefName').value, skjutbanechefContact: $('rngEditChefContact').value,
+            description: $('rngEditDescription').value
+        };
+        const btn = $('rngEditSave'); btn.disabled = true;
+        try {
+            const r = await fetch('/umbraco/surface/ShootingRange/SaveRange', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() },
+                body: JSON.stringify(body)
+            });
+            if (!r.ok) throw new Error(window.hpskRequestFailureMessage ? window.hpskRequestFailureMessage(r.status).msg : 'Det gick inte att spara.');
+            const d = await r.json();
+            if (!d.success) { err(d.message || 'Det gick inte att spara.'); return; }
+            bootstrap.Modal.getOrCreateInstance($('rngEditModal')).hide();
+            if (onSaved) onSaved(d.id);
+        } catch (e) { err(e.message || 'Det gick inte att spara.'); }
+        finally { btn.disabled = false; }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        $('rngEditModal').addEventListener('shown.bs.modal', initMap);
+        $('rngEditFetch').addEventListener('click', fetchAddress);
+        $('rngEditSave').addEventListener('click', save);
+    });
+    window.hpskRangeEdit = { open };
+})();
+</script>
+}

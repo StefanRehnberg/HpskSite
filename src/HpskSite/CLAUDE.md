@@ -7810,8 +7810,8 @@ No state machine — every command button is tappable any time so the chief can 
 
 Efter Michaels önskemål: händelser och träningar kan knytas till en skjutbana (och en bana/vall), som
 tävlingar redan kunde, och banan får en kalender där klubbarna som delar den ser varandras tider.
-Sidan: **`/skjutbana/kalender?r=<rangeId>`** (routad `RangeCalendarController`, ingen nod, kräver
-inloggning). Data: **`RangeCalendarService`** (EN form, `RangeCalendarItem`) över fem källor —
+Kalendern är delen **Kalender** på banans egen sida (`/skjutbana/{id}#vy=kalender`, se nästa avsnitt);
+den gamla adressen `/skjutbana/kalender?r=<rangeId>` leder dit (`RangeCalendarController.Index`). Data: **`RangeCalendarService`** (EN form, `RangeCalendarItem`) över fem källor —
 tävlingar (`competition.rangeId`, ur ett index i runtime-cachen, 2 min, töms av `SetCompetitionRange`),
 träningar (`ClubTraining.RangeId` + ny `RangeSectionId`), händelser (**`ClubEventRange`**), klubbarnas
 fasta tider (`ClubRangeAllocation`, utlagda per dag) och förvaltarens **`RangeExternalBooking`**.
@@ -7847,7 +7847,7 @@ länk, `IcsPurpose` är en del av signaturen — höj versionen i stället för 
   Externa bokningar: banans förvaltare eller sajtadmin, och borttagningen prövas mot BOKNINGENS bana.
 - **Fasta tider tas inte med i ICS-filen** (de hade fyllt varje vardag); inställda träningar skrivs
   som `STATUS:CANCELLED`.
-- **Ingångar:** knappen *Banans kalender* i `/skjutbanor`-detaljvyn, på klubbsidans flik Banor, och
+- **Ingångar:** rälsposten Kalender på banans sida, katalogradens Åtgärder, klubbsidans flik Banor, och
   raden "Vad händer mer på banan?" under klubbkalendern.
 - `ShootingRangeService.DeleteAsync` tar med `RangeExternalBooking` och `ClubEventRange` och nollar
   träningarnas bana; `DeleteSectionAsync` nollar vallen på alla tre.
@@ -7860,6 +7860,50 @@ Admin → Träningar. Körd i dev 2026-10-11, **EJ i prod**. Fildeploy av KB `sk
 Test: `RangeCalendarRulesTests` 27 (A/B: kant-i-kant som krock + vallar som alltid krockar → 2 röda).
 Svit: `hpsk-verify/range-calendar-verify.mjs` (skapar och städar egna `ZZB`-poster på bana 13, som
 klubb 2604 och 3215 delar).
+
+### Banans egen sida och katalogen (2026-10-11, omgjord)
+
+Modalen över kartan på `/skjutbanor` (sex flikar, gick inte att länka till, gröna knappar, råa värden
+som "PrimaryUser") är borta. Förslaget och Stefans fyra beslut: https://claude.ai/artifact/GXndV2GtTRqNJh2m5mzRGj.
+
+- **`/skjutbana/{id}`** — routad `RangePageController` (ingen nod, kräver inloggning) →
+  `Views/RangePage.cshtml` + **`wwwroot/js/range-page.js`**. **Ekonomins skal** (`.rp-page .rp-rail`,
+  samma värden som `.ek-page .rail` och `/styrelse`): vänsterkort med banans namn, rollen, ← Skjutbanor
+  och delarna. Delen står i adressen (`#vy=oversikt|kalender|banor|klubbar|tillstand|aktivitet|incheckning|forvaltare`);
+  de fyra sista bara för förvaltare (`GetRange.canManage`). Blå Åtgärder per del (`setActions`), grå
+  radmeny (`rowMenu`), frågor genom `ask()` och formulär genom `formModal()` — **ingen confirm/alert**.
+  `#vy=oversikt&ansprak=1` öppnar anspråksdialogen (katalogradens "Gör anspråk…").
+- **⚠️ Kalendern är inbäddad**: dess markup (`#rpCalPart`, id:n `rc*`) finns ALLTID i sidan, dold —
+  `range-calendar.js` binder sina lyssnare när skriptet laddas. Den hämtar först när delen visas
+  (`window.hpskRangeCalendar.start()`); sidans Åtgärder anropar `openIcs`/`openExternal`. Kalenderns
+  "Ta bort bokningen" går genom sidans `window.hpskRangeConfirm`. `RangeCalendar.cshtml` är borttagen.
+- **"Att göra"** (förvaltare, överst på Översikt + räknare i rälsen): `ShootingRange/GetRangeTodo`,
+  reglerna i **`Models/RangeTodo.cs` → `RangeTodoRules.Build`** (ren funktion, `RangeTodoRulesTests`):
+  tillstånd/dokument som gått ut eller går ut inom 90 dagar, inga tillstånd, inget skottak, skott ≥ 80 %
+  / 100 % av det LÄGSTA taket, klubb utan fasta tider, tider utanför tillståndens fönster
+  (`IsOutsideWindows`), ingen skjutbanechef, ingen position, inga vallar. Brådskande först.
+- **`GetRange`** bär nu `isSiteAdmin`, `isSteward`, `canClaim`, `myClubIds` (medlemmens klubbar som är
+  kopplade till banan) och `huvudmanClubName`. **`GetRanges`** bär `mine`, `clubCount` och `hasMine`
+  (EN läsning av alla kopplingar, `GetAllLinksAsync`). **`AddAllocation`** tar `Id` > 0 = ändra en tid
+  (samma klubbkoppling krävs). **`GetClubRanges`** bär adress och `relationType`. Klubbens roll ändras
+  via `AddClubLink` (upsert).
+- **Katalogen `/skjutbanor`** (`ShootingRangeHub.cshtml`) har Träningars form: rubrik + förklarande rad,
+  blå Åtgärder (Ny skjutbana, Placera på kartan, OSM-import för sajtadmin), sök + filter (*Mina klubbars
+  banor* förvalt när sådana finns, Alla, Jag förvaltar, Utan förvaltare) + Lista|Karta + antal, högst
+  100 rader i listan. `?range=ID` leder till `/skjutbana/ID` (serverredirect i vyn).
+- **`Views/Partials/_RangeEditModal.cshtml`** = EN dialog för ny bana och ändrade uppgifter
+  (`window.hpskRangeEdit.open(range, coords, onSaved)`), i katalogen och på banans sida.
+- **Kartan: `wwwroot/js/range-map.js`** (`hpskRangeMap.render/directionsUrl/addressText/hasPos`) — samma
+  form som tävlingssidans (röd punkt, zoom 14, Vägbeskrivning). Används av banans Översikt och
+  **klubbsidans flik Banor** (ett kort per bana med karta, tider, Banans kalender, Om banan).
+  ⚠️ `Competition.cshtml` har kvar sin egen kopia — filen är ändrad på `sajtstruktur`; byt till
+  `hpskRangeMap.render` EFTER mergen. Samma sak för en länk till banan från händelsesidan
+  (`ClubSimpleEvent.cshtml`). Träningspanelen har länken *Om banan* (`TrainingPanelModel.RangeId`).
+- Länkar som pekade på den gamla sidan: startsidans påminnelser (`RangeHubService` →
+  `#vy=tillstand`), klubbkalenderns rad, platsväljarens krocklänk och ICS-filens URL → `#vy=kalender`.
+
+Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod. Adds C# → full ombyggnad. Fildeploy av KB
+`skjutbanor.md`. Svit: `hpsk-verify/range-page-verify.mjs`.
 
 ## Mitt schema — personal competition itinerary (2026-07-25)
 

@@ -89,7 +89,7 @@
                 var e = window.hpskEsc || function (s) { return String(s); };
                 box.innerHTML = '<i class="bi bi-geo-alt me-1"></i>Vad händer mer på ' + (ranges.length === 1 ? 'banan' : 'banorna') + '? ' +
                     ranges.map(function (r) {
-                        return '<a class="ms-1" href="/skjutbana/kalender?r=' + r.id + '">' + e(r.name) + '</a>';
+                        return '<a class="ms-1" href="/skjutbana/' + r.id + '#vy=kalender">' + e(r.name) + '</a>';
                     }).join(' · ');
                 box.classList.remove('d-none');
             }).catch(function () { });

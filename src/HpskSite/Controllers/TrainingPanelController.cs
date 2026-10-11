@@ -27,14 +27,17 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly HpskSite.Services.Training.TrainingCourseService _courses;
         private readonly TrainingGroupService _groups;
+        private readonly RangeCalendarService _rangeCalendar;
 
         public TrainingPanelController(
             ClubEventParticipationService participation,
             IMemberManager memberManager,
             IMemberService memberService,
             HpskSite.Services.Training.TrainingCourseService courses,
-            TrainingGroupService groups)
+            TrainingGroupService groups,
+            RangeCalendarService rangeCalendar)
         {
+            _rangeCalendar = rangeCalendar;
             _courses = courses;
             _groups = groups;
             _participation = participation;
@@ -68,6 +71,16 @@ namespace HpskSite.Controllers
             var t = _participation.GetTrainingRow(id);
             model.Discipline = ActivityDiscipline.Label(t?.Discipline);
             model.Description = t?.Description ?? "";
+            if (t?.RangeId is > 0)
+            {
+                var (range, sections) = _rangeCalendar.GetRangeWithSections(t.RangeId.Value);
+                if (range != null)
+                {
+                    model.RangeId = range.Id;
+                    model.RangeName = range.Name;
+                    model.RangeSectionLabel = sections.FirstOrDefault(s => s.Id == t.RangeSectionId)?.Label ?? "";
+                }
+            }
 
             var current = await _memberManager.GetCurrentMemberAsync();
             var me = current?.Email == null ? null : _memberService.GetByEmail(current.Email);
@@ -91,6 +104,9 @@ namespace HpskSite.Controllers
         public DateTime? Date { get; set; }
         public DateTime? EndDate { get; set; }
         public string Venue { get; set; } = "";
+        public int RangeId { get; set; }
+        public string RangeName { get; set; } = "";
+        public string RangeSectionLabel { get; set; } = "";
         public string ClubName { get; set; } = "";
         public string Discipline { get; set; } = "";
         public string Description { get; set; } = "";

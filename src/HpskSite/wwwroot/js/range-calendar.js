@@ -1,5 +1,9 @@
 /*
- * Banans kalender — /skjutbana/kalender?r=ID (Views/RangeCalendar.cshtml).
+ * Banans kalender — delen Kalender på banans sida, /skjutbana/{id}#vy=kalender (Views/RangePage.cshtml).
+ * Den fristående sidan /skjutbana/kalender?r= leder hit sedan 2026-10-11.
+ *
+ * Sidans blå Åtgärder (range-page.js) anropar window.hpskRangeCalendar: prenumerera, lägga in en
+ * bokning för andra. Kalendern läser in sig själv när delen visas första gången (start()).
  *
  * Läser RangeCalendarApi/GetCalendar för det synliga fönstret och ritar månadsrutnät eller lista
  * med kretskalenderns stil (.kc-*). EN färg per klubb, så att det syns vems tid det är; sorten
@@ -44,7 +48,8 @@
     var loadSeq = 0;
 
     function token() {
-        var el = document.querySelector('#rcApp input[name="__RequestVerificationToken"]');
+        // Banans sida har EN token, utanför kalenderns del.
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
         return el ? el.value : '';
     }
     function post(url, body) {
@@ -93,10 +98,6 @@
     }
 
     function head(d) {
-        document.getElementById('rcTitle').textContent = d.range.name;
-        document.title = d.range.name + ' — banans kalender';
-        document.getElementById('rcSub').textContent = [d.range.city || d.range.municipality, 'Allt som klubbarna på banan har lagt in: tävlingar, träningar, händelser och fasta tider.']
-            .filter(Boolean).join(' · ');
         document.querySelectorAll('[data-rc-manage]').forEach(function (el) { el.classList.toggle('d-none', !d.canManage); });
         document.getElementById('rcMineWrap').classList.toggle('d-none', !(d.myClubIds || []).length);
 
@@ -110,15 +111,6 @@
             sec.value = keep && d.sections.some(function (s) { return String(s.id) === keep; }) ? keep : '';
             secWrap.classList.remove('d-none');
         } else secWrap.classList.add('d-none');
-
-        // Växla mellan medlemmens banor — bara när hen har fler än en.
-        var sw = document.getElementById('rcSwitch');
-        var mine = d.myRanges || [];
-        sw.innerHTML = mine.length > 1 ? '<span class="small text-muted me-2">Dina banor:</span>' + mine.map(function (r) {
-            return r.id === rangeId
-                ? '<span class="badge bg-primary me-1 mb-1">' + esc(r.name) + '</span>'
-                : '<a class="badge bg-secondary-subtle text-secondary-emphasis text-decoration-none me-1 mb-1" href="/skjutbana/kalender?r=' + r.id + '">' + esc(r.name) + '</a>';
-        }).join('') : '';
     }
 
     // ── Färger: en per klubb, stabil inom sidan ───────────────────────────
@@ -326,11 +318,16 @@
     }
     function deleteExternal(id) {
         var item = ((state.data && state.data.items) || []).find(function (i) { return i.kind === 'external' && i.sourceId === id; });
-        if (!confirm('Ta bort bokningen' + (item ? ' för ' + item.title : '') + '?')) return;
-        post('/umbraco/surface/RangeCalendarApi/DeleteExternal', { id: id }).then(function (r) {
-            if (!r.success) { msg(esc(r.message || 'Bokningen kunde inte tas bort.')); return; }
-            msg('');
-            load();
+        var text = 'Bokningen' + (item ? ' för ' + item.title + ' ' + item.date : '') + ' tas bort ur banans kalender.';
+        // Sidans egen fråga (range-page.js) — ingen confirm(), som har rapporterats som att sidan frös.
+        var ask = window.hpskRangeConfirm ? window.hpskRangeConfirm('Ta bort bokningen?', text, 'Ta bort', true) : Promise.resolve(confirm(text));
+        ask.then(function (ok) {
+            if (!ok) return;
+            post('/umbraco/surface/RangeCalendarApi/DeleteExternal', { id: id }).then(function (r) {
+                if (!r.success) { msg(esc(r.message || 'Bokningen kunde inte tas bort.')); return; }
+                msg('');
+                load();
+            });
         });
     }
 
@@ -405,5 +402,12 @@
     } catch (e) { }
 
     state.selected = ymd(new Date());
-    load();
+    var started = false;
+    window.hpskRangeCalendar = {
+        /** Första gången delen visas — kalendern hämtas inte för den som aldrig öppnar den. */
+        start: function () { if (!started) { started = true; load(); } },
+        reload: load,
+        openIcs: openIcs,
+        openExternal: function () { openExternal(state.selected || ymd(new Date())); }
+    };
 })();

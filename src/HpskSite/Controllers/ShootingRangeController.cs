@@ -26,6 +26,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly IContentService _contentService;
         private readonly RangeDocumentStorage _docStorage;
+        private readonly MemberClubService _memberClubs;
         private readonly ILogger<ShootingRangeController> _logger;
 
         public ShootingRangeController(
@@ -41,6 +42,7 @@ namespace HpskSite.Controllers
             ClubService clubService,
             IContentService contentService,
             RangeDocumentStorage docStorage,
+            MemberClubService memberClubs,
             ILogger<ShootingRangeController> logger)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -50,6 +52,7 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _contentService = contentService;
             _docStorage = docStorage;
+            _memberClubs = memberClubs;
             _logger = logger;
         }
 
@@ -71,11 +74,18 @@ namespace HpskSite.Controllers
                 bool canCreate = isSiteAdmin || (await _authService.GetManagedClubIds()).Count > 0;
                 var ranges = await _rangeService.ListAsync();
 
+                // Katalogen visar "dina klubbars banor" först (2026-10-11) och hur många klubbar som
+                // delar varje bana. EN läsning av alla kopplingar i stället för en per bana.
+                var myClubs = _memberClubs.GetAllClubIds(_memberService.GetById(memberId.Value)).ToHashSet();
+                var links = await _rangeService.GetAllLinksAsync();
+                var linksByRange = links.GroupBy(l => l.RangeId).ToDictionary(g => g.Key, g => g.ToList());
+
                 var items = ranges.Select(r =>
                 {
                     bool canManage = isSiteAdmin || stewarded.Contains(r.Id);
                     // Restricted ranges hide coords from non-managers (military/discreet).
                     bool showCoords = r.LocationSensitivity != RangeConstants.SensRestricted || canManage;
+                    var rl = linksByRange.GetValueOrDefault(r.Id) ?? new List<ClubRangeLink>();
                     return new
                     {
                         id = r.Id,
@@ -89,11 +99,13 @@ namespace HpskSite.Controllers
                         latitude = showCoords ? r.Latitude : null,
                         longitude = showCoords ? r.Longitude : null,
                         hasCoords = showCoords && r.Latitude.HasValue && r.Longitude.HasValue,
-                        canManage
+                        canManage,
+                        clubCount = rl.Select(l => l.ClubId).Distinct().Count(),
+                        mine = rl.Any(l => myClubs.Contains(l.ClubId))
                     };
                 }).ToList();
 
-                return Json(new { success = true, isSiteAdmin, canCreate, ranges = items });
+                return Json(new { success = true, isSiteAdmin, canCreate, hasMine = items.Any(i => i.mine), ranges = items });
             }
             catch (Exception ex)
             {
@@ -156,12 +168,22 @@ namespace HpskSite.Controllers
 
                 bool sensitiveHidden = range.LocationSensitivity == RangeConstants.SensRestricted && !canManage;
 
+                // Vem tittar? Banans sida skriver rollen i vänsterkortet och visar de egna klubbarnas
+                // tider först (2026-10-11).
+                bool isSteward = await _rangeService.IsStewardAsync(id, memberId.Value);
+                var myClubIds = _memberClubs.GetAllClubIds(_memberService.GetById(memberId.Value));
+                var myLinked = links.Where(l => myClubIds.Contains(l.ClubId)).Select(l => l.ClubId).Distinct().ToList();
+
                 return Json(new
                 {
                     success = true,
                     canManage,
                     canEdit,
                     canDelete = isSiteAdmin, // only site admins may delete a range
+                    isSiteAdmin,
+                    isSteward,
+                    canClaim = range.Status == RangeConstants.StatusUnclaimedSeed && isClubOrRegionalAdmin,
+                    myClubIds = myLinked,
                     range = new
                     {
                         id = range.Id,
@@ -177,6 +199,7 @@ namespace HpskSite.Controllers
                         huvudmanType = range.HuvudmanType,
                         huvudmanClubId = range.HuvudmanClubId,
                         huvudmanName = range.HuvudmanName,
+                        huvudmanClubName = range.HuvudmanClubId is > 0 ? _clubService.GetClubNameById(range.HuvudmanClubId.Value) : null,
                         skjutbanechefName = range.SkjutbanechefName,
                         skjutbanechefContact = range.SkjutbanechefContact,
                         description = range.Description,
@@ -543,6 +566,22 @@ namespace HpskSite.Controllers
                         return Json(new { success = false, message = "Vald bana/vall tillhör inte skjutbanan." });
                 }
 
+                // Id > 0 = ändra en befintlig tid (banans sida, 2026-10-11). Tiden måste höra till SAMMA
+                // klubbkoppling — en ändring flyttar aldrig en tid till en annan klubb.
+                if (req.Id > 0)
+                {
+                    var existing = await _rangeService.GetAllocationAsync(req.Id);
+                    if (existing == null || existing.ClubRangeLinkId != req.ClubRangeLinkId)
+                        return Json(new { success = false, message = "Tiden hittades inte." });
+                    existing.RangeSectionId = req.RangeSectionId;
+                    existing.DayOfWeek = (byte)req.DayOfWeek;
+                    existing.StartTime = start;
+                    existing.EndTime = end;
+                    existing.Note = req.Note;
+                    await _rangeService.UpdateAllocationAsync(existing);
+                    return Json(new { success = true, id = existing.Id });
+                }
+
                 var id = await _rangeService.AddAllocationAsync(new ClubRangeAllocation
                 {
                     ClubRangeLinkId = req.ClubRangeLinkId,
@@ -827,8 +866,11 @@ namespace HpskSite.Controllers
                     {
                         id = r.Id,
                         name = r.Name,
+                        address = r.Address,
+                        postcode = r.Postcode,
                         city = r.City,
                         municipality = r.Municipality,
+                        relationType = links.FirstOrDefault(l => l.RangeId == r.Id)?.RelationType,
                         latitude = showCoords ? r.Latitude : null,
                         longitude = showCoords ? r.Longitude : null,
                         allocations = allocs.Select(a => new
@@ -897,6 +939,89 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Fel: " + ex.Message });
             }
         }
+
+        /// <summary>
+        /// Rutan "Att göra" på banans översikt (2026-10-11): det banan väntar på, räknat på servern ur
+        /// tillstånd, dokument, klubbarnas tider och årets skott. Förvaltare och sajtadmin — det är
+        /// samma krets som får åtgärda det. Reglerna bor i <see cref="RangeTodoRules"/>.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetRangeTodo(int rangeId)
+        {
+            try
+            {
+                var memberId = await _rangeService.GetCurrentMemberIdAsync();
+                if (memberId == null) return Json(new { success = false, message = "Inloggning krävs." });
+                if (!await _rangeService.CanManageRangeAsync(rangeId, memberId))
+                    return Json(new { success = false, message = "Behörighet saknas." });
+                var range = await _rangeService.GetByIdAsync(rangeId);
+                if (range == null) return Json(new { success = false, message = "Skjutbanan hittades inte." });
+
+                var permits = await _rangeService.GetPermitsAsync(rangeId);
+                var docs = await _rangeService.GetDocumentsAsync(rangeId);
+                var links = await _rangeService.GetLinksAsync(rangeId);
+                var allocs = await _rangeService.GetAllocationsForRangeAsync(rangeId);
+                var sections = await _rangeService.GetSectionsAsync(rangeId);
+                int shots = 0;
+                try { shots = (await _rangeService.GetSessionsForYearAsync(rangeId, DateTime.Today.Year)).Sum(s => s.ShotCount); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Årets skott kunde inte läsas för bana {RangeId}", rangeId); }
+
+                var windows = permits.SelectMany(p => ParseWindowRecords(p.AllowedWindows)).ToList();
+                var input = new RangeTodoInput
+                {
+                    Today = DateTime.Today,
+                    Permits = permits.Select(p => new RangeTodoDated(PermitLabel(p.PermitType), p.ExpiryDate, p.MaxShotsPerYear)).ToList(),
+                    Documents = docs.Select(d => new RangeTodoDatedDoc(string.IsNullOrWhiteSpace(d.Title) ? DocLabel(d.DocType) : d.Title, d.ValidUntil)).ToList(),
+                    Clubs = links.GroupBy(l => l.ClubId).Select(g => new RangeTodoClub(
+                        _clubService.GetClubNameById(g.Key) ?? $"Klubb {g.Key}",
+                        allocs.Count(a => g.Any(l => l.Id == a.ClubRangeLinkId)))).ToList(),
+                    AllocationsOutsideWindow = allocs.Count(a => RangeTodoRules.IsOutsideWindows(a.DayOfWeek, a.StartTime, a.EndTime, windows)),
+                    ShotsThisYear = shots,
+                    HasSkjutbanechef = !string.IsNullOrWhiteSpace(range.SkjutbanechefName),
+                    HasPosition = range.Latitude.HasValue && range.Longitude.HasValue,
+                    SectionCount = sections.Count
+                };
+                var items = RangeTodoRules.Build(input);
+                return Json(new
+                {
+                    success = true,
+                    items = items.Select(t => new { severity = t.Severity, text = t.Text, goTo = t.GoTo })
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error building range todo {RangeId}", rangeId);
+                return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        private static IEnumerable<RangeTodoWindow> ParseWindowRecords(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) yield break;
+            List<AllowedWindowDto>? list = null;
+            try { list = System.Text.Json.JsonSerializer.Deserialize<List<AllowedWindowDto>>(json, _jsonCI); } catch { }
+            if (list == null) yield break;
+            foreach (var w in list)
+                if (TimeSpan.TryParse(w.Start, out var s) && TimeSpan.TryParse(w.End, out var e))
+                    yield return new RangeTodoWindow(w.Day, s, e);
+        }
+
+        private static string PermitLabel(string? type) => type switch
+        {
+            RangeConstants.PermitPolice => "Polistillståndet",
+            RangeConstants.PermitEnvC => "Miljöanmälan",
+            RangeConstants.PermitEnvB => "Miljötillståndet",
+            _ => "Tillståndet"
+        };
+
+        private static string DocLabel(string? type) => type switch
+        {
+            RangeConstants.DocPoliceTillstand => "Polistillståndet",
+            RangeConstants.DocBesiktningsprotokoll => "Besiktningsprotokollet",
+            RangeConstants.DocSkjutbaneinstruktion => "Skjutbaneinstruktionen",
+            RangeConstants.DocInsurance => "Försäkringen",
+            _ => "Dokumentet"
+        };
 
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -1496,6 +1621,8 @@ namespace HpskSite.Controllers
 
         public class AddAllocationRequest
         {
+            /// <summary>0 = ny tid, annars tiden som ändras.</summary>
+            public int Id { get; set; }
             public int ClubRangeLinkId { get; set; }
             public int? RangeSectionId { get; set; }
             public int DayOfWeek { get; set; }

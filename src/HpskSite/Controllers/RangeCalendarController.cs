@@ -2,50 +2,34 @@ using System.Text;
 using HpskSite.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
-using Umbraco.Cms.Core.Security;
-using Umbraco.Cms.Core.Web;
 
 namespace HpskSite.Controllers
 {
     /// <summary>
-    /// Banans kalender som sida (<c>/skjutbana/kalender?r=ID</c>) och som prenumeration
-    /// (<c>/skjutbana/kalender.ics?t=…</c>). Routad controller, ingen Umbraco-nod — samma mönster som
-    /// /skjutbana/incheckning och /motion. Sidan läser och skriver genom
-    /// <see cref="RangeCalendarApiController"/>.
+    /// Banans kalender som prenumeration (<c>/skjutbana/kalender.ics?t=…</c>), och den gamla
+    /// sidadressen (<c>/skjutbana/kalender?r=</c>) som nu leder till delen Kalender på banans sida
+    /// (<see cref="RangePageController"/>). Routad controller, ingen Umbraco-nod.
     /// </summary>
     public class RangeCalendarController : Controller
     {
-        private readonly IUmbracoContextAccessor _umbracoContextAccessor;
-        private readonly IMemberManager _memberManager;
         private readonly RangeCalendarService _calendar;
         private readonly IDataProtectionProvider _protection;
         private readonly ILogger<RangeCalendarController> _logger;
 
-        public RangeCalendarController(IUmbracoContextAccessor umbracoContextAccessor, IMemberManager memberManager,
-            RangeCalendarService calendar, IDataProtectionProvider protection, ILogger<RangeCalendarController> logger)
+        public RangeCalendarController(RangeCalendarService calendar, IDataProtectionProvider protection, ILogger<RangeCalendarController> logger)
         {
-            _umbracoContextAccessor = umbracoContextAccessor;
-            _memberManager = memberManager;
             _calendar = calendar;
             _protection = protection;
             _logger = logger;
         }
 
+        /// <summary>
+        /// Den fristående kalendersidan finns inte längre: kalendern är en del på banans egen sida
+        /// (2026-10-11). Adressen leder dit, så länkar i mejl och bokmärken fortsätter fungera.
+        /// </summary>
         [HttpGet("skjutbana/kalender")]
-        public async Task<IActionResult> Index(int r)
-        {
-            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
-                return StatusCode(500, "Umbraco-kontext saknas.");
-            var rootNode = ctx.Content.GetAtRoot().FirstOrDefault();
-            if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
-
-            var member = await _memberManager.GetCurrentMemberAsync();
-            if (member?.Email == null)
-                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/skjutbana/kalender?r={r}")}");
-
-            ViewData["RangeCalendarRangeId"] = r;
-            return View("RangeCalendar", rootNode);
-        }
+        public IActionResult Index(int r)
+            => r > 0 ? Redirect($"/skjutbana/{r}#vy=kalender") : Redirect("/skjutbanor");
 
         /// <summary>
         /// Prenumerationsfilen. Ingen inloggning — en kalenderapp kan inte logga in — så den signerade
