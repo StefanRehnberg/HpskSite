@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pistol.nu för styrelsen · en visning</title>
+<style>
+  :root{
+    --navy:#0f2540; --navy-2:#16365c; --amber:#f4a32c; --amber-deep:#d6850f;
+    --ink:#1b2533; --muted:#5d6b7e; --paper:#f6f8fb; --card:#ffffff;
+    --good:#1f9d72; --bad:#d65745; --line:#e3e9f1;
+    --shadow:0 10px 30px rgba(15,37,64,.10);
+    --maxw:1100px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0; background:var(--paper); color:var(--ink);
+    font:17px/1.6 "Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif; -webkit-font-smoothing:antialiased;}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 20px}
+  h1,h2,h3{line-height:1.2; color:var(--navy); margin:0 0 .4em}
+  h2{font-size:1.8rem; margin-top:0}
+  p{margin:0 0 1em}
+  a{color:var(--amber-deep)}
+
+  .topbar{position:sticky; top:0; z-index:30; background:rgba(255,255,255,.92); backdrop-filter:blur(8px); border-bottom:1px solid var(--line);}
+  .topbar .wrap{display:flex; align-items:center; gap:12px; height:56px}
+  .brand{font-weight:700; color:var(--navy); letter-spacing:.2px}
+  .brand b{color:var(--amber-deep)}
+  .crumb{color:var(--muted); font-size:.85rem; margin-left:2px}
+  .spacer{flex:1}
+  .btn{border:1px solid var(--line); background:var(--card); color:var(--navy); padding:8px 14px; border-radius:10px; font-weight:600; cursor:pointer; font-size:.9rem; transition:.15s;}
+  .btn:hover{border-color:var(--amber); color:var(--amber-deep)}
+  a.btn{text-decoration:none; display:inline-block}
+  @media (max-width:760px){
+    .topbar .wrap{flex-wrap:wrap; height:auto; padding:8px 16px; gap:8px}
+    .topbar .crumb,.topbar .spacer{display:none}
+    .topbar .brand{width:100%}
+  }
+  .btn-present{background:var(--amber); border-color:var(--amber-deep); color:#3a2400}
+  .progress{position:fixed; top:0; left:0; height:3px; background:var(--amber); width:0; z-index:40; transition:width .15s}
+
+  .hero{background:linear-gradient(135deg,var(--navy),var(--navy-2)); color:#fff; padding:72px 0 64px; position:relative; overflow:hidden;}
+  .hero:after{content:""; position:absolute; right:-80px; top:-80px; width:320px; height:320px; background:radial-gradient(circle,rgba(244,163,44,.35),transparent 70%)}
+  .hero .tag{display:inline-block; background:rgba(255,255,255,.12); color:#ffd9a0; padding:5px 12px; border-radius:999px; font-size:.8rem; font-weight:600; letter-spacing:.4px; margin-bottom:18px}
+  .hero h1{color:#fff; font-size:2.8rem; margin-bottom:.3em}
+  .hero p{color:#cfdbeb; font-size:1.25rem; max-width:680px; margin-bottom:0}
+
+  section{padding:46px 0; border-bottom:1px solid var(--line)}
+  .part{background:var(--navy); color:#fff}
+  .part h2{color:#fff; font-size:2.4rem; margin:0}
+  .part .kicker{color:#ffd9a0}
+  .kicker{color:var(--amber-deep); font-weight:700; letter-spacing:.6px; font-size:.8rem; text-transform:uppercase; margin-bottom:6px}
+  .lead{font-size:1.15rem; color:var(--ink)}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:22px 24px; box-shadow:var(--shadow); margin:18px 0}
+  .pull{border-left:4px solid var(--amber); background:#fff8ee; padding:14px 18px; border-radius:0 12px 12px 0; margin:18px 0; font-weight:600; color:var(--navy)}
+  .live-cue{display:inline-flex; align-items:center; gap:8px; background:#e8f6f0; color:var(--good); font-weight:700; border-radius:999px; padding:6px 14px; margin-top:6px; font-size:.95rem}
+  .live-cue:before{content:"▶"}
+
+  ul.tips{list-style:none; padding:0; margin:0}
+  ul.tips li{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 14px 10px 40px; position:relative; margin:8px 0; box-shadow:var(--shadow)}
+  ul.tips li:before{content:"→"; position:absolute; left:14px; top:10px; color:var(--amber-deep); font-weight:700}
+
+  /* bild + text sida vid sida */
+  .split{display:grid; grid-template-columns:minmax(260px,1fr) 1.7fr; gap:32px; align-items:center}
+  .split.phone{grid-template-columns:1fr minmax(220px,.55fr)}
+  .split.duo{grid-template-columns:minmax(240px,.8fr) 1.3fr .45fr}
+  .split.trio{grid-template-columns:1fr .5fr .5fr; align-items:start}
+  body.present .split.trio figure.shot img{max-height:68vh}
+  @media (max-width:860px){ .split,.split.phone,.split.duo,.split.trio{grid-template-columns:1fr} }
+  figure.shot{margin:0}
+  figure.shot img{width:100%; height:auto; display:block; border-radius:12px; border:1px solid var(--line); box-shadow:var(--shadow); background:#fff}
+  figure.shot.phone img{border-radius:22px; border:6px solid #1b2533}
+  figure.shot figcaption{color:var(--muted); font-size:.85rem; margin-top:8px; text-align:center}
+  .shots2{display:grid; grid-template-columns:1.7fr .55fr; gap:18px; align-items:start}
+
+  .layers{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:16px}
+  .layers .card{margin:0; text-align:center}
+  .layers .card b{display:block; font-size:1.1rem; color:var(--navy); margin-bottom:6px}
+  .layers .card span{font-size:2rem}
+  .people{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:16px}
+  .people .card{margin:0; padding:16px 18px}
+  .people .card b{display:block; color:var(--navy); font-size:1.1rem}
+  .people .card small{color:var(--muted)}
+  @media (max-width:860px){ .layers,.people{grid-template-columns:1fr} }
+
+  .beforeafter{display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:12px}
+  .beforeafter .card{margin:0; min-width:0; overflow-x:auto}
+  @media (max-width:860px){ .beforeafter{grid-template-columns:1fr} }
+  .xl{width:100%; border-collapse:collapse; font:13px/1.3 Calibri,"Segoe UI",sans-serif; background:#fff}
+  .xl td,.xl th{border:1px solid #c9d2dd; padding:3px 6px; text-align:right}
+  .xl th{background:#e9eef4; font-weight:600}
+  .xl td:first-child,.xl th:first-child{text-align:left}
+  .xl .warn{background:#fde9e6}
+  .steps{counter-reset:s; list-style:none; padding:0; margin:12px 0 0}
+  .steps li{counter-increment:s; position:relative; padding:12px 16px 12px 58px; background:var(--card); border:1px solid var(--line); border-radius:14px; margin:10px 0; box-shadow:var(--shadow)}
+  .steps li:before{content:counter(s); position:absolute; left:16px; top:12px; width:30px; height:30px; border-radius:50%; background:var(--amber); color:#3a2400; font-weight:800; display:grid; place-items:center}
+
+  /* ===== två lager ===== */
+  .trainer{background:repeating-linear-gradient(135deg,#f4f7fb,#f4f7fb 22px,#eef3f9 22px,#eef3f9 44px)}
+  .trainer .wrap{background:var(--card); border:1px solid var(--line); border-left:5px solid var(--amber-deep); border-radius:14px; padding:22px 24px; box-shadow:var(--shadow); max-width:860px}
+  .tnote-badge{display:inline-flex; align-items:center; gap:7px; background:#fff3e0; color:var(--amber-deep); font-weight:800; font-size:.72rem; letter-spacing:.5px; text-transform:uppercase; padding:5px 12px; border-radius:999px; margin-bottom:12px}
+  .tnote-badge:before{content:"👤"; font-size:.95rem}
+  .tnote-inline{border-left:4px solid var(--amber-deep); background:#fff8ee; border-radius:0 12px 12px 0; padding:12px 16px; margin:18px 0 0}
+  .tnote-inline .lbl{display:inline-flex; align-items:center; gap:6px; font-size:.7rem; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:var(--amber-deep); margin-bottom:5px}
+  .tnote-inline .lbl:before{content:"👤"}
+  .tnote-inline p{margin:0 0 .6em; font-size:.95rem; color:var(--ink)}
+  .tnote-inline p:last-child{margin:0}
+  .deck-tag{display:inline-block; font-size:.72rem; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:var(--good); background:#e8f6f0; border-radius:999px; padding:4px 11px; margin-bottom:8px}
+
+  footer{padding:40px 0 70px; text-align:center; color:var(--muted); font-size:.85rem}
+
+  /* ===== presentationsläge = bara styrelsebilderna ===== */
+  body.present{background:#fff}
+  body.present .topbar,body.present .progress{display:none}
+  body.present section,body.present .hero,body.present footer{min-height:100vh; display:none; padding:4vh 0; place-content:center}
+  body.present section.live,body.present .hero.live{display:flex; flex-direction:column; justify-content:center}
+  body.present .trainer,body.present .tnote-inline,body.present .deck-tag{display:none !important}
+  body.present .wrap{max-width:94vw}
+  body.present h2{font-size:2.6rem}
+  body.present .part h2{font-size:3.4rem}
+  body.present .lead{font-size:1.5rem}
+  body.present ul.tips li{font-size:1.35rem; padding:12px 16px 12px 44px}
+  body.present figure.shot img{max-height:80vh; width:auto; max-width:100%; margin:0 auto}
+  body.present .shots2 figure.shot img{max-height:76vh}
+  body.present .shots2 > div figure.shot img{max-height:50vh}
+  body.present section > .wrap > figure.shot img{max-height:72vh}
+  body.present .steps li{font-size:1.35rem}
+  body.present .people .card b,body.present .layers .card b{font-size:1.4rem}
+  body.present .people .card small,body.present .layers .card small{font-size:1.05rem}
+  .pres-nav{display:none}
+  body.present .pres-nav{display:flex; position:fixed; bottom:14px; right:14px; gap:8px; z-index:50; align-items:center; opacity:.35; transition:opacity .2s}
+  body.present .pres-nav:hover{opacity:1}
+  body.present .pres-nav .pgn{color:var(--muted); font-size:.85rem; margin-right:6px}
+
+  /* ===== utskrift / PDF = bara styrelsebilderna, en per sida ===== */
+  @page{size:A4 landscape; margin:10mm}
+  @media print{
+    body{background:#fff; font-size:13px}
+    .topbar,.progress,.pres-nav,.trainer,.tnote-inline,.deck-tag,footer{display:none !important}
+    section:not([data-slide]){display:none !important}
+    section[data-slide],.hero[data-slide]{display:flex !important; flex-direction:column; justify-content:center;
+      height:186mm; padding:0; border:0; break-after:page; page-break-after:always; break-inside:avoid; overflow:hidden}
+    .wrap{max-width:none; padding:0 4mm}
+    /* Mobilbrytpunkten (860 px) slår till i utskriften och staplar allt — behåll skärmens kolumner. */
+    .split{grid-template-columns:minmax(200px,1fr) 1.7fr !important; gap:6mm}
+    .split.phone{grid-template-columns:1fr minmax(160px,.55fr) !important}
+    .split.duo{grid-template-columns:minmax(180px,.8fr) 1.3fr .45fr !important}
+    .split.trio{grid-template-columns:1fr .5fr .5fr !important}
+    .shots2{grid-template-columns:1.7fr .55fr !important}
+    .layers,.people{grid-template-columns:repeat(3,1fr) !important}
+    .beforeafter{grid-template-columns:1fr 1fr !important}
+    .card{margin:3mm 0; padding:4mm 5mm}
+    ul.tips li{margin:2mm 0; padding:2mm 4mm 2mm 10mm}
+    ul.tips li:before{top:2mm}
+    .card figure.shot img{max-height:85mm}
+    .hero,.part{-webkit-print-color-adjust:exact; print-color-adjust:exact}
+    .card,ul.tips li,.steps li,figure.shot img{box-shadow:none !important}
+    figure.shot img{max-height:120mm; width:auto; max-width:100%; margin:0 auto}
+    .shots2 figure.shot img{max-height:110mm}
+    .shots2 > div figure.shot img{max-height:60mm}
+    .split.trio figure.shot img{max-height:130mm}
+    a[href]{color:inherit; text-decoration:none}
+  }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+
+<div class="topbar">
+  <div class="wrap">
+    <span class="brand">pistol<b>.nu</b></span>
+    <span class="crumb">Visning för styrelsen</span>
+    <span class="spacer"></span>
+    <a class="btn" id="dlBtn" href="visa-styrelsen.zip" download title="Ladda ner presentationen och öppna den med dubbelklick — fungerar utan internet">⬇ Ladda ner</a>
+    <button class="btn" id="printBtn" title="Skriv ut bildspelet, eller spara det som PDF att mejla till styrelsen">🖨 Skriv ut som PDF</button>
+    <button class="btn talarvy-open" title="Öppna anteckningarna i ett eget fönster (för en andra skärm)">🗒 Talarvy</button>
+    <a class="btn" id="alltBtn" href="https://pistol.nu/allt" target="_blank" rel="noopener" title="Allt pistol.nu kan göra, på en sida">Allt pistol.nu kan</a>
+    <button class="btn btn-present" id="presBtn">▶ Visa för styrelsen</button>
+  </div>
+</div>
+
+<!-- ============ ANTECKNING: FÖRE MÖTET ============ -->
+<section class="trainer">
+  <div class="wrap">
+    <span class="tnote-badge">Anteckning · bara för dig som visar</span>
+    <h2>Före mötet</h2>
+    <p><b>Målet med kvällen</b> är inte att visa allt, utan att styrelsen går därifrån med ett beslut om vad som görs först och vem som gör det (bild 27–28).</p>
+    <ul class="tips">
+      <li><b>Kontrollera att personuppgiftsbiträdesavtalet är godkänt.</b> Är det inte det visas en stor gul varning överst i klubbens administration. Godkänn det före mötet, eller gör det till en punkt. Avtalet behövs innan klubben läser in sitt medlemsregister.</li>
+      <li><b>Öppna allt i flikar i förväg</b> och var inloggad. Skriv ingenting live som kan gå fel.</li>
+      <li><b>Den här presentationen är säkerhetsnätet.</b> Fungerar inte nätet går hela visningen att köra från bilderna.</li>
+      <li><b>Låt gärna en av styrelsens egna eldsjälar visa en del.</b> Då blir det deras system, inte ditt.</li>
+      <li><b>För visningen av resultatinmatningen (bild 11):</b> skapa en klubbtävling på er egen sida i förväg (bara för klubbens medlemmar), med några ur styrelsen som anmälda skyttar. De behöver ha konton. Öppna livetavlan (<code>/live?c=…</code>) på projektorn och inmatningen på en telefon. Har ni inga medlemmar med konton: visa bilderna i stället, och säg det.</li>
+      <li>Du behöver inte ändra något i presentationen. Alla bilder kommer från en påhittad klubb, Ankeborg, så den fungerar för vilken klubb som helst. Namnen på bild 28 fyller ni i på mötet.</li>
+    </ul>
+    <p class="note" style="margin-top:14px">Läs aldrig upp bilderna. Texten på dem är kort med flit — resten säger du.</p>
+  </div>
+</section>
+
+<!-- 1 · Titel -->
+<header class="hero slide" data-slide>
+  <div class="wrap">
+    <span class="tag">VISNING FÖR STYRELSEN</span>
+    <h1>pistol.nu — vår pistolskytteplattform</h1>
+    <p>Ett verktyg för föreningen. Hemsidan är bara skyltfönstret.</p>
+  </div>
+  <div class="wrap"><div class="tnote-inline">
+    <div class="lbl">Anteckning</div>
+    <p>Bekräfta det de väntar sig: ja, ni får en hemsida. Sedan: <i>"men det mesta händer bakom den, och det gör jobbet åt er."</i></p>
+  </div></div>
+</header>
+
+<!-- 2 · Er klubb finns redan -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Utgångsläget</div>
+        <h2>Klubbens sida finns redan här</h2>
+        <ul class="tips">
+          <li>Vår sida, vår kalender, våra dokument.</li>
+          <li>Det som saknas är medlemmarna — och de är nyckeln till allt annat.</li>
+        </ul>
+        <span class="live-cue">Visa live: öppna klubbens egen sida</span>
+      </div>
+      <figure class="shot"><img src="bilder/02-klubbsida.jpg" alt="En klubbsida på pistol.nu"></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p><b>Har klubben få medlemmar inne</b> (det vanliga): visa sidan, säg att den är skalet, och gå till nästa bild — där ligger kvällens första beslut.</p>
+      <p><b>Har klubben redan läst in registret:</b> visa antalet medlemmar, tacka den som gjorde det, och gå snabbt förbi nästa bild.</p>
+      <p><b>Öppna aldrig medlemsregistret med personnummer synliga.</b></p>
+    </div>
+  </div>
+</section>
+
+<!-- 3 · Hur kommer medlemmarna in -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Första beslutet</div>
+        <h2>Hur kommer medlemmarna in?</h2>
+        <p class="lead">Två vägar — de går att kombinera.</p>
+        <ul class="tips">
+          <li><b>Medlemmen registrerar sig själv</b> och väljer klubben. Klubben godkänner.</li>
+          <li><b>Klubben läser in sitt register</b> från en fil, till exempel Excel.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="bilder/03-medlemmar.jpg" alt="Klubbens medlemslista med menyn Åtgärder öppen"><figcaption>Importera medlemmar och Hitta dubbletter finns under Åtgärder.</figcaption></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Används båda vägarna finns samma person ofta två gånger efter en inläsning — en gång från filen och en gång självregistrerad. Klubben har en funktion som hittar dubbletterna och slår ihop dem.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 4 · Vad pistol.nu är -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">Helheten</div>
+    <h2>En hemsida — och allt som händer bakom den</h2>
+    <div class="layers">
+      <div class="card"><span>🪟</span><b>Det besökaren ser</b><small>Klubbsidan, kalendern, nyheterna</small></div>
+      <div class="card"><span>📱</span><b>Det medlemmen gör</b><small>Anmäler sig, ser sina resultat och märken</small></div>
+      <div class="card"><span>🗂️</span><b>Det föreningen sköter</b><small>Träningar, tävlingar, märken, styrelse, ekonomi</small></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 · Vem gör vad -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">Så tittar vi på det</div>
+    <h2>Sex personer i klubben</h2>
+    <div class="people">
+      <div class="card"><b>Medlemmen</b><small>anmäler sig, tränar, ser sina märken</small></div>
+      <div class="card"><b>Skjutledaren</b><small>håller i kvällen, lämnar ut lånevapen</small></div>
+      <div class="card"><b>Nybörjaren</b><small>går kursen, lånar vapen</small></div>
+      <div class="card"><b>Tävlingsansvarig</b><small>klubbtävlingar och resultat</small></div>
+      <div class="card"><b>Styrelsen</b><small>möten, protokoll, årshjul, intyg</small></div>
+      <div class="card"><b>Kassören</b><small>avgifter och bokföring</small></div>
+    </div>
+    <p class="pull" style="margin-top:22px">Vi behöver inte lära oss allt. Var och en lär sig sitt.</p>
+  </div>
+</section>
+
+<!-- Del 1 -->
+<section class="part slide" data-slide>
+  <div class="wrap"><div class="kicker">Del 1</div><h2>Klubbkvällen</h2></div>
+</section>
+
+<!-- 6 · Kalendern -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Klubbkvällen</div>
+        <h2>Kalendern</h2>
+        <p class="lead">Allt klubben gör, på ett ställe.</p>
+        <ul class="tips">
+          <li>Träningar, händelser och tävlingar i samma kalender.</li>
+          <li>Medlemmen ser den i telefonen och kan lägga in sina tillfällen i sin egen kalender.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="bilder/06-kalender.jpg" alt="Klubbkalendern i maj: träning på tisdagar, klubbtävling på torsdagar och en kretstävling i fält på söndagen"></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Det här är det de flesta i rummet gör varje vecka. Ta god tid. Peka på tisdagens träning, torsdagens tävling och söndagens kretstävling — kretsens tävlingar kommer med av sig själva.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 7 · Träningen -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Klubbkvällen</div>
+        <h2>Säsongens träningar läggs upp en gång</h2>
+        <ul class="tips">
+          <li>Lägg upp en kväll och kopiera den till hela säsongen.</li>
+          <li>Varje kväll har sin skjutledare — och man kan byta.</li>
+          <li>Ingen anmälan behövs — eller "anmälan krävs" om platserna är få.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="bilder/07-traningar.jpg" alt="Klubbens träningar: en tisdagsträning kopierad till hela säsongen, med skjutledare som turas om"></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Säg att en träning inte kräver anmälan om klubben inte vill det. Lånevapen kan bokas ändå.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 8 · På träningen -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split duo">
+      <div>
+        <div class="kicker">Klubbkvällen</div>
+        <h2>Medlemmen för sin egen träningslogg</h2>
+        <ul class="tips">
+          <li>Serie för serie, med sin utveckling i diagram.</li>
+          <li>Behöver man ett lånevapen bokar man det till kvällen.</li>
+          <li>Närvaron räknas som aktivitet i medlemmens underlag.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="bilder/08-traningslogg.jpg" alt="Min sida med medlemmens träningsöversikt och utvecklingskurva"></figure>
+      <figure class="shot phone"><img src="bilder/08-traningspanel.jpg" alt="En träning i telefonen, med lånevapen att boka"></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Visa en träning i kalendern och öppna den — så ser medlemmen den i telefonen.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 9 · Träningstävlingen -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Klubbkvällen</div>
+        <h2>Träningstävlingen</h2>
+        <p class="lead">En tävling på några minuter — spontant eller planerat.</p>
+        <ul class="tips">
+          <li>Någon startar den på telefonen, de andra går med.</li>
+          <li>Alla matar in sina egna serier; ställningen syns direkt.</li>
+          <li>Med handikapp kan även nybörjaren vinna.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="bilder/09-traningsmatch-om.png" alt="Resultatkortet från en träningsmatch med handikapp"></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Den passar en spontan kväll. Handikappet gör att även en nybörjare kan vinna mot klubbens bästa — lyft det, det brukar väcka intresse.</p>
+      <p>Peka på bilden: Mikael sköt bäst (289), men Bert vann — hans 256 blev 295 med handikappet på drygt åtta poäng per serie.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 10 · Klubbtävlingen -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Klubbkvällen</div>
+        <h2>Klubbtävlingen</h2>
+        <p class="lead">När det är en riktig tävling — klubbmästerskap eller kvällsserie.</p>
+        <ul class="tips">
+          <li>Tävlingen läggs upp en gång, och kopieras till nästa tillfälle.</li>
+          <li>Medlemmarna anmäler sig i telefonen.</li>
+          <li>Flera kvällar samlas i en serie med ställning för säsongen.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="bilder/10-serie.jpg" alt="En tävlingsserie med sina omgångar"></figure>
+    </div>
+  </div>
+</section>
+
+<!-- 11 · Resultaten -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split phone">
+      <div>
+        <div class="kicker">Klubbkvällen</div>
+        <h2>Resultaten matas in vid banan, på en telefon</h2>
+        <ul class="tips">
+          <li>Fem skott per serie, med en sifferpanel.</li>
+          <li>Resultatlistan och ställningen räknar sig själva.</li>
+        </ul>
+        <span class="live-cue">Visa live: mata in en serie medan livetavlan uppdateras</span>
+      </div>
+      <figure class="shot phone"><img src="bilder/11-sifferpanel.jpg" alt="Sifferpanelen för resultatinmatning i telefonen"></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Låt en ur styrelsen trycka in fem skott på telefonen. Peka på tavlan när den uppdateras. Det här är kvällens viktigaste ögonblick — ta det lugnt.</p>
+      <p><b>Säg inte att inmatningen är "enkel".</b> Säg att den görs vid banan i stället för vid köksbordet efteråt.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 12 · Livetavlan -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">Klubbkvällen</div>
+    <h2>Ställningen på en tv i klubbstugan</h2>
+    <figure class="shot"><img src="bilder/12-livetavla.jpg" alt="Livetavlan med ställningen i en klubbtävling"><figcaption>Uppdateras av sig själv, utan att någon rör den.</figcaption></figure>
+  </div>
+</section>
+
+<!-- 13 · Excel-listan -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">Före och efter</div>
+    <h2>Så slipper vi Excel-listan</h2>
+    <div class="beforeafter">
+      <div class="card">
+        <h3>Före</h3>
+        <p>Skjutkort → någon räknar ihop → en lista i Excel.</p>
+        <table class="xl" aria-label="Exempel på en handskriven Excel-lista">
+          <tr><th>Namn</th><th>Omg 1</th><th>Omg 2</th><th>Omg 3</th></tr>
+          <tr><td>Anna Berg</td><td>271</td><td>268</td><td>—</td></tr>
+          <tr class="warn"><td>Per Lindqvist</td><td>255</td><td>—</td><td>262</td></tr>
+          <tr class="warn"><td>Per Lindkvist</td><td>—</td><td>259</td><td>—</td></tr>
+          <tr><td>Kent Olsson</td><td>248</td><td>251</td><td>244</td></tr>
+          <tr class="warn"><td>Kent Olsson</td><td>—</td><td>262</td><td>—</td></tr>
+        </table>
+        <p class="note" style="margin:8px 0 0">Samma person med två stavningar — eller två personer med samma namn?</p>
+      </div>
+      <div class="card">
+        <h3>Efter</h3>
+        <p>Resultaten finns när sista serien är inmatad — och varje skytt är en person med en profil.</p>
+        <figure class="shot"><img src="bilder/12-livetavla.jpg" alt="Ställningen räknad av pistol.nu"></figure>
+      </div>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Fråga styrelsen hur klubbens egen lista ser ut i dag, och vem som för den. Peka på namn som stavats olika på olika rader, eller två personer med samma namn.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 14 · Märkena -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Det som händer av sig självt</div>
+        <h2>Varje serie kan räknas mot medlemmens märken</h2>
+        <ul class="tips">
+          <li><b>Från en klubbtävling:</b> av sig själv — guldserier, och Elitmärket.</li>
+          <li><b>Från träningen:</b> medlemmen skickar in serien, en funktionär godkänner — på plats med en QR-kod.</li>
+          <li>Medlemmen ser själv hur långt hen har kvar.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="bilder/14-min-sida-guldserie.jpg" alt="Medaljer och märken på Min sida: guldfodringens precisionsdel klar"></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Serier i en klubbtävling på pistol.nu räknas mot märkena utan att någon behöver granska dem. En serie från träningen måste skickas in och godkännas av en funktionär — i en kö, eller på plats genom att skanna skyttens QR-kod.</p>
+      <p><b>Elitmärket kräver att medlemmens guldmärke är registrerat, med årtal</b> — och bara serier från året efter räknas. Utan registrerat guld händer ingenting. Därför ligger det i steg 2 på slutet.</p>
+      <p>Kravet är 5 precisionsserier och 5 snabbserier, varje serie minst 45 poäng, samma kalenderår. Brons först, en valör per år.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 15 · Beställa och dela ut -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Märkena</div>
+        <h2>Vad ska beställas — och delas ut?</h2>
+        <ul class="tips">
+          <li>En färdig lista per år, att beställa efter.</li>
+          <li>En utdelningslista till årsmötet.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="bilder/15-marken-bestall.jpg" alt="Listan Att beställa och dela ut, med antal per märke och valör"></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Får du frågan "kan vi lägga in förra årets resultat?": bara om skotten finns kvar, och det är skott för skott. Med bara totalsummor går det inte — lova inget.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Del 2 -->
+<section class="part slide" data-slide>
+  <div class="wrap"><div class="kicker">Del 2</div><h2>Nybörjaren</h2></div>
+</section>
+
+<!-- 16 · Kursen -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">Nybörjaren</div>
+    <h2>Nybörjarkursen samlad på ett ställe</h2>
+    <div class="shots2">
+      <div>
+        <ul class="tips" style="margin-bottom:16px">
+          <li>Instruktören tar närvaro på telefonen.</li>
+          <li>Deltagaren ser sina tillfällen, och får påminnelse dagen innan.</li>
+          <li>Skyttetrappan visar vägen vidare.</li>
+        </ul>
+        <figure class="shot"><img src="bilder/16-min-kurs.jpg" alt="Instruktörens upprop i kursen"></figure>
+      </div>
+      <figure class="shot phone"><img src="bilder/16-min-kurs-deltagare.jpg" alt="Deltagarens kursvy i telefonen"></figure>
+    </div>
+  </div>
+</section>
+
+<!-- 17 · Lånevapen -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">Nybörjaren</div>
+    <h2>Lånevapen — klubben ser vem som har vilket</h2>
+    <div class="shots2">
+      <div>
+        <ul class="tips" style="margin-bottom:16px">
+          <li>Bokning i förväg, eller direkt i valvet.</li>
+          <li>En etikett på varje vapen: skanna, så är utlämningen registrerad.</li>
+        </ul>
+        <figure class="shot"><img src="bilder/17-lanevapen.jpg" alt="Lånevapen att boka"></figure>
+      </div>
+      <figure class="shot phone"><img src="bilder/17-valvet.jpg" alt="Valvet i telefonen: kvällens utlämning"></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Etiketterna skrivs ut en gång och sitter på vapnet. Valvet nås med en QR-affisch på valvdörren — vapenansvarig behöver aldrig leta i menyerna.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 18 · På banan -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Nybörjaren — och alla andra</div>
+        <h2>In- och utcheckning på skjutbanan</h2>
+        <ul class="tips">
+          <li>Medlemmen skannar en QR-kod vid banan.</li>
+          <li>Klubben ser antal skott mot miljötillståndets tak.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="bilder/18-skjutbana.jpg" alt="Skjutbanans aktivitet: skott per år och QR-kod för incheckning"></figure>
+    </div>
+  </div>
+</section>
+
+<!-- Del 3 -->
+<section class="part slide" data-slide>
+  <div class="wrap"><div class="kicker">Del 3</div><h2>Händelser</h2></div>
+</section>
+
+<!-- 19 · Städdagen och festen -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Händelser</div>
+        <h2>Städdagen och festen</h2>
+        <p class="lead">Anmälan, platser och betalning.</p>
+        <ul class="tips">
+          <li>Begränsat antal platser — reservlista av sig själv.</li>
+          <li>Olika priser: vuxen, barn.</li>
+          <li>Medlemmen kan anmäla sin familj.</li>
+          <li>Betalning med Swish.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="bilder/19-handelse.jpg" alt="En kräftskiva med priser för vuxen och barn, och en medlem som anmält sin familj"></figure>
+    </div>
+  </div>
+</section>
+
+<!-- 20 · Närvaro -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Händelser</div>
+        <h2>Närvaron tas med en QR-affisch på dörren</h2>
+        <p class="lead">Obligatoriska händelser — som städdagen — kan räknas in i underlaget till föreningsintyg.</p>
+      </div>
+      <figure class="shot"><img src="bilder/20-qr-affisch.jpg" alt="En utskriven affisch med QR-kod för att registrera närvaro"></figure>
+    </div>
+  </div>
+</section>
+
+<!-- Del 4 -->
+<section class="part slide" data-slide>
+  <div class="wrap"><div class="kicker">Del 4</div><h2>Styrelsen</h2></div>
+</section>
+
+<!-- 21 · Styrelsemötet -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Styrelsen</div>
+        <h2>Från kallelse till justerat protokoll</h2>
+        <ul class="tips">
+          <li>Dagordningen ur en mall.</li>
+          <li>Kallelsen mejlas ut.</li>
+          <li>Protokollet skrivs under mötet.</li>
+        </ul>
+        <span class="live-cue">Visa live (valfritt): justera protokollet med telefonen</span>
+      </div>
+      <figure class="shot"><img src="bilder/21-styrelsemote.jpg" alt="Ett styrelsemöte under mötet: närvaro och beslutsförhet"></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Bara om tiden räcker. Ett påhittat protokoll, och en ur styrelsen skannar QR-koden och godkänner. Det brukar landa bra — de känner igen pappersprocessen.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 22 · Året runt -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Styrelsen</div>
+        <h2>Årshjulet påminner om det som måste göras</h2>
+        <p class="lead">Bokslut, verksamhetsberättelse, revision, kallelse till årsmöte, budget.</p>
+        <p>Och: styrelsens mandattider, valberedningen, motioner från medlemmarna.</p>
+      </div>
+      <figure class="shot"><img src="bilder/22-arshjul.jpg" alt="Årshjulet med föreningens årliga uppgifter"></figure>
+    </div>
+  </div>
+</section>
+
+<!-- 23a · Medlemsavgiften -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">Medlemmen</div>
+    <h2>Medlemmen betalar sin avgift i telefonen</h2>
+    <div class="split trio">
+      <div>
+        <ul class="tips">
+          <li>Medlemmen får ett mejl med en betallänk — ingen inloggning behövs.</li>
+          <li>Klubben sätter avgiften per medlemstyp: senior, junior, veteran, pensionär, stödjande, familj, hedersmedlem eller ständig medlem.</li>
+          <li>Medlemmen väljer sin typ själv, men bara bland de typer klubben tillåter. Familjen betalar en gång, via huvudmedlemmen.</li>
+          <li>Betalar med Swish eller bankgiro.</li>
+          <li>Kassören ser vem som har betalat — och påminner bara de andra.</li>
+        </ul>
+      </div>
+      <figure class="shot phone"><img src="bilder/19a-avgift-valj.jpg" alt="Betalsidan: medlemmen väljer sin medlemstyp"><figcaption>1. Välj medlemstyp</figcaption></figure>
+      <figure class="shot phone"><img src="bilder/19b-avgift-betala.jpg" alt="Betalsidan: avgiften och Swish-koden"><figcaption>2. Betala med Swish</figcaption></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Avgiften per medlemstyp sätts en gång om året, och klubben tar med bara de typer den har. Bilden visar Ankeborgs fem valbara typer. Familj och hedersmedlem finns också men är låsta: en familj kräver att klubben kopplat ihop hushållet, och en avgiftsfri hederstyp ska inte gå att välja själv.</p>
+      <p>Har klubben redan registrerat medlemmens typ hoppas första steget över. Har typen ändrats, till exempel till pensionär, byter medlemmen själv på betalsidan.</p>
+      <p>"Jag har betalat" är medlemmens besked — det är kassören som markerar avgiften som betald när pengarna syns på kontot.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 23 · Ekonomin -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Styrelsen</div>
+        <h2>Ekonomin — skött av kassören, läst av revisorn</h2>
+        <ul class="tips">
+          <li>Medlemsavgifter med betallänk: Swish eller bankgiro.</li>
+          <li>Kontoutdraget läses in och stäms av.</li>
+          <li>Bokslutet steg för steg.</li>
+          <li>Det finns en övningsbokföring att prova i först.</li>
+        </ul>
+      </div>
+      <figure class="shot"><img src="bilder/23-ekonomi.jpg" alt="Ekonomin: välj om pistol.nu ska sköta hela bokföringen eller bara avgifterna"><figcaption>Klubben väljer själv: hela bokföringen, eller bara avgifterna.</figcaption></figure>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Visa i <b>övningsbokföringen</b>, aldrig i klubbens riktiga. Säg att det är kassören som skriver, och att resten av styrelsen och revisorn kan läsa.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 24 · Föreningsintyget -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="split">
+      <div>
+        <div class="kicker">Styrelsen</div>
+        <h2>Föreningsintyget</h2>
+        <p class="lead">Medlemmen begär — styrelsen skriver under.</p>
+        <p>Underlaget finns redan: aktivitet, tävlingar, märken.</p>
+      </div>
+      <figure class="shot"><img src="bilder/24-foreningsintyg.jpg" alt="En medlems förfrågan om föreningsintyg"></figure>
+    </div>
+  </div>
+</section>
+
+<!-- Del 5 -->
+<section class="part slide" data-slide>
+  <div class="wrap"><div class="kicker">Del 5</div><h2>Den stora tävlingen</h2></div>
+</section>
+
+<!-- 25 · Större tävlingar -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">När vi arrangerar större tävlingar</div>
+    <h2>Fältskjutning, stationer, patruller, funktionärer</h2>
+    <div class="beforeafter">
+      <figure class="shot"><img src="bilder/25-faltkonfig.jpg" alt="Fältkonfiguratorn: en station med målgrupper och figurer"><figcaption>Stationerna planeras med SHB:s regler inbyggda.</figcaption></figure>
+      <figure class="shot"><img src="bilder/25-bemanning.jpg" alt="Bemanningen: funktionärer per roll och dag"><figcaption>Funktionärerna — och deras schema i telefonen.</figcaption></figure>
+    </div>
+    <p class="pull">Det här tar vi ett eget möte om, med tävlingsledningen.</p>
+  </div>
+</section>
+
+<!-- Del 6 -->
+<section class="part slide" data-slide>
+  <div class="wrap"><div class="kicker">Del 6</div><h2>Hur gör vi nu?</h2></div>
+</section>
+
+<!-- 26 · Kostnad och uppgifter -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">Det vi undrar</div>
+    <h2>Vad kostar det — och var finns uppgifterna?</h2>
+    <ul class="tips">
+      <li><b>Gratis för skyttar</b>, alltid.</li>
+      <li><b>Gratis för klubbar i dag.</b> På sikt kan en liten avgift tillkomma — några hundralappar per år.</li>
+      <li><b>All data ligger inom EU.</b> Klubben har ett personuppgiftsbiträdesavtal med pistol.nu.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- 27 · Vad gör vi först -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">Beslutet</div>
+    <h2>Vad gör vi först?</h2>
+    <p class="lead">Tre steg — inte allt på en gång.</p>
+    <ol class="steps">
+      <li><b>Nu:</b> få in medlemmarna. Lägg upp träningar och händelser i kalendern. Lägg in styrelsen, med kassören.</li>
+      <li><b>Före säsongen:</b> guldmärkena med årtal, lånevapen med etiketter, nybörjarkursen.</li>
+      <li><b>Under säsongen:</b> klubbkvällarna — träningar, träningstävlingar och klubbtävlingar.</li>
+    </ol>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Det här är målet med kvällen. Låt styrelsen säga ja till steg 1 innan ni går vidare.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 28 · Vem gör vad hos oss -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">Beslutet</div>
+    <h2>Vem gör vad hos oss?</h2>
+    <p class="lead">Vi behöver fyra personer.</p>
+    <div class="people">
+      <div class="card"><b>Medlemsansvarig</b><small>få in medlemmarna och godkänna nya</small><p class="note" style="margin:8px 0 0">Namn: ________________</p></div>
+      <div class="card"><b>Tävlingsansvarig</b><small>klubbtävlingarna</small><p class="note" style="margin:8px 0 0">Namn: ________________</p></div>
+      <div class="card"><b>Märkesansvarig</b><small>guldmärken och historik</small><p class="note" style="margin:8px 0 0">Namn: ________________</p></div>
+      <div class="card"><b>Kassören</b><small>ekonomin</small><p class="note" style="margin:8px 0 0">Namn: ________________</p></div>
+    </div>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Skriv upp namnen under mötet, på tavlan eller i protokollet. Samma person kan ha flera uppgifter. Lämna kvar ett papper med de tre stegen och vem som är ansvarig.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 29 · Frågor -->
+<section class="slide" data-slide>
+  <div class="wrap">
+    <span class="deck-tag">Styrelsebild</span>
+    <div class="kicker">Tack</div>
+    <h2>Skriv ner frågorna — de får ett svar</h2>
+    <ul class="tips">
+      <li>Allt pistol.nu kan göra, på en sida: <a href="https://pistol.nu/allt" target="_blank" rel="noopener"><b>pistol.nu/allt</b></a></li>
+      <li>Frågor om pistol.nu: chatten nere till höger på sajten, eller <b>Rapportera fel</b> i menyn. Svaret kommer skriftligt.</li>
+      <li>Film: <b>Guide för klubbadministratörer</b> (6:42) — <a href="https://www.youtube.com/watch?v=lmjVut0COiY" target="_blank" rel="noopener">youtube.com/watch?v=lmjVut0COiY</a></li>
+      <li>Film: <b>Från projekt till prisutdelning</b> (7:22) — <a href="https://www.youtube.com/watch?v=sSGLnl4u8eQ" target="_blank" rel="noopener">youtube.com/watch?v=sSGLnl4u8eQ</a></li>
+    </ul>
+    <div class="tnote-inline">
+      <div class="lbl">Anteckning</div>
+      <p>Be om frågor <b>skriftligt</b> — ett mejl eller en lapp — inte om ett nytt möte. Då går de att besvara.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Visning för styrelsen · <b>pistol.nu</b><br>
+    Bilderna är tagna mot demoklubben Ankeborg — alla personer och uppgifter är påhittade.
+  </div>
+</footer>
+
+<div class="pres-nav">
+  <span class="pgn" id="pgn"></span>
+  <button class="btn" id="prevBtn">←</button>
+  <button class="btn" id="nextBtn">→</button>
+  <button class="btn talarvy-open" title="Öppna talarvy (T)">🗒 Talarvy</button>
+  <button class="btn" id="exitBtn">Avsluta</button>
+</div>
+
+<script>
+// ---- presentationsläge = bara styrelsebilderna (element med [data-slide]) ----
+const slides=[...document.querySelectorAll('[data-slide]')];
+let cur=0;
+const deck=slides.map((s,i)=>{
+  const h=s.querySelector('h1,h2'); const title=h?h.textContent.trim():('Bild '+(i+1));
+  const ne=s.querySelector('.tnote-inline');
+  let note=''; if(ne){const ps=[...ne.querySelectorAll('p')]; note=ps.length?ps.map(p=>'<p>'+p.innerHTML+'</p>').join(''):ne.innerHTML;}
+  return {title,note};
+});
+let bc=null; try{bc=new BroadcastChannel('styrelsedemo');}catch(e){}
+function pushIdx(){ if(bc) try{bc.postMessage({t:'idx', i:cur, n:slides.length});}catch(e){} }
+if(bc) bc.onmessage=(e)=>{const m=e.data||{}; if(m.t==='nav'){showSlide(cur+(m.dir||0));} else if(m.t==='req'){ if(!document.body.classList.contains('present')) enterPres(); if(bc){try{bc.postMessage({t:'deck',deck:deck,n:slides.length});}catch(_){}} pushIdx(); }};
+function showSlide(i){cur=Math.max(0,Math.min(slides.length-1,i)); slides.forEach((s,k)=>s.classList.toggle('live',k===cur)); document.getElementById('pgn').textContent=(cur+1)+' / '+slides.length; pushIdx();}
+function enterPres(){document.body.classList.add('present'); showSlide(0); window.scrollTo(0,0); if(bc){try{bc.postMessage({t:'deck',deck:deck,n:slides.length});}catch(_){}} try{document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();}catch(_){}}
+function exitPres(){document.body.classList.remove('present'); slides.forEach(s=>s.classList.remove('live')); try{document.fullscreenElement&&document.exitFullscreen();}catch(_){}}
+document.getElementById('presBtn').onclick=enterPres;
+document.getElementById('exitBtn').onclick=exitPres;
+document.getElementById('nextBtn').onclick=()=>showSlide(cur+1);
+document.getElementById('prevBtn').onclick=()=>showSlide(cur-1);
+function openTalarvy(){
+  const w=window.open('', 'styrelsetalarvy', 'width=540,height=780');
+  if(!w){ alert('Tillåt popup-fönster för att öppna talarvyn.'); return; }
+  const data=JSON.stringify(deck).replace(/<\//g,'<\\/');
+  const doc='<!doctype html><html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Talarvy · anteckningar</title>'
+   +'<style>:root{--amber:#f4a32c}*{box-sizing:border-box}body{margin:0;background:#0c1d33;color:#eaf1fb;font:16px/1.6 "Segoe UI",system-ui,sans-serif}'
+   +'.bar{display:flex;align-items:center;gap:12px;padding:12px 18px;background:#0a1729;border-bottom:1px solid #1d3357}'
+   +'.bar b{color:#ffd9a0;letter-spacing:.3px}.cnt{margin-left:auto;color:#9fb4cf;font-weight:700}'
+   +'.wrap{padding:20px 22px}.lbl{font-size:.72rem;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:#ffd9a0;margin-bottom:8px}'
+   +'.cur{font-size:1.5rem;font-weight:800;color:#fff;margin:0 0 14px}'
+   +'.note{background:#10243f;border-left:4px solid var(--amber);border-radius:0 12px 12px 0;padding:14px 16px;font-size:1.12rem}'
+   +'.note p{margin:0 0 .7em}.note p:last-child{margin:0}.empty{opacity:.55;font-style:italic}'
+   +'.next{margin-top:18px;color:#9fb4cf;font-size:.95rem}'
+   +'.nav{position:fixed;left:0;right:0;bottom:0;display:flex;gap:10px;padding:14px 18px;background:#0a1729;border-top:1px solid #1d3357}'
+   +'button{flex:1;border:0;border-radius:10px;padding:14px;font-size:1.05rem;font-weight:700;cursor:pointer;background:#1d3357;color:#eaf1fb}'
+   +'button.nx{background:var(--amber);color:#3a2400}.hint{font-size:.8rem;color:#7f96b5;padding:0 22px 90px}</style></head><body>'
+   +'<div class="bar"><b>🗒 Talarvy</b><span>anteckningar</span><span class="cnt" id="cnt"></span></div>'
+   +'<div class="wrap"><div class="lbl">Nu visas för styrelsen</div><h1 class="cur" id="cur"></h1>'
+   +'<div class="lbl">Din anteckning</div><div class="note" id="note"></div><div class="next" id="next"></div></div>'
+   +'<div class="hint">Följer bildspelet automatiskt. Pilarna här (eller ← →) bläddrar i båda fönstren.</div>'
+   +'<div class="nav"><button id="p">← Föregående</button><button class="nx" id="nx">Nästa →</button></div>'
+   +'<script>var DECK='+data+';var n=DECK.length;var bc=new BroadcastChannel("styrelsedemo");'
+   +'function r(i){document.getElementById("cnt").textContent=(i+1)+" / "+n;'
+   +'document.getElementById("cur").textContent=DECK[i]?DECK[i].title:"";'
+   +'document.getElementById("note").innerHTML=(DECK[i]&&DECK[i].note)?DECK[i].note:\'<p class="empty">Ingen anteckning till den här bilden — berätta utifrån bilden.</p>\';'
+   +'document.getElementById("next").innerHTML=DECK[i+1]?("<b>Nästa:</b> "+DECK[i+1].title):"— sista bilden —";}'
+   +'bc.onmessage=function(e){var m=e.data||{};if(m.t==="deck"){DECK=m.deck||DECK;n=m.n||DECK.length;r(0);}else if(m.t==="idx"){if(m.n)n=m.n;r(m.i);}};'
+   +'document.getElementById("p").onclick=function(){bc.postMessage({t:"nav",dir:-1});};'
+   +'document.getElementById("nx").onclick=function(){bc.postMessage({t:"nav",dir:1});};'
+   +'document.addEventListener("keydown",function(e){if(e.key==="ArrowRight"||e.key===" ")bc.postMessage({t:"nav",dir:1});if(e.key==="ArrowLeft")bc.postMessage({t:"nav",dir:-1});});'
+   +'bc.postMessage({t:"req"});r(0);<\/script><\/body><\/html>'; // escapat med flit: en oescapad body-sluttagg här tolkas som sidans slut av verktyg som skjuter in skript
+  w.document.open(); w.document.write(doc); w.document.close();
+  if(!document.body.classList.contains('present')) enterPres(); else pushIdx();
+}
+[...document.querySelectorAll('.talarvy-open')].forEach(b=>b.onclick=openTalarvy);
+addEventListener('keydown',e=>{
+  if(!document.body.classList.contains('present')) return;
+  if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' ') showSlide(cur+1);
+  if(e.key==='ArrowLeft'||e.key==='PageUp') showSlide(cur-1);
+  if(e.key==='t'||e.key==='T') openTalarvy();
+  if(e.key==='Escape') exitPres();
+});
+const prog=document.getElementById('progress');
+addEventListener('scroll',()=>{const h=document.documentElement; const sc=h.scrollTop/(h.scrollHeight-h.clientHeight); prog.style.width=(sc*100)+'%';});
+window.__slideCount=slides.length;
+window.__goto=n=>{enterPres(); showSlide(n);};
+</script>
+
+<script>
+(function(){
+  // Den nedladdade kopian har ingen zip bredvid sig — där är knappen meningslös.
+  if (location.protocol === 'file:') { var d = document.getElementById('dlBtn'); if (d) d.style.display = 'none'; }
+  var p = document.getElementById('printBtn');
+  if (p) p.onclick = function(){ window.print(); };
+})();
+</script>
+</body>
+</html>

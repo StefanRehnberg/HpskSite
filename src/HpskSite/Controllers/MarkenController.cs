@@ -2281,11 +2281,11 @@ namespace HpskSite.Controllers
                     // The gates that keep this honest are elsewhere and unchanged: a held Guldmärke, only
                     // years after it, 5 precision AND 5 snabb in the SAME calendar year, one valör per
                     // year, in order.
-                    // ⚠️ The PRECISION half is what competitions feed today. The snabb half still comes
-                    // only from human submissions — a Duell competition's series are not materialised,
-                    // because whether they are shot on the snabbpistoltavla at 25 m with 3 s/shot is a
-                    // question about the discipline, not about this code. Until that is answered, a
-                    // shooter cannot complete Elit from competition results alone.
+                    // BOTH halves are fed by competitions: MarkenCompetitionSeriesSync materialises
+                    // PrecisionResultEntry series as precision series and DuellResultEntry series as
+                    // snabbpistol series (Stefan confirmed 2026-08-28 that a Duell series is shot on the
+                    // snabbpistoltavla at 25 m, 3 s/shot). A shooter can therefore complete Elit from
+                    // competition results alone; human submissions (Guldserie/Snabbserie buttons) add to it.
                     .ToList();
 
                 // SHB 5.4.2: "Prov för elitmärke får avläggas första gången året efter det guldmärket
