@@ -27,6 +27,8 @@ namespace HpskSite.Controllers
         private readonly IContentService _contentService;
         private readonly RangeDocumentStorage _docStorage;
         private readonly MemberClubService _memberClubs;
+        private readonly RangeCalendarService _calendar;
+        private readonly ClubEventParticipationService _participation;
         private readonly ILogger<ShootingRangeController> _logger;
 
         public ShootingRangeController(
@@ -43,9 +45,13 @@ namespace HpskSite.Controllers
             IContentService contentService,
             RangeDocumentStorage docStorage,
             MemberClubService memberClubs,
+            RangeCalendarService calendar,
+            ClubEventParticipationService participation,
             ILogger<ShootingRangeController> logger)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _calendar = calendar;
+            _participation = participation;
             _rangeService = rangeService;
             _authService = authService;
             _memberService = memberService;
@@ -1325,7 +1331,11 @@ namespace HpskSite.Controllers
                     rangeName = range.Name,
                     checkedIn = open != null,
                     sessionId = open?.Id,
-                    since = open?.StartTime?.ToString(@"hh\:mm")
+                    since = open?.StartTime?.ToString(@"hh\:mm"),
+                    // Den som skannar igen ska se vad incheckningen gav närvaro på — och kunna välja
+                    // när flera aktiviteter pågår samtidigt.
+                    activities = open == null ? null : (await OngoingActivitiesAsync(rangeId, memberId.Value))
+                        .Select(a => new { id = a.Id, occasionKind = a.OccasionKind, name = a.Name, owner = a.Owner, start = a.Start, end = a.End, present = a.Present })
                 });
             }
             catch (Exception ex)
@@ -1361,7 +1371,25 @@ namespace HpskSite.Controllers
                     ShooterCount = 1,
                     EnteredByMemberId = memberId
                 });
-                return Json(new { success = true, sessionId = id });
+
+                // Närvaro på aktiviteten som pågår på banan. EN aktivitet medlemmen får delta i →
+                // registreras direkt: "Checka in" är redan ett aktivt tryck, inte en kamera som
+                // råkade öppna sidan. Flera → medlemmen väljer på sidan; vi gissar aldrig.
+                string? attended = null;
+                try
+                {
+                    var ongoing = await OngoingActivitiesAsync(req.Id, memberId.Value);
+                    if (ongoing.Count == 1 && !ongoing[0].Present)
+                    {
+                        var a = ongoing[0];
+                        var (ok, _) = await _participation.SetAttendanceAsync(
+                            a.Id, memberId.Value, ClubEvents.AttendancePresent, null, memberId.Value, null, a.OccasionKind);
+                        if (ok) attended = a.Name;
+                    }
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Närvaro från incheckning på bana {RangeId} misslyckades", req.Id); }
+
+                return Json(new { success = true, sessionId = id, attended });
             }
             catch (Exception ex)
             {
@@ -1394,6 +1422,66 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Fel: " + ex.Message });
             }
         }
+
+        /// <summary>En aktivitet på banan som en incheckning kan ge närvaro på.</summary>
+        public record RangeOngoingActivity(int Id, string OccasionKind, string Name, string Owner, string? Start, string? End, bool Present);
+
+        /// <summary>
+        /// Träningar och händelser som pågår på banan NU och som medlemmen får delta i
+        /// (<see cref="RangeCalendarRules.OngoingForCheckIn"/> + aktivitetens egen behörighet). En annan
+        /// klubbs träning på samma bana syns alltså inte — den har inget med medlemmen att göra.
+        /// </summary>
+        private async Task<List<RangeOngoingActivity>> OngoingActivitiesAsync(int rangeId, int memberId)
+        {
+            var result = new List<RangeOngoingActivity>();
+            var now = DateTime.Now;
+            var member = _memberService.GetById(memberId);
+            foreach (var i in RangeCalendarRules.OngoingForCheckIn(_calendar.Build(rangeId, now, now), now))
+            {
+                var kind = i.Kind == RangeCalendarKind.Training ? ClubEvents.OccasionTraining : ClubEvents.OccasionEvent;
+                var ctx = _participation.GetContext(i.SourceId, kind);
+                if (ctx == null || !_participation.IsEligible(ctx, member)) continue;
+                var row = await _participation.GetParticipantAsync(ctx.EventId, memberId, ctx.OccasionKind);
+                result.Add(new RangeOngoingActivity(ctx.EventId, ctx.OccasionKind, i.Title, i.OwnerName, i.Start, i.End,
+                    row?.AttendanceStatus == ClubEvents.AttendancePresent));
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Medlemmen väljer vilken av flera pågående aktiviteter incheckningen gäller.
+        /// ⚠️ Kräver en incheckning på SAMMA bana i dag — banans QR är beviset, inte knappen. Utan det
+        /// hade vem som helst kunnat pricka av sig själv på en träning hen inte var på.
+        /// POST /umbraco/surface/ShootingRange/RangeAttendance { rangeId, id, kind }
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RangeAttendance([FromBody] RangeAttendanceRequest req)
+        {
+            try
+            {
+                var memberId = await _rangeService.GetCurrentMemberIdAsync();
+                if (memberId == null) return Json(new { success = false, message = "Inloggning krävs." });
+                if (await _rangeService.GetOpenSessionAsync(req.RangeId, memberId.Value) == null)
+                    return Json(new { success = false, message = "Checka in på banan först." });
+
+                var a = (await OngoingActivitiesAsync(req.RangeId, memberId.Value))
+                    .FirstOrDefault(x => x.Id == req.Id && x.OccasionKind == ClubEvents.NormaliseOccasionKind(req.Kind));
+                if (a == null) return Json(new { success = false, message = "Aktiviteten pågår inte på banan just nu." });
+                if (a.Present) return Json(new { success = true, attended = a.Name });
+
+                var (ok, msg) = await _participation.SetAttendanceAsync(
+                    a.Id, memberId.Value, ClubEvents.AttendancePresent, null, memberId.Value, null, a.OccasionKind);
+                return Json(new { success = ok, attended = ok ? a.Name : null, message = ok ? null : msg });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error registering range attendance");
+                return Json(new { success = false, message = "Närvaron kunde inte registreras." });
+            }
+        }
+
+        public class RangeAttendanceRequest { public int RangeId { get; set; } public int Id { get; set; } public string? Kind { get; set; } }
 
         /// <summary>
         /// End-of-day auto-checkout for forgotten check-ins. Called opportunistically on page

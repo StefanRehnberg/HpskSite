@@ -7905,6 +7905,24 @@ som "PrimaryUser") är borta. Förslaget och Stefans fyra beslut: https://claude
 Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod. Adds C# → full ombyggnad. Fildeploy av KB
 `skjutbanor.md`. Svit: `hpsk-verify/range-page-verify.mjs`.
 
+### Incheckning på banan ger närvaro (2026-10-11, Michael/Luleå)
+
+- **Rätt bana:** kursens upprop visar *incheckad* bara för incheckning på tillfällets EGEN bana när det
+  har en (`TrainingCourseRules.CheckInAtRightRange`); utan bana räknas klubbens alla banor som förut.
+- **Banans QR → närvaro:** `ShootingRange/CheckIn` letar upp det som pågår på banan
+  (`RangeCalendarRules.OngoingForCheckIn` över `RangeCalendarService.Build` — träningar och händelser,
+  ej inställda, samma fönster som uppropet: 1 h före start till 1 h efter slut) och som medlemmen FÅR
+  delta i (`ClubEventParticipationService.IsEligible`). **Exakt en → närvaro sätts direkt**
+  (självregistrerad, `RecordedByMemberId == MemberId`); flera → `CheckInStatus.activities` och sidan
+  ber medlemmen välja (`ShootingRange/RangeAttendance`, kräver en ÖPPEN incheckning på samma bana).
+  Vi gissar aldrig mellan två. En annan klubbs träning på samma bana syns inte.
+- **Närvaro-QR:n per tillfälle** (`ClubEvent/PrintAttendanceQr`) hade ingen väg in sedan 56b8364
+  (2026-09-20, den gamla listan togs bort). Nu: deltagarsidan → blå **Åtgärder → Skriv ut närvaro-QR**
+  (`#deskActions`, `#deskQrLink`); "Lägg till deltagare" ligger i samma meny.
+
+Tester: `RangeCheckInAttendanceTests` (A/B: gamla regeln + `TimeSpan.TryParse` → 2 röda).
+Svit: `hpsk-verify/range-attendance-verify.mjs`. Ingen SQL.
+
 ### Klockslag skrivs utan kolon (2026-10-11, Anders/Hästveda)
 
 - **Server: `Models/ClockTime.cs`** — `TryNormalize(text, out hhmm)` (tomt → true/null) och `ToTimeSpan`.

@@ -128,11 +128,20 @@ namespace HpskSite.Models.Training
         /// en timme efter slut (eller start + 3 h när sluttid saknas). Ett tillfälle utan klockslag
         /// matchar hela dagen. Härlett — skrivs aldrig som en närvarorad.
         /// </summary>
+        /// <summary>
+        /// Gjordes incheckningen på rätt bana? Har tillfället en egen bana räknas bara den — en klubb
+        /// med två banor (Luleå) ska inte se en incheckning på den ena som närvaro på den andra.
+        /// Utan bana räknas klubbens alla banor, som förut.
+        /// </summary>
+        public static bool CheckInAtRightRange(int checkInRangeId, int? occasionRangeId, ICollection<int> clubRangeIds)
+            => occasionRangeId is > 0 ? checkInRangeId == occasionRangeId : clubRangeIds.Contains(checkInRangeId);
+
         public static bool CheckInCounts(DateTime checkIn, DateTime date, string? startTime, string? endTime)
         {
             if (checkIn.Date != date.Date) return false;
-            if (!TimeSpan.TryParse(startTime ?? "", out var start)) return true;
-            var end = TimeSpan.TryParse(endTime ?? "", out var e) && e > start ? e : start.Add(TimeSpan.FromHours(3));
+            // ClockTime, inte TimeSpan.TryParse — "18" är 18 dygn för den senare.
+            if (HpskSite.Models.ClockTime.ToTimeSpan(startTime) is not TimeSpan start) return true;
+            var end = HpskSite.Models.ClockTime.ToTimeSpan(endTime) is TimeSpan e && e > start ? e : start.Add(TimeSpan.FromHours(3));
             var t = checkIn.TimeOfDay;
             return t >= start.Subtract(TimeSpan.FromHours(1)) && t <= end.Add(TimeSpan.FromHours(1));
         }
