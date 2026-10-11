@@ -73,6 +73,29 @@
         <span class="small text-muted ms-auto" id="calHiddenNote"></span>
     </div>
 
+    @* Banans kalender (2026-10-11): klubbkalendern visar klubbens egna — vad andra klubbar har på
+       samma bana syns i banans kalender. Raden fylls bara när klubben har kopplade banor. *@
+    <div class="small mb-2 d-none" id="ccRangeLinks"></div>
+    <script>
+    (function () {
+        var box = document.getElementById('ccRangeLinks');
+        var clubId = @clubId;
+        if (!box || !clubId) return;
+        fetch('/umbraco/surface/ShootingRange/GetClubRanges?clubId=' + clubId, { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                var ranges = (d && d.success && d.ranges) || [];
+                if (!ranges.length) return;
+                var e = window.hpskEsc || function (s) { return String(s); };
+                box.innerHTML = '<i class="bi bi-geo-alt me-1"></i>Vad händer mer på ' + (ranges.length === 1 ? 'banan' : 'banorna') + '? ' +
+                    ranges.map(function (r) {
+                        return '<a class="ms-1" href="/skjutbana/' + r.id + '#vy=kalender">' + e(r.name) + '</a>';
+                    }).join(' · ');
+                box.classList.remove('d-none');
+            }).catch(function () { });
+    })();
+    </script>
+
     <!-- Lägg in träningar dag för dag (klubbadmin, från träningens meny under Admin → Träningar) -->
     <div class="alert alert-primary d-none" id="calCopyBar" role="region" aria-label="Lägg in träningar">
         <div class="fw-semibold mb-1"><i class="bi bi-calendar-plus me-1"></i>Lägg in träningar dag för dag</div>

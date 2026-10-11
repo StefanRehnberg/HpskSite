@@ -1789,9 +1789,9 @@ namespace HpskSite.Controllers
             var compId = _staffing.GetCompetitionIdFor(request.Id) ?? request.CompetitionId;
             if (!await HasCompetitionAccessAsync(compId))
                 return Json(new { success = false, message = "Ingen behörighet" });
-            if (!TimeSpan.TryParseExact((request.At ?? "").Trim(), new[] { @"hh\:mm", @"h\:mm" },
-                    CultureInfo.InvariantCulture, out var at))
-                return Json(new { success = false, message = "Ange en tid som TT:MM." });
+            // "12" och "1230" räcker (ClockTime) — samma tolkning som fältet i webbläsaren.
+            if (HpskSite.Models.ClockTime.ToTimeSpan(request.At) is not TimeSpan at)
+                return Json(new { success = false, message = "Tiden går inte att läsa. Skriv till exempel 12 eller 12:30." });
             try
             {
                 var (ok, msg, newId) = _staffing.SplitAssignment(request.Id, compId, at,

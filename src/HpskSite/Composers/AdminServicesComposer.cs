@@ -223,6 +223,10 @@ namespace HpskSite.Composers
             // Range compliance documents (permit/besiktning/buller/lead …) under App_Data, served via
             // an authorized steward-gated endpoint. Mirrors StandardMedalProofStorage.
             builder.Services.AddScoped<RangeDocumentStorage>();
+            // Banans kalender (2026-10-11): tävlingar, träningar, händelser, fasta tider och externa
+            // bokningar på en bana, för alla klubbar som delar den. Se RangeCalendarService.
+            builder.Services.AddScoped<RangeCalendarService>();
+            builder.Services.AddHostedService<RangeCalendarSchemaGuardHostedService>();
 
             // Fältskytte member-stats aggregator (powers /user-profile-page dashboard + Resultat tab)
             builder.Services.AddScoped<FaltskytteStatsService>();

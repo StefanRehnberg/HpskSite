@@ -125,7 +125,7 @@ namespace HpskSite.Services.Training
 
         private class MemberRow { public int MemberId { get; set; } public string Role { get; set; } = ""; }
         private class AttendanceRow { public int EventId { get; set; } public int MemberId { get; set; } public string? AttendanceStatus { get; set; } public DateTime? SignedUpAt { get; set; } public DateTime? CancelledAt { get; set; } }
-        private class CheckInRow { public int MemberId { get; set; } public DateTime Date { get; set; } public TimeSpan? StartTime { get; set; } }
+        private class CheckInRow { public int MemberId { get; set; } public int RangeId { get; set; } public DateTime Date { get; set; } public TimeSpan? StartTime { get; set; } }
         private class SeriesRow { public int MemberId { get; set; } public string SeriesType { get; set; } = ""; public string? Target { get; set; } public string? ClaimedLevel { get; set; } public string? BadgeFamily { get; set; } }
 
         public Course? Get(int groupId, DateTime today)
@@ -211,15 +211,21 @@ SELECT EventId, MemberId, AttendanceStatus, SignedUpAt, CancelledAt FROM dbo.Clu
 WHERE OccasionKind = @0 AND EventId IN (@1) AND MemberId IN (@2)", ClubEvents.OccasionTraining, trainingIds, memberIds)
                 .ToDictionary(r => $"{r.MemberId}:{r.EventId}");
 
-            // Incheckningar på klubbens banor de dagar kursen tränar — EN fråga.
+            // Incheckningar på klubbens banor (och tillfällenas egna banor) de dagar kursen tränar — EN fråga.
+            // ⚠️ Har tillfället en bana räknas BARA incheckning på den banan (Michael, Luleå 2026-10-11:
+            // "Hur vet jag att dom har checkat in på rätt bana?" — klubben har två banor).
             var checkIns = new List<CheckInRow>();
+            var clubRanges = new HashSet<int>();
             try
             {
                 var dates = trainings.Select(t => t.Date.Date).Distinct().ToList();
-                checkIns = db.Fetch<CheckInRow>(@"
-SELECT s.MemberId, s.[Date], s.StartTime FROM dbo.RangeActivitySession s
-WHERE s.MemberId IN (@0) AND CAST(s.[Date] AS date) IN (@1)
-  AND s.RangeId IN (SELECT RangeId FROM dbo.ClubRangeLink WHERE ClubId = @2)", memberIds, dates, course.ClubId);
+                clubRanges = db.Fetch<int>("SELECT RangeId FROM dbo.ClubRangeLink WHERE ClubId = @0", course.ClubId).ToHashSet();
+                var ranges = clubRanges.Concat(trainings.Where(t => t.RangeId is > 0).Select(t => t.RangeId!.Value)).Distinct().ToList();
+                if (ranges.Count > 0)
+                    checkIns = db.Fetch<CheckInRow>(@"
+SELECT s.MemberId, s.RangeId, s.[Date], s.StartTime FROM dbo.RangeActivitySession s
+WHERE s.MemberId IN (@0) AND CAST(s.[Date] AS date) IN (@1) AND s.RangeId IN (@2)",
+                        memberIds, dates, ranges);
             }
             catch (Exception ex) { _logger.LogDebug(ex, "Incheckningar kunde inte läsas för kursen"); }
 
@@ -256,7 +262,9 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND MemberId IN (@2) AND Status I
                         };
                     }
                     if (cell.State is "none" or "signedup"
-                        && checkIns.Any(c => c.MemberId == m && TrainingCourseRules.CheckInCounts(
+                        && checkIns.Any(c => c.MemberId == m
+                            && TrainingCourseRules.CheckInAtRightRange(c.RangeId, t.RangeId, clubRanges)
+                            && TrainingCourseRules.CheckInCounts(
                                c.Date.Date.Add(c.StartTime ?? TimeSpan.Zero), t.Date, t.StartTime, t.EndTime)))
                         cell.State = "checkedin";
                     cell.Missed = occ.IsMandatory && occ.IsPast && !t.IsCancelled

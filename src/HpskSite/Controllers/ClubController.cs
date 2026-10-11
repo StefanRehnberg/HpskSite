@@ -41,6 +41,7 @@ namespace HpskSite.Controllers
         // Sajtstrukturen fas 2a: varje läsning och skrivning av klubbens och kretsens händelser går
         // genom lagringen — aldrig direkt mot clubSimpleEvent-noderna.
         private readonly HpskSite.Services.Events.IClubEventStore _events;
+        private readonly RangeCalendarService _rangeCalendar;
         private readonly ILogger<ClubController> _logger;
 
         public ClubController(
@@ -60,6 +61,7 @@ namespace HpskSite.Controllers
             IAntiforgery antiforgery,
             HpskSite.Services.Training.ClubTrainingService trainings,
             HpskSite.Services.Events.EventOwnerResolver eventOwners,
+            RangeCalendarService rangeCalendar,
             ILogger<ClubController> logger,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Events.IClubEventStore events)
@@ -70,6 +72,7 @@ namespace HpskSite.Controllers
             _antiforgery = antiforgery;
             _trainings = trainings;
             _eventOwners = eventOwners;
+            _rangeCalendar = rangeCalendar;
             _logger = logger;
             _contentService = contentService;
             _memberService = memberService;
@@ -564,7 +567,7 @@ namespace HpskSite.Controllers
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
             string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
-            string eventSwishNumber = "")
+            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null)
         {
             try
             {
@@ -578,6 +581,10 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
+
+                // Banan prövas FÖRE noden skapas — ett fel efteråt hade lämnat en händelse utan sin bana.
+                var rangeError = rangeId is > 0 ? _rangeCalendar.Validate(rangeId.Value, rangeSectionId) : null;
+                if (rangeError != null) return Ok(new { success = false, message = rangeError });
 
                 if (UmbracoContext.Content == null)
                 {
@@ -629,6 +636,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = saveError });
                 }
 
+                _rangeCalendar.SetEventRange(newId, rangeId, rangeSectionId, null);
                 return Ok(new
                 {
                     success = true,
@@ -770,6 +778,8 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = saveError });
                 }
 
+                // Skjutbanan bor i ClubEventRange, inte på posten — klonen tar den inte med.
+                _rangeCalendar.CopyEventRange(sourceEventId, copyId);
                 return Ok(new { success = true, message = "Händelse kopierad", data = new { id = copyId } });
             }
             catch (Exception ex)
@@ -802,11 +812,13 @@ namespace HpskSite.Controllers
         /// GetRegionEvents). EN projektion för båda — de låg i två kopior som var tvungna att hållas
         /// lika fält för fält. Egenskapsnamn och värdeformer är oförändrade mot nodtiden.
         /// </summary>
-        private object EventEditListRow(HpskSite.Models.Events.ClubEventRecord evt)
+        private object EventEditListRow(HpskSite.Models.Events.ClubEventRecord evt,
+            IReadOnlyDictionary<int, HpskSite.Models.ClubEventRange> eventRanges)
         {
             var support = _events.Support;
             var displayName = evt.DisplayName;
             var prices = HpskSite.Models.EventPrices.Parse(evt.PricesJson);
+            eventRanges.TryGetValue(evt.Id, out var evRange);
             return new
             {
                 id = evt.Id,
@@ -816,6 +828,10 @@ namespace HpskSite.Controllers
                 type = string.IsNullOrEmpty(evt.EventType) ? "Träning" : evt.EventType,
                 description = evt.Description,
                 venue = evt.Venue,
+                // Skjutbanan (banans kalender). ⚠️ Måste med — annars förfylls väljaren
+                // med klubbens förval och nästa sparning flyttar händelsen till den banan.
+                rangeId = evRange?.RangeId ?? 0,
+                rangeSectionId = evRange?.RangeSectionId,
                 contactPerson = evt.ContactPerson,
                 contactEmail = evt.ContactEmail,
                 // ⚠️⚠️ SAKNADES, och det RADERADE numret. Redigeringsdialogen fyller
@@ -890,9 +906,10 @@ namespace HpskSite.Controllers
                         .OrderBy(e => e.StartsAt ?? DateTime.MinValue)
                         .ToList();
 
+                    var eventRanges = _rangeCalendar.GetEventRanges(allEvents.Select(e => e.Id));
                     foreach (var evt in allEvents)
                     {
-                        events.Add(EventEditListRow(evt));
+                        events.Add(EventEditListRow(evt, eventRanges));
                     }
                 }
 
@@ -1039,7 +1056,7 @@ namespace HpskSite.Controllers
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
             string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
-            string eventSwishNumber = "")
+            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null)
         {
             try
             {
@@ -1060,6 +1077,9 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Access denied - insufficient permissions" });
                 }
+
+                var rangeError = rangeId is > 0 ? _rangeCalendar.Validate(rangeId.Value, rangeSectionId) : null;
+                if (rangeError != null) return Ok(new { success = false, message = rangeError });
 
                 ApplyEventFormFields(e, eventName, eventType, description, venue, contactPerson,
                     contactEmail, contactPhone, pageName);
@@ -1083,6 +1103,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = saveError });
                 }
 
+                _rangeCalendar.SetEventRange(eventId, rangeId, rangeSectionId, null);
                 return Ok(new { success = true, message = "Event updated successfully" });
             }
             catch (Exception ex)
@@ -1119,6 +1140,7 @@ namespace HpskSite.Controllers
 
                 // Lagringen avpublicerar och tar bort.
                 _events.Delete(e.Id);
+                _rangeCalendar.DeleteEventRange(e.Id);
 
                 return Ok(new { success = true, message = "Event deleted successfully" });
             }
@@ -2279,9 +2301,10 @@ namespace HpskSite.Controllers
                         .OrderBy(e => e.StartsAt ?? DateTime.MinValue)
                         .ToList();
 
+                    var eventRanges = _rangeCalendar.GetEventRanges(allEvents.Select(e => e.Id));
                     foreach (var evt in allEvents)
                     {
-                        events.Add(EventEditListRow(evt));
+                        events.Add(EventEditListRow(evt, eventRanges));
                     }
                 }
 
@@ -2308,7 +2331,7 @@ namespace HpskSite.Controllers
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
             string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
-            string eventSwishNumber = "")
+            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null)
         {
             try
             {
@@ -2316,6 +2339,9 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Region ID and event name are required" });
                 }
+
+                var rangeError = rangeId is > 0 ? _rangeCalendar.Validate(rangeId.Value, rangeSectionId) : null;
+                if (rangeError != null) return Ok(new { success = false, message = rangeError });
 
                 if (UmbracoContext.Content == null)
                 {
@@ -2364,6 +2390,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = saveError });
                 }
 
+                _rangeCalendar.SetEventRange(newId, rangeId, rangeSectionId, null);
                 return Ok(new
                 {
                     success = true,
@@ -2394,7 +2421,7 @@ namespace HpskSite.Controllers
             string pageName = "",
             bool registrationRequired = false, int maxParticipants = 0, bool isMandatory = false, string registrationUrl = "", bool lanevapenOffered = false,
             string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
-            string eventSwishNumber = "")
+            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null)
         {
             try
             {
@@ -2402,6 +2429,9 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Event ID and name are required" });
                 }
+
+                var rangeError = rangeId is > 0 ? _rangeCalendar.Validate(rangeId.Value, rangeSectionId) : null;
+                if (rangeError != null) return Ok(new { success = false, message = rangeError });
 
                 var e = _events.Get(eventId);
                 if (e == null)
@@ -2443,6 +2473,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = saveError });
                 }
 
+                _rangeCalendar.SetEventRange(eventId, rangeId, rangeSectionId, null);
                 return Ok(new { success = true, message = "Event updated successfully" });
             }
             catch (Exception ex)
@@ -2485,6 +2516,7 @@ namespace HpskSite.Controllers
 
                 // Lagringen avpublicerar och tar bort.
                 _events.Delete(e.Id);
+                _rangeCalendar.DeleteEventRange(e.Id);
 
                 return Ok(new { success = true, message = "Event deleted successfully" });
             }
@@ -2532,6 +2564,7 @@ namespace HpskSite.Controllers
                 var support = _events.Support;
                 var prices = HpskSite.Models.EventPrices.Parse(e.PricesJson);
 
+                var evRange = _rangeCalendar.GetEventRange(eventId);
                 return Ok(new
                 {
                     success = true,
@@ -2543,6 +2576,10 @@ namespace HpskSite.Controllers
                         eventType = e.EventType,
                         eventDate = e.StartsAt?.ToString("yyyy-MM-dd HH:mm") ?? "",
                         venue = e.Venue,
+                        // Skjutbanan — se GetClubEvents. Ägaren behövs för väljarens förval av klubbens banor.
+                        rangeId = evRange?.RangeId ?? 0,
+                        rangeSectionId = evRange?.RangeSectionId,
+                        ownerClubId = e.OwnerType == HpskSite.Models.Events.ClubEventRecord.OwnerClub ? e.OwnerId : 0,
                         description = e.Description,
                         contactPerson = e.ContactPerson,
                         contactEmail = e.ContactEmail,
@@ -2603,7 +2640,7 @@ namespace HpskSite.Controllers
             bool registrationRequired = false, string registrationUrl = "", string eventEndDate = "",
             bool isMandatory = false, int maxParticipants = 0,
             bool lanevapenOffered = false, string registrationDeadline = "", string eventPrices = "", string eventAudience = "",
-            string eventSwishNumber = "")
+            string eventSwishNumber = "", int? rangeId = null, int? rangeSectionId = null)
         {
             try
             {
@@ -2611,6 +2648,9 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Invalid event ID" });
                 }
+
+                var rangeError = rangeId is > 0 ? _rangeCalendar.Validate(rangeId.Value, rangeSectionId) : null;
+                if (rangeError != null) return Ok(new { success = false, message = rangeError });
 
                 var e = _events.Get(eventId);
                 if (e == null)
@@ -2672,6 +2712,7 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = saveError });
                 }
+                _rangeCalendar.SetEventRange(eventId, rangeId, rangeSectionId, null);
 
                 return Ok(new { success = true, message = "Event details updated successfully" });
             }

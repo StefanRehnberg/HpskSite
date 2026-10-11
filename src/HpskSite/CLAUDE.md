@@ -7814,6 +7814,144 @@ No state machine — every command button is tappable any time so the chief can 
 
 **All four pages are routed MVC `Controller`s — no Umbraco node/doctype needed** (pattern from `FaltskytteConfigurationEditorController`; chromeless `Layout = null` + a typed `@model`, except the Stationer tab which is a partial in CompetitionManagement). Build is green on these but Razor views are **runtime-compiled** — `dotnet build` does NOT validate them (a named-tuple bug once shipped that way; now `int[]`), so load each page once after deploy. Adds C# → full rebuild.
 
+## Banans kalender — träningar och händelser på en skjutbana (2026-10-11)
+
+Efter Michaels önskemål: händelser och träningar kan knytas till en skjutbana (och en bana/vall), som
+tävlingar redan kunde, och banan får en kalender där klubbarna som delar den ser varandras tider.
+Kalendern är delen **Kalender** på banans egen sida (`/skjutbana/{id}#vy=kalender`, se nästa avsnitt);
+den gamla adressen `/skjutbana/kalender?r=<rangeId>` leder dit (`RangeCalendarController.Index`). Data: **`RangeCalendarService`** (EN form, `RangeCalendarItem`) över fem källor —
+tävlingar (`competition.rangeId`, ur ett index i runtime-cachen, 2 min, töms av `SetCompetitionRange`),
+träningar (`ClubTraining.RangeId` + ny `RangeSectionId`), händelser (**`ClubEventRange`**), klubbarnas
+fasta tider (`ClubRangeAllocation`, utlagda per dag) och förvaltarens **`RangeExternalBooking`**.
+API: `RangeCalendarApiController` (`GetPlaceOptions`, `GetRangeInfo`, `GetCalendar`, `GetDay`,
+`SaveExternal`, `DeleteExternal`, `GetIcsLink`). Prenumeration: `/skjutbana/kalender.ics?t=` (signerad
+länk, `IcsPurpose` är en del av signaturen — höj versionen i stället för att ändra strängen).
+
+- **⚠️⚠️ Händelsens bana är en EGEN TABELL (`ClubEventRange`), inte en doctype-egenskap.** Händelserna
+  kan ligga som noder eller som SQL-rader (sajtstrukturen), och id:t bevaras vid flytten — tabellen
+  fungerar i båda. Kalendern frågar på index i stället för att gå trädet. ⚠️ Följden: **varje skrivväg i
+  `ClubController` anropar `_rangeCalendar.SetEventRange`** (Create/Edit för klubb och krets,
+  `EditEventDetails`) efter att lagringen sparat, Kopiera anropar `CopyEventRange` (klonen tar den inte
+  med) och Delete anropar `DeleteEventRange`. Lägger du till en skrivväg för händelser: lägg till anropet.
+- **⚠️⚠️ Kalenderns händelser läses genom `IClubEventStore`** (`RangeCalendarService.Events`), aldrig som
+  noder — i tabelläget finns ingen publicerad `clubSimpleEvent`-nod, och kalendern OCH banans QR-närvaro
+  hade tappat varje händelse utan felmeddelande (sajtstruktur-mergen 2026-10-11).
+- **⚠️ `rangeId` null = RÖR INTE, 0 = ingen bana, > 0 = banan** — för träningar (`TrainingInput`) och
+  händelser (endpointparametrarna `int? rangeId`). En äldre klient som inte skickar fältet får aldrig
+  nolla ett val. Platsväljaren svarar därför `null` (`value()`) och lämnar de dolda fälten TOMMA tills
+  det lagrade valet är inläst.
+- **Vallen valideras mot banan på servern** (`RangeCalendarService.Validate`) FÖRE sparningen, i varje
+  skrivväg — en vall från en annan bana hade lagt posten fel i båda banornas kalender.
+- **⚠️ Krock är en VARNING, aldrig en spärr** (`RangeCalendarRules`, rena funktioner, `RangeCalendarRulesTests`).
+  `SectionsCollide`: null = hela banan = krockar med allt; två olika vallar krockar aldrig.
+  `Relate`: kant i kant är INTE en krock, och en post utan sluttid får ingen påhittad längd (samma
+  regel som Mitt schema). En tävling saknar klockslag men upptar dagen → räknas som krock.
+- **Platsväljaren** är EN partial: `Views/Partials/_RangePlaceField.cshtml` (modell = id-prefix) +
+  `wwwroot/js/range-place.js` (`window.hpskRangePlace.mount/set/value/check`). Används av Admin →
+  Träningar (`ctr`), klubbens händelsedialog (`clubEvent`), kretsens (`regionEvent`, clubId 0 = bara sök)
+  och händelsesidans redigering (`editDetails`). **Förval** för NY post: ägd bana/Huvudman/huvudbana,
+  annars banan klubbens träningar oftast ligger på (`MostUsedRange`), annars den enda banan. Dialogen
+  visas först när valet är inläst. Platsens fritext fylls med banans namn (bara när den är tom eller
+  bär förra autovalet). **En nyhet kopplas aldrig** (fältet göms, `rangeId` 0 skickas).
+- **Synlighet:** inloggade medlemmar. Kalendern visar vad, när, vall och klubb — aldrig deltagare.
+  Externa bokningar: banans förvaltare eller sajtadmin, och borttagningen prövas mot BOKNINGENS bana.
+- **Fasta tider tas inte med i ICS-filen** (de hade fyllt varje vardag); inställda träningar skrivs
+  som `STATUS:CANCELLED`.
+- **Ingångar:** rälsposten Kalender på banans sida, katalogradens Åtgärder, klubbsidans flik Banor, och
+  raden "Vad händer mer på banan?" under klubbkalendern.
+- `ShootingRangeService.DeleteAsync` tar med `RangeExternalBooking` och `ClubEventRange` och nollar
+  träningarnas bana; `DeleteSectionAsync` nollar vallen på alla tre.
+
+**Operatörssteg:** `Migrations/create-range-calendar-tables.sql` **FÖRE deployen** — NPoco skriver
+`ClubTraining.RangeSectionId` vid varje sparning av en träning, så utan kolumnen faller "Spara" i
+Admin → Träningar. Körd i dev 2026-10-11, **EJ i prod**. Fildeploy av KB `skjutbanor.md`,
+`traningar.md`. Adds C# → full ombyggnad. Ingen doctype-egenskap, ingen Umbraco-nod.
+
+Test: `RangeCalendarRulesTests` 27 (A/B: kant-i-kant som krock + vallar som alltid krockar → 2 röda).
+Svit: `hpsk-verify/range-calendar-verify.mjs` (skapar och städar egna `ZZB`-poster på bana 13, som
+klubb 2604 och 3215 delar).
+
+### Banans egen sida och katalogen (2026-10-11, omgjord)
+
+Modalen över kartan på `/skjutbanor` (sex flikar, gick inte att länka till, gröna knappar, råa värden
+som "PrimaryUser") är borta. Förslaget och Stefans fyra beslut: https://claude.ai/artifact/GXndV2GtTRqNJh2m5mzRGj.
+
+- **`/skjutbana/{id}`** — routad `RangePageController` (ingen nod, kräver inloggning) →
+  `Views/RangePage.cshtml` + **`wwwroot/js/range-page.js`**. **Ekonomins skal** (`.rp-page .rp-rail`,
+  samma värden som `.ek-page .rail` och `/styrelse`): vänsterkort med banans namn, rollen, ← Skjutbanor
+  och delarna. Delen står i adressen (`#vy=oversikt|kalender|banor|klubbar|tillstand|aktivitet|incheckning|forvaltare`);
+  de fyra sista bara för förvaltare (`GetRange.canManage`). Blå Åtgärder per del (`setActions`), grå
+  radmeny (`rowMenu`), frågor genom `ask()` och formulär genom `formModal()` — **ingen confirm/alert**.
+  `#vy=oversikt&ansprak=1` öppnar anspråksdialogen (katalogradens "Gör anspråk…").
+- **⚠️ Kalendern är inbäddad**: dess markup (`#rpCalPart`, id:n `rc*`) finns ALLTID i sidan, dold —
+  `range-calendar.js` binder sina lyssnare när skriptet laddas. Den hämtar först när delen visas
+  (`window.hpskRangeCalendar.start()`); sidans Åtgärder anropar `openIcs`/`openExternal`. Kalenderns
+  "Ta bort bokningen" går genom sidans `window.hpskRangeConfirm`. `RangeCalendar.cshtml` är borttagen.
+- **"Att göra"** (förvaltare, överst på Översikt + räknare i rälsen): `ShootingRange/GetRangeTodo`,
+  reglerna i **`Models/RangeTodo.cs` → `RangeTodoRules.Build`** (ren funktion, `RangeTodoRulesTests`):
+  tillstånd/dokument som gått ut eller går ut inom 90 dagar, inga tillstånd, inget skottak, skott ≥ 80 %
+  / 100 % av det LÄGSTA taket, klubb utan fasta tider, tider utanför tillståndens fönster
+  (`IsOutsideWindows`), ingen skjutbanechef, ingen position, inga vallar. Brådskande först.
+- **`GetRange`** bär nu `isSiteAdmin`, `isSteward`, `canClaim`, `myClubIds` (medlemmens klubbar som är
+  kopplade till banan) och `huvudmanClubName`. **`GetRanges`** bär `mine`, `clubCount` och `hasMine`
+  (EN läsning av alla kopplingar, `GetAllLinksAsync`). **`AddAllocation`** tar `Id` > 0 = ändra en tid
+  (samma klubbkoppling krävs). **`GetClubRanges`** bär adress och `relationType`. Klubbens roll ändras
+  via `AddClubLink` (upsert).
+- **Katalogen `/skjutbanor`** (`ShootingRangeHub.cshtml`) har Träningars form: rubrik + förklarande rad,
+  blå Åtgärder (Ny skjutbana, Placera på kartan, OSM-import för sajtadmin), sök + filter (*Mina klubbars
+  banor* förvalt när sådana finns, Alla, Jag förvaltar, Utan förvaltare) + Lista|Karta + antal, högst
+  100 rader i listan. `?range=ID` leder till `/skjutbana/ID` (serverredirect i vyn).
+- **`Views/Partials/_RangeEditModal.cshtml`** = EN dialog för ny bana och ändrade uppgifter
+  (`window.hpskRangeEdit.open(range, coords, onSaved)`), i katalogen och på banans sida.
+- **Kartan: `wwwroot/js/range-map.js`** (`hpskRangeMap.render/directionsUrl/addressText/hasPos`) — samma
+  form som tävlingssidans (röd punkt, zoom 14, Vägbeskrivning). Används av banans Översikt och
+  **klubbsidans flik Banor** (ett kort per bana med karta, tider, Banans kalender, Om banan).
+  ⚠️ `Competition.cshtml` har kvar sin egen kopia — filen är ändrad på `sajtstruktur`; byt till
+  `hpskRangeMap.render` EFTER mergen. Samma sak för en länk till banan från händelsesidan
+  (`ClubSimpleEvent.cshtml`). Träningspanelen har länken *Om banan* (`TrainingPanelModel.RangeId`).
+- Länkar som pekade på den gamla sidan: startsidans påminnelser (`RangeHubService` →
+  `#vy=tillstand`), klubbkalenderns rad, platsväljarens krocklänk och ICS-filens URL → `#vy=kalender`.
+
+Ingen SQL, ingen doctype-egenskap, ingen Umbraco-nod. Adds C# → full ombyggnad. Fildeploy av KB
+`skjutbanor.md`. Svit: `hpsk-verify/range-page-verify.mjs`.
+
+### Incheckning på banan ger närvaro (2026-10-11, Michael/Luleå)
+
+- **Rätt bana:** kursens upprop visar *incheckad* bara för incheckning på tillfällets EGEN bana när det
+  har en (`TrainingCourseRules.CheckInAtRightRange`); utan bana räknas klubbens alla banor som förut.
+- **Banans QR → närvaro:** `ShootingRange/CheckIn` letar upp det som pågår på banan
+  (`RangeCalendarRules.OngoingForCheckIn` över `RangeCalendarService.Build` — träningar och händelser,
+  ej inställda, samma fönster som uppropet: 1 h före start till 1 h efter slut) och som medlemmen FÅR
+  delta i (`ClubEventParticipationService.IsEligible`). **Exakt en → närvaro sätts direkt**
+  (självregistrerad, `RecordedByMemberId == MemberId`); flera → `CheckInStatus.activities` och sidan
+  ber medlemmen välja (`ShootingRange/RangeAttendance`, kräver en ÖPPEN incheckning på samma bana).
+  Vi gissar aldrig mellan två. En annan klubbs träning på samma bana syns inte.
+- **Närvaro-QR:n per tillfälle** (`ClubEvent/PrintAttendanceQr`) hade ingen väg in sedan 56b8364
+  (2026-09-20, den gamla listan togs bort). Nu: deltagarsidan → blå **Åtgärder → Skriv ut närvaro-QR**
+  (`#deskActions`, `#deskQrLink`); "Lägg till deltagare" ligger i samma meny.
+
+Tester: `RangeCheckInAttendanceTests` (A/B: gamla regeln + `TimeSpan.TryParse` → 2 röda).
+Svit: `hpsk-verify/range-attendance-verify.mjs`. Ingen SQL.
+
+### Klockslag skrivs utan kolon (2026-10-11, Anders/Hästveda)
+
+- **Server: `Models/ClockTime.cs`** — `TryNormalize(text, out hhmm)` (tomt → true/null) och `ToTimeSpan`.
+  Godtar "11", "930", "1130", "11:30", "11.30", "11,30", "11 30"; vägrar timme > 23, minut > 59 och
+  "11:5" (11:05 eller 11:50?). **⚠️ Använd ALDRIG `TimeSpan.TryParse` på ett klockslag** — "18" blir
+  18 DYGN (det var ett riktigt fel i banans fasta tider). Används av träningar, banans tider/tillstånd/
+  aktivitet, kalenderns externa bokningar och bemanningens delning av pass. `ClockTimeTests`.
+- **Webbläsare: `wwwroot/js/time-input.js`** (laddas i `Master.cshtml`) — `window.hpskNormalizeTime` med
+  SAMMA regler, och varje `<input data-hpsk-time>` skrivs om när man lämnar fältet (oläsligt → `is-invalid`,
+  lämnas orört). Ett nytt tidsfält: `type="text" data-hpsk-time inputmode="decimal"` (komma på telefonen).
+  Felmeddelandena ger ett exempel: "Skriv till exempel 18 eller 18:30."
+- **Träningspanelens höjd** mäts på `body.getBoundingClientRect()`, inte `documentElement.scrollHeight` —
+  den blir aldrig mindre än ramen, så dialogen kunde bara växa. Anteckningsrutan har `max-height`.
+- **Menyn:** en klubbsida ligger under kretsen — `myClubActive` räknas FÖRE Kretsar-menyn och tar
+  företräde. **⚠️ Ladda aldrig en andra bootstrap-icons-version i en vy** — Master har 1.11.3; 1.10.0
+  ovanpå saknar nyare glyfer (vit ruta i menyn).
+
+Svit: `hpsk-verify/anders-batch-verify.mjs`.
+
 ## Mitt schema — personal competition itinerary (2026-07-25)
 
 A member's own competition day in one timeline: what they **shoot** + what they **work** + the day's
