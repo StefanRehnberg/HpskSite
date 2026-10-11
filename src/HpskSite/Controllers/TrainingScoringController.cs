@@ -1208,17 +1208,7 @@ namespace HpskSite.Controllers
                 if (string.IsNullOrEmpty(weaponClass))
                     return Json(new { success = false, message = "Okänd skytteklass." });
 
-                var payloadJson = JsonSerializer.Serialize(new FaltskytteExternalPayload
-                {
-                    CompetitionName = request.CompetitionName ?? "",
-                    Mode = request.Mode,
-                    StationCount = request.StationCount,
-                    Hits = request.Hits,
-                    Figures = request.Figures,
-                    FiguresMax = request.FiguresMax,
-                    Placement = request.Placement,
-                    Participants = request.Participants
-                });
+                var payloadJson = JsonSerializer.Serialize(BuildFaltskyttePayload(request));
 
                 using var db = _databaseFactory.CreateDatabase();
                 var newId = db.Insert("TrainingScores", "Id", true, new
@@ -1232,7 +1222,7 @@ namespace HpskSite.Controllers
                     CompetitionShootingClass = request.ShootingClass,
                     CompetitionStdMedal = request.StandardMedal ?? "",
                     SeriesScores = payloadJson,
-                    TotalScore = request.Hits, // best-effort scalar for any legacy aggregation
+                    TotalScore = FaltskytteHeadlineScore(request), // best-effort scalar for any legacy aggregation
                     XCount = 0,
                     Notes = request.Notes ?? string.Empty,
                     CreatedAt = DateTime.Now,
@@ -1280,17 +1270,7 @@ namespace HpskSite.Controllers
                 if ((int)existing.MemberId != member.Id) return Json(new { success = false, message = "Du kan bara redigera dina egna resultat." });
                 if (((string?)existing.Discipline) != "Faltskytte") return Json(new { success = false, message = "Endast Fältskytte-rader kan uppdateras via denna endpoint." });
 
-                var payloadJson = JsonSerializer.Serialize(new FaltskytteExternalPayload
-                {
-                    CompetitionName = request.CompetitionName ?? "",
-                    Mode = request.Mode,
-                    StationCount = request.StationCount,
-                    Hits = request.Hits,
-                    Figures = request.Figures,
-                    FiguresMax = request.FiguresMax,
-                    Placement = request.Placement,
-                    Participants = request.Participants
-                });
+                var payloadJson = JsonSerializer.Serialize(BuildFaltskyttePayload(request));
 
                 db.Execute(@"UPDATE TrainingScores
                               SET TrainingDate = @0, WeaponClass = @1, CompetitionPlace = @2,
@@ -1303,7 +1283,7 @@ namespace HpskSite.Controllers
                     request.ShootingClass,
                     request.StandardMedal ?? "",
                     payloadJson,
-                    request.Hits,
+                    FaltskytteHeadlineScore(request),
                     request.Notes ?? string.Empty,
                     DateTime.Now,
                     request.Id.Value);
@@ -1376,6 +1356,28 @@ namespace HpskSite.Controllers
             MedalProofFileRef = r.MedalProofFileRef
         };
 
+        /// <summary>
+        /// En enda plats som formar lagringen, så att spara och uppdatera inte kan glida isär.
+        /// Bara poäng: träff och figurer är okända och nollas — <see cref="FaltskytteExternalPayload.PointsOnly"/>
+        /// är det som säger att nollorna inte är ett resultat.
+        /// </summary>
+        private static FaltskytteExternalPayload BuildFaltskyttePayload(FaltskytteScoreRequest r) => new()
+        {
+            CompetitionName = r.CompetitionName ?? "",
+            Mode = r.Mode,
+            StationCount = r.StationCount,
+            Hits = r.PointsOnly ? 0 : r.Hits,
+            Figures = r.PointsOnly ? 0 : r.Figures,
+            FiguresMax = r.PointsOnly ? 0 : r.FiguresMax,
+            PointsOnly = r.PointsOnly,
+            Points = r.PointsOnly ? r.Points : null,
+            Placement = r.Placement,
+            Participants = r.Participants
+        };
+
+        private static int FaltskytteHeadlineScore(FaltskytteScoreRequest r) =>
+            r.PointsOnly ? (r.Points ?? 0) : r.Hits;
+
         private static string? ValidateFaltskytteRequest(FaltskytteScoreRequest r)
         {
             if (r.Date == default) return "Datum saknas.";
@@ -1383,9 +1385,22 @@ namespace HpskSite.Controllers
             if (r.Mode != "Normalfalt" && r.Mode != "Poangfalt") return "Ogiltig fälttyp.";
             if (r.StationCount < 1 || r.StationCount > 16) return "Antal stationer måste vara mellan 1 och 16.";
             var maxHits = r.StationCount * 6;
-            if (r.Hits < 0 || r.Hits > maxHits) return $"Antal träff måste vara 0–{maxHits}.";
-            if (r.FiguresMax < 1) return "Totalt antal figurer måste vara minst 1.";
-            if (r.Figures < 0 || r.Figures > r.FiguresMax) return $"Träffade figurer måste vara 0–{r.FiguresMax}.";
+            if (r.PointsOnly)
+            {
+                // Resultatlistan visar ofta bara poängen (träff + figurer), och antalet figurer
+                // står sällan där. Då går det inte att dela upp poängen — vi tar emot den som den är.
+                if (r.Mode != "Poangfalt") return "Bara poäng går att ange för poängfält.";
+                if (!r.Points.HasValue) return "Poäng saknas.";
+                // En figur räknas bara om den har minst en träff, så poängen kan aldrig bli
+                // mer än dubbla antalet möjliga träffar.
+                if (r.Points.Value < 0 || r.Points.Value > maxHits * 2) return $"Poängen måste vara 0–{maxHits * 2}.";
+            }
+            else
+            {
+                if (r.Hits < 0 || r.Hits > maxHits) return $"Antal träff måste vara 0–{maxHits}.";
+                if (r.FiguresMax < 1) return "Totalt antal figurer måste vara minst 1.";
+                if (r.Figures < 0 || r.Figures > r.FiguresMax) return $"Träffade figurer måste vara 0–{r.FiguresMax}.";
+            }
             if (r.Placement.HasValue || r.Participants.HasValue)
             {
                 if (!(r.Placement.HasValue && r.Participants.HasValue))
@@ -1407,6 +1422,10 @@ namespace HpskSite.Controllers
             public int Hits { get; set; }
             public int Figures { get; set; }
             public int FiguresMax { get; set; }
+            // Poängfält där bara totalpoängen är känd. Då är Hits/Figures/FiguresMax okända
+            // (lagras som 0) och Points bär resultatet.
+            public bool PointsOnly { get; set; }
+            public int? Points { get; set; }
             public int? Placement { get; set; }
             public int? Participants { get; set; }
             public string? StandardMedal { get; set; } // "S" | "B" | null

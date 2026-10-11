@@ -71,7 +71,7 @@
                                 <option value="Normalfalt" selected>Normalfält</option>
                                 <option value="Poangfalt">Poängfält</option>
                             </select>
-                            <div class="form-text">Styr bara visningen: <code>32/22</code> vs <code>54 p</code>.</div>
+                            <div class="form-text">Normalfält visas <code>32/22</code>, poängfält <code>54 p</code>.</div>
                         </div>
                         <div class="col-md-4">
                             <label for="faltStationCount" class="form-label">Antal stationer <span class="text-danger">*</span></label>
@@ -79,7 +79,28 @@
                             <div class="form-text">Max träff = <span id="faltMaxHitsHint">48</span> (stationer × 6).</div>
                         </div>
 
-                        <div class="col-md-6">
+                        @* Poängfält: resultatlistan visar ofta bara poängen och sällan hur många figurer
+                           tävlingen hade. Då går poängen inte att dela upp i träff och figurer, så
+                           skytten får ange den som den är. Döljs i normalfält. *@
+                        <div class="col-12 d-none" id="faltEntryKindRow">
+                            <input type="hidden" id="faltPointsOnly" value="0">
+                            <div class="form-label mb-1">Vad står i resultatlistan?</div>
+                            <div class="btn-group" role="group" aria-label="Vad står i resultatlistan?">
+                                <input type="radio" class="btn-check" name="faltEntryKind" id="faltKindSplit" value="0" autocomplete="off" checked>
+                                <label class="btn btn-outline-primary" for="faltKindSplit">Träff och figurer</label>
+                                <input type="radio" class="btn-check" name="faltEntryKind" id="faltKindPoints" value="1" autocomplete="off">
+                                <label class="btn btn-outline-primary" for="faltKindPoints">Bara poängen</label>
+                            </div>
+                            <div class="form-text">Välj <strong>Bara poängen</strong> om resultatlistan inte visar träff och figurer var för sig.</div>
+                        </div>
+
+                        <div class="col-md-6 d-none" id="faltPointsCol">
+                            <label for="faltPoints" class="form-label">Poäng <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="faltPoints" min="0">
+                            <div class="form-text">Totalpoängen som den står i resultatlistan. Träff- och figurprocent räknas inte för resultatet.</div>
+                        </div>
+
+                        <div class="col-md-6" id="faltHitsCol">
                             <label for="faltHits" class="form-label">Antal träff <span class="text-danger">*</span></label>
                             <div class="input-group">
                                 <input type="number" class="form-control" id="faltHits" min="0" required>
@@ -87,7 +108,7 @@
                             </div>
                             <div class="form-text">Första värdet i resultatnotationen (<code>32/22</code>).</div>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-6" id="faltFiguresCol">
                             <label class="form-label">Träffade figurer <span class="text-danger">*</span></label>
                             <div class="input-group">
                                 <input type="number" class="form-control" id="faltFigures" min="0" required>
@@ -185,6 +206,20 @@
             var figuresMax = parseInt(document.getElementById('faltFiguresMax').value, 10);
             var mode = document.getElementById('faltMode').value;
             var preview = document.getElementById('faltPreview');
+            document.getElementById('faltPoints').max = maxHits * 2;
+
+            if (faltIsPointsOnly()) {
+                var pts = parseInt(document.getElementById('faltPoints').value, 10);
+                if (Number.isFinite(pts)) {
+                    document.getElementById('faltPreviewHeadline').textContent = pts + ' p';
+                    document.getElementById('faltPreviewHitPct').textContent = 'Träff okänt';
+                    document.getElementById('faltPreviewFigurePct').textContent = 'Figur okänt';
+                    preview.classList.remove('d-none');
+                } else {
+                    preview.classList.add('d-none');
+                }
+                return;
+            }
 
             if (Number.isFinite(hits) && Number.isFinite(figures) && figuresMax > 0 && maxHits > 0) {
                 var headline = mode === 'Poangfalt' ? (hits + figures) + ' p' : (hits + '/' + figures);
@@ -197,9 +232,21 @@
             }
         }
 
-        ['faltStationCount', 'faltHits', 'faltFigures', 'faltFiguresMax', 'faltMode'].forEach(function (id) {
+        ['faltStationCount', 'faltHits', 'faltFigures', 'faltFiguresMax', 'faltMode', 'faltPoints'].forEach(function (id) {
             document.getElementById(id).addEventListener('input', recomputePreview);
             document.getElementById(id).addEventListener('change', recomputePreview);
+        });
+
+        // Typbytet styr om valet "bara poängen" finns; radioknapparna styr vilka fält som syns.
+        // ⚠️ Synken måste köras FÖRE saveFaltDraft (formulärets egen change-lyssnare nedan),
+        // annars sparar utkastet det dolda värdet från före bytet.
+        document.getElementById('faltMode').addEventListener('change', function () { faltSyncEntryKind(); recomputePreview(); });
+        document.querySelectorAll('input[name="faltEntryKind"]').forEach(function (r) {
+            r.addEventListener('change', function () {
+                document.getElementById('faltPointsOnly').value = this.value;
+                faltSyncEntryKind();
+                recomputePreview();
+            });
         });
 
         // Varje ändring i formuläret uppdaterar utkastet.
@@ -278,6 +325,29 @@
             }
         });
     })();
+
+    // ── Bara poäng (poängfält) ──
+    // Det dolda fältet faltPointsOnly är sanningen ("1"/"0"); radioknapparna speglar det.
+    // Så följer valet med i utkastet och nollställs av form.reset() som allt annat.
+    function faltIsPointsOnly() {
+        return document.getElementById('faltMode').value === 'Poangfalt'
+            && document.getElementById('faltPointsOnly').value === '1';
+    }
+    function faltSyncEntryKind() {
+        var isPoang = document.getElementById('faltMode').value === 'Poangfalt';
+        var pointsOnly = faltIsPointsOnly();
+        document.getElementById('faltEntryKindRow').classList.toggle('d-none', !isPoang);
+        document.getElementById('faltKindPoints').checked = pointsOnly;
+        document.getElementById('faltKindSplit').checked = !pointsOnly;
+        document.getElementById('faltPointsCol').classList.toggle('d-none', !pointsOnly);
+        document.getElementById('faltHitsCol').classList.toggle('d-none', pointsOnly);
+        document.getElementById('faltFiguresCol').classList.toggle('d-none', pointsOnly);
+        // Dolda fält får aldrig vara obligatoriska.
+        ['faltHits', 'faltFigures', 'faltFiguresMax'].forEach(function (id) {
+            document.getElementById(id).required = !pointsOnly;
+        });
+        document.getElementById('faltPoints').required = pointsOnly;
+    }
 
     // ── Standardmedalj proof helpers (fält-scoped twins of the Precision modal helpers) ──
     function faltMpEsc(s) {
@@ -398,8 +468,8 @@
     var FALT_DRAFT_KEY = 'pistolnu.faltskyttelogg.utkast.v1.@faltDraftMemberKey';
     var FALT_DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
     var FALT_DRAFT_FIELDS = ['faltDate', 'faltCompetitionName', 'faltShootingClass', 'faltMode',
-        'faltStationCount', 'faltHits', 'faltFigures', 'faltFiguresMax', 'faltPlacement',
-        'faltParticipants', 'faltMedal', 'faltNotes'];
+        'faltStationCount', 'faltHits', 'faltFigures', 'faltFiguresMax', 'faltPointsOnly', 'faltPoints',
+        'faltPlacement', 'faltParticipants', 'faltMedal', 'faltNotes'];
     var faltDraftSuspended = false;
 
     function faltDraftIsEditing() {
@@ -409,7 +479,7 @@
     // Stationsantalet står på 8 från början, så det räknas inte som "något ifyllt".
     function faltDraftHasContent(draft) {
         if (!draft || !draft.fields) return false;
-        return ['faltCompetitionName', 'faltHits', 'faltFigures', 'faltFiguresMax', 'faltPlacement',
+        return ['faltCompetitionName', 'faltHits', 'faltFigures', 'faltFiguresMax', 'faltPoints', 'faltPlacement',
                 'faltParticipants', 'faltMedal', 'faltNotes']
             .some(function (id) { return String(draft.fields[id] || '').trim(); });
     }
@@ -470,6 +540,7 @@
             if (dateEl && dateEl._flatpickr && draft.fields.faltDate) {
                 dateEl._flatpickr.setDate(draft.fields.faltDate, false);
             }
+            faltSyncEntryKind();
             faltToggleProofBlock();
         } finally {
             faltDraftSuspended = false;
@@ -496,6 +567,7 @@
             document.getElementById('faltStationCount').value = 8;
             var dateEl = document.getElementById('faltDate');
             if (dateEl && dateEl._flatpickr) dateEl._flatpickr.clear();
+            faltSyncEntryKind();
             faltResetProof();
             faltToggleProofBlock();
             recomputeFaltPreview();
@@ -512,6 +584,7 @@
         document.getElementById('faltMaxHitsHint').textContent = 48;
         document.getElementById('faltMaxHitsSuffix').textContent = 'av 48';
         document.getElementById('faltPreview').classList.add('d-none');
+        faltSyncEntryKind();
         faltResetProof();
         faltToggleProofBlock();
         document.getElementById('addFaltskytteScoreModalLabel').innerHTML = '<i class="bi bi-plus-circle"></i> Lägg in Fältskytte-resultat';
@@ -529,18 +602,21 @@
         document.getElementById('faltShootingClass').value = row.shootingClass || '';
         document.getElementById('faltMode').value = row.mode || 'Normalfalt';
         document.getElementById('faltStationCount').value = row.stationCount || 8;
-        document.getElementById('faltHits').value = row.totalHits ?? '';
-        document.getElementById('faltFigures').value = row.totalFigures ?? '';
-        document.getElementById('faltFiguresMax').value = row.maxFigures ?? '';
+        // En rad med bara poäng bär nollor i träff/figurer — de betyder "okänt" och ska inte
+        // fyllas i, annars sparas de som ett riktigt resultat om skytten byter läge.
+        document.getElementById('faltPointsOnly').value = row.pointsOnly ? '1' : '0';
+        document.getElementById('faltPoints').value = row.pointsOnly ? (row.points ?? '') : '';
+        document.getElementById('faltHits').value = row.pointsOnly ? '' : (row.totalHits ?? '');
+        document.getElementById('faltFigures').value = row.pointsOnly ? '' : (row.totalFigures ?? '');
+        document.getElementById('faltFiguresMax').value = row.pointsOnly ? '' : (row.maxFigures ?? '');
+        faltSyncEntryKind();
         document.getElementById('faltPlacement').value = row.placement ?? '';
         document.getElementById('faltParticipants').value = row.participants ?? '';
         document.getElementById('faltMedal').value = row.standardMedal || '';
         document.getElementById('faltNotes').value = row.notes || '';
         document.getElementById('addFaltskytteScoreModalLabel').innerHTML = '<i class="bi bi-pencil-square"></i> Redigera Fältskytte-resultat';
         document.getElementById('faltDraftBanner').classList.add('d-none');
-        var maxHits = (parseInt(row.stationCount, 10) || 0) * 6;
-        document.getElementById('faltMaxHitsHint').textContent = maxHits;
-        document.getElementById('faltMaxHitsSuffix').textContent = 'av ' + maxHits;
+        recomputeFaltPreview();
         // Proof tools: reset, then reveal + load current state when a medal is present.
         faltResetProof();
         faltToggleProofBlock();
@@ -557,7 +633,10 @@
         var isEdit = !!idVal;
 
         // Collect & validate locally before posting.
+        var pointsOnly = faltIsPointsOnly();
         var payload = {
+            pointsOnly: pointsOnly,
+            points: pointsOnly && document.getElementById('faltPoints').value ? parseInt(document.getElementById('faltPoints').value, 10) : null,
             id: isEdit ? parseInt(idVal, 10) : null,
             date: document.getElementById('faltDate').value,
             competitionName: document.getElementById('faltCompetitionName').value.trim(),
@@ -578,9 +657,15 @@
         if (!payload.competitionName) missing.push('Tävling');
         if (!payload.shootingClass) missing.push('Skytteklass');
         if (!Number.isFinite(payload.stationCount)) missing.push('Antal stationer');
-        if (!Number.isFinite(payload.hits)) missing.push('Antal träff');
-        if (!Number.isFinite(payload.figures)) missing.push('Träffade figurer');
-        if (!Number.isFinite(payload.figuresMax)) missing.push('Totalt antal figurer');
+        if (pointsOnly) {
+            if (!Number.isFinite(payload.points)) missing.push('Poäng');
+            // Okända tal skickas som 0 — servern ignorerar dem när pointsOnly är satt.
+            payload.hits = 0; payload.figures = 0; payload.figuresMax = 0;
+        } else {
+            if (!Number.isFinite(payload.hits)) missing.push('Antal träff');
+            if (!Number.isFinite(payload.figures)) missing.push('Träffade figurer');
+            if (!Number.isFinite(payload.figuresMax)) missing.push('Totalt antal figurer');
+        }
         if (missing.length) {
             alert('Följande fält saknas eller är ogiltiga: ' + missing.join(', '));
             return;
@@ -620,7 +705,13 @@
     async function deleteFaltskytteScore(id) {
         if (!confirm('Är du säker på att du vill ta bort detta Fältskytte-resultat?')) return;
         try {
-            var resp = await fetch('/umbraco/surface/TrainingScoring/DeleteFaltskytteScore?id=' + id, { method: 'DELETE' });
+            // ⚠️ Utan token svarar servern ett tomt 400 (antiforgery) — knappen gjorde då
+            // ingenting begripligt. Samma form som DeleteTrainingScore.
+            var token = document.querySelector('#faltskytteScoreForm input[name="__RequestVerificationToken"]').value;
+            var resp = await fetch('/umbraco/surface/TrainingScoring/DeleteFaltskytteScore?id=' + id, {
+                method: 'DELETE',
+                headers: { 'RequestVerificationToken': token }
+            });
             var data = await resp.json();
             if (!data.success) {
                 alert(data.message || 'Kunde inte ta bort.');
