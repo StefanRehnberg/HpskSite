@@ -138,8 +138,12 @@
     <script>
         // Höjden till dialogen, så att panelen aldrig får en egen rullningslist inne i en annan.
         (function () {
+            // ⚠️ INNEHÅLLETS höjd, inte documentElement.scrollHeight: den är aldrig mindre än ramen
+            // själv, så dialogen kunde bara växa — drog man i textrutan blev den längre och längre
+            // och krympte aldrig igen (Anders, Hästveda, 2026-10-11).
             function send() {
-                try { parent.postMessage({ hpskTrainingPanelHeight: document.documentElement.scrollHeight }, location.origin); } catch (e) { }
+                var h = Math.ceil(document.body.getBoundingClientRect().height);
+                try { parent.postMessage({ hpskTrainingPanelHeight: h }, location.origin); } catch (e) { }
             }
             if (window.ResizeObserver) new ResizeObserver(send).observe(document.body);
             window.addEventListener('load', send);

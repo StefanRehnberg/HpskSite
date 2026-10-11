@@ -567,9 +567,16 @@
                             var contactPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Contact");
                             var clubsPage = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "clubsPage");
                             var regionalPages = Model.Root().Children.Where(x => x.ContentType.Alias == "regionalPage").ToList();
-                            bool isContactOrClubsActive = (contactPage != null && contactPage.IsAncestorOrSelf(Model)) ||
+                            // "Min klubb" (nedan) täcker medlemmens egna klubbar och kretsar. En klubbsida ligger
+                            // under kretsen i trädet, så utan undantaget lyste BÅDA menyerna på den egna
+                            // klubbens sida (Anders, Hästveda, 2026-10-11). Bara en meny får vara vald.
+                            var myClubActive = isLoggedIn
+                                && (memberClubs.Any(c => Model.Url().StartsWith(c.ClubUrl, StringComparison.OrdinalIgnoreCase))
+                                    || memberRegionPages.Any(r => Model.Url().StartsWith(r.RegionUrl, StringComparison.OrdinalIgnoreCase)));
+                            bool isContactOrClubsActive = !myClubActive && (
+                                                         (contactPage != null && contactPage.IsAncestorOrSelf(Model)) ||
                                                          (clubsPage != null && clubsPage.IsAncestorOrSelf(Model)) ||
-                                                         regionalPages.Any(r => r.IsAncestorOrSelf(Model));
+                                                         regionalPages.Any(r => r.IsAncestorOrSelf(Model)));
                         }
                         @if (regionalPages.Any())
                         {
@@ -636,8 +643,6 @@
                            Placerad EFTER Kretsar: det allmänna först, det egna sist och närmast avataren. *@
                         @if (isLoggedIn && (memberClubs.Count > 0 || memberRegionPages.Count > 0))
                         {
-                            var myClubActive = memberClubs.Any(c => Model.Url().StartsWith(c.ClubUrl, StringComparison.OrdinalIgnoreCase))
-                                            || memberRegionPages.Any(r => Model.Url().StartsWith(r.RegionUrl, StringComparison.OrdinalIgnoreCase));
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle @(myClubActive ? "active" : "")" href="#" role="button" data-bs-toggle="dropdown">
                                     <i class="bi bi-building me-1"></i>@(memberClubs.Count > 1 ? "Mina klubbar" : "Min klubb")
@@ -1081,6 +1086,8 @@
     }
     </script>
 
+    <!-- Klockslag utan kolon: fält med data-hpsk-time ("11" → "11:00") -->
+    <script src="~/js/time-input.js" asp-append-version="true"></script>
     <!-- AI Chat Widget -->
     <script src="~/js/chat-widget.js" asp-append-version="true"></script>
 </body>

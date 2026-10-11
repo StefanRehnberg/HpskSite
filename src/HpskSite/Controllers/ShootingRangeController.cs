@@ -553,8 +553,9 @@ namespace HpskSite.Controllers
 
                 if (req.DayOfWeek < 1 || req.DayOfWeek > 7)
                     return Json(new { success = false, message = "Ogiltig veckodag." });
-                if (!TimeSpan.TryParse(req.StartTime, out var start) || !TimeSpan.TryParse(req.EndTime, out var end))
-                    return Json(new { success = false, message = "Ogiltig tid (använd HH:mm)." });
+                // ClockTime, inte TimeSpan.TryParse — den läser "18" som arton DAGAR.
+                if (ClockTime.ToTimeSpan(req.StartTime) is not TimeSpan start || ClockTime.ToTimeSpan(req.EndTime) is not TimeSpan end)
+                    return Json(new { success = false, message = "Tiderna går inte att läsa. Skriv till exempel 18 eller 18:30." });
                 if (end <= start)
                     return Json(new { success = false, message = "Sluttiden måste vara efter starttiden." });
 
@@ -1002,7 +1003,7 @@ namespace HpskSite.Controllers
             try { list = System.Text.Json.JsonSerializer.Deserialize<List<AllowedWindowDto>>(json, _jsonCI); } catch { }
             if (list == null) yield break;
             foreach (var w in list)
-                if (TimeSpan.TryParse(w.Start, out var s) && TimeSpan.TryParse(w.End, out var e))
+                if (ClockTime.ToTimeSpan(w.Start) is TimeSpan s && ClockTime.ToTimeSpan(w.End) is TimeSpan e)
                     yield return new RangeTodoWindow(w.Day, s, e);
         }
 
@@ -1034,6 +1035,15 @@ namespace HpskSite.Controllers
                 if (!await _rangeService.CanManageRangeAsync(req.RangeId, memberId))
                     return Json(new { success = false, message = "Behörighet saknas." });
 
+                // Skjuttiderna sparas som "HH:mm" — "17" och "1700" räcker att skriva (ClockTime).
+                foreach (var w in req.AllowedWindows ?? new List<AllowedWindowDto>())
+                {
+                    if (!ClockTime.TryNormalize(w.Start, out var ws) || !ClockTime.TryNormalize(w.End, out var we) || ws == null || we == null)
+                        return Json(new { success = false, message = "En skjuttid går inte att läsa. Skriv till exempel 17 eller 17:30." });
+                    if (string.CompareOrdinal(we, ws) <= 0)
+                        return Json(new { success = false, message = $"Skjuttiden {ws}–{we} slutar inte efter att den börjar." });
+                    w.Start = ws; w.End = we;
+                }
                 string? windowsJson = (req.AllowedWindows != null && req.AllowedWindows.Count > 0)
                     ? System.Text.Json.JsonSerializer.Serialize(req.AllowedWindows)
                     : null;
@@ -1440,8 +1450,7 @@ namespace HpskSite.Controllers
 
         private static readonly System.Text.Json.JsonSerializerOptions _jsonCI = new() { PropertyNameCaseInsensitive = true };
 
-        private static TimeSpan? ParseTime(string? s) =>
-            TimeSpan.TryParse(s, out var t) ? t : (TimeSpan?)null;
+        private static TimeSpan? ParseTime(string? s) => ClockTime.ToTimeSpan(s);
 
         private int? ResolvePrimaryClubId(int memberId)
         {

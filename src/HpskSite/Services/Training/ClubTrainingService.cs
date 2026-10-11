@@ -239,8 +239,8 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             var name = (input.Name ?? "").Trim();
             if (name.Length == 0) return (0, "Ange ett namn på träningen.");
             if (!TryDate(input.Date, out var date)) return (0, "Ange ett giltigt datum.");
-            if (!TryTime(input.StartTime, out var start)) return (0, "Starttiden ska skrivas som tt:mm.");
-            if (!TryTime(input.EndTime, out var end)) return (0, "Sluttiden ska skrivas som tt:mm.");
+            if (!TryTime(input.StartTime, out var start)) return (0, "Starttiden går inte att läsa. Skriv till exempel 18 eller 18:30.");
+            if (!TryTime(input.EndTime, out var end)) return (0, "Sluttiden går inte att läsa. Skriv till exempel 20 eller 20:30.");
             if (start != null && end != null && string.CompareOrdinal(end, start) <= 0)
                 return (0, "Sluttiden måste vara efter starttiden.");
             if (input.MaxParticipants is < 0) return (0, "Antalet platser kan inte vara negativt.");
@@ -345,7 +345,7 @@ WHERE OccasionKind = @0 AND OccasionId IN (@1) AND Status IN (@2) GROUP BY Occas
             { plan.Error = "Ange från- och till-datum."; return plan; }
             if (to < from) { plan.Error = "Till-datumet måste vara efter från-datumet."; return plan; }
             if (!TryTime(input.StartTime, out var start) || !TryTime(input.EndTime, out var end))
-            { plan.Error = "Tiderna ska skrivas som tt:mm."; return plan; }
+            { plan.Error = "Tiderna går inte att läsa. Skriv till exempel 18 eller 18:30."; return plan; }
             if (start != null && end != null && string.CompareOrdinal(end, start) <= 0)
             { plan.Error = "Sluttiden måste vara efter starttiden."; return plan; }
 
@@ -826,17 +826,9 @@ WHERE ScheduleId = @0 AND [Date] > @1 AND [Date] >= CAST(GETDATE() AS date)",
         private static bool TryDate(string? s, out DateTime d)
             => DateTime.TryParseExact((s ?? "").Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d);
 
-        /// <summary>Tom = inget klockslag (giltigt). Annars "H:mm"/"HH:mm" → "HH:mm".</summary>
-        private static bool TryTime(string? s, out string? time)
-        {
-            time = null;
-            var v = (s ?? "").Trim();
-            if (v.Length == 0) return true;
-            if (!TimeSpan.TryParseExact(v, new[] { @"h\:mm", @"hh\:mm" }, CultureInfo.InvariantCulture, out var ts)) return false;
-            if (ts.TotalHours >= 24) return false;
-            time = ts.ToString(@"hh\:mm", CultureInfo.InvariantCulture);
-            return true;
-        }
+        /// <summary>Tom = inget klockslag (giltigt). Annars "11", "1130", "11.30", "11:30" → "HH:mm"
+        /// (<see cref="ClockTime"/> — samma tolkning som fältet i webbläsaren).</summary>
+        private static bool TryTime(string? s, out string? time) => ClockTime.TryNormalize(s, out time);
 
         private static bool IsTrue(string? v)
             => v != null && (v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase) || v.Equals("on", StringComparison.OrdinalIgnoreCase));

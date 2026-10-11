@@ -95,13 +95,10 @@ namespace HpskSite.Models
         public static bool SectionsCollide(int? a, int? b)
             => a is not > 0 || b is not > 0 || a == b;
 
-        /// <summary>"HH:mm" → minuter från midnatt. null för tomt eller oläsligt.</summary>
+        /// <summary>Ett klockslag ("18:00", men också "18" eller "1830", se <see cref="ClockTime"/>) →
+        /// minuter från midnatt. null för tomt eller oläsligt.</summary>
         public static int? Minutes(string? hhmm)
-        {
-            if (string.IsNullOrWhiteSpace(hhmm)) return null;
-            return TimeSpan.TryParseExact(hhmm.Trim(), new[] { @"hh\:mm", @"h\:mm" }, CultureInfo.InvariantCulture, out var t)
-                ? (int)t.TotalMinutes : null;
-        }
+            => ClockTime.ToTimeSpan(hhmm) is TimeSpan t ? (int)t.TotalMinutes : null;
 
         /// <summary>
         /// Hur två poster SAMMA DAG förhåller sig i tid.

@@ -531,10 +531,9 @@ GROUP BY RangeId ORDER BY COUNT(*) DESC, MAX([Date]) DESC", clubId) ?? 0;
             if (t.Length > 200) t = t[..200];
             if (!DateTime.TryParseExact((date ?? "").Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
                 return (0, "Ange ett giltigt datum.");
-            var s = string.IsNullOrWhiteSpace(startTime) ? null : startTime.Trim();
-            var e = string.IsNullOrWhiteSpace(endTime) ? null : endTime.Trim();
-            if (s != null && RangeCalendarRules.Minutes(s) == null) return (0, "Starttiden ska skrivas som tt:mm.");
-            if (e != null && RangeCalendarRules.Minutes(e) == null) return (0, "Sluttiden ska skrivas som tt:mm.");
+            // "10" och "1030" räcker (ClockTime); det som sparas är alltid "HH:mm".
+            if (!ClockTime.TryNormalize(startTime, out var s)) return (0, "Starttiden går inte att läsa. Skriv till exempel 10 eller 10:30.");
+            if (!ClockTime.TryNormalize(endTime, out var e)) return (0, "Sluttiden går inte att läsa. Skriv till exempel 14 eller 14:30.");
             if (s == null && e != null) return (0, "Ange en starttid när du anger en sluttid.");
             if (s != null && e != null && RangeCalendarRules.Minutes(e) <= RangeCalendarRules.Minutes(s))
                 return (0, "Sluttiden måste vara efter starttiden.");

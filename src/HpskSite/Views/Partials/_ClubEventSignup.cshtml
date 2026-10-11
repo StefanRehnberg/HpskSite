@@ -565,7 +565,7 @@
                 html += priceBlock(d);
                 html += loanWeaponBlock(d);
                 html += '<div class="mb-2"><label for="ces-note" class="form-label small text-muted mb-1">Meddelande till arrangören (valfritt)</label>'
-                     +  '<textarea class="form-control form-control-sm" id="ces-note" rows="2" maxlength="500"></textarea></div>';
+                     +  '<textarea class="form-control form-control-sm" id="ces-note" rows="2" maxlength="500" style="resize:vertical;max-height:12rem"></textarea></div>';
                 const full = d.event.maxParticipants > 0 && c.seatsLeft === 0;
                 html += `<button type="button" class="btn btn-primary w-100" id="ces-signup">`
                      +  (full ? 'Ställ mig som reserv' : 'Anmäl mig')
