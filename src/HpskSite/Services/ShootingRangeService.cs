@@ -143,6 +143,15 @@ namespace HpskSite.Services
             // guard the delete so a range can still be removed on databases where it hasn't been run yet.
             await db.ExecuteAsync(
                 "IF OBJECT_ID('RangeActivitySession', 'U') IS NOT NULL DELETE FROM RangeActivitySession WHERE RangeId = @0", id);
+            // Banans kalender (create-range-calendar-tables.sql): förvaltarens externa bokningar och
+            // händelsernas koppling följer med banan. Träningarna RADERAS inte — de är klubbens — men
+            // pekar inte längre på en bana som inte finns.
+            await db.ExecuteAsync(
+                "IF OBJECT_ID('RangeExternalBooking', 'U') IS NOT NULL DELETE FROM RangeExternalBooking WHERE RangeId = @0", id);
+            await db.ExecuteAsync(
+                "IF OBJECT_ID('ClubEventRange', 'U') IS NOT NULL DELETE FROM ClubEventRange WHERE RangeId = @0", id);
+            await db.ExecuteAsync(
+                "IF COL_LENGTH('dbo.ClubTraining', 'RangeSectionId') IS NOT NULL UPDATE dbo.ClubTraining SET RangeId = NULL, RangeSectionId = NULL WHERE RangeId = @0", id);
             await db.ExecuteAsync("DELETE FROM ShootingRange WHERE Id = @0", id);
         }
 
@@ -175,6 +184,14 @@ namespace HpskSite.Services
             using var db = _databaseFactory.CreateDatabase();
             // Null out any allocations scoped to this section (don't delete the slot, just un-scope it).
             await db.ExecuteAsync("UPDATE ClubRangeAllocation SET RangeSectionId = NULL WHERE RangeSectionId = @0", sectionId);
+            // Samma sak för banans kalender: en träning, händelse eller extern bokning på en vall som
+            // tas bort ligger kvar på banan, men gäller nu hela banan.
+            await db.ExecuteAsync(
+                "IF COL_LENGTH('dbo.ClubTraining', 'RangeSectionId') IS NOT NULL UPDATE dbo.ClubTraining SET RangeSectionId = NULL WHERE RangeSectionId = @0", sectionId);
+            await db.ExecuteAsync(
+                "IF OBJECT_ID('ClubEventRange', 'U') IS NOT NULL UPDATE ClubEventRange SET RangeSectionId = NULL WHERE RangeSectionId = @0", sectionId);
+            await db.ExecuteAsync(
+                "IF OBJECT_ID('RangeExternalBooking', 'U') IS NOT NULL UPDATE RangeExternalBooking SET RangeSectionId = NULL WHERE RangeSectionId = @0", sectionId);
             await db.ExecuteAsync("DELETE FROM RangeSection WHERE Id = @0", sectionId);
         }
 

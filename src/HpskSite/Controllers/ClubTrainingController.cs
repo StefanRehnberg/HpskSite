@@ -28,6 +28,7 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly MemberClubService _memberClubs;
+        private readonly RangeCalendarService _rangeCalendar;
 
         public ClubTrainingController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -41,7 +42,8 @@ namespace HpskSite.Controllers
             BoardRoleService boardRoles,
             IMemberManager memberManager,
             IMemberService memberService,
-            MemberClubService memberClubs)
+            MemberClubService memberClubs,
+            RangeCalendarService rangeCalendar)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _trainings = trainings;
@@ -50,6 +52,7 @@ namespace HpskSite.Controllers
             _memberManager = memberManager;
             _memberService = memberService;
             _memberClubs = memberClubs;
+            _rangeCalendar = rangeCalendar;
         }
 
         private const string Denied = "Du har inte behörighet att hantera klubbens träningar.";
@@ -79,6 +82,13 @@ namespace HpskSite.Controllers
         {
             var me = await CurrentMemberIdAsync();
             if (input == null || !await CanAdminAsync(input.ClubId, me)) return Json(new { success = false, message = Denied });
+            // Banan prövas FÖRE sparningen: en vall från en annan bana hade lagt träningen på fel ställe
+            // i båda banornas kalender.
+            if (input.RangeId is > 0)
+            {
+                var rangeError = _rangeCalendar.Validate(input.RangeId.Value, input.RangeSectionId);
+                if (rangeError != null) return Json(new { success = false, message = rangeError });
+            }
             var (id, error) = _trainings.Save(input, me);
             if (error != null) return Json(new { success = false, message = error, id });
             // "Den här och alla kommande" — frågan ställs i dialogen när serien har senare tillfällen.

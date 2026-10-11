@@ -122,7 +122,9 @@
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="rngDetailTitle">Skjutbana</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        @* Banans kalender: vad alla klubbar på banan har lagt in (2026-10-11). *@
+        <a class="btn btn-sm btn-outline-primary ms-auto me-2 text-nowrap" id="rngCalendarLink" href="#"><i class="bi bi-calendar3 me-1"></i>Banans kalender</a>
+        <button type="button" class="btn-close ms-0" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <div id="rngClaimBanner" class="alert alert-warning d-none">
@@ -656,6 +658,7 @@
         if (!d.success) { alert(d.message || 'Fel'); return; }
         rngState.current = d;
         document.getElementById('rngDetailTitle').textContent = d.range.name;
+        document.getElementById('rngCalendarLink').href = '/skjutbana/kalender?r=' + d.range.id;
         // Only club/regional/site admins can claim, so the whole "unclaimed" banner is admin-only —
         // regular members can't act on it and don't need the noise.
         const rngShowClaimBanner = d.range.status === 'UnclaimedSeed' && rngState.canCreate;
