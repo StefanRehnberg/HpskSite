@@ -1,6 +1,6 @@
 :root{
   --bg:#eef0ec; --surface:#fbfbf8; --ink:#1c2422; --muted:#5b6662; --line:#c9cfc9; --accent:#1f6f5c;
-  --a1:#c2410c; --a2:#1d6fa3; --a3:#6d4bb3; --a4:#2f8a4e; --a5:#b7791f; --a6:#b83280; --a7:#0f8b8d; --a8:#56616b; --a9:#8a5a2b; --a10:#3f5fbf; --a11:#7a8a1f;
+  --a1:#c2410c; --a2:#1d6fa3; --a3:#6d4bb3; --a4:#2f8a4e; --a5:#b7791f; --a6:#b83280; --a7:#0f8b8d; --a8:#56616b; --a9:#8a5a2b; --a10:#3f5fbf; --a11:#7a8a1f; --a12:#b42318;
   --root:#ffffff; --root-stroke:#aeb7b1;
   --font-d:"Familjen Grotesk",system-ui,sans-serif; --font-b:"Instrument Sans",system-ui,sans-serif;
 }
@@ -8,14 +8,14 @@
   :root:not([data-theme="light"]){
     color-scheme:dark;
     --bg:#0f1413; --surface:#171d1c; --ink:#e7ece9; --muted:#9aa7a2; --line:#2c3634; --accent:#5cc5a7;
-    --a1:#fb8a4f; --a2:#5eb0e5; --a3:#a88bf0; --a4:#62c983; --a5:#e8b04d; --a6:#ee7ab8; --a7:#46c7c6; --a8:#9aa6b1; --a9:#d49a66; --a10:#8ea6f5; --a11:#bccb57;
+    --a1:#fb8a4f; --a2:#5eb0e5; --a3:#a88bf0; --a4:#62c983; --a5:#e8b04d; --a6:#ee7ab8; --a7:#46c7c6; --a8:#9aa6b1; --a9:#d49a66; --a10:#8ea6f5; --a11:#bccb57; --a12:#f2776b;
     --root:#141a19; --root-stroke:#3a4643;
   }
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
   --bg:#0f1413; --surface:#171d1c; --ink:#e7ece9; --muted:#9aa7a2; --line:#2c3634; --accent:#5cc5a7;
-  --a1:#fb8a4f; --a2:#5eb0e5; --a3:#a88bf0; --a4:#62c983; --a5:#e8b04d; --a6:#ee7ab8; --a7:#46c7c6; --a8:#9aa6b1; --a9:#d49a66; --a10:#8ea6f5; --a11:#bccb57;
+  --a1:#fb8a4f; --a2:#5eb0e5; --a3:#a88bf0; --a4:#62c983; --a5:#e8b04d; --a6:#ee7ab8; --a7:#46c7c6; --a8:#9aa6b1; --a9:#d49a66; --a10:#8ea6f5; --a11:#bccb57; --a12:#f2776b;
   --root:#141a19; --root-stroke:#3a4643;
 }
 /* Fristående sida: ingen sajtlayout och ingen reset, så grunden sätts här. */

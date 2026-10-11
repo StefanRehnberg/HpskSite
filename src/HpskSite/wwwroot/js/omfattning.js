@@ -22,11 +22,14 @@ const labels=g.selectAll("text").data(nodes.filter(d=>d.depth>0)).join("text")
 let tokens={};
 function readTokens(){const cs=getComputedStyle(document.documentElement);
   ["--root","--root-stroke","--surface","--ink"].forEach(k=>tokens[k]=cs.getPropertyValue(k).trim());
-  tokens.area=[1,2,3,4,5,6,7,8,9,10,11].map(i=>cs.getPropertyValue("--a"+i).trim());}
+  // En färg per område: --a1, --a2 ... så många som css:en definierar. Ett område utan egen
+  // färg blev svart (2026-10-11, när Träning blev område 12) — lägg till --aN i omfattning.css.
+  tokens.area=[];for(let i=1;;i++){const v=cs.getPropertyValue("--a"+i).trim();if(!v)break;tokens.area.push(v);}
+  tokens.area=tokens.area.length?tokens.area:["#56616b"];}
 function paint(){readTokens();
-  circ.attr("fill",d=>d.depth===0?tokens["--root"]:tokens.area[d.area.ci])
+  circ.attr("fill",d=>d.depth===0?tokens["--root"]:tokens.area[d.area.ci%tokens.area.length])
     .attr("fill-opacity",d=>d.depth===0?1:d.children?(d.depth===1?.13:.17):.34)
-    .attr("stroke",d=>d.depth===0?tokens["--root-stroke"]:tokens.area[d.area.ci])
+    .attr("stroke",d=>d.depth===0?tokens["--root-stroke"]:tokens.area[d.area.ci%tokens.area.length])
     .attr("stroke-opacity",d=>d.depth===0?1:d.children?.55:.4)
     .attr("vector-effect","non-scaling-stroke")
     .attr("stroke-width",d=>d.depth<=1?1.5:1);
@@ -80,7 +83,7 @@ function goTo(d,animate=true){focus=d;
 circ.on("click",(e,d)=>{e.stopPropagation();goTo(d===focus&&d.parent?d.parent:d)});
 svg.on("click",()=>{if(focus.parent)goTo(focus.parent)});
 
-function color(d){return d.depth===0?tokens["--ink"]:tokens.area[d.area.ci]}
+function color(d){return d.depth===0?tokens["--ink"]:tokens.area[d.area.ci%tokens.area.length]}
 function nFunc(d){const n=d.children?d.leaves().length:0;return n?n+(n===1?" funktion":" funktioner"):""}
 function renderInfo(d){
   const info=document.getElementById("info");info.innerHTML="";
