@@ -209,6 +209,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                             TotalFigures = mine.TotalFigures,
                             MaxHits = maxHits,
                             MaxFigures = maxFigures,
+                            Points = mine.TotalPoints,
                             HitPercent = maxHits > 0 ? Math.Round(100.0 * mine.TotalHits / maxHits, 1) : 0,
                             FigurePercent = maxFigures > 0 ? Math.Round(100.0 * mine.TotalFigures / maxFigures, 1) : 0,
                             Placement = placement > 0 ? placement : null,
@@ -296,8 +297,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                         TotalFigures = payload.Figures,
                         MaxHits = maxHits,
                         MaxFigures = maxFigures,
-                        HitPercent = maxHits > 0 ? Math.Round(100.0 * payload.Hits / maxHits, 1) : 0,
-                        FigurePercent = maxFigures > 0 ? Math.Round(100.0 * payload.Figures / maxFigures, 1) : 0,
+                        PointsOnly = payload.PointsOnly,
+                        Points = payload.PointsOnly ? payload.Points : payload.Hits + payload.Figures,
+                        HitPercent = payload.PointsOnly ? null : (maxHits > 0 ? Math.Round(100.0 * payload.Hits / maxHits, 1) : 0),
+                        FigurePercent = payload.PointsOnly ? null : (maxFigures > 0 ? Math.Round(100.0 * payload.Figures / maxFigures, 1) : 0),
                         Placement = payload.Placement,
                         Participants = payload.Participants,
                         StandardMedal = medal,
@@ -348,9 +351,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             if (availableYears.Contains(defaultYear - 1))
             {
                 var prev = all.Where(e => e.Date.Year == defaultYear - 1).ToList();
-                if (prev.Any() && seasonForDefault.Any())
+                if (prev.Any(e => e.HitPercent.HasValue) && seasonForDefault.Any(e => e.HitPercent.HasValue))
                 {
-                    yoYDelta = Math.Round(seasonForDefault.Average(e => e.HitPercent) - prev.Average(e => e.HitPercent), 1);
+                    yoYDelta = Math.Round(AvgKnown(seasonForDefault.Select(e => e.HitPercent)) - AvgKnown(prev.Select(e => e.HitPercent)), 1);
                 }
             }
 
@@ -374,10 +377,20 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     placementPercent = e.Placement.HasValue && e.Participants.HasValue && e.Participants.Value > 1
                         ? Math.Round(100.0 * (1.0 - ((e.Placement.Value - 1.0) / (e.Participants.Value - 1.0))), 1)
                         : (double?)null,
-                    headline = e.Mode == "Poangfalt" ? $"{e.TotalHits + e.TotalFigures} p" : $"{e.TotalHits}/{e.TotalFigures}",
+                    headline = e.Mode == "Poangfalt" ? $"{e.Points ?? (e.TotalHits + e.TotalFigures)} p" : $"{e.TotalHits}/{e.TotalFigures}",
                     competitionName = e.CompetitionName
                 }).OrderBy(x => x.date).ToList()
             };
+        }
+
+        /// <summary>
+        /// Snitt över de rader där talet är känt. En rad med bara poäng har ingen träffprocent,
+        /// och att räkna den som 0 % hade dragit ner snittet för varje sådan tävling.
+        /// </summary>
+        private static double AvgKnown(IEnumerable<double?> values)
+        {
+            var known = values.Where(v => v.HasValue).Select(v => v!.Value).ToList();
+            return known.Count > 0 ? known.Average() : 0;
         }
 
         private static object SummarizeSeason(List<FaltskytteSeasonEntry> season)
@@ -414,10 +427,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 .Select(g => new
                 {
                     weaponGroup = g.Key,
-                    hitPercent = Math.Round(g.Average(e => e.HitPercent), 1),
-                    figurePercent = Math.Round(g.Average(e => e.FigurePercent), 1),
-                    count = g.Count()
+                    hitPercent = Math.Round(AvgKnown(g.Select(e => e.HitPercent)), 1),
+                    figurePercent = Math.Round(AvgKnown(g.Select(e => e.FigurePercent)), 1),
+                    count = g.Count(e => e.HitPercent.HasValue)
                 })
+                .Where(x => x.count > 0)
                 .ToList<object>();
 
             var silverCount = season.Count(e => e.StandardMedal == "S");
@@ -451,9 +465,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             {
                 totalCompetitions = season.Count,
                 activityByWeaponGroup,
-                hitPercentAvg = Math.Round(season.Average(e => e.HitPercent), 1),
+                hitPercentAvg = Math.Round(AvgKnown(season.Select(e => e.HitPercent)), 1),
                 hitPercentByWeaponGroup,
-                figurePercentAvg = Math.Round(season.Average(e => e.FigurePercent), 1),
+                figurePercentAvg = Math.Round(AvgKnown(season.Select(e => e.FigurePercent)), 1),
+                // Tävlingar där bara poängen är känd ingår inte i procentsnitten ovan.
+                pointsOnlyCount = season.Count(e => !e.HitPercent.HasValue),
                 medalStats = new
                 {
                     silverCount,
@@ -488,8 +504,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public int TotalFigures { get; set; }
         public int MaxHits { get; set; }      // stationCount × 6 for the shooter's weapon class
         public int MaxFigures { get; set; }
-        public double HitPercent { get; set; }
-        public double FigurePercent { get; set; }
+        // Bara poäng känd (egenregistrerat poängfält). Då finns ingen träff- eller figurprocent,
+        // och HitPercent/FigurePercent är null — en nolla hade dragit ner snitten.
+        public bool PointsOnly { get; set; }
+        public int? Points { get; set; }
+        public double? HitPercent { get; set; }
+        public double? FigurePercent { get; set; }
         public int? Placement { get; set; }
         public int? Participants { get; set; }
         public string? StandardMedal { get; set; }   // "S" | "B" | null
@@ -513,6 +533,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public int Hits { get; set; }
         public int Figures { get; set; }
         public int FiguresMax { get; set; }
+        // Poängfält där bara totalpoängen är känd (resultatlistan visar ofta bara poäng).
+        // ⚠️ Då är Hits/Figures/FiguresMax 0 och betyder "okänt", inte noll träff.
+        public bool PointsOnly { get; set; }
+        public int? Points { get; set; }
         public int? Placement { get; set; }
         public int? Participants { get; set; }
     }

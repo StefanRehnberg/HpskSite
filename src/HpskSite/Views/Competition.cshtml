@@ -67,8 +67,13 @@
     var contactPhone = Model.Value<string>("contactPhone") ?? "";
     var isActive = Model.Value<bool>("isActive");
     var showLiveResults = Model.Value<bool>("showLiveResults");
-    var competitionType = Model.Value<IPublishedContent>("competitionType");
     var competitionTypeStr = Model.Value<string>("competitionType") ?? "Precision";
+    // competitionType lagras som STRÄNG — oftast id:t ("Milsnabb"), på äldre tävlingar ibland
+    // visningsnamnet ("Magnum Fält"). Den lästes tidigare som en innehållsnod, alltså alltid null,
+    // och typen syntes aldrig på sidan. Exakt matchning, inte GetFuzzy (prefixmatchning).
+    var competitionTypeName = (HpskSite.Models.CompetitionTypes.GetById(competitionTypeStr)
+                               ?? HpskSite.Models.CompetitionTypes.GetByName(competitionTypeStr))?.Name
+                              ?? competitionTypeStr;
     var isSpringskytte = competitionTypeStr == "Springskytte";
     var isFaltskytte = competitionTypeStr == "Faltskytte" || competitionTypeStr == "MagnumFalt";
     var dpConfigJson = "";
@@ -934,10 +939,7 @@
 
 							<p><strong>Tävlingsinformation:</strong></p>
 							<ul class="list-unstyled">
-								@if (competitionType != null)
-								{
-									<li><i class="bi bi-trophy"></i> Typ: <strong>@competitionType.Name</strong></li>
-								}
+								<li><i class="bi bi-trophy"></i> Tävlingstyp: <strong>@competitionTypeName</strong></li>
 								@if (!isSpringskytte)
 								{
 									@* Fältskytte/MagnumFält räknar STATIONER, inte serier — samma property
