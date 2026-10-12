@@ -1,158 +1,149 @@
 using System.Collections.Concurrent;
 using HpskSite.Models.Configuration;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
-using Umbraco.Cms.Core.Services;
+using Umbraco.Cms.Infrastructure.Persistence;
 
 namespace HpskSite.Services
 {
+    /// <summary>När medlemmen senast sågs på webben respektive i mobilappen (UTC, som förut).</summary>
+    public readonly record struct MemberLastSeen(DateTime? Web, DateTime? Mobile)
+    {
+        public DateTime? Any => Web.HasValue && Mobile.HasValue
+            ? (Web.Value > Mobile.Value ? Web : Mobile)
+            : Web ?? Mobile;
+    }
+
     /// <summary>
-    /// Service for tracking member activity with throttling to minimize database writes
+    /// Medlemmens senaste aktivitet — i tabellen <c>dbo.MemberActivity</c> (skalplanen B1, 2026-10-12).
+    ///
+    /// <para><b>⚠️⚠️ Skriv ALDRIG aktiviteten som en medlemsegenskap igen.</b> Förut gjorde den här
+    /// tjänsten <c>_memberService.Save(member)</c> var 5:e minut per inloggad medlem. Varje sparning tog
+    /// Umbracos skrivlås för ALLA medlemmar, skrev om medlemmens egenskaper och byggde om medlemmen i
+    /// Examine — vid en rusning hundratals gånger i minuten, i kö med sparningar som faktiskt betyder
+    /// något. Nu är det en UPSERT på en rad, utan Umbraco.</para>
+    ///
+    /// <para><b>Läsning:</b> <see cref="GetAll"/> för listor och statistik (hela tabellen, cachad
+    /// 60 s — en rad per medlem som någon gång varit aktiv), <see cref="Get"/> för en medlem. Egenskaperna
+    /// <c>lastActiveDate</c>/<c>lastMobileActiveDate</c> finns kvar på medlemstypen men skrivs och läses
+    /// inte längre; migreringen förde över deras värden.</para>
+    ///
+    /// <para>Strypningen (en skrivning per medlem och <c>ThrottleMinutes</c>) ligger kvar i minnet per
+    /// process. Med flera instanser blir det som mest en skrivning per instans och period — ofarligt nu
+    /// när skrivningen är en rad.</para>
     /// </summary>
     public class MemberActivityService
     {
-        // Thread-safe cache of last update times (email -> timestamp)
-        private static readonly ConcurrentDictionary<string, DateTime> _lastUpdateCache = new();
-        private static readonly ConcurrentDictionary<string, DateTime> _lastMobileUpdateCache = new();
+        private const string CacheKey = "member_activity_all";
+        private static readonly ConcurrentDictionary<int, DateTime> _lastWebWrite = new();
+        private static readonly ConcurrentDictionary<int, DateTime> _lastMobileWrite = new();
+        private static int _missingTableLogged;
 
-        private readonly IMemberService _memberService;
+        private readonly IUmbracoDatabaseFactory _databaseFactory;
+        private readonly IMemoryCache _cache;
         private readonly MemberActivityOptions _options;
         private readonly ILogger<MemberActivityService> _logger;
 
         public MemberActivityService(
-            IMemberService memberService,
+            IUmbracoDatabaseFactory databaseFactory,
+            IMemoryCache cache,
             IOptions<MemberActivityOptions> options,
             ILogger<MemberActivityService> logger)
         {
-            _memberService = memberService;
+            _databaseFactory = databaseFactory;
+            _cache = cache;
             _options = options.Value;
             _logger = logger;
         }
 
         /// <summary>
-        /// Update member's last active timestamp (throttled)
+        /// Behöver medlemmens webbaktivitet skrivas nu? Billig, ingen databas — middlewaren frågar här
+        /// INNAN den slår upp medlemmen, så att en vanlig sidladdning inte kostar något alls.
         /// </summary>
-        /// <param name="email">Member email</param>
-        /// <param name="activityTime">Activity timestamp (UTC)</param>
-        public async Task UpdateActivityAsync(string email, DateTime activityTime)
+        public bool WebUpdateDue(int memberId, DateTime utc)
+            => _options.EnableTracking && Due(_lastWebWrite, memberId, utc);
+
+        public void UpdateActivity(int memberId, DateTime utc)
         {
+            if (!WebUpdateDue(memberId, utc)) return;
+            Write(memberId, utc, mobile: false);
+        }
+
+        public void UpdateMobileActivity(int memberId, DateTime utc)
+        {
+            if (!_options.EnableTracking || !Due(_lastMobileWrite, memberId, utc)) return;
+            Write(memberId, utc, mobile: true);
+        }
+
+        public MemberLastSeen Get(int memberId)
+            => GetAll().TryGetValue(memberId, out var seen) ? seen : default;
+
+        /// <summary>Hela tabellen, cachad 60 s. Saknas en medlem har hen aldrig setts.</summary>
+        public IReadOnlyDictionary<int, MemberLastSeen> GetAll()
+        {
+            if (_cache.TryGetValue(CacheKey, out IReadOnlyDictionary<int, MemberLastSeen>? cached) && cached != null)
+                return cached;
             try
             {
-                // Check if tracking is enabled
-                if (!_options.EnableTracking)
-                {
-                    return;
-                }
-
-                // Check if enough time has passed since last update (throttle)
-                if (_lastUpdateCache.TryGetValue(email, out var lastUpdate))
-                {
-                    var elapsed = activityTime.Subtract(lastUpdate);
-                    if (elapsed.TotalMinutes < _options.ThrottleMinutes)
-                    {
-                        // Skip update - not enough time has passed
-                        _logger.LogDebug("Skipping activity update for {Email} - last updated {Elapsed} seconds ago",
-                            email, elapsed.TotalSeconds);
-                        return;
-                    }
-                }
-
-                // Update member property
-                _logger.LogInformation("🔍 Attempting to update activity for {Email}", email);
-
-                await Task.Run(() =>
-                {
-                    var member = _memberService.GetByEmail(email);
-                    if (member != null)
-                    {
-                        _logger.LogInformation("✅ Member found: {Name} ({Id})", member.Name, member.Id);
-
-                        member.SetValue("lastActiveDate", activityTime);
-                        _memberService.Save(member);
-
-                        // Update cache
-                        _lastUpdateCache[email] = activityTime;
-
-                        _logger.LogInformation("✅ Updated last active for {Email} to {Time}",
-                            email, activityTime);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("❌ Member not found for activity update: {Email}", email);
-                    }
-                });
+                using var db = _databaseFactory.CreateDatabase();
+                var rows = db.Fetch<Row>("SELECT MemberId, LastWebUtc, LastMobileUtc FROM dbo.MemberActivity");
+                var map = rows.ToDictionary(r => r.MemberId, r => new MemberLastSeen(r.LastWebUtc, r.LastMobileUtc));
+                _cache.Set(CacheKey, (IReadOnlyDictionary<int, MemberLastSeen>)map, TimeSpan.FromSeconds(60));
+                return map;
             }
             catch (Exception ex)
             {
-                // Log error but don't throw - activity tracking should not break the site
-                _logger.LogError(ex, "Error updating activity for {Email}", email);
+                LogMissing(ex);
+                return new Dictionary<int, MemberLastSeen>();
             }
         }
 
-        /// <summary>
-        /// Update member's last mobile app active timestamp (throttled)
-        /// </summary>
-        /// <param name="email">Member email</param>
-        /// <param name="activityTime">Activity timestamp (UTC)</param>
-        public async Task UpdateMobileActivityAsync(string email, DateTime activityTime)
+        private bool Due(ConcurrentDictionary<int, DateTime> last, int memberId, DateTime utc)
+            => memberId > 0
+               && (!last.TryGetValue(memberId, out var prev) || (utc - prev).TotalMinutes >= _options.ThrottleMinutes);
+
+        private void Write(int memberId, DateTime utc, bool mobile)
         {
+            if (memberId <= 0) return;
+            var last = mobile ? _lastMobileWrite : _lastWebWrite;
+            last[memberId] = utc; // före skrivningen: ett fel ska inte ge ett nytt försök på varje förfrågan
             try
             {
-                // Check if tracking is enabled
-                if (!_options.EnableTracking)
-                {
-                    return;
-                }
-
-                // Check if enough time has passed since last update (throttle)
-                if (_lastMobileUpdateCache.TryGetValue(email, out var lastUpdate))
-                {
-                    var elapsed = activityTime.Subtract(lastUpdate);
-                    if (elapsed.TotalMinutes < _options.ThrottleMinutes)
-                    {
-                        _logger.LogDebug("Skipping mobile activity update for {Email} - last updated {Elapsed} seconds ago",
-                            email, elapsed.TotalSeconds);
-                        return;
-                    }
-                }
-
-                // Update member property
-                _logger.LogInformation("Updating mobile activity for {Email}", email);
-
-                await Task.Run(() =>
-                {
-                    var member = _memberService.GetByEmail(email);
-                    if (member != null)
-                    {
-                        member.SetValue("lastMobileActiveDate", activityTime);
-                        _memberService.Save(member);
-
-                        // Update cache
-                        _lastMobileUpdateCache[email] = activityTime;
-
-                        _logger.LogInformation("Updated last mobile active for {Email} to {Time}",
-                            email, activityTime);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Member not found for mobile activity update: {Email}", email);
-                    }
-                });
+                using var db = _databaseFactory.CreateDatabase();
+                var column = mobile ? "LastMobileUtc" : "LastWebUtc";
+                // ⚠️ Inget @@ROWCOUNT — NPoco läser "@@" som ett escapat "@" och gör det till en parameter.
+                db.Execute($@"
+IF EXISTS (SELECT 1 FROM dbo.MemberActivity WITH (UPDLOCK, HOLDLOCK) WHERE MemberId = @0)
+    UPDATE dbo.MemberActivity SET {column} = @1 WHERE MemberId = @0;
+ELSE
+    INSERT INTO dbo.MemberActivity (MemberId, {column}) VALUES (@0, @1);", memberId, utc);
             }
             catch (Exception ex)
             {
-                // Log error but don't throw - activity tracking should not break the app
-                _logger.LogError(ex, "Error updating mobile activity for {Email}", email);
+                LogMissing(ex);
             }
         }
 
-        /// <summary>
-        /// Clear the cache (useful for testing)
-        /// </summary>
+        private void LogMissing(Exception ex)
+        {
+            // En gång per process — annars fyller varje sidladdning loggen.
+            if (Interlocked.Exchange(ref _missingTableLogged, 1) == 0)
+                _logger.LogCritical(ex,
+                    "Medlemsaktiviteten kunde inte läsas eller skrivas (loggas en gång per process). Saknas dbo.MemberActivity, kör Migrations/create-member-activity-table.sql.");
+        }
+
         public void ClearCache()
         {
-            _lastUpdateCache.Clear();
-            _lastMobileUpdateCache.Clear();
-            _logger.LogInformation("Activity cache cleared");
+            _lastWebWrite.Clear();
+            _lastMobileWrite.Clear();
+            _cache.Remove(CacheKey);
+        }
+
+        private sealed class Row
+        {
+            public int MemberId { get; set; }
+            public DateTime? LastWebUtc { get; set; }
+            public DateTime? LastMobileUtc { get; set; }
         }
     }
 }

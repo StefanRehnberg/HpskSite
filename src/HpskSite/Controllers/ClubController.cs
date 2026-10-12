@@ -112,17 +112,10 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid club ID" });
                 }
 
-                // Get all members
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out _)
-                    .Where(m => m.ContentType.Alias != "hpskClub")
-                    .ToList();
-
-                // Count total members for this club (primary or additional)
-                var memberCount = allMembers.Count(m =>
-                    m.GetValue("primaryClubId")?.ToString() == clubId.ToString() ||
-                    (m.GetValue("memberClubIds")?.ToString()?.Split(',')
-                        .Select(s => s.Trim())
-                        .Contains(clubId.ToString()) ?? false));
+                // Klubbens medlemmar ur klubbregistret (skalplanen B3) — förut hela medlemsregistret.
+                var roster = HttpContext.RequestServices.GetRequiredService<ClubRosterService>();
+                var clubMemberIds = roster.ActiveMemberIds(clubId);
+                var memberCount = clubMemberIds.Count;
 
                 // Count active members (members with competition registrations in last 30 days)
                 var upcomingDate = DateTime.Now.AddDays(30);
@@ -134,14 +127,6 @@ namespace HpskSite.Controllers
                     // i EN fråga — förut en vandring genom hela den publicerade trädstrukturen, som
                     // dessutom bara såg de anmälningar som råkat publiceras. Samma regel som förut:
                     // en klubbintern tävling räknas bara när den är den här klubbens.
-                    var clubMemberIds = allMembers
-                        .Where(m => m.GetValue("primaryClubId")?.ToString() == clubId.ToString() ||
-                                    (m.GetValue("memberClubIds")?.ToString()?.Split(',')
-                                        .Select(s => s.Trim())
-                                        .Contains(clubId.ToString()) ?? false))
-                        .Select(m => m.Id)
-                        .ToList();
-
                     var activeClubMemberIds = new HashSet<int>();
                     var compCache = new Dictionary<int, IPublishedContent?>();
                     foreach (var (memberId, compId) in _registrations.CompetitionsForMembers(clubMemberIds))
@@ -164,19 +149,22 @@ namespace HpskSite.Controllers
                 var upcomingEventCount = 0;
                 if (UmbracoContext.Content != null)
                 {
-                    var competitions = GetAllDescendants(UmbracoContext.Content.GetAtRoot().FirstOrDefault())
-                        .Where(c => c.ContentType.Alias == "competition")
-                        .ToList();
+                    // ⚠️ Förut GetAllDescendants (dynamic) över HELA sajten, och GetValue på ett dynamic
+                    // kastade alltid — klubbsidans statistik svarade "Error loading club stats" för
+                    // varje klubb (rättat 2026-10-12, skalplanen). Bara tävlingsträdet, typat.
+                    var hub = UmbracoContext.Content.GetAtRoot()
+                        .SelectMany(r => r.Children ?? Enumerable.Empty<IPublishedContent>())
+                        .FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
+                    var competitions = hub?.DescendantsOfType("competition").ToList() ?? new List<IPublishedContent>();
 
                     upcomingEventCount = competitions.Count(c =>
                     {
-                        var compDate = c.GetValue<DateTime?>("competitionDate");
-                        var isActive = c.GetValue<bool>("isActive");
-                        var isClubOnly = c.GetValue<bool>("isClubOnly");
-                        var compClubId = c.GetValue<int>("clubId");
-                        var isApproved = c.ParentId > 0; // Published content
+                        var compDate = c.Value<DateTime?>("competitionDate");
+                        var isActive = c.Value<bool>("isActive");
+                        var isClubOnly = c.Value<bool>("isClubOnly");
+                        var compClubId = c.Value<int>("clubId");
 
-                        return isActive && isApproved &&
+                        return isActive &&
                                compDate.HasValue &&
                                compDate.Value.Date >= DateTime.Now.Date &&
                                compDate.Value.Date <= upcomingDate.Date &&
@@ -955,16 +943,10 @@ namespace HpskSite.Controllers
 
                 var members = new List<dynamic>();
 
-                // Get all members and filter to club members
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out _)
+                // Bara klubbens medlemmar, ur klubbregistret (skalplanen B3) — förut hela registret (3,6 s vid 20 000).
+                var clubMembers = HttpContext.RequestServices.GetRequiredService<ClubRosterService>()
+                    .LoadActiveMembers(_memberService, clubId)
                     .Where(m => m.ContentType.Alias != "hpskClub")
-                    .ToList();
-
-                var clubMembers = allMembers.Where(m =>
-                    (m.GetValue("primaryClubId")?.ToString() == clubId.ToString() ||
-                     (m.GetValue("memberClubIds")?.ToString()?.Split(',')
-                         .Select(s => s.Trim())
-                         .Contains(clubId.ToString()) ?? false)))
                     .ToList();
 
                 // Filter by search if provided

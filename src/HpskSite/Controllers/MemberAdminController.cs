@@ -37,6 +37,7 @@ namespace HpskSite.Controllers
         private readonly MemberClubService _memberClubs;
         private readonly ClubMembershipService _clubMemberships;
         private readonly string _adminEmail;
+        private readonly MemberActivityService _activity;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -57,9 +58,11 @@ namespace HpskSite.Controllers
             MemberDataPurgeService purgeService,
             MemberClubService memberClubs,
             ClubMembershipService clubMemberships,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            MemberActivityService activity)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _activity = activity;
             _memberService = memberService;
             _memberGroupService = memberGroupService;
             _authService = authService;
@@ -259,9 +262,10 @@ namespace HpskSite.Controllers
 
                 // Pre-load all roles once into a dictionary (avoids N+1: was called per-member
                 // in role filter AND again per-member in view model creation)
+                var roleIndex = MemberRoleIndex.Load(DatabaseFactory);
                 var memberRolesDict = filteredMembers.ToDictionary(
                     m => m.Id,
-                    m => _memberService.GetAllRoles(m.Id).ToArray()
+                    m => roleIndex.Of(m.Id)
                 );
 
                 // Apply role filter using pre-loaded roles
@@ -301,6 +305,7 @@ namespace HpskSite.Controllers
                 var (clubUrlLookup, regionUrlLookup) = GetClubAndRegionUrls();
 
                 // Transform to view models using pre-loaded roles
+                var lastSeenAll = _activity.GetAll();
                 var memberList = filteredMembers.Select(m => {
                     var primaryClubIdStr = m.GetValue("primaryClubId")?.ToString();
                     var primaryClubName = "No Club";
@@ -324,8 +329,9 @@ namespace HpskSite.Controllers
                         }
                     }
 
-                    var lastActive = m.GetValue<DateTime?>("lastActiveDate");
-                    var lastMobileActive = m.GetValue<DateTime?>("lastMobileActiveDate");
+                    lastSeenAll.TryGetValue(m.Id, out var seenRow);
+                    var lastActive = seenRow.Web;
+                    var lastMobileActive = seenRow.Mobile;
                     var phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "";
                     var memberRoles = memberRolesDict[m.Id];
 
@@ -490,11 +496,12 @@ namespace HpskSite.Controllers
                 }
 
                 // Apply role filter
+                var exportRoles = MemberRoleIndex.Load(DatabaseFactory);
                 if (!string.IsNullOrEmpty(role))
                 {
                     regularMembers = regularMembers.Where(m =>
                     {
-                        var memberRoles = _memberService.GetAllRoles(m.Id);
+                        var memberRoles = exportRoles.Of(m.Id);
 
                         // Handle special cases for ClubAdmin and RegionalAdmin which have suffixes like ClubAdmin_1234
                         if (role.Equals("ClubAdmin", StringComparison.OrdinalIgnoreCase))
@@ -557,10 +564,11 @@ namespace HpskSite.Controllers
                     var firstName = m.GetValue("firstName")?.ToString() ?? "";
                     var lastName = m.GetValue("lastName")?.ToString() ?? "";
                     var phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "";
-                    var memberRoles = _memberService.GetAllRoles(m.Id)
+                    var memberRoles = exportRoles.Of(m.Id)
                         .Where(g => !g.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase));
-                    var lastActive = m.GetValue<DateTime?>("lastActiveDate");
-                    var lastMobileActive = m.GetValue<DateTime?>("lastMobileActiveDate");
+                    var seenCsv = _activity.Get(m.Id);
+                    var lastActive = seenCsv.Web;
+                    var lastMobileActive = seenCsv.Mobile;
 
                     csv.AppendLine(string.Join(",",
                         EscapeCsvField($"{firstName} {lastName}"),
@@ -1254,7 +1262,7 @@ namespace HpskSite.Controllers
                 var isLockedOut = await _memberManager.IsLockedOutAsync(identityUser);
                 var lockoutEnd = identityUser.LockoutEnd;
                 var accessFailedCount = identityUser.AccessFailedCount;
-                var lastActive = member.GetValue<DateTime?>("lastActiveDate");
+                var lastActive = _activity.Get(member.Id).Web;
                 var hasPassword = !string.IsNullOrEmpty(identityUser.PasswordHash);
 
                 return Json(new

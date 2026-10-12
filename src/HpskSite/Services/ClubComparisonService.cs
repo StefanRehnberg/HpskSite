@@ -27,14 +27,17 @@ namespace HpskSite.Services
         private readonly IMemberService _memberService;
         private readonly IMemoryCache _memoryCache;
         private readonly ILogger<ClubComparisonService> _logger;
+        private readonly MemberActivityService _activity;
 
         public ClubComparisonService(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
             IMemberService memberService,
             IMemoryCache memoryCache,
-            ILogger<ClubComparisonService> logger)
+            ILogger<ClubComparisonService> logger,
+            MemberActivityService activity)
         {
+            _activity = activity;
             _umbracoContextAccessor = umbracoContextAccessor;
             _databaseFactory = databaseFactory;
             _memberService = memberService;
@@ -98,6 +101,7 @@ namespace HpskSite.Services
             {
                 var allMembers = _memberService.GetAll(0, int.MaxValue, out _).Where(m => m.IsApproved).ToList();
                 var memberToClub = new Dictionary<int, int>(allMembers.Count);
+                var lastSeenAll = _activity.GetAll();
 
                 foreach (var m in allMembers)
                 {
@@ -108,9 +112,7 @@ namespace HpskSite.Services
                     snapshot.MembersPerClub[cid] = snapshot.MembersPerClub.GetValueOrDefault(cid, 0) + 1;
 
                     // Active 30d (web OR mobile)
-                    var lastWeb = m.GetValue<DateTime?>("lastActiveDate");
-                    var lastMob = m.GetValue<DateTime?>("lastMobileActiveDate");
-                    var lastSeen = MaxNullable(lastWeb, lastMob);
+                    var lastSeen = lastSeenAll.TryGetValue(m.Id, out var seenRow) ? seenRow.Any : null;
                     if (lastSeen.HasValue && lastSeen.Value >= thirtyDaysAgo)
                     {
                         snapshot.Active30dPerClub[cid] = snapshot.Active30dPerClub.GetValueOrDefault(cid, 0) + 1;

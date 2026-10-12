@@ -319,7 +319,8 @@ namespace HpskSite.Controllers.Api
                 return NotFound(ApiResponse.Error("Medlemskontot hittades inte"));
             }
 
-            await _memberActivityService.UpdateMobileActivityAsync(umbracoMember.Email, DateTime.UtcNow);
+            _memberActivityService.UpdateMobileActivity(umbracoMember.Id, DateTime.UtcNow);
+            await Task.CompletedTask;
 
             return Ok(ApiResponse.Ok("Aktivitet registrerad"));
         }

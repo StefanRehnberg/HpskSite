@@ -29,6 +29,8 @@ namespace HpskSite.Controllers
         private readonly ILogger<ClubAdminController> _logger;
         private readonly EmailService _emailService;
         private readonly ClubMembershipService _clubMembershipService;
+        private readonly MemberActivityService _activity;
+        private readonly ClubRosterService _roster;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -45,9 +47,13 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authService,
             ILogger<ClubAdminController> logger,
             EmailService emailService,
-            ClubMembershipService clubMembershipService)
+            ClubMembershipService clubMembershipService,
+            MemberActivityService activity,
+            ClubRosterService roster)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _activity = activity;
+            _roster = roster;
             _memberService = memberService;
             _memberGroupService = memberGroupService;
             _contentService = contentService;
@@ -56,6 +62,26 @@ namespace HpskSite.Controllers
             _logger = logger;
             _emailService = emailService;
             _clubMembershipService = clubMembershipService;
+        }
+
+        /// <summary>
+        /// Medlemmarna i en medlemsgrupp, i EN fråga (skalplanen B2, 2026-10-12). Förut lästes hela
+        /// registret och sedan <c>GetAllRoles</c> per medlem — vid 20 000 medlemmar 20 000 frågor för att
+        /// lista en klubbs administratörer. En grupp som inte finns har inga medlemmar.
+        /// </summary>
+        private IEnumerable<Umbraco.Cms.Core.Models.IMember> MembersInGroup(string groupName)
+        {
+            try
+            {
+                return _memberService.GetMembersInRole(groupName)
+                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Kunde inte läsa medlemmarna i gruppen {Group}.", groupName);
+                return Array.Empty<Umbraco.Cms.Core.Models.IMember>();
+            }
         }
 
         #region Club CRUD Operations
@@ -811,27 +837,24 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Club not found" });
                 }
 
-                var allMembersForClubList = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var clubIdStr = clubId.ToString();
-                var members = allMembersForClubList.Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .Where(m => m.GetValue("primaryClubId")?.ToString() == clubIdStr ||
-                        (m.GetValue("memberClubIds")?.ToString()?.Split(',')
-                            .Select(s => s.Trim())
-                            .Contains(clubIdStr) ?? false))
+                // Klubbregistret i EN fråga (skalplanen B3) — förut hela medlemsregistret (3,8 s vid 20 000).
+                var lastSeenAll = _activity.GetAll();
+                var members = _roster.Active(clubId)
                     .Select(m =>
                     {
-                        var lastActive = m.GetValue<DateTime?>("lastActiveDate");
-                        var lastMobile = m.GetValue<DateTime?>("lastMobileActiveDate");
+                        lastSeenAll.TryGetValue(m.MemberId, out var seenRow);
+                        var lastActive = seenRow.Web;
+                        var lastMobile = seenRow.Mobile;
                         return new
                         {
-                            id = m.Id,
-                            memberName = $"{m.GetValue("firstName")?.ToString() ?? ""} {m.GetValue("lastName")?.ToString() ?? ""}".Trim(),
-                            firstName = m.GetValue("firstName")?.ToString() ?? "",
-                            lastName = m.GetValue("lastName")?.ToString() ?? "",
-                            email = m.Email ?? "",
-                            phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "",
-                            shooterIdNumber = m.GetValue("shooterIdNumber")?.ToString() ?? "",
-                            profilePictureUrl = m.GetValue<string>("profilePictureUrl") ?? "",
+                            id = m.MemberId,
+                            memberName = $"{m.FirstName} {m.LastName}".Trim(),
+                            firstName = m.FirstName,
+                            lastName = m.LastName,
+                            email = m.Email,
+                            phoneNumber = m.Phone,
+                            shooterIdNumber = m.ShooterIdNumber,
+                            profilePictureUrl = m.ProfilePictureUrl,
                             isApproved = m.IsApproved,
                             lastActiveDisplay = FormatLastActive(lastActive),
                             lastActiveSortValue = lastActive.HasValue ? new DateTimeOffset(lastActive.Value).ToUnixTimeSeconds() : 0L,
@@ -858,25 +881,16 @@ namespace HpskSite.Controllers
 
             try
             {
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var clubMembers = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .Where(m => m.GetValue("primaryClubId")?.ToString() == clubId.ToString() ||
-                               (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',')
-                               .Any(id => id.Trim() == clubId.ToString()))
+                var clubMembers = _roster.Active(clubId)
                     .Select(m => new
                     {
-                        id = m.Id,
-                        firstName = m.GetValue("firstName")?.ToString() ?? "",
-                        lastName = m.GetValue("lastName")?.ToString() ?? "",
-                        email = m.Email ?? "",
-                        primaryClubId = int.TryParse(m.GetValue("primaryClubId")?.ToString(), out int pId) ? pId : (int?)null,
+                        id = m.MemberId,
+                        firstName = m.FirstName,
+                        lastName = m.LastName,
+                        email = m.Email,
+                        primaryClubId = m.PrimaryClubId,
                         isApproved = m.IsApproved,
-                        additionalClubIds = (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',')
-                                          .Where(id => !string.IsNullOrWhiteSpace(id))
-                                          .Select(id => int.TryParse(id.Trim(), out int aid) ? aid : (int?)null)
-                                          .Where(id => id.HasValue)
-                                          .Select(id => id.Value)
-                                          .ToList()
+                        additionalClubIds = m.AdditionalClubIds
                     }).ToList();
 
                 return Json(new { success = true, data = clubMembers });
@@ -897,13 +911,7 @@ namespace HpskSite.Controllers
 
             try
             {
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var pendingCount = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .Where(m => !m.IsApproved &&
-                               (m.GetValue("primaryClubId")?.ToString() == clubId.ToString() ||
-                                (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',')
-                                .Any(id => id.Trim() == clubId.ToString())))
-                    .Count();
+                var pendingCount = _roster.Active(clubId).Count(m => !m.IsApproved);
 
                 return Json(new { success = true, count = pendingCount });
             }
@@ -1403,10 +1411,7 @@ namespace HpskSite.Controllers
                     // club with zero admins (the claim-your-club flow can't recover from
                     // an orphaned club without site-admin intervention). Mirrored client-
                     // side in ClubAdminPanel.cshtml so the round-trip is usually avoided.
-                    var totalMembers = _memberService.GetAll(0, int.MaxValue, out _);
-                    var adminCount = totalMembers
-                        .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                        .Count(m => _memberService.GetAllRoles(m.Id).Contains(groupName));
+                    var adminCount = MembersInGroup(groupName).Count();
                     if (adminCount <= 1)
                     {
                         return Json(new { success = false, message = "Minst en klubbadmin måste finnas. Tilldela en annan medlem som klubbadmin innan du tar bort den sista." });
@@ -1438,11 +1443,8 @@ namespace HpskSite.Controllers
             try
             {
                 var groupName = $"ClubAdmin_{clubId}";
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
 
-                var clubAdmins = allMembers
-                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias) // Exclude clubs
-                    .Where(m => _memberService.GetAllRoles(m.Id).Contains(groupName))
+                var clubAdmins = MembersInGroup(groupName)
                     .Select(m => new {
                         Id = m.Id,
                         Name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
@@ -1474,11 +1476,12 @@ namespace HpskSite.Controllers
             {
                 var groupName = $"ClubAdmin_{clubId}";
                 var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
+                var existingAdmins = MembersInGroup(groupName).Select(m => m.Id).ToHashSet();
 
                 // Get members who are not clubs and not already admins of this club
                 var query = allMembers
                     .Where(m => m.ContentType.Alias != ClubMemberTypeAlias) // Exclude clubs
-                    .Where(m => !_memberService.GetAllRoles(m.Id).Contains(groupName)) // Exclude existing club admins
+                    .Where(m => !existingAdmins.Contains(m.Id)) // Exclude existing club admins
                     .Where(m => m.IsApproved); // Only approved members
 
                 // Filter by club membership if filterClubId is specified
@@ -1523,11 +1526,8 @@ namespace HpskSite.Controllers
             try
             {
                 var groupName = $"Skjutledare_{clubId}";
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
 
-                var skjutledare = allMembers
-                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .Where(m => _memberService.GetAllRoles(m.Id).Contains(groupName))
+                var skjutledare = MembersInGroup(groupName)
                     .Select(m => new {
                         Id = m.Id,
                         Name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
@@ -2093,11 +2093,8 @@ namespace HpskSite.Controllers
                 }
 
                 var groupName = $"RegionalAdmin_{regionCode}";
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
 
-                var regionalAdmins = allMembers
-                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .Where(m => _memberService.GetAllRoles(m.Id).Contains(groupName))
+                var regionalAdmins = MembersInGroup(groupName)
                     .Select(m => new
                     {
                         id = m.Id,
@@ -2135,10 +2132,11 @@ namespace HpskSite.Controllers
 
                 var groupName = $"RegionalAdmin_{regionCode}";
                 var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
+                var existingAdmins = MembersInGroup(groupName).Select(m => m.Id).ToHashSet();
 
                 var query = allMembers
                     .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .Where(m => !_memberService.GetAllRoles(m.Id).Contains(groupName))
+                    .Where(m => !existingAdmins.Contains(m.Id))
                     .Where(m => m.IsApproved);
 
                 if (clubId > 0)

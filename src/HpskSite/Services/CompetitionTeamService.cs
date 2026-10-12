@@ -1054,8 +1054,11 @@ namespace HpskSite.Services
             try
             {
                 // Get all members and filter by club
+                // ⚠️ Förut GetAll(0, 5000): ett TYST tak — över 5 000 medlemmar föll klubbens
+                // skyttar ur stafettväljaren. Och rollen lästes per medlem; nu i en fråga (skalplanen B2).
                 long totalRecords;
-                var allMembers = _memberService.GetAll(0, 5000, out totalRecords);
+                var allMembers = _memberService.GetAll(0, int.MaxValue, out totalRecords);
+                var roleIndex = HpskSite.Services.MemberRoleIndex.Load(_databaseFactory);
                 foreach (var member in allMembers)
                 {
                     // Everyone who belongs to the club, primary OR additional. A stafettlag is
@@ -1065,8 +1068,7 @@ namespace HpskSite.Services
                     if (!_memberClubService.IsMemberOfClub(member, clubId)) continue;
 
                     // Check member is approved (has "Users" role, not just "PendingApproval")
-                    var roles = _memberService.GetAllRoles(member.Id);
-                    if (!roles.Contains("Users")) continue;
+                    if (!roleIndex.Has(member.Id, "Users")) continue;
 
                     var firstName = member.GetValue<string>("firstName") ?? "";
                     var lastName = member.GetValue<string>("lastName") ?? "";

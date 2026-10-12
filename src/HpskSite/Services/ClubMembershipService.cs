@@ -94,6 +94,37 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// Sätter ett AKTIVT medlemskap (allt utom Utträdd/Avliden) till <c>Utträdd</c> med dagens datum som
+        /// <c>MemberUntil</c> (om inget datum redan finns). Samma utfall som klubbadmins "Avsluta medlemskap".
+        /// Returnerar true när en rad ändrades. Saknas raden händer ingenting.
+        /// </summary>
+        public bool EndIfActive(int memberId, int clubId)
+        {
+            if (memberId <= 0 || clubId <= 0) return false;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Execute(
+                @"UPDATE ClubMembership
+                     SET MembershipStatus = @2, MemberUntil = ISNULL(MemberUntil, @3)
+                   WHERE MemberId = @0 AND ClubId = @1 AND MembershipStatus NOT IN (@2, @4)",
+                memberId, clubId, "Utträdd", DateTime.Today, "Avliden") > 0;
+        }
+
+        /// <summary>
+        /// Motsatsen till <see cref="EndIfActive"/>: ett <c>Utträdd</c> medlemskap blir <c>Aktiv</c> igen och
+        /// <c>MemberUntil</c> töms. Anropas när klubben LÄGGS TILL i medlemmens klubbar igen. Rör aldrig
+        /// <c>Avliden</c>. Returnerar true när en rad ändrades.
+        /// </summary>
+        public bool ReactivateIfEnded(int memberId, int clubId)
+        {
+            if (memberId <= 0 || clubId <= 0) return false;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Execute(
+                @"UPDATE ClubMembership SET MembershipStatus = @2, MemberUntil = NULL
+                   WHERE MemberId = @0 AND ClubId = @1 AND MembershipStatus = @3",
+                memberId, clubId, "Aktiv", "Utträdd") > 0;
+        }
+
+        /// <summary>
         /// Upsert on (MemberId, ClubId). Returns the saved row. CreatedDate is set on insert.
         /// </summary>
         public ClubMembership Save(ClubMembership m)

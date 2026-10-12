@@ -50,6 +50,7 @@ namespace HpskSite.Controllers
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Events.IClubEventStore _events;
+        private readonly MemberActivityService _activity;
         public AdminStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -66,9 +67,11 @@ namespace HpskSite.Controllers
             IWebHostEnvironment env,
             HpskSite.Services.Training.ClubTrainingService trainings,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.Events.IClubEventStore events)
+            HpskSite.Services.Events.IClubEventStore events,
+            MemberActivityService activity)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _activity = activity;
             _registrations = registrations;
             _trainings = trainings;
             _memberService = memberService;
@@ -1359,24 +1362,12 @@ namespace HpskSite.Controllers
                     int engagementDormant = 0;
                     var activeCountByClub = new Dictionary<int, int>();
 
+                    var lastSeenAll = _activity.GetAll();
                     foreach (var m in approvedMembers)
                     {
-                        DateTime? lastWeb = null;
-                        DateTime? lastMobile = null;
-
-                        if (m.HasProperty("lastActiveDate"))
-                        {
-                            var dateStr = m.GetValue<string>("lastActiveDate");
-                            if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, out var parsed))
-                                lastWeb = parsed;
-                        }
-
-                        if (m.HasProperty("lastMobileActiveDate"))
-                        {
-                            var dateStr = m.GetValue<string>("lastMobileActiveDate");
-                            if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, out var parsed))
-                                lastMobile = parsed;
-                        }
+                        lastSeenAll.TryGetValue(m.Id, out var seenRow);
+                        DateTime? lastWeb = seenRow.Web;
+                        DateTime? lastMobile = seenRow.Mobile;
 
                         if (lastWeb.HasValue)
                         {
