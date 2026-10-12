@@ -1,5 +1,10 @@
 ﻿using HpskSite.CompetitionTypes.Common.Utilities;
+using HpskSite.Services.Results;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Umbraco.Cms.Core.Models;
+using Umbraco.Cms.Core.Strings;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Web;
@@ -26,6 +31,8 @@ namespace HpskSite.Routing
     {
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly ILogger<CompetitionUrlContentFinder> _logger;
+        private readonly IHttpContextAccessor _http;
+        private readonly IShortStringHelper _shortStrings;
 
         private static readonly HashSet<string> XSmSlugs = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -57,10 +64,32 @@ namespace HpskSite.Routing
             || HpskSite.CompetitionTypes.Precision.Models.FinalsWeaponGroup.IsFinalsSlug(segment);
 
         public CompetitionUrlContentFinder(IUmbracoContextAccessor umbracoContextAccessor,
-            ILogger<CompetitionUrlContentFinder> logger)
+            ILogger<CompetitionUrlContentFinder> logger,
+            IHttpContextAccessor http,
+            IShortStringHelper shortStrings)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _logger = logger;
+            _http = http;
+            _shortStrings = shortStrings;
+        }
+
+        /// <summary>
+        /// <c>/resultat/</c> utan resultatnod (skalplanen C1): när listan ligger i tabellen och noden är
+        /// avpublicerad visas TÄVLINGEN med vyn <c>CompetitionResult</c>, som läser listan ur
+        /// <see cref="ICompetitionResultStore"/>. Mallen finns bara i minnet, som händelsernas adress.
+        /// Ingen lista = inte vår adress (404 som förut).
+        /// </summary>
+        public static bool TryServeResultPage(IPublishedRequestBuilder request, IPublishedContent competition,
+            IHttpContextAccessor http, IShortStringHelper shortStrings)
+        {
+            var ctx = http.HttpContext;
+            if (ctx == null) return false;
+            var store = ctx.RequestServices.GetRequiredService<ICompetitionResultStore>();
+            if (store.GetMany(new[] { competition.Id }).Count == 0) return false;
+            request.SetPublishedContent(competition);
+            request.SetTemplate(new Template(shortStrings, "CompetitionResult", "CompetitionResult"));
+            return true;
         }
 
         public Task<bool> TryFindContent(IPublishedRequestBuilder request)
@@ -130,7 +159,12 @@ namespace HpskSite.Routing
                 {
                     var child = competition.Children.FirstOrDefault(c =>
                         string.Equals(c.UrlSegment, childSegment, StringComparison.OrdinalIgnoreCase));
-                    if (child == null) return Task.FromResult(false);
+                    if (child == null)
+                    {
+                        if (string.Equals(childSegment, "resultat", StringComparison.OrdinalIgnoreCase))
+                            return Task.FromResult(TryServeResultPage(request, competition, _http, _shortStrings));
+                        return Task.FromResult(false);
+                    }
                     target = child;
                 }
 
