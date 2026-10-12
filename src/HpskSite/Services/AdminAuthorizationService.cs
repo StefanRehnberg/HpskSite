@@ -848,7 +848,12 @@ namespace HpskSite.Services
                     {
                         var regId = invoice.GetValue<int>("registrationId");
                         if (regId > 0)
-                            payerClubId = _contentService.GetById(regId)?.GetValue<int>("clubId") ?? 0;
+                        {
+                            // Bara lagspegeln — ett annat innehåll med samma id är inte svaret.
+                            var mirror = _contentService.GetById(regId);
+                            if (mirror?.ContentType.Alias == "competitionTeamRegistration")
+                                payerClubId = mirror.GetValue<int>("clubId");
+                        }
                     }
                 }
                 else if (int.TryParse(memberIdStr, out var memberId) && memberId > 0)
