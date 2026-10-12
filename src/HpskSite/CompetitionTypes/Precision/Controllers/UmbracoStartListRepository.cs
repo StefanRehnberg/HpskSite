@@ -16,10 +16,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         private readonly ILogger<UmbracoStartListRepository> _logger;
         private readonly ClubService _clubService;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public UmbracoStartListRepository(IMemberService memberService, IContentService contentService, IContentTypeService contentTypeService, ILogger<UmbracoStartListRepository> logger, ClubService clubService,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.StartLists.IStartListStore startLists)
         {
+            _startLists = startLists;
             _memberService = memberService;
             _contentService = contentService;
             _contentTypeService = contentTypeService;
@@ -124,87 +127,30 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             }
         }
 
-        public List<IContent> GetStartListsForCompetition(int competitionId)
+        /// <summary>
+        /// Precisionsfamiljens grundomgångslista: tävlingens första direkta, annars (äldre tävlingar
+        /// under hubben) den senast genererade. En lista eller ingen — samma regel som alltid, nu ur
+        /// <c>IStartListStore</c> (skalplanen C2).
+        /// </summary>
+        public List<HpskSite.Models.StartLists.StartListRecord> GetStartListsForCompetition(int competitionId)
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null)
-                {
-                    _logger.LogWarning("Competition {CompetitionId} not found", competitionId);
-                    return new List<IContent>();
-                }
-
-                // Get direct children of competition
-                var children = _contentService.GetPagedChildren(competition.Id, 0, 20, out _);
-
-                // Find the correct alias for precision start list
-                var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-                string? correctAlias = null;
-
-                foreach (var alias in possibleAliases)
-                {
-                    var contentType = _contentTypeService.Get(alias);
-                    if (contentType != null)
-                    {
-                        correctAlias = alias;
-                        break;
-                    }
-                }
-
-                if (correctAlias == null)
-                {
-                    _logger.LogWarning("No precision start list content type found");
-                    return new List<IContent>();
-                }
-
-                // NEW ARCHITECTURE: Look for start list as DIRECT child of competition (not under hub)
-                var startList = children.FirstOrDefault(c => c.ContentType.Alias == correctAlias);
-
-                if (startList == null)
-                {
-                    // BACKWARD COMPATIBILITY: Also check under hub during migration period
-                    var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                    if (hub != null)
-                    {
-                        var hubChildren = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _);
-                        startList = hubChildren
-                            .Where(c => c.ContentType.Alias == correctAlias)
-                            .OrderByDescending(sl => sl.GetValue<DateTime>("generatedDate"))
-                            .FirstOrDefault();
-
-                        if (startList != null)
-                        {
-                            _logger.LogInformation("Found start list {StartListId} under hub (legacy) for competition {CompetitionId}",
-                                startList.Id, competitionId);
-                        }
-                    }
-                }
-
-                if (startList == null)
-                {
-                    _logger.LogInformation("No start list found for competition {CompetitionId}", competitionId);
-                    return new List<IContent>();
-                }
-
-                _logger.LogInformation("Found start list {StartListId} for competition {CompetitionId}",
-                    startList.Id, competitionId);
-
-                // Return single-item list to maintain API compatibility
-                return new List<IContent> { startList };
+                var primary = _startLists.Primary(competitionId);
+                return primary == null ? new List<HpskSite.Models.StartLists.StartListRecord>() : new List<HpskSite.Models.StartLists.StartListRecord> { primary };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving start lists for competition {CompetitionId}", competitionId);
-                return new List<IContent>();
+                return new List<HpskSite.Models.StartLists.StartListRecord>();
             }
         }
 
-        public int GetTeamCountFromContent(IContent startList)
+        public int GetTeamCountFromContent(HpskSite.Models.StartLists.StartListRecord startList)
         {
             try
             {
-                var configData = startList.GetValue<string>("configurationData");
+                var configData = startList.ConfigurationData;
                 if (string.IsNullOrEmpty(configData)) return 0;
 
                 var config = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
@@ -216,11 +162,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             }
         }
 
-        public int GetTotalShootersFromContent(IContent startList)
+        public int GetTotalShootersFromContent(HpskSite.Models.StartLists.StartListRecord startList)
         {
             try
             {
-                var configData = startList.GetValue<string>("configurationData");
+                var configData = startList.ConfigurationData;
                 if (string.IsNullOrEmpty(configData)) return 0;
 
                 var config = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
@@ -232,11 +178,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             }
         }
 
-        public int GetUniqueShootersFromContent(IContent startList)
+        public int GetUniqueShootersFromContent(HpskSite.Models.StartLists.StartListRecord startList)
         {
             try
             {
-                var configData = startList.GetValue<string>("configurationData");
+                var configData = startList.ConfigurationData;
                 if (string.IsNullOrEmpty(configData)) return 0;
 
                 var config = JsonConvert.DeserializeObject<StartListConfiguration>(configData);

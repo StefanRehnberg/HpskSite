@@ -6,6 +6,7 @@ using HpskSite.Helpers;
 using HpskSite.Models;
 using HpskSite.Services;
 using Newtonsoft.Json;
+using HpskSite.Models.StartLists;
 
 namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 {
@@ -118,7 +119,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var keptOrder = new List<int>();
                 if (request.ExistingNodeId.HasValue && request.ExistingNodeId.Value > 0)
                 {
-                    var prev = ReadStafettConfig(_contentService.GetById(request.ExistingNodeId.Value));
+                    var prev = ReadStafettConfig(_startLists.Get(request.ExistingNodeId.Value));
                     foreach (var pt in prev?.Teams ?? new List<SpringskytteStafettStartListEntry>())
                     {
                         keptOrder.Add(pt.TeamId);
@@ -177,10 +178,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 // Unique slug across ALL start lists (individual + stafett) — both types set node.Name to
                 // the list name, and they share the public /startlista/{comp}/{slug} URL space.
-                var collision = _contentService.GetPagedChildren(competition.Id, 0, 1000, out _)
-                    .Where(c => c.ContentType.Alias == "precisionStartList")
+                var collision = SpringLists(competition.Id)
                     .Where(c => !(request.ExistingNodeId.HasValue && c.Id == request.ExistingNodeId.Value))
-                    .Any(c => string.Equals(SlugHelper.Slugify(c.Name ?? ""), newSlug, StringComparison.OrdinalIgnoreCase));
+                    .Any(c => string.Equals(SlugHelper.Slugify(c.Name), newSlug, StringComparison.OrdinalIgnoreCase));
                 if (collision)
                     return Json(new { success = false, message = $"Det finns redan en startlista med namnet \"{listName}\" (eller ett namn som ger samma webbadress). Välj ett unikt namn." });
 
@@ -196,28 +196,30 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     Teams = teamEntries
                 };
 
-                Umbraco.Cms.Core.Models.IContent? node = null;
+                StartListRecord? existingList = null;
                 if (request.ExistingNodeId.HasValue && request.ExistingNodeId.Value > 0)
                 {
-                    node = _contentService.GetById(request.ExistingNodeId.Value);
-                    if (node == null || node.ParentId != competition.Id)
+                    existingList = _startLists.Get(request.ExistingNodeId.Value);
+                    if (existingList == null || existingList.CompetitionId != competition.Id || existingList.LegacyHub)
                         return Json(new { success = false, message = "Startlistan hittades inte." });
                 }
-                if (node == null)
-                {
-                    var contentType = _contentTypeService.Get("precisionStartList");
-                    if (contentType == null)
-                        return Json(new { success = false, message = "Dokumenttypen precisionStartList saknas." });
-                    node = _contentService.Create(listName, competition, contentType.Alias);
-                }
 
-                node.Name = listName;
-                node.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                node.SetValue("teamFormat", StafettTeamFormat);
-                node.SetValue("generatedDate", DateTime.Now);
-                node.SetValue("startListContent", BuildStafettStartListHtml(config));
-                _contentService.Save(node);
-                _contentService.Publish(node, new[] { "*" });
+                // Skrivs och publiceras genom IStartListStore (skalplanen C2).
+                var stafettJson = JsonConvert.SerializeObject(config);
+                var stafettHtml = BuildStafettStartListHtml(config);
+                void FillStafett(StartListRecord r)
+                {
+                    r.Name = listName;
+                    r.ConfigurationData = stafettJson;
+                    r.TeamFormat = StafettTeamFormat;
+                    r.GeneratedDate = DateTime.Now;
+                    r.StartListContent = stafettHtml;
+                }
+                var node = existingList != null
+                    ? _startLists.Update(existingList.Id, FillStafett)
+                    : _startLists.Create(competition.Id, StartListKind.Qualifying, listName, FillStafett);
+                if (node == null || node.Id <= 0)
+                    return Json(new { success = false, message = "Kunde inte spara startlistan." });
 
                 _logger.LogInformation("Generated Springskytte STAFETT start list '{ListName}' for CompetitionId={CompetitionId}, {Count} teams, NodeId={NodeId}",
                     listName, request.CompetitionId, teamEntries.Count, node.Id);
@@ -249,10 +251,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var usedSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var lists = new List<object>();
 
-                foreach (var node in _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                             .Where(c => c.ContentType.Alias == "precisionStartList"))
+                foreach (var node in SpringLists(competition.Id))
                 {
-                    var json = node.GetValue<string>("configurationData");
+                    var json = node.ConfigurationData;
                     if (string.IsNullOrEmpty(json)) continue;
                     if (!IsStafettConfig(json)) continue;
 
@@ -294,8 +295,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                             })
                             .ToList(),
                         teamCount = cfg.Teams?.Count ?? 0,
-                        generatedDate = node.GetValue<DateTime?>("generatedDate")?.ToString("yyyy-MM-dd HH:mm") ?? "",
-                        isOfficial = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList")
+                        generatedDate = node.GeneratedDate?.ToString("yyyy-MM-dd HH:mm") ?? "",
+                        isOfficial = node.IsOfficial
                     });
                 }
 
@@ -624,9 +625,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         }
 
         /// <summary>Reads a node's stafett config, or null if it isn't one.</summary>
-        private static SpringskytteStafettStartListConfig? ReadStafettConfig(Umbraco.Cms.Core.Models.IContent? node)
+        private static SpringskytteStafettStartListConfig? ReadStafettConfig(StartListRecord? node)
         {
-            var json = node?.GetValue<string>("configurationData");
+            var json = node?.ConfigurationData;
             if (string.IsNullOrEmpty(json) || !IsStafettConfig(json)) return null;
             try { return JsonConvert.DeserializeObject<SpringskytteStafettStartListConfig>(json); }
             catch { return null; }
@@ -641,8 +642,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             Umbraco.Cms.Core.Models.IContent competition, int? exceptNodeId)
         {
             var map = new Dictionary<int, (int nodeId, int number, string listName)>();
-            foreach (var node in _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                         .Where(c => c.ContentType.Alias == "precisionStartList"))
+            foreach (var node in SpringLists(competition.Id))
             {
                 if (exceptNodeId.HasValue && node.Id == exceptNodeId.Value) continue;
                 var cfg = ReadStafettConfig(node);
@@ -696,8 +696,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 var competition = _contentService.GetById(request.CompetitionId);
                 if (competition == null) return Json(new { success = false, message = "Tävling hittades inte." });
-                var node = _contentService.GetById(request.NodeId);
-                if (node == null || node.ParentId != competition.Id)
+                var node = _startLists.Get(request.NodeId);
+                if (node == null || (node.CompetitionId != competition.Id || node.LegacyHub))
                     return Json(new { success = false, message = "Startlistan hittades inte." });
                 var cfg = ReadStafettConfig(node);
                 var team = cfg?.Teams?.FirstOrDefault(x => x.TeamId == request.TeamId);
@@ -749,9 +749,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 var competition = _contentService.GetById(request.CompetitionId);
                 if (competition == null) return Json(new { success = false, message = "Tävling hittades inte." });
-                var fromNode = _contentService.GetById(request.FromNodeId);
-                var toNode = _contentService.GetById(request.ToNodeId);
-                if (fromNode == null || toNode == null || fromNode.ParentId != competition.Id || toNode.ParentId != competition.Id)
+                var fromNode = _startLists.Get(request.FromNodeId);
+                var toNode = _startLists.Get(request.ToNodeId);
+                if (fromNode == null || toNode == null || (fromNode.CompetitionId != competition.Id || fromNode.LegacyHub) || (toNode.CompetitionId != competition.Id || toNode.LegacyHub))
                     return Json(new { success = false, message = "Startlistan hittades inte." });
 
                 var fromCfg = ReadStafettConfig(fromNode);
@@ -792,13 +792,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         private static string NormalizeStafettTime(string? hhmm)
             => TimeSpan.TryParse(hhmm ?? "", out var ts) ? ts.ToString(@"hh\:mm\:ss") : "10:00:00";
 
-        private void SaveStafettList(Umbraco.Cms.Core.Models.IContent node, SpringskytteStafettStartListConfig cfg)
+        private void SaveStafettList(StartListRecord node, SpringskytteStafettStartListConfig cfg)
         {
-            node.SetValue("configurationData", JsonConvert.SerializeObject(cfg));
-            node.SetValue("startListContent", BuildStafettStartListHtml(cfg));
-            _contentService.Save(node);
-            try { _contentService.Publish(node, new[] { "*" }); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Publish of stafett list {NodeId} failed; saved config is authoritative", node.Id); }
+            SaveSpringList(node.Id, JsonConvert.SerializeObject(cfg), BuildStafettStartListHtml(cfg));
         }
 
         /// <summary>Keeps the result row's number/time in step with the start list (best-effort).</summary>
@@ -839,10 +835,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         private (int startOrder, string? startTime) FindStafettStartInfo(Umbraco.Cms.Core.Models.IContent? competition, int teamId)
         {
             if (competition == null) return (0, null);
-            foreach (var node in _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                         .Where(c => c.ContentType.Alias == "precisionStartList"))
+            foreach (var node in SpringLists(competition.Id))
             {
-                var json = node.GetValue<string>("configurationData");
+                var json = node.ConfigurationData;
                 if (string.IsNullOrEmpty(json) || !IsStafettConfig(json)) continue;
                 SpringskytteStafettStartListConfig? cfg = null;
                 try { cfg = JsonConvert.DeserializeObject<SpringskytteStafettStartListConfig>(json); } catch { }

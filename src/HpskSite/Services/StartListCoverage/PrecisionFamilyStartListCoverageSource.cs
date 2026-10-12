@@ -15,12 +15,15 @@ namespace HpskSite.Services.StartListCoverage
         private readonly IContentService _contentService;
         private readonly UmbracoStartListRepository _repository;
         private readonly ILogger<PrecisionFamilyStartListCoverageSource> _logger;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public PrecisionFamilyStartListCoverageSource(
             IContentService contentService,
             UmbracoStartListRepository repository,
-            ILogger<PrecisionFamilyStartListCoverageSource> logger)
+            ILogger<PrecisionFamilyStartListCoverageSource> logger,
+            HpskSite.Services.StartLists.IStartListStore startLists)
         {
+            _startLists = startLists;
             _contentService = contentService;
             _repository = repository;
             _logger = logger;
@@ -33,8 +36,8 @@ namespace HpskSite.Services.StartListCoverage
 
         public async Task<StartListCoverageResult> BuildAsync(IContent competition)
         {
-            var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                .Where(c => c.ContentType.Alias == "precisionStartList")
+            var startListNodes = _startLists.List(competition.Id, HpskSite.Models.StartLists.StartListKind.Qualifying)
+                .Where(r => !r.LegacyHub)
                 .ToList();
 
             // ⚠️ Qualifying lists ONLY. A finalsStartList is a deliberate SUBSET (the cut), so a
@@ -43,7 +46,7 @@ namespace HpskSite.Services.StartListCoverage
             var placedRows = new List<CoverageBuilder.PlacedRow>();
             foreach (var node in startListNodes)
             {
-                var json = node.GetValue<string>("configurationData");
+                var json = node.ConfigurationData;
                 if (string.IsNullOrWhiteSpace(json)) continue;
 
                 StartListConfiguration? cfg = null;

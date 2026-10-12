@@ -8,6 +8,7 @@
 @inject HpskSite.Services.Events.CompetitionEventLinkService CompetitionLinks
 @inject HpskSite.Services.RangeCalendarService RangeCalendar
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
+@inject HpskSite.Services.StartLists.IStartListStore StartLists
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -55,7 +56,7 @@
     var linkedCards = CompetitionLinks.CompetitionsForEvent(ev.Id)
         .Select(id => Umbraco.Content(id))
         .Where(c => c != null && c.ContentType.Alias == "competition")
-        .Select(c => HpskSite.Services.Events.CompetitionLinkCard.Describe(c!, DateTime.Now, ResultLists.Get(c!.Id)))
+        .Select(c => HpskSite.Services.Events.CompetitionLinkCard.Describe(c!, DateTime.Now, ResultLists.Get(c!.Id), StartLists))
         .OrderBy(c => c.Date ?? DateTime.MaxValue).ThenBy(c => c.Name)
         .ToList();
     var quickLinksJson = string.IsNullOrWhiteSpace(ev.QuickLinksJson) ? "[]" : ev.QuickLinksJson;

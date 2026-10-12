@@ -30,15 +30,18 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         private readonly PrecisionFinalsQualificationService _qualificationService;
         private readonly ILogger<PrecisionQualifyingResultsService> _logger;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public PrecisionQualifyingResultsService(
             IContentService contentService,
             IUmbracoDatabaseFactory databaseFactory,
             PrecisionFinalsQualificationService qualificationService,
             ILogger<PrecisionQualifyingResultsService> logger,
-            HpskSite.Services.Results.ICompetitionResultStore results)
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.StartLists.IStartListStore startLists)
         {
             _results = results;
+            _startLists = startLists;
             _contentService = contentService;
             _databaseFactory = databaseFactory;
             _qualificationService = qualificationService;
@@ -50,7 +53,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             var qualifyingNode = FindQualifyingStartListNode(competitionId);
             if (qualifyingNode == null) return new QualifyingResultsSnapshot { CompetitionId = competitionId };
 
-            var json = qualifyingNode.GetValue<string>("qualifyingResultsSnapshot");
+            var json = qualifyingNode.QualifyingResultsSnapshot;
             if (string.IsNullOrWhiteSpace(json)) return new QualifyingResultsSnapshot { CompetitionId = competitionId };
 
             try
@@ -100,15 +103,16 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             snapshot.CompetitionId = competitionId;
             snapshot.ClassSnapshots[groupName] = classSnap;
 
-            qualifyingNode.SetValue("qualifyingResultsSnapshot", JsonConvert.SerializeObject(snapshot));
+            var snapshotJson = JsonConvert.SerializeObject(snapshot);
 
             // Save only — qualifyingResultsSnapshot is admin-only and read via the draft
             // (IContent.GetValue). Publishing is expensive (NuCache rebuild + content events,
             // ~30s under load) and isn't needed here since the snapshot isn't displayed to
             // public visitors. The next public update of the start list is the admin's
             // explicit re-publish from the regular Publicera button.
-            var saveResult = _contentService.Save(qualifyingNode);
-            if (!saveResult.Success)
+            var saved = _startLists.Update(qualifyingNode.Id, r => r.QualifyingResultsSnapshot = snapshotJson,
+                HpskSite.Models.StartLists.StartListPublish.Never);
+            if (saved == null)
                 return (false, "Kunde inte spara låst grupp.", null);
 
             _logger.LogInformation("Froze group {Group} for competition {CompetitionId} by {FrozenBy} ({ShooterCount} shooters)",
@@ -127,10 +131,11 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             if (!snapshot.ClassSnapshots.Remove(groupName))
                 return (true, "Gruppen var inte låst.");
 
-            qualifyingNode.SetValue("qualifyingResultsSnapshot", JsonConvert.SerializeObject(snapshot));
+            var unfrozenJson = JsonConvert.SerializeObject(snapshot);
             // Save only (see SaveFinalsConfig comment for rationale).
-            var saveResult = _contentService.Save(qualifyingNode);
-            if (!saveResult.Success)
+            var saved = _startLists.Update(qualifyingNode.Id, r => r.QualifyingResultsSnapshot = unfrozenJson,
+                HpskSite.Models.StartLists.StartListPublish.Never);
+            if (saved == null)
                 return (false, "Kunde inte spara.");
 
             await Task.CompletedTask;
@@ -255,14 +260,9 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             return Convert.ToHexString(hash);
         }
 
-        private IContent? FindQualifyingStartListNode(int competitionId)
-        {
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null) return null;
-
-            return _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "precisionStartList");
-        }
+        /// <summary>Grundomgångens lista: tävlingens första direkta grundomgångslista (inte hubbens).</summary>
+        private HpskSite.Models.StartLists.StartListRecord? FindQualifyingStartListNode(int competitionId) =>
+            _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying).FirstOrDefault(r => !r.LegacyHub);
 
         private Dictionary<int, (string Name, string Club)> GetShooterInfoFromStartList(int competitionId)
         {
@@ -270,7 +270,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             var qualifyingNode = FindQualifyingStartListNode(competitionId);
             if (qualifyingNode == null) return dict;
 
-            var configData = qualifyingNode.GetValue<string>("configurationData");
+            var configData = qualifyingNode.ConfigurationData;
             if (string.IsNullOrEmpty(configData)) return dict;
 
             try

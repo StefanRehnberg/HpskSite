@@ -1,5 +1,7 @@
 ﻿using HpskSite.CompetitionTypes.Common.Utilities;
 using HpskSite.Services.Results;
+using HpskSite.Services.StartLists;
+using HpskSite.Models.StartLists;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -92,6 +94,31 @@ namespace HpskSite.Routing
             return true;
         }
 
+        /// <summary>Listan som startlistevyn visar när sidan serveras utan nod (Model är då tävlingen).</summary>
+        public const string StartListItemKey = "hpsk:startlist";
+
+        /// <summary>
+        /// <c>/startlista/</c> och <c>/finalstartlista-x/</c> utan egen nod under tävlingen (skalplanen C2): listorna
+        /// i tabellen, och i nodlagringen de äldre listorna under <c>competitionStartListsHub</c>. TÄVLINGEN visas
+        /// med vyn <c>PrecisionStartList</c> resp. <c>PrecisionFinalsStartList</c>, som läser listan ur
+        /// <see cref="StartListItemKey"/>. Bara publika listor; ingen = inte vår adress.
+        /// </summary>
+        public static bool TryServeStartListPage(IPublishedRequestBuilder request, IPublishedContent competition,
+            string segment, IHttpContextAccessor http, IShortStringHelper shortStrings)
+        {
+            var ctx = http.HttpContext;
+            if (ctx == null) return false;
+            var store = ctx.RequestServices.GetRequiredService<IStartListStore>();
+            var list = store.ListPublished(competition.Id)
+                .FirstOrDefault(r => string.Equals(r.UrlSegment, segment, StringComparison.OrdinalIgnoreCase));
+            if (list == null) return false;
+            ctx.Items[StartListItemKey] = list;
+            request.SetPublishedContent(competition);
+            var view = list.Kind == StartListKind.Finals ? "PrecisionFinalsStartList" : "PrecisionStartList"; // startliststore-ok: mallnamn, inte doctyp
+            request.SetTemplate(new Template(shortStrings, view, view));
+            return true;
+        }
+
         public Task<bool> TryFindContent(IPublishedRequestBuilder request)
         {
             try
@@ -163,7 +190,7 @@ namespace HpskSite.Routing
                     {
                         if (string.Equals(childSegment, "resultat", StringComparison.OrdinalIgnoreCase))
                             return Task.FromResult(TryServeResultPage(request, competition, _http, _shortStrings));
-                        return Task.FromResult(false);
+                        return Task.FromResult(TryServeStartListPage(request, competition, childSegment, _http, _shortStrings));
                     }
                     target = child;
                 }

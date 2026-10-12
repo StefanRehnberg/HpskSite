@@ -20,14 +20,17 @@ namespace HpskSite.Services.StartListCleanup
         private readonly DirektplaceringStartListService _dpService;
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly ILogger<PrecisionFamilyStartListCleanupSource> _logger;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public PrecisionFamilyStartListCleanupSource(
             IContentService contentService,
             StartListHtmlRenderer renderer,
             DirektplaceringStartListService dpService,
             IUmbracoDatabaseFactory databaseFactory,
-            ILogger<PrecisionFamilyStartListCleanupSource> logger)
+            ILogger<PrecisionFamilyStartListCleanupSource> logger,
+            HpskSite.Services.StartLists.IStartListStore startLists)
         {
+            _startLists = startLists;
             _contentService = contentService;
             _renderer = renderer;
             _dpService = dpService;
@@ -40,15 +43,11 @@ namespace HpskSite.Services.StartListCleanup
             // Sportpistol, so deleting a registration there left the shooter on the list.
             string.IsNullOrWhiteSpace(competitionType) || PrecisionFamily.IsMember(competitionType);
 
-        private List<IContent> StartListNodes(IContent competition) =>
-            _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                .Where(c => c.ContentType.Alias == "precisionStartList" || c.ContentType.Alias == "finalsStartList")
-                .ToList();
+        // Tävlingens direkta listor (grundomgång och finaler), som förut — inte hubbens.
+        private List<HpskSite.Models.StartLists.StartListRecord> StartListNodes(IContent competition) =>
+            _startLists.List(competition.Id).Where(r => !r.LegacyHub).ToList();
 
-        private static bool IsPublished(IContent node) =>
-            node.ContentType.Alias == "finalsStartList"
-                ? node.HasProperty("isOfficialFinalsStartList") && node.GetValue<bool>("isOfficialFinalsStartList")
-                : node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList");
+        private static bool IsPublished(HpskSite.Models.StartLists.StartListRecord node) => node.IsOfficial;
 
         public Task<List<StartListPlacement>> DescribePlacementsAsync(IContent competition, int memberId)
         {
@@ -153,12 +152,12 @@ namespace HpskSite.Services.StartListCleanup
                     // on the official flag left a deleted shooter visible there while only the
                     // draft was cleaned (competition 3468, 2026-09-30). Same rule as
                     // RegistrationClubPropagationService. A never-published draft stays unpublished.
-                    var wasPublished = node.Published;
-                    node.SetValue("configurationData", JsonConvert.SerializeObject(cfg));
+                    var wasPublished = node.IsPublished;
+                    var newConfig = JsonConvert.SerializeObject(cfg);
+                    string? newHtml = null;
                     try
                     {
-                        node.SetValue("startListContent",
-                            await _renderer.GenerateStartListHtml(cfg, competition.Name ?? ""));
+                        newHtml = await _renderer.GenerateStartListHtml(cfg, competition.Name ?? "");
                     }
                     catch (Exception ex)
                     {
@@ -167,23 +166,14 @@ namespace HpskSite.Services.StartListCleanup
                         _logger.LogWarning(ex, "Could not re-render cached start list HTML for node {NodeId}", node.Id);
                         warnings.Add($"Den cachade startlistan för \"{node.Name}\" kunde inte ritas om — generera om listan.");
                     }
-                    _contentService.Save(node);
-
                     // Only re-publish what was ALREADY published: publishing a draft list as a side
                     // effect of a deletion would make an unfinished list public.
-                    if (wasPublished)
+                    _startLists.Update(node.Id, r =>
                     {
-                        try
-                        {
-                            _contentService.Publish(node, new[] { "*" });
-                            publishedUpdated++;
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Cleanup: publish failed for {NodeId} (the saved version is authoritative)", node.Id);
-                            warnings.Add($"Den publicerade listan \"{node.Name}\" kunde inte uppdateras — publicera om den.");
-                        }
-                    }
+                        r.ConfigurationData = newConfig;
+                        if (newHtml != null) r.StartListContent = newHtml;
+                    }, HpskSite.Models.StartLists.StartListPublish.IfPublished);
+                    if (wasPublished) publishedUpdated++;
                 }
             }
 
@@ -199,9 +189,9 @@ namespace HpskSite.Services.StartListCleanup
             };
         }
 
-        private StartListConfiguration? ReadConfig(IContent node, int competitionId)
+        private StartListConfiguration? ReadConfig(HpskSite.Models.StartLists.StartListRecord node, int competitionId)
         {
-            var json = node.GetValue<string>("configurationData");
+            var json = node.ConfigurationData;
             if (string.IsNullOrWhiteSpace(json)) return null;
             try { return JsonConvert.DeserializeObject<StartListConfiguration>(json); }
             catch (Exception ex)

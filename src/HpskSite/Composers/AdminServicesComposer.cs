@@ -208,6 +208,10 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Results.ICompetitionResultStore>(
                 sp => sp.GetRequiredService<HpskSite.Services.Results.SwitchingCompetitionResultStore>());
             builder.Services.AddScoped<HpskSite.Services.Results.CompetitionResultMigrationService>();
+            // Enda vägen in till startlistorna (skalplanen fas C2). Nodimplementationen i dag.
+            builder.Services.AddScoped<HpskSite.Services.StartLists.NodeStartListStore>();
+            builder.Services.AddScoped<HpskSite.Services.StartLists.IStartListStore>(
+                sp => sp.GetRequiredService<HpskSite.Services.StartLists.NodeStartListStore>());
             builder.Services.AddHostedService<HpskSite.Services.Results.CompetitionResultSchemaGuardHostedService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
                 HpskSite.Services.Results.CompetitionResultNodeGuard>();
