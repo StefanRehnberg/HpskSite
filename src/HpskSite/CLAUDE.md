@@ -11409,6 +11409,11 @@ ersatt utan att känna till fakturorna. **`SourceId` förblir TÄVLINGENS id** (
 - `CompetitionPaymentModel` (SQL, **oföränderlig** via trigger). Beslutas vid **första anmälan**
   (inne i `CompetitionFeeService.SyncRegistration/SyncTeam`, som varje anmälningsväg passerar).
 - Saknas rad: finns gamla fakturor → `legacy` skrivs (självläkning); annars är tävlingen ny.
+- **⚠️⚠️ Går beslutet inte att läsa svarar tjänsten `unknown`** (Stefans beslut 2026-10-12) — aldrig
+  `legacy`, som förut fick `PaymentService` att skapa fakturanoder för nya tävlingar så snart
+  läsningen föll. `unknown` cachas inte och skrivs aldrig; varje skapande väg (fakturor OCH
+  liggarrader) vägrar och loggar Error, och Swish-/betalendpointsen svarar
+  `CompetitionPaymentModels.UnknownMessage`. Test: `CompetitionPaymentModelServiceTests`.
 - **`PaymentService` skapar aldrig en gammal faktura för en ny tävling** — spärren sitter i varje
   skapande primitiv, och `EnsureRegistrationInvoiceAsync`/`ReconcileRegistrationInvoiceAsync`/
   `CreateTeamInvoiceAsync` räknar om i liggaren i stället. Därför följer disken, efteranmälan och

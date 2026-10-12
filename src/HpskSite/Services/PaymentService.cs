@@ -71,15 +71,29 @@ namespace HpskSite.Services
         /// </summary>
         private bool RefuseForLedgerModel(int competitionId, string caller)
         {
-            if (!_paymentModels.IsLedger(competitionId)) return false;
-            _logger.LogWarning(
-                "{Caller} anropades för tävling {CompetitionId}, som har avgifterna i liggaren. Ingen faktura skapades.",
-                caller, competitionId);
+            var model = _paymentModels.Get(competitionId);
+            if (model == HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Legacy) return false;
+            if (model == HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Unknown)
+                LogUnknownModel(competitionId, caller);
+            else
+                _logger.LogWarning(
+                    "{Caller} anropades för tävling {CompetitionId}, som har avgifterna i liggaren. Ingen faktura skapades.",
+                    caller, competitionId);
             return true;
         }
 
+        // ⚠️⚠️ Stefans beslut 2026-10-12: går betalmodellen inte att läsa skapas INGENTING — ingen gammal
+        // faktura (som den tidigare gissningen "legacy" gav) och ingen liggarrad. Felet ska synas.
+        private void LogUnknownModel(int competitionId, string caller)
+            => _logger.LogError(
+                "{Caller}: betalningsmodellen för tävling {CompetitionId} gick inte att läsa. Ingen faktura skapades.",
+                caller, competitionId);
+
         /// <summary>Tävlingen använder den nya modellen — avgifter i liggaren, inga fakturor.</summary>
         public bool IsLedgerModel(int competitionId) => _paymentModels.IsLedger(competitionId);
+
+        /// <summary>Betalningsmodellen gick inte att läsa — ingen betalning får hanteras.</summary>
+        public bool IsPaymentModelUnknown(int competitionId) => _paymentModels.IsUnknown(competitionId);
 
         /// <summary>
         /// Räknar om en anmälans eller ett lags avgift i liggaren — efter en ändring eller en
@@ -902,9 +916,15 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<IContent?> EnsureRegistrationInvoiceAsync(int competitionId, int registrationId)
         {
-            if (_paymentModels.IsLedger(competitionId))
+            var model = _paymentModels.Get(competitionId);
+            if (model == HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Ledger)
             {
                 _competitionFees.SyncRegistration(competitionId, registrationId, 0);
+                return null;
+            }
+            if (model == HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Unknown)
+            {
+                LogUnknownModel(competitionId, nameof(EnsureRegistrationInvoiceAsync));
                 return null;
             }
 
@@ -997,10 +1017,17 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<bool> ReconcileRegistrationInvoiceAsync(int competitionId, int registrationId)
         {
-            if (_paymentModels.IsLedger(competitionId))
+            var model = _paymentModels.Get(competitionId);
+            if (model == HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Ledger)
             {
                 var sync = _competitionFees.SyncRegistration(competitionId, registrationId, 0);
                 return sync.Error == null;
+            }
+            if (model == HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Unknown)
+            {
+                // Rör inga befintliga fakturor heller — vi vet inte vilken modell de hör till.
+                LogUnknownModel(competitionId, nameof(ReconcileRegistrationInvoiceAsync));
+                return false;
             }
 
             try
@@ -1652,10 +1679,16 @@ namespace HpskSite.Services
             int registrationId = 0,
             string paymentMethod = "Swish")
         {
-            if (_paymentModels.IsLedger(competitionId))
+            var model = _paymentModels.Get(competitionId);
+            if (model == HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Ledger)
             {
                 // Lagets avgift bor i liggaren — räkna om den där i stället för att skapa en faktura.
                 _competitionFees.SyncTeam(competitionId, teamId, 0);
+                return Task.FromResult<IContent?>(null);
+            }
+            if (model == HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Unknown)
+            {
+                LogUnknownModel(competitionId, nameof(CreateTeamInvoiceAsync));
                 return Task.FromResult<IContent?>(null);
             }
 
