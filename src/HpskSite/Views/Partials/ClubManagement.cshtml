@@ -1,6 +1,7 @@
 @{
     // This partial handles club management UI
 }
+@await Html.PartialAsync("_HtmlEscape")
 
 <div id="clubManagement">
     <!-- Region Filter -->
@@ -349,6 +350,12 @@
                             <select class="form-select" id="clubAdminClubFilter" onchange="onClubAdminClubFilterChange()">
                                 <option value="">Välj krets först...</option>
                             </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="availableMembersSearch" class="form-label">Sök medlem</label>
+                            <input type="search" class="form-control" id="availableMembersSearch" autocomplete="off"
+                                   placeholder="Namn eller e-post" oninput="onAvailableMembersSearch()">
+                            <div class="form-text" id="availableMembersHint"></div>
                         </div>
                         <div class="mb-3">
                             <label for="availableMembersSelect" class="form-label">Välj medlem</label>
@@ -1266,6 +1273,11 @@ let currentClubForAdmins = null;
 
 function showClubAdmins(clubId, clubName, regionCode) {
     currentClubForAdmins = clubId;
+    // Förra klubbens sökning får inte följa med till nästa.
+    const searchBox = document.getElementById('availableMembersSearch');
+    if (searchBox) searchBox.value = '';
+    const searchHint = document.getElementById('availableMembersHint');
+    if (searchHint) searchHint.textContent = '';
     document.getElementById('clubAdminsModalTitle').textContent = `Manage Club Admins - ${clubName}`;
 
     // Load current admins
@@ -1377,6 +1389,13 @@ function displayClubAdmins(admins) {
     container.innerHTML = html;
 }
 
+let availableMembersSeq = 0;
+let availableMembersSearchTimer = null;
+function onAvailableMembersSearch() {
+    clearTimeout(availableMembersSearchTimer);
+    availableMembersSearchTimer = setTimeout(() => loadAvailableMembers(currentClubForAdmins), 300);
+}
+
 async function loadAvailableMembers(clubId) {
     const select = document.getElementById('availableMembersSelect');
     const assignBtn = document.getElementById('assignAdminBtn');
@@ -1385,17 +1404,30 @@ async function loadAvailableMembers(clubId) {
     assignBtn.disabled = true;
 
     const filterClubId = document.getElementById('clubAdminClubFilter').value || '';
+    const regionCode = document.getElementById('clubAdminRegionFilter').value || '';
+    const search = (document.getElementById('availableMembersSearch')?.value || '').trim();
     let url = `/umbraco/surface/ClubAdmin/GetAvailableMembersForClubAdmin?clubId=${clubId}`;
     if (filterClubId) {
         url += `&filterClubId=${filterClubId}`;
+    } else if (regionCode) {
+        url += `&regionCode=${encodeURIComponent(regionCode)}`;
     }
+    if (search) url += `&search=${encodeURIComponent(search)}`;
 
+    // Svar som kommer i fel ordning (snabbt skrivande) får inte skriva över det senaste.
+    const seq = ++availableMembersSeq;
     try {
         const response = await fetch(url);
         const data = await response.json();
+        if (seq !== availableMembersSeq) return;
 
         if (data.success) {
             populateMemberDropdown(data.members);
+            // Servern skickar högst 50 när urvalet är stort — säg det, annars ser listan komplett ut.
+            const hint = document.getElementById('availableMembersHint');
+            if (hint) hint.textContent = data.truncated
+                ? `Visar ${data.members.length} av ${data.totalCount}. Skriv mer av namnet för att hitta rätt person.`
+                : '';
         } else {
             select.innerHTML = '<option value="">Fel vid laddning av medlemmar</option>';
         }
@@ -1417,7 +1449,7 @@ function populateMemberDropdown(members) {
 
     let options = '<option value="">Välj en medlem att tilldela...</option>';
     members.forEach(member => {
-        options += `<option value="${member.id}" data-name="${member.name}">${member.name} (${member.email})</option>`;
+        options += `<option value="${member.id}" data-name="${hpskEsc(member.name)}">${hpskEsc(member.name)} (${hpskEsc(member.email)})</option>`;
     });
 
     select.innerHTML = options;

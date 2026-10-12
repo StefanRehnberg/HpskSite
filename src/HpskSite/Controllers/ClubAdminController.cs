@@ -31,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly ClubMembershipService _clubMembershipService;
         private readonly MemberActivityService _activity;
         private readonly ClubRosterService _roster;
+        private readonly MemberDirectoryService _directory;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -49,11 +50,13 @@ namespace HpskSite.Controllers
             EmailService emailService,
             ClubMembershipService clubMembershipService,
             MemberActivityService activity,
-            ClubRosterService roster)
+            ClubRosterService roster,
+            MemberDirectoryService directory)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _activity = activity;
             _roster = roster;
+            _directory = directory;
             _memberService = memberService;
             _memberGroupService = memberGroupService;
             _contentService = contentService;
@@ -82,6 +85,24 @@ namespace HpskSite.Controllers
                 _logger.LogWarning(ex, "Kunde inte läsa medlemmarna i gruppen {Group}.", groupName);
                 return Array.Empty<Umbraco.Cms.Core.Models.IMember>();
             }
+        }
+
+        /// <summary>En kandidat i en väljare: id, namn (för- och efternamn) och e-post, sorterat på namn.</summary>
+        public sealed record MemberCandidate(int Id, string Name, string Email);
+
+        private static List<MemberCandidate> Candidates(IEnumerable<MemberDirectoryEntry> entries)
+            => entries.Select(m => new MemberCandidate(m.MemberId, $"{m.FirstName} {m.LastName}".Trim(), m.Email))
+                      .OrderBy(m => m.Name)
+                      .ToList();
+
+        /// <summary>Namn eller e-post innehåller söktexten (minst 2 tecken; kortare = ingen filtrering).</summary>
+        private static IEnumerable<MemberDirectoryEntry> Search(IEnumerable<MemberDirectoryEntry> entries, string? search)
+        {
+            var q = (search ?? "").Trim();
+            if (q.Length < 2) return entries;
+            return entries.Where(m =>
+                $"{m.FirstName} {m.LastName}".Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                m.Email.Contains(q, StringComparison.OrdinalIgnoreCase));
         }
 
         #region Club CRUD Operations
@@ -1465,7 +1486,7 @@ namespace HpskSite.Controllers
         /// Gets available members for club admin assignment (excluding existing admins)
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetAvailableMembersForClubAdmin(int clubId, int filterClubId = 0)
+        public async Task<IActionResult> GetAvailableMembersForClubAdmin(int clubId, int filterClubId = 0, string? search = null, int take = 50, string? regionCode = null)
         {
             if (!await _authService.IsCurrentUserAdminAsync() && !await _authService.IsClubAdminForClub(clubId))
             {
@@ -1475,34 +1496,35 @@ namespace HpskSite.Controllers
             try
             {
                 var groupName = $"ClubAdmin_{clubId}";
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
                 var existingAdmins = MembersInGroup(groupName).Select(m => m.Id).ToHashSet();
 
-                // Get members who are not clubs and not already admins of this club
-                var query = allMembers
-                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias) // Exclude clubs
-                    .Where(m => !existingAdmins.Contains(m.Id)) // Exclude existing club admins
-                    .Where(m => m.IsApproved); // Only approved members
+                // ⚠️ Medlemskatalogen (en SQL-fråga) i stället för GetAll av fullständiga IMember — 22 s
+                // vid 20 000 medlemmar (skalplanen 2026-10-12).
+                var candidates = _directory.All()
+                    .Where(m => m.IsApproved && !existingAdmins.Contains(m.MemberId));
 
-                // Filter by club membership if filterClubId is specified
+                // Filter by club membership if filterClubId is specified — hela klubben, ingen kapning.
                 if (filterClubId > 0)
                 {
-                    query = query.Where(m =>
-                        m.GetValue("primaryClubId")?.ToString() == filterClubId.ToString() ||
-                        (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
-                            .Contains(filterClubId.ToString()));
+                    var all = Candidates(candidates.Where(m => m.ClubIds.Contains(filterClubId)));
+                    return Json(new { success = true, members = all, totalCount = all.Count, truncated = false });
                 }
 
-                var availableMembers = query
-                    .Select(m => new {
-                        Id = m.Id,
-                        Name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
-                        Email = m.Email
-                    })
-                    .OrderBy(m => m.Name)
-                    .ToList();
+                // "Alla klubbar i kretsen" — skickade förut inget filter alls och fick hela registret.
+                if (!string.IsNullOrWhiteSpace(regionCode))
+                {
+                    var clubIdsInRegion = GetClubsFromStorage()
+                        .Where(c => c.IsActive && c.RegionalFederation == regionCode && c.Id.HasValue)
+                        .Select(c => c.Id!.Value)
+                        .ToHashSet();
+                    candidates = candidates.Where(m => m.ClubIds.Any(clubIdsInRegion.Contains));
+                }
 
-                return Json(new { success = true, members = availableMembers });
+                // ⚠️ Utan klubbfilter kan det vara hela registret — en rullgardin med 20 000 alternativ går
+                // inte att använda. Sökning på servern, högst `take` träffar; svaret säger hur många som finns.
+                var matched = Candidates(Search(candidates, search));
+                var shown = matched.Take(Math.Clamp(take, 1, 200)).ToList();
+                return Json(new { success = true, members = shown, totalCount = matched.Count, truncated = shown.Count < matched.Count });
             }
             catch (Exception ex)
             {
@@ -2131,47 +2153,28 @@ namespace HpskSite.Controllers
                 }
 
                 var groupName = $"RegionalAdmin_{regionCode}";
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
                 var existingAdmins = MembersInGroup(groupName).Select(m => m.Id).ToHashSet();
 
-                var query = allMembers
-                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .Where(m => !existingAdmins.Contains(m.Id))
-                    .Where(m => m.IsApproved);
+                // Medlemskatalogen i stället för GetAll av fullständiga IMember (skalplanen 2026-10-12).
+                var query = _directory.All()
+                    .Where(m => m.IsApproved && !existingAdmins.Contains(m.MemberId));
 
                 if (clubId > 0)
                 {
                     // Filter by specific club
-                    query = query.Where(m =>
-                        m.GetValue("primaryClubId")?.ToString() == clubId.ToString() ||
-                        (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
-                            .Contains(clubId.ToString()));
+                    query = query.Where(m => m.ClubIds.Contains(clubId));
                 }
                 else
                 {
                     // Filter by all clubs in the region
-                    var clubs = GetClubsFromStorage();
-                    var clubIdsInRegion = clubs
-                        .Where(c => c.IsActive && c.RegionalFederation == regionCode)
-                        .Select(c => c.Id?.ToString() ?? "")
-                        .Where(id => !string.IsNullOrEmpty(id))
+                    var clubIdsInRegion = GetClubsFromStorage()
+                        .Where(c => c.IsActive && c.RegionalFederation == regionCode && c.Id.HasValue)
+                        .Select(c => c.Id!.Value)
                         .ToHashSet();
-
-                    query = query.Where(m =>
-                        clubIdsInRegion.Contains(m.GetValue("primaryClubId")?.ToString() ?? "") ||
-                        (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
-                            .Any(cid => clubIdsInRegion.Contains(cid.Trim())));
+                    query = query.Where(m => m.ClubIds.Any(clubIdsInRegion.Contains));
                 }
 
-                var availableMembers = query
-                    .Select(m => new
-                    {
-                        id = m.Id,
-                        name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
-                        email = m.Email
-                    })
-                    .OrderBy(m => m.name)
-                    .ToList();
+                var availableMembers = Candidates(query);
 
                 return Json(new { success = true, members = availableMembers });
             }
