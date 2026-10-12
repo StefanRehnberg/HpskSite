@@ -1,5 +1,6 @@
 using HpskSite.Models;
 using HpskSite.Models.Events;
+using HpskSite.Services.Hosting;
 using HpskSite.Services.SiteSettings;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Strings;
@@ -44,9 +45,23 @@ namespace HpskSite.Services.Events
 
         /// <summary>
         /// Tömmer händelsetabellerna inför ett nytt försök. Bara när nodlagringen gäller. Händelser
-        /// som skapats i tabellen efter en flytt (och sedan återställts) försvinner. Kopplingar till
-        /// tävlingar, deltagare och liggaren bär händelsens id, som flytten återskapar.
+        /// som skapats i tabellen efter en flytt (och sedan återställts) försvinner — men deras kopplingar,
+        /// deltagare och liggarrader står kvar, så identiteten går aldrig bakåt (<see cref="IdentityFloor"/>).
         /// </summary>
+        /// <summary>Allt som bär ett händelse-id. Läggs en ny referens till: lägg till den här.</summary>
+        internal static readonly IdentityFloor.Source[] IdSources =
+        {
+            new("dbo.ClubEventParticipant", "SELECT MAX(EventId) FROM dbo.ClubEventParticipant WHERE OccasionKind = 'Event'"),
+            new("dbo.FirearmBooking", "SELECT MAX(OccasionId) FROM dbo.FirearmBooking WHERE OccasionKind = 'Event'"),
+            new("dbo.LedgerPayment", "SELECT MAX(SourceId) FROM dbo.LedgerPayment WHERE SourceType = 'event'"),
+            new("sbx.LedgerPayment", "SELECT MAX(SourceId) FROM sbx.LedgerPayment WHERE SourceType = 'event'"),
+            new("dbo.LedgerProject", "SELECT MAX(SourceId) FROM dbo.LedgerProject WHERE SourceType = 'event'"),
+            new("sbx.LedgerProject", "SELECT MAX(SourceId) FROM sbx.LedgerProject WHERE SourceType = 'event'"),
+            new("dbo.ClubEventRange", "SELECT MAX(EventId) FROM dbo.ClubEventRange"),
+            new("dbo.CompetitionEventLink", "SELECT MAX(EventId) FROM dbo.CompetitionEventLink"),
+            IdentityFloor.NodesOfType("clubSimpleEvent"),
+        };
+
         public (bool Ok, string Message) ClearTables(int? byMemberId)
         {
             if (ClubEventStoreSettings.UsesTable(_settings))
@@ -58,8 +73,10 @@ namespace HpskSite.Services.Events
 UPDATE dbo.ClubEvent SET LandingPageId = NULL;
 DELETE FROM dbo.ClubEvent;
 DELETE FROM dbo.LandingPage;
-DBCC CHECKIDENT('dbo.ClubEvent', RESEED, 0) WITH NO_INFOMSGS;
 DBCC CHECKIDENT('dbo.LandingPage', RESEED, 0) WITH NO_INFOMSGS;");
+            // Händelsens identitet nollställs ALDRIG: deltagare, lånevapen och liggaren står kvar på
+            // tabellfödda händelsers id, och ett återanvänt id hade ärvt dem.
+            IdentityFloor.Reseed(db, "dbo.ClubEvent", IdSources);
             scope.Complete();
             _logger.LogWarning("Händelsetabellerna tömda ({Rows} rader) av medlem {MemberId}", rows, byMemberId);
             return (true, $"Tabellen tömd ({rows} rader). Flytten kan köras igen.");
@@ -198,11 +215,11 @@ VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18,@19,@2
                 }
             }
 
+            // Över varje id som någon pekar på, inte bara tabellens eget — se IdentityFloor.
             int reseed;
             using (var scope = _scopeProvider.CreateScope())
             {
-                reseed = scope.Database.ExecuteScalar<int>("SELECT ISNULL(MAX(Id), 0) FROM dbo.ClubEvent");
-                if (reseed > 0) scope.Database.Execute($"DBCC CHECKIDENT('dbo.ClubEvent', RESEED, {reseed})");
+                reseed = IdentityFloor.Reseed(scope.Database, "dbo.ClubEvent", IdSources);
                 scope.Complete();
             }
             _logger.LogWarning("Händelseflytten: {Inserted} skrivna, {Skipped} fanns redan, {Legacy} gamla adresser, {Errors} fel, RESEED {Reseed}",
