@@ -11267,6 +11267,38 @@ Test: `BackgroundServiceIsolationTests` (5). A/B: basklassen utan `SuppressFlow`
 rött; en tjänst som ärver `BackgroundService` → arkitekturregeln röd och namnger tjänsten; en tjänst
 som åsidosätter `ExecuteAsync` → kompileringsfel.
 
+## ⚠️⚠️ Resultatlistan går genom `ICompetitionResultStore` (skalplanen C1, branch `skalplan-fas-c`, 2026-10-12)
+
+**Läs eller skriv aldrig `competitionResult`-noden direkt** — varken via content service, publicerad
+cache, `Children()` eller SQL mot `umbracoPropertyData`. Gå genom `Services/Results/ICompetitionResultStore`.
+`ResultStoreGuardTests` fäller bygget på aliaset eller listans egenskaper (`resultData`,
+`honoraryAwardConfig` …) utanför lagringen; ett motiverat undantag får `resultstore-ok: <skäl>` på raden.
+
+- **Posten** är `Models/Results/CompetitionResultRecord` — en per tävling; deltävlingen bär sina egna
+  `Sub…`-fält på samma post. Fältskyttets huvudlistas publiceringsflagga och fält-/springskyttets
+  huvudsammanslagning ligger fortfarande på TÄVLINGEN (`faltskytteResultsOfficial`, `mergeConfig`).
+- **Skriv med `Update(competitionId, r => …, createIfMissing)`**, aldrig en hel post: den läser färskt,
+  kör ändringen och skriver bara det som ändrades (noden) eller under `UPDLOCK, HOLDLOCK` (tabellen).
+  Läs-ändra-skriv av t.ex. klassnamnen görs INNE i lambdan. `Ensure` skapar en tom Preliminär lista.
+- **`GetMany`** för listor och sidor (en uppslagning, publicerade cachen i nodläget). `Get` läser
+  senast sparade läget (content service i nodläget).
+- **`CanStore(field)`** ersätter `HasProperty` — en äldre doctype kan sakna ett fält; tabellen bär alla.
+  Ett ändrat fält som inte går att lagra kastar `CompetitionResultFieldMissingException`.
+- **`/resultat/`-adressen byggs ur tävlingens adress** överallt (`{tävling}/resultat/`), aldrig ur nodens.
+- **Växeln** `Results:Store` (`node`/`table`) och frysningen `Results:WriteFreeze` i `SiteSetting`,
+  som anmälningarna. `SwitchingCompetitionResultStore` väljer per anrop; frysningen ger
+  `CompetitionResultWriteFrozenException`.
+- **Tabellen** `CompetitionResultList` (`create-competition-result-list-table.sql`), en rad per tävling,
+  migrerade rader bär nodens id. Flytten: `CompetitionResultMigrationService` / `CompetitionResultMigrationController`
+  och kortet **Resultatlistor** i Underhåll på `/admin-page`. `CompetitionResultNodeGuard` vägrar nya
+  noder när tabellen gäller.
+- **Utan nod:** `CompetitionUrlContentFinder.TryServeResultPage` (snygga adresser) och
+  `CompetitionResultTreeUrlFinder` (trädadresser) visar TÄVLINGEN med vyn `CompetitionResult` när lagringen
+  har en lista. Vyn tar därför `Model` som antingen resultatnoden eller tävlingen.
+- ⚠️ **Dev delas med main — lämna aldrig dev på `table`.** `hpsk-verify/resultstore-mode.mjs table|node`.
+  Sviter: `resultstore-migration-verify.mjs` (hela fönstret, 30), `resultstore-writepaths-verify.mjs`
+  (23, lägesmedveten) — och resultatsviterna är gröna i båda lägena.
+
 ## DataProtection-nycklarna ligger i databasen (2026-10-12, skalplanen D2)
 
 `dbo.DataProtectionKey` via `Services/Hosting/SqlDataProtectionKeyRepository` (inkopplad i `Program.cs`).

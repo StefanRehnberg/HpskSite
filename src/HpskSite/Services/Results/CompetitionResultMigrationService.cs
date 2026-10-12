@@ -91,6 +91,8 @@ ORDER BY n.parentId, n.id", CompetitionResultFields.NodeAlias)
             public int RowsAlreadyInTable { get; init; }
             /// <summary>Tävlingar med fler än en resultatnod — bara den som lagringen läser flyttas.</summary>
             public List<string> Duplicates { get; init; } = new();
+            /// <summary>Samma form som anmälningarnas och händelsernas torrkörning (underhållspanelen läser den).</summary>
+            public List<string> MissingSchema => TableExists ? new List<string>() : new List<string> { "CompetitionResultList" };
         }
 
         public PreviewResult Preview()
