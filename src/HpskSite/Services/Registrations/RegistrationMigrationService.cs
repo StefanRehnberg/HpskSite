@@ -1,5 +1,6 @@
 using HpskSite.Models;
 using HpskSite.Models.Registrations;
+using HpskSite.Services.Hosting;
 using HpskSite.Services.SiteSettings;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Infrastructure.Scoping;
@@ -103,8 +104,8 @@ namespace HpskSite.Services.Registrations
         /// <summary>
         /// Tömmer anmälningstabellerna inför ett nytt försök. Bara när nodlagringen gäller — då läser
         /// ingen tabellerna. Anmälningar som gjorts i tabellen efter en flytt (och sedan återställts)
-        /// försvinner; de finns inte på noderna. Övriga referenser (avgiftsval, liggaren) bär
-        /// anmälans id, som flytten återskapar.
+        /// försvinner; de finns inte på noderna — men deras referenser (avgiftsval, liggaren) står kvar.
+        /// ⚠️ Identiteten nollställs därför ALDRIG: ett återanvänt id hade ärvt dem (<see cref="IdentityFloor"/>).
         /// </summary>
         public (bool Ok, string Message) ClearTables(int? byMemberId)
         {
@@ -116,8 +117,8 @@ namespace HpskSite.Services.Registrations
             db.Execute(@"DELETE FROM dbo.CompetitionRegistrationLegacyId;
 DELETE FROM dbo.CompetitionRegistrationClass;
 DELETE FROM dbo.CompetitionRegistration;
-DBCC CHECKIDENT('dbo.CompetitionRegistration', RESEED, 0) WITH NO_INFOMSGS;
 UPDATE dbo.CompetitionTeam SET LegacyRegistrationDocId = NULL;");
+            IdentityFloor.Reseed(db, "dbo.CompetitionRegistration", IdSources);
             scope.Complete();
             _logger.LogWarning("Anmälningstabellerna tömda ({Rows} rader) av medlem {MemberId}", rows, byMemberId);
             return (true, $"Tabellen tömd ({rows} rader). Flytten kan köras igen.");
@@ -263,20 +264,32 @@ WHERE t.LegacyRegistrationDocId IS NULL");
         }
 
         /// <summary>
-        /// Identiteten fortsätter efter det högsta id:t som finns — även bland de SAMMANSLAGNA nodernas id:n,
-        /// annars kan en ny rad få ett id som en gammal faktura redan pekar på via LegacyId-tabellen.
+        /// Identiteten fortsätter över varje id som NÅGON pekar på: tabellen, de sammanslagna nodernas id:n,
+        /// liggaren, avgiftsvalen, fakturornas <c>registrationId</c> och varje anmälnings- och lagspegelnod
+        /// (papperskorgen inräknad). Annars kan en ny anmälan få en borttagen anmälans id och ärva dess
+        /// betalningar och val. Går aldrig bakåt — se <see cref="IdentityFloor"/>.
         /// </summary>
         private int Reseed()
         {
             using var scope = _scopeProvider.CreateScope();
-            var max = scope.Database.ExecuteScalar<int>(@"
-SELECT ISNULL(MAX(v), 0) FROM (
-    SELECT MAX(Id) AS v FROM dbo.CompetitionRegistration
-    UNION ALL SELECT MAX(LegacyNodeId) FROM dbo.CompetitionRegistrationLegacyId) x");
-            if (max > 0) scope.Database.Execute($"DBCC CHECKIDENT('dbo.CompetitionRegistration', RESEED, {max})");
+            var seed = IdentityFloor.Reseed(scope.Database, "dbo.CompetitionRegistration", IdSources);
             scope.Complete();
-            return max;
+            return seed;
         }
+
+        /// <summary>Allt som bär ett anmälnings-id. Läggs en ny referens till: lägg till den här.</summary>
+        internal static readonly IdentityFloor.Source[] IdSources =
+        {
+            new("dbo.CompetitionRegistrationLegacyId", "SELECT MAX(LegacyNodeId) FROM dbo.CompetitionRegistrationLegacyId"),
+            new("dbo.LedgerPayment", "SELECT MAX(SourceItemId) FROM dbo.LedgerPayment WHERE SourceType = 'competition-registration'"),
+            new("sbx.LedgerPayment", "SELECT MAX(SourceItemId) FROM sbx.LedgerPayment WHERE SourceType = 'competition-registration'"),
+            new("dbo.CompetitionFeeChoice", "SELECT MAX(RegistrationId) FROM dbo.CompetitionFeeChoice"),
+            IdentityFloor.NodesOfType("competitionRegistration"),
+            IdentityFloor.NodesOfType("competitionTeamRegistration"),
+            new("dbo.umbracoPropertyData", @"SELECT MAX(COALESCE(pd.intValue, TRY_CONVERT(int, LEFT(pd.varcharValue, 20))))
+                FROM umbracoPropertyData pd JOIN cmsPropertyType pt ON pt.id = pd.propertyTypeId
+                WHERE pt.alias = 'registrationId'"),
+        };
 
         public sealed class VerifyResult
         {

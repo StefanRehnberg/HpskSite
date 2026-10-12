@@ -11136,6 +11136,19 @@ läskontroll i prod: `Migrations/check-prod-sajtstruktur-2026-10-10.sql`. Svit:
 `hpsk-verify/underhall-panel-verify.mjs` 18/18. Fliken tas bort i contract-steget.
 - `IDENTITY_INSERT` med nodens id, idempotent, `RESEED` efteråt. Gamla referenser (liggaren,
   fakturor, QR-affischer, `ClubEventParticipant`) pekar därför rätt utan omskrivning.
+- ⚠️⚠️ **Identiteten sätts över varje id som NÅGON pekar på** (`Services/Hosting/IdentityFloor`,
+  källorna i `RegistrationMigrationService.IdSources` / `ClubEventMigrationService.IdSources`), inte bara
+  över tabellens eget. Borttagna anmälningar och händelser har lämnat avgiftsrader, val, deltagare och
+  lånevapen kvar på sina id:n; en ny rad med samma id ärvde dem. **Identiteten går aldrig bakåt** —
+  `ClearTables` nollställer den inte längre. Läggs en ny tabell till som bär ett anmälnings- eller
+  händelse-id: lägg den i `IdSources`. Läskontroll i prod: `Migrations/check-prod-table-id-collisions-2026-10-12.sql`
+  (2026-10-12: inga tabellfödda rader, ingen skada, alla referenser under identiteten).
+- **Ett id jämförs bara med id:n av samma sort.** Att en ny anmälan får samma tal som en klubbnod är
+  ofarligt; en väg som slår upp ett anmälnings- eller händelse-id som NOD är felet. Rättat 2026-10-12:
+  `ClubSimpleEvent.cshtml` (händelsens reservuppslag bara för en `clubSimpleEvent`-nod, och en opublicerad
+  händelse bara för dess administratörer), `PaymentController` (ägarkontrollen via lagringen) och
+  `PrecisionResultsController` (borttagen — lät vilken inloggad medlem som helst skriva och publicera
+  vilken nod som helst via id).
 - `Switch("table")` vägras utan frysning och utan ren jämförelse; `Switch("node")` går alltid.
   Noderna ligger orörda tills avpubliceringen — återställning = växla tillbaka.
 - `RegistrationNodeGuard` / `ClubEventNodeGuard` vägrar NYA noder av typen när tabellen gäller.
