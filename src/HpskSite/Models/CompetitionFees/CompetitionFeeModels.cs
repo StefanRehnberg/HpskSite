@@ -31,6 +31,19 @@ namespace HpskSite.Models.CompetitionFees
 
         /// <summary>Avgifter som begärda betalningar i liggaren, fakturor bara när arrangören buntar.</summary>
         public const string Ledger = "ledger";
+
+        /// <summary>
+        /// Beslutet gick inte att läsa (databasfel, saknad tabell). <b>Lagras aldrig och cachas aldrig</b> —
+        /// nästa läsning försöker igen. Ingen faktura och ingen liggarrad skapas i det här läget
+        /// (Stefans beslut 2026-10-12: vägra med ett tydligt fel i stället för att gissa på den gamla
+        /// modellen, som tyst skapade fakturanoder för nya tävlingar).
+        /// </summary>
+        public const string Unknown = "unknown";
+
+        /// <summary>Beskedet till den som försöker betala eller fakturera när beslutet saknas.</summary>
+        public const string UnknownMessage =
+            "Betalningen kan inte hanteras just nu: vi kunde inte avgöra hur tävlingens avgifter ska tas emot. " +
+            "Ingen faktura har skapats. Försök igen om en stund — kvarstår felet, kontakta arrangören.";
     }
 
     /// <summary>

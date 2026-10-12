@@ -100,7 +100,17 @@ namespace HpskSite.Controllers
         {
             var models = HttpContext?.RequestServices?.GetService(typeof(HpskSite.Services.CompetitionFees.CompetitionPaymentModelService))
                 as HpskSite.Services.CompetitionFees.CompetitionPaymentModelService;
-            if (models == null || !models.IsLedger(competitionId)) return null;
+            if (models == null) return null;
+            var model = models.Get(competitionId);
+            // ⚠️ Oläsbart beslut: ingen QR, ingen faktura — ett tydligt besked (Stefan 2026-10-12).
+            if (model == HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Unknown)
+                return Json(new
+                {
+                    success = false,
+                    paymentModel = model,
+                    message = HpskSite.Models.CompetitionFees.CompetitionPaymentModels.UnknownMessage
+                });
+            if (model != HpskSite.Models.CompetitionFees.CompetitionPaymentModels.Ledger) return null;
             return Json(new
             {
                 success = false,

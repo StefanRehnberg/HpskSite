@@ -68,13 +68,20 @@ namespace HpskSite.Services.CompetitionFees
             }
             catch (Exception ex)
             {
-                // ⚠️ Kan vi inte läsa beslutet är det SÄKRA svaret den gamla modellen för en tävling
-                // som har fakturor, och annars den nya. Vi vet inte vilket — logga högt och svara
-                // legacy: den vägen skapar inga liggarrader som sedan måste redas ut.
-                _logger.LogError(ex, "Kunde inte läsa betalningsmodellen för tävling {CompetitionId}.", competitionId);
-                return CompetitionPaymentModels.Legacy;
+                // ⚠️⚠️ Kan vi inte läsa beslutet GISSAR vi inte (Stefan 2026-10-12). Förut svarade vi
+                // "legacy", vilket fick PaymentService att skapa gamla fakturanoder för en ny tävling
+                // så snart läsningen föll — tyst, och för varje tävling på en gång om tabellen saknades.
+                // "unknown" cachas inte och skrivs aldrig: varje skapande väg vägrar med
+                // CompetitionPaymentModels.UnknownMessage, och nästa läsning försöker igen.
+                _logger.LogError(ex,
+                    "Kunde inte läsa betalningsmodellen för tävling {CompetitionId}. Inga fakturor eller avgifter skapas förrän den går att läsa.",
+                    competitionId);
+                return CompetitionPaymentModels.Unknown;
             }
         }
+
+        /// <summary>Beslutet gick inte att läsa — skapa ingenting.</summary>
+        public bool IsUnknown(int competitionId) => Get(competitionId) == CompetitionPaymentModels.Unknown;
 
         /// <summary>
         /// Anropas vid anmälan. Har tävlingen ingen rad blir den <c>ledger</c> nu — för alltid.
@@ -83,6 +90,8 @@ namespace HpskSite.Services.CompetitionFees
         {
             var model = Get(competitionId);
             if (Decided.ContainsKey(competitionId)) return model;
+            // ⚠️ Ett oläsbart beslut får aldrig skrivas ned — då vore "unknown" tävlingens modell för alltid.
+            if (model == CompetitionPaymentModels.Unknown) return model;
 
             try
             {

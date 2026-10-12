@@ -89,6 +89,9 @@ namespace HpskSite.Controllers
                 // 2026-08-20. EnsureOutstandingInvoiceAsync gives the registration's single
                 // outstanding invoice, creating it only if it genuinely does not exist, and bills the
                 // delta rather than the whole fee again.
+                if (_paymentService.IsPaymentModelUnknown(competitionId))
+                    return Json(new { success = false, message = HpskSite.Models.CompetitionFees.CompetitionPaymentModels.UnknownMessage });
+
                 var billing = await _paymentService.EnsureOutstandingInvoiceAsync(competitionId, registrationId);
                 var invoice = billing.PendingInvoice;
                 var totalAmount = billing.Outstanding;
