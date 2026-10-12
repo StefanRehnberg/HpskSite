@@ -11323,8 +11323,10 @@ efter tömningen (`IDENTITY_INSERT` med positiva värden får inte lämna identi
 - ⚠️ **`id > 0` / `id <= 0` på ett start- eller resultatliste-id är en BUGG** — "ingen lista" är 0, fråga
   `== 0` / `!= 0`. `TableIdSignGuardTests` fäller bygget på mönstret; en NODlagring, där ett negativt id
   aldrig är en nod, får `id-sign-ok: <skäl>`. `ORDER BY Id` är omvänd bland de nya raderna.
-- ⚠️ **Anmälningar och händelser (sajtstrukturen, i drift)** fortsätter efter nodernas högsta id — de har
-  inte bytts. Se utredningen i `notes/skalplan-2026-10-12.md` innan ett id därifrån jämförs med ett nod-id.
+- **Anmälningar och händelser (sajtstrukturen, i drift) har MEDVETET inte negativa id:n** (Stefan
+  2026-10-12): deras referenser bär sin sort överallt, så där sätts identiteten i stället över varje
+  refererat id (`IdentityFloor`, se avsnittet *Sajtstrukturen*). Negativa id:n hör hemma där id:t går
+  genom kanaler som inte vet sorten — `&fsl=`, kalenderfilernas UID, nodreservläget.
 
 ## ⚠️⚠️ Startlistorna går genom `IStartListStore` (skalplanen C2, branch `skalplan-fas-c`, 2026-10-12)
 
