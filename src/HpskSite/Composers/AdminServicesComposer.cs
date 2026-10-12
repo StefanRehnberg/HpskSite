@@ -208,10 +208,23 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Results.ICompetitionResultStore>(
                 sp => sp.GetRequiredService<HpskSite.Services.Results.SwitchingCompetitionResultStore>());
             builder.Services.AddScoped<HpskSite.Services.Results.CompetitionResultMigrationService>();
-            // Enda vägen in till startlistorna (skalplanen fas C2). Nodimplementationen i dag.
+            // Enda vägen in till startlistorna (skalplanen fas C2). Växeln väljer nod eller tabell per
+            // anrop (SiteSetting StartLists:Store) och vägrar skrivningar under frysning; ingen kod utanför
+            // lagringen läser precisionStartList- eller finalsStartList-noderna.
             builder.Services.AddScoped<HpskSite.Services.StartLists.NodeStartListStore>();
+            builder.Services.AddScoped<HpskSite.Services.StartLists.SqlStartListStore>();
+            builder.Services.AddScoped<HpskSite.Services.StartLists.SwitchingStartListStore>();
             builder.Services.AddScoped<HpskSite.Services.StartLists.IStartListStore>(
-                sp => sp.GetRequiredService<HpskSite.Services.StartLists.NodeStartListStore>());
+                sp => sp.GetRequiredService<HpskSite.Services.StartLists.SwitchingStartListStore>());
+            builder.Services.AddScoped<HpskSite.Services.StartLists.StartListMigrationService>();
+            builder.Services.AddHostedService<HpskSite.Services.StartLists.StartListSchemaGuardHostedService>();
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
+                HpskSite.Services.StartLists.StartListNodeGuard>();
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentDeletedNotification,
+                HpskSite.Services.StartLists.CompetitionTableRowsCleanupHandler>();
+            // Frysningen under underhållsfönstret ska svara med sitt meddelande, inte med ett 500-svar.
+            builder.Services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(o =>
+                o.Filters.Add<HpskSite.Services.Hosting.WriteFrozenExceptionFilter>());
             builder.Services.AddHostedService<HpskSite.Services.Results.CompetitionResultSchemaGuardHostedService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
                 HpskSite.Services.Results.CompetitionResultNodeGuard>();

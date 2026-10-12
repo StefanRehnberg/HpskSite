@@ -32,18 +32,6 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             return (true, null);
         }
 
-        public (bool IsValid, string? ErrorMessage) ValidateStartListId(int startListId)
-        {
-            if (startListId <= 0)
-                return (false, "Ogiltigt startlist-ID.");
-            
-            var startList = _contentService.GetById(startListId);
-            if (startList == null)
-                return (false, "Startlista hittades inte.");
-            
-            return (true, null);
-        }
-
         public (bool IsValid, string? ErrorMessage) ValidateGenerationRequest(int competitionId, List<CompetitionRegistration>? registrations)
         {
             var competitionValidation = ValidateCompetitionId(competitionId);

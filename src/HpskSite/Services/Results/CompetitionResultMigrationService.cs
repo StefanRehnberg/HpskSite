@@ -1,5 +1,6 @@
 using HpskSite.Models.Results;
 using HpskSite.Services.SiteSettings;
+using HpskSite.Services.Hosting;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Infrastructure.Scoping;
 
@@ -135,8 +136,8 @@ ORDER BY n.parentId, n.id", CompetitionResultFields.NodeAlias)
             if (!NodesCurrent) return (false, "Tabellen gäller — gå tillbaka till noderna först.");
             using var scope = _scopeProvider.CreateScope();
             var rows = scope.Database.ExecuteScalar<int>($"SELECT COUNT(*) FROM {SqlCompetitionResultStore.Table}");
-            scope.Database.Execute($@"DELETE FROM {SqlCompetitionResultStore.Table};
-DBCC CHECKIDENT('{SqlCompetitionResultStore.Table}', RESEED, 0) WITH NO_INFOMSGS;");
+            scope.Database.Execute($"DELETE FROM {SqlCompetitionResultStore.Table}");
+            NegativeIdentity.Reseed(scope.Database, SqlCompetitionResultStore.Table);
             scope.Complete();
             _logger.LogWarning("Resultatlistornas tabell tömd ({Rows} rader) av medlem {MemberId}", rows, byMemberId);
             return (true, $"Tabellen tömd ({rows} rader). Flytten kan köras igen.");
@@ -215,14 +216,13 @@ SET IDENTITY_INSERT {SqlCompetitionResultStore.Table} OFF;",
             };
         }
 
-        /// <summary>Identiteten fortsätter efter det högsta id:t i tabellen.</summary>
+        /// <summary>Nya rader får NEGATIVA id:n, aldrig samma tal som en innehållsnod. Se <see cref="NegativeIdentity"/>.</summary>
         private int Reseed()
         {
             using var scope = _scopeProvider.CreateScope();
-            var max = scope.Database.ExecuteScalar<int>($"SELECT ISNULL(MAX(Id), 0) FROM {SqlCompetitionResultStore.Table}");
-            if (max > 0) scope.Database.Execute($"DBCC CHECKIDENT('{SqlCompetitionResultStore.Table}', RESEED, {max})");
+            var seed = NegativeIdentity.Reseed(scope.Database, SqlCompetitionResultStore.Table);
             scope.Complete();
-            return max;
+            return seed;
         }
 
         public sealed class VerifyResult

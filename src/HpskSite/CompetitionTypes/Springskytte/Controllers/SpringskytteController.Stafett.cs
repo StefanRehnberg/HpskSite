@@ -218,7 +218,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var node = existingList != null
                     ? _startLists.Update(existingList.Id, FillStafett)
                     : _startLists.Create(competition.Id, StartListKind.Qualifying, listName, FillStafett);
-                if (node == null || node.Id <= 0)
+                if (node == null || node.Id == 0)
                     return Json(new { success = false, message = "Kunde inte spara startlistan." });
 
                 _logger.LogInformation("Generated Springskytte STAFETT start list '{ListName}' for CompetitionId={CompetitionId}, {Count} teams, NodeId={NodeId}",
