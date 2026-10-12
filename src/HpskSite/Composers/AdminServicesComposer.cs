@@ -199,11 +199,18 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Registrations.RegistrationMigrationService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
                 HpskSite.Services.Registrations.RegistrationNodeGuard>();
-            // Enda vägen in till resultatlistorna (skalplanen fas C1). Nodimplementationen i dag; ingen
-            // kod utanför lagringen läser competitionResult-noden.
+            // Enda vägen in till resultatlistorna (skalplanen fas C1). Växeln väljer nod eller tabell per
+            // anrop (SiteSetting Results:Store) och vägrar skrivningar under frysning; ingen kod utanför
+            // lagringen läser competitionResult-noden.
             builder.Services.AddScoped<HpskSite.Services.Results.NodeCompetitionResultStore>();
+            builder.Services.AddScoped<HpskSite.Services.Results.SqlCompetitionResultStore>();
+            builder.Services.AddScoped<HpskSite.Services.Results.SwitchingCompetitionResultStore>();
             builder.Services.AddScoped<HpskSite.Services.Results.ICompetitionResultStore>(
-                sp => sp.GetRequiredService<HpskSite.Services.Results.NodeCompetitionResultStore>());
+                sp => sp.GetRequiredService<HpskSite.Services.Results.SwitchingCompetitionResultStore>());
+            builder.Services.AddScoped<HpskSite.Services.Results.CompetitionResultMigrationService>();
+            builder.Services.AddHostedService<HpskSite.Services.Results.CompetitionResultSchemaGuardHostedService>();
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
+                HpskSite.Services.Results.CompetitionResultNodeGuard>();
             builder.Services.AddScoped<HpskSite.Services.ClubRosterService>();
             builder.Services.AddScoped<HpskSite.Services.MemberDirectoryService>();
             // Skalplanen B3: varje sparad medlem får en ClubMembership-rad per klubb i egenskaperna, och
