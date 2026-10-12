@@ -60,12 +60,26 @@ builder.Services.AddScoped<HpskSite.CompetitionTypes.Precision.Controllers.Start
 builder.Services.AddScoped<HpskSite.Services.MemberClubService>();
 builder.Services.AddScoped<HpskSite.Services.RegistrationClubPropagationService>();
 
-// Configure data protection to persist keys in file system (prevents logout on app pool recycle)
-// Keys are stored in App_Data/DataProtection-Keys which is writable on most shared hosting
+// ⚠️⚠️ DataProtection-nycklarna i DATABASEN (skalplanen D2, 2026-10-12). De signerar inloggningar,
+// antiforgery och de utskrivna/mejlade länkarna; i App_Data dör alla vid en serverflytt och kan inte
+// delas mellan instanser. App_Data-katalogen är kvar som källa för övergången (filerna kopieras in
+// vid första läsningen) och som reserv om migreringen inte är körd — se SqlDataProtectionKeyRepository.
 var keysPath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "DataProtection-Keys");
+var keysDir = new DirectoryInfo(keysPath);
 builder.Services.AddDataProtection()
-    .PersistKeysToFileSystem(new DirectoryInfo(keysPath))
+    .PersistKeysToFileSystem(keysDir)
     .SetApplicationName("HpskSite");
+var dpConnection = builder.Configuration.GetConnectionString("umbracoDbDSN");
+if (!string.IsNullOrWhiteSpace(dpConnection) && !dpConnection.Contains("|DataDirectory|"))
+{
+    builder.Services.AddOptions<Microsoft.AspNetCore.DataProtection.KeyManagement.KeyManagementOptions>()
+        .Configure<ILoggerFactory>((options, loggers) =>
+        {
+            var files = new Microsoft.AspNetCore.DataProtection.Repositories.FileSystemXmlRepository(keysDir, loggers);
+            options.XmlRepository = new HpskSite.Services.Hosting.SqlDataProtectionKeyRepository(
+                dpConnection, keysDir, files, loggers.CreateLogger("HpskSite.DataProtection"));
+        });
+}
 
 // Configure member authentication cookies specifically (not backoffice)
 // This ensures RememberMe checkbox is properly respected for frontend members

@@ -11267,6 +11267,17 @@ Test: `BackgroundServiceIsolationTests` (5). A/B: basklassen utan `SuppressFlow`
 rött; en tjänst som ärver `BackgroundService` → arkitekturregeln röd och namnger tjänsten; en tjänst
 som åsidosätter `ExecuteAsync` → kompileringsfel.
 
+## DataProtection-nycklarna ligger i databasen (2026-10-12, skalplanen D2)
+
+`dbo.DataProtectionKey` via `Services/Hosting/SqlDataProtectionKeyRepository` (inkopplad i `Program.cs`).
+Nycklarna signerar inloggningar, antiforgery och de utskrivna/mejlade länkarna (stations-QR,
+betal-, svars- och justeringslänkar, ICS) — i `App_Data` dör de vid en serverflytt och kan inte delas
+mellan instanser. Egen SqlClient-anslutning, aldrig Umbracos scope. Är tabellen tom kopieras filerna i
+`App_Data/DataProtection-Keys` in vid första läsningen (gjort i dev: 4 nycklar, inga utloggningar);
+saknas tabellen används filerna och loggen larmar Critical. **Radera inte katalogen** förrän tabellen
+har nycklarna. Migrering: `Migrations/create-dataprotection-key-table.sql` (K1, FÖRE deploy).
+⚠️ Nycklarna är okrypterade i tabellen, som de var på disken — databasåtkomst = nyckelåtkomst.
+
 ## Migrations (DISABLED)
 The `/Migrations` folder contains disabled database schemas for direct competition result storage. The system now uses Umbraco Document Types and Content Service instead. Migrations can be safely ignored unless reverting to database-backed storage.
 
