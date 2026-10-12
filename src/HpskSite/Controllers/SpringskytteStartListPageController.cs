@@ -33,13 +33,16 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly ClubService _clubService;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public SpringskytteStartListPageController(
             IContentService contentService,
             IMemberManager memberManager,
             IMemberService memberService,
-            ClubService clubService)
+            ClubService clubService,
+            HpskSite.Services.StartLists.IStartListStore startLists)
         {
+            _startLists = startLists;
             _contentService = contentService;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -84,9 +87,9 @@ namespace HpskSite.Controllers
 
         private List<SpringskytteStartListView> LoadLists(int competitionId)
         {
-            var children = _contentService
-                .GetPagedChildren(competitionId, 0, 1000, out _)
-                .Where(c => c.ContentType.Alias == "precisionStartList")
+            // Listorna direkt under tävlingen (genom IStartListStore).
+            var children = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying)
+                .Where(r => !r.LegacyHub)
                 .ToList();
 
             var lists = new List<SpringskytteStartListView>();
@@ -94,11 +97,11 @@ namespace HpskSite.Controllers
 
             foreach (var node in children)
             {
-                var json = node.GetValue<string>("configurationData");
+                var json = node.ConfigurationData;
                 if (string.IsNullOrEmpty(json)) continue;
 
-                var isOfficial = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList");
-                var generated = node.HasProperty("generatedDate") ? node.GetValue<DateTime>("generatedDate") : node.UpdateDate;
+                var isOfficial = node.IsOfficial;
+                var generated = node.GeneratedDate ?? DateTime.MinValue;
 
                 // Stafett (relay) lists carry Teams, not Starters, and are tagged teamFormat.
                 if (SpringskytteController.IsStafettConfig(json))

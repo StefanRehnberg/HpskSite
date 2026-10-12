@@ -51,21 +51,22 @@ namespace HpskSite.Services
     /// </summary>
     public class RegistrationClubPropagationService
     {
-        private static readonly string[] StartListAliases = { "precisionStartList", "finalsStartList" };
-
         private readonly IContentService _contentService;
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly StartListHtmlRenderer _renderer;
         private readonly DirektplaceringStartListService _dpStartListService;
         private readonly ILogger<RegistrationClubPropagationService> _logger;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public RegistrationClubPropagationService(
             IContentService contentService,
             IUmbracoDatabaseFactory databaseFactory,
             StartListHtmlRenderer renderer,
             DirektplaceringStartListService dpStartListService,
-            ILogger<RegistrationClubPropagationService> logger)
+            ILogger<RegistrationClubPropagationService> logger,
+            HpskSite.Services.StartLists.IStartListStore startLists)
         {
+            _startLists = startLists;
             _contentService = contentService;
             _databaseFactory = databaseFactory;
             _renderer = renderer;
@@ -110,8 +111,8 @@ namespace HpskSite.Services
             }
             else
             {
-                foreach (var node in _contentService.GetPagedChildren(competition.Id, 0, 200, out _)
-                                                    .Where(c => StartListAliases.Contains(c.ContentType.Alias)))
+                // Tävlingens direkta listor (grundomgång och finaler), som förut — inte hubbens.
+                foreach (var node in _startLists.List(competition.Id).Where(r => !r.LegacyHub))
                 {
                     try
                     {
@@ -146,9 +147,9 @@ namespace HpskSite.Services
         /// a no-op must not re-save and re-publish the node, because publishing a start list is a
         /// visible event (it fires participant notifications elsewhere in the codebase).
         /// </summary>
-        private async Task<bool> PatchStartListAsync(IContent node, string competitionName, int memberId, string newClubName)
+        private async Task<bool> PatchStartListAsync(HpskSite.Models.StartLists.StartListRecord node, string competitionName, int memberId, string newClubName)
         {
-            var configData = node.GetValue<string>("configurationData");
+            var configData = node.ConfigurationData;
             if (string.IsNullOrWhiteSpace(configData)) return false;
 
             // Parsed loosely on purpose: precisionStartList is a SHARED doctype carrying at least
@@ -185,7 +186,8 @@ namespace HpskSite.Services
 
             if (!changed) return false;
 
-            node.SetValue("configurationData", root.ToString(Formatting.None));
+            var newConfig = root.ToString(Formatting.None);
+            string? newHtml = null;
 
             // Refresh the cached blob too. The public /startlista page reads configurationData
             // directly, but admin preview, print and e-mail read this — leaving it stale would
@@ -196,14 +198,13 @@ namespace HpskSite.Services
                 {
                     var patched = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(root.ToString(Formatting.None));
                     if (patched?.Starters != null)
-                        node.SetValue("startListContent",
-                            SpringskytteController.BuildStartListHtml(patched.Starters, patched));
+                        newHtml = SpringskytteController.BuildStartListHtml(patched.Starters, patched);
                 }
                 else if (teams != null)
                 {
                     var patched = JsonConvert.DeserializeObject<StartListConfiguration>(root.ToString(Formatting.None));
                     if (patched != null)
-                        node.SetValue("startListContent", await _renderer.GenerateStartListHtml(patched, competitionName));
+                        newHtml = await _renderer.GenerateStartListHtml(patched, competitionName);
                 }
             }
             catch (Exception ex)
@@ -213,15 +214,14 @@ namespace HpskSite.Services
                 _logger.LogWarning(ex, "Could not re-render cached HTML for start list {NodeId}", node.Id);
             }
 
-            var saveResult = _contentService.Save(node);
-            if (!saveResult.Success) return false;
-
             // Only re-publish a list that was already published — publishing a draft list here
             // would make an unfinished start list public as a side effect of a club correction.
-            if (node.Published)
-                _contentService.Publish(node, new[] { "*" }, -1);
-
-            return true;
+            var saved = _startLists.Update(node.Id, r =>
+            {
+                r.ConfigurationData = newConfig;
+                if (newHtml != null) r.StartListContent = newHtml;
+            }, HpskSite.Models.StartLists.StartListPublish.IfPublished);
+            return saved != null;
         }
 
         /// <summary>Set Club on every row of <paramref name="rows"/> whose MemberId matches.</summary>

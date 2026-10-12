@@ -15,6 +15,7 @@
 @inject HpskSite.Services.Registrations.ICompetitionRegistrationStore Registrations
 @inject HpskSite.Services.Events.CompetitionEventLinkService CompetitionLinks
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
+@inject HpskSite.Services.StartLists.IStartListStore StartLists
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
 	Layout = "Master.cshtml";
@@ -486,22 +487,20 @@
     //    (mirrors the finals + Springskytte direct-child reads below, and the
     //    generator/publish endpoints which were migrated to this layout).
     //    Legacy: nested under a competitionStartListsHub — kept as a fallback.
-    var officialStartList = competitionChildren
-        .FirstOrDefault(c => c.ContentType.Alias == "precisionStartList" && c.Value<bool>("isOfficialStartList"));
-    if (officialStartList == null)
-    {
-        var startListsHub = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-        officialStartList = startListsHub?.Children()?.FirstOrDefault(sl => sl.Value<bool>("isOfficialStartList"));
-    }
+    //    Listorna läses ur IStartListStore (skalplanen C2), aldrig noderna direkt; adressen byggs
+    //    ur tävlingens + listans segment.
+    var publishedStartLists = StartLists.ListPublished(Model.Id);
+    var officialStartList = publishedStartLists
+        .FirstOrDefault(r => r.Kind == HpskSite.Models.StartLists.StartListKind.Qualifying && r.IsOfficial);
     var hasOfficialStartList = officialStartList != null;
-    var startListPageUrl = hasOfficialStartList ? officialStartList.Url() : "";
+    var startListPageUrl = hasOfficialStartList ? officialStartList!.PublicUrl(Model.Url()) : "";
 
     // Är självanmälan stängd för att startlistan är publicerad? Frågan besvaras av
     // StartListRegistrationGate och INTE härifrån, eftersom RegisterForCompetition måste ge samma
     // svar — en knapp som är släckt medan endpointen tar emot anmälan är värre än ingen spärr alls.
     // Grinden är härledd (arrangörens val OCH en publicerad lista), så en avpublicering öppnar
     // anmälan igen utan att något behöver skrivas.
-    var startListGateActive = HpskSite.Services.RegistrationGate.StartListRegistrationGate.IsClosed(Model);
+    var startListGateActive = HpskSite.Services.RegistrationGate.StartListRegistrationGate.IsClosed(Model, StartLists);
 
     // ⚠️ Funktionärer undantas ÄVEN HÄR, inte bara i endpointen. Arrangören anmäler rutinmässigt
     // någon annan via den här modalen (targetMemberId), så en släckt knapp för dem hade gjort
@@ -520,19 +519,19 @@
     //     på ett flerdagarsmästerskap är C:s final publicerad på lördagen medan A:s ännu
     //     är ett utkast. Alla publicerade visas, en knapp per lista, märkt med gruppen.
     //     Gruppen läses via FinalsWeaponGroup — samma regel som administrationsytan.
-    var officialFinalsStartLists = competitionChildren
-        .Where(c => c.ContentType.Alias == "finalsStartList" && c.Value<bool>("isOfficialFinalsStartList"))
-        .Select(c => new
+    var officialFinalsStartLists = publishedStartLists
+        .Where(r => r.Kind == HpskSite.Models.StartLists.StartListKind.Finals && r.IsOfficial)
+        .Select(r => new
         {
-            Node = c,
+            Url = r.PublicUrl(Model.Url()),
             Group = HpskSite.CompetitionTypes.Precision.Models.FinalsWeaponGroup
-                .FromConfigurationData(c.Value<string>("configurationData"))
+                .FromConfigurationData(r.ConfigurationData)
         })
         .OrderBy(x => x.Group.Length == 0 ? 1 : 0)
         .ThenBy(x => x.Group, StringComparer.OrdinalIgnoreCase)
         .ToList();
     var hasOfficialFinalsStartList = officialFinalsStartLists.Count > 0;
-    var finalsStartListPageUrl = hasOfficialFinalsStartList ? officialFinalsStartLists[0].Node.Url() : "";
+    var finalsStartListPageUrl = hasOfficialFinalsStartList ? officialFinalsStartLists[0].Url : "";
 
     // 3. Result page availability from published content
     // Resultatlistan ur ICompetitionResultStore (det publicerade läget), aldrig noden direkt.
@@ -1505,8 +1504,8 @@
 							{
 								@* Springskytte can have several start lists (per weapon group / day). One button
 								   opens the /startlista/{id} hub that lists them all, instead of one button each. *@
-								var springStartLists = competitionChildren
-									.Where(c => c.ContentType.Alias == "precisionStartList")
+								var springStartLists = publishedStartLists
+									.Where(r => r.Kind == HpskSite.Models.StartLists.StartListKind.Qualifying)
 									.ToList();
 								if (springStartLists.Any())
 								{
@@ -1544,7 +1543,7 @@
 								var fslLabel = officialFinalsStartLists.Count > 1 && fsl.Group.Length > 0
 									? $"Visa finalsstartlista – {fsl.Group}"
 									: "Visa finalsstartlista";
-								<a href="@fsl.Node.Url()" class="btn btn-warning w-100 mt-2" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('finalsstartlistan'); }">
+								<a href="@fsl.Url" class="btn btn-warning w-100 mt-2" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('finalsstartlistan'); }">
 									<i class="bi bi-trophy me-1"></i> @fslLabel
 								</a>
 							}

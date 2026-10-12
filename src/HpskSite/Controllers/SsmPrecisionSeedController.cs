@@ -58,6 +58,7 @@ namespace HpskSite.Controllers
         private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment _env;
         private readonly ILogger<SsmPrecisionSeedController> _logger;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public SsmPrecisionSeedController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -76,9 +77,11 @@ namespace HpskSite.Controllers
             IConfiguration configuration,
             Microsoft.AspNetCore.Hosting.IWebHostEnvironment env,
             ILogger<SsmPrecisionSeedController> logger,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.StartLists.IStartListStore startLists)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _startLists = startLists;
             _memberService = memberService;
             _contentService = contentService;
             _clubService = clubService;
@@ -647,13 +650,12 @@ namespace HpskSite.Controllers
 
             // (medlem|kanonisk klass) -> (skjutlag, plats) ur startlistan. Läses BARA.
             var placement = new Dictionary<string, (int Team, int Pos)>(StringComparer.OrdinalIgnoreCase);
-            foreach (var sl in _contentService.GetPagedChildren(competitionId, 0, 50, out _)
-                         .Where(c => c.ContentType.Alias == "precisionStartList"))
+            foreach (var sl in _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying).Where(r => !r.LegacyHub))
             {
                 try
                 {
                     var cfg = JsonConvert.DeserializeObject<CompetitionTypes.Precision.Models.StartListConfiguration>(
-                        sl.GetValue<string>("configurationData") ?? "");
+                        sl.ConfigurationData);
                     foreach (var team in cfg?.Teams ?? new List<CompetitionTypes.Precision.Models.StartListTeam>())
                         foreach (var sh in team.Shooters ?? new List<CompetitionTypes.Precision.Models.StartListShooter>())
                         {
@@ -965,13 +967,12 @@ namespace HpskSite.Controllers
             }
 
             var placement = new Dictionary<string, (int Team, int Pos)>(StringComparer.OrdinalIgnoreCase);
-            foreach (var fsl in _contentService.GetPagedChildren(competitionId, 0, 50, out _)
-                         .Where(c => c.ContentType.Alias == "finalsStartList"))
+            foreach (var fsl in _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Finals).Where(r => !r.LegacyHub))
             {
                 try
                 {
                     var cfg = JsonConvert.DeserializeObject<CompetitionTypes.Precision.Models.StartListConfiguration>(
-                        fsl.GetValue<string>("configurationData") ?? "");
+                        fsl.ConfigurationData);
                     foreach (var team in cfg?.Teams ?? new List<CompetitionTypes.Precision.Models.StartListTeam>())
                         foreach (var sh in team.Shooters ?? new List<CompetitionTypes.Precision.Models.StartListShooter>())
                             placement[$"{sh.MemberId}|{ShootingClasses.NormalizeKey(sh.WeaponClass)}"] =

@@ -15,6 +15,7 @@ using HpskSite.CompetitionTypes.Precision.Controllers;
 using HpskSite.Helpers;
 using HpskSite.Services;
 using Newtonsoft.Json;
+using HpskSite.Models.StartLists;
 
 namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 {
@@ -36,6 +37,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
         public SpringskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -55,10 +57,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             CompetitionTeamService teamService,
             MemberClubService memberClubService,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.Results.ICompetitionResultStore results)
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.StartLists.IStartListStore startLists)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
+            _startLists = startLists;
             _results = results;
             _memberClubService = memberClubService;
             _contentService = contentService;
@@ -128,13 +132,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         var comp = _contentService.GetById(request.CompetitionId);
                         if (comp != null)
                         {
-                            var slNodes = _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
-                                .Where(c => c.ContentType.Alias == "precisionStartList")
+                            var slNodes = SpringLists(comp.Id)
                                 .ToList();
 
                             foreach (var node in slNodes)
                             {
-                                var cfgJson = node.GetValue<string>("configurationData");
+                                var cfgJson = node.ConfigurationData;
                                 if (string.IsNullOrEmpty(cfgJson)) continue;
                                 var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
                                 if (config?.Starters == null) continue;
@@ -397,12 +400,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var competition = _contentService.GetById(competitionId);
                 if (competition != null)
                 {
-                    var slNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                        .Where(c => c.ContentType.Alias == "precisionStartList")
+                    var slNodes = SpringLists(competition.Id)
                         .ToList();
                     foreach (var node in slNodes)
                     {
-                        var cfgJson = node.GetValue<string>("configurationData");
+                        var cfgJson = node.ConfigurationData;
                         if (string.IsNullOrEmpty(cfgJson)) continue;
                         var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
                         if (config?.Starters == null) continue;
@@ -726,6 +728,29 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// läses en annan grens form hit blir fälten null, raderna filtreras bort och
         /// uppslaget blir tomt i stället för att gruppera fel.
         /// </summary>
+        /// <summary>
+        /// Springskyttets listor — <c>precisionStartList</c> direkt under tävlingen, i nodordning — genom
+        /// <c>IStartListStore</c> (skalplanen C2). Individuella och stafett; formen avgörs av konfigurationen.
+        /// </summary>
+        private List<StartListRecord> SpringLists(int competitionId) =>
+            _startLists.List(competitionId, StartListKind.Qualifying).Where(r => !r.LegacyHub).ToList();
+
+        /// <summary>
+        /// Skriver listans konfiguration (och HTML) genom <c>IStartListStore</c>. Publicerar som standard —
+        /// den publika sidan och Mitt schema läser det publicerade läget.
+        /// </summary>
+        private bool SaveSpringList(int startListId, string configJson, string? html,
+            StartListPublish publish = StartListPublish.Always)
+        {
+            var saved = _startLists.Update(startListId, r =>
+            {
+                r.ConfigurationData = configJson;
+                if (html != null) r.StartListContent = html;
+            }, publish);
+            if (saved == null) _logger.LogWarning("Springskytte start list {NodeId} not found when saving", startListId);
+            return saved != null;
+        }
+
         private Dictionary<string, string> ReadSpringskytteMergeLookup(Umbraco.Cms.Core.Models.IContent? competition)
         {
             try
@@ -1142,13 +1167,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var competition = _contentService.GetById(competitionId);
                 if (competition != null)
                 {
-                    var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                        .Where(c => c.ContentType.Alias == "precisionStartList")
+                    var startListNodes = SpringLists(competition.Id)
                         .ToList();
 
                     foreach (var node in startListNodes)
                     {
-                        var cfgJson = node.GetValue<string>("configurationData");
+                        var cfgJson = node.ConfigurationData;
                         if (string.IsNullOrEmpty(cfgJson)) continue;
                         var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
                         if (config?.Starters == null) continue;
@@ -1353,8 +1377,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 SpringskytteStartListConfig? previousConfig = null;
                 if (request.ExistingNodeId.HasValue && request.ExistingNodeId.Value > 0)
                 {
-                    var oldNode = _contentService.GetById(request.ExistingNodeId.Value);
-                    var oldJson = oldNode?.GetValue<string>("configurationData");
+                    var oldNode = _startLists.Get(request.ExistingNodeId.Value);
+                    var oldJson = oldNode?.ConfigurationData;
                     if (!string.IsNullOrEmpty(oldJson))
                     {
                         try
@@ -1381,12 +1405,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     if (string.IsNullOrEmpty(newSlug))
                         return Json(new { success = false, message = "Ogiltigt listnamn. Använd bokstäver eller siffror." });
 
-                    var collision = _contentService.GetPagedChildren(competition.Id, 0, 1000, out _)
-                        .Where(c => c.ContentType.Alias == "precisionStartList")
+                    var collision = SpringLists(competition.Id)
                         .Where(c => !(request.ExistingNodeId.HasValue && c.Id == request.ExistingNodeId.Value))
                         .Any(c =>
                         {
-                            var cj = c.GetValue<string>("configurationData");
+                            var cj = c.ConfigurationData;
                             if (string.IsNullOrEmpty(cj)) return false;
                             SpringskytteStartListConfig? cc = null;
                             try { cc = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cj); } catch { }
@@ -1400,46 +1423,38 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 if (competition != null)
                 {
-                    Umbraco.Cms.Core.Models.IContent? startListContent = null;
-                    bool isNewNode = false;
-
+                    StartListRecord? existingList = null;
                     if (request.ExistingNodeId.HasValue && request.ExistingNodeId.Value > 0)
                     {
-                        // Update existing node
-                        startListContent = _contentService.GetById(request.ExistingNodeId.Value);
-                        if (startListContent == null || startListContent.ParentId != competition.Id)
+                        // Update existing list
+                        existingList = _startLists.Get(request.ExistingNodeId.Value);
+                        if (existingList == null || existingList.CompetitionId != competition.Id || existingList.LegacyHub)
                             return Json(new { success = false, message = "Startlistan hittades inte." });
                     }
+                    bool isNewNode = existingList == null;
 
-                    if (startListContent == null)
+                    // Assign start numbers for THIS list only. Generating a list must never rewrite
+                    // numbers on another list, and a shooter who was already on this list keeps the
+                    // number they had — including one an organiser typed in by hand.
+                    var numberingDetail = ApplyNumbersToGeneratedList(
+                        competition, existingList?.Id ?? 0, config, previousConfig);
+                    AppendNumberingEvent(config, isNewNode ? "generate" : "regenerate", numberingDetail,
+                        await CurrentMemberNameAsync());
+
+                    // Skrivs och publiceras genom IStartListStore (skalplanen C2).
+                    var generatedJson = JsonConvert.SerializeObject(config);
+                    var generatedHtml = BuildStartListHtml(starters, config);
+                    void FillSpring(StartListRecord r)
                     {
-                        // Create new node
-                        var contentType = _contentTypeService.Get("precisionStartList");
-                        if (contentType != null)
-                        {
-                            startListContent = _contentService.Create(listName, competition, contentType.Alias);
-                            isNewNode = true;
-                        }
+                        r.Name = listName;
+                        r.ConfigurationData = generatedJson;
+                        r.TeamFormat = "Springskytte";
+                        r.GeneratedDate = DateTime.Now;
+                        r.StartListContent = generatedHtml;
                     }
-
-                    if (startListContent != null)
-                    {
-                        // Assign start numbers for THIS list only. Generating a list must never rewrite
-                        // numbers on another list, and a shooter who was already on this list keeps the
-                        // number they had — including one an organiser typed in by hand.
-                        var numberingDetail = ApplyNumbersToGeneratedList(
-                            competition, startListContent.Id, config, previousConfig);
-                        AppendNumberingEvent(config, isNewNode ? "generate" : "regenerate", numberingDetail,
-                            await CurrentMemberNameAsync());
-
-                        startListContent.Name = listName;
-                        startListContent.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                        startListContent.SetValue("teamFormat", "Springskytte");
-                        startListContent.SetValue("generatedDate", DateTime.Now);
-                        startListContent.SetValue("startListContent", BuildStartListHtml(starters, config));
-                        _contentService.Save(startListContent);
-                        _contentService.Publish(startListContent, new[] { "*" });
-                    }
+                    StartListRecord? startListContent = existingList != null
+                        ? _startLists.Update(existingList.Id, FillSpring)
+                        : _startLists.Create(competition.Id, StartListKind.Qualifying, listName, FillSpring);
 
                     // Update result entries with start order/time for this list's starters only
                     // (non-critical: entries may not exist yet if no results have been entered)
@@ -1612,8 +1627,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
-                var node = _contentService.GetById(request.NodeId);
-                if (node == null || node.ParentId != competition.Id || node.ContentType.Alias != "precisionStartList")
+                var node = _startLists.Get(request.NodeId);
+                if (node == null || (node.CompetitionId != competition.Id || node.LegacyHub) || node.Kind != StartListKind.Qualifying)
                     return Json(new { success = false, message = "Startlistan hittades inte." });
 
                 var listName = (request.ListName ?? "").Trim();
@@ -1624,11 +1639,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     return Json(new { success = false, message = "Ogiltigt listnamn. Använd bokstäver eller siffror." });
 
                 // Unique slug among the OTHER lists that have starters (i.e. that get a public URL).
-                var collision = _contentService.GetPagedChildren(competition.Id, 0, 1000, out _)
-                    .Where(c => c.ContentType.Alias == "precisionStartList" && c.Id != request.NodeId)
+                var collision = SpringLists(competition.Id).Where(c => c.Id != request.NodeId)
                     .Any(c =>
                     {
-                        var cj = c.GetValue<string>("configurationData");
+                        var cj = c.ConfigurationData;
                         if (string.IsNullOrEmpty(cj)) return false;
                         SpringskytteStartListConfig? cc = null;
                         try { cc = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cj); } catch { }
@@ -1639,7 +1653,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (collision)
                     return Json(new { success = false, message = $"Det finns redan en startlista med namnet \"{listName}\" (eller ett namn som ger samma webbadress). Välj ett unikt namn." });
 
-                var json = node.GetValue<string>("configurationData");
+                var json = node.ConfigurationData;
                 SpringskytteStartListConfig? config = null;
                 try { config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(json ?? ""); } catch { }
                 if (config == null)
@@ -1647,10 +1661,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 config.ListName = listName;
                 config.ListDate = (request.ListDate ?? "").Trim();
-                node.Name = listName;
-                node.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                _contentService.Save(node);
-                _contentService.Publish(node, new[] { "*" });
+                var metaJson = JsonConvert.SerializeObject(config);
+                _startLists.Update(node.Id, r => { r.Name = listName; r.ConfigurationData = metaJson; });
 
                 // Slug is unique among lists-with-starters, so it equals the base slug (no dedup needed).
                 return Json(new { success = true, slug = newSlug, listName, listDate = config.ListDate });
@@ -1694,8 +1706,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     _logger.LogWarning(statusEx, "Could not read Springskytte statuses for {Comp}", competitionId);
                 }
 
-                var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                    .Where(c => c.ContentType.Alias == "precisionStartList")
+                var startListNodes = SpringLists(competition.Id)
                     .ToList();
 
                 if (!startListNodes.Any())
@@ -1708,7 +1719,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var lists = new List<object>();
                 foreach (var node in startListNodes)
                 {
-                    var configJson = node.GetValue<string>("configurationData");
+                    var configJson = node.ConfigurationData;
                     // Stafett lists live in their own management section — never surface them among
                     // the individual (per-shooter) start lists, where they'd render as empty cards.
                     if (IsStafettConfig(configJson)) continue;
@@ -1769,8 +1780,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                             })
                             .ToList(),
                         starterCount,
-                        generatedDate = node.GetValue<DateTime?>("generatedDate")?.ToString("yyyy-MM-dd HH:mm") ?? "",
-                        isOfficial = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList")
+                        generatedDate = node.GeneratedDate?.ToString("yyyy-MM-dd HH:mm") ?? "",
+                        isOfficial = node.IsOfficial
                     });
                 }
 
@@ -1795,13 +1806,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
-                var startListContent = _contentService.GetPagedChildren(competition.Id, 0, 20, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "precisionStartList");
+                var startListContent = SpringLists(competition.Id).FirstOrDefault();
 
                 if (startListContent == null)
                     return Json(new { success = true, hasStartList = false, starters = new List<object>() });
 
-                var configJson = startListContent.GetValue<string>("configurationData");
+                var configJson = startListContent.ConfigurationData;
                 if (string.IsNullOrEmpty(configJson))
                     return Json(new { success = true, hasStartList = false, starters = new List<object>() });
 
@@ -1816,7 +1826,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     config?.BreakAfterEvery,
                     config?.BreakDuration,
                     starters = config?.Starters ?? new List<SpringskytteStartListEntry>(),
-                    html = startListContent.GetValue<string>("startListContent") ?? ""
+                    html = startListContent.StartListContent
                 });
             }
             catch (Exception ex)
@@ -1838,17 +1848,17 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var node = _contentService.GetById(request.NodeId);
-                if (node == null || node.ContentType.Alias != "precisionStartList")
+                var node = _startLists.Get(request.NodeId);
+                if (node == null || node.Kind != StartListKind.Qualifying)
                     return Json(new { success = false, message = "Startlistan hittades inte." });
 
                 // Verify the node belongs to this competition
                 var competition = _contentService.GetById(request.CompetitionId);
-                if (competition == null || node.ParentId != competition.Id)
+                if (competition == null || (node.CompetitionId != competition.Id || node.LegacyHub))
                     return Json(new { success = false, message = "Startlistan tillhör inte denna tävling." });
 
                 // Read config to find affected starters
-                var configJson = node.GetValue<string>("configurationData");
+                var configJson = node.ConfigurationData;
                 var config = !string.IsNullOrEmpty(configJson)
                     ? JsonConvert.DeserializeObject<SpringskytteStartListConfig>(configJson)
                     : null;
@@ -1875,8 +1885,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 }
 
                 // Delete the node
-                _contentService.Unpublish(node);
-                _contentService.Delete(node);
+                _startLists.Delete(node.Id);
 
                 _logger.LogInformation("Deleted Springskytte start list NodeId={NodeId} for CompetitionId={CompetitionId}",
                     request.NodeId, request.CompetitionId);
@@ -1915,13 +1924,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 if (competition != null)
                 {
-                    var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                        .Where(c => c.ContentType.Alias == "precisionStartList")
+                    var startListNodes = SpringLists(competition.Id)
                         .ToList();
 
                     foreach (var node in startListNodes)
                     {
-                        var configJson = node.GetValue<string>("configurationData");
+                        var configJson = node.ConfigurationData;
                         if (string.IsNullOrEmpty(configJson)) continue;
                         var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(configJson);
                         if (config?.CoveredClasses == null) continue;
@@ -2132,12 +2140,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     AppendNumberingEvent(config, "renumber",
                         $"{DescribeNumbers(before)} → {DescribeNumbers(nums)}", by);
 
-                    node.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                    node.SetValue("startListContent", BuildStartListHtml(config.Starters, config));
-                    _contentService.Save(node);
-                    var publishResult = _contentService.Publish(node, new[] { "*" });
-                    if (!publishResult.Success)
-                        _logger.LogWarning("Failed to publish start list node {NodeId}: {Result}", node.Id, publishResult.Result);
+                    SaveSpringList(node.Id, JsonConvert.SerializeObject(config), BuildStartListHtml(config.Starters, config));
 
                     totalStarters += config.Starters.Count;
                     listCount++;
@@ -2319,13 +2322,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// modal shows them and the way follow-on numbering walks them: by first start time, then name,
         /// then node id (stable). Stafett nodes are skipped naturally — they carry Teams, not Starters.
         /// </summary>
-        private List<(Umbraco.Cms.Core.Models.IContent node, SpringskytteStartListConfig config)> GetOrderedIndividualStartLists(Umbraco.Cms.Core.Models.IContent competition)
+        private List<(StartListRecord node, SpringskytteStartListConfig config)> GetOrderedIndividualStartLists(Umbraco.Cms.Core.Models.IContent competition)
         {
-            var nodeConfigs = new List<(Umbraco.Cms.Core.Models.IContent node, SpringskytteStartListConfig config)>();
-            foreach (var node in _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                         .Where(c => c.ContentType.Alias == "precisionStartList"))
+            var nodeConfigs = new List<(StartListRecord node, SpringskytteStartListConfig config)>();
+            foreach (var node in SpringLists(competition.Id))
             {
-                var cfgJson = node.GetValue<string>("configurationData");
+                var cfgJson = node.ConfigurationData;
                 if (string.IsNullOrEmpty(cfgJson)) continue;
                 if (IsStafettConfig(cfgJson)) continue;  // stafett lists don't take part in this numbering
                 SpringskytteStartListConfig? config = null;
@@ -2377,12 +2379,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 AppendNumberingEvent(config, "reset",
                     $"{DescribeNumbers(before)} → {DescribeNumbers(config.Starters.Select(s => s.StartOrder))}", by);
 
-                node.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                node.SetValue("startListContent", BuildStartListHtml(config.Starters));
-                _contentService.Save(node);
-                var publishResult = _contentService.Publish(node, new[] { "*" });
-                if (!publishResult.Success)
-                    _logger.LogWarning("Failed to publish start list node {NodeId}: {Result}", node.Id, publishResult.Result);
+                SaveSpringList(node.Id, JsonConvert.SerializeObject(config), BuildStartListHtml(config.Starters));
             }
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
@@ -2457,8 +2454,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     var (node, config) = ordered[idx];
                     config.StartNumberBase = 1;
                     config.ContinueFromPrevious = idx > 0;
-                    node.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                    _contentService.Save(node);
+                    SaveSpringList(node.Id, JsonConvert.SerializeObject(config), null, StartListPublish.Never);
                 }
 
                 var (totalReset, _) = await ApplyRunningSequenceNumberingAsync(competitionId, await CurrentMemberNameAsync());
@@ -2499,11 +2495,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var node = _contentService.GetById(request.NodeId);
-                if (node == null || node.ContentType.Alias != "precisionStartList" || node.ParentId != request.CompetitionId)
+                var node = _startLists.Get(request.NodeId);
+                if (node == null || node.Kind != StartListKind.Qualifying || (node.CompetitionId != request.CompetitionId || node.LegacyHub))
                     return Json(new { success = false, message = "Startlistan hittades inte." });
 
-                var cfgJson = node.GetValue<string>("configurationData");
+                var cfgJson = node.ConfigurationData;
                 if (string.IsNullOrEmpty(cfgJson))
                     return Json(new { success = false, message = "Startlistan saknar data." });
                 var config = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson);
@@ -2607,9 +2603,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 // public start-list route and GetSpringskytteStartLists read, and the DB row keeps
                 // result entry (sprint = finish − start) consistent. Publish is best-effort — those
                 // consumers read the saved content, so a publish hiccup must not fail the edit.
-                node.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                node.SetValue("startListContent", BuildStartListHtml(config.Starters));
-                _contentService.Save(node);
+                SaveSpringList(node.Id, JsonConvert.SerializeObject(config), BuildStartListHtml(config.Starters));
 
                 // Mirror to the DB result row if one exists — the result save reads the DB start
                 // time first (then config), so they must stay consistent for sprint = finish − start.
@@ -2643,17 +2637,6 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     _logger.LogWarning(dbEx, "DB mirror of start-list edit failed (config saved); comp={Comp} member={Member}", request.CompetitionId, request.MemberId);
                 }
 
-                try
-                {
-                    var publishResult = _contentService.Publish(node, new[] { "*" });
-                    if (!publishResult.Success)
-                        _logger.LogWarning("Failed to publish start list node {NodeId}: {Result}", node.Id, publishResult.Result);
-                }
-                catch (Exception pubEx)
-                {
-                    // Saved config is authoritative for the routed start-list page; log and continue.
-                    _logger.LogWarning(pubEx, "Publish of start list node {NodeId} failed after save; saved config is authoritative", node.Id);
-                }
 
                 _logger.LogInformation("Updated Springskytte starter comp={Comp} member={Member} wc={Wc} -> #{Order} @ {Time}",
                     request.CompetitionId, request.MemberId, request.WeaponClass, starter.StartOrder, starter.StartTime);
@@ -2695,16 +2678,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var node = _contentService.GetById(request.NodeId);
-                if (node == null || node.ContentType.Alias != "precisionStartList" || node.ParentId != request.CompetitionId)
+                var node = _startLists.Get(request.NodeId);
+                if (node == null || node.Kind != StartListKind.Qualifying || (node.CompetitionId != request.CompetitionId || node.LegacyHub))
                     return Json(new { success = false, message = "Startlistan hittades inte." });
-                if (!node.HasProperty("isOfficialStartList"))
-                    return Json(new { success = false, message = "Egenskapen 'isOfficialStartList' saknas på dokumenttypen precisionStartList." });
-
-                node.SetValue("isOfficialStartList", request.IsOfficial);
-                _contentService.Save(node);
-                try { _contentService.Publish(node, new[] { "*" }); }
-                catch (Exception pubEx) { _logger.LogWarning(pubEx, "Publish of official toggle failed for {NodeId} (saved value is authoritative)", node.Id); }
+                if (_startLists.Update(node.Id, r => r.IsOfficial = request.IsOfficial) == null)
+                    return Json(new { success = false, message = "Startlistan hittades inte." });
 
                 // The publish dialog's "stäng självanmälan" checkbox. Written on the COMPETITION, not
                 // on this list node: Springskytte publishes one list per weapon class / day and the
@@ -2774,10 +2752,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var comp = _contentService.GetById(competitionId);
                 if (comp != null)
                 {
-                    foreach (var node in _contentService.GetPagedChildren(comp.Id, 0, 200, out _)
-                                 .Where(c => c.ContentType.Alias == "precisionStartList"))
+                    foreach (var node in SpringLists(comp.Id))
                     {
-                        var cfgJson = node.GetValue<string>("configurationData");
+                        var cfgJson = node.ConfigurationData;
                         if (string.IsNullOrEmpty(cfgJson)) continue;
                         SpringskytteStartListConfig? cfg = null;
                         try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
@@ -3022,10 +2999,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var comp = _contentService.GetById(request.CompetitionId);
                 if (comp != null)
                 {
-                    foreach (var node in _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
-                                 .Where(c => c.ContentType.Alias == "precisionStartList"))
+                    foreach (var node in SpringLists(comp.Id))
                     {
-                        var cfgJson = node.GetValue<string>("configurationData");
+                        var cfgJson = node.ConfigurationData;
                         if (string.IsNullOrEmpty(cfgJson)) continue;
                         SpringskytteStartListConfig? cfg = null;
                         try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
@@ -3219,11 +3195,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             catch (Exception ex) { _logger.LogWarning(ex, "Timeline: status load failed for {Comp}", competitionId); }
 
             var gapSlots = new List<(int sec, string wc, object row)>();
-            var slNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                .Where(c => c.ContentType.Alias == "precisionStartList").ToList();
+            var slNodes = SpringLists(competition.Id).ToList();
             foreach (var node in slNodes)
             {
-                var cfgJson = node.GetValue<string>("configurationData");
+                var cfgJson = node.ConfigurationData;
                 if (string.IsNullOrEmpty(cfgJson)) continue;
                 SpringskytteStartListConfig? cfg = null;
                 try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
@@ -3466,14 +3441,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 // Pick the target list: prefer the one whose CoveredClasses covers this registration
                 // class; fall back to the node the picked slot came from (NodeId). Weapon classes are
                 // never mixed, so a slot's node is always the right list for that class.
-                var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                    .Where(c => c.ContentType.Alias == "precisionStartList").ToList();
+                var startListNodes = SpringLists(competition.Id).ToList();
 
-                Umbraco.Cms.Core.Models.IContent? targetNode = null;
+                StartListRecord? targetNode = null;
                 SpringskytteStartListConfig? targetConfig = null;
                 foreach (var node in startListNodes)
                 {
-                    var cfgJson = node.GetValue<string>("configurationData");
+                    var cfgJson = node.ConfigurationData;
                     if (string.IsNullOrEmpty(cfgJson)) continue;
                     SpringskytteStartListConfig? cfg = null;
                     try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
@@ -3551,9 +3525,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     AppendNumberingEvent(targetConfig, "walk-in",
                         $"#{startOrder} tilldelat {name}", await CurrentMemberNameAsync());
 
-                targetNode.SetValue("configurationData", JsonConvert.SerializeObject(targetConfig));
-                targetNode.SetValue("startListContent", BuildStartListHtml(targetConfig.Starters, targetConfig));
-                _contentService.Save(targetNode);
+                SaveSpringList(targetNode.Id, JsonConvert.SerializeObject(targetConfig), BuildStartListHtml(targetConfig.Starters, targetConfig));
 
                 // Mirror onto the DB result row if one already exists (normally none for a fresh walk-in);
                 // best-effort — the saved config is authoritative for the start-list page.
@@ -3571,16 +3543,6 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     _logger.LogWarning(dbEx, "DB mirror of walk-in start-time failed (config saved); comp={Comp} member={Member}", request.CompetitionId, request.MemberId);
                 }
 
-                try
-                {
-                    var publishResult = _contentService.Publish(targetNode, new[] { "*" });
-                    if (!publishResult.Success)
-                        _logger.LogWarning("Failed to publish start list node {NodeId}: {Result}", targetNode.Id, publishResult.Result);
-                }
-                catch (Exception pubEx)
-                {
-                    _logger.LogWarning(pubEx, "Publish of start list node {NodeId} failed after walk-in insert; saved config is authoritative", targetNode.Id);
-                }
 
                 _logger.LogInformation("Springskytte walk-in slotted comp={Comp} member={Member} wc={Wc} -> #{Order} @ {Time}",
                     request.CompetitionId, request.MemberId, weaponClass, startOrder, startTime);
@@ -3618,10 +3580,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 SpringskytteStartListEntry? starter = null;
                 var comp = _contentService.GetById(request.CompetitionId);
                 if (comp != null)
-                    foreach (var node in _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
-                                 .Where(c => c.ContentType.Alias == "precisionStartList"))
+                    foreach (var node in SpringLists(comp.Id))
                     {
-                        var cfgJson = node.GetValue<string>("configurationData");
+                        var cfgJson = node.ConfigurationData;
                         if (string.IsNullOrEmpty(cfgJson)) continue;
                         SpringskytteStartListConfig? cfg = null;
                         try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
@@ -3711,8 +3672,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var competition = _contentService.GetById(competitionId);
                 if (competition == null) return Json(new { success = false, message = "Tävling hittades inte." });
 
-                var startListNodes = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                    .Where(c => c.ContentType.Alias == "precisionStartList")
+                var startListNodes = SpringLists(competition.Id)
                     .ToList();
 
                 // ---- Individuals -------------------------------------------------------
@@ -3720,7 +3680,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var node in startListNodes)
                 {
-                    var cfgJson = node.GetValue<string>("configurationData");
+                    var cfgJson = node.ConfigurationData;
                     if (string.IsNullOrEmpty(cfgJson)) continue;
                     SpringskytteStartListConfig? cfg = null;
                     try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
@@ -3807,16 +3767,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var comp = _contentService.GetById(competitionId);
                 var inLists = new List<object>();
                 if (comp != null)
-                    foreach (var node in _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
-                                 .Where(c => c.ContentType.Alias == "precisionStartList"))
+                    foreach (var node in SpringLists(comp.Id))
                     {
-                        var cfgJson = node.GetValue<string>("configurationData");
+                        var cfgJson = node.ConfigurationData;
                         if (string.IsNullOrEmpty(cfgJson)) continue;
                         SpringskytteStartListConfig? cfg = null;
                         try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
                         var matches = cfg?.Starters?.Where(s => s.MemberId == memberId).ToList();
                         if (matches == null || matches.Count == 0) continue;
-                        bool official = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList");
+                        bool official = node.IsOfficial;
                         var listName = !string.IsNullOrWhiteSpace(cfg!.ListName) ? cfg.ListName : (node.Name ?? "Startlista");
                         foreach (var m in matches)
                             inLists.Add(new { listName, startTime = m.StartTime, weaponClass = m.WeaponClass, official });
@@ -3848,10 +3807,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var freed = new List<object>();
                 var comp = _contentService.GetById(request.CompetitionId);
                 if (comp != null)
-                    foreach (var node in _contentService.GetPagedChildren(comp.Id, 0, 50, out _)
-                                 .Where(c => c.ContentType.Alias == "precisionStartList"))
+                    foreach (var node in SpringLists(comp.Id))
                     {
-                        var cfgJson = node.GetValue<string>("configurationData");
+                        var cfgJson = node.ConfigurationData;
                         if (string.IsNullOrEmpty(cfgJson)) continue;
                         SpringskytteStartListConfig? cfg = null;
                         try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }
@@ -3861,15 +3819,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         if (removed.Count == 0) continue;
 
                         cfg.Starters = cfg.Starters.Where(s => s.MemberId != request.MemberId).ToList();
-                        bool official = node.HasProperty("isOfficialStartList") && node.GetValue<bool>("isOfficialStartList");
-                        node.SetValue("configurationData", JsonConvert.SerializeObject(cfg));
-                        node.SetValue("startListContent", BuildStartListHtml(cfg.Starters, cfg));
-                        _contentService.Save(node);
-                        if (official)
-                        {
-                            try { _contentService.Publish(node, new[] { "*" }); }
-                            catch (Exception pubEx) { _logger.LogWarning(pubEx, "Cleanup: publish failed for {NodeId} (saved is authoritative)", node.Id); }
-                        }
+                        bool official = node.IsOfficial;
+                        SaveSpringList(node.Id, JsonConvert.SerializeObject(cfg), BuildStartListHtml(cfg.Starters, cfg),
+                            official ? StartListPublish.Always : StartListPublish.Never);
                         foreach (var r in removed)
                             freed.Add(new { listName = cfg.ListName, startTime = r.StartTime, wasOfficial = official });
                     }
@@ -3995,17 +3947,16 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var started = new List<(int Sec, object Row)>();
                 var upcoming = new List<(int Sec, object Row)>();
 
-                var slNodes = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                    .Where(c => c.ContentType.Alias == "precisionStartList")
+                var slNodes = SpringLists(competition.Id)
                     .ToList();
 
                 foreach (var node in slNodes)
                 {
                     // Only PUBLISHED lists feed a public board — an unpublished draft must never leak.
-                    if (!node.HasProperty("isOfficialStartList") || !node.GetValue<bool>("isOfficialStartList"))
+                    if (!node.IsOfficial)
                         continue;
 
-                    var cfgJson = node.GetValue<string>("configurationData");
+                    var cfgJson = node.ConfigurationData;
                     if (string.IsNullOrEmpty(cfgJson)) continue;
                     SpringskytteStartListConfig? cfg = null;
                     try { cfg = JsonConvert.DeserializeObject<SpringskytteStartListConfig>(cfgJson); } catch { }

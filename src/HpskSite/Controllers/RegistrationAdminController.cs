@@ -42,6 +42,7 @@ namespace HpskSite.Controllers
         private readonly ILogger<RegistrationAdminController> _logger;
         private readonly BrokenLaneService _brokenLanes;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -68,11 +69,13 @@ namespace HpskSite.Controllers
             HpskSite.Services.StartListCleanup.StartListCleanupService startListCleanupService,
             ILogger<RegistrationAdminController> logger,
             BrokenLaneService brokenLanes,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.StartLists.IStartListStore startLists)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _brokenLanes = brokenLanes;
             _registrations = registrations;
+            _startLists = startLists;
             _memberClubService = memberClubService;
             _clubPropagationService = clubPropagationService;
             _logger = logger;
@@ -1012,19 +1015,15 @@ namespace HpskSite.Controllers
 
                 // Pick the most recent valid start list (matches GetOfficialStartList's rule).
                 var startLists = _startListRepository.GetStartListsForCompetition(competitionId)
-                    .Where(sl =>
-                    {
-                        var content = sl.GetValue<string>("startListContent");
-                        return !string.IsNullOrEmpty(content) && !content.Contains("System.Threading.Tasks.Task");
-                    })
-                    .OrderByDescending(sl => sl.GetValue<DateTime>("generatedDate"))
+                    .Where(sl => !string.IsNullOrEmpty(sl.StartListContent) && !sl.StartListContent.Contains("System.Threading.Tasks.Task"))
+                    .OrderByDescending(sl => sl.GeneratedDate ?? DateTime.MinValue)
                     .ToList();
 
                 if (startLists.Count == 0)
                     return Json(new { success = true, hasStartList = false, teams = Array.Empty<object>() });
 
                 var current = startLists.First();
-                var configData = current.GetValue<string>("configurationData") ?? "";
+                var configData = current.ConfigurationData;
                 StartListConfiguration? config = null;
                 try
                 {
@@ -1116,18 +1115,14 @@ namespace HpskSite.Controllers
 
                 // Use the most recent valid start list, same pick rule as GetOfficialStartList.
                 var startLists = _startListRepository.GetStartListsForCompetition(request.CompetitionId)
-                    .Where(sl =>
-                    {
-                        var content = sl.GetValue<string>("startListContent");
-                        return !string.IsNullOrEmpty(content) && !content.Contains("System.Threading.Tasks.Task");
-                    })
-                    .OrderByDescending(sl => sl.GetValue<DateTime>("generatedDate"))
+                    .Where(sl => !string.IsNullOrEmpty(sl.StartListContent) && !sl.StartListContent.Contains("System.Threading.Tasks.Task"))
+                    .OrderByDescending(sl => sl.GeneratedDate ?? DateTime.MinValue)
                     .ToList();
                 if (startLists.Count == 0)
                     return Json(new { success = false, message = "Ingen startlista finns för denna tävling." });
 
                 var startList = startLists.First();
-                var configData = startList.GetValue<string>("configurationData") ?? "";
+                var configData = startList.ConfigurationData;
                 var config = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
                 if (config?.Teams == null)
                     return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
@@ -1179,14 +1174,15 @@ namespace HpskSite.Controllers
                 team.ShooterCount = team.Shooters.Count;
 
                 var competitionName = competition.Name ?? "";
-                startList.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                startList.SetValue("startListContent", await _startListRenderer.GenerateStartListHtml(config, competitionName));
-
-                var saveResult = _contentService.Save(startList);
-                if (!saveResult.Success)
+                var newConfig = JsonConvert.SerializeObject(config);
+                var newHtml = await _startListRenderer.GenerateStartListHtml(config, competitionName);
+                var saved = _startLists.Update(startList.Id, r =>
+                {
+                    r.ConfigurationData = newConfig;
+                    r.StartListContent = newHtml;
+                });
+                if (saved == null)
                     return Json(new { success = false, message = "Kunde inte spara startlistan." });
-
-                _contentService.Publish(startList, new[] { "*" }, -1);
 
                 return Json(new
                 {

@@ -63,6 +63,7 @@ namespace HpskSite.Controllers
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -86,11 +87,13 @@ namespace HpskSite.Controllers
             ParticipantStatusService participantStatusService,
             StandardMedalMaterializationService medalMaterialization,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.Results.ICompetitionResultStore results)
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.StartLists.IStartListStore startLists)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
             _results = results;
+            _startLists = startLists;
             _contentService = contentService;
             _memberService = memberService;
             _contentTypeService = contentTypeService;
@@ -1420,18 +1423,15 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long total);
-                var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-
-                // Start list is a direct child of competition
-                var startListContent = children.FirstOrDefault(c => possibleAliases.Contains(c.ContentType.Alias));
+                // Start list is a direct child of competition (genom IStartListStore)
+                var startListContent = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying).FirstOrDefault(r => !r.LegacyHub);
 
                 if (startListContent == null)
                 {
                     return null;
                 }
 
-                var configurationData = startListContent.GetValue<string>("configurationData");
+                var configurationData = startListContent.ConfigurationData;
                 if (string.IsNullOrEmpty(configurationData))
                 {
                     return null;
@@ -1903,28 +1903,12 @@ namespace HpskSite.Controllers
             {
                 var comp = _contentService.GetById(competitionId);
                 if (comp == null) return null;
-                var aliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-                bool IsOfficial(Umbraco.Cms.Core.Models.IContent c) { try { return c.GetValue<bool>("isOfficialStartList"); } catch { return false; } }
-
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out _);
-                Umbraco.Cms.Core.Models.IContent? node = children
-                    .Where(c => aliases.Contains(c.ContentType.Alias))
-                    .OrderByDescending(IsOfficial)
-                    .FirstOrDefault();
-                if (node == null)
-                {
-                    var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                    if (hub != null)
-                    {
-                        var hubChildren = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _);
-                        node = hubChildren
-                            .Where(c => aliases.Contains(c.ContentType.Alias))
-                            .OrderByDescending(IsOfficial)
-                            .FirstOrDefault();
-                    }
-                }
+                // Den officiella (annars första) direkt under tävlingen, annars under den äldre hubben.
+                var lists = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying);
+                var node = lists.Where(r => !r.LegacyHub).OrderByDescending(r => r.IsOfficial).FirstOrDefault()
+                    ?? lists.Where(r => r.LegacyHub).OrderByDescending(r => r.IsOfficial).FirstOrDefault();
                 if (node == null) return null;
-                var json = node.GetValue<string>("configurationData");
+                var json = node.ConfigurationData;
                 if (string.IsNullOrEmpty(json)) return null;
                 return JsonConvert.DeserializeObject<StartListConfiguration>(json);
             }
@@ -1983,31 +1967,16 @@ namespace HpskSite.Controllers
         {
             try
             {
-                // Get start list data from Umbraco content
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long total);
-                
-                // Look for start lists hub and then its children
-                var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                if (startListsHub != null)
+                // Startlistorna under den äldre hubben (genom IStartListStore)
+                var hubLists = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying).Where(r => r.LegacyHub).ToList();
+                if (hubLists.Count > 0)
                 {
-                    var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out long hubTotal);
-                    var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-                    
                     // Find the OFFICIAL start list
-                    var startListContent = hubChildren
-                        .Where(c => possibleAliases.Contains(c.ContentType.Alias))
-                        .FirstOrDefault(c => {
-                            try {
-                                var isOfficial = c.GetValue<bool>("isOfficialStartList");
-                                return isOfficial;
-                            } catch {
-                                return false;
-                            }
-                        });
+                    var startListContent = hubLists.FirstOrDefault(r => r.IsOfficial);
                     
                     if (startListContent != null)
                     {
-                        var configurationData = startListContent.GetValue<string>("configurationData");
+                        var configurationData = startListContent.ConfigurationData;
                         if (!string.IsNullOrEmpty(configurationData))
                         {
                             var config = Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(configurationData);
@@ -2145,18 +2114,11 @@ namespace HpskSite.Controllers
             var map = new Dictionary<int, (string Name, string Club)>();
             try
             {
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out _);
-                var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                if (startListsHub == null) return map;
-
-                var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out _);
-                var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-                var officialStartList = hubChildren
-                    .Where(c => possibleAliases.Contains(c.ContentType.Alias))
-                    .FirstOrDefault(c => { try { return c.GetValue<bool>("isOfficialStartList"); } catch { return false; } });
+                var officialStartList = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying)
+                    .FirstOrDefault(r => r.LegacyHub && r.IsOfficial);
                 if (officialStartList == null) return map;
 
-                var json = officialStartList.GetValue<string>("configurationData");
+                var json = officialStartList.ConfigurationData;
                 if (string.IsNullOrEmpty(json)) return map;
 
                 var config = JsonConvert.DeserializeObject<StartListConfiguration>(json);
@@ -2229,34 +2191,16 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long total);
-
-                var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                if (startListsHub == null)
-                {
-                    return ("Unknown", "Unknown");
-                }
-
-                var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out long hubTotal);
-                var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-
-                // Find the OFFICIAL start list
-                var officialStartList = hubChildren
-                    .Where(c => possibleAliases.Contains(c.ContentType.Alias))
-                    .FirstOrDefault(c => {
-                        try {
-                            return c.GetValue<bool>("isOfficialStartList");
-                        } catch {
-                            return false;
-                        }
-                    });
+                // Den officiella listan under den äldre hubben (genom IStartListStore)
+                var officialStartList = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying)
+                    .FirstOrDefault(r => r.LegacyHub && r.IsOfficial);
 
                 if (officialStartList == null)
                 {
                     return ("Unknown", "Unknown");
                 }
 
-                var configurationData = officialStartList.GetValue<string>("configurationData");
+                var configurationData = officialStartList.ConfigurationData;
                 if (string.IsNullOrEmpty(configurationData))
                 {
                     return ("Unknown", "Unknown");
@@ -2302,56 +2246,14 @@ namespace HpskSite.Controllers
             try
             {
                 // Get start list data from Umbraco content
-                _logger.LogInformation("Looking for start list content for competition {CompetitionId}", competitionId);
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long total);
-                
-                _logger.LogInformation("Found {Total} children for competition {CompetitionId}", total, competitionId);
-                foreach (var child in children)
-                {
-                    _logger.LogInformation("Child: {Name} (ID: {Id}, Type: {ContentType})", child.Name, child.Id, child.ContentType.Alias);
-                }
-                
-                // First, try to find start list content directly under competition
-                var startListContent = children.FirstOrDefault(c => c.ContentType.Alias == "precisionStartList");
+                // Direkt under tävlingen först, annars den officiella under den äldre hubben (genom IStartListStore)
+                var lists = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying);
+                var startListContent = lists.FirstOrDefault(r => !r.LegacyHub);
 
                 if (startListContent == null)
                 {
                     _logger.LogInformation("No direct start list found, looking in start lists hub");
-                    
-                    // Look for start lists hub and then its children
-                    var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                    if (startListsHub != null)
-                    {
-                        _logger.LogInformation("Found start lists hub: {Name} (ID: {Id})", startListsHub.Name, startListsHub.Id);
-                        
-                        var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out long hubTotal);
-                        _logger.LogInformation("Found {HubTotal} children in start lists hub", hubTotal);
-                        
-                        foreach (var hubChild in hubChildren)
-                        {
-                            _logger.LogInformation("Hub child: {Name} (ID: {Id}, Type: {ContentType})", hubChild.Name, hubChild.Id, hubChild.ContentType.Alias);
-                        }
-                        
-                        // Look for the OFFICIAL precision start list in the hub
-                        var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-                        startListContent = hubChildren
-                            .Where(c => possibleAliases.Contains(c.ContentType.Alias))
-                            .FirstOrDefault(c => {
-                                try {
-                                    var isOfficial = c.GetValue<bool>("isOfficialStartList");
-                                    _logger.LogInformation("Start list {Name} is official: {IsOfficial}", c.Name, isOfficial);
-                                    return isOfficial;
-                                } catch (Exception ex) {
-                                    _logger.LogWarning(ex, "Error checking isOfficialStartList for start list {Name}", c.Name);
-                                    return false;
-                                }
-                            });
-                        
-                        if (startListContent != null)
-                        {
-                            _logger.LogInformation("Found start list in hub: {Name} (Type: {ContentType})", startListContent.Name, startListContent.ContentType.Alias);
-                        }
-                    }
+                    startListContent = lists.FirstOrDefault(r => r.LegacyHub && r.IsOfficial);
                     
                     if (startListContent == null)
                     {
@@ -2365,7 +2267,7 @@ namespace HpskSite.Controllers
                 
                 _logger.LogInformation("Found start list content: {ContentName} (ID: {ContentId})", startListContent.Name, startListContent.Id);
 
-                var configurationData = startListContent.GetValue<string>("configurationData");
+                var configurationData = startListContent.ConfigurationData;
                 if (string.IsNullOrEmpty(configurationData))
                 {
                     _logger.LogWarning("No configuration data found in start list for competition {CompetitionId}", competitionId);
@@ -3832,20 +3734,12 @@ namespace HpskSite.Controllers
             var finalists = new HashSet<string>();
             try
             {
-                var children = _contentService.GetPagedChildren(competitionId, 0, 50, out _).ToList();
-                var finalsNodes = children.Where(c => c.ContentType.Alias == "finalsStartList").ToList();
-
-                // Backward compatibility: older competitions keep start lists under a hub node.
-                var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                if (hub != null)
-                {
-                    finalsNodes.AddRange(_contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                        .Where(c => c.ContentType.Alias == "finalsStartList"));
-                }
+                // Alla finalstartlistor, även de under den äldre hubben (genom IStartListStore).
+                var finalsNodes = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Finals);
 
                 foreach (var finalsNode in finalsNodes)
                 {
-                    var configData = finalsNode.GetValue<string>("configurationData");
+                    var configData = finalsNode.ConfigurationData;
                     if (string.IsNullOrWhiteSpace(configData)) continue;
 
                     var config = Newtonsoft.Json.JsonConvert
@@ -4743,28 +4637,10 @@ namespace HpskSite.Controllers
         /// </summary>
         private bool UpdateStartListShooterClass(int competitionId, int memberId, string oldClass, string newClass)
         {
-            var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long total);
-            var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-
-            // Find start list - direct child first
-            var startListContent = children.FirstOrDefault(c => possibleAliases.Contains(c.ContentType.Alias));
-
-            if (startListContent == null)
-            {
-                // Look in start lists hub
-                var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                if (startListsHub != null)
-                {
-                    var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out long hubTotal);
-                    startListContent = hubChildren
-                        .Where(c => possibleAliases.Contains(c.ContentType.Alias))
-                        .FirstOrDefault(c =>
-                        {
-                            try { return c.GetValue<bool>("isOfficialStartList"); }
-                            catch { return false; }
-                        });
-                }
-            }
+            // Find start list - direct child first, else the official one under the old hub (genom IStartListStore)
+            var lists = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying);
+            var startListContent = lists.FirstOrDefault(r => !r.LegacyHub)
+                ?? lists.FirstOrDefault(r => r.LegacyHub && r.IsOfficial);
 
             if (startListContent == null)
             {
@@ -4772,7 +4648,7 @@ namespace HpskSite.Controllers
                 return false;
             }
 
-            var configData = startListContent.GetValue<string>("configurationData");
+            var configData = startListContent.ConfigurationData;
             if (string.IsNullOrEmpty(configData))
             {
                 return false;
@@ -4808,12 +4684,8 @@ namespace HpskSite.Controllers
             }
 
             var configJson = JsonConvert.SerializeObject(configuration);
-            startListContent.SetValue("configurationData", configJson);
-
-            var result = _contentService.Save(startListContent);
-            if (result.Success)
+            if (_startLists.Update(startListContent.Id, r => r.ConfigurationData = configJson) != null)
             {
-                _contentService.Publish(startListContent, new[] { "*" }, -1);
                 _logger.LogInformation("Updated start list weapon class for member {MemberId}: {OldClass} -> {NewClass}", memberId, oldClass, newClass);
                 return true;
             }
