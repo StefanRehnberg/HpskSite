@@ -222,19 +222,6 @@ namespace HpskSite.Controllers
                     _logger.LogWarning(ex, "Failed to invalidate series cache after result save, continuing");
                 }
 
-                // Update the live leaderboard in Umbraco content
-                _logger.LogInformation("Attempting to update live leaderboard for competition {CompetitionId}", request.CompetitionId);
-                try
-                {
-                    await UpdateLiveLeaderboard(request.CompetitionId);
-                    _logger.LogInformation("Successfully updated live leaderboard for competition {CompetitionId}", request.CompetitionId);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to update live leaderboard, but continuing with result save. Error: {ErrorMessage}", ex.Message);
-                    // Continue execution - don't fail the entire save operation
-                }
-
                 // TODO: Broadcast live update via SignalR
                 // await _hubContext.Clients.Group($"Competition_{request.CompetitionId}")
                 //     .SendAsync("ResultUpdated", new ResultUpdate { ... });
@@ -418,8 +405,6 @@ namespace HpskSite.Controllers
                 try { _seriesCalculationService.InvalidateCacheForCompetition(request.CompetitionId); }
                 catch (Exception ex) { _logger.LogWarning(ex, "Failed to invalidate series cache after distributed result save"); }
 
-                try { await UpdateLiveLeaderboard(request.CompetitionId); }
-                catch (Exception ex) { _logger.LogWarning(ex, "Failed to update live leaderboard after distributed result save"); }
 
                 // Calculate totals for response
                 var total = 0;
@@ -1158,19 +1143,6 @@ namespace HpskSite.Controllers
                     _logger.LogWarning(ex, "Failed to invalidate series cache after result delete, continuing");
                 }
 
-                // Update the live leaderboard in Umbraco content
-                _logger.LogInformation("Attempting to update live leaderboard after deletion for competition {CompetitionId}", request.CompetitionId);
-                try
-                {
-                    await UpdateLiveLeaderboard(request.CompetitionId);
-                    _logger.LogInformation("Successfully updated live leaderboard after deletion for competition {CompetitionId}", request.CompetitionId);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to update live leaderboard after deletion, but continuing. Error: {ErrorMessage}", ex.Message);
-                    // Continue execution - don't fail the entire delete operation
-                }
-
                 return Json(new ResultEntryResponse
                 {
                     Success = true,
@@ -1293,8 +1265,6 @@ namespace HpskSite.Controllers
                 try { _seriesCalculationService.InvalidateCacheForCompetition(request.CompetitionId); }
                 catch (Exception ex) { _logger.LogWarning(ex, "Failed to invalidate series cache after DeleteShooterFromClass"); }
 
-                try { await UpdateLiveLeaderboard(request.CompetitionId); }
-                catch (Exception ex) { _logger.LogWarning(ex, "Failed to update live leaderboard after DeleteShooterFromClass"); }
 
                 // Skriv om artefakten så även en publicerad lista speglar borttagningen.
                 await RefreshResultArtifactAsync(request.CompetitionId, "skytt borttagen ur klass");
@@ -2475,54 +2445,9 @@ namespace HpskSite.Controllers
             }
         }
 
-        private async Task UpdateLiveLeaderboard(int competitionId)
-        {
-            try
-            {
-                // Get the competition content
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null) return;
-
-                // Find the Competition Results Hub
-                var resultsHub = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long total)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResultsHub");
-
-                if (resultsHub == null) return;
-
-                // Find or create the Live Leaderboard
-                var liveLeaderboard = _contentService.GetPagedChildren(resultsHub.Id, 0, int.MaxValue, out long totalChildren)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" &&
-                                       c.GetValue<string>("resultType") == "Leaderboard");
-
-                if (liveLeaderboard == null)
-                {
-                    // Create new live leaderboard
-                    liveLeaderboard = _contentService.Create("Live Resultat", resultsHub.Id, "competitionResult");
-                    liveLeaderboard.SetValue("resultType", "Leaderboard");
-                    liveLeaderboard.SetValue("isOfficial", false);
-                }
-
-                // Calculate current leaderboard data
-                var results = await GetCompetitionResultsInternal(competitionId);
-                var leaderboardData = await CalculateLeaderboard(results, competitionId);
-
-                // Update the content
-                liveLeaderboard.SetValue("resultData", Newtonsoft.Json.JsonConvert.SerializeObject(leaderboardData));
-                liveLeaderboard.SetValue("lastUpdated", DateTime.Now);
-                liveLeaderboard.SetValue("isOfficial", false);
-
-                // Save and publish
-                _contentService.Save(liveLeaderboard);
-                _contentService.Publish(liveLeaderboard, new[] { "*" }, -1); // Publish for all cultures, system user
-
-                _logger.LogInformation("Updated live leaderboard for competition {CompetitionId}", competitionId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error updating live leaderboard for competition {CompetitionId}. Exception: {ExceptionMessage}. StackTrace: {StackTrace}",
-                    competitionId, ex.Message, ex.StackTrace);
-            }
-        }
+        // UpdateLiveLeaderboard ("Live Resultat"-noden) borttagen 2026-10-12, skalplanen C0: den skrev bara
+        // under ett competitionResultsHub, som ingenting skapar längre — men kostade två innehållsläsningar
+        // av tävlingens barn vid VARJE sparad och raderad serie. Live-tavlan räknar direkt ur resultattabellen.
 
         private async Task<object> CalculateLeaderboard(List<PrecisionResultEntry> results, int competitionId)
         {
