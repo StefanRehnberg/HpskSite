@@ -11,15 +11,15 @@
 *@
 <div id="ssmPanel">
     @Html.AntiForgeryToken()
-    <h5 class="mb-1"><i class="bi bi-arrow-left-right me-2"></i>Underhållsfönstret: anmälningar, händelser och resultatlistor till egna tabeller</h5>
+    <h5 class="mb-1"><i class="bi bi-arrow-left-right me-2"></i>Underhållsfönstret: anmälningar, händelser, resultatlistor och startlistor till egna tabeller</h5>
     <p class="text-body-secondary mb-3" style="max-width:75ch">
         Gör flytten en kväll när ingen anmäler sig och ingen tävling pågår. Under flytten (några sekunder per del)
-        svarar anmälan, redigering av händelser och uppdatering av resultatlistor att underhåll pågår. Börja med <strong>Torrkör</strong>; den skriver ingenting.
+        svarar anmälan, redigering av händelser och uppdatering av resultat- och startlistor att underhåll pågår. Börja med <strong>Torrkör</strong>; den skriver ingenting.
         Stannar flytten på ett fel gäller de gamla noderna som förut och ingenting har ändrats för besökarna.
     </p>
 
     <div class="row g-3">
-        @foreach (var part in new[] { ("reg", "Anmälningar", "/umbraco/surface/RegistrationMigration"), ("ev", "Händelser", "/umbraco/surface/ClubEventMigration"), ("res", "Resultatlistor", "/umbraco/surface/CompetitionResultMigration") })
+        @foreach (var part in new[] { ("reg", "Anmälningar", "/umbraco/surface/RegistrationMigration"), ("ev", "Händelser", "/umbraco/surface/ClubEventMigration"), ("res", "Resultatlistor", "/umbraco/surface/CompetitionResultMigration"), ("sl", "Startlistor", "/umbraco/surface/StartListMigration") })
         {
             <div class="col-12 col-xl-6">
                 <div class="card h-100 ssm-part" data-part="@part.Item1" data-base="@part.Item3" data-label="@part.Item2">
@@ -119,6 +119,12 @@
             var dupes = g('duplicates') || [];
             if (dupes.length) rows.push('<details><summary>Tävlingar med fler än en resultatnod (' + dupes.length + ')</summary><ul class="mb-0">'
                 + dupes.slice(0, 100).map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul></details>');
+        } else if (part === 'sl') {
+            rows.push('Startlistenoder: <strong>' + g('nodes') + '</strong> i ' + g('competitions') + ' tävlingar → '
+                + '<strong>' + (g('qualifying') + g('finals')) + '</strong> rader · grundomgång: ' + g('qualifying')
+                + ' · final: ' + g('finals') + ' · officiella: ' + g('official'));
+            rows.push('Under den gamla hubben: ' + g('legacyHub') + ' · utkast som skiljer sig från det publicerade: '
+                + g('draftAhead') + ' · utan tävling (flyttas inte): ' + g('orphans'));
         } else {
             rows.push('Händelser: <strong>' + g('nodes') + '</strong> → <strong>' + g('rowsToWrite') + '</strong> rader'
                 + ' · flyttade till träningar (hoppas över): ' + g('skippedMovedToTraining')

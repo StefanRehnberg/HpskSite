@@ -4962,7 +4962,7 @@ function loadFinalsStartList() {
             if (lists && lists.length) {
                 var wantedFsl = parseInt(new URLSearchParams(window.location.search).get('fsl') || '0', 10);
                 var picked = null;
-                if (wantedFsl > 0) {
+                if (wantedFsl && !isNaN(wantedFsl)) {
                     picked = lists.find(function(L) {
                         return (L.finalsStartListId || L.FinalsStartListId) === wantedFsl;
                     }) || null;

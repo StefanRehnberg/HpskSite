@@ -11299,6 +11299,61 @@ cache, `Children()` eller SQL mot `umbracoPropertyData`. Gå genom `Services/Res
   Sviter: `resultstore-migration-verify.mjs` (hela fönstret, 30), `resultstore-writepaths-verify.mjs`
   (23, lägesmedveten) — och resultatsviterna är gröna i båda lägena.
 
+## ⚠️⚠️ Tabeller som tar över noder: negativa id:n (skalplanen fas C, 2026-10-12)
+
+`CompetitionResultList` och `CompetitionStartList` har `IDENTITY(-1,-1)` och `CHECK (Id <> 0)`. Flyttade
+rader bär nodens (positiva) id; **nya rader får negativa id:n**, så de aldrig kan vara samma tal som en
+innehållsnod. **Ett eget startvärde uppåt räcker inte** (en första version började på 100 000 000):
+Umbracos nod-id är en global stigande serie, och varje fast gräns nås till slut — samma lärdom som
+ekonomins sandlåda. `Services/Hosting/NegativeIdentity.Reseed` är den enda omsättningen, efter flytten och
+efter tömningen (`IDENTITY_INSERT` med positiva värden får inte lämna identiteten i nodernas serie).
+- ⚠️ **`id > 0` / `id <= 0` på ett start- eller resultatliste-id är en BUGG** — "ingen lista" är 0, fråga
+  `== 0` / `!= 0`. `TableIdSignGuardTests` fäller bygget på mönstret; en NODlagring, där ett negativt id
+  aldrig är en nod, får `id-sign-ok: <skäl>`. `ORDER BY Id` är omvänd bland de nya raderna.
+- ⚠️ **Anmälningar och händelser (sajtstrukturen, i drift)** fortsätter efter nodernas högsta id — de har
+  inte bytts. Se utredningen i `notes/skalplan-2026-10-12.md` innan ett id därifrån jämförs med ett nod-id.
+
+## ⚠️⚠️ Startlistorna går genom `IStartListStore` (skalplanen C2, branch `skalplan-fas-c`, 2026-10-12)
+
+**Läs eller skriv aldrig en `precisionStartList`-, `finalsStartList`- eller `competitionStartListsHub`-nod
+direkt** — varken via content service, publicerad cache, `Children()` eller SQL mot `umbracoPropertyData`.
+Gå genom `Services/StartLists/IStartListStore`. `StartListStoreGuardTests` fäller bygget på aliasen och
+listans egenskaper (`configurationData`, `isOfficialStartList` …) utanför lagringen; ett motiverat
+undantag får `startliststore-ok: <skäl>` på raden.
+
+- **Posten** är `Models/StartLists/StartListRecord` — en per lista, `Kind` = `Qualifying` (precision,
+  egenbokning, springskyttets namngivna listor och stafetten) eller `Finals` (en per vapengrupp).
+  `ConfigurationData` har fyra JSON-former (se posten). **Id:t är nodens id och bevaras** — klienten,
+  `&fsl=`, påminnelseloggen, kalenderfilernas UID och finalens `QualificationStartListId` bär det.
+- **Skriv med `Update(id, r => …, publish)`** (läser färskt, skriver bara ändrade fält; tabellen under
+  `UPDLOCK, HOLDLOCK`). `Create(competitionId, kind, name, init)`. `StartListPublish` styr bara nodens
+  publicering — tabellen har ingen, och det publika läget avgörs av `IsOfficial`, som alla publika läsare
+  frågar efter. `ListPublished` = nodernas publicerade cache, tabellens `List`.
+- **Adressen byggs ur tävlingens** + `UrlSegment` (`StartListRecord.PublicUrl`), aldrig ur en nod.
+  Utan nod (hubbens listor nu, tabellen sedan) visar `CompetitionUrlContentFinder.TryServeStartListPage`
+  och `CompetitionResultTreeUrlFinder` tävlingen med mallen `PrecisionStartList`/`PrecisionFinalsStartList`
+  och lägger listan i `Context.Items[StartListItemKey]`.
+- **Tabellen** `CompetitionStartList` (`create-competition-start-list-table.sql`). Migrerade rader bär
+  nodens (positiva) id; **nya rader får NEGATIVA id:n** — se *Tabeller som tar över noder: negativa id:n*
+  nedan. Namnet är unikt per tävling på SEGMENTET
+  (`"Namn (1)"`, som syskonnoder). Hubbens listor flyttas med `LegacyHub = 1`.
+- **Växeln** `StartLists:Store` (`node`/`table`) och frysningen `StartLists:WriteFreeze` i `SiteSetting`.
+  `SwitchingStartListStore` väljer per anrop; frysningen ger `StartListWriteFrozenException`.
+  Flytten: `StartListMigrationService` / `StartListMigrationController`, kortet **Startlistor** i
+  Underhåll på `/admin-page`. **Utkastet flyttas, inte det publicerade** — torrkörningen räknar listor
+  där de skiljer sig. `StartListNodeGuard` vägrar nya noder när tabellen gäller.
+- ⚠️ **`teamFormat` är en FlexibleDropdown** som kastar på ett rent strängvärde — `NodeStartListStore.
+  FromPublished` läser då det råa källvärdet. Fångades av sviterna, inte av enhetstesten: tävlingssidan
+  gav 500 på varje tävling med en springskyttelista.
+- **Frysningen svarar med sitt meddelande** genom `Services/Hosting/WriteFrozenExceptionFilter` (alla fyra
+  lagringarnas frysundantag), i stället för ett 500-svar från endpoints utan egen felhantering.
+- **En permanent raderad tävling** tar med sig sina rader i `CompetitionStartList` och
+  `CompetitionResultList` (`CompetitionTableRowsCleanupHandler`) — startlistorna bär namn och klubbar.
+  Papperskorgen rör den inte.
+- ⚠️ **Dev delas med main — lämna aldrig dev på `table`.** `hpsk-verify/startliststore-mode.mjs table|node`.
+  Svit: `startliststore-migration-verify.mjs` (hela fönstret) — och startlistesviterna ska vara gröna i
+  båda lägena.
+
 ## DataProtection-nycklarna ligger i databasen (2026-10-12, skalplanen D2)
 
 `dbo.DataProtectionKey` via `Services/Hosting/SqlDataProtectionKeyRepository` (inkopplad i `Program.cs`).

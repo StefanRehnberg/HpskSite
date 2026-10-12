@@ -488,7 +488,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Medlemsdata hittades inte." });
                 }
 
-                if (request.StartListId <= 0)
+                if (request.StartListId == 0)
                 {
                     return Json(new { success = false, message = "Ogiltigt startlist-ID." });
                 }
@@ -553,7 +553,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Medlemsdata hittades inte." });
                 }
 
-                if (request.StartListId <= 0)
+                if (request.StartListId == 0)
                 {
                     return Json(new { success = false, message = "Ogiltigt startlist-ID." });
                 }
@@ -787,7 +787,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (startListId <= 0)
+                if (startListId == 0)
                 {
                     return Json(new { success = false, message = "Ogiltigt startliste-ID." });
                 }
@@ -838,7 +838,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (startListId <= 0)
+                if (startListId == 0)
                 {
                     return Json(new { success = false, message = "Ogiltigt startliste-ID." });
                 }
@@ -926,7 +926,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request.StartListId <= 0)
+                if (request.StartListId == 0)
                 {
                     return Json(new { success = false, message = "Ogiltigt startliste-ID." });
                 }
@@ -1032,7 +1032,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request.StartListId <= 0)
+                if (request.StartListId == 0)
                 {
                     return Json(new { success = false, message = "Ogiltigt startliste-ID." });
                 }
@@ -1084,7 +1084,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request.StartListId <= 0 || request.TeamNumber <= 0 || request.MemberId <= 0)
+                if (request.StartListId == 0 || request.TeamNumber <= 0 || request.MemberId <= 0)
                 {
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
@@ -1275,7 +1275,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request.StartListId <= 0 || request.MemberId <= 0)
+                if (request.StartListId == 0 || request.MemberId <= 0)
                 {
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
@@ -1439,7 +1439,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request.StartListId <= 0)
+                if (request.StartListId == 0)
                 {
                     return Json(new { success = false, message = "Ogiltigt startliste-ID." });
                 }
@@ -1542,7 +1542,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request.StartListId <= 0 || request.TeamNumber <= 0)
+                if (request.StartListId == 0 || request.TeamNumber <= 0)
                 {
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
@@ -1651,7 +1651,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request.StartListId <= 0 || request.MemberId <= 0 || request.TargetTeamNumber <= 0)
+                if (request.StartListId == 0 || request.MemberId <= 0 || request.TargetTeamNumber <= 0)
                 {
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
@@ -1811,7 +1811,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request.StartListId <= 0 || request.MemberId <= 0 || string.IsNullOrWhiteSpace(request.Direction))
+                if (request.StartListId == 0 || request.MemberId <= 0 || string.IsNullOrWhiteSpace(request.Direction))
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
 
                 var direction = request.Direction.Trim().ToLowerInvariant();
@@ -1959,7 +1959,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request == null || request.StartListId <= 0 || request.MemberId <= 0 || request.Lane <= 0)
+                if (request == null || request.StartListId == 0 || request.MemberId <= 0 || request.Lane <= 0)
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
 
                 var startList = _startLists.Get(request.StartListId);
@@ -2036,7 +2036,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request.StartListId <= 0 || request.MemberIds == null || !request.MemberIds.Any() || request.TargetTeamNumber <= 0)
+                if (request.StartListId == 0 || request.MemberIds == null || !request.MemberIds.Any() || request.TargetTeamNumber <= 0)
                 {
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
@@ -2151,7 +2151,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request.StartListId <= 0 || request.MemberId <= 0 || string.IsNullOrWhiteSpace(request.NewWeaponClass))
+                if (request.StartListId == 0 || request.MemberId <= 0 || string.IsNullOrWhiteSpace(request.NewWeaponClass))
                 {
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
@@ -2384,7 +2384,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                if (request.StartListId <= 0 || request.TeamNumber <= 0)
+                if (request.StartListId == 0 || request.TeamNumber <= 0)
                 {
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
@@ -2801,7 +2801,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             var finalsStartList = existingFinalsStartList != null
                 ? _startLists.Update(existingFinalsStartList.Id, FillFinals)
                 : _startLists.Create(competition.Id, StartListKind.Finals, wantedName, FillFinals);
-            if (finalsStartList == null || finalsStartList.Id <= 0)
+            if (finalsStartList == null || finalsStartList.Id == 0)
             {
                 _logger.LogError("Failed to save finals start list for competition {CompetitionId}", competition.Id);
                 return (false, "Kunde inte spara finalstartlistan.", 0, 0, 0, false, false);
@@ -3246,7 +3246,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 {
                     saved = _startLists.Update(finalsNode.Id, r => r.PerClassConfigData = perClassConfig, StartListPublish.Never);
                 }
-                if (saved == null || saved.Id <= 0)
+                if (saved == null || saved.Id == 0)
                     return Json(new { success = false, message = "Kunde inte spara konfigurationen." });
 
                 return Json(new { success = true, message = "Konfiguration sparad." });
@@ -3299,7 +3299,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> PublishFinalsStartList([FromBody] PublishFinalsStartListRequest request)
         {
-            if (request == null || request.FinalsStartListId <= 0)
+            if (request == null || request.FinalsStartListId == 0)
                 return Json(new { success = false, message = "Ogiltig förfrågan." });
 
             var currentMember = await _memberManager.GetCurrentMemberAsync();
@@ -3936,7 +3936,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     startList = _startLists.Create(competition.Id, StartListKind.Qualifying, StartListNodes.QualifyingName, FillDirekt);
                 }
 
-                if (startList == null || startList.Id <= 0)
+                if (startList == null || startList.Id == 0)
                 {
                     _logger.LogError("Failed to save Direktplacering start list for competition {CompetitionId}", competitionId);
                     return Json(new { success = false, message = "Kunde inte spara startlistan." });
