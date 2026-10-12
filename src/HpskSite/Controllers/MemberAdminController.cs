@@ -38,6 +38,7 @@ namespace HpskSite.Controllers
         private readonly ClubMembershipService _clubMemberships;
         private readonly string _adminEmail;
         private readonly MemberActivityService _activity;
+        private readonly MemberDirectoryService _directory;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -59,10 +60,12 @@ namespace HpskSite.Controllers
             MemberClubService memberClubs,
             ClubMembershipService clubMemberships,
             IConfiguration configuration,
-            MemberActivityService activity)
+            MemberActivityService activity,
+            MemberDirectoryService directory)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _activity = activity;
+            _directory = directory;
             _memberService = memberService;
             _memberGroupService = memberGroupService;
             _authService = authService;
@@ -197,37 +200,24 @@ namespace HpskSite.Controllers
                         .ToHashSet();
                 }
 
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-
-                // Materialize filtered members to avoid lazy re-evaluation
-                var filteredMembers = allMembers
-                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .ToList();
+                // ⚠️ Medlemskatalogen (en SQL-fråga, sju egenskaper) i stället för GetAll av fullständiga
+                // IMember — 4 s vid 20 000 medlemmar även när svaret var 50 rader (skalplanen 2026-10-12).
+                var filteredMembers = _directory.All();
 
                 // Apply search filter
                 if (!string.IsNullOrWhiteSpace(search))
                 {
                     var searchLower = search.ToLowerInvariant();
                     filteredMembers = filteredMembers.Where(m =>
-                        (m.GetValue("firstName")?.ToString()?.ToLowerInvariant().Contains(searchLower) ?? false) ||
-                        (m.GetValue("lastName")?.ToString()?.ToLowerInvariant().Contains(searchLower) ?? false) ||
-                        (m.Email?.ToLowerInvariant().Contains(searchLower) ?? false)
+                        m.FirstName.ToLowerInvariant().Contains(searchLower) ||
+                        m.LastName.ToLowerInvariant().Contains(searchLower) ||
+                        m.Email.ToLowerInvariant().Contains(searchLower)
                     ).ToList();
                 }
 
                 // Apply region filter (always enforced for regional admins)
                 if (clubsInRegion.Any())
-                {
-                    filteredMembers = filteredMembers.Where(m =>
-                    {
-                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
-                        if (int.TryParse(memberClubIdStr, out var memberClubId))
-                        {
-                            return clubsInRegion.Contains(memberClubId);
-                        }
-                        return false;
-                    }).ToList();
-                }
+                    filteredMembers = filteredMembers.Where(m => m.PrimaryClubId is int c && clubsInRegion.Contains(c)).ToList();
 
                 // Apply club admin restriction (always enforced — club admins only see
                 // members of clubs they manage; the explicit clubId filter below is
@@ -235,37 +225,19 @@ namespace HpskSite.Controllers
                 if (isClubAdmin)
                 {
                     var managedClubIdsSet = managedClubIds.ToHashSet();
-                    filteredMembers = filteredMembers.Where(m =>
-                    {
-                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
-                        if (int.TryParse(memberClubIdStr, out var memberClubId))
-                        {
-                            return managedClubIdsSet.Contains(memberClubId);
-                        }
-                        return false;
-                    }).ToList();
+                    filteredMembers = filteredMembers.Where(m => m.PrimaryClubId is int c && managedClubIdsSet.Contains(c)).ToList();
                 }
 
                 // Apply club filter
                 if (clubId.HasValue)
-                {
-                    filteredMembers = filteredMembers.Where(m =>
-                    {
-                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
-                        if (int.TryParse(memberClubIdStr, out var memberClubId))
-                        {
-                            return memberClubId == clubId.Value;
-                        }
-                        return false;
-                    }).ToList();
-                }
+                    filteredMembers = filteredMembers.Where(m => m.PrimaryClubId == clubId.Value).ToList();
 
                 // Pre-load all roles once into a dictionary (avoids N+1: was called per-member
                 // in role filter AND again per-member in view model creation)
                 var roleIndex = MemberRoleIndex.Load(DatabaseFactory);
                 var memberRolesDict = filteredMembers.ToDictionary(
-                    m => m.Id,
-                    m => roleIndex.Of(m.Id)
+                    m => m.MemberId,
+                    m => roleIndex.Of(m.MemberId)
                 );
 
                 // Apply role filter using pre-loaded roles
@@ -273,7 +245,7 @@ namespace HpskSite.Controllers
                 {
                     filteredMembers = filteredMembers.Where(m =>
                     {
-                        var memberRoles = memberRolesDict[m.Id];
+                        var memberRoles = memberRolesDict[m.MemberId];
 
                         // Handle special cases for ClubAdmin and RegionalAdmin which have suffixes like ClubAdmin_1234
                         if (role.Equals("ClubAdmin", StringComparison.OrdinalIgnoreCase))
@@ -307,7 +279,7 @@ namespace HpskSite.Controllers
                 // Transform to view models using pre-loaded roles
                 var lastSeenAll = _activity.GetAll();
                 var memberList = filteredMembers.Select(m => {
-                    var primaryClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                    var primaryClubIdStr = m.PrimaryClubIdRaw;
                     var primaryClubName = "No Club";
                     var hasInvalidClubReference = false;
                     int? memberPrimaryClubId = null;
@@ -329,11 +301,11 @@ namespace HpskSite.Controllers
                         }
                     }
 
-                    lastSeenAll.TryGetValue(m.Id, out var seenRow);
+                    lastSeenAll.TryGetValue(m.MemberId, out var seenRow);
                     var lastActive = seenRow.Web;
                     var lastMobileActive = seenRow.Mobile;
-                    var phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "";
-                    var memberRoles = memberRolesDict[m.Id];
+                    var phoneNumber = m.Phone;
+                    var memberRoles = memberRolesDict[m.MemberId];
 
                     var primaryClubUrl = memberPrimaryClubId.HasValue && clubUrlLookup.TryGetValue(memberPrimaryClubId.Value, out var cu)
                         ? cu
@@ -344,12 +316,12 @@ namespace HpskSite.Controllers
 
                     return new MemberListItem
                     {
-                        Id = m.Id,
-                        Name = m.Name ?? "",
-                        Email = m.Email ?? "",
-                        FirstName = m.GetValue("firstName")?.ToString() ?? "",
-                        LastName = m.GetValue("lastName")?.ToString() ?? "",
-                        ProfilePictureUrl = m.GetValue<string>("profilePictureUrl") ?? "",
+                        Id = m.MemberId,
+                        Name = m.Name,
+                        Email = m.Email,
+                        FirstName = m.FirstName,
+                        LastName = m.LastName,
+                        ProfilePictureUrl = m.ProfilePictureUrl,
                         PrimaryClubName = primaryClubName,
                         PrimaryClubId = memberPrimaryClubId,
                         PrimaryClubUrl = primaryClubUrl,

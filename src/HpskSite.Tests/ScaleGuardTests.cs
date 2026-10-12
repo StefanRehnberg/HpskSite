@@ -23,7 +23,7 @@ namespace HpskSite.Tests
     public class ScaleGuardTests
     {
         /// <summary>Antal levande anrop till <c>MemberService.GetAll(</c> 2026-10-12. Sänk när ett tas bort — höj aldrig.</summary>
-        private const int GetAllBaseline = 44;
+        private const int GetAllBaseline = 41;
 
         private static readonly string[] SkipDirectories =
             { "bin", "obj", "node_modules", "lib", "Migrations", "Documentation", "KnowledgeBase", "App_Data", "umbraco", "media", "App_Plugins", "wwwroot" };

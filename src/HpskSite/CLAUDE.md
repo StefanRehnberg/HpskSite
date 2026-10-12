@@ -11292,13 +11292,18 @@ administratörer. Efter B1–B3: 0,05–0,4 s.
   varje klubb i egenskaperna (Saved), en klubb som tas bort ger `Utträdd` + dagens datum och en klubb
   som läggs tillbaka gör den aktiv igen (Saving, i sparningens transaktion — Stefans beslut 2026-10-12).
   ⚠️ Aliaset heter **`memberClubIDs`** i databasen; jämför alias utan skiftläge i C#.
+- **Hela registret i en lista/väljare = `MemberDirectoryService.All()`** (en SQL-fråga, sju egenskaper,
+  inga `IMember`). Sajtadmins medlemslista filtrerar/sorterar/delar upp i sidor på den; "kan bli admin"
+  utan klubbfilter söker på servern (`search`, högst `take` = 50, svaret bär `totalCount`/`truncated`).
+  ⚠️ NPoco kan inte mappa direkt till en klass med beräknade egenskaper ("CLR detected an invalid
+  program") — hämta till en ren radklass och mappa själv.
 - **Roller i listor = `MemberRoleIndex.Load(db)`** (en fråga för alla) eller `GetMembersInRole(grupp)` —
   aldrig `GetAllRoles(m.Id)` i en loop. För EN medlem duger `GetAllRoles`.
 - **Senast aktiv = `MemberActivityService`** (`GetAll`/`Get`, tabellen `MemberActivity`) — skrivs aldrig
   som medlemsegenskap. Middlewaren läser medlemskakan själv (`IdentityConstants.ApplicationScheme`; den
   ligger före autentiseringen i pipelinen, så `context.User` är tom där).
 - **`ScaleGuardTests`** fäller bygget på rollfråga per medlem i en lista, fast tak (`GetAll(0, 5000, …)`)
-  och fler `MemberService.GetAll(`-anrop än `GetAllBaseline` (44). Sänk taket när ett tas bort.
+  och fler `MemberService.GetAll(`-anrop än `GetAllBaseline` (41). Sänk taket när ett tas bort.
 - Mätverktyg: `ScaleSeedController` (vägrar allt utom databasen `Umbraco_Scale`, startprofilen
   "Umbraco.Web.UI (Scale)"), `hpsk-verify/scale-measure.mjs`, `scale-verify-b.mjs`, `scale-verify-sync.mjs`.
 - Migreringar: `create-member-activity-table.sql` (K2, FÖRE deploy) och
