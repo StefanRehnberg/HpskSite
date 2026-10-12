@@ -1,6 +1,7 @@
 @using Umbraco.Cms.Web.Common.PublishedModels;
 @using Umbraco.Extensions;
 @using HpskSite.Models;
+@inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     var regionCode = ViewBag.regionCode as string ?? "";
@@ -155,9 +156,8 @@
 
                             if (isPast && !isExternal)
                             {
-                                var resultPage = comp.Children
-                                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                                if (resultPage != null && resultPage.Value<bool>("isOfficial"))
+                                var resultPage = ResultLists.GetMany(new[] { comp.Id }).Values.FirstOrDefault();
+                                if (resultPage != null && resultPage.IsOfficial)
                                 {
                                     linkUrl = compUrl.TrimEnd('/') + "/resultat/";
                                     linkText = "Resultat";

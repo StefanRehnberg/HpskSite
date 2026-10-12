@@ -199,6 +199,11 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Registrations.RegistrationMigrationService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
                 HpskSite.Services.Registrations.RegistrationNodeGuard>();
+            // Enda vägen in till resultatlistorna (skalplanen fas C1). Nodimplementationen i dag; ingen
+            // kod utanför lagringen läser competitionResult-noden.
+            builder.Services.AddScoped<HpskSite.Services.Results.NodeCompetitionResultStore>();
+            builder.Services.AddScoped<HpskSite.Services.Results.ICompetitionResultStore>(
+                sp => sp.GetRequiredService<HpskSite.Services.Results.NodeCompetitionResultStore>());
             builder.Services.AddScoped<HpskSite.Services.ClubRosterService>();
             builder.Services.AddScoped<HpskSite.Services.MemberDirectoryService>();
             // Skalplanen B3: varje sparad medlem får en ClubMembership-rad per klubb i egenskaperna, och

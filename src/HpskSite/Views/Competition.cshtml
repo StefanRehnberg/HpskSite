@@ -14,6 +14,7 @@
 @inject Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory DbFactory
 @inject HpskSite.Services.Registrations.ICompetitionRegistrationStore Registrations
 @inject HpskSite.Services.Events.CompetitionEventLinkService CompetitionLinks
+@inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
 	Layout = "Master.cshtml";
@@ -534,16 +535,17 @@
     var finalsStartListPageUrl = hasOfficialFinalsStartList ? officialFinalsStartLists[0].Node.Url() : "";
 
     // 3. Result page availability from published content
-    var resultPageNode = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-    var hasResultPage = resultPageNode != null;
-    var isResultsOfficial = resultPageNode?.Value<bool>("isOfficial") ?? false;
+    // Resultatlistan ur ICompetitionResultStore (det publicerade läget), aldrig noden direkt.
+    var resultList = ResultLists.GetMany(new[] { Model.Id }).Values.FirstOrDefault();
+    var hasResultPage = resultList != null;
+    var isResultsOfficial = resultList?.IsOfficial ?? false;
     // Deltävling result list — published independently of the main result list. When
     // subCompetitionIsOfficial is true on the same competitionResult node, a second
     // public button is rendered pointing at /resultat/?sub=true (handled by the
     // /resultat/ page). Value<bool> returns false when the property is missing, so
     // we don't need a separate HasProperty guard — a clean falsy value is the
     // correct "no sub-comp published yet" answer.
-    var isSubResultsOfficial = resultPageNode?.Value<bool>("subCompetitionIsOfficial") ?? false;
+    var isSubResultsOfficial = resultList?.SubIsOfficial ?? false;
     var hasSubCompetition = !string.IsNullOrWhiteSpace(subCompetitionNameRaw);
 
     // Springskytte stafett (relay) results — published independently via the

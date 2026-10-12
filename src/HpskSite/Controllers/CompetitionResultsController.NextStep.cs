@@ -213,8 +213,8 @@ namespace HpskSite.Controllers
             }
 
             // ── Resultatlistan ─────────────────────────────────────────────────────────
-            var resultPage = children.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-            bool resultsOfficial = resultPage != null && SafeBool(resultPage, "isOfficial");
+            var resultPage = _results.Get(competitionId);
+            bool resultsOfficial = resultPage?.IsOfficial ?? false;
 
             // ── Särskjutning — bara när allt är inmatat (uträkningen är tung) ──────────
             bool? unresolvedTies = null;

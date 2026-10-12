@@ -21,7 +21,8 @@ namespace HpskSite.Services.Events
         public string? PrimaryUrl { get; init; }
         public string? PrimaryIcon { get; init; }
 
-        public static CompetitionLinkCard Describe(IPublishedContent comp, DateTime now)
+        /// <param name="result">Tävlingens resultatlista ur <c>ICompetitionResultStore</c>, eller null.</param>
+        public static CompetitionLinkCard Describe(IPublishedContent comp, DateTime now, HpskSite.Models.Results.CompetitionResultRecord? result)
         {
             var url = comp.Url();
             var date = comp.Value<DateTime>("competitionDate");
@@ -29,10 +30,9 @@ namespace HpskSite.Services.Events
 
             // Resultat: resultatnoden "Resultat" med isOfficial (precisionsfamiljen, spring), eller
             // fältskyttets flagga på tävlingen.
-            var resultNode = children.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-            var resultsOfficial = (resultNode?.Value<bool>("isOfficial") ?? false) || comp.Value<bool>("faltskytteResultsOfficial");
-            if (resultsOfficial && resultNode != null)
-                return Card(comp, url, date, "Resultat publicerade", true, "Resultat", resultNode.Url(), "bi-trophy");
+            var resultsOfficial = (result?.IsOfficial ?? false) || comp.Value<bool>("faltskytteResultsOfficial");
+            if (resultsOfficial && result != null)
+                return Card(comp, url, date, "Resultat publicerade", true, "Resultat", url.TrimEnd('/') + "/resultat/", "bi-trophy");
 
             if (StartListRegistrationGate.HasPublishedStartList(comp))
             {

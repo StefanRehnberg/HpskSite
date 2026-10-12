@@ -39,6 +39,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly HpskSite.Services.Kretsgranskning.CourseReviewAccess _courseReviewAccess;
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -59,10 +60,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             FaltskytteResultsBuilder resultsBuilder,
             FaltskytteResultArtifactService resultArtifact,
             HpskSite.Services.Kretsgranskning.CourseReviewAccess courseReviewAccess,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Results.ICompetitionResultStore results)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
+            _results = results;
             _contentService = contentService;
             _memberService = memberService;
             _memberManager = memberManager;
@@ -920,11 +923,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 string savedConfig;
                 if (subCompetitionOnly)
                 {
-                    var resultPageNode = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
-                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                    savedConfig = resultPageNode != null && resultPageNode.HasProperty("subCompetitionMergeConfig")
-                        ? resultPageNode.GetValue<string>("subCompetitionMergeConfig") ?? ""
-                        : "";
+                    savedConfig = _results.Get(competition.Id)?.SubMergeConfig ?? "";
                 }
                 else
                 {
@@ -979,24 +978,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 // Deltävling merge config lives on the competitionResult node so it stays
                 // bundled with the published Deltävling state. Create the node lazily —
                 // we don't want SaveMergeConfig to require Publish to run first.
-                var resultPageNode = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                if (resultPageNode == null)
-                {
-                    resultPageNode = _contentService.Create("Resultat", competition.Id, "competitionResult");
-                    resultPageNode.SetValue("resultType", "Final Results");
-                }
                 // ⚠️ VÄGRA och namnge egenskapen. `SetValue` på en saknad egenskap är en TYST
                 // no-op, så det gamla beteendet — logga en varning och svara `success: true` —
                 // rapporterade en sparning som aldrig hände och var borta vid nästa laddning.
-                if (!resultPageNode.HasProperty("subCompetitionMergeConfig"))
+                if (!_results.CanStore(HpskSite.Models.Results.CompetitionResultField.SubMergeConfig))
                 {
                     _logger.LogWarning("competitionResult node for comp {CompId} missing 'subCompetitionMergeConfig' property — Deltävling merge config not saved.", request.CompetitionId);
                     return Json(new { success = false, message = "Egenskapen 'subCompetitionMergeConfig' saknas på dokumenttypen competitionResult — deltävlingens sammanslagning kan inte sparas förrän den läggs till." });
                 }
-                resultPageNode.SetValue("subCompetitionMergeConfig", request.MergeConfig ?? "");
-                _contentService.Save(resultPageNode);
-                _contentService.Publish(resultPageNode, new[] { "*" }, -1);
+                _results.Update(competition.Id, r => r.SubMergeConfig = request.MergeConfig ?? "", createIfMissing: true);
             }
             else
             {
@@ -1070,13 +1060,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 var competition = _contentService.GetById(competitionId);
                 if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-                var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-
-                var propName = subCompetitionOnly ? "subCompetitionFaltskytteShootOffConfig" : "faltskytteShootOffConfig";
-                var json = (resultPage != null && resultPage.HasProperty(propName))
-                    ? resultPage.GetValue<string>(propName) ?? ""
-                    : "";
+                var json = _results.Get(competition.Id)?.ShootOffConfigFor(subCompetitionOnly) ?? "";
                 return Json(new { success = true, config = json });
             }
             catch (Exception ex)
@@ -1100,27 +1084,20 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 var competition = _contentService.GetById(request.CompetitionId);
                 if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-                // Lazy-create the result page (mirrors SaveMergeConfig behaviour).
-                var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                if (resultPage == null)
-                {
-                    resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
-                    resultPage.SetValue("resultType", "Final Results");
-                }
-
-                var propName = request.IsSubCompetition
-                    ? "subCompetitionFaltskytteShootOffConfig"
-                    : "faltskytteShootOffConfig";
-                if (!resultPage.HasProperty(propName))
+                var shootOffField = HpskSite.Models.Results.CompetitionResultFields.ShootOffConfigFor(request.IsSubCompetition);
+                var propName = HpskSite.Models.Results.CompetitionResultFields.Alias(shootOffField);
+                if (!_results.CanStore(shootOffField))
                 {
                     _logger.LogWarning("competitionResult node missing '{Prop}' property — shoot-off config not saved.", propName);
                     return Json(new { success = false, message = $"Egenskapen '{propName}' saknas på doctypen competitionResult. Lägg till den (Textarea) i Umbraco-backoffice." });
                 }
 
-                resultPage.SetValue(propName, request.ConfigJson ?? "");
-                _contentService.Save(resultPage);
-                _contentService.Publish(resultPage, new[] { "*" }, -1);
+                // Skapas vid behov (samma som SaveMergeConfig).
+                _results.Update(competition.Id, r =>
+                {
+                    if (request.IsSubCompetition) r.SubShootOffConfig = request.ConfigJson ?? "";
+                    else r.ShootOffConfig = request.ConfigJson ?? "";
+                }, createIfMissing: true);
                 return Json(new { success = true });
             }
             catch (Exception ex)
@@ -1232,28 +1209,14 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             // Ensure a competitionResult child page exists so the comp gets a /resultat/ URL.
             // CompetitionResult.cshtml renders Fältskytte by fetching live results from
             // GetFaltskytteResults — no resultData needs to be serialized here.
-            var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-
-            if (resultPage == null)
+            if (request.IsSubCompetition && !_results.CanStore(HpskSite.Models.Results.CompetitionResultField.SubIsOfficial))
+                return Json(new { success = false, message = "Egenskapen 'subCompetitionIsOfficial' saknas på dokumenttypen competitionResult. Lägg till den i Umbraco backoffice (True/False)." });
+            _results.Update(competition.Id, r =>
             {
-                resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
-                resultPage.SetValue("resultType", "Final Results");
-            }
-
-            if (request.IsSubCompetition)
-            {
-                if (!resultPage.HasProperty("subCompetitionIsOfficial"))
-                    return Json(new { success = false, message = "Egenskapen 'subCompetitionIsOfficial' saknas på dokumenttypen competitionResult. Lägg till den i Umbraco backoffice (True/False)." });
-                resultPage.SetValue("subCompetitionIsOfficial", request.IsOfficial);
-            }
-            else
-            {
-                resultPage.SetValue("isOfficial", request.IsOfficial);
-            }
-            resultPage.SetValue("lastUpdated", DateTime.Now);
-            _contentService.Save(resultPage);
-            _contentService.Publish(resultPage, new[] { "*" }, -1);
+                if (request.IsSubCompetition) r.SubIsOfficial = request.IsOfficial;
+                else r.IsOfficial = request.IsOfficial;
+                r.LastUpdated = DateTime.Now;
+            }, createIfMissing: true);
 
             // ⚠️ FÖRST NU FINNS NODEN ATT SKRIVA ARTEFAKTEN PÅ. Publiceringen är den naturliga
             // punkt där prislistan ska bli aktuell — den sker efter att alla stationer matats in
@@ -1449,8 +1412,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     await MaterializeFaltskytteMedalsAsync(compContent, true);
                     medalsMaterialized++;
 
-                    var existing = _contentService.GetPagedChildren(compContent.Id, 0, int.MaxValue, out _)
-                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                    var existing = _results.Get(compContent.Id);
 
                     if (existing != null)
                     {
@@ -1460,13 +1422,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         // if a publish of the result page failed silently. Without this
                         // sync, the comp page's "Visa resultat" button stays hidden even
                         // when the admin sees "Officiell" in the results panel.
-                        var current = existing.GetValue<bool>("isOfficial");
-                        if (!current)
+                        if (!existing.IsOfficial)
                         {
-                            existing.SetValue("isOfficial", true);
-                            existing.SetValue("lastUpdated", DateTime.Now);
-                            _contentService.Save(existing);
-                            _contentService.Publish(existing, new[] { "*" }, -1);
+                            _results.Update(compContent.Id, r =>
+                            {
+                                r.IsOfficial = true;
+                                r.LastUpdated = DateTime.Now;
+                            });
                             synced++;
                             syncedNames.Add(compNode.Name);
                         }
@@ -1477,12 +1439,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                         continue;
                     }
 
-                    var resultPage = _contentService.Create("Resultat", compContent.Id, "competitionResult");
-                    resultPage.SetValue("resultType", "Final Results");
-                    resultPage.SetValue("isOfficial", true);
-                    resultPage.SetValue("lastUpdated", DateTime.Now);
-                    _contentService.Save(resultPage);
-                    _contentService.Publish(resultPage, new[] { "*" }, -1);
+                    _results.Update(compContent.Id, r =>
+                    {
+                        r.IsOfficial = true;
+                        r.LastUpdated = DateTime.Now;
+                    }, createIfMissing: true);
 
                     created++;
                     createdNames.Add(compNode.Name);

@@ -52,6 +52,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly UmbracoStartListRepository _startListRepository;
         private readonly FaltskytteShootOffService _shootOffService;
         private readonly ILogger<FaltskytteResultsBuilder> _logger;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         public FaltskytteResultsBuilder(
             IContentService contentService,
@@ -59,8 +60,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             ClubService clubService,
             UmbracoStartListRepository startListRepository,
             FaltskytteShootOffService shootOffService,
-            ILogger<FaltskytteResultsBuilder> logger)
+            ILogger<FaltskytteResultsBuilder> logger,
+            HpskSite.Services.Results.ICompetitionResultStore results)
         {
+            _results = results;
             _contentService = contentService;
             _umbracoDatabaseFactory = umbracoDatabaseFactory;
             _clubService = clubService;
@@ -177,8 +180,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             // Locate the competitionResult child node — used both for the sub-comp's
             // own merge config / official flag and as a fallback when nothing was passed
             // in. The node may not exist yet if results have never been published.
-            var resultPageNode = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+            var resultPageNode = _results.Get(competition.Id);
 
             // Build merge lookup from config (if provided)
             var mergeLookup = new Dictionary<string, string>(); // source class → combined group name
@@ -188,9 +190,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 // main reads from the competition's mergeConfig (existing pattern).
                 if (subCompetitionOnly)
                 {
-                    mergeConfig = resultPageNode != null && resultPageNode.HasProperty("subCompetitionMergeConfig")
-                        ? resultPageNode.GetValue<string>("subCompetitionMergeConfig") ?? ""
-                        : "";
+                    mergeConfig = resultPageNode?.SubMergeConfig ?? "";
                 }
                 else
                 {
@@ -356,9 +356,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             bool isOfficialForPayload;
             if (subCompetitionOnly)
             {
-                isOfficialForPayload = resultPageNode != null
-                    && resultPageNode.HasProperty("subCompetitionIsOfficial")
-                    && resultPageNode.GetValue<bool>("subCompetitionIsOfficial");
+                isOfficialForPayload = resultPageNode?.SubIsOfficial ?? false;
             }
             else
             {
