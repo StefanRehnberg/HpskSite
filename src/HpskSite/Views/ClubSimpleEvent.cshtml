@@ -15,7 +15,17 @@
 
     // Händelsen via händelselagringen (sajtstrukturen fas 2a). På årsadressen är modellen ÄGARNODEN
     // och händelsen ligger i HttpContext.Items; på den gamla trädadressen är modellen händelsenoden.
-    var ev = Context.Items[HpskSite.Routing.ClubEventRoute.ItemKey] as HpskSite.Models.Events.ClubEventRecord
+    var routed = Context.Items[HpskSite.Routing.ClubEventRoute.ItemKey] as HpskSite.Models.Events.ClubEventRecord;
+    // ⚠️ Utan årsadressen är modellen en NOD. Bara en händelsenod får slås upp som händelse: mallen går att
+    // välja för vilken sida som helst (?altTemplate=ClubSimpleEvent), och då hade händelsen med samma TAL
+    // som sidans nod-id visats — en annan sorts id, alltså en annan händelse.
+    if (routed == null && Model.ContentType.Alias != "clubSimpleEvent")
+    {
+        Layout = null;
+        Context.Response.Redirect(Model.Url());
+        return;
+    }
+    var ev = routed
              ?? Events.Get(Model.Id)
              ?? new HpskSite.Models.Events.ClubEventRecord { Id = Model.Id, PageName = Model.Name ?? "" };
     var eventId = ev.Id;
@@ -179,6 +189,15 @@
     else if (clubNode != null)
     {
         isAdmin = await AuthorizationService.IsClubAdminForClub(clubNode.Id);
+    }
+
+    // En opublicerad händelse visas bara för den som administrerar den — på trädadressen kan noden vara
+    // publicerad medan händelsen i tabellen inte är det.
+    if (!ev.IsPublished && !isAdmin)
+    {
+        Layout = null;
+        Context.Response.Redirect(ownerUrl);
+        return;
     }
 
     // Breadcrumb path

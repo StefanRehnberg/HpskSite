@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
 using Umbraco.Cms.Core.Models;
@@ -20,6 +20,7 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly IContentService _contentService;
+        private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly PaymentService _paymentService;
         private readonly AdminAuthorizationService _authService;
         private readonly InvoiceAuditService _auditService;
@@ -38,12 +39,14 @@ namespace HpskSite.Controllers
             PaymentService paymentService,
             AdminAuthorizationService authService,
             InvoiceAuditService auditService,
-            ILogger<PaymentController> logger)
+            ILogger<PaymentController> logger,
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _memberManager = memberManager;
             _memberService = memberService;
             _contentService = contentService;
+            _registrations = registrations;
             _paymentService = paymentService;
             _authService = authService;
             _auditService = auditService;
@@ -76,8 +79,9 @@ namespace HpskSite.Controllers
                 }
 
                 // Verify ownership of registration
-                var registration = _contentService.GetById(registrationId);
-                if (registration == null || registration.GetValue<string>("memberId") != currentMember.Id.ToString())
+                // Genom anmälningslagringen, aldrig som nod: i tabelläget är noden med samma id något annat.
+                var registration = _registrations.Get(competitionId, registrationId);
+                if (registration == null || registration.MemberId.ToString() != currentMember.Id)
                 {
                     return Json(new { success = false, message = "Du kan bara skapa fakturor för dina egna anmälningar." });
                 }
@@ -239,10 +243,9 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Du måste vara inloggad." });
                 }
 
-                var umbracoContext = UmbracoContext;
-                var registration = umbracoContext.Content.GetById(registrationId);
-                
-                if (registration?.Value<string>("memberId") != currentMember.Id.ToString())
+                // Genom anmälningslagringen, aldrig som nod (se CreateInvoice).
+                var registration = _registrations.GetById(registrationId);
+                if (registration == null || registration.MemberId.ToString() != currentMember.Id)
                 {
                     return Json(new { success = false, message = "Du kan bara se betalningsstatus för dina egna anmälningar." });
                 }
