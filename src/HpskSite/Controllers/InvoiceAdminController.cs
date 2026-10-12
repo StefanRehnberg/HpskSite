@@ -1909,8 +1909,8 @@ namespace HpskSite.Controllers
                 var regId = invoice.GetValue<int>("registrationId");
                 if (regId > 0)
                 {
-                    var reg = _contentService.GetById(regId);
-                    var clubId = reg?.GetValue<int>("clubId") ?? 0;
+                    // Genom anmälningslagringen: i tabelläget är noden med samma id något annat.
+                    var clubId = _registrations.Get(competitionId, regId)?.ClubId ?? 0;
                     if (clubId > 0) club = _clubService.GetClubNameById(clubId) ?? "";
                 }
 

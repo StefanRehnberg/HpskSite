@@ -44,9 +44,12 @@ namespace HpskSite.Services
         /// Anmälans klasser som visningsnamn, via anmälningslagringen. Ett id som inte är en anmälan
         /// (en lagfakturas registrationId pekar på lagspegeln) ger en tom sträng, som förut.
         /// </summary>
-        private string ClassesOf(int registrationId)
+        private string ClassesOf(int competitionId, int registrationId, string memberIdStr)
         {
-            var reg = _registrations.GetById(registrationId);
+            // En lagfaktura bär lagspegelns id, aldrig en anmälans — och i tabelläget kan samma tal vara en
+            // anmälan i en annan tävling. Fråga därför bara om en skytts faktura, och bara i den här tävlingen.
+            if (registrationId <= 0 || memberIdStr.StartsWith("team-", StringComparison.Ordinal)) return "";
+            var reg = _registrations.Get(competitionId, registrationId);
             return reg == null
                 ? ""
                 : string.Join(", ", reg.ClassIds.Select(HpskSite.Models.ShootingClasses.DisplayName));
@@ -119,7 +122,7 @@ namespace HpskSite.Services
             // --- Classes from the linked registration. ---
             var classes = "";
             if (registrationId > 0)
-                classes = ClassesOf(registrationId);
+                classes = ClassesOf(competition.Id, registrationId, memberIdStr);
 
             // --- Consolidated payment: itemise what the one payment covered. ---
             // A club paying for N shooters cannot reconcile a single lump-sum "Anmälningsavgift" line,
@@ -134,7 +137,7 @@ namespace HpskSite.Services
                     if (child == null || child.ContentType.Alias != "registrationInvoice") continue;
 
                     var childRegId = child.GetValue<int>("registrationId");
-                    var childClasses = childRegId > 0 ? ClassesOf(childRegId) : "";
+                    var childClasses = ClassesOf(competition.Id, childRegId, child.GetValue<string>("memberId") ?? "");
 
                     coveredLines.Add(new ReceiptLine
                     {
