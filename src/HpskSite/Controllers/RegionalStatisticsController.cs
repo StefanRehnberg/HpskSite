@@ -30,6 +30,7 @@ namespace HpskSite.Controllers
         private readonly IMemoryCache _memoryCache;
         private readonly ILogger<RegionalStatisticsController> _logger;
         private readonly HpskSite.Services.Events.IClubEventStore _events;
+        private readonly MemberActivityService _activity;
 
         public RegionalStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -44,9 +45,11 @@ namespace HpskSite.Controllers
             IMemoryCache memoryCache,
             ILogger<RegionalStatisticsController> logger,
             HpskSite.Services.Training.ClubTrainingService trainings,
-            HpskSite.Services.Events.IClubEventStore events)
+            HpskSite.Services.Events.IClubEventStore events,
+            MemberActivityService activity)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _activity = activity;
             _trainings = trainings;
             _memberService = memberService;
             _authService = authService;
@@ -141,11 +144,10 @@ namespace HpskSite.Controllers
             int totalMembers = regionMembers.Count;
             int newMembers30d = regionMembers.Count(m => m.CreateDate >= thirtyDaysAgo);
 
+            var lastSeen = _activity.GetAll();
             int active30d = regionMembers.Count(m =>
             {
-                var web = m.GetValue<DateTime?>("lastActiveDate");
-                var mob = m.GetValue<DateTime?>("lastMobileActiveDate");
-                var seen = MaxNullable(web, mob);
+                var seen = lastSeen.TryGetValue(m.Id, out var s) ? s.Any : null;
                 return seen.HasValue && seen.Value >= thirtyDaysAgo;
             });
 
@@ -204,10 +206,11 @@ namespace HpskSite.Controllers
             int kretsinstruktorAppointedCount = 0;
             int regionVapenkontrollantCount = 0;
             int regionBanlaggareCount = 0;
+            var roleIndex = MemberRoleIndex.Load(_databaseFactory);
             foreach (var m in allMembers.Where(m => m.IsApproved))
             {
-                var roles = _memberService.GetAllRoles(m.Id);
-                if (roles == null) continue;
+                var roles = roleIndex.Of(m.Id);
+                if (roles.Length == 0) continue;
 
                 // Is this member primarily in this region? (For Vapen/Ban totals)
                 int primaryClubId = 0;

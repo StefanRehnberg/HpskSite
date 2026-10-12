@@ -30,6 +30,7 @@ namespace HpskSite.Controllers
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly IMemoryCache _memoryCache;
         private readonly ILogger<ClubStatisticsController> _logger;
+        private readonly MemberActivityService _activity;
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Events.IClubEventStore _events;
@@ -47,9 +48,11 @@ namespace HpskSite.Controllers
             ILogger<ClubStatisticsController> logger,
             HpskSite.Services.Training.ClubTrainingService trainings,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.Events.IClubEventStore events)
+            HpskSite.Services.Events.IClubEventStore events,
+            MemberActivityService activity)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _activity = activity;
             _registrations = registrations;
             _trainings = trainings;
             _memberService = memberService;
@@ -111,27 +114,29 @@ namespace HpskSite.Controllers
             }
 
             // ── Members of this club ───────────────────────────────────
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _).ToList();
-            var clubMembers = allMembers.Where(m => GetPrimaryClubId(m) == clubId && m.IsApproved).ToList();
-            var pendingApprovals = allMembers.Count(m => GetPrimaryClubId(m) == clubId && !m.IsApproved);
+            // Bara klubbens medlemmar, ur klubbregistret (skalplanen B3) — förut hela medlemsregistret.
+            // Statistiken räknar som förut medlemmar med klubben som HUVUDklubb.
+            var rosterMembers = HttpContext.RequestServices.GetRequiredService<ClubRosterService>()
+                .LoadActiveMembers(_memberService, clubId)
+                .Where(m => GetPrimaryClubId(m) == clubId)
+                .ToList();
+            var clubMembers = rosterMembers.Where(m => m.IsApproved).ToList();
+            var pendingApprovals = rosterMembers.Count(m => !m.IsApproved);
 
             int totalMembers = clubMembers.Count;
             int newMembers30d = clubMembers.Count(m => m.CreateDate >= thirtyDaysAgo);
 
+            var lastSeen = _activity.GetAll();
             int active30d = clubMembers.Count(m =>
             {
-                var web = m.GetValue<DateTime?>("lastActiveDate");
-                var mob = m.GetValue<DateTime?>("lastMobileActiveDate");
-                var seen = MaxNullable(web, mob);
+                var seen = lastSeen.TryGetValue(m.Id, out var s) ? s.Any : null;
                 return seen.HasValue && seen.Value >= thirtyDaysAgo;
             });
 
             int inactive90d = clubMembers.Count(m =>
             {
                 if (m.CreateDate >= ninetyDaysAgo) return false;
-                var web = m.GetValue<DateTime?>("lastActiveDate");
-                var mob = m.GetValue<DateTime?>("lastMobileActiveDate");
-                var seen = MaxNullable(web, mob);
+                var seen = lastSeen.TryGetValue(m.Id, out var s) ? s.Any : null;
                 return !seen.HasValue || seen.Value < ninetyDaysAgo;
             });
 
@@ -179,9 +184,10 @@ namespace HpskSite.Controllers
             int foreningsinstruktorCount = 0;
             int vapenkontrollantCount = 0;
             int banlaggareCount = 0;
+            var roleIndex = MemberRoleIndex.Load(_databaseFactory);
             foreach (var m in clubMembers)
             {
-                var roles = _memberService.GetAllRoles(m.Id) ?? Enumerable.Empty<string>();
+                var roles = roleIndex.Of(m.Id);
                 if (roles.Contains(skjutledareRole)) skjutledareCount++;
                 if (roles.Contains(foreningsinstruktorRole)) foreningsinstruktorCount++;
                 if (roles.Contains("Vapenkontrollant")) vapenkontrollantCount++;
@@ -191,11 +197,9 @@ namespace HpskSite.Controllers
             // — fall back to scanning all approved members if the club-member pass found none.
             if (foreningsinstruktorCount == 0)
             {
-                foreach (var m in allMembers.Where(x => x.IsApproved && GetPrimaryClubId(x) != clubId))
-                {
-                    var roles = _memberService.GetAllRoles(m.Id);
-                    if (roles != null && roles.Contains(foreningsinstruktorRole)) foreningsinstruktorCount++;
-                }
+                // Gruppens medlemmar direkt — förut en genomgång av hela registret.
+                foreningsinstruktorCount = _memberService.GetMembersInRole(foreningsinstruktorRole)
+                    .Count(x => x.IsApproved && GetPrimaryClubId(x) != clubId);
             }
 
             // ── Events: upcoming + by-year + per-type + per-month ──────

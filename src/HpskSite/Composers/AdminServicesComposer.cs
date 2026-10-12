@@ -199,6 +199,13 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Registrations.RegistrationMigrationService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
                 HpskSite.Services.Registrations.RegistrationNodeGuard>();
+            builder.Services.AddScoped<HpskSite.Services.ClubRosterService>();
+            // Skalplanen B3: varje sparad medlem får en ClubMembership-rad per klubb i egenskaperna, och
+            // en klubb som tas bort ur egenskaperna ger Utträdd. Saving läser klubbarna FÖRE sparningen.
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.MemberSavingNotification,
+                HpskSite.Services.ClubMembershipSyncHandler>();
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.MemberSavedNotification,
+                HpskSite.Services.ClubMembershipSyncHandler>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingMigrationService>();
             builder.Services.AddScoped<HpskSite.Services.Training.ClubTrainingService>();
             builder.Services.AddScoped<HpskSite.Services.Training.TrainingCourseService>();

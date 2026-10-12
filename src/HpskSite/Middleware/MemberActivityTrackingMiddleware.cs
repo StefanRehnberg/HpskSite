@@ -4,8 +4,12 @@ using Umbraco.Cms.Core.Security;
 namespace HpskSite.Middleware
 {
     /// <summary>
-    /// Middleware to track member activity on frontend pages
-    /// Excludes backoffice/admin panel requests
+    /// Stämplar inloggade medlemmars webbaktivitet (backoffice undantaget).
+    ///
+    /// <para><b>⚠️ Billig på varje förfrågan, med flit</b> (skalplanen B1, 2026-10-12). Förut slog den
+    /// upp medlemmen på VARJE förfrågan och loggade en Information-rad per förfrågan. Nu: är
+    /// förfrågan inte inloggad händer ingenting, och medlemmen slås bara upp när strypningen säger
+    /// att det är dags att skriva — högst en gång per medlem och <c>ThrottleMinutes</c>.</para>
     /// </summary>
     public class MemberActivityTrackingMiddleware
     {
@@ -27,38 +31,38 @@ namespace HpskSite.Middleware
         {
             try
             {
-                // Get current path
                 var path = context.Request.Path.Value ?? "";
-
-                // Exclude backoffice paths (admin panel)
-                if (!path.StartsWith("/umbraco", StringComparison.OrdinalIgnoreCase))
+                // ⚠️ Middlewaren ligger i Umbracos PostPipeline, FÖRE autentiseringen — context.User är
+                // tom här. Medlemskakan läses därför direkt (dekryptering, ingen databas).
+                // ⚠️ Medlemmarnas schema i Umbraco 16 är IdentityConstants.ApplicationScheme
+                // ("Identity.Application") — "Umbraco.Members" finns inte (mätt i loggen 2026-10-12).
+                var auth = path.StartsWith("/umbraco", StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : await Microsoft.AspNetCore.Authentication.AuthenticationHttpContextExtensions
+                        .AuthenticateAsync(context, Microsoft.AspNetCore.Identity.IdentityConstants.ApplicationScheme);
+                if (auth?.Succeeded == true && auth.Principal != null)
                 {
-                    // Check if member is authenticated
-                    var currentMember = await memberManager.GetCurrentMemberAsync();
-
-                    _logger.LogInformation("🔍 Middleware invoked for path: {Path}, Member: {Email}",
-                        path, currentMember?.Email ?? "Not authenticated");
-
-                    if (currentMember != null && !string.IsNullOrEmpty(currentMember.Email))
+                    var now = DateTime.UtcNow;
+                    var idClaim = auth.Principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                    if (int.TryParse(idClaim, out var claimId))
                     {
-                        // Update activity (throttled internally by service)
-                        await activityService.UpdateActivityAsync(
-                            currentMember.Email,
-                            DateTime.UtcNow);
+                        if (activityService.WebUpdateDue(claimId, now))
+                            activityService.UpdateActivity(claimId, now);
                     }
-                }
-                else
-                {
-                    _logger.LogDebug("Skipping activity tracking for backoffice path: {Path}", path);
+                    else
+                    {
+                        var member = await memberManager.GetCurrentMemberAsync();
+                        if (member != null && int.TryParse(member.Id, out var id) && activityService.WebUpdateDue(id, now))
+                            activityService.UpdateActivity(id, now);
+                    }
                 }
             }
             catch (Exception ex)
             {
-                // Log error but don't break the request pipeline
-                _logger.LogError(ex, "Error in MemberActivityTrackingMiddleware");
+                // Aktiviteten får aldrig fälla en förfrågan.
+                _logger.LogError(ex, "Fel i MemberActivityTrackingMiddleware");
             }
 
-            // Continue pipeline
             await _next(context);
         }
     }

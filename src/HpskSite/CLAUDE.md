@@ -11278,6 +11278,32 @@ saknas tabellen används filerna och loggen larmar Critical. **Radera inte katal
 har nycklarna. Migrering: `Migrations/create-dataprotection-key-table.sql` (K1, FÖRE deploy).
 ⚠️ Nycklarna är okrypterade i tabellen, som de var på disken — databasåtkomst = nyckelåtkomst.
 
+## ⚠️⚠️ Skalreglerna — medlemmar (skalplanen B1–B4, 2026-10-12)
+
+Plan och mätningar: `notes/skalplan-2026-10-12.md`. Mätt på en kopia med 20 000 medlemmar: ytor som
+läste hela registret tog 3,6–4,1 s, och en rollfråga per medlem gav **21 s** för att lista en klubbs
+administratörer. Efter B1–B3: 0,05–0,4 s.
+
+- **Klubbens medlemmar = `ClubRosterService`** (`Active`, `ActiveMemberIds`, `LoadActiveMembers`) —
+  ALDRIG `_memberService.GetAll(0, int.MaxValue)` + filter på `primaryClubId`/`memberClubIds`. Källan är
+  `ClubMembership` med status annan än `Utträdd`/`Avliden`. `LoadActiveMembers` hämtar fullständiga
+  `IMember` i bitar om 1 000 för ytor som behöver många egenskaper.
+- **`ClubMembershipSyncHandler`** håller tabellen i takt vid VARJE medlemssparning: raden skapas för
+  varje klubb i egenskaperna (Saved), en klubb som tas bort ger `Utträdd` + dagens datum och en klubb
+  som läggs tillbaka gör den aktiv igen (Saving, i sparningens transaktion — Stefans beslut 2026-10-12).
+  ⚠️ Aliaset heter **`memberClubIDs`** i databasen; jämför alias utan skiftläge i C#.
+- **Roller i listor = `MemberRoleIndex.Load(db)`** (en fråga för alla) eller `GetMembersInRole(grupp)` —
+  aldrig `GetAllRoles(m.Id)` i en loop. För EN medlem duger `GetAllRoles`.
+- **Senast aktiv = `MemberActivityService`** (`GetAll`/`Get`, tabellen `MemberActivity`) — skrivs aldrig
+  som medlemsegenskap. Middlewaren läser medlemskakan själv (`IdentityConstants.ApplicationScheme`; den
+  ligger före autentiseringen i pipelinen, så `context.User` är tom där).
+- **`ScaleGuardTests`** fäller bygget på rollfråga per medlem i en lista, fast tak (`GetAll(0, 5000, …)`)
+  och fler `MemberService.GetAll(`-anrop än `GetAllBaseline` (44). Sänk taket när ett tas bort.
+- Mätverktyg: `ScaleSeedController` (vägrar allt utom databasen `Umbraco_Scale`, startprofilen
+  "Umbraco.Web.UI (Scale)"), `hpsk-verify/scale-measure.mjs`, `scale-verify-b.mjs`, `scale-verify-sync.mjs`.
+- Migreringar: `create-member-activity-table.sql` (K2, FÖRE deploy) och
+  `backfill-clubmembership-from-club-properties.sql` med `@Apply = 1` (K3, efter deploy).
+
 ## Migrations (DISABLED)
 The `/Migrations` folder contains disabled database schemas for direct competition result storage. The system now uses Umbraco Document Types and Content Service instead. Migrations can be safely ignored unless reverting to database-backed storage.
 

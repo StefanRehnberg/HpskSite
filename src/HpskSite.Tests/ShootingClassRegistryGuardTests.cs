@@ -33,6 +33,7 @@ namespace HpskSite.Tests
             ["Models/ShootingClass.cs"] = "the registry itself",
             ["Controllers/AnkeborgSeedController.cs"] = "dev seeder writing fixture data",
             ["Controllers/SsmPrecisionSeedController.cs"] = "dev seeder mapping an external export's codes",
+            ["Controllers/ScaleSeedController.cs"] = "skalmätningens seeder (Umbraco_Scale), påhittade fixturdata",
             ["Models/RecordClassRegistry.cs"] = "record-CATEGORY codes (C_VetY, C_Dam) — a separate code system, not class ids",
             ["CompetitionTypes/MagnumPrecision/Services/MagnumPrecisionStandardMedalService.cs"] = "SHB medal thresholds per magnum class",
         };
