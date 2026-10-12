@@ -9,6 +9,7 @@
 @inject Umbraco.Cms.Core.Services.IContentService ContentService
 @inject HpskSite.Services.AdminAuthorizationService AuthService
 @inject HpskSite.Services.ClubService ClubService
+@inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -767,7 +768,6 @@
                     // Only set if a competitionResult child node named "Resultat" actually exists; otherwise the
                     // iframe would 404 ("Page not Found"). The partial falls back to a friendly inline message
                     // ("inga publicerade resultat ännu") when this is empty.
-                    var resultChild = competition?.Children()?.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
 
                     // Safety net: the Resultat-page should always exist — den skapas ivrigt när
                     // tävlingen skapas eller kopieras (CompetitionAdminController
@@ -785,25 +785,15 @@
                     //
                     // Läget är Preliminär (isOfficial=false), så publika "Visa resultat" är
                     // fortsatt dold tills arrangören klickar Officiell.
-                    if (resultChild == null && competition != null)
+                    //
+                    // ⚠️ Skrivningen går genom ICompetitionResultStore (skalplanen C1) — vyn skapar
+                    // aldrig en nod själv. Ensure gör ingenting när listan redan finns.
+                    if (competition != null)
                     {
                         try
                         {
-                            var compContent = ContentService.GetById(competition.Id);
-                            if (compContent != null)
-                            {
-                                var existing = ContentService.GetPagedChildren(compContent.Id, 0, int.MaxValue, out _)
-                                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                                if (existing == null)
-                                {
-                                    var newResultPage = ContentService.Create("Resultat", compContent.Id, "competitionResult");
-                                    newResultPage.SetValue("resultType", "Final Results");
-                                    newResultPage.SetValue("isOfficial", false);
-                                    newResultPage.SetValue("lastUpdated", DateTime.Now);
-                                    ContentService.Save(newResultPage);
-                                    ContentService.Publish(newResultPage, new[] { "*" }, -1);
-                                }
-                            }
+                            if (ResultLists.GetMany(new[] { competition.Id }).Count == 0)
+                                ResultLists.Ensure(competition.Id);
                         }
                         catch { /* best effort — the partial will show the friendly empty-state if creation fails */ }
                     }

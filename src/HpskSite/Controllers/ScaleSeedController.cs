@@ -64,6 +64,7 @@ namespace HpskSite.Controllers
         private readonly IConfiguration _configuration;
         private readonly IWebHostEnvironment _env;
         private readonly ILogger<ScaleSeedController> _logger;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         public ScaleSeedController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -77,9 +78,11 @@ namespace HpskSite.Controllers
             ClubMembershipService memberships,
             IConfiguration configuration,
             IWebHostEnvironment env,
-            ILogger<ScaleSeedController> logger)
+            ILogger<ScaleSeedController> logger,
+            HpskSite.Services.Results.ICompetitionResultStore results)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _results = results;
             _memberService = memberService;
             _contentService = contentService;
             _memberships = memberships;
@@ -267,10 +270,11 @@ namespace HpskSite.Controllers
                     sl.SetValue("isOfficialStartList", true);
                     if (_contentService.Save(sl).Success) _contentService.Publish(sl, new[] { "*" }, -1);
 
-                    var res = _contentService.Create("Resultat", comp.Id, "competitionResult");
-                    res.SetValue("resultData", resultData);
-                    res.SetValue("isOfficial", true);
-                    if (_contentService.Save(res).Success) _contentService.Publish(res, new[] { "*" }, -1);
+                    _results.Update(comp.Id, r =>
+                    {
+                        r.ResultData = resultData;
+                        r.IsOfficial = true;
+                    }, createIfMissing: true);
 
                     created++;
                 }

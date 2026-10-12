@@ -36,13 +36,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly FaltskytteResultsBuilder _builder;
         private readonly ILogger<FaltskytteResultArtifactService> _logger;
         private readonly IServiceProvider _services;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         public FaltskytteResultArtifactService(
             IContentService contentService,
             FaltskytteResultsBuilder builder,
             ILogger<FaltskytteResultArtifactService> logger,
-            IServiceProvider services)
+            IServiceProvider services,
+            HpskSite.Services.Results.ICompetitionResultStore results)
         {
+            _results = results;
             _contentService = contentService;
             _builder = builder;
             _logger = logger;
@@ -61,7 +64,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 var competition = _contentService.GetById(competitionId);
                 if (competition == null) return false;
 
-                var resultPage = FindResultNode(competition.Id);
+                var resultPage = _results.Get(competition.Id);
                 if (resultPage == null)
                 {
                     // Ingen resultatnod = tävlingen har aldrig publicerat en lista. Att skapa en
@@ -86,20 +89,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
                 var artifact = BuildArtifact(competition, build);
 
-                var existingIsOfficial = resultPage.GetValue<bool>("isOfficial");
-                resultPage.SetValue("resultData", JsonConvert.SerializeObject(artifact));
-                resultPage.SetValue("lastUpdated", DateTime.Now);
-                resultPage.SetValue("isOfficial", existingIsOfficial);
-                resultPage.SetValue("resultType", "Final Results");
-
-                _contentService.Save(resultPage);
-                _contentService.Publish(resultPage, new[] { "*" }, -1);
+                var artifactJson = JsonConvert.SerializeObject(artifact);
+                _results.Update(competition.Id, r =>
+                {
+                    r.ResultData = artifactJson;
+                    r.LastUpdated = DateTime.Now;
+                });
 
                 _logger.LogInformation("Resultatartefakten omräknad för fältskyttetävling {CompetitionId} ({Reason})",
                     competitionId, reason);
                 // Kretsgranskning fas 2: en ändrad lista efter inskick/godkännande.
                 if (_services.GetService(typeof(HpskSite.Services.Kretsgranskning.ResultReviewHooks)) is HpskSite.Services.Kretsgranskning.ResultReviewHooks hooks)
-                    await hooks.AfterResultDataWrittenAsync(competitionId, resultPage.GetValue<string>("resultData"));
+                    await hooks.AfterResultDataWrittenAsync(competitionId, artifactJson);
                 return true;
             }
             catch (Exception ex)
@@ -109,10 +110,6 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 return false;
             }
         }
-
-        private IContent? FindResultNode(int competitionId) =>
-            _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
 
         // ── Översättningen ───────────────────────────────────────────────────────
 

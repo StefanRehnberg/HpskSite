@@ -51,6 +51,7 @@ namespace HpskSite.Controllers
         private readonly ReplyContactResolver _replyTo;
         private readonly ClubService _clubs;
         private readonly ILogger<ResultReviewController> _logger;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         public ResultReviewController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -73,9 +74,11 @@ namespace HpskSite.Controllers
             EmailService email,
             ReplyContactResolver replyTo,
             ClubService clubs,
-            ILogger<ResultReviewController> logger)
+            ILogger<ResultReviewController> logger,
+            HpskSite.Services.Results.ICompetitionResultStore results)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _results = results;
             _reviews = reviews;
             _gate = gate;
             _hooks = hooks;
@@ -583,7 +586,7 @@ namespace HpskSite.Controllers
             public int ClubId; public int RegionId; public string RegionName = ""; public string Organiser = "";
             public string Venue = ""; public string Level = ""; public string Scope = ""; public string TypeLabel = "";
             public bool IsClubOnly; public bool Offered; public bool IsChampionship; public bool IsSmOrLandsdel;
-            public IContent? ResultNode; public string? ResultData; public bool ResultOfficial;
+            public HpskSite.Models.Results.CompetitionResultRecord? ResultNode; public string? ResultData; public bool ResultOfficial;
             public string? ResultUrl; public string? Url;
         }
 
@@ -630,14 +633,13 @@ namespace HpskSite.Controllers
 
             try
             {
-                var children = _contentService.GetPagedChildren(competitionId, 0, 200, out _)
-                    .Where(x => x.ContentType.Alias == "competitionResult").ToList();
-                c.ResultNode = children.FirstOrDefault(x => x.Name == "Resultat") ?? children.FirstOrDefault();
+                c.ResultNode = _results.Get(competitionId);
                 if (c.ResultNode != null)
                 {
-                    c.ResultData = c.ResultNode.GetValue<string>("resultData");
-                    c.ResultOfficial = c.ResultNode.GetValue<bool>("isOfficial");
-                    c.ResultUrl = UmbracoContext.Content?.GetById(c.ResultNode.Id)?.Url();
+                    c.ResultData = c.ResultNode.ResultData;
+                    c.ResultOfficial = c.ResultNode.IsOfficial;
+                    // Adressen byggs ur tävlingens, som överallt annars — inte ur nodens.
+                    c.ResultUrl = string.IsNullOrEmpty(c.Url) ? null : c.Url.TrimEnd('/') + "/resultat/";
                 }
             }
             catch (Exception ex)

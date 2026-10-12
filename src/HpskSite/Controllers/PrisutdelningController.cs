@@ -26,13 +26,16 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _auth;
         private readonly PrizeGivingService _prizeGiving;
         private readonly ILogger<PrisutdelningController> _logger;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         public PrisutdelningController(
             IContentService contentService,
             AdminAuthorizationService auth,
             PrizeGivingService prizeGiving,
-            ILogger<PrisutdelningController> logger)
+            ILogger<PrisutdelningController> logger,
+            HpskSite.Services.Results.ICompetitionResultStore results)
         {
+            _results = results;
             _contentService = contentService;
             _auth = auth;
             _prizeGiving = prizeGiving;
@@ -99,12 +102,13 @@ namespace HpskSite.Controllers
 
             try
             {
+                string newConfig;
                 if (request?.Reset == true)
                 {
                     // Återställ till systemets förslag = ta bort arrangörens siffror helt.
                     // Att skriva ner förslagets siffror hade låst dem: nästa gång deltagarantalet
                     // ändras skulle "förslaget" vara ett gammalt förslag.
-                    resultNode.SetValue(PrizeGivingService.HonoraryConfigProperty, "");
+                    newConfig = "";
                 }
                 else
                 {
@@ -114,21 +118,14 @@ namespace HpskSite.Controllers
                         if (string.IsNullOrWhiteSpace(kv.Key)) continue;
                         counts[kv.Key.Trim()] = Math.Max(0, kv.Value);
                     }
-                    resultNode.SetValue(
-                        PrizeGivingService.HonoraryConfigProperty,
-                        JsonConvert.SerializeObject(counts));
+                    newConfig = JsonConvert.SerializeObject(counts);
                 }
 
-                _contentService.Save(resultNode);
+                _results.Update(competitionId, r => r.HonoraryAwardConfig = newConfig);
 
                 // ⚠️ Publicera BARA en nod som redan var publicerad. Att publicera ett utkast som
                 // sidoeffekt av en hedersprisändring skulle göra en okontrollerad resultatlista
                 // publik — samma regel som startlistornas klubbrättelse följer.
-                if (resultNode.Published)
-                {
-                    _contentService.Publish(resultNode, new[] { "*" }, -1);
-                }
-
                 return Json(new { success = true });
             }
             catch (Exception ex)

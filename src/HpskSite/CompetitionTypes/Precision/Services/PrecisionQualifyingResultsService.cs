@@ -29,13 +29,16 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly PrecisionFinalsQualificationService _qualificationService;
         private readonly ILogger<PrecisionQualifyingResultsService> _logger;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         public PrecisionQualifyingResultsService(
             IContentService contentService,
             IUmbracoDatabaseFactory databaseFactory,
             PrecisionFinalsQualificationService qualificationService,
-            ILogger<PrecisionQualifyingResultsService> logger)
+            ILogger<PrecisionQualifyingResultsService> logger,
+            HpskSite.Services.Results.ICompetitionResultStore results)
         {
+            _results = results;
             _contentService = contentService;
             _databaseFactory = databaseFactory;
             _qualificationService = qualificationService;
@@ -169,14 +172,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         /// </summary>
         public Dictionary<string, string> GetMergeLookup(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null) return new();
-
-            var resultPage = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-            if (resultPage == null) return new();
-
-            var mergeJson = resultPage.GetValue<string>("mergeConfig");
+            var mergeJson = _results.Get(competitionId)?.MergeConfig;
             if (string.IsNullOrWhiteSpace(mergeJson)) return new();
 
             try

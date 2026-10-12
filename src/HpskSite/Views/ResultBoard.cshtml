@@ -1,4 +1,5 @@
 ﻿@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @{
     // Standalone live results board at /live?c=<competitionId>. Chromeless (no Master)
     // so it fills a wall-TV/kiosk screen. Public, but only renders when the competition
@@ -54,12 +55,11 @@
     var resultPageUrl = "";
     if (competition != null)
     {
-        var kids = competition.Children()?.ToList() ?? new List<IPublishedContent>();
-        var resultNode = kids.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat")
-                      ?? kids.FirstOrDefault(c => c.ContentType.Alias == "competitionResult");
-        var rel = resultNode?.Url();
-        if (!string.IsNullOrEmpty(rel))
-            resultPageUrl = $"{Context.Request.Scheme}://{Context.Request.Host}{rel}";
+        // Resultatlistan ur ICompetitionResultStore; adressen byggs ur tävlingens, som överallt annars.
+        var hasResultList = ResultLists.GetMany(new[] { competition.Id }).Count > 0;
+        var compRel = competition.Url();
+        if (hasResultList && !string.IsNullOrEmpty(compRel))
+            resultPageUrl = $"{Context.Request.Scheme}://{Context.Request.Host}{compRel.TrimEnd('/')}/resultat/";
     }
 }<!DOCTYPE html>
 <html lang="sv">

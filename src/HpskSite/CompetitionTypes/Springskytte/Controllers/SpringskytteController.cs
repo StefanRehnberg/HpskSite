@@ -35,6 +35,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         private readonly MemberClubService _memberClubService;
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
         public SpringskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -53,10 +54,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             StandardMedalMaterializationService medalMaterialization,
             CompetitionTeamService teamService,
             MemberClubService memberClubService,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Results.ICompetitionResultStore results)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
+            _results = results;
             _memberClubService = memberClubService;
             _contentService = contentService;
             _memberService = memberService;
@@ -500,8 +503,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 // Published/preliminary state of the result list (for the admin status badge).
                 // For the Deltävling view the state lives in subCompetitionIsOfficial.
-                var resultNode = competition == null ? null : _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                var resultNode = competition == null ? null : _results.Get(competition.Id);
                 bool resultsExist = resultNode != null;
 
                 // A and C publish independently, so "official" is per weapon class. resultsOfficial stays
@@ -510,7 +512,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                     : ReadOfficialWeaponClasses(resultNode, competitionId);
                 bool resultsOfficial = subCompetitionOnly
-                    ? (resultNode != null && resultNode.HasProperty("subCompetitionIsOfficial") && resultNode.GetValue<bool>("subCompetitionIsOfficial"))
+                    ? (resultNode?.SubIsOfficial ?? false)
                     : officialClasses.Count > 0;
 
                 if (publicOnly && !subCompetitionOnly)
@@ -547,13 +549,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(competitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
                 var competition = _contentService.GetById(competitionId);
-                var resultPage = competition == null ? null : _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                if (resultPage == null || !resultPage.HasProperty("subCompetitionIsOfficial"))
+                var resultPage = competition == null ? null : _results.Get(competition.Id);
+                if (resultPage == null || !_results.CanStore(HpskSite.Models.Results.CompetitionResultField.SubIsOfficial))
                     return Json(new { success = false, message = "Ingen deltävlingslista att avpublicera." });
-                resultPage.SetValue("subCompetitionIsOfficial", false);
-                _contentService.Save(resultPage);
-                _contentService.Publish(resultPage, new[] { "*" });
+                _results.Update(competition!.Id, r => r.SubIsOfficial = false);
                 return Json(new { success = true, isOfficial = false, message = "Deltävlingslistan är nu preliminär (inte publik)." });
             }
             catch (Exception ex)
@@ -614,19 +613,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 }
                 if (competition != null)
                 {
-                    var resultPage = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                    if (resultPage == null)
-                    {
-                        resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
-                        resultPage.SetValue("resultType", "Final Results");
-                    }
-                    if (!resultPage.HasProperty("subCompetitionIsOfficial"))
+                    if (!_results.CanStore(HpskSite.Models.Results.CompetitionResultField.SubIsOfficial))
                         return Json(new { success = false, message = "Egenskapen 'subCompetitionIsOfficial' saknas på dokumenttypen competitionResult. Lägg till den i Umbraco backoffice (True/False)." });
-                    resultPage.SetValue("subCompetitionIsOfficial", true);
-                    resultPage.SetValue("lastUpdated", DateTime.Now);
-                    _contentService.Save(resultPage);
-                    _contentService.Publish(resultPage, new[] { "*" });
+                    _results.Update(competition.Id, r =>
+                    {
+                        r.SubIsOfficial = true;
+                        r.LastUpdated = DateTime.Now;
+                    }, createIfMissing: true);
                     _logger.LogInformation("Published Springskytte sub-competition results for CompetitionId={CompetitionId}, {Count} shooters",
                         competitionId, shooterResults.Count);
                 }
@@ -674,8 +667,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(competitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
                 var competition = _contentService.GetById(competitionId);
-                var resultPage = competition == null ? null : _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                var resultPage = competition == null ? null : _results.Get(competition.Id);
                 if (resultPage == null)
                     return Json(new { success = false, message = "Ingen resultatlista att avpublicera." });
 
@@ -684,11 +676,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (string.IsNullOrEmpty(wc)) official.Clear();
                 else official.Remove(wc);
 
-                if (!WriteOfficialWeaponClasses(resultPage, official))
+                if (ReadStoredResults(resultPage) == null)
                     return Json(new { success = false, message = "Resultatlistan är inte beräknad ännu — klicka Uppdatera först." });
-                resultPage.SetValue("isOfficial", official.Count > 0);
-                _contentService.Save(resultPage);
-                _contentService.Publish(resultPage, new[] { "*" });
+                _results.Update(competition!.Id, r =>
+                {
+                    WriteOfficialWeaponClasses(r, official);
+                    r.IsOfficial = official.Count > 0;
+                });
 
                 // The medal ledger reconciles against the whole competition, so re-materialize from
                 // whatever is still official — otherwise unpublishing one class would leave its medals
@@ -845,7 +839,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// The weapon classes whose results are public. Falls back to "every class that has results" for a
         /// legacy node published before per-class publishing existed, so nothing that was public goes dark.
         /// </summary>
-        private HashSet<string> ReadOfficialWeaponClasses(Umbraco.Cms.Core.Models.IContent? resultPage, int competitionId)
+        private HashSet<string> ReadOfficialWeaponClasses(HpskSite.Models.Results.CompetitionResultRecord? resultPage, int competitionId)
         {
             var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (resultPage == null) return set;
@@ -859,16 +853,16 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             }
 
             // Nothing per-class stored: a published legacy list means every class is public.
-            bool legacyOfficial = resultPage.HasProperty("isOfficial") && resultPage.GetValue<bool>("isOfficial");
+            bool legacyOfficial = resultPage.IsOfficial;
             if (legacyOfficial)
                 foreach (var wc in WeaponClassesWithResults(competitionId)) set.Add(wc);
             return set;
         }
 
         /// <summary>The stored result snapshot, or null when the list has never been calculated.</summary>
-        private SpringskytteFinalResults? ReadStoredResults(Umbraco.Cms.Core.Models.IContent? resultPage)
+        private SpringskytteFinalResults? ReadStoredResults(HpskSite.Models.Results.CompetitionResultRecord? resultPage)
         {
-            var raw = resultPage?.GetValue<string>("resultData");
+            var raw = resultPage?.ResultData;
             if (string.IsNullOrWhiteSpace(raw)) return null;
             try { return JsonConvert.DeserializeObject<SpringskytteFinalResults>(raw); }
             catch { return null; }
@@ -878,13 +872,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// Rewrites the official-class set inside the stored snapshot without recomputing it — used by
         /// "Gör preliminär", which must change visibility only.
         /// </summary>
-        private bool WriteOfficialWeaponClasses(Umbraco.Cms.Core.Models.IContent resultPage, HashSet<string> official)
+        private bool WriteOfficialWeaponClasses(HpskSite.Models.Results.CompetitionResultRecord resultPage, HashSet<string> official)
         {
             var stored = ReadStoredResults(resultPage);
             if (stored == null) return false;
             stored.OfficialWeaponClasses = official.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
             stored.IsOfficial = official.Count > 0;
-            resultPage.SetValue("resultData", JsonConvert.SerializeObject(stored));
+            resultPage.ResultData = JsonConvert.SerializeObject(stored);
             return true;
         }
 
@@ -1031,11 +1025,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var officialClasses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (competition != null)
                 {
-                    var resultPage = _contentService.GetPagedChildren(competition.Id, 0, 50, out _)
-                        .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-
-                    if (resultPage == null)
-                        resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
+                    var resultPage = _results.Get(competition.Id);
 
                     // Preserve which classes are already public; publishing adds, never removes.
                     var existingOfficial = ReadOfficialWeaponClasses(resultPage, competitionId);
@@ -1059,15 +1049,15 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         OfficialWeaponClasses = officialClasses.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList()
                     };
 
-                    resultPage.SetValue("resultData", JsonConvert.SerializeObject(finalResults));
-                    resultPage.SetValue("lastUpdated", DateTime.Now);
-                    resultPage.SetValue("resultType", "Final Results");
-                    resultPage.SetValue("isOfficial", official);
-
-                    _contentService.Save(resultPage);
-                    _contentService.Publish(resultPage, new[] { "*" });
+                    var storedJson = JsonConvert.SerializeObject(finalResults);
+                    _results.Update(competition.Id, r =>
+                    {
+                        r.ResultData = storedJson;
+                        r.LastUpdated = DateTime.Now;
+                        r.IsOfficial = official;
+                    }, createIfMissing: true);
                     if (HttpContext?.RequestServices.GetService(typeof(HpskSite.Services.Kretsgranskning.ResultReviewHooks)) is HpskSite.Services.Kretsgranskning.ResultReviewHooks reviewHooks)
-                        await reviewHooks.AfterResultDataWrittenAsync(competitionId, resultPage.GetValue<string>("resultData"));
+                        await reviewHooks.AfterResultDataWrittenAsync(competitionId, storedJson);
                     _logger.LogInformation("Stored Springskytte results for CompetitionId={CompetitionId}, {Count} shooters, official classes=[{Official}]",
                         competitionId, shooterResults.Count, string.Join(",", officialClasses));
 

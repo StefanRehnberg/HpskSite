@@ -46,14 +46,17 @@ namespace HpskSite.Services
         private readonly ShootOffService _shootOffService;
         private readonly FaltskytteShootOffService _faltShootOffService;
         private readonly ILogger<PrizeGivingService> _logger;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         public PrizeGivingService(
             IContentService contentService,
             CompetitionTeamService teamService,
             ShootOffService shootOffService,
             FaltskytteShootOffService faltShootOffService,
-            ILogger<PrizeGivingService> logger)
+            ILogger<PrizeGivingService> logger,
+            HpskSite.Services.Results.ICompetitionResultStore results)
         {
+            _results = results;
             _contentService = contentService;
             _teamService = teamService;
             _shootOffService = shootOffService;
@@ -62,9 +65,7 @@ namespace HpskSite.Services
         }
 
         /// <summary>Resultatnoden för en tävling, eller null när ingen resultatlista finns.</summary>
-        public IContent? GetResultNode(int competitionId) =>
-            _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+        public HpskSite.Models.Results.CompetitionResultRecord? GetResultNode(int competitionId) => _results.Get(competitionId);
 
         public async Task<PrizeGivingModel?> BuildAsync(int competitionId, string? weaponGroup, bool canEdit)
         {
@@ -89,7 +90,7 @@ namespace HpskSite.Services
             var resultNode = GetResultNode(competitionId);
             model.HasResultList = resultNode != null;
 
-            var artifactJson = resultNode?.GetValue<string>("resultData");
+            var artifactJson = resultNode?.ResultData;
             PrecisionFinalResults? artifact = null;
             if (!string.IsNullOrWhiteSpace(artifactJson))
             {
@@ -356,7 +357,7 @@ namespace HpskSite.Services
 
         private PrizeHonorarySection BuildHonorary(
             IContent competition,
-            IContent? resultNode,
+            HpskSite.Models.Results.CompetitionResultRecord? resultNode,
             PrecisionFinalResults artifact,
             string scope,
             string selectedWeaponGroup,
@@ -478,12 +479,12 @@ namespace HpskSite.Services
         }
 
         /// <summary>Arrangörens sparade fördelning, kategorinamn → antal. Tom när inget är sparat.</summary>
-        public Dictionary<string, int> ReadHonoraryConfig(IContent? resultNode)
+        public Dictionary<string, int> ReadHonoraryConfig(HpskSite.Models.Results.CompetitionResultRecord? resultNode)
         {
             var empty = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            if (resultNode == null || !resultNode.HasProperty(HonoraryConfigProperty)) return empty;
+            if (resultNode == null) return empty;
 
-            var json = resultNode.GetValue<string>(HonoraryConfigProperty);
+            var json = resultNode.HonoraryAwardConfig;
             if (string.IsNullOrWhiteSpace(json)) return empty;
             try
             {
@@ -500,13 +501,13 @@ namespace HpskSite.Services
         }
 
         /// <summary>True när fördelningen kan sparas — annars saknas doctype-egenskapen.</summary>
-        public bool CanStoreHonoraryConfig(IContent? resultNode) =>
-            resultNode != null && resultNode.HasProperty(HonoraryConfigProperty);
+        public bool CanStoreHonoraryConfig(HpskSite.Models.Results.CompetitionResultRecord? resultNode) =>
+            resultNode != null && _results.CanStore(HpskSite.Models.Results.CompetitionResultField.HonoraryAwardConfig);
 
         private async Task AddIntegrityWarningsAsync(
             PrizeGivingModel model,
             IContent competition,
-            IContent? resultNode,
+            HpskSite.Models.Results.CompetitionResultRecord? resultNode,
             PrecisionFinalResults artifact)
         {
             // ⚠️ ÄR ARTEFAKTEN ÄLDRE ÄN SÄRSKJUTNINGEN? Då beskriver medaljlistan ett
@@ -558,7 +559,7 @@ namespace HpskSite.Services
             // C.4.3.1.11: "Tävlingsresultaten skall före prisutdelningen vara noga kontrollerade,
             // inte minst i lagtävlingar." En opublicerad lista är per definition inte den
             // kontrollerade listan.
-            if (resultNode != null && !resultNode.GetValue<bool>("isOfficial"))
+            if (resultNode != null && !resultNode.IsOfficial)
             {
                 model.Warnings.Add("Resultatlistan är inte publicerad som officiell. "
                     + "Kontrollera och publicera den innan prisutdelningen.");
