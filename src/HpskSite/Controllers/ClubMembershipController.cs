@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
+using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
@@ -51,8 +52,9 @@ namespace HpskSite.Controllers
         {
             if (!await _authService.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
+            var (member, m, deny) = LoadMemberOfClub(memberId, clubId);
+            if (member == null) return Json(new { success = false, message = deny });
 
-            var m = _membershipService.Get(memberId, clubId);
             return Json(new { success = true, data = Project(m, memberId, clubId) });
         }
 
@@ -67,8 +69,9 @@ namespace HpskSite.Controllers
         {
             if (!await _authService.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
+            var (member, existing, deny) = LoadMemberOfClub(memberId, clubId);
+            if (member == null) return Json(new { success = false, message = deny });
 
-            var existing = _membershipService.Get(memberId, clubId);
             var m = existing ?? new ClubMembership { MemberId = memberId, ClubId = clubId };
 
             m.MembershipType = string.IsNullOrWhiteSpace(membershipType) ? null : membershipType.Trim();
@@ -84,6 +87,8 @@ namespace HpskSite.Controllers
             // HouseholdId / HouseholdPrimary are managed by SetHousehold (family multi-select), not here.
 
             _membershipService.Save(m);
+            // Raden först, sedan egenskaperna: synkens Saving-steg ser då att raden redan har rätt status.
+            SyncAffiliation(member, clubId, belongs: !ClubAffiliation.IsEnded(m.MembershipStatus));
             return Json(new { success = true });
         }
 
@@ -98,12 +103,16 @@ namespace HpskSite.Controllers
         {
             if (!await _authService.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
+            var (member, existing, deny) = LoadMemberOfClub(memberId, clubId);
+            if (member == null) return Json(new { success = false, message = deny });
 
-            var m = _membershipService.Get(memberId, clubId)
-                    ?? new ClubMembership { MemberId = memberId, ClubId = clubId };
+            var m = existing ?? new ClubMembership { MemberId = memberId, ClubId = clubId };
             m.MembershipStatus = "Utträdd";
             if (m.MemberUntil == null) m.MemberUntil = DateTime.Today;
             _membershipService.Save(m);
+            // Förut stod klubben kvar i medlemmens egenskaper: en utträdd medlem fick klubbutskick och
+            // årsmöteskallelse och kunde tävla för klubben (genomgången 2026-10-13, A5).
+            SyncAffiliation(member, clubId, belongs: false);
 
             return Json(new { success = true, memberUntil = m.MemberUntil?.ToString("yyyy-MM-dd") });
         }
@@ -122,6 +131,13 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
             var selected = (memberIds ?? Array.Empty<int>()).Where(id => id != primaryMemberId).Distinct().ToList();
+            // Alla i hushållet måste höra till klubben — annars kunde en klubbadmin lägga in vilken medlem
+            // som helst i sitt register (och se personens kontaktuppgifter där).
+            foreach (var id in selected.Prepend(primaryMemberId))
+            {
+                var (member, _, deny) = LoadMemberOfClub(id, clubId);
+                if (member == null) return Json(new { success = false, message = deny });
+            }
 
             var primary = _membershipService.Get(primaryMemberId, clubId)
                           ?? new ClubMembership { MemberId = primaryMemberId, ClubId = clubId, MembershipStatus = "Aktiv" };
@@ -177,6 +193,50 @@ namespace HpskSite.Controllers
             }
 
             return Json(new { success = true, householdMemberCount = selected.Count });
+        }
+
+        /// <summary>
+        /// Medlemmen och klubbens rad, om medlemmen HÖR TILL klubben: klubben står i medlemmens egenskaper
+        /// eller klubben har en rad för medlemmen (även en avslutad — den ska gå att återaktivera).
+        /// Förut kontrollerades bara att anroparen var klubbadmin, inte att medlemmen hörde till klubben:
+        /// en klubbadmin kunde skapa en rad för vilket medlems-id som helst och få personen i sitt register
+        /// (genomgången 2026-10-13, A5).
+        /// </summary>
+        private (IMember? Member, ClubMembership? Row, string Deny) LoadMemberOfClub(int memberId, int clubId)
+        {
+            if (memberId <= 0 || clubId <= 0) return (null, null, "Ogiltig medlem eller klubb.");
+            var member = _memberService.GetById(memberId);
+            if (member == null) return (null, null, "Medlemmen finns inte.");
+            var row = _membershipService.Get(memberId, clubId);
+            if (row == null && !ClubMembershipSyncHandler.ClubIds(member).Contains(clubId))
+                return (null, null, "Medlemmen tillhör inte klubben.");
+            return (member, row, "");
+        }
+
+        /// <summary>
+        /// För klubbens status till medlemmens egenskaper, så att tabellen och egenskaperna säger samma sak
+        /// (<see cref="ClubAffiliation"/>). Sparar bara om något ändras.
+        /// </summary>
+        private void SyncAffiliation(IMember member, int clubId, bool belongs)
+        {
+            var primary = member.GetValue("primaryClubId")?.ToString();
+            var others = member.GetValue("memberClubIDs")?.ToString();
+            var (newPrimary, newOthers) = belongs
+                ? ClubAffiliation.With(primary, others, clubId)
+                : ClubAffiliation.Without(primary, others, clubId);
+            var changed = false;
+            if ((newPrimary ?? "") != (primary ?? "").Trim() && member.HasProperty("primaryClubId"))
+            {
+                member.SetValue("primaryClubId", newPrimary);
+                changed = true;
+            }
+            var oldOthers = string.Join(",", (others ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            if (newOthers != oldOthers && member.HasProperty("memberClubIDs"))
+            {
+                member.SetValue("memberClubIDs", newOthers);
+                changed = true;
+            }
+            if (changed) _memberService.Save(member);
         }
 
         private object Project(ClubMembership? m, int memberId, int clubId)

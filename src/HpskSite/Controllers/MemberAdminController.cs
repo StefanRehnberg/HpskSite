@@ -1601,11 +1601,10 @@ namespace HpskSite.Controllers
                 int firstMemberClubId = 0;
                 if (clubId > 0)
                 {
-                    var allMembers = _memberService.GetAll(0, int.MaxValue, out _);
-                    var otherApprovedClubMembers = allMembers
-                        .Where(m => m.Id != memberId && m.IsApproved &&
-                                    m.GetValue("primaryClubId")?.ToString() == clubId.ToString())
-                        .Any();
+                    // Klubbens register (ClubMembership, fas B) i en fråga — förut lästes hela
+                    // medlemsregistret vid varje godkännande (genomgången 2026-10-13, B).
+                    var otherApprovedClubMembers = _clubMemberships.GetForClubApprovedMembers(clubId)
+                        .Any(cm => cm.MemberId != memberId && !ClubAffiliation.IsEnded(cm.MembershipStatus));
 
                     if (!otherApprovedClubMembers)
                     {
@@ -2036,7 +2035,7 @@ namespace HpskSite.Controllers
 
                 foreach (var member in regularMembers)
                 {
-                    var memberRoles = _memberService.GetAllRoles(member.Id);
+                    var memberRoles = _memberService.GetAllRoles(member.Id); // scale-ok: sajtadmins engångsverktyg, körs för hand
 
                     // If member has no groups, assign them to Users group
                     if (!memberRoles.Any())

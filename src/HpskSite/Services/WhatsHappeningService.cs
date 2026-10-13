@@ -159,7 +159,7 @@ namespace HpskSite.Services
                 {
                     clubEvents = serviceScope.ServiceProvider
                         .GetRequiredService<HpskSite.Services.Events.IClubEventStore>()
-                        .ListAllPublished();
+                        .ListPublishedBetween(today, horizon.AddDays(1));
                 }
                 foreach (var ev in clubEvents)
                 {

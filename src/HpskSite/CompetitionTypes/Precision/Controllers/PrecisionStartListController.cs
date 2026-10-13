@@ -470,71 +470,6 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DeleteStartList([FromBody] DeleteStartListRequest request)
-        {
-            try
-            {
-                // Validate user authentication
-                var currentMember = await _memberManager.GetCurrentMemberAsync();
-                if (currentMember == null)
-                {
-                    return Json(new { success = false, message = "Du måste vara inloggad för att ta bort startlistor." });
-                }
-
-                // Get the actual member data with integer ID
-                var memberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
-                if (memberData == null)
-                {
-                    return Json(new { success = false, message = "Medlemsdata hittades inte." });
-                }
-
-                if (request.StartListId == 0)
-                {
-                    return Json(new { success = false, message = "Ogiltigt startlist-ID." });
-                }
-
-                // Get the start list content
-                var startList = _startLists.Get(request.StartListId);
-                if (startList == null)
-                {
-                    return Json(new { success = false, message = "Startlista hittades inte." });
-                }
-
-                // Check if user has permission to delete this start list
-                var competitionId = startList.CompetitionId;
-                if (competitionId > 0)
-                {
-                    var competition = _contentService.GetById(competitionId);
-                    // TODO: Implement permission check
-                    // if (competition == null || !await PrecisionCanManageCompetition(memberData.Id, competition.Id))
-                    // {
-                    //     return Json(new { success = false, message = "Du har inte behörighet att ta bort denna startlista." });
-                    // }
-                }
-
-                // Delete the start list (genom IStartListStore)
-                if (_startLists.Delete(startList.Id))
-                {
-                    _logger.LogInformation("Deleted start list {StartListId} by user {UserId}", request.StartListId, memberData.Id);
-                    return Json(new { success = true, message = "Startlistan har tagits bort." });
-                }
-                else
-                {
-                    var errorCount = 0;
-                    _logger.LogError("Failed to delete start list {StartListId}. Error count: {ErrorCount}", 
-                                   request.StartListId, errorCount);
-                    return Json(new { success = false, message = "Ett fel uppstod vid borttagning av startlistan." });
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error deleting start list {StartListId}", request.StartListId);
-                return Json(new { success = false, message = "Ett oväntat fel uppstod." });
-            }
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
         public async Task<IActionResult> PublishStartList([FromBody] PublishStartListRequest request)
         {
             try
@@ -558,41 +493,32 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Ogiltigt startlist-ID." });
                 }
 
-                // Get the start list content
-                var startList = _startLists.Get(request.StartListId);
+                // Behörigheten prövas i grinden — förut hoppades den över för en lista utan tävlings-id.
+                var (startList, deny) = await LoadStartListForEditAsync(request.StartListId);
                 if (startList == null)
                 {
-                    return Json(new { success = false, message = "Startlista hittades inte." });
+                    return Json(new { success = false, message = deny });
                 }
 
                 // Was it already official? Distinguishes a first publish ("dina tider finns nu") from a
                 // re-publish ("tiderna kan ha ändrats"), which are different messages to a shooter.
                 var isRepublish = startList.IsOfficial;
 
-                // Check if user has permission to manage this start list
                 var competitionId = startList.CompetitionId;
-                if (competitionId > 0)
+
+                // First, unpublish all other start lists for this competition.
+                // NOTE: under the direct-child architecture this also touches THIS node
+                // (it's a direct child of the competition), loading a fresh IContent and
+                // Save()+Publish()ing it. That bumps the version, so the `startList` instance
+                // captured above becomes non-current — saving it then throws
+                // "Cannot save a non-current version". Re-fetch after the call to get the
+                // current version before we mutate + save it.
+                await UnpublishAllStartListsForCompetition(competitionId);
+
+                startList = _startLists.Get(request.StartListId);
+                if (startList == null)
                 {
-                    var competition = _contentService.GetById(competitionId);
-                    if (competition == null || !await _validator.CanManageCompetition(memberData.Id, competition.Id))
-                    {
-                        return Json(new { success = false, message = "Du har inte behörighet att hantera denna startlista." });
-                    }
-
-                    // First, unpublish all other start lists for this competition.
-                    // NOTE: under the direct-child architecture this also touches THIS node
-                    // (it's a direct child of the competition), loading a fresh IContent and
-                    // Save()+Publish()ing it. That bumps the version, so the `startList` instance
-                    // captured above becomes non-current — saving it then throws
-                    // "Cannot save a non-current version". Re-fetch after the call to get the
-                    // current version before we mutate + save it.
-                    await UnpublishAllStartListsForCompetition(competitionId);
-
-                    startList = _startLists.Get(request.StartListId);
-                    if (startList == null)
-                    {
-                        return Json(new { success = false, message = "Startlista hittades inte." });
-                    }
+                    return Json(new { success = false, message = "Startlista hittades inte." });
                 }
 
                 // Set the start list as published (sparas och publiceras genom IStartListStore)
@@ -792,10 +718,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Ogiltigt startliste-ID." });
                 }
 
-                var startList = _startLists.Get(startListId);
+                var (startList, deny) = await LoadStartListForEditAsync(startListId);
                 if (startList == null)
                 {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
                 }
 
                 // Get configuration data
@@ -849,10 +775,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 }
 
                 // Get the start list to find the competition ID
-                var startList = _startLists.Get(startListId);
+                var (startList, deny) = await LoadStartListForEditAsync(startListId);
                 if (startList == null)
                 {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
                 }
 
                 var competitionId = startList.CompetitionId;
@@ -918,164 +844,6 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         }
 
         /// <summary>
-        /// Repair club data in start list (fills in missing clubs from registrations)
-        /// </summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> RepairClubData([FromBody] RepairClubDataRequest request)
-        {
-            try
-            {
-                if (request.StartListId == 0)
-                {
-                    return Json(new { success = false, message = "Ogiltigt startliste-ID." });
-                }
-
-                var startList = _startLists.Get(request.StartListId);
-                if (startList == null)
-                {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
-                }
-
-                var configData = startList.ConfigurationData;
-                if (string.IsNullOrEmpty(configData))
-                {
-                    return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
-                }
-
-                var configuration = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
-                if (configuration?.Teams == null)
-                {
-                    return Json(new { success = false, message = "Ingen lagdata hittades." });
-                }
-
-                var competitionId = startList.CompetitionId;
-                var registrations = await _repository.GetCompetitionRegistrations(competitionId);
-                var regDict = registrations.ToDictionary(r => r.MemberId);
-
-                int updatedCount = 0;
-
-                foreach (var team in configuration.Teams)
-                {
-                    if (team.Shooters != null)
-                    {
-                        foreach (var shooter in team.Shooters)
-                        {
-                            // Check if club is missing or unknown
-                            if (string.IsNullOrWhiteSpace(shooter.Club) ||
-                                shooter.Club == "Okänd klubb" ||
-                                shooter.Club == "Unknown Club")
-                            {
-                                // Try to get club from registration
-                                if (regDict.TryGetValue(shooter.MemberId, out var reg) &&
-                                    !string.IsNullOrWhiteSpace(reg.MemberClub) &&
-                                    reg.MemberClub != "Okänd klubb")
-                                {
-                                    shooter.Club = reg.MemberClub;
-                                    updatedCount++;
-                                }
-                                else
-                                {
-                                    // Try member lookup as fallback
-                                    var memberClub = _repository.GetMemberClub(shooter.MemberId);
-                                    if (!string.IsNullOrWhiteSpace(memberClub) && memberClub != "Okänd klubb")
-                                    {
-                                        shooter.Club = memberClub;
-                                        updatedCount++;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (updatedCount > 0)
-                {
-                    // Save updated configuration
-                    var configJson = JsonConvert.SerializeObject(configuration);
-                    startList.ConfigurationData = configJson;
-
-                    // Regenerate HTML content
-                    var competition = _contentService.GetById(competitionId);
-                    var competitionName = competition?.Name ?? "Okänd tävling";
-                    var htmlContent = await _renderer.GenerateStartListHtml(configuration, competitionName);
-                    startList.StartListContent = htmlContent;
-
-                    var result = SaveListContent(startList);
-                    if (!result.Success)
-                    {
-                        return Json(new { success = false, message = "Kunde inte spara uppdateringarna." });
-                    }
-
-                }
-
-                return Json(new {
-                    success = true,
-                    message = updatedCount > 0
-                        ? $"Uppdaterade klubbinfo för {updatedCount} skyttar."
-                        : "Ingen klubbinfo behövde uppdateras - alla skyttar har redan klubbinfo."
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error repairing club data for start list {StartListId}", request.StartListId);
-                return Json(new { success = false, message = "Ett oväntat fel uppstod." });
-            }
-        }
-
-        /// <summary>
-        /// Update entire start list configuration
-        /// </summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> UpdateStartList([FromBody] UpdateStartListRequest request)
-        {
-            try
-            {
-                if (request.StartListId == 0)
-                {
-                    return Json(new { success = false, message = "Ogiltigt startliste-ID." });
-                }
-
-                var startList = _startLists.Get(request.StartListId);
-                if (startList == null)
-                {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
-                }
-
-                // Get competition name
-                var competitionId = startList.CompetitionId;
-                var competition = _contentService.GetById(competitionId);
-                var competitionName = competition?.Name ?? "Okänd tävling";
-
-                // Serialize configuration
-                var configJson = JsonConvert.SerializeObject(request.Configuration);
-                startList.ConfigurationData = configJson;
-
-                // Regenerate HTML content
-                var htmlContent = await _renderer.GenerateStartListHtml(request.Configuration, competitionName);
-                startList.StartListContent = htmlContent;
-
-                // Save
-                var result = SaveListContent(startList);
-                if (result.Success)
-                {
-                    return Json(new { success = true, message = "Startlistan har uppdaterats." });
-                }
-                else
-                {
-                    _logger.LogError("Failed to save start list {StartListId}", request.StartListId);
-                    return Json(new { success = false, message = "Kunde inte spara startlistan." });
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error updating start list {StartListId}", request.StartListId);
-                return Json(new { success = false, message = "Ett oväntat fel uppstod." });
-            }
-        }
-
-        /// <summary>
         /// Add a shooter to a specific team in the start list
         /// </summary>
         [HttpPost]
@@ -1089,10 +857,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
 
-                var startList = _startLists.Get(request.StartListId);
+                var (startList, deny) = await LoadStartListForEditAsync(request.StartListId);
                 if (startList == null)
                 {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
                 }
 
                 // Get configuration
@@ -1280,10 +1048,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
 
-                var startList = _startLists.Get(request.StartListId);
+                var (startList, deny) = await LoadStartListForEditAsync(request.StartListId);
                 if (startList == null)
                 {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
                 }
 
                 // Get competition info (needed for both results check and HTML generation)
@@ -1444,10 +1212,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Ogiltigt startliste-ID." });
                 }
 
-                var startList = _startLists.Get(request.StartListId);
+                var (startList, deny) = await LoadStartListForEditAsync(request.StartListId);
                 if (startList == null)
                 {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
                 }
 
                 // Get configuration
@@ -1547,10 +1315,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
 
-                var startList = _startLists.Get(request.StartListId);
+                var (startList, deny) = await LoadStartListForEditAsync(request.StartListId);
                 if (startList == null)
                 {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
                 }
 
                 // Get configuration
@@ -1656,10 +1424,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
 
-                var startList = _startLists.Get(request.StartListId);
+                var (startList, deny) = await LoadStartListForEditAsync(request.StartListId);
                 if (startList == null)
                 {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
                 }
 
                 var configData = startList.ConfigurationData;
@@ -1818,9 +1586,9 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (direction != "up" && direction != "down")
                     return Json(new { success = false, message = "Ogiltig riktning." });
 
-                var startList = _startLists.Get(request.StartListId);
+                var (startList, deny) = await LoadStartListForEditAsync(request.StartListId);
                 if (startList == null)
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
 
                 var configData = startList.ConfigurationData;
                 var configuration = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
@@ -1864,6 +1632,22 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 _logger.LogError(ex, "Error moving shooter {MemberId} {Direction} in start list {StartListId}", request.MemberId, request.Direction, request.StartListId);
                 return Json(new { success = false, message = "Ett oväntat fel uppstod." });
             }
+        }
+
+        /// <summary>
+        /// Den enda vägen in för varje endpoint som ÄNDRAR en startlista: listan slås upp genom
+        /// <c>IStartListStore</c> (aldrig som nod — LAG: id-reglerna, regel 2), den måste höra till en
+        /// tävling, och den inloggade måste få hantera tävlingen. Null-lista = nekad, med meddelandet i
+        /// <c>Deny</c>. Tidigare saknade tio endpoints all behörighetskontroll (genomgången 2026-10-13, A1).
+        /// </summary>
+        private async Task<(StartListRecord? StartList, string Deny)> LoadStartListForEditAsync(int startListId)
+        {
+            if (startListId == 0) return (null, "Ogiltigt startliste-ID.");
+            var list = _startLists.Get(startListId);
+            if (list == null) return (null, "Startlistan kunde inte hittas.");
+            if (list.CompetitionId <= 0) return (null, "Startlistan saknar tävling.");
+            var deny = await DenyUnlessCanManageAsync(list.CompetitionId);
+            return deny != null ? (null, deny) : (list, "");
         }
 
         /// <summary>
@@ -1962,13 +1746,11 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (request == null || request.StartListId == 0 || request.MemberId <= 0 || request.Lane <= 0)
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
 
-                var startList = _startLists.Get(request.StartListId);
+                var (startList, deny) = await LoadStartListForEditAsync(request.StartListId);
                 if (startList == null)
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
 
                 var competitionId = startList.CompetitionId;
-                var deny = await DenyUnlessCanManageAsync(competitionId);
-                if (deny != null) return Json(new { success = false, message = deny });
 
                 var configuration = JsonConvert.DeserializeObject<StartListConfiguration>(startList.ConfigurationData ?? "");
                 if (configuration?.Teams == null)
@@ -2041,10 +1823,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
 
-                var startList = _startLists.Get(request.StartListId);
+                var (startList, deny) = await LoadStartListForEditAsync(request.StartListId);
                 if (startList == null)
                 {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
                 }
 
                 var configData = startList.ConfigurationData;
@@ -2156,10 +1938,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
 
-                var startList = _startLists.Get(request.StartListId);
+                var (startList, deny) = await LoadStartListForEditAsync(request.StartListId);
                 if (startList == null)
                 {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
                 }
 
                 var configData = startList.ConfigurationData;
@@ -2389,10 +2171,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { success = false, message = "Ogiltiga parametrar." });
                 }
 
-                var startList = _startLists.Get(request.StartListId);
+                var (startList, deny) = await LoadStartListForEditAsync(request.StartListId);
                 if (startList == null)
                 {
-                    return Json(new { success = false, message = "Startlistan kunde inte hittas." });
+                    return Json(new { success = false, message = deny });
                 }
 
                 var configData = startList.ConfigurationData;
@@ -4053,11 +3835,6 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         #endregion
     }
 
-    public class DeleteStartListRequest
-    {
-        public int StartListId { get; set; }
-    }
-
     public class PublishStartListRequest
     {
         public int StartListId { get; set; }
@@ -4134,12 +3911,6 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
     public class GetStartListForEditingRequest
     {
         public int StartListId { get; set; }
-    }
-
-    public class UpdateStartListRequest
-    {
-        public int StartListId { get; set; }
-        public StartListConfiguration Configuration { get; set; } = new StartListConfiguration();
     }
 
     public class AddShooterToStartListRequest
@@ -4251,10 +4022,5 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
     {
         public int StartListId { get; set; }
         public int TeamNumber { get; set; }
-    }
-
-    public class RepairClubDataRequest
-    {
-        public int StartListId { get; set; }
     }
 }

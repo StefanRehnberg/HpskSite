@@ -3326,28 +3326,28 @@ namespace HpskSite.Controllers
             var regionalAdmins = new List<(string Name, string Email)>();
             var regionCode = "";
 
+            // Gruppens medlemmar i EN fråga (samma grepp som ClubAdminController.MembersInGroup). Förut
+            // lästes hela registret och sedan GetAllRoles per medlem — två gånger — vid VARJE ny
+            // registrering: ~40 000 frågor vid 20 000 medlemmar (genomgången 2026-10-13, B).
+            List<(string Name, string Email)> Contacts(string group)
+            {
+                try
+                {
+                    return _memberService.GetMembersInRole(group)
+                        .Where(m => m.ContentType.Alias != ClubMemberTypeAlias && !string.IsNullOrEmpty(m.Email))
+                        .Select(m => ($"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(), m.Email))
+                        .ToList();
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Kunde inte läsa medlemmarna i gruppen {group}: {ex.Message}");
+                    return new List<(string Name, string Email)>();
+                }
+            }
+
             try
             {
-                // Single GetAll call reused for both lookups
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var members = allMembers
-                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .ToList();
-
-                // Find club admins
-                var clubAdminGroup = $"ClubAdmin_{clubId}";
-                foreach (var member in members)
-                {
-                    var roles = _memberService.GetAllRoles(member.Id);
-                    if (roles.Contains(clubAdminGroup))
-                    {
-                        var name = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim();
-                        if (!string.IsNullOrEmpty(member.Email))
-                        {
-                            clubAdmins.Add((name, member.Email));
-                        }
-                    }
-                }
+                clubAdmins = Contacts($"ClubAdmin_{clubId}");
 
                 // Get the club's region code
                 var clubContent = _contentService.GetById(clubId);
@@ -3356,23 +3356,8 @@ namespace HpskSite.Controllers
                     regionCode = clubContent.GetValue<string>("regionalFederation") ?? "";
                 }
 
-                // Find regional admins
                 if (!string.IsNullOrEmpty(regionCode))
-                {
-                    var regionalAdminGroup = $"RegionalAdmin_{regionCode}";
-                    foreach (var member in members)
-                    {
-                        var roles = _memberService.GetAllRoles(member.Id);
-                        if (roles.Contains(regionalAdminGroup))
-                        {
-                            var name = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim();
-                            if (!string.IsNullOrEmpty(member.Email))
-                            {
-                                regionalAdmins.Add((name, member.Email));
-                            }
-                        }
-                    }
-                }
+                    regionalAdmins = Contacts($"RegionalAdmin_{regionCode}");
             }
             catch (Exception ex)
             {

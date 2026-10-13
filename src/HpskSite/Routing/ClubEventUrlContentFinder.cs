@@ -86,7 +86,10 @@ namespace HpskSite.Routing
         private bool Resolve(IPublishedRequestBuilder request, HttpContext http, SqlClubEventStore store,
             Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent owner, int? year, string slug)
         {
-            var hit = store.FindByAddress(owner.Id, year, slug);
+            var ownerType = owner.ContentType.Alias == ClubEvents.OwnerRegionAlias
+                ? HpskSite.Models.Events.ClubEventRecord.OwnerRegion
+                : HpskSite.Models.Events.ClubEventRecord.OwnerClub;
+            var hit = store.FindByAddress(ownerType, owner.Id, year, slug);
             if (hit == null) return false;
             var ev = store.Get(hit.Value.EventId);
             if (ev == null || !ev.IsPublished) return false;

@@ -23,7 +23,13 @@ namespace HpskSite.Tests
     public class ScaleGuardTests
     {
         /// <summary>Antal levande anrop till <c>MemberService.GetAll(</c> 2026-10-12. Sänk när ett tas bort — höj aldrig.</summary>
-        private const int GetAllBaseline = 41;
+        private const int GetAllBaseline = 39; // 2026-10-13: registreringens adminkontakter och godkännandet flyttade
+
+        /// <summary>
+        /// Antal levande <c>GetAllMembers()</c> UTAN argument (hela registret) 2026-10-13 — sökfälten i
+        /// genomgångens punkt B. Spärren missade dem förut. Sänk när ett tas bort — höj aldrig.
+        /// </summary>
+        private const int GetAllMembersBaseline = 3;
 
         private static readonly string[] SkipDirectories =
             { "bin", "obj", "node_modules", "lib", "Migrations", "Documentation", "KnowledgeBase", "App_Data", "umbraco", "media", "App_Plugins", "wwwroot" };
@@ -31,6 +37,23 @@ namespace HpskSite.Tests
         private static readonly Regex GetAllCall = new(@"[mM]emberService\.GetAll\(", RegexOptions.Compiled);
         private static readonly Regex FixedCap = new(@"[mM]emberService\.GetAll\(\s*0\s*,\s*\d+\s*,", RegexOptions.Compiled);
         private static readonly Regex RolesInLambda = new(@"\.(Where|Count|Any|All|Select|ToDictionary|First|FirstOrDefault)\([^;]*GetAllRoles\(", RegexOptions.Compiled);
+        private static readonly Regex GetAllMembersNoArgs = new(@"[mM]emberService\.GetAllMembers\(\s*\)", RegexOptions.Compiled);
+        private static readonly Regex RolesOfVariable = new(@"GetAllRoles\(\s*(\w+)\.Id\s*\)", RegexOptions.Compiled);
+
+        /// <summary>
+        /// En rollfråga på <c>x.Id</c> där <c>x</c> är variabeln i en <c>foreach</c> högst 25 rader upp — en
+        /// fråga per medlem i en loop. Spärren såg förut bara lambdor och missade
+        /// <c>MemberController.GetAdminContactsForClub</c> (genomgången 2026-10-13). Ren funktion.
+        /// </summary>
+        internal static bool IsRoleQueryPerLoopMember(IReadOnlyList<string> lines, int i)
+        {
+            var m = RolesOfVariable.Match(lines[i]);
+            if (!m.Success) return false;
+            var loop = new Regex(@"foreach\s*\(\s*var\s+" + Regex.Escape(m.Groups[1].Value) + @"\s+in\b");
+            for (var j = Math.Max(0, i - 25); j < i; j++)
+                if (loop.IsMatch(lines[j])) return true;
+            return false;
+        }
 
         [Fact]
         public void Ingen_rollfraga_per_medlem_i_en_lista()
@@ -38,6 +61,37 @@ namespace HpskSite.Tests
             var hits = Scan(line => RolesInLambda.IsMatch(line));
             Assert.True(hits.Count == 0,
                 "En rollfråga per medlem i en lista — använd MemberRoleIndex.Load(...) eller GetMembersInRole:\n" + string.Join("\n", hits));
+        }
+
+        [Fact]
+        public void Ingen_rollfraga_per_medlem_i_en_loop()
+        {
+            var hits = ScanLines((lines, i) => IsRoleQueryPerLoopMember(lines, i));
+            Assert.True(hits.Count == 0,
+                "En rollfråga per medlem i en loop — använd MemberRoleIndex.Load(...) eller GetMembersInRole:\n" + string.Join("\n", hits));
+        }
+
+        [Fact]
+        public void Antalet_GetAllMembers_utan_urval_okar_inte()
+        {
+            var hits = Scan(line => GetAllMembersNoArgs.IsMatch(line));
+            Assert.True(hits.Count <= GetAllMembersBaseline,
+                $"{hits.Count} anrop till GetAllMembers() utan urval — taket är {GetAllMembersBaseline}. Det läser hela registret:\n" + string.Join("\n", hits));
+        }
+
+        /// <summary>Positivt kontrollprov: varje mönster FÅNGAR det det ska (annars kan spärren inte falla).</summary>
+        [Fact]
+        public void Monstren_fangar_det_de_ska()
+        {
+            Assert.Matches(GetAllCall, "var all = _memberService.GetAll(0, int.MaxValue, out _);");
+            Assert.Matches(FixedCap, "var all = _memberService.GetAll(0, 5000, out _);");
+            Assert.Matches(RolesInLambda, "members.Where(m => _memberService.GetAllRoles(m.Id).Contains(g))");
+            Assert.Matches(GetAllMembersNoArgs, "var all = _memberService.GetAllMembers();");
+            Assert.DoesNotMatch(GetAllMembersNoArgs, "var some = _memberService.GetAllMembers(ids);");
+            var loop = new[] { "foreach (var member in members)", "{", "    var roles = _memberService.GetAllRoles(member.Id);", "}" };
+            Assert.True(IsRoleQueryPerLoopMember(loop, 2));
+            var notLoop = new[] { "foreach (var role in _memberService.GetAllRoles(loser.Id))", "{", "}" };
+            Assert.False(IsRoleQueryPerLoopMember(notLoop, 0));
         }
 
         [Fact]
@@ -57,7 +111,9 @@ namespace HpskSite.Tests
                 "ClubMembership i stället för hela registret:\n" + string.Join("\n", hits));
         }
 
-        private static List<string> Scan(Func<string, bool> match)
+        private static List<string> Scan(Func<string, bool> match) => ScanLines((lines, i) => match(lines[i]));
+
+        private static List<string> ScanLines(Func<IReadOnlyList<string>, int, bool> match)
         {
             var root = SiteRoot();
             var hits = new List<string>();
@@ -70,7 +126,7 @@ namespace HpskSite.Tests
                     var trimmed = line.TrimStart();
                     if (trimmed.StartsWith("//") || trimmed.StartsWith("*") || trimmed.StartsWith("///")) continue;
                     if (line.Contains("scale-ok:")) continue;
-                    if (match(line)) hits.Add($"{Path.GetRelativePath(root, file)}:{i + 1}: {trimmed}");
+                    if (match(lines, i)) hits.Add($"{Path.GetRelativePath(root, file)}:{i + 1}: {trimmed}");
                 }
             }
             return hits;

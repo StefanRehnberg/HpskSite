@@ -2592,16 +2592,12 @@ namespace HpskSite.Controllers
         /// </summary>
         private int CountRegistrationsForCompetition(int competitionId)
         {
-            try
-            {
-                // Via anmälningslagringen (sajtstrukturen fas 1a) — förut en vandring genom hela
-                // innehållsträdet för att räkna en tävlings anmälningar.
-                return _registrations.CountByCompetition(new[] { competitionId }).GetValueOrDefault(competitionId);
-            }
-            catch
-            {
-                return 0;
-            }
+            // Via anmälningslagringen (sajtstrukturen fas 1a) — förut en vandring genom hela
+            // innehållsträdet för att räkna en tävlings anmälningar.
+            // ⚠️ Inget try/catch: ett läsfel är INTE noll anmälningar. Förut svarade den 0 vid fel, och
+            // raderingen släppte då igenom en tävling med anmälningar (genomgången 2026-10-13, A7).
+            // Felet bubblar till DeleteCompetitions catch, som vägrar.
+            return _registrations.CountByCompetition(new[] { competitionId }).GetValueOrDefault(competitionId);
         }
 
         /// <summary>
