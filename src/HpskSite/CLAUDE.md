@@ -11291,6 +11291,39 @@ tävlingssidan `PageMeta.Canonical = Model.Url()`. Svit: `hpsk-verify/competitio
 värd vid skapandet, så ingen förifyllning behövdes. **Operatörssteg i prod efter deploy:** Underhåll →
 Tävlingarnas värd → Visa listan (ska vara de 8) → Skriv in värden.
 
+### Driftskollen — felsvar, hälsa, signaler och larm (C3-planen F6, 2026-10-13)
+
+`/admin-page` → Underhåll → kortet **Driftskoll** (`_OpsOverviewPanel`, `OpsController`, sajtadmin). Allt i `Services/Ops/`.
+- **Felsvar per dag:** `RequestErrorMiddleware` (post-pipeline, samma plats som besöksloggen) räknar varje svar
+  ≥ 400 — ett ofångat undantag som 500 — i `RequestErrorCounter` (minnet, högst 2000 nycklar, resten under
+  `(övrigt)`). `RequestErrorFlushService` gör MERGE till `dbo.RequestErrorLog` (dag, status, område, bot) en
+  gång i minuten och rensar efter 120 dagar. Området = första sökvägsdelen (`RequestErrorArea`, ren funktion);
+  för `/umbraco/surface|api/` även kontrollern. Bot = `VisitorTrackingMiddleware.IsBotUserAgent`.
+- **`/health/competitions`** (anonym, 503 vid FAIL, `?format=json`, cachad 2 min, `?fresh=1`):
+  `CompetitionHealthService` — per lagring (anmälningar, händelser) läge, frysning, rader, noder, tabellfödda
+  rader och **golvet** (`IdentityFloor.Inspect`, läser bara: nästa id > högsta referens). Regeln i `Evaluate`
+  (ren): FAIL om tabellen gäller men saknas, om noderna gäller men tabellfödda rader finns (de syns inte), om
+  golvet är brutet; WARN vid frysning och publicerade tävlingar utan adress. **När C1/C2 (resultat- och
+  startlistor) och S1 (tävlingarna) kommer till main: lägg till deras lagringar här.**
+- **Signaler** (`OpsSignals`, strypta: samma nyckel en gång i timmen, högst 100 rader i timmen; räknas alltid):
+  *saknas i lagringen* — lagringsväxlarnas `Get`/`GetById` som inte gav något; loggas bara i tabelläget.
+  ⚠️ En miss bevisar ingen förlust (gamla länkar, raderade rader — tabellen raderar på riktigt och den gamla
+  noden står kvar — och sonder ger också missar). **Ny lagring (`ICompetitionStore` i S1) anropar
+  `OpsSignals.StoreMiss`.** *Nekad behörighet på grund av fel* — varje `catch` i `AdminAuthorizationService`s
+  grindar går via `OpsSignals.AuthGateFailed` (loggar grind, objekt och undantaget, svarar `false`). Ett vanligt
+  nej loggas inte. Nya grindar: samma mönster, aldrig `catch { return false; }`.
+- **Larm på Critical:** `CriticalAlertSink` (Serilog-sink, fångar `Fatal` = MEL Critical) → `CriticalAlertQueue`
+  → `CriticalAlertService` sparar i `dbo.OpsAlert` (samma kategori + meddelande inom 6 h räknas upp) och mejlar
+  `Email:AdminEmail` högst var 15:e minut (`EmailService.SendOpsAlertAsync`; markeras mejlad bara när mejlet
+  gick). ⚠️⚠️ **En `ILoggerProvider` får ALDRIG en rad** — Umbraco registrerar en `SerilogLoggerFactory` som
+  inte tar med providers ur DI, inte ens via `ILoggerFactory.AddProvider` (provat). Umbraco bygger om loggern
+  med `ReadFrom.Services(sp)`, som tar med varje `Serilog.Core.ILogEventSink` i DI — registrera en sink.
+  *Skicka ett provlarm* i kortet visar att hela vägen fungerar. `RenderMessage()` sätter citattecken runt
+  strängar; sinken renderar utan.
+- Migrering `Migrations/create-ops-tables.sql` (O1 i körordningen); startkontroll `OpsSchemaGuardHostedService`.
+- Test: `OpsTests` (27). Svit: `hpsk-verify/ops-overview-verify.mjs` 22/22 (går mot dev, städar sina rader);
+  A/B (bara 5xx räknas + sinken på fel nivå) → 10 röda.
+
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
 `Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,

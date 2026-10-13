@@ -41,12 +41,22 @@ namespace HpskSite.Services.Registrations
         private readonly NodeRegistrationStore _node;
         private readonly SqlRegistrationStore _sql;
         private readonly SiteSettingService _settings;
+        private readonly ILogger<SwitchingRegistrationStore> _logger;
 
-        public SwitchingRegistrationStore(NodeRegistrationStore node, SqlRegistrationStore sql, SiteSettingService settings)
+        public SwitchingRegistrationStore(NodeRegistrationStore node, SqlRegistrationStore sql, SiteSettingService settings,
+            ILogger<SwitchingRegistrationStore> logger)
         {
             _node = node;
             _sql = sql;
             _settings = settings;
+            _logger = logger;
+        }
+
+        /// <summary>C3-planen F6: en uppslagning på id som inte gav något räknas (och loggas strypt i tabelläget).</summary>
+        private RegistrationRecord? Miss(RegistrationRecord? r, int id)
+        {
+            if (r == null) HpskSite.Services.Ops.OpsSignals.StoreMiss(_logger, "anmälan", id, UsesTable ? "table" : "node");
+            return r;
         }
 
         public bool UsesTable =>
@@ -67,8 +77,8 @@ namespace HpskSite.Services.Registrations
         }
 
         public IReadOnlyList<RegistrationRecord> List(int competitionId) => Current.List(competitionId);
-        public RegistrationRecord? Get(int competitionId, int registrationId) => Current.Get(competitionId, registrationId);
-        public RegistrationRecord? GetById(int registrationId) => Current.GetById(registrationId);
+        public RegistrationRecord? Get(int competitionId, int registrationId) => Miss(Current.Get(competitionId, registrationId), registrationId);
+        public RegistrationRecord? GetById(int registrationId) => Miss(Current.GetById(registrationId), registrationId);
         public RegistrationRecord? FindForMember(int competitionId, int memberId) => Current.FindForMember(competitionId, memberId);
         public IReadOnlyList<RegistrationRecord> ListForMemberInCompetition(int competitionId, int memberId)
             => Current.ListForMemberInCompetition(competitionId, memberId);
