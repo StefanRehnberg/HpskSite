@@ -843,7 +843,11 @@ namespace HpskSite.Services
                         payerClubId = ReadTeamClubId(teamId);
 
                     // Fallback for a team row that is gone (deleted team, invoice left behind): the
-                    // team registration doc still names the club that was billed.
+                    // invoice's own payerClubId — filled in from the team mirror before the mirrors are
+                    // removed (C3-planen F2, RegistrationMigrationService.CleanupNodes).
+                    if (payerClubId <= 0 && invoice.HasProperty("payerClubId"))
+                        payerClubId = invoice.GetValue<int>("payerClubId");
+                    // …and the team registration doc, as long as it still exists.
                     if (payerClubId <= 0)
                     {
                         var regId = invoice.GetValue<int>("registrationId");
