@@ -14,10 +14,11 @@ namespace HpskSite.Services.StartLists
     /// frågar efter; <see cref="ListPublished"/> är därför samma sak som <see cref="List"/>.
     /// <see cref="StartListPublish"/> ignoreras.</para>
     ///
-    /// <para><b>⚠️ Id:n.</b> Migrerade rader bär nodens (positiva) id (IDENTITY_INSERT). Nya rader får
-    /// NEGATIVA id:n, så ett startliste-id aldrig kan vara samma tal som en innehållsnod — se
-    /// <see cref="HpskSite.Services.Hosting.NegativeIdentity"/>. "Ingen lista" är 0; fråga <c>!= 0</c>, aldrig
-    /// <c>&gt; 0</c>.</para>
+    /// <para><b>⚠️ Id:n — LAG: id-reglerna (CLAUDE.md).</b> Migrerade rader bär nodens id (IDENTITY_INSERT);
+    /// identiteten fortsätter över varje startliste-id någon pekar på (<c>IdentityFloor</c> med
+    /// <c>StartListMigrationService.IdSources</c>, vid flytt, tömning och varje start). Id:n är positiva;
+    /// "ingen lista" är 0. Att samma tal kan finnas som en nod av en annan sort är ofarligt — en lista
+    /// slås bara upp här.</para>
     ///
     /// <para><b>Namnet är unikt inom tävlingen</b>, som syskonnoder i Umbraco: adressens segment härleds ur
     /// namnet och finnarna matchar listan på segmentet. Ett namn som redan finns får " (1)", " (2)" …</para>

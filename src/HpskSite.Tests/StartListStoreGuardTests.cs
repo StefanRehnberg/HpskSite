@@ -58,6 +58,19 @@ namespace HpskSite.Tests
                 "Startlistans egenskaper läses eller skrivs på en nod — gå genom IStartListStore:\n" + string.Join("\n", hits));
         }
 
+        /// <summary>Positivt kontrollprov: mönstren FÅNGAR det de ska — annars kan spärren inte falla.</summary>
+        [Fact]
+        public void Monstren_fangar_det_de_ska()
+        {
+            Assert.Matches(AliasLiteral, "var lists = children.Where(c => c.ContentType.Alias == \"precisionStartList\");");
+            Assert.Matches(AliasLiteral, "if (node.ContentType.Alias == \"finalsStartList\") return;");
+            Assert.Matches(AliasLiteral, "var hub = children.FirstOrDefault(c => c.ContentType.Alias == \"competitionStartListsHub\");");
+            Assert.Matches(PropertyAccess, "var cfg = node.GetValue<string>(\"configurationData\");");
+            Assert.Matches(PropertyAccess, "node.SetValue(\"isOfficialStartList\", true);");
+            Assert.Matches(PropertyAccess, "var html = sl.Value<string>(\"startListContent\");");
+            Assert.DoesNotMatch(PropertyAccess, "var cfg = record.ConfigurationData;");
+        }
+
         private static List<string> Scan(Func<string, bool> match)
         {
             var root = SiteRoot();

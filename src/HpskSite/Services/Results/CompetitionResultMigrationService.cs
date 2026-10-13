@@ -137,7 +137,8 @@ ORDER BY n.parentId, n.id", CompetitionResultFields.NodeAlias)
             using var scope = _scopeProvider.CreateScope();
             var rows = scope.Database.ExecuteScalar<int>($"SELECT COUNT(*) FROM {SqlCompetitionResultStore.Table}");
             scope.Database.Execute($"DELETE FROM {SqlCompetitionResultStore.Table}");
-            NegativeIdentity.Reseed(scope.Database, SqlCompetitionResultStore.Table);
+            // Identiteten går aldrig bakåt (LAG: id-reglerna, regel 3).
+            IdentityFloor.Reseed(scope.Database, SqlCompetitionResultStore.Table, IdSources);
             scope.Complete();
             _logger.LogWarning("Resultatlistornas tabell tömd ({Rows} rader) av medlem {MemberId}", rows, byMemberId);
             return (true, $"Tabellen tömd ({rows} rader). Flytten kan köras igen.");
@@ -216,14 +217,23 @@ SET IDENTITY_INSERT {SqlCompetitionResultStore.Table} OFF;",
             };
         }
 
-        /// <summary>Nya rader får NEGATIVA id:n, aldrig samma tal som en innehållsnod. Se <see cref="NegativeIdentity"/>.</summary>
+        /// <summary>
+        /// Identiteten fortsätter över varje resultatliste-id som någon pekar på (LAG: id-reglerna, regel 3).
+        /// Går aldrig bakåt — se <see cref="IdentityFloor"/>.
+        /// </summary>
         private int Reseed()
         {
             using var scope = _scopeProvider.CreateScope();
-            var seed = NegativeIdentity.Reseed(scope.Database, SqlCompetitionResultStore.Table);
+            var seed = IdentityFloor.Reseed(scope.Database, SqlCompetitionResultStore.Table, IdSources);
             scope.Complete();
             return seed;
         }
+
+        /// <summary>Allt som bär ett resultatliste-id. Läggs en ny referens till: lägg till den här.</summary>
+        internal static readonly IdentityFloor.Source[] IdSources =
+        {
+            IdentityFloor.NodesOfType("competitionResult"), // resultstore-ok: bara högsta id:t, ingen läsning
+        };
 
         public sealed class VerifyResult
         {

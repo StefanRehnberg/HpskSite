@@ -51,8 +51,8 @@ en flytt. Därför gäller tre regler, för varje sort, nu och framåt:
   `id > 0` betyder "finns".
 - Ny tabell som tar över noder → `IdentityFloor` + `IdSources` + en store + ett spärrtest mot nya noder.
 - Ny referenskolumn till en sort → lägg den i sortens `IdSources`.
-- Kända avvikelser som ska bort (2026-10-13): start- och resultatlistorna på branchen `skalplan-fas-c`
-  har negativa id:n (byts före deploy); `featuredItems` (tas bort); gamla fakturanoders
+- Kända avvikelser som ska bort (2026-10-13): ~~start- och resultatlistornas negativa id:n~~ (bytta
+  på branchen `skalplan-fas-c` 2026-10-13); `featuredItems` (tas bort); gamla fakturanoders
   `registrationId` (försvinner med fakturaarkivet); närvaro-QR där ett nummer utan prefix tolkas som
   händelse (får prefix).
 
@@ -11183,7 +11183,11 @@ läskontroll i prod: `Migrations/check-prod-sajtstruktur-2026-10-10.sql`. Svit:
   `PrecisionResultsController` (borttagen — lät vilken inloggad medlem som helst skriva och publicera
   vilken nod som helst via id).
 - `Switch("table")` vägras utan frysning och utan ren jämförelse; `Switch("node")` går alltid.
-  Noderna ligger orörda tills avpubliceringen — återställning = växla tillbaka.
+  ⚠️ **Men att växla tillbaka är en återställning bara FÖRE avpubliceringen och innan nya rader skrivits
+  i tabellen.** Efter avpubliceringen läser nodlagringen avpublicerade noder: de publika sidorna
+  (händelsesidor, anmälningslistor, start- och resultatlistor) blir tomma tills noderna publiceras igen.
+  Rader som skapats eller ändrats i tabellen efter bytet finns inte i noderna. En återställning då är en
+  kopiering tillbaka, inte en växling (genomgången 2026-10-13; förut stod här motsatsen).
 - `RegistrationNodeGuard` / `ClubEventNodeGuard` vägrar NYA noder av typen när tabellen gäller.
 - **⚠️ Dev-databasen delas med `main`:** lämna aldrig dev på `table`. Sviterna
   `hpsk-verify/registration-migration-verify.mjs` och `club-event-migration-verify.mjs` kör hela
@@ -11345,21 +11349,18 @@ cache, `Children()` eller SQL mot `umbracoPropertyData`. Gå genom `Services/Res
   Sviter: `resultstore-migration-verify.mjs` (hela fönstret, 30), `resultstore-writepaths-verify.mjs`
   (23, lägesmedveten) — och resultatsviterna är gröna i båda lägena.
 
-## ⚠️⚠️ Tabeller som tar över noder: negativa id:n (skalplanen fas C, 2026-10-12)
+## ⚠️⚠️ Tabeller som tar över noder: id:n enligt LAGEN (skalplanen fas C)
 
-`CompetitionResultList` och `CompetitionStartList` har `IDENTITY(-1,-1)` och `CHECK (Id <> 0)`. Flyttade
-rader bär nodens (positiva) id; **nya rader får negativa id:n**, så de aldrig kan vara samma tal som en
-innehållsnod. **Ett eget startvärde uppåt räcker inte** (en första version började på 100 000 000):
-Umbracos nod-id är en global stigande serie, och varje fast gräns nås till slut — samma lärdom som
-ekonomins sandlåda. `Services/Hosting/NegativeIdentity.Reseed` är den enda omsättningen, efter flytten och
-efter tömningen (`IDENTITY_INSERT` med positiva värden får inte lämna identiteten i nodernas serie).
-- ⚠️ **`id > 0` / `id <= 0` på ett start- eller resultatliste-id är en BUGG** — "ingen lista" är 0, fråga
-  `== 0` / `!= 0`. `TableIdSignGuardTests` fäller bygget på mönstret; en NODlagring, där ett negativt id
-  aldrig är en nod, får `id-sign-ok: <skäl>`. `ORDER BY Id` är omvänd bland de nya raderna.
-- **Anmälningar och händelser (sajtstrukturen, i drift) har MEDVETET inte negativa id:n** (Stefan
-  2026-10-12): deras referenser bär sin sort överallt, så där sätts identiteten i stället över varje
-  refererat id (`IdentityFloor`, se avsnittet *Sajtstrukturen*). Negativa id:n hör hemma där id:t går
-  genom kanaler som inte vet sorten — `&fsl=`, kalenderfilernas UID, nodreservläget.
+**Se ⚖️ LAG: id-reglerna överst.** `CompetitionResultList` och `CompetitionStartList` har `IDENTITY(1,1)`.
+Flyttade rader bär nodens id; identiteten sätts över varje id sorten någonsin haft eller som någon pekar på
+(`IdentityFloor` med `StartListMigrationService.IdSources` / `CompetitionResultMigrationService.IdSources`)
+— efter flytten, efter tömningen och vid varje start (`IdentityFloorHostedService`).
+- **Historik:** 2026-10-12 fick tabellerna först ett startvärde på 100 000 000, sedan negativa id:n
+  (`IDENTITY(-1,-1)`, `NegativeIdentity`, `TableIdSignGuardTests`). Båda togs bort 2026-10-13 när Stefan
+  beslutade lagen: krocken med en nod av en annan sort är ofarlig när varje sort slås upp på ett ställe.
+  Tabellskripten bygger om en tom tabell i den gamla formen; startkontrollen räknar den som saknad.
+- Påminnelseloggens nycklar (`lag-{id}-…`, `final-…`, `spring-…`, `stafett-…`) och finalernas
+  `QualificationStartListId` är källor — ett återanvänt id hade fått en påminnelse att se skickad ut.
 
 ## ⚠️⚠️ Startlistorna går genom `IStartListStore` (skalplanen C2, branch `skalplan-fas-c`, 2026-10-12)
 
@@ -11382,8 +11383,8 @@ undantag får `startliststore-ok: <skäl>` på raden.
   och `CompetitionResultTreeUrlFinder` tävlingen med mallen `PrecisionStartList`/`PrecisionFinalsStartList`
   och lägger listan i `Context.Items[StartListItemKey]`.
 - **Tabellen** `CompetitionStartList` (`create-competition-start-list-table.sql`). Migrerade rader bär
-  nodens (positiva) id; **nya rader får NEGATIVA id:n** — se *Tabeller som tar över noder: negativa id:n*
-  nedan. Namnet är unikt per tävling på SEGMENTET
+  nodens id; nya rader fortsätter över varje refererat startliste-id — se *Tabeller som tar över noder:
+  id:n enligt LAGEN* ovan. Namnet är unikt per tävling på SEGMENTET
   (`"Namn (1)"`, som syskonnoder). Hubbens listor flyttas med `LegacyHub = 1`.
 - **Växeln** `StartLists:Store` (`node`/`table`) och frysningen `StartLists:WriteFreeze` i `SiteSetting`.
   `SwitchingStartListStore` väljer per anrop; frysningen ger `StartListWriteFrozenException`.

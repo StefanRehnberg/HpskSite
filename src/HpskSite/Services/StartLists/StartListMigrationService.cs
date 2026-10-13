@@ -172,7 +172,9 @@ ORDER BY n.id", StartListNodes.QualifyingAlias, StartListNodes.FinalsAlias, Star
             using var scope = _scopeProvider.CreateScope();
             var rows = scope.Database.ExecuteScalar<int>($"SELECT COUNT(*) FROM {SqlStartListStore.Table}");
             scope.Database.Execute($"DELETE FROM {SqlStartListStore.Table}");
-            NegativeIdentity.Reseed(scope.Database, SqlStartListStore.Table);
+            // Identiteten går aldrig bakåt (LAG: id-reglerna, regel 3) — påminnelseloggen och finalernas
+            // kvalreferens står kvar på tabellfödda listors id.
+            IdentityFloor.Reseed(scope.Database, SqlStartListStore.Table, IdSources);
             scope.Complete();
             _logger.LogWarning("Startlistornas tabell tömd ({Rows} rader) av medlem {MemberId}", rows, byMemberId);
             return (true, $"Tabellen tömd ({rows} rader). Flytten kan köras igen.");
@@ -259,16 +261,35 @@ SET IDENTITY_INSERT {SqlStartListStore.Table} OFF;",
         }
 
         /// <summary>
-        /// Nya rader får NEGATIVA id:n under alla befintliga, aldrig samma tal som en innehållsnod. Se
-        /// <see cref="NegativeIdentity"/>.
+        /// Identiteten fortsätter över varje startliste-id som NÅGON pekar på (LAG: id-reglerna, regel 3).
+        /// Går aldrig bakåt — se <see cref="IdentityFloor"/>.
         /// </summary>
         private int Reseed()
         {
             using var scope = _scopeProvider.CreateScope();
-            var seed = NegativeIdentity.Reseed(scope.Database, SqlStartListStore.Table);
+            var seed = IdentityFloor.Reseed(scope.Database, SqlStartListStore.Table, IdSources);
             scope.Complete();
             return seed;
         }
+
+        /// <summary>
+        /// Allt som bär ett startliste-id. Läggs en ny referens till: lägg till den här.
+        /// Påminnelseloggens nycklar är <c>lag-{id}-…</c>, <c>final-{id}-…</c>, <c>spring-{id}-…</c> och
+        /// <c>stafett-{id}-…</c> — ett återanvänt id hade fått en påminnelse att se redan skickad ut.
+        /// </summary>
+        internal static readonly IdentityFloor.Source[] IdSources =
+        {
+            IdentityFloor.NodesOfType("precisionStartList"), // startliststore-ok: bara högsta id:t, ingen läsning
+            IdentityFloor.NodesOfType("finalsStartList"),    // startliststore-ok: bara högsta id:t, ingen läsning
+            new("dbo.CompetitionStartList", "SELECT MAX(QualificationStartListId) FROM dbo.CompetitionStartList"),
+            new("dbo.umbracoPropertyData", @"SELECT MAX(COALESCE(pd.intValue, TRY_CONVERT(int, LEFT(pd.varcharValue, 20))))
+                FROM umbracoPropertyData pd JOIN cmsPropertyType pt ON pt.id = pd.propertyTypeId
+                WHERE pt.alias = 'qualificationStartListId'"),
+            new("dbo.ScheduleReminderLog", @"SELECT MAX(TRY_CONVERT(int, LEFT(SUBSTRING(r.SourceKey, CHARINDEX('-', r.SourceKey) + 1, 20),
+                    CHARINDEX('-', SUBSTRING(r.SourceKey, CHARINDEX('-', r.SourceKey) + 1, 20) + '-') - 1)))
+                FROM dbo.ScheduleReminderLog r
+                WHERE r.SourceKey LIKE 'lag-%' OR r.SourceKey LIKE 'final-%' OR r.SourceKey LIKE 'spring-%' OR r.SourceKey LIKE 'stafett-%'"),
+        };
 
         public sealed class VerifyResult
         {

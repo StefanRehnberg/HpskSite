@@ -28,13 +28,16 @@ namespace HpskSite.Services.Results
             _logger = logger;
         }
 
-        /// <summary>Om tabellen finns. Kastar när databasen inte går att fråga — en kontroll får aldrig
-        /// översätta "kunde inte fråga" till ett svar.</summary>
+        /// <summary>Om tabellen finns i rätt form. Kastar när databasen inte går att fråga — en kontroll får
+        /// aldrig översätta "kunde inte fråga" till ett svar.
+        /// <para>En tabell från en äldre version av skriptet (negativ identitet) räknas som saknad: kör om
+        /// <c>create-competition-result-list-table.sql</c>, som bygger om en tom tabell (LAG: id-reglerna).</para></summary>
         public static bool TableExists(IScopeProvider scopeProvider)
         {
             using var scope = scopeProvider.CreateScope(autoComplete: true);
             return scope.Database.ExecuteScalar<int>(
-                "SELECT CASE WHEN OBJECT_ID('dbo.CompetitionResultList', 'U') IS NULL THEN 0 ELSE 1 END") == 1;
+                @"SELECT CASE WHEN OBJECT_ID('dbo.CompetitionResultList', 'U') IS NULL
+                                OR IDENT_INCR('dbo.CompetitionResultList') < 0 THEN 0 ELSE 1 END") == 1;
         }
 
         protected override async Task ExecuteIsolatedAsync(CancellationToken stoppingToken)
