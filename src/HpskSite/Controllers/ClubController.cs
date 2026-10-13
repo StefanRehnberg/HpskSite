@@ -1532,6 +1532,9 @@ namespace HpskSite.Controllers
                 }
 
                 _memberService.Save(prospectMember);
+                // Synken satte nyss raden till "Utträdd" — men en avslagen sökande har aldrig varit medlem.
+                // Raden tas bort om den aldrig blev ett medlemskap (genomgången 2026-10-13, A5).
+                _clubMembershipService.DeleteIfNeverMember(prospectMember.Id, request.ClubId);
 
                 return Ok(new { success = true, message = "Member declined and removed from club" });
             }

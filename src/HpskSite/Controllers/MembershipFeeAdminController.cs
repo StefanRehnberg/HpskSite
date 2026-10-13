@@ -165,7 +165,7 @@ namespace HpskSite.Controllers
 
         /// <summary>Klubbens aktiva medlemmar (utom utträdda och avlidna) som underlag för avgiften.</summary>
         private List<MemberFeeInput> ActiveFeeMembers(int clubId)
-            => _clubMembershipService.GetForClub(clubId)
+            => _clubMembershipService.GetForClubApprovedMembers(clubId)
                 .Where(cm => cm.MembershipStatus != "Utträdd" && cm.MembershipStatus != "Avliden")
                 .Select(cm => new MemberFeeInput
                 {
@@ -961,7 +961,7 @@ namespace HpskSite.Controllers
         /// samma regel som klubbens egen avgiftskörning, så de två inte räknar olika på samma register.
         /// </summary>
         private int ActiveMemberCount(int clubId)
-            => _clubMembershipService.GetForClub(clubId)
+            => _clubMembershipService.GetForClubApprovedMembers(clubId)
                 .Count(cm => cm.MembershipStatus != "Utträdd" && cm.MembershipStatus != "Avliden");
 
         /// <summary>
