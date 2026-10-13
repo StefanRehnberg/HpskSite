@@ -11183,7 +11183,11 @@ läskontroll i prod: `Migrations/check-prod-sajtstruktur-2026-10-10.sql`. Svit:
   `PrecisionResultsController` (borttagen — lät vilken inloggad medlem som helst skriva och publicera
   vilken nod som helst via id).
 - `Switch("table")` vägras utan frysning och utan ren jämförelse; `Switch("node")` går alltid.
-  Noderna ligger orörda tills avpubliceringen — återställning = växla tillbaka.
+  ⚠️ **Men att växla tillbaka är en återställning bara FÖRE avpubliceringen och innan nya rader skrivits
+  i tabellen.** Efter avpubliceringen läser nodlagringen avpublicerade noder: de publika sidorna
+  (händelsesidor, anmälningslistor, start- och resultatlistor) blir tomma tills noderna publiceras igen.
+  Rader som skapats eller ändrats i tabellen efter bytet finns inte i noderna. En återställning då är en
+  kopiering tillbaka, inte en växling (genomgången 2026-10-13; förut stod här motsatsen).
 - `RegistrationNodeGuard` / `ClubEventNodeGuard` vägrar NYA noder av typen när tabellen gäller.
 - **⚠️ Dev-databasen delas med `main`:** lämna aldrig dev på `table`. Sviterna
   `hpsk-verify/registration-migration-verify.mjs` och `club-event-migration-verify.mjs` kör hela
