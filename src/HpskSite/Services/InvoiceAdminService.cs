@@ -38,14 +38,18 @@ namespace HpskSite.Services
         /// </summary>
         private static readonly TimeSpan ScanCacheDuration = TimeSpan.FromSeconds(60);
 
+        private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
+
         public InvoiceAdminService(
             ILogger<InvoiceAdminService> logger,
             IContentService contentService,
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberService memberService,
             AppCaches appCaches,
-            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory databaseFactory)
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory databaseFactory,
+            HpskSite.Services.LegacyInvoiceHubs invoiceHubs)
         {
+            _invoiceHubs = invoiceHubs;
             _databaseFactory = databaseFactory ?? throw new ArgumentNullException(nameof(databaseFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _contentService = contentService ?? throw new ArgumentNullException(nameof(contentService));
@@ -195,8 +199,13 @@ namespace HpskSite.Services
                 // that, which took out the whole invoice list for every competition and every admin,
                 // not just the affected one. Group instead, and read invoices from every hub, so a
                 // duplicate degrades to a log line rather than an outage or invisible invoices.
+                //
+                // Mappens tävling via LegacyInvoiceHubs (C3-planen F1): föräldern när den är en tävling,
+                // annars det id mappens fakturor bär. Förut var föräldern alltid tävlingens id — efter
+                // flytten till arkivet hade alla mappar hamnat på arkivets id.
+                var competitionByHub = _invoiceHubs.CompetitionByHub();
                 var hubsByCompetition = allInvoicesHubs
-                    .GroupBy(hub => hub.ParentId)
+                    .GroupBy(hub => competitionByHub.TryGetValue(hub.Id, out var cid) ? cid : hub.ParentId)
                     .ToDictionary(g => g.Key, g => g.ToList());
 
                 foreach (var dup in hubsByCompetition.Where(kv => kv.Value.Count > 1))

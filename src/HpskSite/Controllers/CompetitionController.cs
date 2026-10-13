@@ -20,6 +20,11 @@ namespace HpskSite.Controllers
 {
     public class CompetitionController : SurfaceController
     {
+        /// <summary>De gamla fakturamapparna — EN väg dit (C3-planen F1). Ur RequestServices, så att
+        /// konstruktorn inte ändras.</summary>
+        private HpskSite.Services.LegacyInvoiceHubs InvoiceHubs =>
+            HttpContext.RequestServices.GetRequiredService<HpskSite.Services.LegacyInvoiceHubs>();
+
         private static readonly ConcurrentDictionary<int, SemaphoreSlim> _registrationLocks = new();
 
         private readonly IMemberManager _memberManager;
@@ -1543,8 +1548,7 @@ namespace HpskSite.Controllers
                 var registrationContents = _registrations.List(competitionId.Value);
 
                 // PERFORMANCE FIX: Batch load payment status - pre-load all invoices once
-                var invoicesHub = competitionChildren
-                    .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+                var invoicesHub = InvoiceHubs.Hub(competitionId.Value);
 
                 var paymentStatusMap = new Dictionary<int, string>();
                 var paymentInvoiceMap = new Dictionary<int, int>();        // registrationId -> invoiceId (newest actionable)
@@ -2142,8 +2146,7 @@ namespace HpskSite.Controllers
                 if (competition == null) return "No Invoice";
 
                 // Find the "Betalningar" (invoices) hub under the competition
-                var children = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _);
-                var invoicesHub = children.FirstOrDefault(x => x.ContentType.Alias == "registrationInvoicesHub");
+                var invoicesHub = InvoiceHubs.Hub(competition.Id);
 
                 if (invoicesHub == null) return "No Invoice";
 

@@ -198,6 +198,7 @@ namespace HpskSite.Composers
             builder.Services.AddHostedService<HpskSite.Services.Registrations.CompetitionRegistrationSchemaGuardHostedService>();
             builder.Services.AddHostedService<HpskSite.Services.Hosting.IdentityFloorHostedService>();
             builder.Services.AddSingleton<HpskSite.Services.CompetitionMenuService>();
+            builder.Services.AddSingleton<HpskSite.Services.LegacyInvoiceHubs>();
             builder.Services.AddScoped<HpskSite.Services.Registrations.RegistrationMigrationService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
                 HpskSite.Services.Registrations.RegistrationNodeGuard>();

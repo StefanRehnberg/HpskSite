@@ -37,14 +37,18 @@ namespace HpskSite.Services.CompetitionFees
         private readonly LedgerSourceProjectResolver _projects;
         private readonly ILogger<LedgerLegacyInvoiceBridge> _logger;
 
+        private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
+
         public LedgerLegacyInvoiceBridge(
             IUmbracoDatabaseFactory databaseFactory,
             IContentService contentService,
             LedgerPostingService posting,
             LedgerIssuerResolver issuers,
             LedgerSourceProjectResolver projects,
-            ILogger<LedgerLegacyInvoiceBridge> logger)
+            ILogger<LedgerLegacyInvoiceBridge> logger,
+            HpskSite.Services.LegacyInvoiceHubs invoiceHubs)
         {
+            _invoiceHubs = invoiceHubs;
             _databaseFactory = databaseFactory;
             _contentService = contentService;
             _posting = posting;
@@ -445,8 +449,7 @@ namespace HpskSite.Services.CompetitionFees
 
         private IEnumerable<IContent> LoadInvoices(IContent competition)
         {
-            var hubs = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                .Where(c => c.ContentType.Alias == "registrationInvoicesHub").ToList();
+            var hubs = _invoiceHubs.Hubs(competition.Id).ToList();
             foreach (var hub in hubs)
                 foreach (var inv in _contentService.GetPagedChildren(hub.Id, 0, 5000, out _)
                              .Where(c => c.ContentType.Alias == "registrationInvoice" && !c.Trashed))

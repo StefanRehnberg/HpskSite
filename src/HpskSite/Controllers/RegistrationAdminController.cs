@@ -23,6 +23,11 @@ namespace HpskSite.Controllers
     /// </summary>
     public class RegistrationAdminController : SurfaceController
     {
+        /// <summary>De gamla fakturamapparna — EN väg dit (C3-planen F1). Ur RequestServices, så att
+        /// konstruktorn inte ändras.</summary>
+        private HpskSite.Services.LegacyInvoiceHubs InvoiceHubs =>
+            HttpContext.RequestServices.GetRequiredService<HpskSite.Services.LegacyInvoiceHubs>();
+
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
         private readonly IContentService _contentService;
@@ -620,8 +625,7 @@ namespace HpskSite.Controllers
         /// </summary>
         private List<IContent> GetAllInvoicesForRegistration(IContent competition, int registrationId)
         {
-            var hub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            var hub = InvoiceHubs.Hub(competition.Id);
             if (hub == null) return new List<IContent>();
 
             return _contentService.GetPagedChildren(hub.Id, 0, 1000, out _)
@@ -1853,8 +1857,7 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                var invoicesHub = _contentService.GetPagedChildren(competitionId, 0, 100, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+                var invoicesHub = InvoiceHubs.Hub(competitionId);
                 if (invoicesHub == null)
                     return Json(new { success = true, kind = "notfound" });
 
@@ -2065,8 +2068,7 @@ namespace HpskSite.Controllers
                 if (!number.StartsWith($"{request.CompetitionId}-", StringComparison.OrdinalIgnoreCase))
                     return Json(new { success = false, message = "Fakturan hör inte till den här tävlingen." });
 
-                var hub = _contentService.GetPagedChildren(request.CompetitionId, 0, 100, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+                var hub = InvoiceHubs.Hub(request.CompetitionId);
                 if (hub == null)
                     return Json(new { success = false, message = "Tävlingen saknar fakturamapp att återställa till." });
 
@@ -2156,8 +2158,7 @@ namespace HpskSite.Controllers
                 // whichever direction the ids happened to fall.
                 var teamInvoices = new Dictionary<string, IContent>();
                 var teamPaidBilled = new Dictionary<string, decimal>();
-                var invoicesHub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+                var invoicesHub = InvoiceHubs.Hub(competition.Id);
                 if (invoicesHub != null)
                 {
                     foreach (var inv in _contentService.GetPagedChildren(invoicesHub.Id, 0, 1000, out _)
@@ -2393,7 +2394,7 @@ namespace HpskSite.Controllers
                 if (!authorized) return Json(new { success = false, message = "Access denied" });
 
                 var children = _contentService.GetPagedChildren(request.CompetitionId, 0, 200, out _).ToList();
-                var invoicesHub = children.FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+                var invoicesHub = InvoiceHubs.Hub(request.CompetitionId);
 
                 // Anmälningarna via anmälningslagringen (sajtstrukturen fas 1a).
                 var registrations = _registrations.List(request.CompetitionId);
@@ -2669,8 +2670,7 @@ namespace HpskSite.Controllers
                 // Build invoice lookup keyed by registrationId. A registration may match either
                 // via the new invoice.registrationId int field or via the legacy
                 // relatedRegistrationIds JSON array.
-                var invoicesHub = competitionChildren
-                    .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+                var invoicesHub = InvoiceHubs.Hub(competitionId);
                 var invoiceByRegId = new Dictionary<int, IContent>();
                 if (invoicesHub != null)
                 {
@@ -2826,8 +2826,7 @@ namespace HpskSite.Controllers
                 if (competition == null) return "No Invoice";
 
                 // Find the "Betalningar" (invoices) hub under the competition
-                var children = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _);
-                var invoicesHub = children.FirstOrDefault(x => x.ContentType.Alias == "registrationInvoicesHub");
+                var invoicesHub = InvoiceHubs.Hub(competition.Id);
 
                 if (invoicesHub == null) return NoInvoiceOrNoFee(competition, registrationId);
 

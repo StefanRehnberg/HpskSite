@@ -129,8 +129,10 @@ namespace HpskSite.Services.CompetitionFees
         }
 
         /// <summary>
-        /// Har tävlingen minst en gammal faktura? Samma trädregel som deploymigreringen:
-        /// faktura → hubb → tävling.
+        /// Har tävlingen minst en gammal faktura? Faktura → mapp → tävling (som deploymigreringen), ELLER
+        /// fakturans egen <c>competitionId</c>. Den andra vägen gör att svaret står sig när fakturamapparna
+        /// flyttas till arkivet (C3-planen F1, 2026-10-13) — utan den hade en sådan tävling tyst blivit
+        /// "ledger", och raden i <c>CompetitionPaymentModel</c> är oföränderlig.
         /// </summary>
         private static bool HasLegacyInvoices(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int competitionId)
             => db.ExecuteScalar<int>(
@@ -139,7 +141,12 @@ namespace HpskSite.Services.CompetitionFees
                     JOIN umbracoContent c ON c.nodeId = i.id
                     JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
                     JOIN umbracoNode hub ON hub.id = i.parentId
-                   WHERE ct.alias = 'registrationInvoice' AND i.trashed = 0 AND hub.parentId = @0",
+                   WHERE ct.alias = 'registrationInvoice' AND i.trashed = 0
+                     AND (hub.parentId = @0 OR EXISTS (
+                          SELECT 1 FROM umbracoContentVersion cv
+                          JOIN umbracoPropertyData pd ON pd.versionId = cv.id
+                          JOIN cmsPropertyType pt ON pt.id = pd.propertyTypeId
+                          WHERE cv.nodeId = i.id AND cv.[current] = 1 AND pt.alias = 'competitionId' AND pd.intValue = @0))",
                 competitionId) > 0;
 
         /// <summary>För tester och verifiering: glöm cachen för en tävling.</summary>

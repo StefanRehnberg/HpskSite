@@ -26,6 +26,8 @@ namespace HpskSite.Services
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
+        private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
+
         public CompetitionTeamService(
             IUmbracoDatabaseFactory databaseFactory,
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -36,8 +38,10 @@ namespace HpskSite.Services
             PaymentService paymentService,
             MemberClubService memberClubService,
             ILogger<CompetitionTeamService> logger,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.LegacyInvoiceHubs invoiceHubs)
         {
+            _invoiceHubs = invoiceHubs;
             _registrations = registrations;
             _memberClubService = memberClubService;
             _databaseFactory = databaseFactory;
@@ -387,9 +391,7 @@ namespace HpskSite.Services
                 var competition = _contentService.GetById(team.CompetitionId);
                 if (competition == null) return (true, "");   // nothing to reconcile against
 
-                var hubs = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                    .Where(c => c.ContentType.Alias == "registrationInvoicesHub")
-                    .ToList();
+                var hubs = _invoiceHubs.Hubs(competition.Id).ToList();
                 if (hubs.Count == 0) return (true, "");
 
                 var teamMemberId = $"team-{team.Id}";
@@ -1691,8 +1693,7 @@ namespace HpskSite.Services
             if (!decimal.TryParse(feeStr, out var fee) || fee <= 0) return null;
 
             var teamMemberId = $"team-{teamId}";
-            var hub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            var hub = _invoiceHubs.Hub(competition.Id);
             if (hub != null)
             {
                 var existing = _contentService.GetPagedChildren(hub.Id, 0, 1000, out _)
