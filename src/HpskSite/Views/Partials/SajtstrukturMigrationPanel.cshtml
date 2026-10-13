@@ -32,6 +32,11 @@
                             <button type="button" class="btn btn-outline-primary btn-sm" data-ssm="preview">1. Torrkör</button>
                             <button type="button" class="btn btn-primary btn-sm" data-ssm="migrate">2. Flytta till tabellen</button>
                             <button type="button" class="btn btn-outline-secondary btn-sm" data-ssm="unpublish">3. Avpublicera de gamla noderna</button>
+                            @if (part.Item1 == "reg")
+                            {
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-ssm="cleanup"
+                                        title="Tar bort de gamla anmälnings- och lagnoderna för gott. Bara noder som finns i tabellen; lagfakturorna får först sin klubb.">4. Ta bort de gamla noderna</button>
+                            }
                             <button type="button" class="btn btn-outline-danger btn-sm ms-auto" data-ssm="rollback">Tillbaka till noderna</button>
                             <button type="button" class="btn btn-outline-danger btn-sm d-none" data-ssm="clear"
                                     title="Tömmer tabellen inför ett nytt försök. Det som skapats efter flytten försvinner.">Töm tabellen</button>
@@ -192,6 +197,34 @@
         finally { busy(card, false); }
     }
 
+    function cleanupHtml(s) {
+        s = s || {};
+        var g = function (a, b) { return s[a] != null ? s[a] : (s[b] != null ? s[b] : 0); };
+        var html = 'Kvar att ta bort: <strong>' + g('migratedRegistrationNodes', 'MigratedRegistrationNodes') + '</strong> anmälningsnoder · '
+            + g('teamMirrorNodes', 'TeamMirrorNodes') + ' lagnoder · ' + g('emptyRegistrationHubs', 'EmptyRegistrationHubs') + ' tomma mappar · '
+            + g('teamInvoicesToBackfill', 'TeamInvoicesToBackfill') + ' lagfakturor att komplettera.';
+        var un = g('unmigratedRegistrationNodes', 'UnmigratedRegistrationNodes');
+        if (un > 0) html += '<br><span class="text-warning-emphasis">' + un + ' anmälningsnoder finns inte i tabellen och lämnas orörda.</span>';
+        return '<div>' + html + '</div>';
+    }
+
+    // Först ett läsande anrop som visar vad som skulle tas bort; borttagningen sker i portioner.
+    async function doCleanup(card) {
+        clear(card); busy(card, true);
+        try {
+            if (card.dataset.store !== 'table') { lines(card, 'Borttagningen görs först när tabellen gäller.', 'text-danger'); return; }
+            var total = 0, last = null;
+            for (var i = 0; i < 500; i++) {
+                var d = await post(card.dataset.base, 'Cleanup', { batch: '50' });
+                total += d.done || 0; last = d;
+                card.querySelector('.ssm-out').innerHTML = '<div>Åtgärder: ' + total + '</div>' + cleanupHtml(d.state);
+                if (!d.done || /^Klart/.test(d.message || '') || /kunde inte/.test(d.message || '')) break;
+            }
+            if (last) lines(card, esc(last.message || ''), /kunde inte/.test(last.message || '') ? 'text-danger' : '');
+        } catch (e) { lines(card, 'Avbrutet: ' + esc(e.message), 'text-danger'); }
+        finally { busy(card, false); }
+    }
+
     async function doRollback(card) {
         clear(card); busy(card, true);
         try {
@@ -227,6 +260,14 @@
         if (a === 'preview') doPreview(card);
         else if (a === 'migrate') { if (armed(btn, 'Tryck igen för att flytta')) doMigrate(card); }
         else if (a === 'unpublish') { if (armed(btn, 'Tryck igen för att avpublicera')) doUnpublish(card); }
+        else if (a === 'cleanup') {
+            if (btn.dataset.armed === '1') { armed(btn); doCleanup(card); return; }
+            // Första trycket: visa vad som skulle tas bort, beväpna knappen.
+            armed(btn, 'Tryck igen — noderna tas bort för gott');
+            clear(card);
+            get(card.dataset.base, 'CleanupPreview').then(function (d) { lines(card, cleanupHtml(d.state)); })
+                .catch(function (err) { lines(card, 'Läget gick inte att läsa: ' + esc(err.message), 'text-danger'); });
+        }
         else if (a === 'rollback') { if (armed(btn, 'Tryck igen — tillbaka till noderna')) doRollback(card); }
         else if (a === 'clear') { if (armed(btn, 'Tryck igen — det som skapats efter flytten försvinner')) doClear(card); }
     });

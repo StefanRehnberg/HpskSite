@@ -11182,6 +11182,13 @@ läskontroll i prod: `Migrations/check-prod-sajtstruktur-2026-10-10.sql`. Svit:
   händelse bara för dess administratörer), `PaymentController` (ägarkontrollen via lagringen) och
   `PrecisionResultsController` (borttagen — lät vilken inloggad medlem som helst skriva och publicera
   vilken nod som helst via id).
+- **Rensningen (C3-planen F2, bara anmälningar):** Underhåll → *4. Ta bort de gamla noderna*
+  (`RegistrationMigration/CleanupPreview` läser, `Cleanup` i portioner). Bara i tabelläget. Först får
+  lagfakturor utan `payerClubId` lagspegelns klubb (det är vad "jag har betalat" läser när laget är
+  borta), sedan tas anmälningsnoder som finns i tabellen eller bland de sammanslagna id:na bort för gott,
+  alla lagspeglar och tomma anmälningsmappar. **En nod som inte finns i tabellen rörs aldrig.**
+  Svit: `hpsk-verify/registration-cleanup-verify.mjs` — **bara mot en databaskopia** (`HPSK_DB`, vägrar
+  `Umbraco`). 29/29 mot `Umbraco_C3`; A/B utan spärren "bara flyttade" → 5 röda.
 - `Switch("table")` vägras utan frysning och utan ren jämförelse.
   ⚠️⚠️ **POINT OF NO RETURN = den första skrivningen i tabellen efter att frysningen släppts.** En
   tabellfödd rad har ett id som ingen nod kan få, så den går inte att "kopiera tillbaka". Därefter rättar

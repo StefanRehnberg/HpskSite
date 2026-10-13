@@ -111,5 +111,25 @@ namespace HpskSite.Controllers
             var (done, remaining, message) = _migration.UnpublishNodes(batch);
             return Json(new { success = true, unpublished = done, remaining, message });
         }
+
+        /// <summary>Vad rensningen av de gamla anmälningsnoderna skulle göra (C3-planen F2). Läser bara.</summary>
+        [HttpGet]
+        public async Task<IActionResult> CleanupPreview()
+        {
+            if (await DenyAsync() is { } deny) return deny;
+            return Json(new { success = true, state = _migration.CleanupPreview() });
+        }
+
+        /// <summary>
+        /// Tar bort de gamla anmälnings- och lagspegelnoderna i portioner (C3-planen F2). Bara i tabelläget;
+        /// fyller först i lagfakturornas klubb; rör aldrig en nod som inte är flyttad.
+        /// </summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> Cleanup(int batch = 50)
+        {
+            if (await DenyAsync() is { } deny) return deny;
+            var (done, state, message) = _migration.CleanupNodes(batch);
+            return Json(new { success = true, done, state, message });
+        }
     }
 }

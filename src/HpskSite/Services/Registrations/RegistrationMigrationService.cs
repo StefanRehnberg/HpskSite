@@ -441,6 +441,164 @@ ORDER BY CASE WHEN ct.alias = @1 THEN 1 ELSE 0 END, n.id",
             return (done, remaining, remaining == 0 ? "Alla anmälningsnoder är avpublicerade." : $"{remaining} kvar — kör igen.");
         }
 
+        // ── Rensningen (C3-planen F2) ─────────────────────────────────────────────────────
+
+        public const string TeamMirrorAlias = "competitionTeamRegistration";
+
+        public sealed class CleanupState
+        {
+            /// <summary>Anmälningsnoder vars id finns i tabellen (eller bland de sammanslagna id:na).</summary>
+            public int MigratedRegistrationNodes { get; init; }
+            /// <summary>Anmälningsnoder som INTE finns i tabellen — rörs aldrig.</summary>
+            public int UnmigratedRegistrationNodes { get; init; }
+            public int TeamMirrorNodes { get; init; }
+            /// <summary>Lagfakturor utan <c>payerClubId</c> vars lagspegel bär klubben — fylls i före borttagningen.</summary>
+            public int TeamInvoicesToBackfill { get; init; }
+            public int EmptyRegistrationHubs { get; init; }
+            public List<int> UnmigratedIds { get; init; } = new();
+        }
+
+        private const string InvoicePayerSql = @"
+SELECT i.id AS InvoiceId, mirror.id AS MirrorId
+FROM umbracoNode i
+JOIN umbracoContent ic ON ic.nodeId = i.id
+JOIN cmsContentType ict ON ict.nodeId = ic.contentTypeId AND ict.alias = 'registrationInvoice'
+JOIN umbracoContentVersion icv ON icv.nodeId = i.id AND icv.[current] = 1
+JOIN umbracoPropertyData mpd ON mpd.versionId = icv.id
+JOIN cmsPropertyType mpt ON mpt.id = mpd.propertyTypeId AND mpt.alias = 'memberId'
+JOIN umbracoPropertyData rpd ON rpd.versionId = icv.id
+JOIN cmsPropertyType rpt ON rpt.id = rpd.propertyTypeId AND rpt.alias = 'registrationId'
+JOIN umbracoNode mirror ON mirror.id = COALESCE(rpd.intValue, TRY_CONVERT(int, LEFT(rpd.varcharValue, 20)))
+JOIN umbracoContent mc ON mc.nodeId = mirror.id
+JOIN cmsContentType mct ON mct.nodeId = mc.contentTypeId AND mct.alias = 'competitionTeamRegistration'
+WHERE i.trashed = 0 AND (mpd.varcharValue LIKE 'team-%')
+  AND NOT EXISTS (SELECT 1 FROM umbracoPropertyData ppd
+                  JOIN cmsPropertyType ppt ON ppt.id = ppd.propertyTypeId AND ppt.alias = 'payerClubId'
+                  WHERE ppd.versionId = icv.id AND COALESCE(ppd.intValue, TRY_CONVERT(int, LEFT(ppd.varcharValue, 20))) > 0)";
+
+        /// <summary>Läser bara: vad rensningen skulle göra.</summary>
+        public CleanupState CleanupPreview()
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            var unmigrated = db.Fetch<int>(@"
+SELECT n.id FROM umbracoNode n
+JOIN umbracoContent c ON c.nodeId = n.id
+JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
+WHERE ct.alias = @0
+  AND NOT EXISTS (SELECT 1 FROM dbo.CompetitionRegistration r WHERE r.Id = n.id)
+  AND NOT EXISTS (SELECT 1 FROM dbo.CompetitionRegistrationLegacyId l WHERE l.LegacyNodeId = n.id)", NodeRegistrationStore.RegistrationAlias);
+            int Count(string alias) => db.ExecuteScalar<int>(@"SELECT COUNT(*) FROM umbracoNode n JOIN umbracoContent c ON c.nodeId = n.id
+JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId WHERE ct.alias = @0", alias);
+            return new CleanupState
+            {
+                MigratedRegistrationNodes = Count(NodeRegistrationStore.RegistrationAlias) - unmigrated.Count,
+                UnmigratedRegistrationNodes = unmigrated.Count,
+                UnmigratedIds = unmigrated.Take(50).ToList(),
+                TeamMirrorNodes = Count(TeamMirrorAlias),
+                TeamInvoicesToBackfill = db.ExecuteScalar<int>("SELECT COUNT(*) FROM (" + InvoicePayerSql + ") x"),
+                EmptyRegistrationHubs = db.ExecuteScalar<int>(@"SELECT COUNT(*) FROM umbracoNode h JOIN umbracoContent c ON c.nodeId = h.id
+JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId WHERE ct.alias = @0 AND NOT EXISTS (SELECT 1 FROM umbracoNode k WHERE k.parentId = h.id)",
+                    NodeRegistrationStore.HubAlias),
+            };
+        }
+
+        /// <summary>
+        /// Tar bort de gamla anmälnings- och lagspegelnoderna i portioner (C3-planen F2). Bara när
+        /// tabellagringen gäller. Tre steg i ordning, högst <paramref name="batch"/> åtgärder per anrop:
+        /// <list type="number">
+        /// <item>Lagfakturor utan <c>payerClubId</c> får lagspegelns klubb. Fakturan är det som ska veta vem som
+        /// fakturerades; spegeln var förut enda källan när laget tagits bort (behörigheten för "jag har betalat").</item>
+        /// <item>Anmälnings- och lagspegelnoder tas bort permanent — <b>bara</b> anmälningsnoder vars id finns i
+        /// tabellen eller bland de sammanslagna id:na. En nod som inte är flyttad rörs aldrig.</item>
+        /// <item>Tomma anmälningsmappar tas bort.</item>
+        /// </list>
+        /// Id-golvet påverkas inte: identiteten går aldrig bakåt, och fakturornas <c>registrationId</c> är kvar som källa.
+        /// </summary>
+        public (int Done, CleanupState Remaining, string Message) CleanupNodes(int batch)
+        {
+            if (!string.Equals(CurrentStore, RegistrationStoreSettings.StoreTable, StringComparison.OrdinalIgnoreCase))
+                return (0, CleanupPreview(), "Rensningen körs bara när tabellagringen gäller.");
+            batch = Math.Clamp(batch, 1, 200);
+            int done = 0;
+
+            // 1. Lagfakturorna får sin klubb.
+            List<InvoiceMirror> toBackfill;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+                toBackfill = scope.Database.Fetch<InvoiceMirror>(InvoicePayerSql);
+            foreach (var row in toBackfill.Take(batch))
+            {
+                try
+                {
+                    var mirror = _contentService.GetById(row.MirrorId);
+                    var invoice = _contentService.GetById(row.InvoiceId);
+                    var clubId = mirror?.GetValue<int>("clubId") ?? 0;
+                    if (invoice == null || clubId <= 0 || !invoice.HasProperty("payerClubId")) continue;
+                    invoice.SetValue("payerClubId", clubId);
+                    var wasPublished = invoice.Published;
+                    _contentService.Save(invoice);
+                    if (wasPublished) _contentService.Publish(invoice, new[] { "*" }, -1);
+                    done++;
+                }
+                catch (Exception ex) { _logger.LogError(ex, "Lagfaktura {Id} kunde inte få payerClubId", row.InvoiceId); }
+            }
+            if (done >= batch) return (done, CleanupPreview(), "Lagfakturor kompletteras — kör igen.");
+            if (toBackfill.Count > done)
+                return (done, CleanupPreview(), "Några lagfakturor kunde inte kompletteras — se loggen. Inga noder tas bort förrän de är klara.");
+
+            // 2. Flyttade anmälningsnoder och lagspeglarna.
+            List<int> deletable;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+                deletable = scope.Database.Fetch<int>(@"
+SELECT n.id FROM umbracoNode n
+JOIN umbracoContent c ON c.nodeId = n.id
+JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
+WHERE (ct.alias = @0 AND (EXISTS (SELECT 1 FROM dbo.CompetitionRegistration r WHERE r.Id = n.id)
+                          OR EXISTS (SELECT 1 FROM dbo.CompetitionRegistrationLegacyId l WHERE l.LegacyNodeId = n.id)))
+   OR ct.alias = @1
+ORDER BY n.id", NodeRegistrationStore.RegistrationAlias, TeamMirrorAlias);
+            foreach (var id in deletable.Take(batch - done))
+            {
+                try
+                {
+                    var node = _contentService.GetById(id);
+                    if (node == null) continue;
+                    if (_contentService.Delete(node).Success) done++;
+                }
+                catch (Exception ex) { _logger.LogError(ex, "Anmälningsnod {Id} kunde inte tas bort", id); }
+            }
+            if (done >= batch) return (done, CleanupPreview(), "Noder tas bort — kör igen.");
+
+            // 3. Tomma anmälningsmappar.
+            List<int> emptyHubs;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+                emptyHubs = scope.Database.Fetch<int>(@"SELECT h.id FROM umbracoNode h JOIN umbracoContent c ON c.nodeId = h.id
+JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId WHERE ct.alias = @0 AND NOT EXISTS (SELECT 1 FROM umbracoNode k WHERE k.parentId = h.id)",
+                    NodeRegistrationStore.HubAlias);
+            foreach (var id in emptyHubs.Take(batch - done))
+            {
+                try
+                {
+                    var hub = _contentService.GetById(id);
+                    if (hub != null && _contentService.Delete(hub).Success) done++;
+                }
+                catch (Exception ex) { _logger.LogError(ex, "Anmälningsmapp {Id} kunde inte tas bort", id); }
+            }
+
+            var state = CleanupPreview();
+            var left = state.MigratedRegistrationNodes + state.TeamMirrorNodes + state.EmptyRegistrationHubs + state.TeamInvoicesToBackfill;
+            _logger.LogWarning("Anmälningsrensning: {Done} åtgärder, {Left} kvar, {Unmigrated} ej flyttade (rörs inte)", done, left, state.UnmigratedRegistrationNodes);
+            return (done, state, left == 0
+                ? (state.UnmigratedRegistrationNodes == 0 ? "Klart — inga gamla anmälningsnoder kvar." : $"Klart — {state.UnmigratedRegistrationNodes} ej flyttade noder lämnas orörda.")
+                : "Kör igen.");
+        }
+
+        private sealed class InvoiceMirror
+        {
+            public int InvoiceId { get; set; }
+            public int MirrorId { get; set; }
+        }
+
         private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
     }
 }
