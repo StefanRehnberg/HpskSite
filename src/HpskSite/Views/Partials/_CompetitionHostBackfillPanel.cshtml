@@ -1,0 +1,94 @@
+@*
+    C3-planen F5: seriens värd in i de omgångar som saknar både klubb och krets. Bara sajtadministratör.
+    Visar differenslistan, skriver bara de markerade raderna, och visar den nya adressen efteråt.
+    Tas bort när fas C är klar.
+*@
+<div id="hbfPanel" class="mt-5">
+    @Html.AntiForgeryToken()
+    <h5 class="mb-1"><i class="bi bi-diagram-3 me-2"></i>Tävlingarnas värd: seriens värd in i omgångarna</h5>
+    <p class="text-body-secondary mb-3" style="max-width:75ch">
+        Omgångar i en serie som varken har en egen klubb eller krets får seriens värd. Det ändrar vem som får
+        hantera tävlingen och tävlingens adress (den gamla adressen skickas vidare). Tävlingar med avgifter eller
+        fakturor rörs inte. Markera de rader som ska skrivas.
+    </p>
+    <div class="d-flex gap-2 flex-wrap mb-2">
+        <button type="button" class="btn btn-outline-primary btn-sm" id="hbfLoad">Visa listan</button>
+        <button type="button" class="btn btn-primary btn-sm d-none" id="hbfApply">Skriv in värden för markerade</button>
+    </div>
+    <div id="hbfOut" class="small" style="min-width:0"></div>
+</div>
+
+<script>
+(function () {
+    if (window.__hbfInit) return; window.__hbfInit = true;
+    var BASE = '/umbraco/surface/CompetitionHostBackfill';
+    var root = document.getElementById('hbfPanel');
+    var out = document.getElementById('hbfOut');
+    var applyBtn = document.getElementById('hbfApply');
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]; }); }
+    function token() { return root.querySelector('input[name="__RequestVerificationToken"]').value; }
+    function fmt(d) { return d ? String(d).slice(0, 10) : ''; }
+
+    async function load() {
+        out.textContent = 'Läser…';
+        applyBtn.classList.add('d-none');
+        try {
+            var r = await fetch(BASE + '/Preview', { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error((window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status).msg) || ('HTTP ' + r.status));
+            var d = await r.json();
+            if (!d.success) { out.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
+            var rows = d.rows || [];
+            if (!rows.length) { out.textContent = 'Inga omgångar saknar värd. Ingenting att göra.'; return; }
+            var html = '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr>'
+                + '<th></th><th>Tävling</th><th>Datum</th><th>Serie</th><th>Ny värd</th><th>Nuvarande adress</th></tr></thead><tbody>';
+            rows.forEach(function (x) {
+                var host = (x.newClubId > 0 ? 'klubb ' + x.newClubId : '') + (x.newRegion ? (x.newClubId > 0 ? ', ' : '') + 'krets ' + esc(x.newRegion) : '');
+                html += '<tr data-hbf-row="' + x.competitionId + '"><td>'
+                    + (x.blocked ? '' : '<input type="checkbox" class="form-check-input" data-hbf-id="' + x.competitionId + '" checked aria-label="Välj">')
+                    + '</td><td>' + esc(x.name) + ' <span class="text-body-secondary">(' + x.competitionId + ')</span>'
+                    + (x.blocked ? '<div class="text-danger">' + esc(x.blocked) + '</div>' : '')
+                    + '</td><td>' + fmt(x.date) + '</td><td>' + esc(x.seriesName) + '</td><td>' + host
+                    + '</td><td class="text-break">' + esc(x.oldUrl) + '<div class="hbf-new text-success"></div></td></tr>';
+            });
+            html += '</tbody></table></div>';
+            out.innerHTML = html;
+            applyBtn.classList.toggle('d-none', !rows.some(function (x) { return !x.blocked; }));
+        } catch (e) { out.innerHTML = '<span class="text-danger">Listan gick inte att läsa: ' + esc(e.message) + '</span>'; }
+    }
+
+    // Bekräftelse i sidan, aldrig confirm(): ett andra tryck inom några sekunder.
+    function armed(btn, text) {
+        if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; return true; }
+        btn.dataset.label = btn.textContent; btn.dataset.armed = '1'; btn.textContent = text;
+        setTimeout(function () { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; } }, 6000);
+        return false;
+    }
+
+    async function apply() {
+        var ids = Array.prototype.map.call(out.querySelectorAll('[data-hbf-id]:checked'), function (c) { return c.dataset.hbfId; });
+        if (!ids.length) { out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">Markera minst en rad.</div>'); return; }
+        applyBtn.disabled = true;
+        try {
+            var fd = new FormData(); fd.append('ids', ids.join(',')); fd.append('__RequestVerificationToken', token());
+            var r = await fetch(BASE + '/Apply', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error((window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status).msg) || ('HTTP ' + r.status));
+            var d = await r.json();
+            (d.results || []).forEach(function (x) {
+                var tr = out.querySelector('[data-hbf-row="' + x.id + '"]');
+                if (!tr) return;
+                var cell = tr.querySelector('.hbf-new');
+                if (x.ok) { cell.textContent = 'Ny adress: ' + x.newUrl; var cb = tr.querySelector('[data-hbf-id]'); if (cb) cb.remove(); }
+                else { cell.className = 'hbf-new text-danger'; cell.textContent = x.message; }
+            });
+            var okCount = (d.results || []).filter(function (x) { return x.ok; }).length;
+            out.insertAdjacentHTML('afterbegin', '<div class="mb-2 ' + (d.success ? 'text-success' : 'text-danger') + '">'
+                + okCount + ' av ' + (d.results || []).length + ' tävlingar fick sin värd.' + (d.message ? ' ' + esc(d.message) : '') + '</div>');
+            applyBtn.classList.add('d-none');
+        } catch (e) { out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">Avbrutet: ' + esc(e.message) + '</div>'); }
+        finally { applyBtn.disabled = false; }
+    }
+
+    document.getElementById('hbfLoad').addEventListener('click', load);
+    applyBtn.addEventListener('click', function () { if (armed(applyBtn, 'Tryck igen för att skriva')) apply(); });
+})();
+</script>

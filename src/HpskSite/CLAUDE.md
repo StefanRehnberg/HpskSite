@@ -11276,6 +11276,21 @@ En fristående sida (`Layout = null`) måste inkludera partialen själv. En `.ca
 `.catch(console.error)` gör felet osynligt igen — ~80 sådana finns kvar och är ej genomgångna.
 Svit: `hpsk-verify/styrelse-request-errors-verify.mjs` (27; `ONLY_NET=1` hoppar över styrelsedelen).
 
+### Tävlingens värd ärvs inte från serien (C3-planen F5, 2026-10-13)
+
+Stefan godkände differenslistan 2026-10-13 (prod: Hallandsserien 2025, omgångarna 2586–2593 → kretsen
+Halland). `CompetitionHostBackfillService` + `CompetitionHostBackfillController` (sajtadmin), kortet
+**Tävlingarnas värd** under `/admin-page` → Underhåll (`_CompetitionHostBackfillPanel`): omgångar i en serie
+med värd som saknar BÅDE `clubId` och `regionalFederation` får seriens klubb och krets som en enhet. Bara
+markerade rader skrivs; tävlingar med liggarrader eller gamla fakturor hoppas över (utställaren flyttas aldrig).
+Därefter gäller tävlingens egna värden. ⚠️ Publicera med användar-id **-1**, aldrig medlemmens id
+(FK_umbracoContentVersion_umbracoUser_id — sparningen gick igenom men publiceringen föll). Den gamla
+trädadressen svarar fortfarande 200 (Umbracos egen uppslagning går före omdirigeringen), därför sätter
+tävlingssidan `PageMeta.Canonical = Model.Url()`. Svit: `hpsk-verify/competition-host-backfill-verify.mjs`
+(bara mot en kopia) 11/11; A/B utan klubbvillkoret → demotävlingarna skrivs över. Ny tävling kräver redan en
+värd vid skapandet, så ingen förifyllning behövdes. **Operatörssteg i prod efter deploy:** Underhåll →
+Tävlingarnas värd → Visa listan (ska vara de 8) → Skriv in värden.
+
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
 `Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,
