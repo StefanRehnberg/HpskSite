@@ -107,7 +107,7 @@ namespace HpskSite.Services.Registrations
         /// försvinner; de finns inte på noderna — men deras referenser (avgiftsval, liggaren) står kvar.
         /// ⚠️ Identiteten nollställs därför ALDRIG: ett återanvänt id hade ärvt dem (<see cref="IdentityFloor"/>).
         /// </summary>
-        public (bool Ok, string Message) ClearTables(int? byMemberId)
+        public (bool Ok, string Message) ClearTables(int? byMemberId, bool force = false)
         {
             // Förbi cachen och utan senast kända värde: en tömning får aldrig bygga på en gissning.
             string store;
@@ -115,6 +115,11 @@ namespace HpskSite.Services.Registrations
             catch (SiteSettingUnavailableException) { return (false, "Växeln kunde inte läsas — ingenting tömt. Försök igen."); }
             if (!string.Equals(store, RegistrationStoreSettings.StoreNode, StringComparison.OrdinalIgnoreCase))
                 return (false, "Tabellen gäller — gå tillbaka till noderna först.");
+            // En anmälan som bara finns i tabellen försvinner för alltid vid en tömning — den har ingen nod.
+            var born = TableBornCount();
+            if (born > 0 && !force)
+                return (false, $"{born} anmälningar finns bara i tabellen (gjorda efter bytet) och försvinner vid en tömning. " +
+                               "Ingenting tömt. Tvinga bara om de medvetet ska kastas.");
             using var scope = _scopeProvider.CreateScope();
             var db = scope.Database;
             var rows = db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.CompetitionRegistration");
@@ -345,13 +350,43 @@ WHERE t.LegacyRegistrationDocId IS NULL");
             => string.Join("|", classes.Select(c => $"{c.Class}/{(string.IsNullOrWhiteSpace(c.StartPreference) ? "Inget" : c.StartPreference)}/{c.TeamNumber}"));
 
         /// <summary>
-        /// Byter lagring. Till tabellen bara under frysning och bara när jämförelsen är ren; tillbaka till
-        /// noderna alltid (återställningen ska aldrig kunna vägras av en kontroll).
+        /// Anmälningar som bara finns i tabellen: ingen <c>competitionRegistration</c>-nod har deras id. De är
+        /// gjorda efter bytet, och noderna vet ingenting om dem.
         /// </summary>
-        public (bool Ok, string Message, List<string> Problems) Switch(string store, int? byMemberId)
+        public int TableBornCount()
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>(@"
+SELECT COUNT(*) FROM dbo.CompetitionRegistration r
+WHERE NOT EXISTS (SELECT 1 FROM umbracoNode n
+                  JOIN umbracoContent c ON c.nodeId = n.id
+                  JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
+                  WHERE n.id = r.Id AND ct.alias = @0)", NodeRegistrationStore.RegistrationAlias);
+        }
+
+        /// <summary>
+        /// Byter lagring. Till tabellen bara under frysning och bara när jämförelsen är ren.
+        ///
+        /// <para><b>⚠️ Tillbaka till noderna vägras när tabellen har gått ifrån noderna</b> (genomgången av
+        /// C3-planen 2026-10-13, K2): anmälningar som bara finns i tabellen, eller som ändrats där efter bytet.
+        /// Noderna vet ingenting om dem — en växling tillbaka hade tyst gömt dem, och en tabellfödd anmälan kan
+        /// aldrig få en nod med samma id. Efter första skrivningen i tabellen rättar man framåt. Bara ett
+        /// uttryckligt <paramref name="force"/> kör igenom.</para>
+        /// </summary>
+        public (bool Ok, string Message, List<string> Problems) Switch(string store, int? byMemberId, bool force = false)
         {
             if (string.Equals(store, RegistrationStoreSettings.StoreNode, StringComparison.OrdinalIgnoreCase))
             {
+                if (!force && string.Equals(CurrentStore, RegistrationStoreSettings.StoreTable, StringComparison.OrdinalIgnoreCase))
+                {
+                    var born = TableBornCount();
+                    var diverged = Verify();
+                    if (born > 0 || diverged.Mismatches > 0)
+                        return (false,
+                            $"Tabellen har gått ifrån noderna: {born} anmälningar finns bara i tabellen och {diverged.Mismatches} " +
+                            "avviker från sin nod. En växling tillbaka hade gömt dem — rätta framåt i stället. Växeln slås inte om.",
+                            diverged.Problems.Take(50).ToList());
+                }
                 _settings.Set(RegistrationStoreSettings.StoreKey, RegistrationStoreSettings.StoreNode, byMemberId);
                 return (true, "Nodlagringen gäller igen.", new List<string>());
             }

@@ -62,7 +62,7 @@ namespace HpskSite.Services.Events
             IdentityFloor.NodesOfType("clubSimpleEvent"),
         };
 
-        public (bool Ok, string Message) ClearTables(int? byMemberId)
+        public (bool Ok, string Message) ClearTables(int? byMemberId, bool force = false)
         {
             // Förbi cachen och utan senast kända värde: en tömning får aldrig bygga på en gissning.
             string store;
@@ -70,6 +70,11 @@ namespace HpskSite.Services.Events
             catch (SiteSettingUnavailableException) { return (false, "Växeln kunde inte läsas — ingenting tömt. Försök igen."); }
             if (!string.Equals(store, ClubEventStoreSettings.StoreNode, StringComparison.OrdinalIgnoreCase))
                 return (false, "Tabellen gäller — gå tillbaka till noderna först.");
+            // En händelse som bara finns i tabellen försvinner för alltid vid en tömning — den har ingen nod.
+            var born = TableBornCount();
+            if (born > 0 && !force)
+                return (false, $"{born} händelser finns bara i tabellen (skapade efter bytet) och försvinner vid en tömning. " +
+                               "Ingenting tömt. Tvinga bara om de medvetet ska kastas.");
             using var scope = _scopeProvider.CreateScope();
             var db = scope.Database;
             var rows = db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.ClubEvent");
@@ -283,10 +288,38 @@ VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18,@19,@2
             return (plan.Rows.Count, problems);
         }
 
-        public (bool Ok, string Message, List<string> Problems) Switch(string store, int? byMemberId)
+        /// <summary>Händelser som bara finns i tabellen: ingen <c>clubSimpleEvent</c>-nod har deras id.</summary>
+        public int TableBornCount()
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.ExecuteScalar<int>(@"
+SELECT COUNT(*) FROM dbo.ClubEvent e
+WHERE NOT EXISTS (SELECT 1 FROM umbracoNode n
+                  JOIN umbracoContent c ON c.nodeId = n.id
+                  JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
+                  WHERE n.id = e.Id AND ct.alias = 'clubSimpleEvent')");
+        }
+
+        /// <summary>
+        /// Byter lagring. ⚠️ Tillbaka till noderna vägras när tabellen har gått ifrån noderna — händelser som
+        /// bara finns i tabellen, eller som ändrats eller avpublicerats efter bytet (genomgången av
+        /// C3-planen 2026-10-13, K2). Efter första skrivningen i tabellen rättar man framåt. Bara ett
+        /// uttryckligt <paramref name="force"/> kör igenom.
+        /// </summary>
+        public (bool Ok, string Message, List<string> Problems) Switch(string store, int? byMemberId, bool force = false)
         {
             if (string.Equals(store, ClubEventStoreSettings.StoreNode, StringComparison.OrdinalIgnoreCase))
             {
+                if (!force && ClubEventStoreSettings.UsesTable(_settings))
+                {
+                    var born = TableBornCount();
+                    var (_, diverged) = Verify();
+                    if (born > 0 || diverged.Count > 0)
+                        return (false,
+                            $"Tabellen har gått ifrån noderna: {born} händelser finns bara i tabellen och {diverged.Count} " +
+                            "avvikelser mot noderna. En växling tillbaka hade gömt dem — rätta framåt i stället. Växeln slås inte om.",
+                            diverged.Take(50).ToList());
+                }
                 _settings.Set(ClubEventStoreSettings.StoreKey, ClubEventStoreSettings.StoreNode, byMemberId);
                 return (true, "Nodlagringen gäller igen.", new());
             }
