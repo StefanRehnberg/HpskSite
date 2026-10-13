@@ -113,7 +113,7 @@ window.OMFATTNING_DATA = ["pistol.nu","Pistolskyttarnas egen plattform. Skytten,
  ]],
  ["Klubben","En komplett klubb: hemsida, verksamhet, intyg och märken.",[
   ["Klubbsidan","",[
-   ["Hem","",["Kommande händelser","Nyheter","Utvalda tävlingar","Snabblänkar"]],
+   ["Hem","",["Det här händer i klubben","Kommande händelser","Nyheter","Snabblänkar"]],
    "Om klubben","Kalender","Tävlingar","Rekord och mästare","Dokument","Instruktörer","Banor"]],
   ["Evenemang","",[
    ["Typer","",["Städdag","Möte","Socialt","Nyhet"]],

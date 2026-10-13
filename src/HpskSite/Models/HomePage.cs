@@ -12,6 +12,5 @@ namespace HpskSite.Models
 
         public string WelcomeTitle => this.Value<string>("welcomeTitle") ?? "Welcome to Pistol.nu";
         public string WelcomeText => this.Value<string>("welcomeText") ?? "";
-        public IEnumerable<IPublishedContent> FeaturedItems => this.Value<IEnumerable<IPublishedContent>>("featuredItems") ?? Enumerable.Empty<IPublishedContent>();
     }
 }

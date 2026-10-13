@@ -52,7 +52,8 @@ en flytt. Därför gäller tre regler, för varje sort, nu och framåt:
 - Ny tabell som tar över noder → `IdentityFloor` + `IdSources` + en store + ett spärrtest mot nya noder.
 - Ny referenskolumn till en sort → lägg den i sortens `IdSources`.
 - Kända avvikelser som ska bort (2026-10-13): start- och resultatlistorna på branchen `skalplan-fas-c`
-  har negativa id:n (byts före deploy); `featuredItems` (tas bort); gamla fakturanoders
+  har negativa id:n (byts före deploy); `featuredItems` (ingen läser den längre sedan C3 F3 — doctype-
+  egenskapen kan tas bort i backoffice); gamla fakturanoders
   `registrationId` (försvinner med fakturaarkivet); närvaro-QR där ett nummer utan prefix tolkas som
   händelse (får prefix).
 
@@ -4070,6 +4071,17 @@ Verifierat 14/14 `hpsk-verify/delete-class-idname-verify.mjs` (**A/B: 5 av 14 fa
 sin egen fixtur på ett kast-medlems-id och asserterar båda riktningarna (rader lagrade som namn raderade
 via Id, och tvärtom), det blandade fallet i en operation, och — kärnan i rapporten — att skyttens **A1
 står kvar** när A Opt 1 tas bort.
+
+### ⚠️ "Utvalda tävlingar" FINNS INTE LÄNGRE — "Det här händer i {klubben}" (C3-planen F3, 2026-10-13)
+
+Stefans beslut: tävlingar fästs inte längre på klubb- och kretssidor; "Det här händer"-modellen gäller
+genomgående. Kortet, `FeaturedItemsPicker.cshtml` och endpointsen `Club/GetAvailableCompetitions` +
+`Club/SaveFeaturedItems` är borttagna. Klubbsidans startflik (inloggade, som kortet förut) visar
+`_WhatsHappening` med `WhatsHappeningScope.LockedClubId/LockedClubName`: bara rader med klubbens `ClubId`,
+`data-locked="club:{id}"` i klientfiltret, ingen kretsväljare, ongoing-räknaren per klubb. Träningsregeln
+gäller som överallt: en träning syns bara för klubbens egna medlemmar. Kretssidan hade redan flödet.
+Svit: `hpsk-verify/club-whats-happening-verify.mjs` 17/17 (klubbsidans rader = klubbens rader på
+startsidan; A/B utan klubbfiltret → 3 röda). Avsnittet nedan är historik.
 
 ### "Utvalda tävlingar"-väljaren gick inte att skilja tävlingar åt i (2026-08-29)
 

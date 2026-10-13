@@ -29,24 +29,6 @@
     // Welcome message: use rich text aboutClub content, fallback to description if empty
     var welcomeMessage = !string.IsNullOrEmpty(aboutClub) ? aboutClub : description;
 
-    // Get featured items - handle both single item and collection (competitions and series)
-    var featuredItemsRaw = Model?.Value("featuredItems");
-    var featuredItems = new List<IPublishedContent>();
-
-    if (featuredItemsRaw is IEnumerable<IPublishedContent> multipleItems)
-    {
-        featuredItems = multipleItems
-            .Where(c => c.ContentType.Alias == "competition" || c.ContentType.Alias == "competitionSeries")
-            .ToList();
-    }
-    else if (featuredItemsRaw is IPublishedContent singleItem)
-    {
-        if (singleItem.ContentType.Alias == "competition" || singleItem.ContentType.Alias == "competitionSeries")
-        {
-            featuredItems.Add(singleItem);
-        }
-    }
-
     // Get current member to check permissions
     var currentMember = await MemberManager.GetCurrentMemberAsync();
     var isLoggedIn = currentMember != null;
@@ -208,6 +190,9 @@ window.currentClubId = clubId;
 
                 <!-- TIER 2: About Tab (All logged-in users) -->
                 <div class="tab-pane fade show active" id="clubHome" role="tabpanel">
+                    @* "Det här händer i {klubben}" — samma flöde som startsidan och kretssidan, låst till
+                       klubbens egna tävlingar, händelser och träningar. Ersätter "Utvalda tävlingar" (C3 F3). *@
+                    @await Html.PartialAsync("_WhatsHappening", new HpskSite.Models.WhatsHappeningScope { LockedClubId = clubId, LockedClubName = clubName })
                     <div class="row">
                         <!-- Main Content Column -->
                         <div class="col-lg-8">
@@ -230,147 +215,6 @@ window.currentClubId = clubId;
                         <div class="col-lg-4">
                             @* Motionerna (för klubbens medlemmar) och styrelsens ärenden (för styrelseledamöter). *@
                             @await Html.PartialAsync("_ClubMotionCard", null, new ViewDataDictionary(ViewData) { { "MotionCardClubId", clubId } })
-                            <!-- Featured Items (Competitions and Series) -->
-                            @if (featuredItems.Any() || isClubAdmin)
-                            {
-                                var featuredItemIds = featuredItems.Select(f => f.Id).ToList();
-                                <div class="card mb-4">
-                                    <div class="card-header d-flex justify-content-between align-items-center">
-                                        <h5 class="mb-0"><i class="bi bi-star-fill me-2 text-warning"></i>Utvalda Tävlingar</h5>
-                                        @if (isClubAdmin)
-                                        {
-                                            <button class="btn btn-sm btn-outline-secondary" onclick="openFeaturedPicker(@clubId, 'club', [@string.Join(",", featuredItemIds)], '@(Model?.Value<string>("regionalFederation") ?? "")')" title="Välj vilka tävlingar som visas här">
-                                                <i class="bi bi-star"></i>
-                                            </button>
-                                        }
-                                    </div>
-                                    @if (!featuredItems.Any())
-                                    {
-                                        <div class="card-body text-center text-muted">
-                                            <small>Inga utvalda tävlingar. Klicka pennan för att lägga till.</small>
-                                        </div>
-                                    }
-                                    <div class="list-group list-group-flush">
-                                        @foreach (var item in featuredItems)
-                                        {
-                                            var isSeries = item.ContentType.Alias == "competitionSeries";
-
-                                            if (isSeries)
-                                            {
-                                                // Series display
-                                                var seriesName = item.Value<string>("seriesName") ?? item.Name;
-                                                var seriesDescription = item.Value<string>("shortDescription") ?? "";
-                                                var competitionCount = item.Children.Count(c => c.ContentType.Alias == "competition");
-
-                                                <a href="@item.Url()" class="list-group-item list-group-item-action">
-                                                    <div class="d-flex justify-content-between align-items-start">
-                                                        <div>
-                                                            <strong class="d-block">@seriesName</strong>
-                                                            @if (!string.IsNullOrEmpty(seriesDescription))
-                                                            {
-                                                                <small class="text-muted d-block">@seriesDescription</small>
-                                                            }
-                                                            <small class="text-muted">
-                                                                <i class="bi bi-collection me-1"></i>@competitionCount tävlingar
-                                                            </small>
-                                                        </div>
-                                                        <span class="badge bg-purple" style="background-color: #6f42c1;">Serie</span>
-                                                    </div>
-                                                </a>
-                                            }
-                                            else
-                                            {
-                                                // Competition display
-                                                var compName = item.Value<string>("competitionName") ?? item.Name;
-                                                var compDate = item.Value<DateTime>("competitionDate");
-                                                var compEndDate = item.Value<DateTime?>("competitionEndDate");
-                                                var venue = item.Value<string>("venue") ?? "";
-                                                var isActiveComp = item.Value<bool>("isActive");
-                                                var registrationOpenDate = item.Value<DateTime>("registrationOpenDate");
-                                                var registrationCloseDate = item.Value<DateTime>("registrationCloseDate");
-
-                                                // Determine status
-                                                var now = DateTime.Now;
-                                                var hasValidEnd = compEndDate.HasValue && compEndDate.Value.Year > 1900 && compEndDate.Value.Date >= compDate.Date;
-                                                var effectiveEnd = hasValidEnd ? compEndDate!.Value.Date : compDate.Date;
-                                                string statusText;
-                                                string statusBadgeClass;
-
-                                                if (!isActiveComp)
-                                                {
-                                                    statusText = "Inaktiv";
-                                                    statusBadgeClass = "bg-secondary";
-                                                }
-                                                else if (now < registrationOpenDate)
-                                                {
-                                                    statusText = "Anmälan öppnar snart";
-                                                    statusBadgeClass = "bg-info";
-                                                }
-                                                else if (now >= registrationOpenDate && now <= registrationCloseDate)
-                                                {
-                                                    statusText = "Anmälan öppen";
-                                                    statusBadgeClass = "bg-success";
-                                                }
-                                                else if (now > registrationCloseDate && now.Date < compDate.Date)
-                                                {
-                                                    statusText = "Anmälan stängd";
-                                                    statusBadgeClass = "bg-warning text-dark";
-                                                }
-                                                else if (now.Date >= compDate.Date && now.Date <= effectiveEnd)
-                                                {
-                                                    statusText = "Pågår";
-                                                    statusBadgeClass = "bg-primary";
-                                                }
-                                                else if (now.Date > effectiveEnd)
-                                                {
-                                                    statusText = "Avslutad";
-                                                    statusBadgeClass = "bg-secondary";
-                                                }
-                                                else
-                                                {
-                                                    statusText = "Kommande";
-                                                    statusBadgeClass = "bg-info";
-                                                }
-
-                                                // Check if multi-day
-                                                var hasValidEndDate = compEndDate.HasValue &&
-                                                                      compEndDate.Value > DateTime.MinValue &&
-                                                                      compEndDate.Value.Year > 1900 &&
-                                                                      compEndDate.Value.Date > compDate.Date;
-
-                                                <a href="@item.Url()" class="list-group-item list-group-item-action">
-                                                    <div class="d-flex justify-content-between align-items-start">
-                                                        <div>
-                                                            <strong class="d-block">@compName</strong>
-                                                            <small class="text-muted">
-                                                                <i class="bi bi-calendar3 me-1"></i>
-                                                                @if (hasValidEndDate)
-                                                                {
-                                                                    @compDate.ToString("d MMM", CultureInfo.GetCultureInfo("sv-SE"))
-                                                                    <text> - </text>
-                                                                    @compEndDate!.Value.ToString("d MMM", CultureInfo.GetCultureInfo("sv-SE"))
-                                                                }
-                                                                else
-                                                                {
-                                                                    @compDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
-                                                                }
-                                                            </small>
-                                                            @if (!string.IsNullOrEmpty(venue))
-                                                            {
-                                                                <small class="text-muted d-block">
-                                                                    <i class="bi bi-geo-alt me-1"></i>@venue
-                                                                </small>
-                                                            }
-                                                        </div>
-                                                        <span class="badge @statusBadgeClass">@statusText</span>
-                                                    </div>
-                                                </a>
-                                            }
-                                        }
-                                    </div>
-                                </div>
-                            }
-
                             <!-- Contact Information -->
                             @if (!string.IsNullOrEmpty(contactPerson) || !string.IsNullOrEmpty(contactEmail) || !string.IsNullOrEmpty(contactPhone))
                             {
@@ -607,7 +451,6 @@ window.currentClubId = clubId;
     @await Html.PartialAsync("SpringskytteEditModal")
     @await Html.PartialAsync("CompetitionAdvertEditModal")
     @await Html.PartialAsync("CompetitionDeleteConfirmModal")
-    @await Html.PartialAsync("FeaturedItemsPicker")
 
     @* Åtgärder → Redigera tävlingen — delad med krets- och sajtlistorna *@
     @await Html.PartialAsync("_CompetitionEditDispatch")
@@ -715,15 +558,17 @@ function loadUpcomingEvents() {
 
                         html += `
                             <li class="list-group-item py-2">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <div style="min-width: 0; flex: 1;">
-                                        <div class="d-flex align-items-baseline gap-2">
+                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-1">
+                                    <div style="min-width: 0; flex: 1 1 14rem;">
+                                        <div class="d-flex align-items-baseline flex-wrap column-gap-2">
                                             ${eventNameHtml}
-                                            ${dateText ? `<small class="text-muted flex-shrink-0">${dateText}</small>` : ''}
+                                            ${dateText ? `<small class="text-muted">${dateText}</small>` : ''}
                                         </div>
                                         ${snippet ? `<p class="mb-0 text-muted small event-snippet">${snippet}</p>` : ''}
                                     </div>
-                                    <span class="badge ms-2 flex-shrink-0" style="background-color: ${color}">${event.type}</span>${hpskEventBadges(event)}
+                                    <div class="d-flex flex-wrap gap-1 justify-content-end ms-auto">
+                                        <span class="badge" style="background-color: ${color}">${event.type}</span>${hpskEventBadges(event)}
+                                    </div>
                                 </div>
                             </li>
                         `;

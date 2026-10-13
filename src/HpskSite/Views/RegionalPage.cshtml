@@ -32,23 +32,6 @@
         clubCount = clubsPage.Children.Count(c => c.ContentType.Alias == "club");
     }
 
-    // Get featured items - handle both single item and collection (competitions and series)
-    var featuredItemsRaw = Model.Value("featuredItems");
-    var featuredItems = new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
-
-    if (featuredItemsRaw is IEnumerable<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent> multipleItems)
-    {
-        featuredItems = multipleItems
-            .Where(c => c.ContentType.Alias == "competition" || c.ContentType.Alias == "competitionSeries")
-            .ToList();
-    }
-    else if (featuredItemsRaw is Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent singleItem)
-    {
-        if (singleItem.ContentType.Alias == "competition" || singleItem.ContentType.Alias == "competitionSeries")
-        {
-            featuredItems.Add(singleItem);
-        }
-    }
 
     ViewBag.Title = regionName;
 
@@ -132,7 +115,6 @@
 @if (isRegionalAdmin)
 {
     @Html.AntiForgeryToken()
-    @await Html.PartialAsync("FeaturedItemsPicker")
 
     @* Series modals for the Serier sub-tab in RegionalAdminPanel. They are included BEFORE
        the competition modals on purpose: SeriesCopyModal/SeriesDeleteConfirmModal each declare
@@ -169,7 +151,6 @@
             { "clubsPage", clubsPage },
             { "clubsUrl", clubsUrl },
             { "clubCount", clubCount },
-            { "featuredItems", featuredItems },
             { "aboutRegion", aboutRegion },
             { "contactPerson", contactPerson },
             { "contactEmail", contactEmail },
@@ -346,9 +327,9 @@
                             html += '<li class="list-group-item py-2">'
                                 + '<div class="d-flex justify-content-between align-items-start">'
                                 + '<div style="min-width: 0; flex: 1;">'
-                                + '<div class="d-flex align-items-baseline gap-2">'
+                                + '<div class="d-flex align-items-baseline flex-wrap column-gap-2">'
                                 + eventNameHtml
-                                + (dateText ? '<small class="text-muted flex-shrink-0">' + dateText + '</small>' : '')
+                                + (dateText ? '<small class="text-muted">' + dateText + '</small>' : '')
                                 + '</div>'
                                 + (snippet ? '<p class="mb-0 text-muted small">' + snippet + '</p>' : '')
                                 + '</div>'

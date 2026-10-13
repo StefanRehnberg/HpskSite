@@ -26,13 +26,19 @@
         whAccess = HpskSite.Services.WhatsHappeningAccess.For(whMember, MemberService, MemberClubService);
     }
 
-    var lockedCode = Model?.LockedRegionCode;
-    var lockedName = Model?.LockedRegionName;
+    // Klubbsidan låser flödet till EN klubb ("club:{id}" i data-locked, så klientfiltret skiljer det
+    // från en kretskod). Kretssidan låser till kretsen. Startsidan är nationell.
+    var lockedClubId = Model?.LockedClubId ?? 0;
+    var isClubLocked = lockedClubId > 0;
+    var lockedCode = isClubLocked ? "club:" + lockedClubId : Model?.LockedRegionCode;
+    var lockedName = isClubLocked ? Model?.LockedClubName : Model?.LockedRegionName;
     var isLocked = !string.IsNullOrWhiteSpace(lockedCode);
     var scopeWord = isLocked ? $"i {lockedName}" : "i hela Sverige";
 
     IEnumerable<FeedItem> items = data.Items;
-    if (isLocked)
+    if (isClubLocked)
+        items = items.Where(i => i.ClubId == lockedClubId);
+    else if (isLocked)
         items = items.Where(i => string.Equals(i.RegionCode, lockedCode, StringComparison.OrdinalIgnoreCase));
     var itemList = items.ToList();
 
@@ -46,8 +52,11 @@
     var tabs = new[] { ("today", 0, "Idag"), ("d7", 7, "7 dagar"), ("d14", 14, "14 dagar"), ("d30", 30, "30 dagar") };
     const string defaultTab = "d7";
 
-    var ongoingTotal = isLocked ? data.OngoingMatchCountByRegion.GetValueOrDefault(lockedCode!) : data.OngoingMatchTotal;
-    var countsJson = JsonSerializer.Serialize(data.OngoingMatchCountByRegion);
+    var ongoingTotal = isClubLocked ? ongoing.Count(i => i.Source == FeedSource.TrainingMatch)
+        : isLocked ? data.OngoingMatchCountByRegion.GetValueOrDefault(lockedCode!) : data.OngoingMatchTotal;
+    var countsJson = isClubLocked
+        ? JsonSerializer.Serialize(new[] { lockedCode! }.ToDictionary(k => k, k => ongoingTotal))
+        : JsonSerializer.Serialize(data.OngoingMatchCountByRegion);
     var regionsJson = JsonSerializer.Serialize(data.Regions.ToDictionary(r => r.Code, r => new { name = r.Name, url = r.Url }));
 
     string RowLabel(FeedItem i, bool full) => full ? i.Title : (string.IsNullOrEmpty(i.RegionName) ? i.MaskedTypeLabel : $"{i.MaskedTypeLabel} i {i.RegionName}");
@@ -268,6 +277,8 @@
         var club = row.dataset.club || '0';
         if (region === 'mine') return !!myClubs[club];
         if (row.dataset.training === '1' && !myClubs[club]) return false;
+        // Klubbsidan: raderna är redan valda på servern — bara klubbens egna.
+        if (region.indexOf('club:') === 0) return club === region.slice(5);
         return region === 'hela' || (row.dataset.region || '') === region;
     }
 
