@@ -59,6 +59,25 @@ namespace HpskSite.Services.Results
             return result;
         }
 
+        public IReadOnlyDictionary<int, bool> OfficialByCompetition(IReadOnlyCollection<int> competitionIds)
+        {
+            var result = new Dictionary<int, bool>();
+            var ids = competitionIds?.Where(i => i > 0).Distinct().ToList() ?? new List<int>();
+            if (ids.Count == 0) return result;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            // ⚠️ IN (@0) tar slut kring 2100 parametrar och gör det tyst — i bitar om 1000.
+            foreach (var chunk in ids.Chunk(1000))
+                foreach (var row in scope.Database.Fetch<OfficialRow>($"SELECT CompetitionId, IsOfficial FROM {Table} WHERE CompetitionId IN (@0)", chunk))
+                    result[row.CompetitionId] = row.IsOfficial;
+            return result;
+        }
+
+        private sealed class OfficialRow
+        {
+            public int CompetitionId { get; set; }
+            public bool IsOfficial { get; set; }
+        }
+
         public bool CanStore(CompetitionResultField field) => true;
 
         // ── Skrivning ──────────────────────────────────────────────────────────────────────

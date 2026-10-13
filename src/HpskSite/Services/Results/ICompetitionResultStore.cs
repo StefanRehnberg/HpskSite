@@ -29,6 +29,13 @@ namespace HpskSite.Services.Results
         IReadOnlyDictionary<int, CompetitionResultRecord> GetMany(IReadOnlyCollection<int> competitionIds);
 
         /// <summary>
+        /// Bara om huvudlistan är officiell, per tävling som har en lista — för klubbens och kretsens
+        /// tävlingslistor. Läser inte resultatet: förut hämtade listorna hela <c>ResultData</c> per tävling, en
+        /// fråga per rad (genomgången 2026-10-13, C).
+        /// </summary>
+        IReadOnlyDictionary<int, bool> OfficialByCompetition(IReadOnlyCollection<int> competitionIds);
+
+        /// <summary>
         /// Läser listan färskt, kör <paramref name="change"/> och sparar de fält som ändrades. Saknas
         /// listan skapas den när <paramref name="createIfMissing"/> är satt (Preliminär, tom), annars
         /// returneras null och ingenting skrivs. Returnerar posten som den sparades.

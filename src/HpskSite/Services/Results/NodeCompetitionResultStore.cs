@@ -73,6 +73,10 @@ namespace HpskSite.Services.Results
             return result;
         }
 
+        /// <summary>Nodlagringen läser den publicerade cachen, så GetMany är redan billig här.</summary>
+        public IReadOnlyDictionary<int, bool> OfficialByCompetition(IReadOnlyCollection<int> competitionIds)
+            => GetMany(competitionIds).ToDictionary(kv => kv.Key, kv => kv.Value.IsOfficial);
+
         public bool CanStore(CompetitionResultField field)
         {
             _aliases ??= LoadAliases();

@@ -35,9 +35,10 @@ namespace HpskSite.Routing
                 if (seg.Length < 2) return Task.FromResult(false);
                 var last = seg[^1];
                 var isResult = string.Equals(last, "resultat", StringComparison.OrdinalIgnoreCase);
-                var isStartList = string.Equals(last, "startlista", StringComparison.OrdinalIgnoreCase)
-                    || HpskSite.CompetitionTypes.Precision.Models.FinalsWeaponGroup.IsFinalsSlug(last);
-                if (!isResult && !isStartList) return Task.FromResult(false);
+                // Vilket segment som helst prövas som en lista: den gamla hubbens listor
+                // ("startlista-2025-11-08-0855"), springskyttets namngivna och "(1)"-listor fick annars 404
+                // (genomgången 2026-10-13, C). Finnern körs SIST — det här är bara adresser som annars hade
+                // varit 404 — och TryServeStartListPage svarar bara för en publicerad lista ur lagringen.
                 if (!_ctx.TryGetUmbracoContext(out var uc) || uc.Content == null) return Task.FromResult(false);
 #pragma warning disable CS0618 // GetByRoute är den publicerade cachens uppslag på adress.
                 var competition = uc.Content.GetByRoute("/" + string.Join('/', seg[..^1]) + "/");
