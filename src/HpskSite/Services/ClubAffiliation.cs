@@ -31,15 +31,19 @@ namespace HpskSite.Services
         }
 
         /// <summary>
-        /// Klubben borttagen. Var den huvudklubb töms huvudklubben — en annan klubb befordras inte,
-        /// samma som när en ansökan avslås.
+        /// Klubben borttagen. Var den huvudklubb blir medlemmens första andra klubb huvudklubb (och
+        /// lämnar listan över övriga); har medlemmen ingen annan klubb blir huvudklubben tom.
+        /// Stefans beslut 2026-10-13 — en medlem med andra klubbar ska inte stå utan huvudklubb.
         /// </summary>
         public static (string? Primary, string Others) Without(string? primary, string? others, int clubId)
         {
             var p = (primary ?? "").Trim();
             var id = clubId.ToString();
             var list = Split(others).Where(c => c != id).ToList();
-            return (p == id ? null : NullIfEmpty(p), string.Join(",", list));
+            if (p != id) return (NullIfEmpty(p), string.Join(",", list));
+            if (list.Count == 0) return (null, "");
+            var promoted = list[0];
+            return (promoted, string.Join(",", list.Skip(1)));
         }
 
         private static List<string> Split(string? csv)

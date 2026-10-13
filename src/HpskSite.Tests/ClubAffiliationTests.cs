@@ -26,8 +26,12 @@ namespace HpskSite.Tests
             => Assert.Equal(("3", "5"), ClubAffiliation.Without("3", "5,7", 7));
 
         [Fact]
-        public void Without_clears_primary_and_promotes_nothing()
-            => Assert.Equal(((string?)null, "5"), ClubAffiliation.Without("7", "5", 7));
+        public void Without_primary_promotes_the_first_other_club()
+            => Assert.Equal(("5", "9"), ClubAffiliation.Without("7", "5,9", 7));
+
+        [Fact]
+        public void Without_primary_and_no_other_club_leaves_primary_empty()
+            => Assert.Equal(((string?)null, ""), ClubAffiliation.Without("7", "", 7));
 
         [Fact]
         public void Without_absent_club_changes_nothing()
