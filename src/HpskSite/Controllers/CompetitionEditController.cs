@@ -311,6 +311,8 @@ namespace HpskSite.Controllers
 
             if (!await CanEditCompetitionAsync(request.CompetitionId))
                 return Ok(new { success = false, message = "Åtkomst nekad." });
+            // Bara sajtadmin lägger en tävling i den nationella menyn (Stefan 2026-10-13); för andra står värdet kvar.
+            if (!await _authorizationService.IsCurrentUserAdminAsync()) request.Fields?.Remove("addToMenu");
 
             try
             {
@@ -473,6 +475,7 @@ namespace HpskSite.Controllers
                 // Invalidate admin competition/series list caches so edits are reflected
                 AppCaches.RuntimeCache.ClearByKey("admin_series_list");
                 AppCaches.RuntimeCache.ClearByRegex("^admin_competitions_list_");
+                HpskSite.Services.CompetitionMenuService.Invalidate(AppCaches);
 
                 return Ok(result);
             }

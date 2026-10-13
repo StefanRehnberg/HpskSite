@@ -5,6 +5,7 @@
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
 @inject HpskSite.Services.AdminAuthorizationService AuthService
+@inject HpskSite.Services.CompetitionMenuService CompetitionMenu
 @inject HpskSite.Services.BoardRoleService BoardRoleService
 @inject HpskSite.Services.Training.TrainingCourseService TrainingCourseService
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
@@ -499,46 +500,23 @@
                                     <li><a class="dropdown-item" href="/competitions">Alla Tävlingar</a></li>
                                 }
 
-                                @* Add competitions and series with addToMenu/showInMenu = true *@
+                                @* Genvägar: serier (showInMenu) och fristående tävlingar (addToMenu) — pågående och
+                                   kommande, närmast först. Cachat; förut en genomgång av HELA trädet vid varje sida. *@
                                 @{
-                                    // Single tree traversal for menu items (was 2 separate scans on every page load)
-                                    var menuContent = Model.Root().DescendantsOrSelf()
-                                        .Where(x => (x.ContentType.Alias == "competition" || x.ContentType.Alias == "competitionSeries") &&
-                                                   x.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true))
-                                        .ToList();
-
-                                    var menuCompetitions = menuContent
-                                        .Where(x => x.ContentType.Alias == "competition" &&
-                                                   x.Value<bool>("addToMenu") &&
-                                                   x.Parent()?.ContentType.Alias != "competitionSeries")
-                                        .OrderBy(x => x.Value<DateTime>("competitionDate"))
-                                        .Take(5); // Limit to 5 standalone competitions to avoid menu overflow
-
-                                    var menuSeries = menuContent
-                                        .Where(x => x.ContentType.Alias == "competitionSeries" &&
-                                                   x.Value<bool>("showInMenu"))
-                                        .OrderBy(x => x.Value<DateTime>("seriesStartDate"))
-                                        .Take(3); // Limit to 3 series to avoid menu overflow
-
-                                    var allMenuItems = menuSeries.Concat(menuCompetitions)
-                                        .OrderBy(x => x.ContentType.Alias == "competitionSeries" ?
-                                                     x.Value<DateTime>("seriesStartDate") :
-                                                     x.Value<DateTime>("competitionDate"))
-                                        .Take(6); // Total limit of 6 items
+                                    var allMenuItems = CompetitionMenu.Get(competitionsPage);
                                 }
                                 @if (allMenuItems.Any())
                                 {
                                     <li><hr class="dropdown-divider"></li>
                                     @foreach (var item in allMenuItems)
                                     {
-                                        @if (item.ContentType.Alias == "competitionSeries")
+                                        @if (item.IsSeries)
                                         {
-                                            var seriesName = item.Value<string>("seriesName") ?? item.Name;
-                                            <li><a class="dropdown-item" href="@item.Url()"><i class="bi bi-trophy me-2"></i> @seriesName</a></li>
+                                            <li><a class="dropdown-item" href="@item.Url"><i class="bi bi-trophy me-2"></i> @item.Label</a></li>
                                         }
                                         else
                                         {
-                                            <li><a class="dropdown-item" href="@item.Url()">@item.Name</a></li>
+                                            <li><a class="dropdown-item" href="@item.Url">@item.Label</a></li>
                                         }
                                     }
                                 }
