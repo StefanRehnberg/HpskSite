@@ -11300,11 +11300,12 @@ Tävlingarnas värd → Visa listan (ska vara de 8) → Skriv in värden.
   gång i minuten och rensar efter 120 dagar. Området = första sökvägsdelen (`RequestErrorArea`, ren funktion);
   för `/umbraco/surface|api/` även kontrollern. Bot = `VisitorTrackingMiddleware.IsBotUserAgent`.
 - **`/health/competitions`** (anonym, 503 vid FAIL, `?format=json`, cachad 2 min, `?fresh=1`):
-  `CompetitionHealthService` — per lagring (anmälningar, händelser) läge, frysning, rader, noder, tabellfödda
-  rader och **golvet** (`IdentityFloor.Inspect`, läser bara: nästa id > högsta referens). Regeln i `Evaluate`
-  (ren): FAIL om tabellen gäller men saknas, om noderna gäller men tabellfödda rader finns (de syns inte), om
-  golvet är brutet; WARN vid frysning och publicerade tävlingar utan adress. **När C1/C2 (resultat- och
-  startlistor) och S1 (tävlingarna) kommer till main: lägg till deras lagringar här.**
+  `CompetitionHealthService` — per lagring (anmälningar, händelser, startlistor, resultatlistor) läge, frysning,
+  rader, noder, tabellfödda rader och **golvet** (`IdentityFloor.Inspect`, läser bara: nästa id > högsta
+  referens). Regeln i `Evaluate` (ren): FAIL om tabellen gäller men saknas, om noderna gäller men tabellfödda
+  rader finns (de syns inte), om golvet är brutet **och tabellen gäller** (i nodläget skapas noder förbi
+  identiteten — ofarligt, flytten sätter golvet före bytet); WARN vid frysning och publicerade tävlingar utan
+  adress. **När S1 (tävlingarna) kommer: lägg till dess lagring här.**
 - **Signaler** (`OpsSignals`, strypta: samma nyckel en gång i timmen, högst 100 rader i timmen; räknas alltid):
   *saknas i lagringen* — lagringsväxlarnas `Get`/`GetById` som inte gav något; loggas bara i tabelläget.
   ⚠️ En miss bevisar ingen förlust (gamla länkar, raderade rader — tabellen raderar på riktigt och den gamla
