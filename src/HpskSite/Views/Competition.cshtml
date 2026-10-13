@@ -38,6 +38,21 @@
     var competitionDate = Model.Value<DateTime>("competitionDate");
     var competitionEndDate = Model.Value<DateTime?>("competitionEndDate");
     var venue = Model.Value<string>("venue") ?? "";
+    // Delningsbeskrivning (C3-planen F4): datum och plats, sedan början av beskrivningen.
+    {
+        var compMeta = HpskSite.Models.PageMeta.For(Context);
+        var metaParts = new[]
+        {
+            competitionDate.Year > 1900 ? competitionDate.ToString("d MMMM yyyy", new System.Globalization.CultureInfo("sv-SE")) : "",
+            venue.Trim()
+        }.Where(s => s.Length > 0);
+        var metaText = System.Net.WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(description ?? "", "<[^>]*>", " "));
+        metaText = System.Text.RegularExpressions.Regex.Replace(metaText, @"\s+", " ").Trim();
+        var metaLead = string.Join(" · ", metaParts);
+        var metaFull = string.IsNullOrEmpty(metaText) ? metaLead : (metaLead.Length > 0 ? metaLead + ". " + metaText : metaText);
+        if (metaFull.Length > 160) metaFull = metaFull.Substring(0, 157).TrimEnd() + "…";
+        if (metaFull.Length > 0) compMeta.Description = metaFull;
+    }
 
     // Multi-day competition logic
     var hasValidEndDate = competitionEndDate.HasValue &&

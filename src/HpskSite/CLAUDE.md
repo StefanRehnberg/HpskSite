@@ -11276,6 +11276,19 @@ En fristående sida (`Layout = null`) måste inkludera partialen själv. En `.ca
 `.catch(console.error)` gör felet osynligt igen — ~80 sådana finns kvar och är ej genomgångna.
 Svit: `hpsk-verify/styrelse-request-errors-verify.mjs` (27; `ONLY_NET=1` hoppar över styrelsedelen).
 
+### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
+
+`Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,
+sedan ViewBag (`Title`, `MetaDescription`, `OgImage` …), sist noden. **Nodens `metaDescription` och `Url()`
+används bara när begäran ÄR nodens sida** (`PageMeta.IsNodesOwnPage`): en routad sida (händelser i
+tabelläget, `/mitt-schema`, tävlingssidorna när de blir controllers) bär en annan nod — förut fick en delad
+händelselänk klubbens beskrivning och `og:url` till klubben. Master skriver nu `<link rel="canonical">`;
+`og:url` = canonical. Standard: nodens adress utan frågesträng på nodens egen sida, annars sökvägen MED
+frågesträng (`/mitt-schema?c=` är olika sidor). Bilder görs absoluta (`PageMeta.Absolute`). Ny routad sida:
+sätt `PageMeta.For(Context).Title/Description/Canonical` i vyn eller controllern. Händelsesidan och
+tävlingssidan sätter beskrivningen. Test: `PageMetaTests`. Svit: `hpsk-verify/page-meta-verify.mjs` (bara mot
+en kopia — växlar händelserna till tabellen), 15/15; A/B utan händelsens PageMeta → 3 röda.
+
 ### Model Usage
 **✅ CORRECT** - Use auto-generated models:
 ```csharp

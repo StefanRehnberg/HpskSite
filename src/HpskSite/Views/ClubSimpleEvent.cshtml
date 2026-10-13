@@ -215,6 +215,12 @@
     }
 
     ViewBag.Title = $"{eventName} - {ownerName}";
+    // I tabelläget är Model ägarens nod — utan PageMeta fick en delad länk klubbens beskrivning
+    // och og:url till klubben (C3-planen F4). Den kanoniska adressen är händelsens egen, utan frågesträng.
+    var eventMeta = HpskSite.Models.PageMeta.For(Context);
+    eventMeta.Description = System.Net.WebUtility.HtmlDecode(shortDescription).Trim();
+    eventMeta.Image = string.IsNullOrEmpty(heroImageUrl) ? null : heroImageUrl;
+    eventMeta.Canonical = Context.Request.Path.Value;
 
     // Determine darker color for gradient
     var colorDark = eventTypeColor switch
