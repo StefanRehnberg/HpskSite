@@ -32,6 +32,38 @@ namespace HpskSite.Services
                 "SELECT * FROM ClubMembership WHERE ClubId = @0", clubId);
         }
 
+        /// <summary>
+        /// Klubbens medlemskap för GODKÄNDA medlemmar (<c>cmsMember.isApproved</c>). Avgiften och
+        /// medlemsantalet bygger på den här: en ansökan som väntar på godkännande har redan en rad
+        /// (synken skapar den när klubben står i egenskaperna) och fakturerades förut som medlem
+        /// (genomgången 2026-10-13, A5).
+        /// </summary>
+        public List<ClubMembership> GetForClubApprovedMembers(int clubId)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<ClubMembership>(
+                @"SELECT cm.* FROM ClubMembership cm
+                  JOIN cmsMember m ON m.nodeId = cm.MemberId
+                  WHERE cm.ClubId = @0 AND m.isApproved = 1", clubId);
+        }
+
+        /// <summary>
+        /// Tar bort raden för en ansökan som avslogs, om den aldrig blev ett medlemskap: inget
+        /// medlemsdatum, inget hushåll, ingen bakgrundskontroll och inga anteckningar. En avslagen sökande
+        /// har aldrig varit medlem och ska inte stå som "Utträdd" i klubbens historik. En rad som bär
+        /// något klubben skrivit rörs inte. Returnerar true när en rad togs bort.
+        /// </summary>
+        public bool DeleteIfNeverMember(int memberId, int clubId)
+        {
+            if (memberId <= 0 || clubId <= 0) return false;
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Execute(
+                @"DELETE FROM ClubMembership
+                   WHERE MemberId = @0 AND ClubId = @1 AND MemberSince IS NULL AND NULLIF(HouseholdId, '') IS NULL
+                     AND BackgroundCheckApproved = 0 AND BackgroundCheckDate IS NULL AND NULLIF(MemberNotes, '') IS NULL",
+                memberId, clubId) > 0;
+        }
+
         /// <summary>All of a person's memberships across clubs.</summary>
         public List<ClubMembership> GetForMember(int memberId)
         {

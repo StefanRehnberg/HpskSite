@@ -32,18 +32,33 @@ namespace HpskSite.Services.Hosting
         /// <summary>
         /// Sätter identiteten så att nästa rad får ett id över tabellens, varje källas och identitetens nuvarande
         /// värde. Källor vars tabell saknas (ekonomin är inte överallt) hoppas över. Returnerar värdet.
+        ///
+        /// <para><b>Låser tabellen</b> (inom anroparens transaktion) innan identiteten och tabellens högsta id
+        /// läses. Annars kan en rad som skrivs mellan läsningen och omsättningen få ett id över värdet, och
+        /// omsättningen flyttar då identiteten BAKÅT. Källorna läses före låset — de kan vara tunga
+        /// (<c>umbracoPropertyData</c>), och ett nytt id som tillkommer under tiden hamnar i tabellen, som
+        /// läses under låset. Därför går den att köra när som helst, även i drift (startkontrollen gör det
+        /// vid varje start).</para>
         /// </summary>
         public static int Reseed(IUmbracoDatabase db, string table, IEnumerable<Source> sources)
         {
-            var floor = db.ExecuteScalar<int?>($"SELECT CAST(IDENT_CURRENT('{table}') AS INT)") ?? 0;
-            floor = Math.Max(floor, db.ExecuteScalar<int?>($"SELECT MAX(Id) FROM {table}") ?? 0);
+            var floor = 0;
             foreach (var s in sources)
             {
                 if (db.ExecuteScalar<int?>("SELECT OBJECT_ID(@0)", s.RequiredTable) == null) continue;
                 floor = Math.Max(floor, db.ExecuteScalar<int?>(s.MaxSql) ?? 0);
             }
-            if (floor > 0) db.Execute($"DBCC CHECKIDENT('{table}', RESEED, {floor}) WITH NO_INFOMSGS");
-            return floor;
+            db.ExecuteScalar<int>($"SELECT COUNT(*) FROM {table} WITH (TABLOCKX, HOLDLOCK)");
+            floor = Math.Max(floor, db.ExecuteScalar<int?>($"SELECT CAST(IDENT_CURRENT('{table}') AS INT)") ?? 0);
+            floor = Math.Max(floor, db.ExecuteScalar<int?>($"SELECT MAX(Id) FROM {table}") ?? 0);
+            if (floor <= 0) return floor;
+            // En tabell som aldrig haft en rad ger nästa rad EXAKT omsättningsvärdet, inte värdet + 1 —
+            // då hade den fått det högsta refererade id:t. Ett steg till; det går bara framåt.
+            var neverUsed = db.ExecuteScalar<int>(
+                "SELECT CASE WHEN last_value IS NULL THEN 1 ELSE 0 END FROM sys.identity_columns WHERE object_id = OBJECT_ID(@0)", table) == 1;
+            var seed = neverUsed ? floor + 1 : floor;
+            db.Execute($"DBCC CHECKIDENT('{table}', RESEED, {seed}) WITH NO_INFOMSGS");
+            return seed;
         }
     }
 }

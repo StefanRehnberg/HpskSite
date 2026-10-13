@@ -23,6 +23,39 @@ Mistrals embeddings-API (`mistral-embed`, härlett ur `AiChat:Endpoint`) och vä
   Läs den när ett svar är dåligt: hittades rätt stycke alls?
 - Test: `KnowledgeRetrievalTests` (14).
 
+## ⚖️ LAG: id-reglerna (beslutad av Stefan 2026-10-13 — gäller ALLTID, inga undantag)
+
+Umbraco ger varje nod (sidor, tävlingar, medlemmar, dokumenttyper) ett nummer ur EN räknare, så ett
+nod-id pekar alltid på exakt en sak. Våra egna tabeller har en räknare var: samma nummer kan vara en
+anmälan, en händelse och en nod samtidigt. En global räknare för våra tabeller löser det INTE —
+Umbraco fortsätter räkna (varje ny medlem är en nod) och krockar till slut ändå. Alla id-problem hittills
+har haft en av två orsaker: ett id slogs upp på fel ställe, eller samma sort fanns på två ställen under
+en flytt. Därför gäller tre regler, för varje sort, nu och framåt:
+
+1. **Ett id följs alltid av sin sort.** Varje kolumn, adress, parameter, token, cachenyckel, ICS-UID,
+   QR-kod och JSON-fält som bär ett id säger också vilken sort det är: ett kolumnnamn som bara kan
+   betyda en sort (`CompetitionId`), ett sortfält bredvid (`SourceType`/`SourceId`, `OccasionKind`),
+   ett prefix (`training:12`, `lag-34`) eller en adress som bara tar en sort (`/competitions/{id}/`).
+   Ett nummer utan sort som tolkas som "standardsorten" är en bugg.
+2. **Varje sort slås upp på ett enda ställe — sin store/tjänst.** Ett id som kommer utifrån (adress,
+   formulär, JSON, kolumn) slås aldrig upp direkt med `Umbraco.Content(id)` / `GetById(id)` om inte
+   sorten faktiskt lever som noder, och då alltid med aliaskontroll. Storen avgör var sorten finns
+   (noder eller tabell) — anroparen vet det aldrig.
+3. **Vid flytt från noder till tabell behåller raderna sina nod-id:n** (`IDENTITY_INSERT`), och
+   tabellens räknare sätts över det högsta id:t sorten NÅGONSIN haft eller som någon pekar på
+   (`IdentityFloor` med alla `IdSources`, papperskorgen inräknad), går aldrig bakåt och nollställs aldrig
+   (`RESEED 0` är förbjudet). Efter flytten finns sorten bara i tabellen.
+
+**Följder:**
+- Inga negativa id:n, inga startvärden "långt upp", ingen global räknare. Positiva id:n överallt, så
+  `id > 0` betyder "finns".
+- Ny tabell som tar över noder → `IdentityFloor` + `IdSources` + en store + ett spärrtest mot nya noder.
+- Ny referenskolumn till en sort → lägg den i sortens `IdSources`.
+- Kända avvikelser som ska bort (2026-10-13): start- och resultatlistorna på branchen `skalplan-fas-c`
+  har negativa id:n (byts före deploy); `featuredItems` (tas bort); gamla fakturanoders
+  `registrationId` (försvinner med fakturaarkivet); närvaro-QR där ett nummer utan prefix tolkas som
+  händelse (får prefix).
+
 ## Core Architecture Principles
 
 ### Data Storage Best Practices

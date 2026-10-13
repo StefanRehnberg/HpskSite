@@ -64,7 +64,11 @@ namespace HpskSite.Services.Events
 
         public (bool Ok, string Message) ClearTables(int? byMemberId)
         {
-            if (ClubEventStoreSettings.UsesTable(_settings))
+            // Förbi cachen och utan senast kända värde: en tömning får aldrig bygga på en gissning.
+            string store;
+            try { store = _settings.GetFresh(ClubEventStoreSettings.StoreKey, ClubEventStoreSettings.StoreNode); }
+            catch (SiteSettingUnavailableException) { return (false, "Växeln kunde inte läsas — ingenting tömt. Försök igen."); }
+            if (!string.Equals(store, ClubEventStoreSettings.StoreNode, StringComparison.OrdinalIgnoreCase))
                 return (false, "Tabellen gäller — gå tillbaka till noderna först.");
             using var scope = _scopeProvider.CreateScope();
             var db = scope.Database;
@@ -270,7 +274,7 @@ VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18,@19,@2
                 Diff("Block", HasBlocks(n) ? N(n.ContentBlocksJson) + "|" + N(n.QuickLinksJson) : "", HasBlocks(t) ? N(t.ContentBlocksJson) + "|" + N(t.QuickLinksJson) : "");
                 if (p.LegacySlug.Length > 0)
                 {
-                    var hit = _table.FindByAddress(n.OwnerId, null, p.LegacySlug);
+                    var hit = _table.FindByAddress(n.OwnerType, n.OwnerId, null, p.LegacySlug);
                     var sharers = sharedLegacy[(n.OwnerId, p.LegacySlug.ToLowerInvariant())];
                     if (hit == null || !sharers.Contains(hit.Value.EventId))
                         problems.Add($"{n.Id}: den gamla adressen {p.LegacySlug} leder inte hit");

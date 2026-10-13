@@ -248,16 +248,24 @@ namespace HpskSite.Services
                 }
 
                 // 3) Evenemangsnärvaro. Datumet är EVENEMANGETS, inte radens tidsstämplar.
+                //    Bara närvarorader läses (förut all närvaro), och varje tillfälle slås upp EN gång —
+                //    förut en innehållsläsning per rad, och samma träning har hela klubben som deltagare
+                //    (genomgången 2026-10-13, B). Årtalet går inte att filtrera här: i nodläget bor
+                //    händelsens datum i noden.
                 var eventRows = db.Fetch<MemberEventRow>(
                     $@"SELECT MemberId, EventId, OccasionKind, AttendanceStatus FROM ClubEventParticipant
-                       WHERE CancelledAt IS NULL AND MemberId IN ({inList})", args);
+                       WHERE CancelledAt IS NULL AND AttendanceStatus = @{batch.Length} AND MemberId IN ({inList})",
+                    args.Append((object)ClubEvents.AttendancePresent).ToArray());
+                var contexts = new Dictionary<(int, string?), ClubEventContext?>();
 
                 foreach (var row in eventRows)
                 {
                     if (row.AttendanceStatus != ClubEvents.AttendancePresent) continue;
                     if (!days.TryGetValue(row.MemberId, out var set)) continue;
                     // ⚠️ Sorten avgör uppslaget: en träningsrads id är ingen nod (fas B2).
-                    var ctx = _events.GetContext(row.EventId, row.OccasionKind);
+                    var key = (row.EventId, row.OccasionKind);
+                    if (!contexts.TryGetValue(key, out var ctx))
+                        contexts[key] = ctx = _events.GetContext(row.EventId, row.OccasionKind);
                     if (ctx?.EventDate == null || ctx.EventDate.Value.Year != year) continue;
                     // Samma regel som detaljvyn — badgen och listan får inte vara oense om samma medlem.
                     if (!MemberActivitySummary.EventCounts(row.AttendanceStatus,

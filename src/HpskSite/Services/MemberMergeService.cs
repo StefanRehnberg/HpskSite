@@ -391,12 +391,25 @@ namespace HpskSite.Services
 
             // Affiliations are a union, never a choice: the survivor must end up in every club
             // either account belonged to, or the merge silently removes someone from a roster.
-            UnionAffiliations(survivor, loser);
+            // Clubs where the loser's membership has ENDED are not carried over (see UnionAffiliations).
+            HashSet<string> loserEnded;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+                loserEnded = scope.Database.Fetch<int>(
+                        "SELECT ClubId FROM ClubMembership WHERE MemberId = @0 AND MembershipStatus IN (@1, @2)",
+                        loser.Id, ClubAffiliation.EndedStatuses[0], ClubAffiliation.EndedStatuses[1])
+                    .Select(c => c.ToString()).ToHashSet(StringComparer.Ordinal);
+            UnionAffiliations(survivor, loser, loserEnded);
 
             // The display name follows the names actually stored after the merge; leaving the old
             // one would show "Kent Öberg" in one list and the merged name in another.
             var display = $"{ReadForMerge(survivor, "firstName")} {ReadForMerge(survivor, "lastName")}".Trim();
             if (display.Length > 0) survivor.Name = display;
+
+            // ⚠️ Club memberships BEFORE the survivor is saved (genomgången 2026-10-13, A5). Saving first let
+            // ClubMembershipSyncHandler create an empty "Aktiv" row for every club only the loser had; the
+            // union below then treated it as shared, kept its "Aktiv" over the loser's "Utträdd" and dropped
+            // the loser's HouseholdPrimary. With the rows moved first, the sync finds them and does nothing.
+            MergeClubMemberships(survivor.Id, loser.Id, result);
 
             _memberService.Save(survivor);
 
@@ -408,9 +421,6 @@ namespace HpskSite.Services
                 _memberService.AssignRole(survivor.Id, role);
                 result.RolesTaken.Add(role);
             }
-
-            // ---- Club memberships (union per club, then the generic move) ----
-            MergeClubMemberships(survivor.Id, loser.Id, result);
 
             // ---- Every other subject-owned table ----
             MoveSubjectRows(survivor.Id, loser.Id, result);
@@ -462,6 +472,11 @@ namespace HpskSite.Services
                         s.EndReason        = COALESCE(NULLIF(s.EndReason, ''),  l.EndReason),
                         s.Federations      = COALESCE(NULLIF(s.Federations, ''), l.Federations),
                         s.MemberNotes      = COALESCE(NULLIF(s.MemberNotes, ''), l.MemberNotes),
+                        -- Huvudmedlemmen följer med hushållet: tar överlevaren förlorarens hushåll tar den
+                        -- också dess huvudmedlemskap (SET-uttrycken läser värdena FÖRE uppdateringen).
+                        s.HouseholdPrimary = CASE WHEN s.HouseholdPrimary = 1 THEN 1
+                                                  WHEN NULLIF(s.HouseholdId, '') IS NULL THEN l.HouseholdPrimary
+                                                  ELSE 0 END,
                         s.HouseholdId      = COALESCE(NULLIF(s.HouseholdId, ''), l.HouseholdId),
                         s.BackgroundCheckApproved = CASE WHEN s.BackgroundCheckApproved = 1 THEN 1 ELSE l.BackgroundCheckApproved END,
                         s.BackgroundCheckDate     = COALESCE(s.BackgroundCheckDate, l.BackgroundCheckDate),
@@ -716,24 +731,30 @@ namespace HpskSite.Services
             public DateTime? MemberSince { get; set; }
         }
 
-        private static void UnionAffiliations(IMember survivor, IMember loser)
+        /// <param name="loserEnded">Klubbar där förlorarens medlemskap är avslutat (Utträdd/Avliden). De förs
+        /// INTE över till överlevarens egenskaper: synken hade då sett dem som tillagda och gjort det
+        /// avslutade medlemskapet aktivt igen (genomgången 2026-10-13, A5). Tidigare data kan ha klubben kvar
+        /// i egenskaperna fast medlemskapet är avslutat.</param>
+        private static void UnionAffiliations(IMember survivor, IMember loser, IReadOnlySet<string> loserEnded)
         {
             var ids = new List<string>();
-            void Collect(IMember m)
+            void Collect(IMember m, IReadOnlySet<string> skip)
             {
                 var primary = Prop(m, "primaryClubId");
-                if (!string.IsNullOrWhiteSpace(primary)) ids.Add(primary.Trim());
+                if (!string.IsNullOrWhiteSpace(primary) && !skip.Contains(primary.Trim())) ids.Add(primary.Trim());
                 var csv = Prop(m, "memberClubIDs") ?? "";
-                ids.AddRange(csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                ids.AddRange(csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(c => !skip.Contains(c)));
             }
-            Collect(survivor);
-            Collect(loser);
+            Collect(survivor, new HashSet<string>());
+            Collect(loser, loserEnded);
 
             var survivorPrimary = Prop(survivor, "primaryClubId");
             if (string.IsNullOrWhiteSpace(survivorPrimary))
             {
                 var loserPrimary = Prop(loser, "primaryClubId");
-                if (!string.IsNullOrWhiteSpace(loserPrimary) && survivor.HasProperty("primaryClubId"))
+                if (!string.IsNullOrWhiteSpace(loserPrimary) && !loserEnded.Contains(loserPrimary.Trim())
+                    && survivor.HasProperty("primaryClubId"))
                 {
                     survivor.SetValue("primaryClubId", loserPrimary.Trim());
                     survivorPrimary = loserPrimary.Trim();
