@@ -97,6 +97,14 @@ namespace HpskSite.Models
         public string? LockedRegionCode { get; set; }
         public string? LockedRegionName { get; set; }
 
+        /// <summary>
+        /// Klubbsidan: flödet låst till EN klubbs tävlingar, händelser, träningar och träningsmatcher
+        /// ("Det här händer i {klubben}"). Ersätter de handplockade "Utvalda tävlingar" (C3-planen F3).
+        /// Slår ut <see cref="LockedRegionCode"/> när båda är satta.
+        /// </summary>
+        public int LockedClubId { get; set; }
+        public string? LockedClubName { get; set; }
+
         /// <summary>National only: preselect this krets in the dropdown without locking (member's own krets on the hub).</summary>
         public string? DefaultRegionCode { get; set; }
 
