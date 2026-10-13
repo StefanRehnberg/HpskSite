@@ -44,13 +44,16 @@ namespace HpskSite.Services.RegistrationGate
 
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IContentService _contentService;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public StartListRegistrationGate(
             IUmbracoContextAccessor umbracoContextAccessor,
-            IContentService contentService)
+            IContentService contentService,
+            HpskSite.Services.StartLists.IStartListStore startLists)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _contentService = contentService;
+            _startLists = startLists;
         }
 
         /// <summary>
@@ -61,7 +64,7 @@ namespace HpskSite.Services.RegistrationGate
         /// list is not public, and a gate that fired on it would close registration for a list no
         /// shooter can see.
         /// </summary>
-        public static bool HasPublishedStartList(IPublishedContent competition)
+        public static bool HasPublishedStartList(IPublishedContent competition, HpskSite.Services.StartLists.IStartListStore startLists)
         {
             if (competition == null) return false;
 
@@ -69,32 +72,23 @@ namespace HpskSite.Services.RegistrationGate
             // competition itself — there is no per-list node to inspect.
             if (competition.Value<bool>("faltskyttePatrolsPublished")) return true;
 
-            // Precision family AND Springskytte both store their lists as `precisionStartList`
-            // children carrying `isOfficialStartList`. Springskytte publishes one node per weapon
-            // class / day, so ANY published node closes the gate: the shooters on that list have
-            // their numbers, and a regeneration is what we are protecting them from.
-            var children = competition.Children()?.ToList() ?? new List<IPublishedContent>();
-            if (children.Any(c => c.ContentType.Alias == "precisionStartList"
-                                  && c.Value<bool>("isOfficialStartList")))
-                return true;
-
-            // Legacy layout: nested under a competitionStartListsHub. Kept because the public
-            // competition page still falls back to it when resolving the "Visa startlista" button.
-            var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-            if (hub?.Children()?.Any(sl => sl.Value<bool>("isOfficialStartList")) == true)
-                return true;
-
-            return false;
+            // Precision family AND Springskytte both store their lists as grundomgångslistor carrying
+            // the official flag. Springskytte publishes one list per weapon class / day, so ANY
+            // official list closes the gate: the shooters on that list have their numbers, and a
+            // regeneration is what we are protecting them from. The legacy hub's lists count too
+            // (the store includes them).
+            return startLists.ListPublished(competition.Id, HpskSite.Models.StartLists.StartListKind.Qualifying)
+                .Any(r => r.IsOfficial);
         }
 
         /// <summary>
         /// The gate itself, for a caller that already holds the published competition (the view).
         /// </summary>
-        public static bool IsClosed(IPublishedContent competition)
+        public static bool IsClosed(IPublishedContent competition, HpskSite.Services.StartLists.IStartListStore startLists)
         {
             if (competition == null) return false;
             if (!competition.Value<bool>(PropertyAlias)) return false;
-            return HasPublishedStartList(competition);
+            return HasPublishedStartList(competition, startLists);
         }
 
         /// <summary>
@@ -113,7 +107,7 @@ namespace HpskSite.Services.RegistrationGate
                 if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return false;
                 var competition = ctx.Content.GetById(competitionId);
                 if (competition == null || competition.ContentType.Alias != "competition") return false;
-                return IsClosed(competition);
+                return IsClosed(competition, _startLists);
             }
             catch
             {

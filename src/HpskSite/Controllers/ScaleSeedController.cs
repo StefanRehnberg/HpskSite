@@ -64,6 +64,8 @@ namespace HpskSite.Controllers
         private readonly IConfiguration _configuration;
         private readonly IWebHostEnvironment _env;
         private readonly ILogger<ScaleSeedController> _logger;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public ScaleSeedController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -77,9 +79,13 @@ namespace HpskSite.Controllers
             ClubMembershipService memberships,
             IConfiguration configuration,
             IWebHostEnvironment env,
-            ILogger<ScaleSeedController> logger)
+            ILogger<ScaleSeedController> logger,
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.StartLists.IStartListStore startLists)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _results = results;
+            _startLists = startLists;
             _memberService = memberService;
             _contentService = contentService;
             _memberships = memberships;
@@ -261,16 +267,18 @@ namespace HpskSite.Controllers
                     if (!_contentService.Save(comp).Success) continue;
                     _contentService.Publish(comp, new[] { "*" }, -1);
 
-                    var sl = _contentService.Create("Startlista", comp.Id, "precisionStartList");
-                    sl.SetValue("configurationData", startList);
-                    sl.SetValue("startListContent", startListHtml);
-                    sl.SetValue("isOfficialStartList", true);
-                    if (_contentService.Save(sl).Success) _contentService.Publish(sl, new[] { "*" }, -1);
+                    _startLists.Create(comp.Id, HpskSite.Models.StartLists.StartListKind.Qualifying, HpskSite.Models.StartLists.StartListNodes.QualifyingName, r =>
+                    {
+                        r.ConfigurationData = startList;
+                        r.StartListContent = startListHtml;
+                        r.IsOfficial = true;
+                    });
 
-                    var res = _contentService.Create("Resultat", comp.Id, "competitionResult");
-                    res.SetValue("resultData", resultData);
-                    res.SetValue("isOfficial", true);
-                    if (_contentService.Save(res).Success) _contentService.Publish(res, new[] { "*" }, -1);
+                    _results.Update(comp.Id, r =>
+                    {
+                        r.ResultData = resultData;
+                        r.IsOfficial = true;
+                    }, createIfMissing: true);
 
                     created++;
                 }

@@ -1,6 +1,13 @@
 ﻿using HpskSite.CompetitionTypes.Common.Utilities;
+using HpskSite.Services.Results;
+using HpskSite.Services.StartLists;
+using HpskSite.Models.StartLists;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Cache;
+using Umbraco.Cms.Core.Models;
+using Umbraco.Cms.Core.Strings;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Web;
@@ -28,6 +35,8 @@ namespace HpskSite.Routing
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly ILogger<CompetitionUrlContentFinder> _logger;
         private readonly AppCaches _caches;
+        private readonly IHttpContextAccessor _http;
+        private readonly IShortStringHelper _shortStrings;
 
         private static readonly HashSet<string> XSmSlugs = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -59,11 +68,58 @@ namespace HpskSite.Routing
             || HpskSite.CompetitionTypes.Precision.Models.FinalsWeaponGroup.IsFinalsSlug(segment);
 
         public CompetitionUrlContentFinder(IUmbracoContextAccessor umbracoContextAccessor,
-            ILogger<CompetitionUrlContentFinder> logger, AppCaches caches)
+            ILogger<CompetitionUrlContentFinder> logger, AppCaches caches,
+            IHttpContextAccessor http,
+            IShortStringHelper shortStrings)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _logger = logger;
             _caches = caches;
+            _http = http;
+            _shortStrings = shortStrings;
+        }
+
+        /// <summary>
+        /// <c>/resultat/</c> utan resultatnod (skalplanen C1): när listan ligger i tabellen och noden är
+        /// avpublicerad visas TÄVLINGEN med vyn <c>CompetitionResult</c>, som läser listan ur
+        /// <see cref="ICompetitionResultStore"/>. Mallen finns bara i minnet, som händelsernas adress.
+        /// Ingen lista = inte vår adress (404 som förut).
+        /// </summary>
+        public static bool TryServeResultPage(IPublishedRequestBuilder request, IPublishedContent competition,
+            IHttpContextAccessor http, IShortStringHelper shortStrings)
+        {
+            var ctx = http.HttpContext;
+            if (ctx == null) return false;
+            var store = ctx.RequestServices.GetRequiredService<ICompetitionResultStore>();
+            if (store.GetMany(new[] { competition.Id }).Count == 0) return false;
+            request.SetPublishedContent(competition);
+            request.SetTemplate(new Template(shortStrings, "CompetitionResult", "CompetitionResult"));
+            return true;
+        }
+
+        /// <summary>Listan som startlistevyn visar när sidan serveras utan nod (Model är då tävlingen).</summary>
+        public const string StartListItemKey = "hpsk:startlist";
+
+        /// <summary>
+        /// <c>/startlista/</c> och <c>/finalstartlista-x/</c> utan egen nod under tävlingen (skalplanen C2): listorna
+        /// i tabellen, och i nodlagringen de äldre listorna under <c>competitionStartListsHub</c>. TÄVLINGEN visas
+        /// med vyn <c>PrecisionStartList</c> resp. <c>PrecisionFinalsStartList</c>, som läser listan ur
+        /// <see cref="StartListItemKey"/>. Bara publika listor; ingen = inte vår adress.
+        /// </summary>
+        public static bool TryServeStartListPage(IPublishedRequestBuilder request, IPublishedContent competition,
+            string segment, IHttpContextAccessor http, IShortStringHelper shortStrings)
+        {
+            var ctx = http.HttpContext;
+            if (ctx == null) return false;
+            var store = ctx.RequestServices.GetRequiredService<IStartListStore>();
+            var list = store.ListPublished(competition.Id)
+                .FirstOrDefault(r => string.Equals(r.UrlSegment, segment, StringComparison.OrdinalIgnoreCase));
+            if (list == null) return false;
+            ctx.Items[StartListItemKey] = list;
+            request.SetPublishedContent(competition);
+            var view = list.Kind == StartListKind.Finals ? "PrecisionFinalsStartList" : "PrecisionStartList"; // startliststore-ok: mallnamn, inte doctyp
+            request.SetTemplate(new Template(shortStrings, view, view));
+            return true;
         }
 
         public Task<bool> TryFindContent(IPublishedRequestBuilder request)
@@ -90,40 +146,24 @@ namespace HpskSite.Routing
                     segments = segments[..^1];
                 }
 
-                // After year, what remains determines which shape this is.
-                var rest = segments.AsSpan(2).ToArray();
-
                 if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                     return Task.FromResult(false);
 
-                IPublishedContent? competition = null;
+                // After year, what remains determines which shape this is.
+                var competition = FindCompetition(year, segments.AsSpan(2).ToArray());
 
-                // Length 2: xSM/comp OR region/comp (region-hosted, no series, no club).
-                if (rest.Length == 2)
+                // En lista vars segment inte är ett av de kända ("startlista", "finalstartlista-x") —
+                // de gamla hubbens listor ("startlista-grovskottet-2025-09-26-1133") och en lista som fått
+                // " (1)". Leder hela adressen inte till en tävling prövas den utan sista segmentet, och det
+                // segmentet slås upp som en lista i lagringen (genomgången 2026-10-13, C). Ingen lista = inte
+                // vår adress, som förut.
+                // (Tävlingar på trädadressen — utan klubb — tas av CompetitionResultTreeUrlFinder, som körs sist.)
+                if (competition == null && childSegment == null && segments.Length >= 5)
                 {
-                    if (XSmSlugs.Contains(rest[0]))
-                        competition = FindBySmShape(year, rest[0], series: null, compSlug: rest[1]);
-                    else
-                        competition = FindByRegionShape(year, regionSlug: rest[0], series: null, compSlug: rest[1]);
-                }
-                // Length 3: xSM/series/comp OR region/club/comp OR region/series/comp.
-                else if (rest.Length == 3)
-                {
-                    if (XSmSlugs.Contains(rest[0]))
-                    {
-                        competition = FindBySmShape(year, rest[0], series: rest[1], compSlug: rest[2]);
-                    }
-                    else
-                    {
-                        // Try club-hosted first; if no match, fall back to region-hosted-in-series.
-                        competition = FindByRegionClubShape(year, rest[0], rest[1], series: null, compSlug: rest[2])
-                                      ?? FindByRegionShape(year, rest[0], series: rest[1], compSlug: rest[2]);
-                    }
-                }
-                // Length 4: region/club/series/comp.
-                else if (rest.Length == 4)
-                {
-                    competition = FindByRegionClubShape(year, rest[0], rest[1], series: rest[2], compSlug: rest[3]);
+                    var listCompetition = FindCompetition(year, segments.AsSpan(2, segments.Length - 3).ToArray());
+                    // Bara en PUBLICERAD lista ur lagringen visas — aldrig en godtycklig barnnod.
+                    if (listCompetition != null)
+                        return Task.FromResult(TryServeStartListPage(request, listCompetition, segments[^1], _http, _shortStrings));
                 }
 
                 if (competition == null) return Task.FromResult(false);
@@ -133,7 +173,12 @@ namespace HpskSite.Routing
                 {
                     var child = competition.Children.FirstOrDefault(c =>
                         string.Equals(c.UrlSegment, childSegment, StringComparison.OrdinalIgnoreCase));
-                    if (child == null) return Task.FromResult(false);
+                    if (child == null)
+                    {
+                        if (string.Equals(childSegment, "resultat", StringComparison.OrdinalIgnoreCase))
+                            return Task.FromResult(TryServeResultPage(request, competition, _http, _shortStrings));
+                        return Task.FromResult(TryServeStartListPage(request, competition, childSegment, _http, _shortStrings));
+                    }
                     target = child;
                 }
 
@@ -145,6 +190,27 @@ namespace HpskSite.Routing
                 _logger.LogWarning(ex, "CompetitionUrlContentFinder failed for {Path}", request.Uri.AbsolutePath);
                 return Task.FromResult(false);
             }
+        }
+
+        /// <summary>Tävlingen bakom segmenten efter årtalet, eller null. Formerna, se klassens kommentar.</summary>
+        private IPublishedContent? FindCompetition(int year, string[] rest)
+        {
+            // Length 2: xSM/comp OR region/comp (region-hosted, no series, no club).
+            if (rest.Length == 2)
+                return XSmSlugs.Contains(rest[0])
+                    ? FindBySmShape(year, rest[0], series: null, compSlug: rest[1])
+                    : FindByRegionShape(year, regionSlug: rest[0], series: null, compSlug: rest[1]);
+            // Length 3: xSM/series/comp OR region/club/comp OR region/series/comp.
+            if (rest.Length == 3)
+                return XSmSlugs.Contains(rest[0])
+                    ? FindBySmShape(year, rest[0], series: rest[1], compSlug: rest[2])
+                    // Try club-hosted first; if no match, fall back to region-hosted-in-series.
+                    : FindByRegionClubShape(year, rest[0], rest[1], series: null, compSlug: rest[2])
+                      ?? FindByRegionShape(year, rest[0], series: rest[1], compSlug: rest[2]);
+            // Length 4: region/club/series/comp.
+            if (rest.Length == 4)
+                return FindByRegionClubShape(year, rest[0], rest[1], series: rest[2], compSlug: rest[3]);
+            return null;
         }
 
         private IPublishedContent? FindBySmShape(int year, string xSm, string? series, string compSlug)

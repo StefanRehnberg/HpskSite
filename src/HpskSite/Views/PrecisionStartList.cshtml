@@ -6,6 +6,7 @@
 @inject IMemberManager MemberManager
 @inject IMemberService MemberService
 @inject HpskSite.Services.ClubService ClubService
+@inject HpskSite.Services.StartLists.IStartListStore StartLists
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 
 @functions {
@@ -23,11 +24,23 @@
 @{
 	Layout = null;
 
-	// Get properties
-	var competitionId = Model.Value<int>("competitionId");
-	var configurationData = Model.Value<string>("configurationData") ?? "";
-	var generatedDate = Model.Value<DateTime>("generatedDate");
-	var isPublished = Model.Value<bool>("isOfficialStartList");
+	// Listan genom IStartListStore (skalplanen C2). Utan egen nod är Model TÄVLINGEN och listan
+	// kommer från finnaren; annars är Model listans nod (under tävlingen eller den äldre hubben).
+	var routedList = Context.Items[HpskSite.Routing.CompetitionUrlContentFinder.StartListItemKey] as HpskSite.Models.StartLists.StartListRecord;
+	IPublishedContent? competition;
+	if (routedList != null) competition = Model;
+	else
+	{
+		var parentNode = Model.Parent;
+		competition = parentNode?.ContentType.Alias == HpskSite.Models.StartLists.StartListNodes.LegacyHubAlias ? parentNode.Parent : parentNode;
+	}
+	var list = routedList ?? (competition != null
+		? StartLists.ListPublished(competition.Id).FirstOrDefault(r => r.Id == Model.Id)
+		: null);
+	var competitionId = list?.CompetitionId ?? 0;
+	var configurationData = list?.ConfigurationData ?? "";
+	var generatedDate = list?.GeneratedDate ?? default;
+	var isPublished = list?.IsOfficial ?? false;
 
 	// Get current member info for highlighting
 	var currentMember = await MemberManager.GetCurrentMemberAsync();
@@ -47,17 +60,7 @@
 		}
 	}
 
-	// Get competition name
-	// Direct cache lookup (O(1) instead of full tree scan)
-	var competitionNode = competitionId > 0 ? Umbraco.Content(competitionId) : null;
-	var competition = (competitionNode?.ContentType.Alias == "competition") ? competitionNode : null;
-	// Fallback: for Springskytte lists, the parent IS the competition
-	if (competition == null)
-	{
-		var parentNode = Model.Parent;
-		if (parentNode?.ContentType.Alias == "competition")
-			competition = parentNode;
-	}
+	if (competition?.ContentType.Alias != "competition") competition = null;
 	var competitionName = competition?.Name ?? "Okänd tävling";
 }
 

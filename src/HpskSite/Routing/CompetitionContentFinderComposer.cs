@@ -50,6 +50,9 @@ namespace HpskSite.Routing
                 builder.ContentFinders().Append<CompetitionUrlContentFinder>();
             }
 
+            // {trädadress}/resultat/ utan resultatnod (skalplanen C1) — sist, efter Umbracos uppslag.
+            builder.ContentFinders().Append<CompetitionResultTreeUrlFinder>();
+
             // URL provider that produces the new shapes. Insert<T>() with default index 0
             // puts us at the front of the collection so we run before DefaultUrlProvider.
             // (We can't use InsertBefore<DefaultUrlProvider> here — DefaultUrlProvider is

@@ -114,6 +114,8 @@ namespace HpskSite.Tests
         [Fact] public void Health_allows_table_born_rows_in_table_mode() => Eval(Store(born: 3)).Status.Should().Be("OK");
         [Fact] public void Health_fails_below_the_floor() => Eval(Store(next: 100, highest: 100)).Status.Should().Be("FAIL");
         [Fact] public void Health_ignores_floor_without_table() => Eval(Store(store: "node", exists: false, next: 0, highest: 50)).Status.Should().Be("OK");
+        // Mätt i dev 2026-10-13: resultatnoder skapade efter senaste omsättningen — ofarligt så länge noderna gäller.
+        [Fact] public void Health_ignores_floor_in_node_mode() => Eval(Store(store: "node", next: 11025, highest: 11051)).Status.Should().Be("OK");
         [Fact] public void Health_warns_when_frozen() => Eval(Store(frozen: true)).Status.Should().Be("WARN");
 
         [Fact]
