@@ -36,6 +36,8 @@ namespace HpskSite.Services
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
+        private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
+
         public PaymentService(ILogger<PaymentService> logger,
             IContentService contentService,
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -48,8 +50,10 @@ namespace HpskSite.Services
             Umbraco.Cms.Core.Cache.AppCaches appCaches,
             HpskSite.Services.CompetitionFees.CompetitionPaymentModelService paymentModels,
             HpskSite.Services.CompetitionFees.CompetitionFeeService competitionFees,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.LegacyInvoiceHubs invoiceHubs)
         {
+            _invoiceHubs = invoiceHubs;
             _registrations = registrations;
             _appCaches = appCaches;
             _paymentModels = paymentModels;
@@ -176,8 +180,7 @@ namespace HpskSite.Services
             var competition = umbracoContext.Content.GetById(competitionId);
             if (competition == null) return 1;
 
-            var invoicesHub = competition.Children()
-                .FirstOrDefault(x => x.ContentType?.Alias == "registrationInvoicesHub");
+            var invoicesHub = _invoiceHubs.PublishedHub(competition.Id);
 
             if (invoicesHub == null) return 1;
 
@@ -230,7 +233,7 @@ namespace HpskSite.Services
                 _logger.LogInformation("Competition {CompetitionId} children: {Children}", 
                     competitionId, string.Join(", ", allChildren.Select(c => $"{c.Name} ({c.ContentType?.Alias})")));
 
-                var invoicesHub = allChildren
+                var invoicesHub = _invoiceHubs.PublishedHub(competition.Id) ?? allChildren
                     .FirstOrDefault(x => x.ContentType?.Alias == "registrationInvoicesHub" || 
                                         x.Name?.Contains("Fakturor") == true || 
                                         x.Name?.Contains("Betalningar") == true);
@@ -416,9 +419,10 @@ namespace HpskSite.Services
         /// </summary>
         private int? FindInvoicesHubIdFromDb(int competitionId)
         {
-            var children = _contentService.GetPagedChildren(competitionId, 0, 500, out _);
-            var hub = children.FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
-            return hub?.Id;
+            // Via LegacyInvoiceHubs (C3-planen F1): mappen under tävlingen, eller — efter flytten till
+            // arkivet — den vars fakturor bär tävlingens id. Läser databasen, ingen cache.
+            var id = _invoiceHubs.HubIds(competitionId).FirstOrDefault();
+            return id > 0 ? id : null;
         }
 
         // The same conspiracy that minted duplicate invoice HUBS mints duplicate INVOICES, one level
@@ -712,8 +716,7 @@ namespace HpskSite.Services
                     return Task.FromResult<IContent?>(null);
                 }
 
-                var hubId = competition.Children()
-                    .FirstOrDefault(x => x.ContentType?.Alias == "registrationInvoicesHub")?.Id;
+                int? hubId = _invoiceHubs.HubIds(competition.Id).FirstOrDefault() is var hid && hid > 0 ? hid : null;
                 if (hubId == null)
                 {
                     // The consolidated flow always runs against a competition that already has
@@ -1166,7 +1169,7 @@ namespace HpskSite.Services
             // Sum the BILLED totals of Paid invoices per registration. Not actualPaidAmount: a debt
             // is measured against what was billed, and a cash-rounding variance is not a debt.
             var paidBilled = new Dictionary<int, decimal>();
-            var invoicesHub = children.FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            var invoicesHub = _invoiceHubs.Hub(competitionId);
             if (invoicesHub != null)
             {
                 foreach (var invoice in _contentService.GetPagedChildren(invoicesHub.Id, 0, 2000, out _))
@@ -1232,8 +1235,7 @@ namespace HpskSite.Services
         /// </summary>
         private List<IContent> GetAllNonCancelledInvoicesForRegistration(IContent competition, int registrationId)
         {
-            var hub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            var hub = _invoiceHubs.Hub(competition.Id);
             if (hub == null) return new List<IContent>();
 
             return _contentService.GetPagedChildren(hub.Id, 0, 1000, out _)
@@ -1253,8 +1255,7 @@ namespace HpskSite.Services
         /// </summary>
         private IContent? FindActiveInvoiceForRegistration(IContent competition, int registrationId, int memberId)
         {
-            var hub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            var hub = _invoiceHubs.Hub(competition.Id);
             if (hub == null) return null;
 
             var invoices = _contentService.GetPagedChildren(hub.Id, 0, 1000, out _)
@@ -1628,8 +1629,7 @@ namespace HpskSite.Services
                 
                 if (competition == null) return new List<RegistrationInvoice>();
 
-                var invoicesHub = competition.Children()
-                    .FirstOrDefault(x => x.ContentType.Alias == "registrationInvoicesHub");
+                var invoicesHub = _invoiceHubs.PublishedHub(competition.Id);
 
                 if (invoicesHub == null) return new List<RegistrationInvoice>();
 

@@ -29,6 +29,11 @@ namespace HpskSite.Controllers
     }
     public class SwishController : SurfaceController
     {
+        /// <summary>De gamla fakturamapparna — EN väg dit (C3-planen F1). Ur RequestServices, så att
+        /// konstruktorn inte ändras.</summary>
+        private HpskSite.Services.LegacyInvoiceHubs InvoiceHubs =>
+            HttpContext.RequestServices.GetRequiredService<HpskSite.Services.LegacyInvoiceHubs>();
+
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly PaymentService _paymentService;
@@ -343,8 +348,7 @@ namespace HpskSite.Controllers
                 var hasIndividualInvoice = false;
 
                 // Check existing invoices
-                var invoicesHub = competition.Children()
-                    .FirstOrDefault(c => c.ContentType?.Alias == "registrationInvoicesHub");
+                var invoicesHub = InvoiceHubs.PublishedHub(competition.Id);
 
                 if (invoicesHub != null)
                 {

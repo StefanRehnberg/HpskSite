@@ -26,13 +26,17 @@ namespace HpskSite.Services
         private readonly IPublishedUrlProvider _publishedUrlProvider;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
+        private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
+
         public ReceiptModelBuilder(
             IContentService contentService,
             IMemberService memberService,
             IUmbracoContextAccessor umbracoContextAccessor,
             IPublishedUrlProvider publishedUrlProvider,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.LegacyInvoiceHubs invoiceHubs)
         {
+            _invoiceHubs = invoiceHubs;
             _registrations = registrations;
             _contentService = contentService;
             _memberService = memberService;
@@ -317,8 +321,7 @@ namespace HpskSite.Services
         {
             if (registrationId <= 0) return new List<IContent> { fallback };
 
-            var hub = _contentService.GetPagedChildren(competition.Id, 0, 100, out _)
-                .FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+            var hub = _invoiceHubs.Hub(competition.Id);
             if (hub == null) return new List<IContent> { fallback };
 
             var list = _contentService.GetPagedChildren(hub.Id, 0, 1000, out _)

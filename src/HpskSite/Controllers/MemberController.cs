@@ -25,6 +25,11 @@ namespace HpskSite.Controllers
 {
     public class MemberController : SurfaceController
     {
+        /// <summary>De gamla fakturamapparna — EN väg dit (C3-planen F1). Ur RequestServices, så att
+        /// konstruktorn inte ändras.</summary>
+        private HpskSite.Services.LegacyInvoiceHubs InvoiceHubs =>
+            HttpContext.RequestServices.GetRequiredService<HpskSite.Services.LegacyInvoiceHubs>();
+
         private readonly IMemberService _memberService;
         private readonly IMemberGroupService _memberGroupService;
         private readonly IMemberManager _memberManager;
@@ -2001,9 +2006,8 @@ namespace HpskSite.Controllers
                         var competition = _contentService.GetById(competitionId);
                         if (competition == null) continue;
 
-                        // Find registrationInvoicesHub (usually first 20 children)
-                        var children = _contentService.GetPagedChildren(competition.Id, 0, 20, out _);
-                        var invoiceHub = children.FirstOrDefault(c => c.ContentType.Alias == "registrationInvoicesHub");
+                        // Tävlingens fakturamapp (förut bara bland de 20 första barnen — en mapp längre ned missades).
+                        var invoiceHub = InvoiceHubs.Hub(competition.Id);
 
                         if (invoiceHub == null) continue;
 
