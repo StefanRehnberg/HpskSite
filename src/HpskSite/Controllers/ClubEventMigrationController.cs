@@ -77,19 +77,19 @@ namespace HpskSite.Controllers
         }
 
         [HttpPost, ValidateAntiForgeryToken]
-        public async Task<IActionResult> Switch(string store)
+        public async Task<IActionResult> Switch(string store, bool force = false)
         {
             if (await DenyAsync() is { } deny) return deny;
-            var (ok, message, problems) = _migration.Switch(store ?? "", await ActorAsync());
+            var (ok, message, problems) = _migration.Switch(store ?? "", await ActorAsync(), force);
             return Json(new { success = ok, message, problems });
         }
 
         /// <summary>Tömmer tabellerna inför ett nytt försök. Bara när nodlagringen gäller.</summary>
         [HttpPost, ValidateAntiForgeryToken]
-        public async Task<IActionResult> Clear()
+        public async Task<IActionResult> Clear(bool force = false)
         {
             if (await DenyAsync() is { } deny) return deny;
-            var (ok, message) = _migration.ClearTables(await ActorAsync());
+            var (ok, message) = _migration.ClearTables(await ActorAsync(), force);
             return Json(new { success = ok, message });
         }
 
