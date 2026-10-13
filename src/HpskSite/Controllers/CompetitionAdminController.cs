@@ -1120,6 +1120,9 @@ namespace HpskSite.Controllers
                 // Set competitionName as a property as well (in addition to the content name)
                 newCompetition.SetValue("competitionName", competitionName);
 
+                // Bara sajtadmin lägger en tävling i den nationella menyn (Stefan 2026-10-13).
+                if (!isSiteAdmin) request.Fields?.Remove("addToMenu");
+
                 // Set all other properties from fields
                 foreach (var field in request.Fields)
                 {
@@ -1379,6 +1382,8 @@ namespace HpskSite.Controllers
                 }
 
                 var fields = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(fieldsJson.ToString());
+                // Bara sajtadmin lägger en tävling i den nationella menyn (Stefan 2026-10-13).
+                if (fields != null && !await _authorizationService.IsCurrentUserAdminAsync()) fields.Remove("addToMenu");
                 if (fields == null || fields.Count == 0)
                 {
                     return Ok(new { success = false, message = "Invalid competition data format" });
@@ -1680,6 +1685,8 @@ namespace HpskSite.Controllers
                 }
 
                 var fields = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(fieldsJson.ToString());
+                // Bara sajtadmin lägger en tävling i den nationella menyn (Stefan 2026-10-13).
+                if (fields != null && !await _authorizationService.IsCurrentUserAdminAsync()) fields.Remove("addToMenu");
                 if (fields == null || fields.Count == 0)
                 {
                     return Ok(new { success = false, message = "Invalid competition data format" });
@@ -2562,6 +2569,7 @@ namespace HpskSite.Controllers
         {
             _appCaches.RuntimeCache.ClearByKey(SeriesListCacheKey);
             _appCaches.RuntimeCache.ClearByRegex("^admin_competitions_list_");
+            HpskSite.Services.CompetitionMenuService.Invalidate(_appCaches);
         }
 
         /// <summary>
@@ -2931,7 +2939,8 @@ namespace HpskSite.Controllers
                     newSeries.SetValue("seriesStartDate", request.SeriesStartDate.Value);
                 if (request.SeriesEndDate.HasValue)
                     newSeries.SetValue("seriesEndDate", request.SeriesEndDate.Value);
-                newSeries.SetValue("showInMenu", request.ShowInMenu);
+                // Bara sajtadmin lägger serier i den nationella menyn (Stefan 2026-10-13).
+                newSeries.SetValue("showInMenu", isSiteAdmin && request.ShowInMenu);
                 newSeries.SetValue("isActive", request.IsActive);
                 if (!string.IsNullOrEmpty(request.ClubId) && request.ClubId != "0")
                     newSeries.SetValue("clubId", int.Parse(request.ClubId));
@@ -3031,7 +3040,8 @@ namespace HpskSite.Controllers
                     series.SetValue("seriesStartDate", request.SeriesStartDate.Value);
                 if (request.SeriesEndDate.HasValue)
                     series.SetValue("seriesEndDate", request.SeriesEndDate.Value);
-                series.SetValue("showInMenu", request.ShowInMenu);
+                // Bara sajtadmin lägger serier i den nationella menyn (Stefan 2026-10-13); för andra står värdet kvar.
+                if (isSiteAdmin) series.SetValue("showInMenu", request.ShowInMenu);
                 series.SetValue("isActive", request.IsActive);
 
                 // Clear both organizer fields first, then set the relevant one
@@ -3220,7 +3230,7 @@ namespace HpskSite.Controllers
                 {
                     newSeries.SetValue("seriesEndDate", request.EndDate.Value);
                 }
-                newSeries.SetValue("showInMenu", sourceSeries.GetValue<bool>("showInMenu"));
+                newSeries.SetValue("showInMenu", isSiteAdmin && sourceSeries.GetValue<bool>("showInMenu"));
                 newSeries.SetValue("isActive", sourceSeries.GetValue<bool>("isActive"));
 
                 // Copy organizer properties

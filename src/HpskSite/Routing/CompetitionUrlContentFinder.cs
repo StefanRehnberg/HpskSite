@@ -1,5 +1,6 @@
 ﻿using HpskSite.CompetitionTypes.Common.Utilities;
 using Microsoft.Extensions.Logging;
+using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Web;
@@ -26,6 +27,7 @@ namespace HpskSite.Routing
     {
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly ILogger<CompetitionUrlContentFinder> _logger;
+        private readonly AppCaches _caches;
 
         private static readonly HashSet<string> XSmSlugs = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -57,10 +59,11 @@ namespace HpskSite.Routing
             || HpskSite.CompetitionTypes.Precision.Models.FinalsWeaponGroup.IsFinalsSlug(segment);
 
         public CompetitionUrlContentFinder(IUmbracoContextAccessor umbracoContextAccessor,
-            ILogger<CompetitionUrlContentFinder> logger)
+            ILogger<CompetitionUrlContentFinder> logger, AppCaches caches)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
             _logger = logger;
+            _caches = caches;
         }
 
         public Task<bool> TryFindContent(IPublishedRequestBuilder request)
@@ -159,7 +162,7 @@ namespace HpskSite.Routing
                 ? CompetitionScopeHelper.SvensktMasterskap
                 : CompetitionScopeHelper.Landsdelsmasterskap;
 
-            foreach (var comp in EnumerateCompetitionsByYear(year))
+            foreach (var comp in EnumerateCompetitionsByYear(year, compSlug))
             {
                 if (!string.Equals(comp.UrlSegment, compSlug, StringComparison.OrdinalIgnoreCase)) continue;
                 if (!MatchSeries(comp, series)) continue;
@@ -195,7 +198,7 @@ namespace HpskSite.Routing
             if (region == null) return null;
             var regionCode = region.Value<string>("regionCode") ?? "";
 
-            foreach (var comp in EnumerateCompetitionsByYear(year))
+            foreach (var comp in EnumerateCompetitionsByYear(year, compSlug))
             {
                 if (!string.Equals(comp.UrlSegment, compSlug, StringComparison.OrdinalIgnoreCase)) continue;
                 if (!MatchSeries(comp, series)) continue;
@@ -241,7 +244,7 @@ namespace HpskSite.Routing
         private IPublishedContent? FindByRegionClubShape(int year, string regionSlug, string clubSlug,
             string? series, string compSlug)
         {
-            foreach (var comp in EnumerateCompetitionsByYear(year))
+            foreach (var comp in EnumerateCompetitionsByYear(year, compSlug))
             {
                 if (!string.Equals(comp.UrlSegment, compSlug, StringComparison.OrdinalIgnoreCase)) continue;
                 if (!MatchSeries(comp, series)) continue;
@@ -262,7 +265,42 @@ namespace HpskSite.Routing
             return null;
         }
 
-        private IEnumerable<IPublishedContent> EnumerateCompetitionsByYear(int year)
+        /// <summary>
+        /// Tävlingarna med det året och den sluggen. Förut gicks ALLA tävlingar igenom upp till tre gånger
+        /// per förfrågan; nu slås de upp i ett index (år, slug) → id som byggs en gång och cachas
+        /// (C3-planen Q2, 2026-10-13). Töms med <see cref="HpskSite.Services.CompetitionNavigationCaches"/>
+        /// när en tävling eller serie skrivs, och lever högst fem minuter.
+        /// </summary>
+        private IEnumerable<IPublishedContent> EnumerateCompetitionsByYear(int year, string compSlug)
+        {
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                yield break;
+            var index = _caches.RuntimeCache.GetCacheItem(HpskSite.Services.CompetitionNavigationCaches.UrlIndexKey,
+                            BuildYearSlugIndex, HpskSite.Services.CompetitionNavigationCaches.CacheFor)
+                        ?? new Dictionary<string, List<int>>();
+            if (!index.TryGetValue(IndexKey(year, compSlug), out var ids)) yield break;
+            foreach (var id in ids)
+            {
+                var node = ctx.Content.GetById(id);
+                if (node?.ContentType.Alias == "competition") yield return node;
+            }
+        }
+
+        private static string IndexKey(int year, string slug) => year + "|" + (slug ?? "").ToLowerInvariant();
+
+        private Dictionary<string, List<int>> BuildYearSlugIndex()
+        {
+            var index = new Dictionary<string, List<int>>();
+            foreach (var (id, year, slug) in AllCompetitionsByYear())
+            {
+                var key = IndexKey(year, slug);
+                if (!index.TryGetValue(key, out var list)) index[key] = list = new List<int>();
+                list.Add(id);
+            }
+            return index;
+        }
+
+        private IEnumerable<(int Id, int Year, string Slug)> AllCompetitionsByYear()
         {
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                 yield break;
@@ -290,8 +328,8 @@ namespace HpskSite.Routing
                         else if (int.TryParse(p.UrlSegment, out var y2) && y2 > 1900) nodeYear = y2;
                     }
                 }
-                if (nodeYear == year)
-                    yield return node;
+                if (nodeYear > 0)
+                    yield return (node.Id, nodeYear, node.UrlSegment ?? "");
             }
         }
 

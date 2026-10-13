@@ -3,6 +3,13 @@
  * Used for both creating and editing competition series
  * Includes Flatpickr for dates and CKEditor 5 for rich text editing
 *@
+@inject HpskSite.Services.AdminAuthorizationService SeriesModalAuthService
+@{
+    // Bara sajtadmin lägger serier i den nationella menyn (Stefan 2026-10-13). Kryssrutan finns kvar i
+    // DOM:en för alla — panelerna sätter den från JS — men syns bara för sajtadmin; servern ignorerar
+    // värdet från andra.
+    var seriesModalIsSiteAdmin = await SeriesModalAuthService.IsCurrentUserAdminAsync();
+}
 
 <!-- Flatpickr CSS & JS -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
@@ -142,10 +149,10 @@
                     <!-- Checkboxes -->
                     <div class="row">
                         <div class="col-md-6">
-                            <div class="form-check mb-3">
+                            <div class="form-check mb-3 @(seriesModalIsSiteAdmin ? "" : "d-none")">
                                 <input class="form-check-input" type="checkbox" id="showInMenu" name="showInMenu" value="true">
                                 <label class="form-check-label" for="showInMenu">
-                                    Show in Menu
+                                    Visa i menyn (pågående och kommande serier)
                                 </label>
                             </div>
                         </div>
