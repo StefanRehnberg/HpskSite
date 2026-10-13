@@ -78,15 +78,10 @@ IsSubCompetition, IsCheckedIn, RegistrationDate, CreatedDate, RegisteredBy, Lega
         public IReadOnlyList<RegistrationRecord> ListForMember(int memberId)
         {
             if (memberId <= 0) return Array.Empty<RegistrationRecord>();
-            try
-            {
-                return Load("WHERE r.MemberId = @0", memberId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Medlem {MemberId}s anmälningar kunde inte läsas", memberId);
-                return Array.Empty<RegistrationRecord>();
-            }
+            // ⚠️ Ett läsfel kastas — det är inte "inga anmälningar". Förut svarade de tre läsningarna här
+            // tomt vid fel, och dubblettsammanslagningen flyttade då ingenting medan raderingen av en
+            // tävling räknade noll (genomgången 2026-10-13, A7). En yta som hellre visar tomt fångar själv.
+            return Load("WHERE r.MemberId = @0", memberId);
         }
 
         public IReadOnlyList<(int MemberId, int CompetitionId)> CompetitionsForMembers(IReadOnlyCollection<int> memberIds)
@@ -94,22 +89,16 @@ IsSubCompetition, IsCheckedIn, RegistrationDate, CreatedDate, RegisteredBy, Lega
             var result = new List<(int, int)>();
             var ids = memberIds.Where(i => i > 0).Distinct().ToList();
             if (ids.Count == 0) return result;
-            try
+            // Ett läsfel kastas (se ListForMember).
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            // I portioner: IN (@0) blir en parameter per id, och SQL Server tar slut vid ~2100.
+            foreach (var batch in ids.Chunk(1000))
             {
-                using var scope = _scopeProvider.CreateScope(autoComplete: true);
-                // I portioner: IN (@0) blir en parameter per id, och SQL Server tar slut vid ~2100.
-                foreach (var batch in ids.Chunk(1000))
-                {
-                    var inList = string.Join(",", batch.Select((_, i) => "@" + i));
-                    var rows = scope.Database.Fetch<PairRow>(
-                        $"SELECT DISTINCT MemberId, CompetitionId FROM dbo.CompetitionRegistration WHERE MemberId IN ({inList})",
-                        batch.Cast<object>().ToArray());
-                    result.AddRange(rows.Select(r => (r.MemberId, r.CompetitionId)));
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Medlemmarnas anmälningar kunde inte läsas");
+                var inList = string.Join(",", batch.Select((_, i) => "@" + i));
+                var rows = scope.Database.Fetch<PairRow>(
+                    $"SELECT DISTINCT MemberId, CompetitionId FROM dbo.CompetitionRegistration WHERE MemberId IN ({inList})",
+                    batch.Cast<object>().ToArray());
+                result.AddRange(rows.Select(r => (r.MemberId, r.CompetitionId)));
             }
             return result;
         }
@@ -117,19 +106,25 @@ IsSubCompetition, IsCheckedIn, RegistrationDate, CreatedDate, RegisteredBy, Lega
         public IReadOnlyDictionary<int, int> CountByCompetition(IReadOnlyCollection<int>? competitionIds = null)
         {
             var result = new Dictionary<int, int>();
-            try
+            // Ett läsfel kastas (se ListForMember) — tävlingsraderingen bygger på det här talet.
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            // Alla rader, även inaktiva — samma svar som nodlagringen gav (den räknade noder).
+            if (competitionIds is null)
             {
-                using var scope = _scopeProvider.CreateScope(autoComplete: true);
-                // Alla rader, även inaktiva — samma svar som nodlagringen gav (den räknade noder).
-                var rows = scope.Database.Fetch<CountRow>(
-                    "SELECT CompetitionId, COUNT(*) AS Cnt FROM dbo.CompetitionRegistration GROUP BY CompetitionId");
-                foreach (var r in rows)
-                    if (competitionIds is null || competitionIds.Contains(r.CompetitionId))
-                        result[r.CompetitionId] = r.Cnt;
+                foreach (var r in scope.Database.Fetch<CountRow>(
+                             "SELECT CompetitionId, COUNT(*) AS Cnt FROM dbo.CompetitionRegistration GROUP BY CompetitionId"))
+                    result[r.CompetitionId] = r.Cnt;
+                return result;
             }
-            catch (Exception ex)
+            // Bara de efterfrågade tävlingarna — förut aggregerades hela tabellen vid varje sidladdning.
+            // I portioner av samma skäl som ovan.
+            foreach (var batch in competitionIds.Where(i => i > 0).Distinct().Chunk(1000))
             {
-                _logger.LogError(ex, "Antalet anmälningar per tävling kunde inte läsas");
+                var inList = string.Join(",", batch.Select((_, i) => "@" + i));
+                foreach (var r in scope.Database.Fetch<CountRow>(
+                             $"SELECT CompetitionId, COUNT(*) AS Cnt FROM dbo.CompetitionRegistration WHERE CompetitionId IN ({inList}) GROUP BY CompetitionId",
+                             batch.Cast<object>().ToArray()))
+                    result[r.CompetitionId] = r.Cnt;
             }
             return result;
         }
