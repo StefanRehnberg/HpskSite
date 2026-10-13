@@ -64,7 +64,11 @@ namespace HpskSite.Services.Events
 
         public (bool Ok, string Message) ClearTables(int? byMemberId)
         {
-            if (ClubEventStoreSettings.UsesTable(_settings))
+            // Förbi cachen och utan senast kända värde: en tömning får aldrig bygga på en gissning.
+            string store;
+            try { store = _settings.GetFresh(ClubEventStoreSettings.StoreKey, ClubEventStoreSettings.StoreNode); }
+            catch (SiteSettingUnavailableException) { return (false, "Växeln kunde inte läsas — ingenting tömt. Försök igen."); }
+            if (!string.Equals(store, ClubEventStoreSettings.StoreNode, StringComparison.OrdinalIgnoreCase))
                 return (false, "Tabellen gäller — gå tillbaka till noderna först.");
             using var scope = _scopeProvider.CreateScope();
             var db = scope.Database;

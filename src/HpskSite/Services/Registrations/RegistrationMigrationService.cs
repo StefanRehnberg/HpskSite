@@ -109,7 +109,11 @@ namespace HpskSite.Services.Registrations
         /// </summary>
         public (bool Ok, string Message) ClearTables(int? byMemberId)
         {
-            if (!string.Equals(CurrentStore, RegistrationStoreSettings.StoreNode, StringComparison.OrdinalIgnoreCase))
+            // Förbi cachen och utan senast kända värde: en tömning får aldrig bygga på en gissning.
+            string store;
+            try { store = _settings.GetFresh(RegistrationStoreSettings.StoreKey, RegistrationStoreSettings.StoreNode); }
+            catch (SiteSettingUnavailableException) { return (false, "Växeln kunde inte läsas — ingenting tömt. Försök igen."); }
+            if (!string.Equals(store, RegistrationStoreSettings.StoreNode, StringComparison.OrdinalIgnoreCase))
                 return (false, "Tabellen gäller — gå tillbaka till noderna först.");
             using var scope = _scopeProvider.CreateScope();
             var db = scope.Database;
