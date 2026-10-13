@@ -274,7 +274,7 @@ VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18,@19,@2
                 Diff("Block", HasBlocks(n) ? N(n.ContentBlocksJson) + "|" + N(n.QuickLinksJson) : "", HasBlocks(t) ? N(t.ContentBlocksJson) + "|" + N(t.QuickLinksJson) : "");
                 if (p.LegacySlug.Length > 0)
                 {
-                    var hit = _table.FindByAddress(n.OwnerId, null, p.LegacySlug);
+                    var hit = _table.FindByAddress(n.OwnerType, n.OwnerId, null, p.LegacySlug);
                     var sharers = sharedLegacy[(n.OwnerId, p.LegacySlug.ToLowerInvariant())];
                     if (hit == null || !sharers.Contains(hit.Value.EventId))
                         problems.Add($"{n.Id}: den gamla adressen {p.LegacySlug} leder inte hit");
