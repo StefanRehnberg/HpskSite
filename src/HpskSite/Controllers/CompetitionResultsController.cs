@@ -62,6 +62,8 @@ namespace HpskSite.Controllers
         private readonly StandardMedalMaterializationService _medalMaterialization;
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -84,10 +86,14 @@ namespace HpskSite.Controllers
             ShootOffService shootOffService,
             ParticipantStatusService participantStatusService,
             StandardMedalMaterializationService medalMaterialization,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.StartLists.IStartListStore startLists)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
+            _results = results;
+            _startLists = startLists;
             _contentService = contentService;
             _memberService = memberService;
             _contentTypeService = contentTypeService;
@@ -996,9 +1002,7 @@ namespace HpskSite.Controllers
                 // detail modal can show a "Tävlingsresultat" section like self-reported results do.
                 int? placement = null;
                 string? standardMedal = null;
-                var resultPage = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                var snapshotJson = resultPage?.GetValue<string>("resultData");
+                var snapshotJson = _results.Get(competitionId)?.ResultData;
                 if (!string.IsNullOrEmpty(snapshotJson))
                 {
                     try
@@ -1419,18 +1423,15 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long total);
-                var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-
-                // Start list is a direct child of competition
-                var startListContent = children.FirstOrDefault(c => possibleAliases.Contains(c.ContentType.Alias));
+                // Start list is a direct child of competition (genom IStartListStore)
+                var startListContent = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying).FirstOrDefault(r => !r.LegacyHub);
 
                 if (startListContent == null)
                 {
                     return null;
                 }
 
-                var configurationData = startListContent.GetValue<string>("configurationData");
+                var configurationData = startListContent.ConfigurationData;
                 if (string.IsNullOrEmpty(configurationData))
                 {
                     return null;
@@ -1902,28 +1903,12 @@ namespace HpskSite.Controllers
             {
                 var comp = _contentService.GetById(competitionId);
                 if (comp == null) return null;
-                var aliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-                bool IsOfficial(Umbraco.Cms.Core.Models.IContent c) { try { return c.GetValue<bool>("isOfficialStartList"); } catch { return false; } }
-
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out _);
-                Umbraco.Cms.Core.Models.IContent? node = children
-                    .Where(c => aliases.Contains(c.ContentType.Alias))
-                    .OrderByDescending(IsOfficial)
-                    .FirstOrDefault();
-                if (node == null)
-                {
-                    var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                    if (hub != null)
-                    {
-                        var hubChildren = _contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _);
-                        node = hubChildren
-                            .Where(c => aliases.Contains(c.ContentType.Alias))
-                            .OrderByDescending(IsOfficial)
-                            .FirstOrDefault();
-                    }
-                }
+                // Den officiella (annars första) direkt under tävlingen, annars under den äldre hubben.
+                var lists = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying);
+                var node = lists.Where(r => !r.LegacyHub).OrderByDescending(r => r.IsOfficial).FirstOrDefault()
+                    ?? lists.Where(r => r.LegacyHub).OrderByDescending(r => r.IsOfficial).FirstOrDefault();
                 if (node == null) return null;
-                var json = node.GetValue<string>("configurationData");
+                var json = node.ConfigurationData;
                 if (string.IsNullOrEmpty(json)) return null;
                 return JsonConvert.DeserializeObject<StartListConfiguration>(json);
             }
@@ -1982,31 +1967,16 @@ namespace HpskSite.Controllers
         {
             try
             {
-                // Get start list data from Umbraco content
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long total);
-                
-                // Look for start lists hub and then its children
-                var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                if (startListsHub != null)
+                // Startlistorna under den äldre hubben (genom IStartListStore)
+                var hubLists = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying).Where(r => r.LegacyHub).ToList();
+                if (hubLists.Count > 0)
                 {
-                    var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out long hubTotal);
-                    var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-                    
                     // Find the OFFICIAL start list
-                    var startListContent = hubChildren
-                        .Where(c => possibleAliases.Contains(c.ContentType.Alias))
-                        .FirstOrDefault(c => {
-                            try {
-                                var isOfficial = c.GetValue<bool>("isOfficialStartList");
-                                return isOfficial;
-                            } catch {
-                                return false;
-                            }
-                        });
+                    var startListContent = hubLists.FirstOrDefault(r => r.IsOfficial);
                     
                     if (startListContent != null)
                     {
-                        var configurationData = startListContent.GetValue<string>("configurationData");
+                        var configurationData = startListContent.ConfigurationData;
                         if (!string.IsNullOrEmpty(configurationData))
                         {
                             var config = Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(configurationData);
@@ -2144,18 +2114,11 @@ namespace HpskSite.Controllers
             var map = new Dictionary<int, (string Name, string Club)>();
             try
             {
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out _);
-                var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                if (startListsHub == null) return map;
-
-                var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out _);
-                var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-                var officialStartList = hubChildren
-                    .Where(c => possibleAliases.Contains(c.ContentType.Alias))
-                    .FirstOrDefault(c => { try { return c.GetValue<bool>("isOfficialStartList"); } catch { return false; } });
+                var officialStartList = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying)
+                    .FirstOrDefault(r => r.LegacyHub && r.IsOfficial);
                 if (officialStartList == null) return map;
 
-                var json = officialStartList.GetValue<string>("configurationData");
+                var json = officialStartList.ConfigurationData;
                 if (string.IsNullOrEmpty(json)) return map;
 
                 var config = JsonConvert.DeserializeObject<StartListConfiguration>(json);
@@ -2228,34 +2191,16 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long total);
-
-                var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                if (startListsHub == null)
-                {
-                    return ("Unknown", "Unknown");
-                }
-
-                var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out long hubTotal);
-                var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-
-                // Find the OFFICIAL start list
-                var officialStartList = hubChildren
-                    .Where(c => possibleAliases.Contains(c.ContentType.Alias))
-                    .FirstOrDefault(c => {
-                        try {
-                            return c.GetValue<bool>("isOfficialStartList");
-                        } catch {
-                            return false;
-                        }
-                    });
+                // Den officiella listan under den äldre hubben (genom IStartListStore)
+                var officialStartList = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying)
+                    .FirstOrDefault(r => r.LegacyHub && r.IsOfficial);
 
                 if (officialStartList == null)
                 {
                     return ("Unknown", "Unknown");
                 }
 
-                var configurationData = officialStartList.GetValue<string>("configurationData");
+                var configurationData = officialStartList.ConfigurationData;
                 if (string.IsNullOrEmpty(configurationData))
                 {
                     return ("Unknown", "Unknown");
@@ -2301,56 +2246,14 @@ namespace HpskSite.Controllers
             try
             {
                 // Get start list data from Umbraco content
-                _logger.LogInformation("Looking for start list content for competition {CompetitionId}", competitionId);
-                var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long total);
-                
-                _logger.LogInformation("Found {Total} children for competition {CompetitionId}", total, competitionId);
-                foreach (var child in children)
-                {
-                    _logger.LogInformation("Child: {Name} (ID: {Id}, Type: {ContentType})", child.Name, child.Id, child.ContentType.Alias);
-                }
-                
-                // First, try to find start list content directly under competition
-                var startListContent = children.FirstOrDefault(c => c.ContentType.Alias == "precisionStartList");
+                // Direkt under tävlingen först, annars den officiella under den äldre hubben (genom IStartListStore)
+                var lists = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying);
+                var startListContent = lists.FirstOrDefault(r => !r.LegacyHub);
 
                 if (startListContent == null)
                 {
                     _logger.LogInformation("No direct start list found, looking in start lists hub");
-                    
-                    // Look for start lists hub and then its children
-                    var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                    if (startListsHub != null)
-                    {
-                        _logger.LogInformation("Found start lists hub: {Name} (ID: {Id})", startListsHub.Name, startListsHub.Id);
-                        
-                        var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out long hubTotal);
-                        _logger.LogInformation("Found {HubTotal} children in start lists hub", hubTotal);
-                        
-                        foreach (var hubChild in hubChildren)
-                        {
-                            _logger.LogInformation("Hub child: {Name} (ID: {Id}, Type: {ContentType})", hubChild.Name, hubChild.Id, hubChild.ContentType.Alias);
-                        }
-                        
-                        // Look for the OFFICIAL precision start list in the hub
-                        var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-                        startListContent = hubChildren
-                            .Where(c => possibleAliases.Contains(c.ContentType.Alias))
-                            .FirstOrDefault(c => {
-                                try {
-                                    var isOfficial = c.GetValue<bool>("isOfficialStartList");
-                                    _logger.LogInformation("Start list {Name} is official: {IsOfficial}", c.Name, isOfficial);
-                                    return isOfficial;
-                                } catch (Exception ex) {
-                                    _logger.LogWarning(ex, "Error checking isOfficialStartList for start list {Name}", c.Name);
-                                    return false;
-                                }
-                            });
-                        
-                        if (startListContent != null)
-                        {
-                            _logger.LogInformation("Found start list in hub: {Name} (Type: {ContentType})", startListContent.Name, startListContent.ContentType.Alias);
-                        }
-                    }
+                    startListContent = lists.FirstOrDefault(r => r.LegacyHub && r.IsOfficial);
                     
                     if (startListContent == null)
                     {
@@ -2364,7 +2267,7 @@ namespace HpskSite.Controllers
                 
                 _logger.LogInformation("Found start list content: {ContentName} (ID: {ContentId})", startListContent.Name, startListContent.Id);
 
-                var configurationData = startListContent.GetValue<string>("configurationData");
+                var configurationData = startListContent.ConfigurationData;
                 if (string.IsNullOrEmpty(configurationData))
                 {
                     _logger.LogWarning("No configuration data found in start list for competition {CompetitionId}", competitionId);
@@ -2546,8 +2449,7 @@ namespace HpskSite.Controllers
                 // En arrangör som valt ett annat mål än förslaget, eller kryssat av ett förslag,
                 // fick sitt val överskrivet nästa gång dialogen öppnades och sparades.
                 // Rapporterat 2026-09-08.
-                var mergeResultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                var mergeResultPage = _results.Get(competition.Id);
                 var appliedMerges = ReadStoredMerges(mergeResultPage, subCompetitionOnly)
                                     ?? new List<ClassMergeAction>();
                 var hasResultList = mergeResultPage != null;
@@ -2581,8 +2483,7 @@ namespace HpskSite.Controllers
                 // Fallback to cached result data if DB is empty
                 if (!results.Any())
                 {
-                    var resultPage = mergeResultPage;
-                    var existingJson = resultPage?.GetValue<string>("resultData");
+                    var existingJson = mergeResultPage?.ResultData;
                     if (!string.IsNullOrEmpty(existingJson))
                     {
                         // Return analysis based on cached results
@@ -2737,9 +2638,8 @@ namespace HpskSite.Controllers
                     return Json(new { Success = false, Message = "Detta är en extern tävling. Resultat kan inte skapas i systemet." });
                 }
 
-                // Find or create result page as direct child of competition
-                var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long total)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                // Tävlingens resultatlista, om den finns (skapas nedan vid behov)
+                var resultPage = _results.Get(competition.Id);
 
                 // Get all results for this competition; if this is a Deltävling rebuild,
                 // narrow down to the IsSubCompetition members.
@@ -2780,7 +2680,7 @@ namespace HpskSite.Controllers
                 else if (resultPage != null)
                 {
                     // No DB rows but cached result page exists — use existing snapshot
-                    var existingJson = resultPage.GetValue<string>("resultData");
+                    var existingJson = resultPage.ResultData;
                     if (!string.IsNullOrEmpty(existingJson))
                     {
                         finalResults = JsonConvert.DeserializeObject<FinalResults>(existingJson);
@@ -2811,65 +2711,38 @@ namespace HpskSite.Controllers
                     return Json(new { Success = false, Message = "Inga resultat hittades för denna tävling." });
                 }
 
-                if (resultPage == null)
+                // Huvudlistans publiceringsläge behålls (deltävlingen har sitt eget)
+                var existingIsOfficial = resultPage?.IsOfficial ?? false;
+                var mergesJson = request.Merges?.Any() == true
+                    ? Newtonsoft.Json.JsonConvert.SerializeObject(request.Merges)
+                    : "";
+                bool subMergeStorable = _results.CanStore(HpskSite.Models.Results.CompetitionResultField.SubMergeConfig);
+                if (request.IsSubCompetition && !request.KeepExistingMerges && !subMergeStorable)
                 {
-                    // Create new result page
-                    resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
-                    resultPage.SetValue("resultType", "Final Results");
-                    resultPage.SetValue("isOfficial", false); // Start as preliminary
-                    _logger.LogInformation("Created new result page for competition {CompetitionId}", request.CompetitionId);
+                    _logger.LogWarning("competitionResult saknar 'subCompetitionMergeConfig' — deltävlingens sammanslagning sparades inte (tävling {CompId}).", request.CompetitionId);
                 }
 
-                // Keep existing isOfficial status (main flag — sub-comp uses subCompetitionIsOfficial)
-                var existingIsOfficial = resultPage.GetValue<bool>("isOfficial");
-
-                if (request.IsSubCompetition)
+                var saved = _results.Update(competition.Id, r =>
                 {
-                    // Deltävling path: don't overwrite the main resultData / mergeConfig.
-                    // Just persist the sub-comp merge config; live recompute when read.
-                    if (request.KeepExistingMerges)
+                    r.LastUpdated = DateTime.Now;
+                    if (request.IsSubCompetition)
                     {
-                        // Ren uppdatering — deltävlingens sammanslagning ligger kvar orörd.
-                    }
-                    else if (resultPage.HasProperty("subCompetitionMergeConfig"))
-                    {
-                        resultPage.SetValue("subCompetitionMergeConfig", request.Merges?.Any() == true
-                            ? Newtonsoft.Json.JsonConvert.SerializeObject(request.Merges)
-                            : "");
+                        // Deltävlingen skriver aldrig över huvudlistan — den räknas om vid läsning.
+                        // ⚠️ RÖR INTE sammanslagningen vid en ren uppdatering.
+                        if (!request.KeepExistingMerges && subMergeStorable) r.SubMergeConfig = mergesJson;
                     }
                     else
                     {
-                        _logger.LogWarning("competitionResult node for comp {CompId} missing 'subCompetitionMergeConfig' property — Deltävling merge config not saved.", request.CompetitionId);
+                        r.ResultData = Newtonsoft.Json.JsonConvert.SerializeObject(finalResults);
+                        // ⚠️ RÖR INTE sammanslagningen vid en ren uppdatering — se resonemanget ovan.
+                        if (!request.KeepExistingMerges) r.MergeConfig = mergesJson;
                     }
-                    resultPage.SetValue("lastUpdated", DateTime.Now);
-                    resultPage.SetValue("resultType", "Final Results");
-                }
-                else
-                {
-                    // Update the result page (main results path)
-                    resultPage.SetValue("resultData", Newtonsoft.Json.JsonConvert.SerializeObject(finalResults));
-                    resultPage.SetValue("lastUpdated", DateTime.Now);
-                    resultPage.SetValue("isOfficial", existingIsOfficial); // Keep existing status
-                    resultPage.SetValue("resultType", "Final Results");
-
-                    // Persist merge config so GetResultsList can re-apply on preliminary reload.
-                    // ⚠️ RÖR DEN INTE vid en ren uppdatering — se resonemanget ovan.
-                    if (!request.KeepExistingMerges)
-                    {
-                        resultPage.SetValue("mergeConfig", request.Merges?.Any() == true
-                            ? Newtonsoft.Json.JsonConvert.SerializeObject(request.Merges)
-                            : "");
-                    }
-                }
-
-                // Save and publish
-                _contentService.Save(resultPage);
-                _contentService.Publish(resultPage, new[] { "*" }, -1);
+                }, createIfMissing: true)!;
 
                 _logger.LogInformation("Created/updated final results list for competition {CompetitionId}", request.CompetitionId);
 
                 if (!request.IsSubCompetition)
-                    await ResultReviewHookAsync(request.CompetitionId, resultPage.GetValue<string>("resultData"));
+                    await ResultReviewHookAsync(request.CompetitionId, saved.ResultData);
 
                 // If "Uppdatera" regenerates an ALREADY-OFFICIAL main list, reconcile the
                 // Standardmedalj ledger from the fresh results. This covers the case where
@@ -2917,9 +2790,7 @@ namespace HpskSite.Controllers
                     return Json(new { Success = false, Message = "Tävlingen hittades inte." });
                 }
 
-                // Find result page as direct child of competition
-                var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long total)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                var resultPage = _results.Get(competition.Id);
 
                 var showLiveResults = competition.GetValue<bool>("showLiveResults");
 
@@ -2941,22 +2812,14 @@ namespace HpskSite.Controllers
                     var finalResultsList = resultPage;
                     // Read the relevant Official flag — main vs sub live on different properties
                     // so each section can be published independently.
-                    if (subCompetitionOnly)
-                    {
-                        isOfficial = finalResultsList.HasProperty("subCompetitionIsOfficial")
-                            && finalResultsList.GetValue<bool>("subCompetitionIsOfficial");
-                    }
-                    else
-                    {
-                        isOfficial = finalResultsList.GetValue<bool>("isOfficial");
-                    }
+                    isOfficial = finalResultsList.OfficialFor(subCompetitionOnly);
 
                     // Deltävling is always recomputed live from the filtered DB rows — we don't
                     // store a separate sub-comp snapshot. Main path keeps its frozen-snapshot
                     // behaviour when Officiell so historical snapshots stay stable.
                     if (isOfficial && !subCompetitionOnly)
                     {
-                        var resultDataJson = finalResultsList.GetValue<string>("resultData");
+                        var resultDataJson = finalResultsList.ResultData;
                         _logger.LogInformation("Loading official (frozen) results for competition {CompetitionId}", competitionId);
 
                         if (string.IsNullOrEmpty(resultDataJson))
@@ -2965,7 +2828,7 @@ namespace HpskSite.Controllers
                         }
 
                         resultData = JsonConvert.DeserializeObject<FinalResults>(resultDataJson);
-                        lastUpdated = finalResultsList.GetValue<DateTime>("lastUpdated");
+                        lastUpdated = finalResultsList.LastUpdated ?? default;
 
                         // Apply class-name overrides on top of the snapshot so renaming doesn't
                         // require re-publishing the official result list.
@@ -3003,11 +2866,7 @@ namespace HpskSite.Controllers
                         }
 
                         // Read stored merge config from the slot that matches the current mode
-                        var mergeConfigJson = subCompetitionOnly
-                            ? (finalResultsList.HasProperty("subCompetitionMergeConfig")
-                                ? finalResultsList.GetValue<string>("subCompetitionMergeConfig")
-                                : null)
-                            : finalResultsList.GetValue<string>("mergeConfig");
+                        var mergeConfigJson = finalResultsList.MergeConfigFor(subCompetitionOnly);
                         List<ClassMergeAction>? storedMerges = null;
                         if (!string.IsNullOrEmpty(mergeConfigJson))
                         {
@@ -3118,15 +2977,14 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Du har inte behörighet för den här tävlingen." });
             var competition = _contentService.GetById(competitionId);
             if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
-            var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long _)
-                .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+            var resultPage = _results.Get(competition.Id);
             if (resultPage == null) return Json(new { success = true, hasResultPage = false, stale = false });
             var (stale, savedAt) = ReadArtifactFreshness(resultPage, competitionId);
             return Json(new
             {
                 success = true,
                 hasResultPage = true,
-                isOfficial = resultPage.GetValue<bool>("isOfficial"),
+                isOfficial = resultPage.IsOfficial,
                 stale,
                 savedAt
             });
@@ -3156,29 +3014,18 @@ namespace HpskSite.Controllers
                     return Json(new { Success = false, Message = "Detta är en extern tävling. Resultat kan inte hanteras i systemet." });
                 }
 
-                // Find result page as direct child of competition
-                var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long total)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                var finalResultsList = _results.Get(competition.Id);
 
-                if (resultPage == null)
+                if (finalResultsList == null)
                 {
                     return Json(new { Success = false, Message = "Ingen resultatsida hittades." });
                 }
 
-                var finalResultsList = resultPage;
-
                 // Read whichever flag is being toggled (main isOfficial or subCompetitionIsOfficial)
-                bool currentFlag;
-                if (request.IsSubCompetition)
-                {
-                    if (!finalResultsList.HasProperty("subCompetitionIsOfficial"))
-                        return Json(new { Success = false, Message = "Egenskapen 'subCompetitionIsOfficial' saknas på dokumenttypen competitionResult. Lägg till den i Umbraco backoffice (True/False)." });
-                    currentFlag = finalResultsList.GetValue<bool>("subCompetitionIsOfficial");
-                }
-                else
-                {
-                    currentFlag = finalResultsList.GetValue<bool>("isOfficial");
-                }
+                if (request.IsSubCompetition && !_results.CanStore(HpskSite.Models.Results.CompetitionResultField.SubIsOfficial))
+                    return Json(new { Success = false, Message = "Egenskapen 'subCompetitionIsOfficial' saknas på dokumenttypen competitionResult. Lägg till den i Umbraco backoffice (True/False)." });
+                bool currentFlag = finalResultsList.OfficialFor(request.IsSubCompetition);
+                string? newResultData = null;
 
                 // Toggle or set the flag
                 var newIsOfficial = request.IsOfficial ?? !currentFlag;
@@ -3194,7 +3041,7 @@ namespace HpskSite.Controllers
                         // the merged groups the admin saw on the preliminary list. Without this the
                         // snapshot is regenerated with every class in its own group.
                         List<ClassMergeAction>? storedMerges = null;
-                        var mergeConfigJson = finalResultsList.GetValue<string>("mergeConfig");
+                        var mergeConfigJson = finalResultsList.MergeConfig;
                         if (!string.IsNullOrEmpty(mergeConfigJson))
                         {
                             try { storedMerges = JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeConfigJson); }
@@ -3203,7 +3050,7 @@ namespace HpskSite.Controllers
 
                         var freshResults = await CalculateFinalResults(dbResults, request.CompetitionId, storedMerges);
                         var resultDataJson = JsonConvert.SerializeObject(freshResults);
-                        finalResultsList.SetValue("resultData", resultDataJson);
+                        newResultData = resultDataJson;
                         _logger.LogInformation("Regenerated results JSON with {Count} shooters for competition {CompetitionId}",
                             freshResults.ClassGroups.Sum(g => g.Shooters.Count), request.CompetitionId);
 
@@ -3218,19 +3065,13 @@ namespace HpskSite.Controllers
                     await _medalMaterialization.RemoveOnSiteForCompetitionAsync(request.CompetitionId);
                 }
 
-                if (request.IsSubCompetition)
+                _results.Update(competition.Id, r =>
                 {
-                    finalResultsList.SetValue("subCompetitionIsOfficial", newIsOfficial);
-                }
-                else
-                {
-                    finalResultsList.SetValue("isOfficial", newIsOfficial);
-                }
-                finalResultsList.SetValue("lastUpdated", DateTime.Now);
-
-                // Save and publish
-                _contentService.Save(finalResultsList);
-                _contentService.Publish(finalResultsList, new[] { "*" }, -1);
+                    if (newResultData != null) r.ResultData = newResultData;
+                    if (request.IsSubCompetition) r.SubIsOfficial = newIsOfficial;
+                    else r.IsOfficial = newIsOfficial;
+                    r.LastUpdated = DateTime.Now;
+                });
 
                 _logger.LogInformation("Toggled {Flag} for competition {CompetitionId} to {IsOfficial}",
                     request.IsSubCompetition ? "subCompetitionIsOfficial" : "isOfficial",
@@ -3325,12 +3166,10 @@ namespace HpskSite.Controllers
                 // Load merge config from the existing result page so the tied-group detection
                 // matches what the admin sees on the published list.
                 List<ClassMergeAction>? merges = null;
-                var resultPage = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                var resultPage = _results.Get(competitionId);
                 if (resultPage != null)
                 {
-                    var mergeProp = subCompetitionOnly ? "subCompetitionMergeConfig" : "mergeConfig";
-                    var mergeJson = resultPage.HasProperty(mergeProp) ? resultPage.GetValue<string>(mergeProp) : null;
+                    var mergeJson = resultPage.MergeConfigFor(subCompetitionOnly);
                     if (!string.IsNullOrEmpty(mergeJson))
                     {
                         try { merges = JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeJson); }
@@ -3459,13 +3298,12 @@ namespace HpskSite.Controllers
         /// resultattabellens senaste ändring räcker. En billig MAX-fråga — omräkningen själv är det dyra
         /// (8–16 s på en tävling i SM-storlek), och den körs bara när det här svarar ja.
         /// </summary>
-        private (bool Stale, DateTime? SavedAt) ReadArtifactFreshness(IContent resultPage, int competitionId)
+        private (bool Stale, DateTime? SavedAt) ReadArtifactFreshness(HpskSite.Models.Results.CompetitionResultRecord resultPage, int competitionId)
         {
             try
             {
-                if (string.IsNullOrEmpty(resultPage.GetValue<string>("resultData"))) return (true, null);
-                var saved = resultPage.GetValue<DateTime>("lastUpdated");
-                if (saved == default) return (true, null);
+                if (!resultPage.HasResultData) return (true, null);
+                if (resultPage.LastUpdated is not DateTime saved) return (true, null);
                 var table = CompetitionResultTables.ForSharedResultEndpoint(GetCompetitionTypeId(competitionId));
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
                 var newest = db.ExecuteScalar<DateTime?>(
@@ -3513,15 +3351,14 @@ namespace HpskSite.Controllers
                 var competition = _contentService.GetById(competitionId);
                 if (competition == null) return false;
 
-                var resultPage = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out long _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                var resultPage = _results.Get(competition.Id);
                 if (resultPage == null) return false;
 
                 // ⚠️ Den sparade sammanslagningen MÅSTE med. Utan den räknas artefakten om
                 // utan arrangörens klassammanslagning — samma tysta förlust som
                 // `Merges = null` gav i CreateResultsList innan KeepExistingMerges fanns.
                 List<ClassMergeAction>? storedMerges = null;
-                var mergeConfigJson = resultPage.GetValue<string>("mergeConfig");
+                var mergeConfigJson = resultPage.MergeConfig;
                 if (!string.IsNullOrEmpty(mergeConfigJson))
                 {
                     try { storedMerges = JsonConvert.DeserializeObject<List<ClassMergeAction>>(mergeConfigJson); }
@@ -3534,18 +3371,16 @@ namespace HpskSite.Controllers
                 var results = await GetCompetitionResultsInternal(competitionId);
                 var finalResults = await CalculateFinalResults(results, competitionId, storedMerges);
 
-                var existingIsOfficial = resultPage.GetValue<bool>("isOfficial");
-                resultPage.SetValue("resultData", JsonConvert.SerializeObject(finalResults));
-                resultPage.SetValue("lastUpdated", DateTime.Now);
-                resultPage.SetValue("isOfficial", existingIsOfficial);
-                resultPage.SetValue("resultType", "Final Results");
-
-                _contentService.Save(resultPage);
-                _contentService.Publish(resultPage, new[] { "*" }, -1);
+                var refreshedJson = JsonConvert.SerializeObject(finalResults);
+                _results.Update(competition.Id, r =>
+                {
+                    r.ResultData = refreshedJson;
+                    r.LastUpdated = DateTime.Now;
+                });
 
                 _logger.LogInformation("Resultatartefakten omräknad för tävling {CompetitionId} ({Reason})",
                     competitionId, reason);
-                await ResultReviewHookAsync(competitionId, resultPage.GetValue<string>("resultData"));
+                await ResultReviewHookAsync(competitionId, refreshedJson);
                 return true;
             }
             catch (Exception ex)
@@ -3770,10 +3605,10 @@ namespace HpskSite.Controllers
         // frozen official snapshot and the live preliminary recompute, so renaming
         // doesn't require re-publishing.
 
-        private static string? ReadClassNameOverrides(IContent resultPage, bool subCompetitionOnly)
+        private static string? ReadClassNameOverrides(HpskSite.Models.Results.CompetitionResultRecord resultPage, bool subCompetitionOnly)
         {
-            var propName = subCompetitionOnly ? "subCompetitionClassNameOverrides" : "classNameOverrides";
-            return resultPage.HasProperty(propName) ? resultPage.GetValue<string>(propName) : null;
+            var json = resultPage.ClassNameOverridesFor(subCompetitionOnly);
+            return string.IsNullOrEmpty(json) ? null : json;
         }
 
         private static void ApplyClassNameOverrides(FinalResults? results, string? overridesJson)
@@ -3803,16 +3638,17 @@ namespace HpskSite.Controllers
                 if (!await CanManageCompetitionResults(request.CompetitionId))
                     return Json(new { Success = false, Message = "Du har inte behörighet att hantera resultat för denna tävling." });
 
-                var resultPage = _contentService.GetPagedChildren(request.CompetitionId, 0, int.MaxValue, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
+                var resultPage = _results.Get(request.CompetitionId);
                 if (resultPage == null)
                     return Json(new { Success = false, Message = "Ingen resultatsida hittades." });
 
-                var propName = request.IsSubCompetition ? "subCompetitionClassNameOverrides" : "classNameOverrides";
-                if (!resultPage.HasProperty(propName))
+                var overrideField = HpskSite.Models.Results.CompetitionResultFields.ClassNameOverridesFor(request.IsSubCompetition);
+                var propName = HpskSite.Models.Results.CompetitionResultFields.Alias(overrideField);
+                if (!_results.CanStore(overrideField))
                     return Json(new { Success = false, Message = $"Egenskapen '{propName}' saknas på doctypen competitionResult. Lägg till den (Textarea) i Umbraco-backoffice." });
 
-                var existingJson = resultPage.GetValue<string>(propName);
+                Dictionary<string, string> MergeOverride(string? existingJson)
+                {
                 Dictionary<string, string> overrides;
                 try
                 {
@@ -3830,12 +3666,17 @@ namespace HpskSite.Controllers
                     overrides.Remove(request.OriginalName);
                 else
                     overrides[request.OriginalName] = request.CustomName.Trim();
+                return overrides;
+                }
 
-                resultPage.SetValue(propName, JsonConvert.SerializeObject(overrides));
-                resultPage.SetValue("lastUpdated", DateTime.Now);
-
-                _contentService.Save(resultPage);
-                _contentService.Publish(resultPage, new[] { "*" }, -1);
+                // Läs-ändra-skriv inne i Update, så att två samtidiga namnbyten inte skriver över varandra.
+                _results.Update(request.CompetitionId, r =>
+                {
+                    var merged = JsonConvert.SerializeObject(MergeOverride(r.ClassNameOverridesFor(request.IsSubCompetition)));
+                    if (request.IsSubCompetition) r.SubClassNameOverrides = merged;
+                    else r.ClassNameOverrides = merged;
+                    r.LastUpdated = DateTime.Now;
+                });
 
                 return Json(new { Success = true, OriginalName = request.OriginalName, CustomName = request.CustomName });
             }
@@ -3893,20 +3734,12 @@ namespace HpskSite.Controllers
             var finalists = new HashSet<string>();
             try
             {
-                var children = _contentService.GetPagedChildren(competitionId, 0, 50, out _).ToList();
-                var finalsNodes = children.Where(c => c.ContentType.Alias == "finalsStartList").ToList();
-
-                // Backward compatibility: older competitions keep start lists under a hub node.
-                var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                if (hub != null)
-                {
-                    finalsNodes.AddRange(_contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _)
-                        .Where(c => c.ContentType.Alias == "finalsStartList"));
-                }
+                // Alla finalstartlistor, även de under den äldre hubben (genom IStartListStore).
+                var finalsNodes = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Finals);
 
                 foreach (var finalsNode in finalsNodes)
                 {
-                    var configData = finalsNode.GetValue<string>("configurationData");
+                    var configData = finalsNode.ConfigurationData;
                     if (string.IsNullOrWhiteSpace(configData)) continue;
 
                     var config = Newtonsoft.Json.JsonConvert
@@ -3949,12 +3782,10 @@ namespace HpskSite.Controllers
         /// konfiguration", tom = "arrangören har valt att inte slå samman". Båda ger samma
         /// beräkning, men bara den ena får skrivas tillbaka.
         /// </summary>
-        private List<ClassMergeAction>? ReadStoredMerges(IContent? resultPage, bool isSubCompetition)
+        private List<ClassMergeAction>? ReadStoredMerges(HpskSite.Models.Results.CompetitionResultRecord? resultPage, bool isSubCompetition)
         {
             if (resultPage == null) return null;
-            var prop = isSubCompetition ? "subCompetitionMergeConfig" : "mergeConfig";
-            if (!resultPage.HasProperty(prop)) return null;
-            var json = resultPage.GetValue<string>(prop);
+            var json = resultPage.MergeConfigFor(isSubCompetition);
             if (string.IsNullOrWhiteSpace(json)) return null;
             try
             {
@@ -3964,7 +3795,7 @@ namespace HpskSite.Controllers
             {
                 // En trasig konfiguration får inte blockera en omräkning. Utan sammanslagning
                 // är listan råare men riktig, och operatören kan slå samman på nytt.
-                _logger.LogWarning(ex, "Could not read stored {Prop} for result page {Id}", prop, resultPage.Id);
+                _logger.LogWarning(ex, "Could not read stored merge config (sub={Sub}) for result list {Id}", isSubCompetition, resultPage.Id);
                 return null;
             }
         }
@@ -4806,28 +4637,10 @@ namespace HpskSite.Controllers
         /// </summary>
         private bool UpdateStartListShooterClass(int competitionId, int memberId, string oldClass, string newClass)
         {
-            var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out long total);
-            var possibleAliases = new[] { "precisionStartList", "PrecisionStartList", "precision-start-list" };
-
-            // Find start list - direct child first
-            var startListContent = children.FirstOrDefault(c => possibleAliases.Contains(c.ContentType.Alias));
-
-            if (startListContent == null)
-            {
-                // Look in start lists hub
-                var startListsHub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-                if (startListsHub != null)
-                {
-                    var hubChildren = _contentService.GetPagedChildren(startListsHub.Id, 0, int.MaxValue, out long hubTotal);
-                    startListContent = hubChildren
-                        .Where(c => possibleAliases.Contains(c.ContentType.Alias))
-                        .FirstOrDefault(c =>
-                        {
-                            try { return c.GetValue<bool>("isOfficialStartList"); }
-                            catch { return false; }
-                        });
-                }
-            }
+            // Find start list - direct child first, else the official one under the old hub (genom IStartListStore)
+            var lists = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying);
+            var startListContent = lists.FirstOrDefault(r => !r.LegacyHub)
+                ?? lists.FirstOrDefault(r => r.LegacyHub && r.IsOfficial);
 
             if (startListContent == null)
             {
@@ -4835,7 +4648,7 @@ namespace HpskSite.Controllers
                 return false;
             }
 
-            var configData = startListContent.GetValue<string>("configurationData");
+            var configData = startListContent.ConfigurationData;
             if (string.IsNullOrEmpty(configData))
             {
                 return false;
@@ -4871,12 +4684,8 @@ namespace HpskSite.Controllers
             }
 
             var configJson = JsonConvert.SerializeObject(configuration);
-            startListContent.SetValue("configurationData", configJson);
-
-            var result = _contentService.Save(startListContent);
-            if (result.Success)
+            if (_startLists.Update(startListContent.Id, r => r.ConfigurationData = configJson) != null)
             {
-                _contentService.Publish(startListContent, new[] { "*" }, -1);
                 _logger.LogInformation("Updated start list weapon class for member {MemberId}: {OldClass} -> {NewClass}", memberId, oldClass, newClass);
                 return true;
             }

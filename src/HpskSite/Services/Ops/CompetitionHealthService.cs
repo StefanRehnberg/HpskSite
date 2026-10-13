@@ -90,6 +90,16 @@ namespace HpskSite.Services.Ops
                     RegistrationStoreSettings.WriteFreezeKey, new[] { NodeRegistrationStore.RegistrationAlias }, RegistrationMigrationService.IdSources),
                 ReadStore("Händelser", "dbo.ClubEvent", ClubEventStoreSettings.StoreKey,
                     ClubEventStoreSettings.WriteFreezeKey, new[] { "clubSimpleEvent" }, ClubEventMigrationService.IdSources),
+                ReadStore("Startlistor", "dbo.CompetitionStartList", HpskSite.Services.StartLists.StartListStoreSettings.StoreKey,
+                    HpskSite.Services.StartLists.StartListStoreSettings.WriteFreezeKey,
+                    new[] { "precisionStartList", "finalsStartList" }, // startliststore-ok: bara ett antal noder i hälsokontrollen
+
+                    HpskSite.Services.StartLists.StartListMigrationService.IdSources),
+                ReadStore("Resultatlistor", "dbo.CompetitionResultList", HpskSite.Services.Results.CompetitionResultStoreSettings.StoreKey,
+                    HpskSite.Services.Results.CompetitionResultStoreSettings.WriteFreezeKey,
+                    new[] { "competitionResult" }, // resultstore-ok: bara ett antal noder i hälsokontrollen
+
+                    HpskSite.Services.Results.CompetitionResultMigrationService.IdSources),
             };
 
             var (count, noUrl, compError) = ReadCompetitions();
@@ -124,7 +134,9 @@ namespace HpskSite.Services.Ops
                     r.Problems.Add($"{s.Name}: tabellen gäller men {s.Table} finns inte.");
                 if (!table && s.TableBorn > 0)
                     r.Problems.Add($"{s.Name}: noderna gäller men {s.TableBorn} rader finns bara i tabellen — de syns inte.");
-                if (s.TableExists && s.NextId <= s.HighestReferenced)
+                // Golvet gäller bara när tabellen gäller: i nodläget skapas noder fortfarande (deras id:n går
+                // förbi identiteten), tabellen skrivs inte, och flytten sätter golvet innan bytet.
+                if (table && s.TableExists && s.NextId <= s.HighestReferenced)
                     r.Problems.Add($"{s.Name}: nästa id ({s.NextId}) är inte över det högsta som någon pekar på ({s.HighestReferenced}). En ny rad ärver en gammal referens.");
                 if (s.WriteFrozen)
                     r.Warnings.Add($"{s.Name}: skrivningar är frysta.");

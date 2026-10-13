@@ -49,6 +49,7 @@ namespace HpskSite.Controllers
         private readonly MemberDataPresenceService _presenceService;
         private const string ClubMemberTypeAlias = "hpskClub";
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         public MemberController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -72,10 +73,12 @@ namespace HpskSite.Controllers
             UnifiedResultsService unifiedResultsService,
             FaltskytteStatsService faltskytteStatsService,
             MemberDataPresenceService presenceService,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Results.ICompetitionResultStore results)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
+            _results = results;
             _memberService = memberService;
             _memberGroupService = memberGroupService;
             _memberManager = memberManager;
@@ -3164,12 +3167,7 @@ namespace HpskSite.Controllers
                     foreach (var competitionId in competitionIdsForYear)
                     {
                         // Find the specific result page named "Resultat" (official results)
-                        var resultPage = _contentService.GetPagedChildren(competitionId, 0, 50, out _)
-                            .FirstOrDefault(n => n.ContentType.Alias == "competitionResult" && n.Name == "Resultat");
-
-                        if (resultPage == null) continue;
-
-                        var resultDataJson = resultPage.GetValue<string>("resultData");
+                        var resultDataJson = _results.Get(competitionId)?.ResultData;
                         if (string.IsNullOrEmpty(resultDataJson)) continue;
 
                         try

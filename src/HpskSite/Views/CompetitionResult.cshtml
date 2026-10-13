@@ -10,14 +10,18 @@
 @inject HpskSite.Services.AdminAuthorizationService AuthService
 @inject HpskSite.Services.Kretsgranskning.ResultReviewService ResultReviews
 @inject HpskSite.Services.Kretsgranskning.KretsCalendarService KretsCalendar
+@inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @{
     Layout = null;
-    var competition = Model.Parent; // Competition -> Result (direct child)
+    // Sidan visas antingen för resultatnoden (barn till tävlingen) eller, när listorna ligger i
+    // tabellen, direkt för tävlingen. Listan läses alltid ur ICompetitionResultStore.
+    var competition = Model.ContentType.Alias == "competition" ? Model : Model.Parent;
+    var resultList = competition == null ? null : ResultLists.GetMany(new[] { competition.Id }).Values.FirstOrDefault();
     
     // Get properties using Value<T>
-    var resultData = Model.Value<string>("resultData") ?? "";
-    var lastUpdated = Model.Value<DateTime>("lastUpdated", fallback: Fallback.ToDefaultValue, defaultValue: DateTime.Now);
-    var isOfficial = Model.Value<bool>("isOfficial", fallback: Fallback.ToDefaultValue, defaultValue: false);
+    var resultData = resultList?.ResultData ?? "";
+    var lastUpdated = resultList?.LastUpdated ?? DateTime.Now;
+    var isOfficial = resultList?.IsOfficial ?? false;
     
     // Get competition type
     var competitionTypeId = "";
@@ -131,7 +135,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@(isSubCompetitionView ? subCompetitionName : Model.Name) - @competition.Name</title>
+    <title>@(isSubCompetitionView ? subCompetitionName : "Resultat") - @competition.Name</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
@@ -278,7 +282,7 @@
             <div>
                 <h1>
                         <i class="bi bi-trophy text-warning me-2"></i>
-                                @(isSubCompetitionView ? subCompetitionName : Model.Name)
+                                @(isSubCompetitionView ? subCompetitionName : "Resultat")
                 </h1>
                 <p class="text-muted mb-0">@competition.Name</p>
                 @if (!string.IsNullOrEmpty(reviewedByRegion))
@@ -298,7 +302,7 @@
 
         <!-- Print Header -->
         <div class="print-only mb-4">
-            <h1>@(isSubCompetitionView ? subCompetitionName : Model.Name) @competition.Name</h1>
+            <h1>@(isSubCompetitionView ? subCompetitionName : "Resultat") @competition.Name</h1>
             @if (!string.IsNullOrEmpty(reviewedByRegion))
             {
                 <p class="mb-0">Granskad av @reviewedByRegion@(string.IsNullOrEmpty(reviewedAt) ? "" : " " + reviewedAt)</p>

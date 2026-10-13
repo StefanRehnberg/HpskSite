@@ -67,13 +67,11 @@ namespace HpskSite.Controllers
             catch { /* ett oläsbart datum ska inte fälla kortet */ }
 
             // ── Startlistorna ──────────────────────────────────────────────────────────
-            var children = _contentService.GetPagedChildren(competitionId, 0, int.MaxValue, out _).ToList();
-            var hub = children.FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-            if (hub != null) children.AddRange(_contentService.GetPagedChildren(hub.Id, 0, int.MaxValue, out _));
-
-            var qualNodes = children.Where(c => c.ContentType.Alias is "precisionStartList" or "PrecisionStartList").ToList();
+            // Även listorna under den äldre hubben (genom IStartListStore).
+            var startLists = _startLists.List(competitionId);
+            var qualNodes = startLists.Where(r => r.Kind == HpskSite.Models.StartLists.StartListKind.Qualifying).ToList();
             bool hasStartList = qualNodes.Count > 0;
-            bool startListPublished = qualNodes.Any(n => SafeBool(n, "isOfficialStartList"));
+            bool startListPublished = qualNodes.Any(n => n.IsOfficial);
             var qualCfg = LoadOfficialStartListConfig(competitionId);
 
             var qualStarts = (qualCfg?.Teams ?? new List<StartListTeam>())
@@ -110,9 +108,9 @@ namespace HpskSite.Controllers
             bool Has(NsStart s, int series) => entered.Contains(s.MemberId + "|" + s.ClassKey + "|" + series);
 
             // ── Finalstartlistorna, en per vapengrupp ──────────────────────────────────
-            var finalsLists = children.Where(c => c.ContentType.Alias == "finalsStartList").Select(n =>
+            var finalsLists = startLists.Where(r => r.Kind == HpskSite.Models.StartLists.StartListKind.Finals).Select(n =>
             {
-                var json = SafeString(n, "configurationData");
+                var json = n.ConfigurationData;
                 StartListConfiguration? cfg = null;
                 try { cfg = string.IsNullOrWhiteSpace(json) ? null : JsonConvert.DeserializeObject<StartListConfiguration>(json); }
                 catch { /* en trasig lista räknas som saknad i stället för att fälla kortet */ }
@@ -120,7 +118,7 @@ namespace HpskSite.Controllers
                 {
                     Node = n,
                     Group = FinalsWeaponGroup.FromConfiguration(cfg),
-                    Published = SafeBool(n, "isOfficialFinalsStartList"),
+                    Published = n.IsOfficial,
                     Starts = (cfg?.Teams ?? new List<StartListTeam>())
                         .SelectMany(t => (t.Shooters ?? new List<StartListShooter>())
                             .Where(s => s.MemberId > 0)
@@ -213,8 +211,8 @@ namespace HpskSite.Controllers
             }
 
             // ── Resultatlistan ─────────────────────────────────────────────────────────
-            var resultPage = children.FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-            bool resultsOfficial = resultPage != null && SafeBool(resultPage, "isOfficial");
+            var resultPage = _results.Get(competitionId);
+            bool resultsOfficial = resultPage?.IsOfficial ?? false;
 
             // ── Särskjutning — bara när allt är inmatat (uträkningen är tung) ──────────
             bool? unresolvedTies = null;
@@ -270,7 +268,7 @@ namespace HpskSite.Controllers
                 registrationOpen = closes == null || closes.Value >= DateTime.Now,
                 hasStartList,
                 startListPublished,
-                startListId = qualNodes.OrderByDescending(n => SafeBool(n, "isOfficialStartList")).FirstOrDefault()?.Id ?? 0,
+                startListId = qualNodes.OrderByDescending(n => n.IsOfficial).FirstOrDefault()?.Id ?? 0,
                 teamCount,
                 startCount = qualStarts.Count,
                 firstStartTime,

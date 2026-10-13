@@ -58,6 +58,8 @@ namespace HpskSite.Services.Schedule
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
+
         public MyScheduleService(
             IUmbracoContextFactory ctxFactory,
             IScopeProvider scopeProvider,
@@ -66,9 +68,11 @@ namespace HpskSite.Services.Schedule
             HpskSite.Services.Staffing.RoleCatalogService roles,
             IConfiguration configuration,
             ILogger<MyScheduleService> logger,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.StartLists.IStartListStore startLists)
         {
             _registrations = registrations;
+            _startLists = startLists;
             _ctxFactory = ctxFactory;
             _scopeProvider = scopeProvider;
             _audience = audience;
@@ -263,23 +267,18 @@ namespace HpskSite.Services.Schedule
         {
             var items = new List<ScheduleItem>();
 
-            var nodes = comp.Children()
-                .Where(c => c.ContentType.Alias is "precisionStartList" or "finalsStartList")
+            // Listorna ur IStartListStore (skalplanen C2) — publicerat läge, hubbens listor inräknade.
+            var nodes = _startLists.ListPublished(comp.Id)
+                .Where(r => !r.LegacyHub || r.Kind == HpskSite.Models.StartLists.StartListKind.Qualifying)
                 .ToList();
-
-            // Legacy layout: nested under a competitionStartListsHub.
-            var hub = comp.Children().FirstOrDefault(c => c.ContentType.Alias == "competitionStartListsHub");
-            if (hub != null) nodes.AddRange(hub.Children().Where(c => c.ContentType.Alias == "precisionStartList"));
+            var compUrl = comp.Url();
 
             foreach (var node in nodes)
             {
-                var isFinals = node.ContentType.Alias == "finalsStartList";
-                var official = isFinals
-                    ? node.Value<bool>("isOfficialFinalsStartList")
-                    : node.Value<bool>("isOfficialStartList");
-                if (!official) continue;
+                var isFinals = node.Kind == HpskSite.Models.StartLists.StartListKind.Finals;
+                if (!node.IsOfficial) continue;
 
-                var json = node.Value<string>("configurationData");
+                var json = node.ConfigurationData;
                 if (string.IsNullOrWhiteSpace(json)) continue;
 
                 // Springskytte stafett is tagged; individual lists carry Starters; everything else is
@@ -300,7 +299,7 @@ namespace HpskSite.Services.Schedule
                 var precision = TryDeserialize<StartListConfiguration>(json);
                 if (precision?.Teams is { Count: > 0 })
                 {
-                    items.AddRange(BuildPrecisionItems(precision, memberId, s, node, isFinals));
+                    items.AddRange(BuildPrecisionItems(precision, memberId, s, node, isFinals, node.PublicUrl(compUrl)));
                 }
             }
 
@@ -308,10 +307,9 @@ namespace HpskSite.Services.Schedule
         }
 
         private List<ScheduleItem> BuildPrecisionItems(
-            StartListConfiguration cfg, int memberId, MySchedule s, IPublishedContent node, bool isFinals)
+            StartListConfiguration cfg, int memberId, MySchedule s, HpskSite.Models.StartLists.StartListRecord node, bool isFinals, string url)
         {
             var items = new List<ScheduleItem>();
-            var url = node.Url();
 
             foreach (var team in cfg.Teams!)
             {
@@ -361,7 +359,7 @@ namespace HpskSite.Services.Schedule
         }
 
         private List<ScheduleItem> BuildSpringskytteItems(
-            SpringskytteStartListConfig cfg, int memberId, MySchedule s, IPublishedContent node)
+            SpringskytteStartListConfig cfg, int memberId, MySchedule s, HpskSite.Models.StartLists.StartListRecord node)
         {
             var items = new List<ScheduleItem>();
             // Springskytte already carries a per-list date (multi-day comps run the same clock time on
@@ -396,7 +394,7 @@ namespace HpskSite.Services.Schedule
             return items;
         }
 
-        private List<ScheduleItem> BuildStafettItems(string json, int memberId, MySchedule s, IPublishedContent node)
+        private List<ScheduleItem> BuildStafettItems(string json, int memberId, MySchedule s, HpskSite.Models.StartLists.StartListRecord node)
         {
             var items = new List<ScheduleItem>();
             var cfg = TryDeserialize<SpringskytteStafettStartListConfig>(json);

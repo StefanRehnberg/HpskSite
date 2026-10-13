@@ -20,14 +20,17 @@ namespace HpskSite.Services
         private readonly ILogger<DirektplaceringStartListService> _logger;
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public DirektplaceringStartListService(
             IContentService contentService,
             ClubService clubService,
             ILogger<DirektplaceringStartListService> logger,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.StartLists.IStartListStore startLists)
         {
             _registrations = registrations;
+            _startLists = startLists;
             _contentService = contentService;
             _clubService = clubService;
             _logger = logger;
@@ -56,9 +59,13 @@ namespace HpskSite.Services
             }
         }
 
+        /// <summary>Tävlingens lista: den första direkta grundomgångslistan (inte hubbens).</summary>
+        private HpskSite.Models.StartLists.StartListRecord? CurrentList(int competitionId) =>
+            _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying).FirstOrDefault(r => !r.LegacyHub);
+
         public void Regenerate(int competitionId, IContent competition, DirektplaceringConfig dpConfig)
         {
-            var competitionChildren = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
+            var currentList = CurrentList(competition.Id);
 
             var shootersByTeam = new Dictionary<int, List<ShooterRow>>();
             foreach (var team in dpConfig.Teams)
@@ -69,8 +76,7 @@ namespace HpskSite.Services
             // another lane because someone else registered or withdrew. Newcomers are appended in
             // registration order. This also carries over an order made by the ordinary generator
             // when Egenbokning is switched on afterwards.
-            var existingPlacements = ReadExistingPlacements(
-                competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "precisionStartList"));
+            var existingPlacements = ReadExistingPlacements(currentList);
 
             // Process registrations in the order they were created so that the position a
             // shooter picked at registration is preserved (first-come, first-served within a
@@ -143,8 +149,6 @@ namespace HpskSite.Services
 
             var configJson = System.Text.Json.JsonSerializer.Serialize(config);
 
-            var existingStartList = competitionChildren.FirstOrDefault(c => c.ContentType.Alias == "precisionStartList");
-            IContent startList = existingStartList ?? _contentService.Create("Startlista", competition.Id, "precisionStartList");
 
             var html = new System.Text.StringBuilder();
             html.AppendLine("<div class='start-list-content'>");
@@ -164,23 +168,28 @@ namespace HpskSite.Services
             }
             html.AppendLine("</div>");
 
-            startList.SetValue("competitionId", competitionId);
-            startList.SetValue("teamFormat", dpConfig.AllowMixedClasses ? "Mixade Skjutlag" : "En vapengrupp per Skjutlag");
-            startList.SetValue("generatedDate", DateTime.Now);
-            startList.SetValue("generatedBy", "Egenbokning (auto)");
-            startList.SetValue("notes", "Autogenererad vid anmälan");
-            startList.SetValue("isOfficialStartList", true);
-            startList.SetValue("configurationData", configJson);
-            startList.SetValue("startListContent", html.ToString());
+            var htmlText = html.ToString();
+            void Fill(HpskSite.Models.StartLists.StartListRecord r)
+            {
+                r.TeamFormat = dpConfig.AllowMixedClasses ? "Mixade Skjutlag" : "En vapengrupp per Skjutlag";
+                r.GeneratedDate = DateTime.Now;
+                r.GeneratedBy = "Egenbokning (auto)";
+                r.Notes = "Autogenererad vid anmälan";
+                r.IsOfficial = true;
+                r.ConfigurationData = configJson;
+                r.StartListContent = htmlText;
+            }
 
-            try { _contentService.Save(startList); }
+            try
+            {
+                if (currentList != null) _startLists.Update(currentList.Id, Fill);
+                else _startLists.Create(competition.Id, HpskSite.Models.StartLists.StartListKind.Qualifying,
+                    HpskSite.Models.StartLists.StartListNodes.QualifyingName, Fill);
+            }
             catch (Exception ex) when (IsDocumentUrlTimeout(ex))
             {
                 _logger.LogWarning("Start list saved but URL segment rebuild timed out (non-critical)");
             }
-
-            try { _contentService.Publish(startList, new[] { "*" }, -1); }
-            catch { /* publish is non-critical */ }
 
             _logger.LogInformation("Auto-updated Egenbokning start list for competition {CompId} with {Teams} teams",
                 competitionId, teams.Count);
@@ -258,16 +267,15 @@ namespace HpskSite.Services
         public AssignmentPlan Plan(IContent competition, DirektplaceringConfig dpConfig)
         {
             var plan = new AssignmentPlan();
-            var children = _contentService.GetPagedChildren(competition.Id, 0, 100, out _).ToList();
-            var startList = children.FirstOrDefault(c => c.ContentType.Alias == "precisionStartList");
+            var startList = CurrentList(competition.Id);
             var existing = ReadExistingPlacements(startList);
 
             if (startList != null)
             {
                 plan.HasStartList = existing.Count > 0;
                 plan.StartListIsManual = !string.Equals(
-                    startList.GetValue<string>("generatedBy"), "Egenbokning (auto)", StringComparison.Ordinal);
-                plan.StartListIsPublished = startList.Published;
+                    startList.GeneratedBy, "Egenbokning (auto)", StringComparison.Ordinal);
+                plan.StartListIsPublished = startList.IsPublished;
             }
 
             var registrations = RegistrationDocs(competition.Id);
@@ -423,10 +431,10 @@ namespace HpskSite.Services
         /// ordinary generator's and Egenbokning's — through a case-insensitive JSON walk, since
         /// the two serialisers differ in casing.
         /// </summary>
-        private Dictionary<string, Placement> ReadExistingPlacements(IContent? startList)
+        private Dictionary<string, Placement> ReadExistingPlacements(HpskSite.Models.StartLists.StartListRecord? startList)
         {
             var result = new Dictionary<string, Placement>();
-            var json = startList?.GetValue<string>("configurationData");
+            var json = startList?.ConfigurationData;
             if (string.IsNullOrWhiteSpace(json)) return result;
             try
             {

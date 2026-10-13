@@ -47,6 +47,7 @@ namespace HpskSite.Controllers
         private readonly ILogger<RegistrationAdminController> _logger;
         private readonly BrokenLaneService _brokenLanes;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -73,11 +74,13 @@ namespace HpskSite.Controllers
             HpskSite.Services.StartListCleanup.StartListCleanupService startListCleanupService,
             ILogger<RegistrationAdminController> logger,
             BrokenLaneService brokenLanes,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.StartLists.IStartListStore startLists)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _brokenLanes = brokenLanes;
             _registrations = registrations;
+            _startLists = startLists;
             _memberClubService = memberClubService;
             _clubPropagationService = clubPropagationService;
             _logger = logger;
@@ -446,7 +449,9 @@ namespace HpskSite.Controllers
                     AppCaches.RuntimeCache.ClearByKey($"dp_availability_{competitionId}");
                     if (dpConfigEdit != null && competition != null)
                     {
-                        _dpStartListService.Regenerate(competitionId, competition, dpConfigEdit);
+                        var frozenNote = TryRegenerateDirektplacering(competitionId, competition, dpConfigEdit);
+                        if (frozenNote != null)
+                            clubPropagationNote = string.IsNullOrEmpty(clubPropagationNote) ? frozenNote : clubPropagationNote + " " + frozenNote;
                     }
                 }
 
@@ -913,17 +918,19 @@ namespace HpskSite.Controllers
                 // Direktplacering: invalidate availability cache and regenerate the auto-built
                 // start list so the new shooter shows up on the right team without the operator
                 // having to click "Generera startlista". Mirrors what RegisterForCompetition does.
+                string? frozenNote = null;
                 if (dpConfig != null && classEntries.Any(e => e.TeamNumber.HasValue))
                 {
                     AppCaches.RuntimeCache.ClearByKey($"dp_availability_{request.CompetitionId}");
-                    _dpStartListService.Regenerate(request.CompetitionId, competition, dpConfig);
+                    frozenNote = TryRegenerateDirektplacering(request.CompetitionId, competition, dpConfig);
                 }
 
                 var classCodes = classEntries.Select(e => e.Class).ToList();
                 return Json(new
                 {
                     success = true,
-                    message = $"Late registration created for {member.Name}. The start list can now be regenerated without losing existing results.",
+                    message = frozenNote ?? $"Late registration created for {member.Name}. The start list can now be regenerated without losing existing results.",
+                    startListPending = frozenNote != null,
                     registrationId = registration.Id,
                     memberName = member.Name,
                     shootingClasses = classCodes,
@@ -934,6 +941,25 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 return Json(new { success = false, message = "Kunde inte skapa anmälan: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Bygger om direktplaceringens startlista efter en ändrad anmälan. Under startlistornas frysning
+        /// (underhållsfönstret) vägrar lagringen — men anmälan ÄR redan sparad, så det är inget fel: förut
+        /// svarade efteranmälan "Kunde inte skapa anmälan" fast den fanns (genomgången 2026-10-13, C).
+        /// Null = ombyggd; annars beskedet till funktionären.
+        /// </summary>
+        private string? TryRegenerateDirektplacering(int competitionId, IContent competition, HpskSite.Models.DirektplaceringConfig dpConfig)
+        {
+            try
+            {
+                _dpStartListService.Regenerate(competitionId, competition, dpConfig);
+                return null;
+            }
+            catch (HpskSite.Services.StartLists.StartListWriteFrozenException)
+            {
+                return "Anmälan är sparad. Startlistan kunde inte uppdateras just nu (underhåll pågår) — generera om den om några minuter.";
             }
         }
 
@@ -1016,19 +1042,15 @@ namespace HpskSite.Controllers
 
                 // Pick the most recent valid start list (matches GetOfficialStartList's rule).
                 var startLists = _startListRepository.GetStartListsForCompetition(competitionId)
-                    .Where(sl =>
-                    {
-                        var content = sl.GetValue<string>("startListContent");
-                        return !string.IsNullOrEmpty(content) && !content.Contains("System.Threading.Tasks.Task");
-                    })
-                    .OrderByDescending(sl => sl.GetValue<DateTime>("generatedDate"))
+                    .Where(sl => !string.IsNullOrEmpty(sl.StartListContent) && !sl.StartListContent.Contains("System.Threading.Tasks.Task"))
+                    .OrderByDescending(sl => sl.GeneratedDate ?? DateTime.MinValue)
                     .ToList();
 
                 if (startLists.Count == 0)
                     return Json(new { success = true, hasStartList = false, teams = Array.Empty<object>() });
 
                 var current = startLists.First();
-                var configData = current.GetValue<string>("configurationData") ?? "";
+                var configData = current.ConfigurationData;
                 StartListConfiguration? config = null;
                 try
                 {
@@ -1120,18 +1142,14 @@ namespace HpskSite.Controllers
 
                 // Use the most recent valid start list, same pick rule as GetOfficialStartList.
                 var startLists = _startListRepository.GetStartListsForCompetition(request.CompetitionId)
-                    .Where(sl =>
-                    {
-                        var content = sl.GetValue<string>("startListContent");
-                        return !string.IsNullOrEmpty(content) && !content.Contains("System.Threading.Tasks.Task");
-                    })
-                    .OrderByDescending(sl => sl.GetValue<DateTime>("generatedDate"))
+                    .Where(sl => !string.IsNullOrEmpty(sl.StartListContent) && !sl.StartListContent.Contains("System.Threading.Tasks.Task"))
+                    .OrderByDescending(sl => sl.GeneratedDate ?? DateTime.MinValue)
                     .ToList();
                 if (startLists.Count == 0)
                     return Json(new { success = false, message = "Ingen startlista finns för denna tävling." });
 
                 var startList = startLists.First();
-                var configData = startList.GetValue<string>("configurationData") ?? "";
+                var configData = startList.ConfigurationData;
                 var config = JsonConvert.DeserializeObject<StartListConfiguration>(configData);
                 if (config?.Teams == null)
                     return Json(new { success = false, message = "Startlistan har ingen konfigurationsdata." });
@@ -1183,14 +1201,15 @@ namespace HpskSite.Controllers
                 team.ShooterCount = team.Shooters.Count;
 
                 var competitionName = competition.Name ?? "";
-                startList.SetValue("configurationData", JsonConvert.SerializeObject(config));
-                startList.SetValue("startListContent", await _startListRenderer.GenerateStartListHtml(config, competitionName));
-
-                var saveResult = _contentService.Save(startList);
-                if (!saveResult.Success)
+                var newConfig = JsonConvert.SerializeObject(config);
+                var newHtml = await _startListRenderer.GenerateStartListHtml(config, competitionName);
+                var saved = _startLists.Update(startList.Id, r =>
+                {
+                    r.ConfigurationData = newConfig;
+                    r.StartListContent = newHtml;
+                });
+                if (saved == null)
                     return Json(new { success = false, message = "Kunde inte spara startlistan." });
-
-                _contentService.Publish(startList, new[] { "*" }, -1);
 
                 return Json(new
                 {

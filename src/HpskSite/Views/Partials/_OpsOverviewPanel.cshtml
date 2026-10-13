@@ -63,7 +63,7 @@
             // Telefon: ett block per lagring (sju kolumner går inte att läsa på 390 px).
             h += '<div class="d-md-none mt-2">';
             (d.stores || []).forEach(function (s) {
-                var floorOk = !s.tableExists || s.nextId > s.highestReferenced;
+                var floorOk = s.store !== 'table' || !s.tableExists || s.nextId > s.highestReferenced;
                 h += '<div class="border-bottom py-2"><strong>' + esc(s.name) + '</strong> · ' + (s.store === 'table' ? 'tabellen gäller' : 'noderna gäller')
                     + (s.writeFrozen ? ' · <span class="text-warning-emphasis">fryst</span>' : '') + (s.error ? ' · <span class="text-danger">kunde inte läsas</span>' : '')
                     + '<div class="text-body-secondary">' + (s.tableExists ? s.tableRows + ' rader, ' + s.tableBorn + ' bara i tabellen, ' : 'ingen tabell, ') + s.nodes + ' noder</div>'
@@ -74,7 +74,7 @@
                 + '<th>Sort</th><th>Lagring</th><th class="text-end">Rader</th><th class="text-end">Noder</th>'
                 + '<th class="text-end">Bara i tabellen</th><th class="text-end">Nästa id</th><th class="text-end">Högsta referens</th></tr></thead><tbody>';
             (d.stores || []).forEach(function (s) {
-                var floorOk = !s.tableExists || s.nextId > s.highestReferenced;
+                var floorOk = s.store !== 'table' || !s.tableExists || s.nextId > s.highestReferenced;
                 h += '<tr><td>' + esc(s.name) + '</td><td>' + (s.store === 'table' ? 'Tabellen' : 'Noderna') + (s.writeFrozen ? ' <span class="badge text-bg-warning">fryst</span>' : '')
                     + (s.error ? ' <span class="text-danger">kunde inte läsas</span>' : '') + '</td>'
                     + '<td class="text-end">' + (s.tableExists ? s.tableRows : '<span class="text-body-secondary">ingen tabell</span>') + '</td>'

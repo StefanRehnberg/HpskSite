@@ -53,6 +53,7 @@ namespace HpskSite.Controllers
         private static readonly TimeSpan RegistrationCountsCacheDuration = TimeSpan.FromSeconds(60);
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
         public CompetitionAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -67,10 +68,12 @@ namespace HpskSite.Controllers
             IMediaService mediaService,
             MediaFileManager mediaFileManager,
             SeriesCalculationService seriesCalculationService,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Results.ICompetitionResultStore results)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
+            _results = results;
             _contentService = contentService;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -2544,16 +2547,7 @@ namespace HpskSite.Controllers
             if (competition == null) return;
             try
             {
-                var existing = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out _)
-                    .FirstOrDefault(c => c.ContentType.Alias == "competitionResult" && c.Name == "Resultat");
-                if (existing != null) return;
-
-                var resultPage = _contentService.Create("Resultat", competition.Id, "competitionResult");
-                resultPage.SetValue("resultType", "Final Results");
-                resultPage.SetValue("isOfficial", false);
-                resultPage.SetValue("lastUpdated", DateTime.Now);
-                _contentService.Save(resultPage);
-                _contentService.Publish(resultPage, new[] { "*" }, -1);
+                _results.Ensure(competition.Id);
             }
             catch (Exception ex)
             {
