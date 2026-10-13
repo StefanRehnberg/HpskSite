@@ -41,6 +41,9 @@
     // Delningsbeskrivning (C3-planen F4): datum och plats, sedan början av beskrivningen.
     {
         var compMeta = HpskSite.Models.PageMeta.For(Context);
+        // Tävlingen nås också på sin gamla trädadress (Umbraco svarar 200 där); canonical är alltid den
+        // aktuella adressen, så en äldre länk pekar sökmotorer och delningar rätt (C3 F4/F5).
+        compMeta.Canonical = Model.Url();
         var metaParts = new[]
         {
             competitionDate.Year > 1900 ? competitionDate.ToString("d MMMM yyyy", new System.Globalization.CultureInfo("sv-SE")) : "",
