@@ -94,6 +94,7 @@
                         </tr>
                     </thead>
                     <tbody id="regionCompetitionsTableBody">
+                        @{ var officialResultLists = ResultLists.OfficialByCompetition(allCompetitions.Select(c => c.Id).ToList()); }
                         @foreach (var comp in allCompetitions.OrderByDescending(c => c.Value<DateTime>("competitionDate")))
                         {
                             var compDate = comp.Value<DateTime>("competitionDate");
@@ -156,8 +157,8 @@
 
                             if (isPast && !isExternal)
                             {
-                                var resultPage = ResultLists.GetMany(new[] { comp.Id }).Values.FirstOrDefault();
-                                if (resultPage != null && resultPage.IsOfficial)
+                                var resultOfficial = officialResultLists.TryGetValue(comp.Id, out var isOff) && isOff;
+                                if (resultOfficial)
                                 {
                                     linkUrl = compUrl.TrimEnd('/') + "/resultat/";
                                     linkText = "Resultat";

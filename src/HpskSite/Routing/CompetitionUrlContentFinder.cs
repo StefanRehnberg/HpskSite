@@ -143,40 +143,24 @@ namespace HpskSite.Routing
                     segments = segments[..^1];
                 }
 
-                // After year, what remains determines which shape this is.
-                var rest = segments.AsSpan(2).ToArray();
-
                 if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                     return Task.FromResult(false);
 
-                IPublishedContent? competition = null;
+                // After year, what remains determines which shape this is.
+                var competition = FindCompetition(year, segments.AsSpan(2).ToArray());
 
-                // Length 2: xSM/comp OR region/comp (region-hosted, no series, no club).
-                if (rest.Length == 2)
+                // En lista vars segment inte är ett av de kända ("startlista", "finalstartlista-x") —
+                // de gamla hubbens listor ("startlista-grovskottet-2025-09-26-1133") och en lista som fått
+                // " (1)". Leder hela adressen inte till en tävling prövas den utan sista segmentet, och det
+                // segmentet slås upp som en lista i lagringen (genomgången 2026-10-13, C). Ingen lista = inte
+                // vår adress, som förut.
+                // (Tävlingar på trädadressen — utan klubb — tas av CompetitionResultTreeUrlFinder, som körs sist.)
+                if (competition == null && childSegment == null && segments.Length >= 5)
                 {
-                    if (XSmSlugs.Contains(rest[0]))
-                        competition = FindBySmShape(year, rest[0], series: null, compSlug: rest[1]);
-                    else
-                        competition = FindByRegionShape(year, regionSlug: rest[0], series: null, compSlug: rest[1]);
-                }
-                // Length 3: xSM/series/comp OR region/club/comp OR region/series/comp.
-                else if (rest.Length == 3)
-                {
-                    if (XSmSlugs.Contains(rest[0]))
-                    {
-                        competition = FindBySmShape(year, rest[0], series: rest[1], compSlug: rest[2]);
-                    }
-                    else
-                    {
-                        // Try club-hosted first; if no match, fall back to region-hosted-in-series.
-                        competition = FindByRegionClubShape(year, rest[0], rest[1], series: null, compSlug: rest[2])
-                                      ?? FindByRegionShape(year, rest[0], series: rest[1], compSlug: rest[2]);
-                    }
-                }
-                // Length 4: region/club/series/comp.
-                else if (rest.Length == 4)
-                {
-                    competition = FindByRegionClubShape(year, rest[0], rest[1], series: rest[2], compSlug: rest[3]);
+                    var listCompetition = FindCompetition(year, segments.AsSpan(2, segments.Length - 3).ToArray());
+                    // Bara en PUBLICERAD lista ur lagringen visas — aldrig en godtycklig barnnod.
+                    if (listCompetition != null)
+                        return Task.FromResult(TryServeStartListPage(request, listCompetition, segments[^1], _http, _shortStrings));
                 }
 
                 if (competition == null) return Task.FromResult(false);
@@ -203,6 +187,27 @@ namespace HpskSite.Routing
                 _logger.LogWarning(ex, "CompetitionUrlContentFinder failed for {Path}", request.Uri.AbsolutePath);
                 return Task.FromResult(false);
             }
+        }
+
+        /// <summary>Tävlingen bakom segmenten efter årtalet, eller null. Formerna, se klassens kommentar.</summary>
+        private IPublishedContent? FindCompetition(int year, string[] rest)
+        {
+            // Length 2: xSM/comp OR region/comp (region-hosted, no series, no club).
+            if (rest.Length == 2)
+                return XSmSlugs.Contains(rest[0])
+                    ? FindBySmShape(year, rest[0], series: null, compSlug: rest[1])
+                    : FindByRegionShape(year, regionSlug: rest[0], series: null, compSlug: rest[1]);
+            // Length 3: xSM/series/comp OR region/club/comp OR region/series/comp.
+            if (rest.Length == 3)
+                return XSmSlugs.Contains(rest[0])
+                    ? FindBySmShape(year, rest[0], series: rest[1], compSlug: rest[2])
+                    // Try club-hosted first; if no match, fall back to region-hosted-in-series.
+                    : FindByRegionClubShape(year, rest[0], rest[1], series: null, compSlug: rest[2])
+                      ?? FindByRegionShape(year, rest[0], series: rest[1], compSlug: rest[2]);
+            // Length 4: region/club/series/comp.
+            if (rest.Length == 4)
+                return FindByRegionClubShape(year, rest[0], rest[1], series: rest[2], compSlug: rest[3]);
+            return null;
         }
 
         private IPublishedContent? FindBySmShape(int year, string xSm, string? series, string compSlug)

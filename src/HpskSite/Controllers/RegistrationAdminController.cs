@@ -444,7 +444,9 @@ namespace HpskSite.Controllers
                     AppCaches.RuntimeCache.ClearByKey($"dp_availability_{competitionId}");
                     if (dpConfigEdit != null && competition != null)
                     {
-                        _dpStartListService.Regenerate(competitionId, competition, dpConfigEdit);
+                        var frozenNote = TryRegenerateDirektplacering(competitionId, competition, dpConfigEdit);
+                        if (frozenNote != null)
+                            clubPropagationNote = string.IsNullOrEmpty(clubPropagationNote) ? frozenNote : clubPropagationNote + " " + frozenNote;
                     }
                 }
 
@@ -912,17 +914,19 @@ namespace HpskSite.Controllers
                 // Direktplacering: invalidate availability cache and regenerate the auto-built
                 // start list so the new shooter shows up on the right team without the operator
                 // having to click "Generera startlista". Mirrors what RegisterForCompetition does.
+                string? frozenNote = null;
                 if (dpConfig != null && classEntries.Any(e => e.TeamNumber.HasValue))
                 {
                     AppCaches.RuntimeCache.ClearByKey($"dp_availability_{request.CompetitionId}");
-                    _dpStartListService.Regenerate(request.CompetitionId, competition, dpConfig);
+                    frozenNote = TryRegenerateDirektplacering(request.CompetitionId, competition, dpConfig);
                 }
 
                 var classCodes = classEntries.Select(e => e.Class).ToList();
                 return Json(new
                 {
                     success = true,
-                    message = $"Late registration created for {member.Name}. The start list can now be regenerated without losing existing results.",
+                    message = frozenNote ?? $"Late registration created for {member.Name}. The start list can now be regenerated without losing existing results.",
+                    startListPending = frozenNote != null,
                     registrationId = registration.Id,
                     memberName = member.Name,
                     shootingClasses = classCodes,
@@ -933,6 +937,25 @@ namespace HpskSite.Controllers
             catch (Exception ex)
             {
                 return Json(new { success = false, message = "Kunde inte skapa anmälan: " + ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Bygger om direktplaceringens startlista efter en ändrad anmälan. Under startlistornas frysning
+        /// (underhållsfönstret) vägrar lagringen — men anmälan ÄR redan sparad, så det är inget fel: förut
+        /// svarade efteranmälan "Kunde inte skapa anmälan" fast den fanns (genomgången 2026-10-13, C).
+        /// Null = ombyggd; annars beskedet till funktionären.
+        /// </summary>
+        private string? TryRegenerateDirektplacering(int competitionId, IContent competition, HpskSite.Models.DirektplaceringConfig dpConfig)
+        {
+            try
+            {
+                _dpStartListService.Regenerate(competitionId, competition, dpConfig);
+                return null;
+            }
+            catch (HpskSite.Services.StartLists.StartListWriteFrozenException)
+            {
+                return "Anmälan är sparad. Startlistan kunde inte uppdateras just nu (underhåll pågår) — generera om den om några minuter.";
             }
         }
 

@@ -65,6 +65,8 @@ namespace HpskSite.Services.Results
         public CompetitionResultRecord? Get(int competitionId) => Current.Get(competitionId);
         public IReadOnlyDictionary<int, CompetitionResultRecord> GetMany(IReadOnlyCollection<int> competitionIds)
             => Current.GetMany(competitionIds);
+        public IReadOnlyDictionary<int, bool> OfficialByCompetition(IReadOnlyCollection<int> competitionIds)
+            => Current.OfficialByCompetition(competitionIds);
         public bool CanStore(CompetitionResultField field) => Current.CanStore(field);
 
         public CompetitionResultRecord? Update(int competitionId, Action<CompetitionResultRecord> change, bool createIfMissing = false)
