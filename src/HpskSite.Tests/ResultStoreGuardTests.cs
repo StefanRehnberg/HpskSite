@@ -56,6 +56,16 @@ namespace HpskSite.Tests
                 "Resultatlistans egenskaper läses eller skrivs på en nod — gå genom ICompetitionResultStore:\n" + string.Join("\n", hits));
         }
 
+        /// <summary>Positivt kontrollprov: mönstren FÅNGAR det de ska — annars kan spärren inte falla.</summary>
+        [Fact]
+        public void Monstren_fangar_det_de_ska()
+        {
+            Assert.Matches(AliasLiteral, "var node = comp.Children().FirstOrDefault(c => c.ContentType.Alias == \"competitionResult\");");
+            Assert.Matches(PropertyAccess, "var json = node.GetValue<string>(\"resultData\");");
+            Assert.Matches(PropertyAccess, "node.SetValue(\"honoraryAwardConfig\", cfg);");
+            Assert.DoesNotMatch(PropertyAccess, "var json = record.ResultData;");
+        }
+
         private static List<string> Scan(Func<string, bool> match)
         {
             var root = SiteRoot();

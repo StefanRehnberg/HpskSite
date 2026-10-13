@@ -32,12 +32,10 @@ namespace HpskSite.Tests
         };
 
         [Fact]
-        public void Ett_negativt_id_ar_en_vanlig_rad()
+        public void Radens_id_foljer_med_till_posten()
         {
-            // Nya rader får NEGATIVA id:n (NegativeIdentity), så ett startliste-id aldrig kan vara samma tal
-            // som en Umbraco-nod. Mappningen får inte behandla tecknet som något särskilt.
-            var rec = SqlStartListStore.ToRecord(new SqlStartListStore.Row { Id = -3, CompetitionId = 7, Kind = 0, Name = "Startlista" });
-            Assert.Equal(-3, rec.Id);
+            var rec = SqlStartListStore.ToRecord(new SqlStartListStore.Row { Id = 7471, CompetitionId = 7, Kind = 0, Name = "Startlista" });
+            Assert.Equal(7471, rec.Id);
         }
 
         [Fact]

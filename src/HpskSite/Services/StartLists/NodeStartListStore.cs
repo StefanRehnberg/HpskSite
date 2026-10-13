@@ -95,7 +95,6 @@ namespace HpskSite.Services.StartLists
 
         public StartListRecord? Get(int startListId)
         {
-            // id-sign-ok: med flit <= 0, ett negativt id är en tabellrad (NegativeIdentity), aldrig en nod.
             if (startListId <= 0) return null;
             var node = _contentService.GetById(startListId);
             if (node == null || StartListNodes.KindOf(node.ContentType.Alias) == null) return null;
@@ -131,7 +130,7 @@ namespace HpskSite.Services.StartLists
 
         public StartListRecord? Update(int startListId, Action<StartListRecord> change, StartListPublish publish = StartListPublish.Always)
         {
-            var node = startListId > 0 ? _contentService.GetById(startListId) : null; // id-sign-ok: ett negativt id är aldrig en nod
+            var node = startListId > 0 ? _contentService.GetById(startListId) : null;
             if (node == null || StartListNodes.KindOf(node.ContentType.Alias) == null) return null;
             var (competitionId, legacyHub) = CompetitionOf(node);
             var before = FromContent(node, competitionId, legacyHub);
@@ -152,7 +151,7 @@ namespace HpskSite.Services.StartLists
 
         public bool Delete(int startListId)
         {
-            var node = startListId > 0 ? _contentService.GetById(startListId) : null; // id-sign-ok: ett negativt id är aldrig en nod
+            var node = startListId > 0 ? _contentService.GetById(startListId) : null;
             if (node == null || StartListNodes.KindOf(node.ContentType.Alias) == null) return false;
             if (node.Published) _contentService.Unpublish(node);
             _contentService.Delete(node);
