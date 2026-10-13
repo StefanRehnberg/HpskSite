@@ -131,18 +131,34 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>@(ViewBag.Title ?? Model.Value<string>("pageTitle") ?? Model.Name) - Pistol.nu</title>
-    <meta name="description" content="@(ViewBag.MetaDescription ?? Model.Value<string>("metaDescription") ?? "")" />
+    @{
+        // Sidmetadata (C3-planen F4): PageMeta först, sedan ViewBag, sedan noden — men nodens egna
+        // fält bara när sidan ÄR nodens sida (en routad sida bär en annan nod, se PageMeta).
+        var pm = HpskSite.Models.PageMeta.For(Context);
+        var pmNodeUrl = Model.Url();
+        var pmOwnPage = HpskSite.Models.PageMeta.IsNodesOwnPage(Context.Request.Path.Value ?? "/", pmNodeUrl);
+        string pmTitle = pm.Title ?? (string?)ViewBag.Title ?? Model.Value<string>("pageTitle") ?? Model.Name ?? "";
+        string pmDescription = pm.Description ?? (string?)ViewBag.MetaDescription
+            ?? (pmOwnPage ? Model.Value<string>("metaDescription") : null) ?? "";
+        string pmOgTitle = pm.Title ?? (string?)ViewBag.OgTitle ?? pmTitle;
+        string pmOgDescription = pm.Description ?? (string?)ViewBag.OgDescription ?? pmDescription;
+        var pmImage = HpskSite.Models.PageMeta.Absolute(Context.Request, pm.Image ?? (string?)ViewBag.OgImage);
+        var pmCanonical = HpskSite.Models.PageMeta.Absolute(Context.Request, pm.Canonical)
+            ?? HpskSite.Models.PageMeta.DefaultCanonical(Context.Request, pmNodeUrl);
+    }
+    <title>@pmTitle - Pistol.nu</title>
+    <meta name="description" content="@pmDescription" />
+    <link rel="canonical" href="@pmCanonical" />
 
     <!-- OpenGraph Meta Tags for Social Sharing -->
-    <meta property="og:title" content="@(ViewBag.OgTitle ?? ViewBag.Title ?? Model.Name) - Pistol.nu" />
-    <meta property="og:description" content="@(ViewBag.OgDescription ?? ViewBag.MetaDescription ?? Model.Value<string>("metaDescription") ?? "")" />
-    @if (ViewBag.OgImage != null)
+    <meta property="og:title" content="@pmOgTitle - Pistol.nu" />
+    <meta property="og:description" content="@pmOgDescription" />
+    @if (pmImage != null)
     {
-        <meta property="og:image" content="@ViewBag.OgImage" />
+        <meta property="og:image" content="@pmImage" />
     }
-    <meta property="og:type" content="@(ViewBag.OgType ?? "website")" />
-    <meta property="og:url" content="@Context.Request.Scheme://@Context.Request.Host@Model.Url()" />
+    <meta property="og:type" content="@(pm.Type ?? (string?)ViewBag.OgType ?? "website")" />
+    <meta property="og:url" content="@pmCanonical" />
     <meta name="twitter:card" content="summary_large_image" />
 
     <!-- Favicon -->
