@@ -36,13 +36,16 @@ namespace HpskSite.Services.Events
         private readonly SqlClubEventStore _sql;
         private readonly SiteSettingService _settings;
         private readonly WhatsHappeningService _feed;
+        private readonly ILogger<SwitchingClubEventStore> _logger;
 
-        public SwitchingClubEventStore(NodeClubEventStore node, SqlClubEventStore sql, SiteSettingService settings, WhatsHappeningService feed)
+        public SwitchingClubEventStore(NodeClubEventStore node, SqlClubEventStore sql, SiteSettingService settings, WhatsHappeningService feed,
+            ILogger<SwitchingClubEventStore> logger)
         {
             _node = node;
             _sql = sql;
             _settings = settings;
             _feed = feed;
+            _logger = logger;
         }
 
         /// <summary>
@@ -59,7 +62,14 @@ namespace HpskSite.Services.Events
         private bool Frozen => _settings.Get(ClubEventStoreSettings.WriteFreezeKey, "0") == "1";
 
         public ClubEventFieldSupport Support => Current.Support;
-        public ClubEventRecord? Get(int id) => Current.Get(id);
+        public ClubEventRecord? Get(int id)
+        {
+            var r = Current.Get(id);
+            // C3-planen F6: en uppslagning som inte gav något räknas (och loggas strypt i tabelläget).
+            if (r == null) HpskSite.Services.Ops.OpsSignals.StoreMiss(_logger, "händelse", id,
+                ClubEventStoreSettings.UsesTable(_settings) ? "table" : "node");
+            return r;
+        }
         public IReadOnlyList<ClubEventRecord> GetMany(IReadOnlyCollection<int> ids) => Current.GetMany(ids);
         public IReadOnlyList<ClubEventRecord> ListForOwner(int ownerId, bool publishedOnly = true) => Current.ListForOwner(ownerId, publishedOnly);
         public IReadOnlyList<ClubEventRecord> ListPublishedBetween(DateTime from, DateTime to) => Current.ListPublishedBetween(from, to);

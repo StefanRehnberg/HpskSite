@@ -1560,6 +1560,22 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// C3-planen F6: larmet på Critical. En lista med Critical-rader till <c>Email:AdminEmail</c>.
+        /// Returnerar om mejlet faktiskt gick iväg — raderna markeras som mejlade bara då.
+        /// </summary>
+        public async Task<bool> SendOpsAlertAsync(IReadOnlyList<string> entries)
+        {
+            if (string.IsNullOrEmpty(_adminEmail) || entries.Count == 0) return false;
+            var sb = new System.Text.StringBuilder();
+            sb.Append("<html><head><style>body { font-family: Arial, sans-serif; line-height: 1.5; color: #333; } pre { white-space: pre-wrap; background:#f3f4f6; padding:8px 10px; border-radius:6px; }</style></head><body>");
+            sb.Append("<h2>Larm från pistol.nu</h2>");
+            sb.Append($"<p>{entries.Count} {(entries.Count == 1 ? "rad" : "rader")} på nivån Critical har loggats. Varje rad är ett fel som behöver åtgärdas. Alla larm finns under Admin → Underhåll → Driftskoll.</p>");
+            foreach (var e in entries) sb.Append("<pre>").Append(WebUtility.HtmlEncode(e)).Append("</pre>");
+            sb.Append("</body></html>");
+            return await SendEmailAsync(_adminEmail, $"[Larm] pistol.nu: {entries.Count} Critical", sb.ToString(), MailReplyTo.NoReply);
+        }
+
+        /// <summary>
         /// Send the admin an oversight copy of a member mailing (one copy per campaign, not per
         /// recipient). Goes to the configured Email:AdminEmail (admin@pistol.nu). No-op if unset.
         /// </summary>

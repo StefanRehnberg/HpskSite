@@ -125,15 +125,19 @@ namespace HpskSite.Middleware
                 if (path.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) return false;
             }
 
-            var ua = context.Request.Headers.UserAgent.ToString();
-            if (string.IsNullOrEmpty(ua)) return false;
+            return !IsBotUserAgent(context.Request.Headers.UserAgent.ToString());
+        }
+
+        /// <summary>Tom user agent eller en känd bot. Delas med felräknaren (C3-planen F6).</summary>
+        internal static bool IsBotUserAgent(string? ua)
+        {
+            if (string.IsNullOrEmpty(ua)) return true;
             var uaLower = ua.ToLowerInvariant();
             foreach (var marker in BotMarkers)
             {
-                if (uaLower.Contains(marker)) return false;
+                if (uaLower.Contains(marker)) return true;
             }
-
-            return true;
+            return false;
         }
 
         private static string EnsureSessionCookie(HttpContext context)

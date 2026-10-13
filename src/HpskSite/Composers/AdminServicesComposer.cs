@@ -200,6 +200,23 @@ namespace HpskSite.Composers
             builder.Services.AddSingleton<HpskSite.Services.CompetitionMenuService>();
             builder.Services.AddSingleton<HpskSite.Services.LegacyInvoiceHubs>();
             builder.Services.AddScoped<HpskSite.Services.CompetitionHostBackfillService>();
+
+            // C3-planen F6: driftskollen. Räknaren och larmkön är singletons (middlewaren och loggprovidern
+            // skriver till dem); tjänsterna registreras som singletons OCH som hostade, så att driftskollens
+            // "skriv nu"/"provlarm" anropar samma instans som bakgrunden.
+            builder.Services.AddSingleton<HpskSite.Services.Ops.RequestErrorCounter>();
+            builder.Services.AddSingleton<HpskSite.Services.Ops.RequestErrorFlushService>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<HpskSite.Services.Ops.RequestErrorFlushService>());
+            builder.Services.AddSingleton<HpskSite.Services.Ops.CriticalAlertQueue>();
+            // En Serilog-sink: Umbraco tar med ILogEventSink ur DI (ReadFrom.Services), men inga ILoggerProvider.
+            builder.Services.AddSingleton<Serilog.Core.ILogEventSink, HpskSite.Services.Ops.CriticalAlertSink>();
+            builder.Services.AddSingleton<HpskSite.Services.Ops.CriticalAlertService>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<HpskSite.Services.Ops.CriticalAlertService>());
+            builder.Services.AddHostedService<HpskSite.Services.Ops.OpsSchemaGuardHostedService>();
+            builder.Services.AddScoped<HpskSite.Services.Ops.CompetitionHealthService>();
+            builder.Services.Configure<Umbraco.Cms.Web.Common.ApplicationBuilder.UmbracoPipelineOptions>(options =>
+                options.AddFilter(new Umbraco.Cms.Web.Common.ApplicationBuilder.UmbracoPipelineFilter(
+                    "RequestErrors", postPipeline: app => app.UseMiddleware<HpskSite.Middleware.RequestErrorMiddleware>())));
             builder.Services.AddScoped<HpskSite.Services.Registrations.RegistrationMigrationService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
                 HpskSite.Services.Registrations.RegistrationNodeGuard>();

@@ -220,6 +220,40 @@ namespace HpskSite.Controllers
                 PlainText);
         }
 
+        /// <summary>
+        /// <c>GET /health/competitions</c> (C3-planen F6) — läget för det som flyttas ur Umbraco-trädet:
+        /// lagring och frysning per sort, rader mot noder, tabellfödda rader, golvet för nästa id, tävlingar
+        /// utan adress och signalerna sedan start. 503 när något är fel (FAIL), annars 200 med OK eller WARN
+        /// som första ord. <c>?format=json</c> ger hela rapporten.
+        ///
+        /// <para>Anonym av samma skäl som <see cref="Db"/>. Lämnar ut antal och tävlingarnas id och namn —
+        /// inga personuppgifter. Cachad i två minuter; <c>?fresh=1</c> räknar om (bara sajtens egen
+        /// driftskoll behöver det).</para>
+        /// </summary>
+        [HttpGet("competitions")]
+        public IActionResult Competitions([FromServices] HpskSite.Services.Ops.CompetitionHealthService health,
+            string? format = null, string? fresh = null)
+        {
+            Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+            var sw = Stopwatch.StartNew();
+            var r = health.Get(fresh == "1");
+            sw.Stop();
+            if (r.Status == "FAIL") Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+
+            if (string.Equals(format, "json", StringComparison.OrdinalIgnoreCase))
+                return Json(r);
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"{r.Status} competitions {sw.ElapsedMilliseconds}ms");
+            foreach (var s in r.Stores)
+                sb.Append($" | {s.Name}: {s.Store}{(s.WriteFrozen ? " fryst" : "")} rader={s.TableRows} noder={s.Nodes} tabellfödda={s.TableBorn} nästa-id={s.NextId} högsta-referens={s.HighestReferenced}");
+            sb.Append($" | tävlingar={r.Competitions} utan-adress={r.CompetitionsWithoutUrl.Count}");
+            sb.Append($" | saknas-i-lagringen={r.StoreMisses} nekad-pga-fel={r.AuthErrors} sedan {r.SignalsSince:yyyy-MM-dd HH:mm}\n");
+            foreach (var p in r.Problems) sb.Append("FAIL ").Append(p).Append('\n');
+            foreach (var w in r.Warnings) sb.Append("WARN ").Append(w).Append('\n');
+            return Content(sb.ToString(), "text/plain; charset=utf-8");
+        }
+
         private IActionResult Fail(string reason, Stopwatch sw)
         {
             Response.StatusCode = StatusCodes.Status503ServiceUnavailable;

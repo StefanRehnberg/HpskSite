@@ -1,0 +1,200 @@
+@*
+    C3-planen F6: driftskollen. Bara sajtadministratör (fliken Underhåll).
+    Hälsoläget (/health/competitions), felsvar per dag (dbo.RequestErrorLog) och larmen (dbo.OpsAlert).
+    Knapparna bär bara data-attribut; ingen användartext i ett attribut.
+*@
+<div id="opsPanel" class="mb-4">
+    @Html.AntiForgeryToken()
+    <h5 class="mb-1"><i class="bi bi-heart-pulse me-2"></i>Driftskoll</h5>
+    <p class="text-body-secondary mb-3" style="max-width:75ch">
+        Läget för det som flyttas ur Umbraco-trädet, felsvar per dag och larmen. Övervakaren hos Simply kan
+        fråga <code>/health/competitions</code>; svaret är 503 när något är fel.
+    </p>
+
+    <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+        <h6 class="mb-0">Hälsoläget</h6>
+        <span id="opsHealthState" class="badge text-bg-secondary">Läser…</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-ops="health">Läs om</button>
+    </div>
+    <div id="opsHealth" class="small mb-4" style="min-width:0"></div>
+
+    <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+        <h6 class="mb-0">Felsvar per dag</h6>
+        <span class="text-body-secondary small">de senaste 28 dagarna — klicka på en dag för områdena</span>
+    </div>
+    <div id="opsErrors" class="small mb-2" style="min-width:0"></div>
+    <div id="opsErrorDay" class="small mb-4" style="min-width:0"></div>
+
+    <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+        <h6 class="mb-0">Larm (Critical)</h6>
+        <button type="button" class="btn btn-outline-primary btn-sm" data-ops="test">Skicka ett provlarm</button>
+    </div>
+    <div id="opsTestMsg" class="small mb-2"></div>
+    <div id="opsAlerts" class="small" style="min-width:0"></div>
+</div>
+
+<script>
+(function () {
+    if (window.__opsInit) return; window.__opsInit = true;
+    var BASE = '/umbraco/surface/Ops';
+    var root = document.getElementById('opsPanel');
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]; }); }
+    function token() { return root.querySelector('input[name="__RequestVerificationToken"]').value; }
+    function failText(r) { return (window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status).msg) || ('HTTP ' + r.status); }
+    async function getJson(url) {
+        var r = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        // /health/competitions svarar 503 MED rapporten när något är fel — läs den ändå.
+        if (!r.ok && r.status !== 503) throw new Error(failText(r));
+        return r.json();
+    }
+
+    async function loadHealth() {
+        var out = document.getElementById('opsHealth');
+        var badge = document.getElementById('opsHealthState');
+        badge.className = 'badge text-bg-secondary'; badge.textContent = 'Läser…';
+        try {
+            var d = await getJson('/health/competitions?format=json&fresh=1');
+            var cls = d.status === 'OK' ? 'text-bg-success' : d.status === 'WARN' ? 'text-bg-warning' : 'text-bg-danger';
+            badge.className = 'badge ' + cls;
+            badge.textContent = d.status === 'OK' ? 'Allt ser rätt ut' : d.status === 'WARN' ? 'Något att titta på' : 'Fel';
+            var h = '';
+            (d.problems || []).forEach(function (p) { h += '<div class="text-danger"><i class="bi bi-x-octagon me-1"></i>' + esc(p) + '</div>'; });
+            (d.warnings || []).forEach(function (p) { h += '<div class="text-warning-emphasis"><i class="bi bi-exclamation-triangle me-1"></i>' + esc(p) + '</div>'; });
+            // Telefon: ett block per lagring (sju kolumner går inte att läsa på 390 px).
+            h += '<div class="d-md-none mt-2">';
+            (d.stores || []).forEach(function (s) {
+                var floorOk = !s.tableExists || s.nextId > s.highestReferenced;
+                h += '<div class="border-bottom py-2"><strong>' + esc(s.name) + '</strong> · ' + (s.store === 'table' ? 'tabellen gäller' : 'noderna gäller')
+                    + (s.writeFrozen ? ' · <span class="text-warning-emphasis">fryst</span>' : '') + (s.error ? ' · <span class="text-danger">kunde inte läsas</span>' : '')
+                    + '<div class="text-body-secondary">' + (s.tableExists ? s.tableRows + ' rader, ' + s.tableBorn + ' bara i tabellen, ' : 'ingen tabell, ') + s.nodes + ' noder</div>'
+                    + (s.tableExists ? '<div class="' + (floorOk ? 'text-body-secondary' : 'text-danger fw-semibold') + '">Nästa id ' + s.nextId + ', högsta referens ' + s.highestReferenced + '</div>' : '')
+                    + '</div>';
+            });
+            h += '</div><div class="table-responsive mt-2 d-none d-md-block"><table class="table table-sm align-middle mb-2"><thead><tr>'
+                + '<th>Sort</th><th>Lagring</th><th class="text-end">Rader</th><th class="text-end">Noder</th>'
+                + '<th class="text-end">Bara i tabellen</th><th class="text-end">Nästa id</th><th class="text-end">Högsta referens</th></tr></thead><tbody>';
+            (d.stores || []).forEach(function (s) {
+                var floorOk = !s.tableExists || s.nextId > s.highestReferenced;
+                h += '<tr><td>' + esc(s.name) + '</td><td>' + (s.store === 'table' ? 'Tabellen' : 'Noderna') + (s.writeFrozen ? ' <span class="badge text-bg-warning">fryst</span>' : '')
+                    + (s.error ? ' <span class="text-danger">kunde inte läsas</span>' : '') + '</td>'
+                    + '<td class="text-end">' + (s.tableExists ? s.tableRows : '<span class="text-body-secondary">ingen tabell</span>') + '</td>'
+                    + '<td class="text-end">' + s.nodes + '</td><td class="text-end">' + (s.tableExists ? s.tableBorn : '—') + '</td>'
+                    + '<td class="text-end' + (floorOk ? '' : ' text-danger fw-semibold') + '">' + (s.tableExists ? s.nextId : '—') + '</td>'
+                    + '<td class="text-end">' + (s.tableExists ? s.highestReferenced : '—') + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+            h += '<div>' + d.competitions + ' publicerade tävlingar, ' + (d.competitionsWithoutUrl || []).length + ' utan adress.'
+                + ' Sedan ' + esc(String(d.signalsSince || '').slice(0, 16).replace('T', ' ')) + ': ' + d.storeMisses + ' uppslagningar som inte gav något, '
+                + d.authErrors + ' nekade behörigheter på grund av fel.</div>';
+            if ((d.competitionsWithoutUrl || []).length) {
+                h += '<details class="mt-1"><summary>Tävlingar utan adress</summary><ul class="mb-0">'
+                    + d.competitionsWithoutUrl.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></details>';
+            }
+            out.innerHTML = h;
+        } catch (e) {
+            badge.className = 'badge text-bg-danger'; badge.textContent = 'Kunde inte läsas';
+            out.innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>';
+        }
+    }
+
+    async function loadErrors() {
+        var out = document.getElementById('opsErrors');
+        out.textContent = 'Läser…';
+        try {
+            var d = await getJson(BASE + '/GetErrorDays?days=28');
+            if (!d.success) { out.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
+            var days = d.days || [];
+            if (!days.length) { out.textContent = 'Inga felsvar räknade ännu.'; return; }
+            var h = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0"><thead><tr>'
+                + '<th>Dag</th><th class="text-end">4xx</th><th class="text-end">5xx</th><th class="text-end text-body-secondary">Botar 4xx</th><th class="text-end text-body-secondary">Botar 5xx</th></tr></thead><tbody>';
+            days.forEach(function (x) {
+                h += '<tr role="button" data-ops-day="' + esc(x.day) + '"><td>' + esc(x.day) + '</td><td class="text-end">' + x.c4xx + '</td>'
+                    + '<td class="text-end' + (x.c5xx > 0 ? ' text-danger fw-semibold' : '') + '">' + x.c5xx + '</td>'
+                    + '<td class="text-end text-body-secondary">' + x.bot4xx + '</td><td class="text-end text-body-secondary">' + x.bot5xx + '</td></tr>';
+            });
+            out.innerHTML = h + '</tbody></table></div>';
+        } catch (e) { out.innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>'; }
+    }
+
+    async function loadDay(day) {
+        var out = document.getElementById('opsErrorDay');
+        out.textContent = 'Läser ' + day + '…';
+        try {
+            var d = await getJson(BASE + '/GetErrorDay?day=' + encodeURIComponent(day));
+            if (!d.success) { out.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
+            var rows = d.rows || [];
+            // Dator: tabell. Telefon: ett block per rad — sex kolumner går inte att läsa på 390 px.
+            var h = '<h6 class="mt-2">' + esc(day) + '</h6><div class="table-responsive d-none d-md-block"><table class="table table-sm align-middle mb-0"><thead><tr>'
+                + '<th>Status</th><th>Område</th><th>Vem</th><th class="text-end">Antal</th><th>Senaste adressen</th><th>Kl.</th></tr></thead><tbody>';
+            rows.forEach(function (x) {
+                h += '<tr><td>' + x.statusCode + '</td><td>' + esc(x.area) + '</td><td>' + (x.isBot ? 'bot' : 'människa') + '</td>'
+                    + '<td class="text-end">' + x.count + '</td><td class="text-break">' + esc(x.lastPath) + '</td><td>' + esc(x.lastAt) + '</td></tr>';
+            });
+            h += '</tbody></table></div><div class="d-md-none">';
+            rows.forEach(function (x) {
+                h += '<div class="border-bottom py-2"><div><strong>' + x.statusCode + '</strong> · ' + esc(x.area)
+                    + ' · ' + x.count + ' st · ' + (x.isBot ? 'bot' : 'människa') + '</div>'
+                    + '<div class="text-body-secondary text-break">' + esc(x.lastPath) + ' kl. ' + esc(x.lastAt) + '</div></div>';
+            });
+            out.innerHTML = h + '</div>';
+        } catch (e) { out.innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>'; }
+    }
+
+    async function loadAlerts() {
+        var out = document.getElementById('opsAlerts');
+        out.textContent = 'Läser…';
+        try {
+            var d = await getJson(BASE + '/GetAlerts?take=30');
+            if (!d.success) { out.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
+            var a = d.alerts || [];
+            if (!a.length) { out.textContent = 'Inga larm.'; return; }
+            // Ett block per larm: meddelandet är det viktiga och behöver hela bredden, även på dator.
+            var h = '';
+            a.forEach(function (x) {
+                h += '<div class="border-bottom py-2"><div class="text-break">' + esc(x.message) + '</div>'
+                    + '<div class="text-body-secondary">' + esc(x.lastAt) + (x.count > 1 ? ' · ' + x.count + ' gånger sedan ' + esc(x.firstAt) : '')
+                    + ' · ' + (x.mailedAt ? 'mejlat ' + esc(x.mailedAt) : 'inte mejlat än')
+                    + '<span class="d-block text-break small">' + esc(x.category) + '</span></div></div>';
+            });
+            out.innerHTML = h;
+        } catch (e) { out.innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>'; }
+    }
+
+    // Bekräftelse i sidan, aldrig confirm(): ett andra tryck inom några sekunder.
+    function armed(btn, text) {
+        if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; return true; }
+        btn.dataset.label = btn.textContent; btn.dataset.armed = '1'; btn.textContent = text;
+        setTimeout(function () { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; } }, 6000);
+        return false;
+    }
+
+    async function testAlert(btn) {
+        if (!armed(btn, 'Tryck igen för att skicka')) return;
+        var msg = document.getElementById('opsTestMsg');
+        btn.disabled = true; msg.textContent = 'Skickar…';
+        try {
+            var fd = new FormData(); fd.append('__RequestVerificationToken', token());
+            var r = await fetch(BASE + '/SendTestAlert', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(failText(r));
+            var d = await r.json();
+            msg.innerHTML = '<span class="' + (d.success && d.mailSent ? 'text-success' : 'text-danger') + '">' + esc(d.message) + '</span>';
+            loadAlerts();
+        } catch (e) { msg.innerHTML = '<span class="text-danger">Provlarmet gick inte: ' + esc(e.message) + '</span>'; }
+        finally { btn.disabled = false; }
+    }
+
+    root.addEventListener('click', function (ev) {
+        var b = ev.target.closest('[data-ops]');
+        if (b) { if (b.dataset.ops === 'health') loadHealth(); else if (b.dataset.ops === 'test') testAlert(b); return; }
+        var tr = ev.target.closest('[data-ops-day]');
+        if (tr) loadDay(tr.dataset.opsDay);
+    });
+
+    // Laddas när Underhåll-fliken visas första gången, inte vid sidladdningen.
+    var loaded = false;
+    function start() { if (loaded) return; loaded = true; loadHealth(); loadErrors(); loadAlerts(); }
+    var tab = document.getElementById('underhall-tab');
+    if (tab) tab.addEventListener('shown.bs.tab', start);
+    if (document.getElementById('underhall') && document.getElementById('underhall').classList.contains('active')) start();
+})();
+</script>

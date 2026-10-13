@@ -30,6 +30,25 @@ namespace HpskSite.Services.Hosting
             "JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId WHERE ct.alias = '" + alias.Replace("'", "''") + "'");
 
         /// <summary>
+        /// Läser bara (C3-planen F6, <c>/health/competitions</c>): vilket id nästa rad får, och det högsta id
+        /// någon pekar på. <c>NextId &gt; HighestReferenced</c> är golvet. Ingen omsättning, inget lås.
+        /// </summary>
+        public static (int NextId, int HighestReferenced) Inspect(IUmbracoDatabase db, string table, IEnumerable<Source> sources)
+        {
+            var highest = 0;
+            foreach (var s in sources)
+            {
+                if (db.ExecuteScalar<int?>("SELECT OBJECT_ID(@0)", s.RequiredTable) == null) continue;
+                highest = Math.Max(highest, db.ExecuteScalar<int?>(s.MaxSql) ?? 0);
+            }
+            highest = Math.Max(highest, db.ExecuteScalar<int?>($"SELECT MAX(Id) FROM {table}") ?? 0);
+            var current = db.ExecuteScalar<int?>($"SELECT CAST(IDENT_CURRENT('{table}') AS INT)") ?? 0;
+            var neverUsed = db.ExecuteScalar<int>(
+                "SELECT CASE WHEN last_value IS NULL THEN 1 ELSE 0 END FROM sys.identity_columns WHERE object_id = OBJECT_ID(@0)", table) == 1;
+            return (neverUsed ? current : current + 1, highest);
+        }
+
+        /// <summary>
         /// Sätter identiteten så att nästa rad får ett id över tabellens, varje källas och identitetens nuvarande
         /// värde. Källor vars tabell saknas (ekonomin är inte överallt) hoppas över. Returnerar värdet.
         ///

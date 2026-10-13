@@ -22,6 +22,9 @@ namespace HpskSite.Services
         private readonly IContentService _contentService;
         private readonly Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory _databaseFactory;
 
+        // C3-planen F6: en grind som kastar svarar nej OCH loggar varför (OpsSignals.AuthGateFailed, strypt).
+        private readonly ILogger<AdminAuthorizationService> _logger;
+
         // Per-request memo for the roster app-access lookup (this service is scoped). A page can ask
         // "may this person manage the competition?" several times; the answer can't change mid-request.
         private readonly Dictionary<(int competitionId, int memberId), bool> _rosterAccessCache = new();
@@ -33,8 +36,10 @@ namespace HpskSite.Services
             IUmbracoContextAccessor umbracoContextAccessor,
             HpskSite.Services.Staffing.StaffingService staffingService,
             IContentService contentService,
-            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory databaseFactory)
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory databaseFactory,
+            ILogger<AdminAuthorizationService> logger)
         {
+            _logger = logger;
             _memberService = memberService;
             _memberManager = memberManager;
             _memberGroupService = memberGroupService;
@@ -219,9 +224,9 @@ namespace HpskSite.Services
                 }
                 return await IsRegionHostAdminAsync(clubId, competition.Value<string>("regionalFederation"));
             }
-            catch
+            catch (Exception gateEx)
             {
-                return false;
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "HasCompetitionStaffAccessAsync", competitionId);
             }
         }
 
@@ -242,9 +247,9 @@ namespace HpskSite.Services
                     competition.Value<int>("clubId"),
                     competition.Value<string>("regionalFederation"));
             }
-            catch
+            catch (Exception gateEx)
             {
-                return false;
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "IsRegionHostAdminAsync", competitionId);
             }
         }
 
@@ -492,9 +497,9 @@ namespace HpskSite.Services
                 var roles = _memberService.GetAllRoles(member.Id);
                 return roles?.Any(r => r == roleName) ?? false;
             }
-            catch
+            catch (Exception gateEx)
             {
-                return false;
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "IsUserInRole", $"{memberId}/{roleName}");
             }
         }
 
@@ -546,9 +551,9 @@ namespace HpskSite.Services
                 return roles.Contains("Administrators") ||
                        roles.Contains($"ClubAdmin_{clubId}");
             }
-            catch
+            catch (Exception gateEx)
             {
-                return false;
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "IsClubAdmin", clubId);
             }
         }
 
@@ -619,9 +624,9 @@ namespace HpskSite.Services
                 var roles = _memberService.GetAllRoles(member.Id);
                 return roles.Contains($"Skjutledare_{clubId}");
             }
-            catch
+            catch (Exception gateEx)
             {
-                return false;
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "IsMemberSkjutledareForClub", $"{memberId}/{clubId}");
             }
         }
 
@@ -772,9 +777,9 @@ namespace HpskSite.Services
 
                 return HasRosterAppAccess(competitionId, member.Id);
             }
-            catch
+            catch (Exception gateEx)
             {
-                return false;
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "HasCompetitionManagementAccess", competitionId);
             }
         }
 
@@ -877,9 +882,9 @@ namespace HpskSite.Services
 
                 return payerClubId > 0 && await IsClubAdminForClub(payerClubId);
             }
-            catch
+            catch (Exception gateEx)
             {
-                return false;
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "CanClaimPaymentForInvoice", invoiceId);
             }
         }
 
@@ -944,9 +949,9 @@ namespace HpskSite.Services
 
                 return await CanManageCompetitionFinanceAsync(competitionId);
             }
-            catch
+            catch (Exception gateEx)
             {
-                return false;
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "CanManageCompetitionInvoice", invoiceId);
             }
         }
 
@@ -988,9 +993,9 @@ namespace HpskSite.Services
                 // separately named a competition manager on it.
                 return await IsRegionHostAdminAsync(clubId, competition.Value<string>("regionalFederation"));
             }
-            catch
+            catch (Exception gateEx)
             {
-                return false;
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "CanManageCompetitionFinanceAsync", competitionId);
             }
         }
 
@@ -1016,9 +1021,9 @@ namespace HpskSite.Services
                 // Check if current user is club admin for this club
                 return await IsClubAdminForClub(primaryClubId.Value);
             }
-            catch
+            catch (Exception gateEx)
             {
-                return false;
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "CanApproveMemberAsync", memberId);
             }
         }
 
