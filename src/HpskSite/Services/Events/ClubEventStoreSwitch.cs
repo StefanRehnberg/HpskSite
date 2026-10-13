@@ -60,8 +60,9 @@ namespace HpskSite.Services.Events
 
         public ClubEventFieldSupport Support => Current.Support;
         public ClubEventRecord? Get(int id) => Current.Get(id);
+        public IReadOnlyList<ClubEventRecord> GetMany(IReadOnlyCollection<int> ids) => Current.GetMany(ids);
         public IReadOnlyList<ClubEventRecord> ListForOwner(int ownerId, bool publishedOnly = true) => Current.ListForOwner(ownerId, publishedOnly);
-        public IReadOnlyList<ClubEventRecord> ListAllPublished() => Current.ListAllPublished();
+        public IReadOnlyList<ClubEventRecord> ListPublishedBetween(DateTime from, DateTime to) => Current.ListPublishedBetween(from, to);
         public IReadOnlyList<ClubEventRecord> ListAllForOwnerType(string ownerType) => Current.ListAllForOwnerType(ownerType);
 
         public async Task<(int Id, string? Error)> SaveAsync(ClubEventRecord record)

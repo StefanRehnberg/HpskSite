@@ -50,26 +50,44 @@ e.CreatedDate, e.UpdatedDate, lp.ContentBlocksJson, lp.QuickLinksJson";
         public ClubEventRecord? Get(int id)
             => id <= 0 ? null : Load("WHERE e.Id = @0", id).FirstOrDefault();
 
+        public IReadOnlyList<ClubEventRecord> GetMany(IReadOnlyCollection<int> ids)
+        {
+            var result = new List<ClubEventRecord>();
+            // I portioner: IN (@0) blir en parameter per id, och SQL Server tar slut vid ~2100.
+            foreach (var chunk in ids.Where(i => i > 0).Distinct().Chunk(1000))
+                result.AddRange(Load("WHERE e.Id IN (@0)", chunk.ToList()));
+            return result;
+        }
+
         public IReadOnlyList<ClubEventRecord> ListForOwner(int ownerId, bool publishedOnly = true)
             => ownerId <= 0
                 ? Array.Empty<ClubEventRecord>()
                 : Load(publishedOnly ? "WHERE e.OwnerId = @0 AND e.IsPublished = 1" : "WHERE e.OwnerId = @0", ownerId);
 
-        public IReadOnlyList<ClubEventRecord> ListAllPublished() => Load("WHERE e.IsPublished = 1");
+        public IReadOnlyList<ClubEventRecord> ListPublishedBetween(DateTime from, DateTime to)
+            => Load("WHERE e.IsPublished = 1 AND e.StartsAt >= @0 AND e.StartsAt < @1", from, to);
 
         public IReadOnlyList<ClubEventRecord> ListAllForOwnerType(string ownerType) => Load("WHERE e.OwnerType = @0", ownerType);
 
         /// <summary>
         /// Händelsen bakom en adress, och om adressen är den aktuella. Årtal null = den gamla
         /// trädadressen från tiden som nod.
+        ///
+        /// <para><b>Ägartypen följer med, och årtalet är två frågor</b> (genomgången 2026-10-13, B). Indexet
+        /// <c>UX_ClubEventUrl_Address</c> börjar på (OwnerType, OwnerId, UrlYear, Slug); utan OwnerType och med
+        /// <c>(@1 IS NULL AND … ) OR …</c> kunde det inte sökas, och varje förfrågan under en klubb läste
+        /// hela adresstabellen.</para>
         /// </summary>
-        public (int EventId, bool IsCurrent)? FindByAddress(int ownerId, int? urlYear, string slug)
+        public (int EventId, bool IsCurrent)? FindByAddress(string ownerType, int ownerId, int? urlYear, string slug)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var row = scope.Database.FirstOrDefault<AddressRow>(@"
+            var row = urlYear == null
+                ? scope.Database.FirstOrDefault<AddressRow>(@"
 SELECT TOP 1 u.EventId, u.IsCurrent FROM dbo.ClubEventUrl u
-WHERE u.OwnerId = @0 AND ((@1 IS NULL AND u.UrlYear IS NULL) OR u.UrlYear = @1) AND u.Slug = @2",
-                ownerId, urlYear, slug);
+WHERE u.OwnerType = @0 AND u.OwnerId = @1 AND u.UrlYear IS NULL AND u.Slug = @2", ownerType, ownerId, slug)
+                : scope.Database.FirstOrDefault<AddressRow>(@"
+SELECT TOP 1 u.EventId, u.IsCurrent FROM dbo.ClubEventUrl u
+WHERE u.OwnerType = @0 AND u.OwnerId = @1 AND u.UrlYear = @2 AND u.Slug = @3", ownerType, ownerId, urlYear.Value, slug);
             return row == null ? null : (row.EventId, row.IsCurrent);
         }
 

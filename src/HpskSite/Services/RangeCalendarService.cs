@@ -359,14 +359,15 @@ GROUP BY RangeId ORDER BY COUNT(*) DESC, MAX([Date]) DESC", clubId) ?? 0;
             using var cref = _contextFactory.EnsureUmbracoContext();
             var content = cref.UmbracoContext.Content;
 
+            // ⚠️ Genom lagringen (sajtstrukturen), aldrig som nod: när Events:Store = table finns
+            // ingen publicerad clubSimpleEvent-nod, och kalendern och banans QR-närvaro hade tyst
+            // tappat varje händelse. Alla i EN läsning — förut en fråga per länk, och länkarna växer
+            // med varje händelse banan någonsin haft (genomgången 2026-10-13, B).
+            var byId = _events.GetMany(links.Select(l => l.EventId).ToList()).ToDictionary(e => e.Id);
             foreach (var link in links)
             {
-                // ⚠️ Genom lagringen (sajtstrukturen), aldrig som nod: när Events:Store = table finns
-                // ingen publicerad clubSimpleEvent-nod, och kalendern och banans QR-närvaro hade tyst
-                // tappat varje händelse.
-                var ev = _events.Get(link.EventId);
                 // Opublicerad, borttagen eller avstängd händelse syns inte — i kalendern som överallt annars.
-                if (ev == null || !ev.IsPublished || !ev.IsActive) continue;
+                if (!byId.TryGetValue(link.EventId, out var ev) || !ev.IsPublished || !ev.IsActive) continue;
                 var start = ClubEvents.RealDate(ev.StartsAt);
                 if (start == null) continue;
                 var end = ClubEvents.RealDate(ev.EndsAt);

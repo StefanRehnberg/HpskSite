@@ -60,6 +60,9 @@ namespace HpskSite.Services.Events
 
         // ── Läsning ────────────────────────────────────────────────────────────────────────
 
+        public IReadOnlyList<ClubEventRecord> GetMany(IReadOnlyCollection<int> ids)
+            => ids.Distinct().Select(Get).Where(e => e != null).Select(e => e!).ToList();
+
         public ClubEventRecord? Get(int id)
         {
             if (id <= 0) return null;
@@ -105,7 +108,10 @@ namespace HpskSite.Services.Events
                 .ToList();
         }
 
-        public IReadOnlyList<ClubEventRecord> ListAllPublished()
+        public IReadOnlyList<ClubEventRecord> ListPublishedBetween(DateTime from, DateTime to)
+            => ListAllPublished().Where(e => e.StartsAt >= from && e.StartsAt < to).ToList();
+
+        private IReadOnlyList<ClubEventRecord> ListAllPublished()
         {
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                 return Array.Empty<ClubEventRecord>();

@@ -22,11 +22,20 @@ namespace HpskSite.Services.Events
         /// <summary>Händelsen, publicerad eller inte, eller null.</summary>
         ClubEventRecord? Get(int id);
 
+        /// <summary>
+        /// Flera händelser i en läsning (saknade id:n hoppas över). För listor som annars hade gjort
+        /// <see cref="Get"/> per rad — banans kalender gjorde det vid varje QR-incheckning (genomgången 2026-10-13, B).
+        /// </summary>
+        IReadOnlyList<ClubEventRecord> GetMany(IReadOnlyCollection<int> ids);
+
         /// <summary>Ägarens händelser. <paramref name="publishedOnly"/> = det besökare ser.</summary>
         IReadOnlyList<ClubEventRecord> ListForOwner(int ownerId, bool publishedOnly = true);
 
-        /// <summary>Alla publicerade händelser (flödet och statistiken).</summary>
-        IReadOnlyList<ClubEventRecord> ListAllPublished();
+        /// <summary>
+        /// Publicerade händelser som börjar i [<paramref name="from"/>, <paramref name="to"/>) — startsidans flöde.
+        /// Förut lästes alla publicerade händelser som någonsin funnits (genomgången 2026-10-13, B).
+        /// </summary>
+        IReadOnlyList<ClubEventRecord> ListPublishedBetween(DateTime from, DateTime to);
 
         /// <summary>
         /// Alla händelser med en ägare av typen <paramref name="ownerType"/>, publicerade eller inte
