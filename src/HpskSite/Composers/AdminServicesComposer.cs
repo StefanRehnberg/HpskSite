@@ -214,6 +214,11 @@ namespace HpskSite.Composers
             builder.Services.AddHostedService(sp => sp.GetRequiredService<HpskSite.Services.Ops.CriticalAlertService>());
             builder.Services.AddHostedService<HpskSite.Services.Ops.OpsSchemaGuardHostedService>();
             builder.Services.AddScoped<HpskSite.Services.Ops.CompetitionHealthService>();
+
+            // C3-planen S0: skyddsnätets läsande underlag (C3BaselineController, bara sajtadmin).
+            builder.Services.AddScoped<HpskSite.Services.C3.LegacyCompetitionReadSnapshot>();
+            builder.Services.AddScoped<HpskSite.Services.C3.CompetitionAuthorizationReport>();
+            builder.Services.AddScoped<HpskSite.Services.C3.CompetitionUrlCorpusSource>();
             builder.Services.Configure<Umbraco.Cms.Web.Common.ApplicationBuilder.UmbracoPipelineOptions>(options =>
                 options.AddFilter(new Umbraco.Cms.Web.Common.ApplicationBuilder.UmbracoPipelineFilter(
                     "RequestErrors", postPipeline: app => app.UseMiddleware<HpskSite.Middleware.RequestErrorMiddleware>())));

@@ -49,6 +49,22 @@ namespace HpskSite.Services
             _databaseFactory = databaseFactory;
         }
 
+        // C3-planen S0: behörighetsrapporten (CompetitionAuthorizationReport) prövar de RIKTIGA grindarna
+        // som en vald medlem i stället för att skriva om reglerna. Sätts bara på en egen instans som
+        // rapporten skapar — aldrig i en vanlig förfrågan. All läsning av "nuvarande medlem" i den här
+        // klassen går genom CurrentMemberAsync, så att en grind inte kan läsa förbi rapporten.
+        private string? _evaluateAsEmail;
+        internal void EvaluateAs(string email) => _evaluateAsEmail = email ?? "";
+
+        private sealed record CurrentMemberRef(string? Email);
+
+        private async Task<CurrentMemberRef?> CurrentMemberAsync()
+        {
+            if (_evaluateAsEmail != null) return new CurrentMemberRef(_evaluateAsEmail);
+            var member = await _memberManager.GetCurrentMemberAsync();
+            return member == null ? null : new CurrentMemberRef(member.Email);
+        }
+
         /// <summary>
         /// Look up the area code (Syd/Vast/Ost/Nord) for a given region. Returns null when
         /// the regionalPage doesn't exist or has no area set yet.
@@ -84,7 +100,7 @@ namespace HpskSite.Services
         {
             if (string.IsNullOrWhiteSpace(areaCode)) return false;
 
-            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var currentMember = await CurrentMemberAsync();
             if (currentMember == null) return false;
 
             if (await IsCurrentUserAdminAsync()) return true;
@@ -101,7 +117,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<bool> IsCurrentUserAdminAsync()
         {
-            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var currentMember = await CurrentMemberAsync();
             if (currentMember == null) return false;
 
             var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
@@ -118,7 +134,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<bool> IsClubAdminForClub(int clubId)
         {
-            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var currentMember = await CurrentMemberAsync();
             if (currentMember == null) return false;
 
             // Full admins can manage any club
@@ -152,7 +168,7 @@ namespace HpskSite.Services
         {
             if (string.IsNullOrEmpty(regionCode)) return false;
 
-            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var currentMember = await CurrentMemberAsync();
             if (currentMember == null) return false;
 
             // Full admins can manage any region
@@ -259,7 +275,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<List<string>> GetManagedRegions()
         {
-            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var currentMember = await CurrentMemberAsync();
             if (currentMember == null) return new List<string>();
 
             // Full admins can manage all regions
@@ -377,7 +393,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<List<int>> GetManagedClubIds()
         {
-            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var currentMember = await CurrentMemberAsync();
             if (currentMember == null) return new List<int>();
 
             var allClubs = GetClubsFromContent();
@@ -539,7 +555,7 @@ namespace HpskSite.Services
         {
             try
             {
-                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                var currentMember = await CurrentMemberAsync();
                 if (currentMember == null) return false;
 
                 var member = _memberService.GetByEmail(currentMember.Email);
@@ -567,7 +583,7 @@ namespace HpskSite.Services
         {
             try
             {
-                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                var currentMember = await CurrentMemberAsync();
                 if (currentMember == null) return null;
 
                 var member = _memberService.GetByEmail(currentMember.Email);
@@ -599,7 +615,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<bool> IsSkjutledareForClub(int clubId)
         {
-            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var currentMember = await CurrentMemberAsync();
             if (currentMember == null) return false;
 
             if (await IsCurrentUserAdminAsync()) return true;
@@ -636,7 +652,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<List<int>> GetSkjutledareClubIds()
         {
-            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var currentMember = await CurrentMemberAsync();
             if (currentMember == null) return new List<int>();
 
             if (await IsCurrentUserAdminAsync())
@@ -670,7 +686,7 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<bool> IsSkjutledareForMember(int memberId)
         {
-            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            var currentMember = await CurrentMemberAsync();
             if (currentMember == null) return false;
 
             if (await IsCurrentUserAdminAsync()) return true;
@@ -755,7 +771,7 @@ namespace HpskSite.Services
         {
             try
             {
-                var currentMember = await _memberManager.GetCurrentMemberAsync();
+                var currentMember = await CurrentMemberAsync();
                 if (currentMember == null) return false;
 
                 // Site admins can manage all competitions
@@ -868,7 +884,7 @@ namespace HpskSite.Services
                 else if (int.TryParse(memberIdStr, out var memberId) && memberId > 0)
                 {
                     // Self-pay: the shooter may claim their own invoice.
-                    var currentMember = await _memberManager.GetCurrentMemberAsync();
+                    var currentMember = await CurrentMemberAsync();
                     if (currentMember != null)
                     {
                         var currentMemberData = _memberService.GetByEmail(currentMember.Email ?? string.Empty);
