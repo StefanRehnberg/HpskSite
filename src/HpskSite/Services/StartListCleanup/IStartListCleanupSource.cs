@@ -37,7 +37,7 @@ namespace HpskSite.Services.StartListCleanup
         bool Supports(string? competitionType);
 
         /// <summary>Read-only: where does this member currently stand? For the warning before deleting.</summary>
-        Task<List<StartListPlacement>> DescribePlacementsAsync(IContent competition, int memberId);
+        Task<List<StartListPlacement>> DescribePlacementsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, int memberId);
 
         /// <summary>
         /// Remove the member from every start unit and drop their result rows.
@@ -47,6 +47,6 @@ namespace HpskSite.Services.StartListCleanup
         /// action needs: a shooter can legitimately hold a place in C1 while their A1 row is the
         /// orphan, and clearing both would delete a start the shooter is entitled to. Null = all.
         /// </summary>
-        Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId, string? onlyShootingClass = null);
+        Task<CleanupOutcome> CleanupAsync(HpskSite.Models.Competitions.CompetitionInfo competition, int memberId, string? onlyShootingClass = null);
     }
 }

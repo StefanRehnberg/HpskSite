@@ -24,6 +24,7 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public CompetitionTeamController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -36,9 +37,11 @@ namespace HpskSite.Controllers
             ILogger<CompetitionTeamController> logger,
             AdminAuthorizationService authorizationService,
             CompetitionTeamService teamService,
-            ClubService clubService)
+            ClubService clubService,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _memberManager = memberManager;
             _memberService = memberService;
             _logger = logger;
@@ -291,21 +294,8 @@ namespace HpskSite.Controllers
             if (teamId <= 0) return false;
             var competitionId = await _teamService.GetTeamCompetitionIdAsync(teamId);
             if (competitionId <= 0) return false;
-            if (await _authorizationService.IsCompetitionManager(competitionId)) return true;
-
-            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return false;
-            var competition = ctx.Content.GetById(competitionId);
-            if (competition == null) return false;
-            var competitionClubId = competition.Value<int>("clubId");
-            if (competitionClubId > 0)
-            {
-                return await _authorizationService.IsClubAdminForClub(competitionClubId)
-                    || await _authorizationService.IsSkjutledareForClub(competitionClubId);
-            }
-            // Region-hosted (clubId unset — the SM shape): the krets's regional admin is the organiser.
-            var regionCode = (competition.Value<string>("regionalFederation") ?? "").Trim();
-            return !string.IsNullOrWhiteSpace(regionCode)
-                && await _authorizationService.IsRegionalAdminForRegion(regionCode);
+            // C3-planen S3: personalregeln, som hade en handskriven kopia här.
+            return await _authorizationService.HasCompetitionStaffAccessAsync(competitionId);
         }
 
         [HttpPost]
@@ -668,13 +658,13 @@ namespace HpskSite.Controllers
 
                 if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                     return "Träff";
-                var comp = ctx.Content.GetById(competitionId);
+                var comp = _competitions.Get(competitionId);
                 if (comp == null) return "Träff";
 
                 var config = HpskSite.CompetitionTypes.Faltskytte.Models.FaltskytteConfigParser
-                    .Parse(comp.Value<string>("stationConfig"));
+                    .Parse(comp.StationConfig);
                 var mode = HpskSite.CompetitionTypes.Faltskytte.Models.FaltskytteScoringMode
-                    .Resolve(config, comp.Value<string>("scoringMode"));
+                    .Resolve(config, comp.ScoringMode);
                 return string.Equals(mode, "Poang", StringComparison.OrdinalIgnoreCase) ? "Poäng" : "Träff";
             }
             catch
@@ -690,8 +680,8 @@ namespace HpskSite.Controllers
             {
                 if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
                 {
-                    var comp = ctx.Content.GetById(competitionId);
-                    return comp?.Value<string>("competitionType") ?? "Precision";
+                    var comp = _competitions.Get(competitionId);
+                    return comp?.CompetitionType ?? "Precision";
                 }
             }
             catch { }
@@ -704,11 +694,11 @@ namespace HpskSite.Controllers
             {
                 if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
                 {
-                    var comp = ctx.Content.GetById(competitionId);
+                    var comp = _competitions.Get(competitionId);
                     // Value<int> returns 0 (not null) when the property is unset/empty,
                     // so `?? 7` never fires. A 0 here caps the team sum at
                     // Math.Min(7, 0) = 0 → team totals show as 0. Treat 0 as unset.
-                    var n = comp?.Value<int>("numberOfSeriesOrStations") ?? 0;
+                    var n = comp?.NumberOfSeriesOrStations ?? 0;
                     return n > 0 ? n : 7;
                 }
             }
@@ -729,12 +719,10 @@ namespace HpskSite.Controllers
             {
                 if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
                 {
-                    var comp = ctx.Content.GetById(competitionId);
-                    var explicitCount = comp?.Value<int>("teamResultSeriesCount") ?? 0;
-                    if (explicitCount > 0) return explicitCount;
-
-                    var total = comp?.Value<int>("numberOfSeriesOrStations") ?? 0;
-                    var finals = comp?.Value<int>("numberOfFinalSeries") ?? 0;
+                    var comp = _competitions.Get(competitionId);
+                    // teamResultSeriesCount har aldrig funnits på doktypen (C3-planen S1) — standardvärdet gäller.
+                    var total = comp?.NumberOfSeriesOrStations ?? 0;
+                    var finals = comp?.NumberOfFinalSeries ?? 0;
                     var qualifying = total - finals;
                     if (qualifying > 0) return qualifying;
                     if (total > 0) return total;
@@ -750,8 +738,8 @@ namespace HpskSite.Controllers
             {
                 if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
                 {
-                    var comp = ctx.Content.GetById(competitionId);
-                    var raw = comp?.Value<string>("shootingClassIds") ?? "";
+                    var comp = _competitions.Get(competitionId);
+                    var raw = comp?.ShootingClassIds ?? "";
                     if (string.IsNullOrEmpty(raw)) return Array.Empty<string>();
 
                     if (raw.TrimStart().StartsWith("["))

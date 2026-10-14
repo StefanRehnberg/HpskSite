@@ -45,12 +45,15 @@ namespace HpskSite.Services.RegistrationGate
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IContentService _contentService;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
 
         public StartListRegistrationGate(
             IUmbracoContextAccessor umbracoContextAccessor,
             IContentService contentService,
-            HpskSite.Services.StartLists.IStartListStore startLists)
+            HpskSite.Services.StartLists.IStartListStore startLists,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _umbracoContextAccessor = umbracoContextAccessor;
             _contentService = contentService;
             _startLists = startLists;
@@ -64,32 +67,37 @@ namespace HpskSite.Services.RegistrationGate
         /// list is not public, and a gate that fired on it would close registration for a list no
         /// shooter can see.
         /// </summary>
-        public static bool HasPublishedStartList(IPublishedContent competition, HpskSite.Services.StartLists.IStartListStore startLists)
-        {
-            if (competition == null) return false;
+        public static bool HasPublishedStartList(HpskSite.Models.Competitions.CompetitionInfo competition, HpskSite.Services.StartLists.IStartListStore startLists) =>
+            competition != null && HasPublishedStartList(competition.Id, competition.FaltskyttePatrolsPublished, startLists);
 
+        /// <summary>Samma fråga för en anropare som håller den publicerade noden (tävlingssidan). Flyttas till posten med vyn.</summary>
+        public static bool HasPublishedStartList(IPublishedContent competition, HpskSite.Services.StartLists.IStartListStore startLists) =>
+            competition != null && HasPublishedStartList(competition.Id, competition.Value<bool>("faltskyttePatrolsPublished"), startLists);
+
+        private static bool HasPublishedStartList(int competitionId, bool patrolsPublished, HpskSite.Services.StartLists.IStartListStore startLists)
+        {
             // Fältskytte / MagnumFält publish the patrol list as a whole, as a flag on the
             // competition itself — there is no per-list node to inspect.
-            if (competition.Value<bool>("faltskyttePatrolsPublished")) return true;
+            if (patrolsPublished) return true;
 
             // Precision family AND Springskytte both store their lists as grundomgångslistor carrying
             // the official flag. Springskytte publishes one list per weapon class / day, so ANY
             // official list closes the gate: the shooters on that list have their numbers, and a
             // regeneration is what we are protecting them from. The legacy hub's lists count too
             // (the store includes them).
-            return startLists.ListPublished(competition.Id, HpskSite.Models.StartLists.StartListKind.Qualifying)
+            return startLists.ListPublished(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying)
                 .Any(r => r.IsOfficial);
         }
 
         /// <summary>
-        /// The gate itself, for a caller that already holds the published competition (the view).
+        /// The gate itself, for a caller that already holds the published competition.
         /// </summary>
-        public static bool IsClosed(IPublishedContent competition, HpskSite.Services.StartLists.IStartListStore startLists)
-        {
-            if (competition == null) return false;
-            if (!competition.Value<bool>(PropertyAlias)) return false;
-            return HasPublishedStartList(competition, startLists);
-        }
+        public static bool IsClosed(HpskSite.Models.Competitions.CompetitionInfo competition, HpskSite.Services.StartLists.IStartListStore startLists) =>
+            competition != null && competition.CloseRegistrationOnStartList && HasPublishedStartList(competition, startLists);
+
+        /// <summary>Samma grind för den publicerade noden (tävlingssidan). Flyttas till posten med vyn.</summary>
+        public static bool IsClosed(IPublishedContent competition, HpskSite.Services.StartLists.IStartListStore startLists) =>
+            competition != null && competition.Value<bool>(PropertyAlias) && HasPublishedStartList(competition, startLists);
 
         /// <summary>
         /// The gate for a caller that only has the id (the registration endpoint). Resolves from the
@@ -104,10 +112,8 @@ namespace HpskSite.Services.RegistrationGate
             try
             {
                 if (competitionId <= 0) return false;
-                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return false;
-                var competition = ctx.Content.GetById(competitionId);
-                if (competition == null || competition.ContentType.Alias != "competition") return false;
-                return IsClosed(competition, _startLists);
+                var competition = _competitions.Get(competitionId);
+                return competition != null && IsClosed(competition, _startLists);
             }
             catch
             {

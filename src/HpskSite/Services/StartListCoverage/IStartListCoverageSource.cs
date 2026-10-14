@@ -14,7 +14,7 @@ namespace HpskSite.Services.StartListCoverage
     {
         bool Supports(string? competitionType);
 
-        Task<StartListCoverageResult> BuildAsync(IContent competition);
+        Task<StartListCoverageResult> BuildAsync(HpskSite.Models.Competitions.CompetitionInfo competition);
     }
 
     /// <summary>

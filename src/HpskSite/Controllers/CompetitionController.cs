@@ -47,6 +47,7 @@ namespace HpskSite.Controllers
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public CompetitionController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -66,9 +67,11 @@ namespace HpskSite.Controllers
             MemberClubService memberClubService,
             RegistrationClubPropagationService clubPropagationService,
             IServiceScopeFactory scopeFactory,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _memberClubService = memberClubService;
             _clubPropagationService = clubPropagationService;
             _memberManager = memberManager;
@@ -206,7 +209,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get competition details
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                 {
                     var errorMsg = "Tävlingen kunde inte hittas.";
@@ -219,7 +222,7 @@ namespace HpskSite.Controllers
                 }
 
                 // VALIDATION: Check if competition is external
-                var isExternal = competition.GetValue<bool>("isExternal");
+                var isExternal = competition.IsExternal;
                 if (isExternal)
                 {
                     var errorMsg = "Detta är en extern tävling. Anmälan sker via extern länk eller e-post.";
@@ -378,7 +381,7 @@ namespace HpskSite.Controllers
                 // ⚠️ Regeln fanns bara i klienten — servern tog emot vad som helst. En anmälan
                 //    ersätter hela klasslistan (även vid uppdatering), så listan här är hela svaret.
                 var classRuleError = ClassRegistrationRule.Conflict(selectedClassesList,
-                    competition.GetValue<bool>(ClassRegistrationRule.PropertyAlias));
+                    competition.AllowDualCClassRegistration);
                 if (classRuleError != null)
                 {
                     if (IsAjaxRequest()) return Json(new { success = false, message = classRuleError });
@@ -402,7 +405,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Parse Direktplacering config and team assignments
-                var dpConfig = DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"));
+                var dpConfig = DirektplaceringConfig.Parse(competition.DirektplaceringConfig);
                 var teamAssignments = new Dictionary<string, int>();
                 if (dpConfig != null && !string.IsNullOrEmpty(teamAssignmentsJson))
                 {
@@ -824,7 +827,7 @@ namespace HpskSite.Controllers
         }
 
 
-        private IContent GetOrCreateRegistrationsFolder(IContent competition)
+        private IContent GetOrCreateRegistrationsFolder(HpskSite.Models.Competitions.CompetitionInfo competition)
         {
             // Look for existing registrations folder
             var childContents = _contentService.GetPagedChildren(competition.Id, 0, int.MaxValue, out var totalRecords);
@@ -1507,7 +1510,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get the competition content
-                var competition = UmbracoContext.Content.GetById(competitionId.Value);
+                var competition = _competitions.Get(competitionId.Value);
                 if (competition == null)
                 {
                     return Json(new { success = false, message = "Competition not found" });
@@ -1976,7 +1979,7 @@ namespace HpskSite.Controllers
                     // Name of the optional sub-competition (Deltävling), empty when the
                     // competition has none. Lets the Anmälningar tab show a Deltävling column
                     // (with a check on rows where the shooter opted in) only when relevant.
-                    subCompetitionName = competition.Value<string>("subCompetitionName") ?? "",
+                    subCompetitionName = competition.SubCompetitionName ?? "",
                     // "ledger" = avgifterna i liggaren (P3/P4). Anmälningar-flikens JS väljer väg på den.
                     paymentModel
                 });
@@ -2008,7 +2011,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Du måste vara inloggad." });
                 }
 
-                if (UmbracoContext.Content.GetById(competitionId) == null)
+                if (_competitions.Get(competitionId) == null)
                 {
                     return Json(new { success = false, message = "Competition not found" });
                 }
@@ -2120,7 +2123,7 @@ namespace HpskSite.Controllers
             try
             {
                 // Get the competition
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null) return "No Invoice";
 
                 // Find the "Betalningar" (invoices) hub under the competition
@@ -2248,7 +2251,7 @@ namespace HpskSite.Controllers
 
                     if (!canViewMember)
                     {
-                        var hostingClubId = _contentService.GetById(competitionId)?.GetValue<int>("clubId") ?? 0;
+                        var hostingClubId = _competitions.GetSaved(competitionId)?.ClubId ?? 0;
                         if (hostingClubId > 0)
                         {
                             canViewMember = await _authorizationService.IsClubAdminForClub(hostingClubId)
@@ -2291,7 +2294,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get competition
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                 {
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
@@ -2331,11 +2334,11 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
 
-                var config = DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"));
+                var config = DirektplaceringConfig.Parse(competition.DirektplaceringConfig);
                 if (config == null)
                     return Json(new { success = false, message = "Direktplacering är inte aktiverat för denna tävling." });
 
@@ -2355,7 +2358,7 @@ namespace HpskSite.Controllers
             }
         }
 
-        private object BuildTeamAvailability(int competitionId, IContent competition, DirektplaceringConfig config)
+        private object BuildTeamAvailability(int competitionId, HpskSite.Models.Competitions.CompetitionInfo competition, DirektplaceringConfig config)
         {
             // Occupancy per team, counted from the registrations (via the registration store).
             // Count team assignments from existing registrations

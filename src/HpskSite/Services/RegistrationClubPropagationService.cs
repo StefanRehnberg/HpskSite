@@ -58,14 +58,17 @@ namespace HpskSite.Services
         private readonly ILogger<RegistrationClubPropagationService> _logger;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public RegistrationClubPropagationService(
             IContentService contentService,
             IUmbracoDatabaseFactory databaseFactory,
             StartListHtmlRenderer renderer,
             DirektplaceringStartListService dpStartListService,
             ILogger<RegistrationClubPropagationService> logger,
-            HpskSite.Services.StartLists.IStartListStore startLists)
+            HpskSite.Services.StartLists.IStartListStore startLists,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _startLists = startLists;
             _contentService = contentService;
             _databaseFactory = databaseFactory;
@@ -86,7 +89,7 @@ namespace HpskSite.Services
             if (competitionId <= 0 || memberId <= 0 || string.IsNullOrWhiteSpace(newClubName))
                 return result;
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return result;
 
             // Direktplacering writes its precisionStartList node with its OWN config shape and its
@@ -94,7 +97,7 @@ namespace HpskSite.Services
             // StartListConfiguration and re-render it with the precision renderer — silently
             // replacing the whole list's markup. Its list is fully derived from the registrations,
             // so regenerating is both correct and the routine operation on that path.
-            var dpConfig = DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"));
+            var dpConfig = DirektplaceringConfig.Parse(competition.DirektplaceringConfig);
             if (dpConfig != null)
             {
                 try

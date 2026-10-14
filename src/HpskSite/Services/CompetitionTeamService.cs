@@ -28,6 +28,7 @@ namespace HpskSite.Services
 
         private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public CompetitionTeamService(
             IUmbracoDatabaseFactory databaseFactory,
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -39,8 +40,10 @@ namespace HpskSite.Services
             MemberClubService memberClubService,
             ILogger<CompetitionTeamService> logger,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.LegacyInvoiceHubs invoiceHubs)
+            HpskSite.Services.LegacyInvoiceHubs invoiceHubs,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _invoiceHubs = invoiceHubs;
             _registrations = registrations;
             _memberClubService = memberClubService;
@@ -388,7 +391,7 @@ namespace HpskSite.Services
         {
             try
             {
-                var competition = _contentService.GetById(team.CompetitionId);
+                var competition = _competitions.GetSaved(team.CompetitionId);
                 if (competition == null) return (true, "");   // nothing to reconcile against
 
                 var hubs = _invoiceHubs.Hubs(competition.Id).ToList();
@@ -1412,8 +1415,8 @@ namespace HpskSite.Services
             {
                 if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
                 {
-                    var comp = ctx.Content.GetById(competitionId);
-                    return comp?.Value<string>("competitionType") ?? "Precision";
+                    var comp = _competitions.Get(competitionId);
+                    return comp?.CompetitionType ?? "Precision";
                 }
             }
             catch { }
@@ -1448,14 +1451,14 @@ namespace HpskSite.Services
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null) return null;
 
                 // ⚠️ Tävlingstypen läses ur KONFIGURATIONEN först. Egenskapen `scoringMode` är
                 // en spegel som bara synkas vid Anslut och kan vara inaktuell — läses den ensam
                 // scoras en poängfälttävling som normalfält, tyst.
-                var config = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig"));
-                var scoringMode = FaltskytteScoringMode.Resolve(config, competition.GetValue<string>("scoringMode"));
+                var config = FaltskytteConfigParser.Parse(competition.StationConfig);
+                var scoringMode = FaltskytteScoringMode.Resolve(config, competition.ScoringMode);
 
                 // Särskjutningsstationer räknas ALDRIG in i lagresultatet. En särskjutning
                 // avgör en placering inom en omgång; att lägga den i totalen betalar en skytt
@@ -1685,11 +1688,10 @@ namespace HpskSite.Services
         /// </summary>
         private async Task<IContent?> EnsureTeamInvoiceCoreAsync(int competitionId, int teamId, string teamName, int clubId, bool isRelay)
         {
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null || competition.GetValue<bool>("isExternal")) return null;
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null || competition.IsExternal) return null;
 
-            var feeProp = isRelay ? "stafettRegistrationFee" : "teamRegistrationFee";
-            var feeStr = competition.GetValue<string>(feeProp) ?? "0";
+            var feeStr = (isRelay ? competition.StafettRegistrationFee : competition.TeamRegistrationFee) ?? "0";
             if (!decimal.TryParse(feeStr, out var fee) || fee <= 0) return null;
 
             var teamMemberId = $"team-{teamId}";

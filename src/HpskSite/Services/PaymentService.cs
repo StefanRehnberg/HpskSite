@@ -38,6 +38,7 @@ namespace HpskSite.Services
 
         private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public PaymentService(ILogger<PaymentService> logger,
             IContentService contentService,
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -51,8 +52,10 @@ namespace HpskSite.Services
             HpskSite.Services.CompetitionFees.CompetitionPaymentModelService paymentModels,
             HpskSite.Services.CompetitionFees.CompetitionFeeService competitionFees,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.LegacyInvoiceHubs invoiceHubs)
+            HpskSite.Services.LegacyInvoiceHubs invoiceHubs,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _invoiceHubs = invoiceHubs;
             _registrations = registrations;
             _appCaches = appCaches;
@@ -177,7 +180,7 @@ namespace HpskSite.Services
         private int GetNextInvoiceNumberForMember(int competitionId, string memberId, int currentInvoiceUmbracoId)
         {
             var umbracoContext = _umbracoContextAccessor.GetRequiredUmbracoContext();
-            var competition = umbracoContext.Content.GetById(competitionId);
+            var competition = _competitions.Get(competitionId);
             if (competition == null) return 1;
 
             var invoicesHub = _invoiceHubs.PublishedHub(competition.Id);
@@ -567,7 +570,7 @@ namespace HpskSite.Services
                     return Task.FromResult<IContent?>(null);
                 }
 
-                var competition = umbracoContext.Content.GetById(competitionId);
+                var competition = _competitions.Get(competitionId);
                 if (competition == null)
                 {
                     _logger.LogWarning("Competition {CompetitionId} not found", competitionId);
@@ -575,7 +578,7 @@ namespace HpskSite.Services
                 }
 
                 // VALIDATION: Check if competition is external
-                var isExternal = competition.Value<bool>("isExternal");
+                var isExternal = competition.IsExternal;
                 if (isExternal)
                 {
                     _logger.LogWarning("Attempt to create invoice for external competition {CompetitionId}. Invoices are not created for external competitions.", competitionId);
@@ -704,13 +707,13 @@ namespace HpskSite.Services
             try
             {
                 _umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext);
-                var competition = umbracoContext?.Content?.GetById(competitionId);
-                if (competition == null || competition.ContentType.Alias != "competition")
+                var competition = _competitions.Get(competitionId);
+                if (competition == null)
                 {
                     _logger.LogError("CreateStandaloneInvoiceAsync: {CompetitionId} is not a competition", competitionId);
                     return Task.FromResult<IContent?>(null);
                 }
-                if (competition.Value<bool>("isExternal"))
+                if (competition.IsExternal)
                 {
                     _logger.LogWarning("CreateStandaloneInvoiceAsync: competition {CompetitionId} is external — no invoices", competitionId);
                     return Task.FromResult<IContent?>(null);
@@ -936,8 +939,8 @@ namespace HpskSite.Services
                 var registration = _registrations.GetById(registrationId);
                 if (registration == null) return null;
 
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null || competition.GetValue<bool>("isExternal"))
+                var competition = _competitions.GetSaved(competitionId);
+                if (competition == null || competition.IsExternal)
                     return null;
 
                 var memberId = registration.MemberId;
@@ -1038,8 +1041,8 @@ namespace HpskSite.Services
                 var registration = _registrations.GetById(registrationId);
                 if (registration == null) return false;
 
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null || competition.GetValue<bool>("isExternal"))
+                var competition = _competitions.GetSaved(competitionId);
+                if (competition == null || competition.IsExternal)
                     return false;
 
                 var memberId = registration.MemberId;
@@ -1122,7 +1125,7 @@ namespace HpskSite.Services
         public RegistrationInvoiceTotals GetInvoiceTotalsForRegistration(int competitionId, int registrationId)
         {
             var result = new RegistrationInvoiceTotals();
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             var registration = _registrations.GetById(registrationId);
             if (competition == null || registration == null)
                 return result;
@@ -1161,7 +1164,7 @@ namespace HpskSite.Services
         public Dictionary<int, decimal> GetOutstandingByRegistration(int competitionId)
         {
             var result = new Dictionary<int, decimal>();
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return result;
 
             var children = _contentService.GetPagedChildren(competitionId, 0, 200, out _).ToList();
@@ -1205,7 +1208,7 @@ namespace HpskSite.Services
         /// <see cref="RegistrationFeeCalculator"/>. En anmälan utan klasser räknas som en anmälan med
         /// en tom klass, samma regel som förut.
         /// </summary>
-        private static decimal FeeFor(IContent competition, HpskSite.Models.Registrations.RegistrationRecord registration)
+        private static decimal FeeFor(HpskSite.Models.Competitions.CompetitionInfo competition, HpskSite.Models.Registrations.RegistrationRecord registration)
         {
             var classCodes = registration.ClassIds;
             var classesForCalc = classCodes.Count > 0
@@ -1233,7 +1236,7 @@ namespace HpskSite.Services
         /// All non-cancelled invoices for a registration (matched by <c>registrationId</c> or the
         /// legacy <c>relatedRegistrationIds</c> JSON array), newest first.
         /// </summary>
-        private List<IContent> GetAllNonCancelledInvoicesForRegistration(IContent competition, int registrationId)
+        private List<IContent> GetAllNonCancelledInvoicesForRegistration(HpskSite.Models.Competitions.CompetitionInfo competition, int registrationId)
         {
             var hub = _invoiceHubs.Hub(competition.Id);
             if (hub == null) return new List<IContent>();
@@ -1253,7 +1256,7 @@ namespace HpskSite.Services
         /// single <c>registrationId</c>, the legacy <c>relatedRegistrationIds</c> JSON array,
         /// or — as a fallback for invoices not yet linked — the member id. Newest first.
         /// </summary>
-        private IContent? FindActiveInvoiceForRegistration(IContent competition, int registrationId, int memberId)
+        private IContent? FindActiveInvoiceForRegistration(HpskSite.Models.Competitions.CompetitionInfo competition, int registrationId, int memberId)
         {
             var hub = _invoiceHubs.Hub(competition.Id);
             if (hub == null) return null;
@@ -1472,13 +1475,13 @@ namespace HpskSite.Services
                 var paidAt = invoice.GetValue<DateTime?>("paymentDate") ?? DateTime.Now;
 
                 var competitionId = invoice.GetValue<int>("competitionId");
-                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
-                var competitionName = competition?.GetValue<string>("competitionName") ?? competition?.Name ?? "";
+                var competition = competitionId > 0 ? _competitions.GetSaved(competitionId) : null;
+                var competitionName = competition?.CompetitionName ?? competition?.Name ?? "";
 
                 // Resolve the organizer name (hosting club, or the region for region-hosted
                 // comps) for the confirmation. The full issuer details (org.nr + address)
                 // live on the printable Kvitto, not in this confirmation email.
-                var organizerClubId = competition?.GetValue<int>("clubId") ?? 0;
+                var organizerClubId = competition?.ClubId ?? 0;
                 string organizerName;
                 if (organizerClubId > 0)
                 {
@@ -1486,7 +1489,7 @@ namespace HpskSite.Services
                 }
                 else
                 {
-                    var regionCode = competition?.GetValue<string>("regionalFederation") ?? "";
+                    var regionCode = competition?.RegionalFederation ?? "";
                     var regionNode = !string.IsNullOrWhiteSpace(regionCode) ? FindRegionByCode(regionCode) : null;
                     organizerName = regionNode?.GetValue<string>("regionName") ?? regionNode?.Name ?? "";
                 }
@@ -1625,7 +1628,7 @@ namespace HpskSite.Services
             try
             {
                 var umbracoContext = _umbracoContextAccessor.GetRequiredUmbracoContext();
-                var competition = umbracoContext.Content.GetById(competitionId);
+                var competition = _competitions.Get(competitionId);
                 
                 if (competition == null) return new List<RegistrationInvoice>();
 
@@ -1704,7 +1707,7 @@ namespace HpskSite.Services
                     return Task.FromResult<IContent?>(null);
                 }
 
-                var competition = umbracoContext.Content.GetById(competitionId);
+                var competition = _competitions.Get(competitionId);
                 if (competition == null)
                 {
                     _logger.LogWarning("Competition {CompetitionId} not found", competitionId);

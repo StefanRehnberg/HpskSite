@@ -46,6 +46,7 @@ namespace HpskSite.Controllers
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly ILogger<SwishController> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public SwishController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -63,9 +64,11 @@ namespace HpskSite.Controllers
             ConsolidatedInvoiceService consolidatedService,
             AdminAuthorizationService authorizationService,
             ILogger<SwishController> logger,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _registrations = registrations;
             _memberManager = memberManager ?? throw new ArgumentNullException(nameof(memberManager));
             _memberService = memberService ?? throw new ArgumentNullException(nameof(memberService));
@@ -143,18 +146,18 @@ namespace HpskSite.Controllers
 
                 // Get competition details
                 var umbracoContext = UmbracoContext;
-                var competition = umbracoContext.Content.GetById(competitionId);
+                var competition = _competitions.Get(competitionId);
                 if (competition == null)
                 {
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
                 }
 
-                var swishNumber = competition.Value<string>("swishNumber");
-                var _feeStr = competition.Value<string>("registrationFee") ?? "0";
+                var swishNumber = competition.SwishNumber;
+                var _feeStr = competition.RegistrationFee ?? "0";
                 decimal.TryParse(_feeStr, out var registrationFee);
-                var _juniorFeeStr = competition.Value<string>("juniorRegistrationFee") ?? "0";
+                var _juniorFeeStr = competition.JuniorRegistrationFee ?? "0";
                 decimal.TryParse(_juniorFeeStr, out var juniorFeeConfigured);
-                var _subCompFeeStr = competition.Value<string>("subCompetitionFee") ?? "0";
+                var _subCompFeeStr = competition.SubCompetitionFee ?? "0";
                 decimal.TryParse(_subCompFeeStr, out var subCompFeeConfigured);
 
                 _logger.LogInformation("Swish payment request - CompetitionId: {CompetitionId}, SwishNumber: {SwishNumber}, RegistrationFee: {RegistrationFee}, JuniorFee: {JuniorFee}, SubCompFee: {SubCompFee}",
@@ -282,7 +285,7 @@ namespace HpskSite.Controllers
 
                 var subCompPortion = RegistrationFeeCalculator.CalculateSubCompetitionPortion(
                     competition, classesForCalc, registeredIsSubCompetition);
-                var subCompetitionName = competition.Value<string>("subCompetitionName") ?? "";
+                var subCompetitionName = competition.SubCompetitionName ?? "";
 
                 return Json(new {
                     success = true,
@@ -336,12 +339,12 @@ namespace HpskSite.Controllers
                 if (currentMember == null)
                     return Json(new { success = false, invoices = Array.Empty<object>() });
 
-                var competition = UmbracoContext?.Content?.GetById(competitionId);
+                var competition = _competitions.Get(competitionId);
                 if (competition == null)
                     return Json(new { success = false, invoices = Array.Empty<object>() });
 
                 var memberId = currentMember.Id.ToString();
-                var feeStr = competition.Value<string>("registrationFee") ?? "0";
+                var feeStr = competition.RegistrationFee ?? "0";
                 decimal.TryParse(feeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var registrationFee);
 
                 var unpaid = new List<object>();
@@ -525,13 +528,13 @@ namespace HpskSite.Controllers
                 if (currentMember == null)
                     return Json(new { success = false, message = "Du måste vara inloggad." });
 
-                var competition = UmbracoContext.Content.GetById(competitionId);
+                var competition = _competitions.Get(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
 
                 // Team fees are typically paid BY THE CLUB, which normally means bankgiro — so a missing
                 // Swish number must not block the payment dialog when the organiser has a BG.
-                var swishNumber = competition.Value<string>("swishNumber");
+                var swishNumber = competition.SwishNumber;
                 var teamPayee = _consolidatedService.ResolvePayee(competitionId);
                 var teamHasSwish = !string.IsNullOrEmpty(swishNumber);
                 if (!teamHasSwish && string.IsNullOrEmpty(teamPayee.BgNumber))
@@ -548,8 +551,7 @@ namespace HpskSite.Controllers
                 if (team == null)
                     return Json(new { success = false, message = "Laget kunde inte hittas." });
 
-                var feeProperty = team.IsRelay ? "stafettRegistrationFee" : "teamRegistrationFee";
-                var feeStr = competition.Value<string>(feeProperty) ?? "0";
+                var feeStr = (team.IsRelay ? competition.StafettRegistrationFee : competition.TeamRegistrationFee) ?? "0";
                 if (!decimal.TryParse(feeStr, out var teamFee) || teamFee <= 0)
                     return Json(new { success = false, message = "Ingen lagavgift är konfigurerad." });
 
@@ -731,13 +733,13 @@ namespace HpskSite.Controllers
                     }
 
                     // Generate QR code for existing invoice
-                    var competition = umbracoContext.Content.GetById(request.CompetitionId);
+                    var competition = _competitions.Get(request.CompetitionId);
                     if (competition == null)
                     {
                         return Json(new { success = false, message = "Tävling kunde inte hittas." });
                     }
 
-                    var swishNumber = competition.Value<string>("swishNumber");
+                    var swishNumber = competition.SwishNumber;
                     var totalAmount = existingInvoice.Value<decimal>("totalAmount");
                     var invoiceNumber = existingInvoice.Value<string>("invoiceNumber") ?? existingInvoice.Id.ToString();
                     var message = $"Betalning: {invoiceNumber}";
@@ -878,7 +880,7 @@ namespace HpskSite.Controllers
                 var userRegistrations = new List<object>();
 
                 // Get the competition first, then find its registrations
-                var competitionForPayment = umbracoContext.Content.GetById(competitionId);
+                var competitionForPayment = _competitions.Get(competitionId);
                 if (competitionForPayment == null)
                 {
                     return Json(new { success = false, message = "Tävling kunde inte hittas." });
@@ -945,19 +947,19 @@ namespace HpskSite.Controllers
 
                 // Get competition details
                 var umbracoContext = UmbracoContext;
-                var competition = umbracoContext.Content.GetById(competitionId);
+                var competition = _competitions.Get(competitionId);
                 if (competition == null)
                 {
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
                 }
 
                 var competitionName = competition.Name;
-                var swishNumber = competition.Value<string>("swishNumber");
-                var _feeStr = competition.Value<string>("registrationFee") ?? "0";
+                var swishNumber = competition.SwishNumber;
+                var _feeStr = competition.RegistrationFee ?? "0";
                 decimal.TryParse(_feeStr, out var registrationFee);
-                var _juniorFeeStr = competition.Value<string>("juniorRegistrationFee") ?? "0";
+                var _juniorFeeStr = competition.JuniorRegistrationFee ?? "0";
                 decimal.TryParse(_juniorFeeStr, out var juniorFeeConfigured);
-                var _subCompFeeStr = competition.Value<string>("subCompetitionFee") ?? "0";
+                var _subCompFeeStr = competition.SubCompetitionFee ?? "0";
                 decimal.TryParse(_subCompFeeStr, out var subCompFeeConfigured);
 
                 if (string.IsNullOrEmpty(swishNumber))
@@ -1146,7 +1148,7 @@ namespace HpskSite.Controllers
                 if (callerData == null)
                     return Json(new { success = false, message = "Kunde inte hitta din profil." });
 
-                var competition = UmbracoContext.Content.GetById(competitionId);
+                var competition = _competitions.Get(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
 
@@ -1165,8 +1167,8 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Laget kunde inte hittas." });
 
                 var kindLabel = team.IsRelay ? "Stafett" : "Lag";
-                var swishNumber = competition.Value<string>("swishNumber");
-                var feeStr = competition.Value<string>(team.IsRelay ? "stafettRegistrationFee" : "teamRegistrationFee") ?? "0";
+                var swishNumber = competition.SwishNumber;
+                var feeStr = (team.IsRelay ? competition.StafettRegistrationFee : competition.TeamRegistrationFee) ?? "0";
                 if (!decimal.TryParse(feeStr, out var teamFee) || teamFee <= 0 || string.IsNullOrEmpty(swishNumber))
                     return Json(new { success = false, message = "Betalning ej konfigurerad." });
 

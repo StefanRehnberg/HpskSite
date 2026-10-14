@@ -44,12 +44,12 @@ namespace HpskSite.Services.StartListCleanup
             string.IsNullOrWhiteSpace(competitionType) || PrecisionFamily.IsMember(competitionType);
 
         // Tävlingens direkta listor (grundomgång och finaler), som förut — inte hubbens.
-        private List<HpskSite.Models.StartLists.StartListRecord> StartListNodes(IContent competition) =>
+        private List<HpskSite.Models.StartLists.StartListRecord> StartListNodes(HpskSite.Models.Competitions.CompetitionInfo competition) =>
             _startLists.List(competition.Id).Where(r => !r.LegacyHub).ToList();
 
         private static bool IsPublished(HpskSite.Models.StartLists.StartListRecord node) => node.IsOfficial;
 
-        public Task<List<StartListPlacement>> DescribePlacementsAsync(IContent competition, int memberId)
+        public Task<List<StartListPlacement>> DescribePlacementsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, int memberId)
         {
             var found = new List<StartListPlacement>();
 
@@ -79,7 +79,7 @@ namespace HpskSite.Services.StartListCleanup
             return Task.FromResult(found);
         }
 
-        public async Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId, string? onlyShootingClass = null)
+        public async Task<CleanupOutcome> CleanupAsync(HpskSite.Models.Competitions.CompetitionInfo competition, int memberId, string? onlyShootingClass = null)
         {
             // Keyed per class here, matching how placement works in this family: each registered
             // class holds its own position in a skjutlag.
@@ -101,7 +101,7 @@ namespace HpskSite.Services.StartListCleanup
             // markup. A DP list is fully derived from the registrations, so regenerating is both
             // correct and cheaper. Same rule as RegistrationClubPropagationService.
             var dpConfig = DirektplaceringConfig.Parse(
-                competition.HasProperty("direktplaceringConfig") ? competition.GetValue<string>("direktplaceringConfig") : null);
+                competition.DirektplaceringConfig);
 
             if (dpConfig != null)
             {
@@ -201,12 +201,12 @@ namespace HpskSite.Services.StartListCleanup
             }
         }
 
-        private async Task<int> DeleteResultRowsAsync(IContent competition, int memberId, string? onlyShootingClass, List<string> warnings)
+        private async Task<int> DeleteResultRowsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, int memberId, string? onlyShootingClass, List<string> warnings)
         {
             // ⚠️ No silent fallback here. `For()` answers PrecisionResultEntry for anything unknown,
             // which is right for a READ and dangerous for a DELETE — a typo in the type would delete
             // from the wrong discipline's table.
-            var type = competition.GetValue<string>("competitionType");
+            var type = competition.CompetitionType;
             if (!CompetitionResultTables.TryFor(type, out var table))
             {
                 // Empty type is the documented legacy Precision shape, so that one is safe.

@@ -157,6 +157,35 @@ namespace HpskSite.Services
             ReadFee(competition, SubCompetitionFeeAlias),
             competition.Value<string>(SubCompetitionFeeModeAlias));
 
+        // ── C3-planen S3: samma regler på tävlingsposten (läsarna flyttas hit) ──────────────
+
+        public static FeeConfig ReadConfig(HpskSite.Models.Competitions.CompetitionInfo competition) => new(
+            ParseFee(competition.RegistrationFee),
+            ParseFeeOrNull(competition.JuniorRegistrationFee),
+            ParseFee(competition.SubCompetitionFee),
+            competition.SubCompetitionFeeMode);
+
+        public static decimal Calculate(
+            HpskSite.Models.Competitions.CompetitionInfo? competition,
+            IReadOnlyCollection<string> selectedClasses,
+            bool isSubCompetition)
+        {
+            if (competition == null) return 0;
+            var c = ReadConfig(competition);
+            return CalculateTotal(selectedClasses, isSubCompetition, c.BaseFee, c.JuniorFee, c.SubCompFee, c.SubCompFeeMode);
+        }
+
+        public static decimal CalculateSubCompetitionPortion(
+            HpskSite.Models.Competitions.CompetitionInfo? competition,
+            IReadOnlyCollection<string> selectedClasses,
+            bool isSubCompetition)
+        {
+            if (!isSubCompetition || competition == null) return 0;
+            var subCompFee = ParseFee(competition.SubCompetitionFee);
+            if (subCompFee <= 0) return 0;
+            return ComputeSubCompPortion(selectedClasses, subCompFee, competition.SubCompetitionFeeMode);
+        }
+
         /// <summary>En klass avgift: grund- eller junioravgift, plus deltävlingen när den tas per klass.</summary>
         public static decimal FeeForClass(FeeConfig config, string cls, bool isSubCompetition)
         {
