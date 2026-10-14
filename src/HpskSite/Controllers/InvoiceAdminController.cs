@@ -61,6 +61,7 @@ namespace HpskSite.Controllers
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public InvoiceAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -80,9 +81,11 @@ namespace HpskSite.Controllers
             IMemberManager memberManager,
             ConsolidatedInvoiceService consolidatedService,
             MemberClubService memberClubService,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _registrations = registrations;
             _consolidatedService = consolidatedService;
             _memberClubService = memberClubService;
@@ -1308,7 +1311,7 @@ namespace HpskSite.Controllers
                 // Get competition details
                 var competitionId = invoice.GetValue<int>("competitionId");
                 var umbracoContext = _umbracoContextAccessor.GetRequiredUmbracoContext();
-                var competition = umbracoContext.Content.GetById(competitionId);
+                var competition = _competitions.Get(competitionId);
                 if (competition == null)
                 {
                     return Json(new { success = false, message = "Competition not found" });
@@ -1335,7 +1338,7 @@ namespace HpskSite.Controllers
 
                 // Get Swish details from competition. The mail embeds a Swish QR, so it still needs a
                 // Swish number; the organiser's bankgiro rides along in the body as the alternative.
-                var swishNumber = competition.Value<string>("swishNumber");
+                var swishNumber = competition.SwishNumber;
                 if (string.IsNullOrEmpty(swishNumber))
                 {
                     return Json(new { success = false, message = "Competition has no Swish number configured" });
@@ -1435,7 +1438,7 @@ namespace HpskSite.Controllers
                 // Get competition details
                 var competitionId = invoice.GetValue<int>("competitionId");
                 var umbracoContext = _umbracoContextAccessor.GetRequiredUmbracoContext();
-                var competition = umbracoContext.Content.GetById(competitionId);
+                var competition = _competitions.Get(competitionId);
                 if (competition == null)
                 {
                     return Json(new { success = false, message = "Competition not found" });
@@ -1445,7 +1448,7 @@ namespace HpskSite.Controllers
                 // club/krets. Either one alone is enough to pay — a BG-only organiser used to get
                 // "Competition has no Swish number configured" and no way to pay at all.
                 var payee = _consolidatedService.ResolvePayee(competitionId);
-                var swishNumber = competition.Value<string>("swishNumber");
+                var swishNumber = competition.SwishNumber;
                 var bgNumber = payee.BgNumber;
                 if (string.IsNullOrEmpty(swishNumber) && string.IsNullOrEmpty(bgNumber))
                 {
@@ -1591,14 +1594,14 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "competitionId is required" });
 
             // Same four-tier rule as the rest of the per-competition surface.
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Competition not found" });
 
             bool authorized = await _authService.CanManageCompetitionFinanceAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
             if (!authorized) return Json(new { success = false, message = "Access denied" });
 
-            var swishNumber = competition.GetValue<string>("swishNumber");
+            var swishNumber = competition.SwishNumber;
             if (string.IsNullOrEmpty(swishNumber))
                 return Json(new { success = false, message = "Tävlingen saknar Swish-nummer." });
             var reminderPayee = _consolidatedService.ResolvePayee(competitionId);
@@ -1622,7 +1625,7 @@ namespace HpskSite.Controllers
 
             var (actorId, actorName) = await GetCurrentActorAsync();
             var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
-            var competitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "";
+            var competitionName = competition.CompetitionName ?? competition.Name ?? "";
             var sentCount = 0;
             var skippedCount = 0;
             var errors = new List<string>();
@@ -1757,7 +1760,7 @@ namespace HpskSite.Controllers
             if (competitionId <= 0)
                 return Json(new { success = false, message = "competitionId is required" });
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Competition not found" });
 
@@ -1801,7 +1804,7 @@ namespace HpskSite.Controllers
             if (competitionId <= 0)
                 return Json(new { success = false, message = "competitionId is required" });
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Competition not found" });
 
@@ -1904,7 +1907,7 @@ namespace HpskSite.Controllers
             if (competitionId <= 0)
                 return Json(new { success = false, message = "competitionId is required" });
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Competition not found" });
 
@@ -1912,7 +1915,7 @@ namespace HpskSite.Controllers
             bool authorized = await _authService.CanManageCompetitionFinanceAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
             if (!authorized) return Json(new { success = false, message = "Access denied" });
 
-            var swishNumber = competition.GetValue<string>("swishNumber");
+            var swishNumber = competition.SwishNumber;
             if (string.IsNullOrEmpty(swishNumber))
                 return Json(new { success = false, message = "Tävlingen saknar Swish-nummer." });
             var testPayee = _consolidatedService.ResolvePayee(competitionId);
@@ -1948,7 +1951,7 @@ namespace HpskSite.Controllers
             }
             if (amount <= 0m)
             {
-                decimal.TryParse(competition.GetValue<string>("registrationFee"), out amount);
+                decimal.TryParse(competition.RegistrationFee, out amount);
                 if (amount <= 0m) amount = 1m;  // QR needs a positive amount
             }
 
@@ -1958,7 +1961,7 @@ namespace HpskSite.Controllers
 
             try
             {
-                var competitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "";
+                var competitionName = competition.CompetitionName ?? competition.Name ?? "";
                 var normalizedSwishNumber = swishNumber.Trim().Replace(" ", "").Replace("-", "");
                 var qrMessage = $"Betalning: {invoiceNumber}";
                 var qrBytes = SwishQrCodeGenerator.GeneratePng(normalizedSwishNumber, amount.ToString("F2"), qrMessage);
@@ -2002,7 +2005,7 @@ namespace HpskSite.Controllers
         {
             if (competitionId <= 0) return BadRequest("competitionId is required");
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return NotFound("Competition not found");
 
             bool authorized = await _authService.CanManageCompetitionFinanceAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
@@ -2161,7 +2164,7 @@ namespace HpskSite.Controllers
                     .ToDictionary(g => g.Key, g => g.Count())
             };
 
-            var organizerClubId = competition.GetValue<int>("clubId");
+            var organizerClubId = competition.ClubId;
             string? organizerName = organizerClubId > 0
                 ? _clubService.GetClubNameById(organizerClubId)
                 : null;
@@ -2173,13 +2176,13 @@ namespace HpskSite.Controllers
             var model = new BokforingsUnderlagViewModel
             {
                 CompetitionId = competitionId,
-                CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
-                CompetitionDate = competition.GetValue<DateTime?>("competitionDate"),
-                CompetitionEndDate = competition.GetValue<DateTime?>("competitionEndDate"),
-                Venue = competition.GetValue<string>("venue"),
+                CompetitionName = competition.CompetitionName ?? competition.Name ?? "",
+                CompetitionDate = competition.CompetitionDate,
+                CompetitionEndDate = competition.CompetitionEndDate,
+                Venue = competition.Venue,
                 Organizer = organizerName,
-                Scope = competition.GetValue<string>("competitionScope"),
-                SubCompetitionName = competition.GetValue<string>("subCompetitionName"),
+                Scope = competition.CompetitionScope,
+                SubCompetitionName = competition.SubCompetitionName,
                 GeneratedAt = DateTime.Now,
                 GeneratedBy = actorName,
                 IncludeOutstanding = includeOutstanding,

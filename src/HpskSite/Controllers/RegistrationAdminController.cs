@@ -49,6 +49,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public RegistrationAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -75,9 +76,11 @@ namespace HpskSite.Controllers
             ILogger<RegistrationAdminController> logger,
             BrokenLaneService brokenLanes,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.StartLists.IStartListStore startLists)
+            HpskSite.Services.StartLists.IStartListStore startLists,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _brokenLanes = brokenLanes;
             _registrations = registrations;
             _startLists = startLists;
@@ -271,7 +274,7 @@ namespace HpskSite.Controllers
                 var registration = stored.Clone();
 
                 var competitionId = registration.CompetitionId;
-                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+                var competition = competitionId > 0 ? _competitions.GetSaved(competitionId) : null;
 
                 // Four-tier auth — load competition first to find the club
                 bool authorized = await _authService.IsCurrentUserAdminAsync()
@@ -327,14 +330,14 @@ namespace HpskSite.Controllers
                 // Samma regel som anmälan — se ClassRegistrationRule.
                 var classRuleError = HpskSite.Models.ClassRegistrationRule.Conflict(
                     newClasses.Select(c => c.Class),
-                    competition?.GetValue<bool>(HpskSite.Models.ClassRegistrationRule.PropertyAlias) ?? false);
+                    competition?.AllowDualCClassRegistration ?? false);
                 if (classRuleError != null)
                     return Json(new { success = false, message = classRuleError });
 
                 // Capacity check: same rule as walk-in, but exclude this registration's existing
                 // contribution so re-saving without changing slots doesn't trip the guard.
                 var dpConfigEdit = competition != null
-                    ? HpskSite.Models.DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"))
+                    ? HpskSite.Models.DirektplaceringConfig.Parse(competition.DirektplaceringConfig)
                     : null;
                 if (dpConfigEdit != null && newClasses.Any(c => c.TeamNumber.HasValue))
                 {
@@ -595,7 +598,7 @@ namespace HpskSite.Controllers
         /// competition's invoicesHub. Matches both the new single-int registrationId field
         /// and the legacy relatedRegistrationIds JSON array. Returns null when no match.
         /// </summary>
-        private IContent? FindInvoiceForRegistration(IContent competition, int registrationId)
+        private IContent? FindInvoiceForRegistration(HpskSite.Models.Competitions.CompetitionInfo competition, int registrationId)
         {
             return GetAllInvoicesForRegistration(competition, registrationId).FirstOrDefault();
         }
@@ -607,7 +610,7 @@ namespace HpskSite.Controllers
         /// fee-recompute logic in UpdateCompetitionRegistration relies on summing across
         /// all of them, not just the most recent.
         /// </summary>
-        private List<IContent> GetAllInvoicesForRegistration(IContent competition, int registrationId)
+        private List<IContent> GetAllInvoicesForRegistration(HpskSite.Models.Competitions.CompetitionInfo competition, int registrationId)
         {
             var hub = InvoiceHubs.Hub(competition.Id);
             if (hub == null) return new List<IContent>();
@@ -644,7 +647,7 @@ namespace HpskSite.Controllers
                 // cashier (club admin / competition manager / skjutledare) can delete from the
                 // desk, not just site admins.
                 var competitionId = registration.CompetitionId;
-                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+                var competition = competitionId > 0 ? _competitions.GetSaved(competitionId) : null;
                 bool authorized = await _authService.IsCurrentUserAdminAsync()
                     || (competition != null && await _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved));
                 if (!authorized)
@@ -739,7 +742,7 @@ namespace HpskSite.Controllers
             try
             {
                 // Validate competition exists
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                 {
                     return Json(new { success = false, message = "Tävling hittades inte." });
@@ -820,14 +823,14 @@ namespace HpskSite.Controllers
                 // C2 och C Vet Y stå ihop oavsett tävlingens inställning.
                 var lateClassRuleError = HpskSite.Models.ClassRegistrationRule.Conflict(
                     classEntries.Select(e => e.Class),
-                    competition.GetValue<bool>(HpskSite.Models.ClassRegistrationRule.PropertyAlias));
+                    competition.AllowDualCClassRegistration);
                 if (lateClassRuleError != null)
                     return Json(new { success = false, message = lateClassRuleError });
 
                 // Capacity validation: refuse over-booking direktplacering slots. Compute
                 // existing usage across all *other* registrations, then verify each picked
                 // teamNumber still has remaining positions after this walk-in lands.
-                var dpConfig = HpskSite.Models.DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"));
+                var dpConfig = HpskSite.Models.DirektplaceringConfig.Parse(competition.DirektplaceringConfig);
                 if (dpConfig != null && classEntries.Any(e => e.TeamNumber.HasValue))
                 {
                     var capacityError = ValidateCapacity(competition.Id, dpConfig, classEntries, excludeRegistrationId: null);
@@ -889,7 +892,7 @@ namespace HpskSite.Controllers
         /// svarade efteranmälan "Kunde inte skapa anmälan" fast den fanns (genomgången 2026-10-13, C).
         /// Null = ombyggd; annars beskedet till funktionären.
         /// </summary>
-        private string? TryRegenerateDirektplacering(int competitionId, IContent competition, HpskSite.Models.DirektplaceringConfig dpConfig)
+        private string? TryRegenerateDirektplacering(int competitionId, HpskSite.Models.Competitions.CompetitionInfo competition, HpskSite.Models.DirektplaceringConfig dpConfig)
         {
             try
             {
@@ -953,7 +956,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -1020,7 +1023,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -1148,7 +1151,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Anmälan kunde inte hittas." });
 
                 var competitionId = registration.CompetitionId;
-                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+                var competition = competitionId > 0 ? _competitions.GetSaved(competitionId) : null;
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
 
@@ -1248,7 +1251,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Anmälan hittades inte." });
 
                 var competitionId = registration.CompetitionId;
-                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+                var competition = competitionId > 0 ? _competitions.GetSaved(competitionId) : null;
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -1276,7 +1279,7 @@ namespace HpskSite.Controllers
         /// </summary>
         /// <remarks>C3-planen S2: personalregeln i <see cref="AdminAuthorizationService.HasCompetitionStaffAccessAsync"/>,
         /// på det sparade läget som ytan alltid läst. <paramref name="competition"/> behövs inte längre.</remarks>
-        private Task<bool> CanManageCompetitionDeskAsync(IContent competition, int competitionId) =>
+        private Task<bool> CanManageCompetitionDeskAsync(HpskSite.Models.Competitions.CompetitionInfo competition, int competitionId) =>
             _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
 
         /// <summary>
@@ -1303,8 +1306,8 @@ namespace HpskSite.Controllers
                     || string.IsNullOrWhiteSpace(request.ShootingClass))
                     return Json(new { success = false, message = "Ogiltig begäran." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
-                if (competition == null || competition.ContentType.Alias != "competition")
+                var competition = _competitions.GetSaved(request.CompetitionId);
+                if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
                 if (!await CanManageCompetitionDeskAsync(competition, request.CompetitionId))
@@ -1373,8 +1376,8 @@ namespace HpskSite.Controllers
                 if (competitionId <= 0 || memberId <= 0)
                     return Json(new { success = false, message = "Ogiltig begäran." });
 
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null || competition.ContentType.Alias != "competition")
+                var competition = _competitions.GetSaved(competitionId);
+                if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
                 if (!await CanManageCompetitionDeskAsync(competition, competitionId))
@@ -1422,8 +1425,8 @@ namespace HpskSite.Controllers
             {
                 if (competitionId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
 
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null || competition.ContentType.Alias != "competition")
+                var competition = _competitions.GetSaved(competitionId);
+                if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
                 // Goes through the shared desk check, which carries the club-vs-region host rule —
@@ -1491,7 +1494,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -1615,7 +1618,7 @@ namespace HpskSite.Controllers
                 if (request == null || request.RegistrationId <= 0)
                     return Json(new { success = false, message = "Ogiltig begäran." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -1694,7 +1697,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -1916,7 +1919,7 @@ namespace HpskSite.Controllers
                 if (request == null || request.CompetitionId <= 0 || request.InvoiceId <= 0)
                     return Json(new { success = false, message = "Ogiltig begäran." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -1989,7 +1992,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -2038,8 +2041,8 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                decimal.TryParse(competition.GetValue<string>("teamRegistrationFee") ?? "0", out var teamFee);
-                decimal.TryParse(competition.GetValue<string>("stafettRegistrationFee") ?? "0", out var stafettFee);
+                decimal.TryParse(competition.TeamRegistrationFee ?? "0", out var teamFee);
+                decimal.TryParse(competition.StafettRegistrationFee ?? "0", out var stafettFee);
 
                 // Den nya modellen (P3/P4): lagets läge ur liggaren, som anmälningarnas.
                 var ledgerTeams = new Dictionary<int, HpskSite.Services.CompetitionFees.FeeItemStatus>();
@@ -2139,7 +2142,7 @@ namespace HpskSite.Controllers
                 if (request == null || request.TeamId <= 0 || request.CompetitionId <= 0)
                     return Json(new { success = false, message = "competitionId och teamId krävs." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -2203,8 +2206,8 @@ namespace HpskSite.Controllers
                 if (request == null || request.CompetitionId <= 0)
                     return Json(new { success = false, message = "competitionId krävs." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
-                if (competition == null || competition.ContentType.Alias != "competition")
+                var competition = _competitions.GetSaved(request.CompetitionId);
+                if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
                 // Same four-tier rule as the rest of the per-competition surface, plus the region path
@@ -2311,7 +2314,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Anmälan hittades inte." });
 
                 var competitionId = registration.CompetitionId;
-                var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+                var competition = competitionId > 0 ? _competitions.GetSaved(competitionId) : null;
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -2368,7 +2371,7 @@ namespace HpskSite.Controllers
         /// thereby locking the krets out of its own championship.</para>
         /// </summary>
         /// <remarks>C3-planen S2: samma personalregel, se <see cref="CanManageCompetitionDeskAsync"/>.</remarks>
-        private Task<bool> CanManageRegistrationsAsync(IContent competition, int competitionId) =>
+        private Task<bool> CanManageRegistrationsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, int competitionId) =>
             _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
 
         /// <summary>
@@ -2384,7 +2387,7 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> GetParticipantEmails(int competitionId)
         {
             if (competitionId <= 0) return Json(new { success = false, message = "competitionId krävs" });
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte" });
             if (!await CanManageRegistrationsAsync(competition, competitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
@@ -2444,7 +2447,7 @@ namespace HpskSite.Controllers
             if (competitionId <= 0)
                 return BadRequest("competitionId is required");
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return NotFound("Competition not found");
 
@@ -2483,7 +2486,7 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                var competitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "";
+                var competitionName = competition.DisplayName ?? "";
 
                 // Build CSV using ; separator (Swedish Excel default) and quote every field
                 // so commas and embedded line breaks in notes don't break parsing.
@@ -2594,7 +2597,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 return competition?.Name ?? "Unknown Competition";
             }
             catch
@@ -2611,7 +2614,7 @@ namespace HpskSite.Controllers
             try
             {
                 // Get the competition
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null) return "No Invoice";
 
                 // Find the "Betalningar" (invoices) hub under the competition
@@ -2653,7 +2656,7 @@ namespace HpskSite.Controllers
         /// "Ingen avgift") from a fee-bearing one that's missing its invoice ("No Invoice" →
         /// "Saknar Faktura", the error/edge case now that invoices are created eagerly).
         /// </summary>
-        private string NoInvoiceOrNoFee(IContent competition, int registrationId)
+        private string NoInvoiceOrNoFee(HpskSite.Models.Competitions.CompetitionInfo competition, int registrationId)
         {
             try
             {

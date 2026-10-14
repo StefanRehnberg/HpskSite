@@ -31,7 +31,7 @@ namespace HpskSite.Services.StartListCoverage
         public bool Supports(string? competitionType) =>
             !string.IsNullOrWhiteSpace(competitionType) && Types.Contains(competitionType.Trim());
 
-        public async Task<StartListCoverageResult> BuildAsync(IContent competition)
+        public async Task<StartListCoverageResult> BuildAsync(HpskSite.Models.Competitions.CompetitionInfo competition)
         {
             var placedRows = new List<CoverageBuilder.PlacedRow>();
             var patrolCount = 0;

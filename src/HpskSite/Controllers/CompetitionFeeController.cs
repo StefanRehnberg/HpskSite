@@ -53,6 +53,7 @@ namespace HpskSite.Controllers
         private readonly LedgerAccessService _ledgerAccess;
         private readonly LedgerIssuerResolver _issuers;
         private readonly ILogger<CompetitionFeeController> _logger;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
 
         public CompetitionFeeController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -75,10 +76,12 @@ namespace HpskSite.Controllers
             IDataProtectionProvider dataProtection,
             LedgerAccessService ledgerAccess,
             LedgerIssuerResolver issuers,
-            ILogger<CompetitionFeeController> logger)
+            ILogger<CompetitionFeeController> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _ledgerAccess = ledgerAccess;
+            _competitions = competitions;
             _issuers = issuers;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -207,7 +210,7 @@ namespace HpskSite.Controllers
                 if (!allowed) return Json(new { success = false, message = Denied });
             }
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             var settings = _fees.GetSettings(competitionId);
             var rows = _fees.LoadFeeRows(competitionId);
             var coverage = _fees.LoadCoverage(rows);
@@ -382,12 +385,12 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Betalaren saknar e-postadress." });
 
             var payee = _payees.ResolvePayee(row.SourceId ?? 0);
-            var competition = _contentService.GetById(row.SourceId ?? 0);
+            var competition = _competitions.GetSaved(row.SourceId ?? 0);
             var sent = await _email.SendCompetitionFeeCodeAsync(
-                payer.Email, payer.Name ?? "", competition?.GetValue<string>("competitionName") ?? competition?.Name ?? "",
+                payer.Email, payer.Name ?? "", competition?.DisplayName ?? "",
                 payee.Name, SwishQrCodeGenerator.IsValidSwishNumber(payee.SwishNumber) ? payee.SwishNumber : null,
                 payee.BgNumber, row.Amount, CompetitionFeeService.ReferenceFor(row),
-                competition?.GetValue<string>("contactEmail"));
+                competition?.ContactEmail);
 
             return Json(new
             {
@@ -415,7 +418,7 @@ namespace HpskSite.Controllers
 
             _fees.SyncTeam(competitionId, teamId, me);
             var rows = _fees.LoadFeeRows(competitionId).Where(r => r.SourceType == LedgerSourceType.TeamFee && r.SourceItemId == teamId).ToList();
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             var status = FeeItemStatus.For(competition == null ? 0 : CompetitionFeeService.TeamFee(competition, team.IsRelay), rows, _fees.LoadCoverage(rows));
             var open = rows.Where(r => r.VoidedUtc is null && r.ConfirmedUtc is null).ToList();
 
@@ -696,9 +699,9 @@ namespace HpskSite.Controllers
             if (rows.Count == 0) return Json(new { success = true, sent = 0, failed = 0, message = "Ingen har en obetald avgift att påminnas om." });
 
             var payee = _payees.ResolvePayee(competitionId);
-            var competition = _contentService.GetById(competitionId);
-            var name = competition?.GetValue<string>("competitionName") ?? competition?.Name ?? "";
-            var organiserEmail = competition?.GetValue<string>("contactEmail");
+            var competition = _competitions.GetSaved(competitionId);
+            var name = competition?.DisplayName ?? "";
+            var organiserEmail = competition?.ContactEmail;
             var swish = SwishQrCodeGenerator.IsValidSwishNumber(payee.SwishNumber) ? payee.SwishNumber : null;
             var members = _memberService.GetAllMembers(rows.Select(r => r.PayerMemberId!.Value).Distinct().ToArray())
                 .ToDictionary(m => m.Id);
@@ -822,9 +825,9 @@ namespace HpskSite.Controllers
 
         private async Task<bool> SendAsync(LedgerCharge charge, string email)
         {
-            var competition = _contentService.GetById(charge.SourceId);
+            var competition = _competitions.GetSaved(charge.SourceId);
             var sent = await _email.SendClubInvoiceAsync(email.Trim(), charge, DocumentUrl(charge.Id),
-                competition?.GetValue<string>("contactEmail"));
+                competition?.ContactEmail);
             if (sent) _charges.MarkSent(charge.Id, email.Trim());
             return sent;
         }
@@ -947,12 +950,12 @@ namespace HpskSite.Controllers
             {
                 var mine = rows.Where(r => r.SourceId == id).ToList();
                 var fees = mine.Where(r => r.SourceType != LedgerSourceType.CompetitionInvoice).ToList();
-                var node = _contentService.GetById(id);
+                var node = _competitions.GetSaved(id);
                 return new
                 {
                     competitionId = id,
-                    name = node?.GetValue<string>("competitionName") ?? node?.Name ?? $"Borttagen tävling (#{id})",
-                    date = node?.GetValue<DateTime?>("competitionDate")?.ToString("yyyy-MM-dd"),
+                    name = node?.DisplayName ?? $"Borttagen tävling (#{id})",
+                    date = node?.CompetitionDate?.ToString("yyyy-MM-dd"),
                     received = mine.Where(r => r.IsMoney).Sum(r => r.SettledAmount),
                     claimed = mine.Where(r => r.IsClaimedOnly).Sum(r => r.Amount),
                     open = fees.Where(r => r.VoidedUtc == null && r.ConfirmedUtc == null && r.ClaimedUtc == null).Sum(r => r.Amount),

@@ -29,7 +29,7 @@ namespace HpskSite.Services.StartListCleanup
         public bool Supports(string? competitionType) =>
             !string.IsNullOrWhiteSpace(competitionType) && Types.Contains(competitionType.Trim());
 
-        public async Task<List<StartListPlacement>> DescribePlacementsAsync(IContent competition, int memberId)
+        public async Task<List<StartListPlacement>> DescribePlacementsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, int memberId)
         {
             var found = new List<StartListPlacement>();
             try
@@ -64,7 +64,7 @@ namespace HpskSite.Services.StartListCleanup
             return found;
         }
 
-        public async Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId, string? onlyShootingClass = null)
+        public async Task<CleanupOutcome> CleanupAsync(HpskSite.Models.Competitions.CompetitionInfo competition, int memberId, string? onlyShootingClass = null)
         {
             // A patrol is per WEAPON GROUP, so a scoped removal narrows to the group — clearing
             // "C1" must not also pull the shooter out of their A patrol.

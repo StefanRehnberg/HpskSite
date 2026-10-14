@@ -17,9 +17,9 @@ namespace HpskSite.Services.StartListCoverage
 
         public StartListCoverageService(IEnumerable<IStartListCoverageSource> sources) => _sources = sources;
 
-        public async Task<StartListCoverageResult> BuildAsync(IContent competition)
+        public async Task<StartListCoverageResult> BuildAsync(HpskSite.Models.Competitions.CompetitionInfo competition)
         {
-            var type = competition.GetValue<string>("competitionType");
+            var type = competition.CompetitionType;
 
             var source = _sources.FirstOrDefault(s => s.Supports(type));
             if (source == null)

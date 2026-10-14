@@ -22,10 +22,10 @@ namespace HpskSite.Services.StartListCleanup
             _logger = logger;
         }
 
-        private IStartListCleanupSource? SourceFor(IContent competition) =>
-            _sources.FirstOrDefault(s => s.Supports(competition.GetValue<string>("competitionType")));
+        private IStartListCleanupSource? SourceFor(HpskSite.Models.Competitions.CompetitionInfo competition) =>
+            _sources.FirstOrDefault(s => s.Supports(competition.CompetitionType));
 
-        public async Task<List<StartListPlacement>> DescribePlacementsAsync(IContent competition, int memberId)
+        public async Task<List<StartListPlacement>> DescribePlacementsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, int memberId)
         {
             var source = SourceFor(competition);
             if (source == null) return new List<StartListPlacement>();
@@ -43,7 +43,7 @@ namespace HpskSite.Services.StartListCleanup
         /// already gone, so throwing here would report a failed deletion that actually succeeded and
         /// invite the operator to try again.
         /// </summary>
-        public async Task<CleanupOutcome> CleanupAsync(IContent competition, int memberId, string? onlyShootingClass = null)
+        public async Task<CleanupOutcome> CleanupAsync(HpskSite.Models.Competitions.CompetitionInfo competition, int memberId, string? onlyShootingClass = null)
         {
             var source = SourceFor(competition);
             if (source == null) return new CleanupOutcome { Supported = false };

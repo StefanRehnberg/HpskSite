@@ -39,6 +39,7 @@ namespace HpskSite.Services.CompetitionFees
         private readonly MemberClubService _memberClubs;
         private readonly ILogger<CompetitionFeeService> _logger;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
 
         public CompetitionFeeService(
             IUmbracoDatabaseFactory databaseFactory,
@@ -50,9 +51,11 @@ namespace HpskSite.Services.CompetitionFees
             CompetitionPaymentModelService models,
             MemberClubService memberClubs,
             ILogger<CompetitionFeeService> logger,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
             _registrations = registrations;
+            _competitions = competitions;
             _memberClubs = memberClubs;
             _databaseFactory = databaseFactory;
             _contentService = contentService;
@@ -281,16 +284,16 @@ namespace HpskSite.Services.CompetitionFees
 
         // ── Det som är skyldigt ──────────────────────────────────────────────────────────────
 
-        public List<FeePartAmount> DesiredForRegistration(IContent competition, RegistrationInfo reg, CompetitionFeeSettings settings, bool clubPays)
+        public List<FeePartAmount> DesiredForRegistration(HpskSite.Models.Competitions.CompetitionInfo competition, RegistrationInfo reg, CompetitionFeeSettings settings, bool clubPays)
         {
-            if (competition.GetValue<bool>("isExternal")) return new List<FeePartAmount>();
+            if (competition.IsExternal) return new List<FeePartAmount>();
             var config = RegistrationFeeCalculator.ReadConfig(competition);
             return CompetitionFeePlanner.SplitRegistration(config, reg.Classes, reg.IsSubCompetition, clubPays, settings.ClubPayable);
         }
 
-        public static decimal TeamFee(IContent competition, bool isRelay)
-            => competition.GetValue<bool>("isExternal") ? 0m
-               : RegistrationFeeCalculator.ReadFeeOrNull(competition, isRelay ? "stafettRegistrationFee" : "teamRegistrationFee") ?? 0m;
+        public static decimal TeamFee(HpskSite.Models.Competitions.CompetitionInfo competition, bool isRelay)
+            => competition.IsExternal ? 0m
+               : RegistrationFeeCalculator.ParseFeeOrNull(isRelay ? competition.StafettRegistrationFee : competition.TeamRegistrationFee) ?? 0m;
 
         // ── Synken ───────────────────────────────────────────────────────────────────────────
 
@@ -314,7 +317,7 @@ namespace HpskSite.Services.CompetitionFees
             if (_models.DecideAtFirstRegistration(competitionId) != CompetitionPaymentModels.Ledger)
                 return new SyncResult { Skipped = true };
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return new SyncResult { Error = "Tävlingen finns inte." };
 
             var reg = LoadRegistration(registrationId);
@@ -349,7 +352,7 @@ namespace HpskSite.Services.CompetitionFees
             if (_models.DecideAtFirstRegistration(competitionId) != CompetitionPaymentModels.Ledger)
                 return new SyncResult { Skipped = true };
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return new SyncResult { Error = "Tävlingen finns inte." };
 
             var team = LoadTeam(teamId);
@@ -475,11 +478,11 @@ namespace HpskSite.Services.CompetitionFees
         /// </summary>
         public CompetitionFeeOverview BuildOverview(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             var overview = new CompetitionFeeOverview
             {
                 CompetitionId = competitionId,
-                CompetitionName = competition?.GetValue<string>("competitionName") ?? competition?.Name ?? "",
+                CompetitionName = competition?.DisplayName ?? "",
                 Model = _models.Get(competitionId),
                 Settings = GetSettings(competitionId)
             };
@@ -515,7 +518,7 @@ namespace HpskSite.Services.CompetitionFees
             foreach (var reg in regs)
             {
                 var myRows = rowsByItem.GetValueOrDefault((LedgerSourceType.CompetitionRegistration, reg.Id)) ?? new List<LedgerPayment>();
-                var fee = competition.GetValue<bool>("isExternal") ? 0m
+                var fee = competition.IsExternal ? 0m
                     : reg.Classes.Sum(c => RegistrationFeeCalculator.FeeForClass(config, c, reg.IsSubCompetition))
                       + RegistrationFeeCalculator.PerRegistrationSurcharge(config, reg.IsSubCompetition);
 
@@ -596,12 +599,5 @@ namespace HpskSite.Services.CompetitionFees
         /// bankgirots 25 tecken, entydig, och går att slå upp i Anmälningars referenssök.
         /// </summary>
         public static string ReferenceFor(LedgerPayment row) => $"{row.SourceId}-P{row.Id}";
-
-        private static int ReadInt(IContent content, string alias)
-        {
-            if (!content.HasProperty(alias)) return 0;
-            var raw = content.GetValue<object>(alias)?.ToString();
-            return int.TryParse(raw, out var v) ? v : 0;
-        }
     }
 }

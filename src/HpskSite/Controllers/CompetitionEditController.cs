@@ -32,6 +32,7 @@ namespace HpskSite.Controllers
         private readonly Microsoft.Extensions.Logging.ILogger<CompetitionEditController> _logger;
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public CompetitionEditController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -43,9 +44,11 @@ namespace HpskSite.Controllers
             IPublishedContentQuery publishedContentQuery,
             HpskSite.Services.AdminAuthorizationService authorizationService,
             Microsoft.Extensions.Logging.ILogger<CompetitionEditController> logger,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _registrations = registrations;
             _contentService = contentService;
             _publishedContentQuery = publishedContentQuery;
@@ -92,7 +95,7 @@ namespace HpskSite.Controllers
 
             try
             {
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
 
                 var config = HpskSite.Models.DirektplaceringConfig.Parse(request.Config);

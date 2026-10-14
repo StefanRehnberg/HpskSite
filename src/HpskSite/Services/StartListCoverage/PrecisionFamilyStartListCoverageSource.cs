@@ -34,7 +34,7 @@ namespace HpskSite.Services.StartListCoverage
         public bool Supports(string? competitionType) =>
             string.IsNullOrWhiteSpace(competitionType) || HpskSite.CompetitionTypes.Common.PrecisionFamily.IsMember(competitionType);
 
-        public async Task<StartListCoverageResult> BuildAsync(IContent competition)
+        public async Task<StartListCoverageResult> BuildAsync(HpskSite.Models.Competitions.CompetitionInfo competition)
         {
             var startListNodes = _startLists.List(competition.Id, HpskSite.Models.StartLists.StartListKind.Qualifying)
                 .Where(r => !r.LegacyHub)

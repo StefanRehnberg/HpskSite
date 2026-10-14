@@ -11411,6 +11411,19 @@ tävling med sparade men opublicerade ändringar, 5361). ~25 handskrivna kopior 
 - Behörighetsrapporten och grindproven oförändrade mellan S1- och S2-bygget (`c3-compare` 0 avvikelser i
   auth/probes; korskontrollen 3092 överens, 0 oense).
 
+**S3 (läsarna flyttas, område för område).** Regeln: ett gammalt `IContentService.GetById` +
+`GetValue` blir `_competitions.GetSaved`, ett `Umbraco.Content(id)`/`ctx.Content.GetById` + `Value`
+blir `_competitions.Get` — läsläget följer det gamla anropet. Aliaskontrollen på anropsplatsen tas
+bort (lagringen prövar aliaset). Följder att räkna med: en tävling i papperskorgen hittas inte längre,
+och tom text är null (så `?? Name` slår till).
+- **Område 1, anmälan och lag (2026-10-14):** anmälan, avgifter, lag, fakturaadmin, Swish, medlemmens
+  historik, startlistornas täckning/städning och anmälningsgrinden. `RegistrationFeeCalculator` och
+  `StartListRegistrationGate` har överlagringar för `CompetitionInfo`; grindens `IPublishedContent`-
+  varianter finns kvar för `Competition.cshtml` och `CompetitionLinkCard` tills de ytorna flyttas.
+  Kvar på noden med flit: fakturaarkivets nodstruktur (`PaymentService`) och tävlingens URL. Taken
+  113 → 106 och 796 → 734. Verifierat: fångst utan ej godkända avvikelser, korskontroll 3092/0,
+  matrisen 8/8 + 36/36.
+
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
 `Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,

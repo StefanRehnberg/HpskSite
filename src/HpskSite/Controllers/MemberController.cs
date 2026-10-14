@@ -51,6 +51,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public MemberController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -74,9 +75,11 @@ namespace HpskSite.Controllers
             FaltskytteStatsService faltskytteStatsService,
             MemberDataPresenceService presenceService,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.Results.ICompetitionResultStore results)
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _registrations = registrations;
             _results = results;
             _memberService = memberService;
@@ -934,10 +937,10 @@ namespace HpskSite.Controllers
                     foreach (var group in groupedCompetitions)
                     {
                         // Get competition details from Umbraco content
-                        var competition = _contentService.GetById(group.Key.CompetitionId);
+                        var competition = _competitions.GetSaved(group.Key.CompetitionId);
                         if (competition == null) continue;
 
-                        var competitionDate = competition.GetValue<DateTime>("competitionDate");
+                        var competitionDate = (competition.CompetitionDate ?? DateTime.MinValue);
                         if (competitionDate.Year != filterYear) continue;
 
                         var competitionName = competition.Name ?? "Okänd tävling";
@@ -1812,13 +1815,13 @@ namespace HpskSite.Controllers
                     .Distinct()
                     .ToList();
 
-                var competitionDict = new Dictionary<int, IContent>();
+                var competitionDict = new Dictionary<int, HpskSite.Models.Competitions.CompetitionInfo>();
                 foreach (var compId in competitionIds)
                 {
                     try
                     {
-                        var comp = _contentService.GetById(compId);
-                        if (comp != null && !comp.Trashed && comp.ContentType.Alias == "competition")
+                        var comp = _competitions.GetSaved(compId);
+                        if (comp != null)
                         {
                             competitionDict[compId] = comp;
                         }
@@ -1858,14 +1861,14 @@ namespace HpskSite.Controllers
                         var classes = reg.ClassIds;
 
                         // Determine competition status
-                        var competitionDate = competition.GetValue<DateTime?>("competitionDate") ?? DateTime.MinValue;
+                        var competitionDate = competition.CompetitionDate ?? DateTime.MinValue;
                         var status = competitionDate > DateTime.Now ? "upcoming" : "past";
 
                         // Determine if competition is payable (has fee + Swish)
-                        var compFeeStr = competition.GetValue<string>("registrationFee") ?? "0";
+                        var compFeeStr = competition.RegistrationFee ?? "0";
                         decimal.TryParse(compFeeStr, System.Globalization.NumberStyles.Any,
                             System.Globalization.CultureInfo.InvariantCulture, out var compFee);
-                        var compSwish = competition.GetValue<string>("swishNumber") ?? "";
+                        var compSwish = competition.SwishNumber ?? "";
                         var isPayable = compFee > 0 && !string.IsNullOrWhiteSpace(compSwish);
 
                         // Get payment status from batch-loaded invoice lookup
@@ -1916,7 +1919,7 @@ namespace HpskSite.Controllers
                                 ? HpskSite.Extensions.CompetitionUrlExtensions.CompetitionUrl(pub) : $"/competitions/{competitionId}/",
                             CompetitionName = competition.Name ?? "Unknown",
                             CompetitionDate = competitionDate,
-                            CompetitionType = competition.GetValue<string>("competitionType") ?? "Precision",
+                            CompetitionType = competition.CompetitionType ?? "Precision",
                             ShootingClasses = classes,
                             CompetitionStatus = status,
                             PaymentStatus = paymentInfo.Item1,
@@ -2008,11 +2011,8 @@ namespace HpskSite.Controllers
                 {
                     try
                     {
-                        var competition = _contentService.GetById(competitionId);
-                        if (competition == null) continue;
-
                         // Tävlingens fakturamapp (förut bara bland de 20 första barnen — en mapp längre ned missades).
-                        var invoiceHub = InvoiceHubs.Hub(competition.Id);
+                        var invoiceHub = InvoiceHubs.Hub(competitionId);
 
                         if (invoiceHub == null) continue;
 
@@ -3027,7 +3027,7 @@ namespace HpskSite.Controllers
                 foreach (var group in byCompetition)
                 {
                     int competitionId = group.Key;
-                    var competition = _contentService.GetById(competitionId);
+                    var competition = _competitions.GetSaved(competitionId);
                     string competitionName = competition?.Name ?? $"Tävling #{competitionId}";
                     string weaponClass = "";
                     int totalScore = 0;
@@ -3075,7 +3075,7 @@ namespace HpskSite.Controllers
                     DateTime competitionDate = enteredAt;
                     if (competition != null)
                     {
-                        var compDate = competition.GetValue<DateTime>("competitionDate");
+                        var compDate = (competition.CompetitionDate ?? DateTime.MinValue);
                         if (compDate != default) competitionDate = compDate;
                     }
 
@@ -3224,11 +3224,11 @@ namespace HpskSite.Controllers
             var result = new List<int>();
 
             // Batch load competitions to check dates
-            var competitions = _contentService.GetByIds(competitionIds);
+            var competitions = competitionIds.Select(id => _competitions.GetSaved(id)).Where(c => c != null).Select(c => c!).ToList();
 
             foreach (var competition in competitions)
             {
-                var competitionDate = competition.GetValue<DateTime>("competitionDate");
+                var competitionDate = (competition.CompetitionDate ?? DateTime.MinValue);
                 if (competitionDate.Year == year)
                 {
                     result.Add(competition.Id);

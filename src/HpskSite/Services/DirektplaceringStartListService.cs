@@ -21,14 +21,17 @@ namespace HpskSite.Services
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
 
         public DirektplaceringStartListService(
             IContentService contentService,
             ClubService clubService,
             ILogger<DirektplaceringStartListService> logger,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.StartLists.IStartListStore startLists)
+            HpskSite.Services.StartLists.IStartListStore startLists,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _registrations = registrations;
             _startLists = startLists;
             _contentService = contentService;
@@ -45,10 +48,10 @@ namespace HpskSite.Services
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null) return;
 
-                var dpConfig = DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"));
+                var dpConfig = DirektplaceringConfig.Parse(competition.DirektplaceringConfig);
                 if (dpConfig == null) return;
 
                 Regenerate(competitionId, competition, dpConfig);
@@ -63,7 +66,7 @@ namespace HpskSite.Services
         private HpskSite.Models.StartLists.StartListRecord? CurrentList(int competitionId) =>
             _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying).FirstOrDefault(r => !r.LegacyHub);
 
-        public void Regenerate(int competitionId, IContent competition, DirektplaceringConfig dpConfig)
+        public void Regenerate(int competitionId, HpskSite.Models.Competitions.CompetitionInfo competition, DirektplaceringConfig dpConfig)
         {
             var currentList = CurrentList(competition.Id);
 
@@ -264,7 +267,7 @@ namespace HpskSite.Services
             public bool NeedsConfirmation => Rows.Count > 0 || (StartListIsManual && HasStartList);
         }
 
-        public AssignmentPlan Plan(IContent competition, DirektplaceringConfig dpConfig)
+        public AssignmentPlan Plan(HpskSite.Models.Competitions.CompetitionInfo competition, DirektplaceringConfig dpConfig)
         {
             var plan = new AssignmentPlan();
             var startList = CurrentList(competition.Id);
@@ -364,9 +367,9 @@ namespace HpskSite.Services
         /// </summary>
         public AssignmentPlan Apply(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId)
+            var competition = _competitions.GetSaved(competitionId)
                 ?? throw new InvalidOperationException("Tävlingen hittades inte.");
-            var dpConfig = DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"))
+            var dpConfig = DirektplaceringConfig.Parse(competition.DirektplaceringConfig)
                 ?? throw new InvalidOperationException("Egenbokning är inte påslagen.");
 
             var plan = Plan(competition, dpConfig);
