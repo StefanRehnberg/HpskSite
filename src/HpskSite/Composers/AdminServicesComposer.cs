@@ -219,6 +219,20 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.C3.LegacyCompetitionReadSnapshot>();
             builder.Services.AddScoped<HpskSite.Services.C3.CompetitionAuthorizationReport>();
             builder.Services.AddScoped<HpskSite.Services.C3.CompetitionUrlCorpusSource>();
+            builder.Services.AddScoped<HpskSite.Services.C3.CompetitionStoreComparison>();
+
+            // C3-planen S1: tävlingarnas och seriernas lagring. Växeln (SiteSetting Competitions:Store) står
+            // på node; tabellen används i S1 bara mot databaskopian. Läsarna flyttas hit i S3.
+            builder.Services.AddScoped<HpskSite.Services.Competitions.NodeCompetitionStore>();
+            builder.Services.AddScoped<HpskSite.Services.Competitions.SqlCompetitionStore>();
+            builder.Services.AddScoped<HpskSite.Services.Competitions.SwitchingCompetitionStore>();
+            builder.Services.AddScoped<HpskSite.Services.Competitions.ICompetitionStore>(
+                sp => sp.GetRequiredService<HpskSite.Services.Competitions.SwitchingCompetitionStore>());
+            builder.Services.AddScoped<HpskSite.Services.Competitions.NodeCompetitionSeriesStore>();
+            builder.Services.AddScoped<HpskSite.Services.Competitions.SqlCompetitionSeriesStore>();
+            builder.Services.AddScoped<HpskSite.Services.Competitions.SwitchingCompetitionSeriesStore>();
+            builder.Services.AddScoped<HpskSite.Services.Competitions.ICompetitionSeriesStore>(
+                sp => sp.GetRequiredService<HpskSite.Services.Competitions.SwitchingCompetitionSeriesStore>());
             builder.Services.Configure<Umbraco.Cms.Web.Common.ApplicationBuilder.UmbracoPipelineOptions>(options =>
                 options.AddFilter(new Umbraco.Cms.Web.Common.ApplicationBuilder.UmbracoPipelineFilter(
                     "RequestErrors", postPipeline: app => app.UseMiddleware<HpskSite.Middleware.RequestErrorMiddleware>())));
