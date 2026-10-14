@@ -1912,6 +1912,8 @@ namespace HpskSite.Controllers
                         {
                             RegistrationId = reg.Id,
                             CompetitionId = competitionId,
+                            CompetitionUrl = UmbracoContext?.Content?.GetById(competitionId) is { } pub
+                                ? HpskSite.Extensions.CompetitionUrlExtensions.CompetitionUrl(pub) : $"/competitions/{competitionId}/",
                             CompetitionName = competition.Name ?? "Unknown",
                             CompetitionDate = competitionDate,
                             CompetitionType = competition.GetValue<string>("competitionType") ?? "Precision",
@@ -3379,6 +3381,8 @@ namespace HpskSite.Controllers
     {
         public int RegistrationId { get; set; }
         public int CompetitionId { get; set; }
+        /// <summary>Den fina adressen (C3-planen §9a) — klienten bygger aldrig en adress av id:t.</summary>
+        public string CompetitionUrl { get; set; } = "";
         public string CompetitionName { get; set; } = "";
         public DateTime CompetitionDate { get; set; }
         public string CompetitionType { get; set; } = "Precision";

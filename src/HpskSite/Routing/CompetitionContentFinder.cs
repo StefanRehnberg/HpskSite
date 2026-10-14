@@ -1,3 +1,4 @@
+using Umbraco.Extensions;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Web;
@@ -43,7 +44,18 @@ namespace HpskSite.Routing
 
                         if (content != null && content.ContentType.Alias == "competition")
                         {
-                            // Set the published content for this request
+                            // Stefan 2026-10-14 (C3-planen §9a): den fina adressen är den enda. /competitions/{id}/
+                            // ger 301 dit i stället för att visa sidan — annars kopieras den här formen ur
+                            // webbläsaren och delas vidare (den var prods mest besökta tävlingsadress).
+                            // Frågesträngen följer med (?tab=… m.m.). Saknar tävlingen en fin adress visas
+                            // sidan här som förut, hellre än en 404.
+                            var pretty = content.Url();
+                            if (!string.IsNullOrEmpty(pretty) && pretty != "#"
+                                && !pretty.TrimEnd('/').Equals(path.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+                            {
+                                request.SetRedirectPermanent(pretty + request.Uri.Query);
+                                return Task.FromResult(true);
+                            }
                             request.SetPublishedContent(content);
                             return Task.FromResult(true);
                         }

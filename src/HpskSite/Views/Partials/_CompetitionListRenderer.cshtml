@@ -169,7 +169,7 @@
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
                             ${manage}
-                            <li><a class="dropdown-item" href="/competitions/${comp.id}/" target="_blank"><i class="bi bi-eye me-2 text-secondary"></i>Visa tävlingssidan</a></li>
+                            <li><a class="dropdown-item" href="${window.hpskCompEscape(comp.url || `/competitions/${comp.id}/`)}" target="_blank"><i class="bi bi-eye me-2 text-secondary"></i>Visa tävlingssidan</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><button class="dropdown-item" type="button" onclick="${call(editFn, editArgs)}"><i class="bi bi-pencil me-2 text-primary"></i>Redigera tävlingen</button></li>
                             <li><button class="dropdown-item" type="button" onclick="${call(copyFn, copyArgs)}"><i class="bi bi-files me-2 text-info"></i>Kopiera tävlingen</button></li>
