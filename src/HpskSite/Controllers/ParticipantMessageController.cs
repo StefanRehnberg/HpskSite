@@ -149,37 +149,7 @@ namespace HpskSite.Controllers
             return new Viewer(md.Id, name);
         }
 
-        private async Task<bool> HasCompetitionAccessAsync(int competitionId)
-        {
-            if (competitionId <= 0) return false;
-            try
-            {
-                if (await _auth.IsCurrentUserAdminAsync()) return true;
-                if (await _auth.IsCompetitionManager(competitionId)) return true;
-
-                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
-                    return false;
-                var comp = ctx.Content.GetById(competitionId);
-                if (comp == null) return false;
-
-                var clubId = comp.Value<int>("clubId");
-                if (clubId > 0)
-                {
-                    if (await _auth.IsClubAdminForClub(clubId)) return true;
-                    if (await _auth.IsSkjutledareForClub(clubId)) return true;
-                }
-                else
-                {
-                    var regionCode = comp.Value<string>("regionalFederation") ?? "";
-                    if (!string.IsNullOrEmpty(regionCode) && await _auth.IsRegionalAdminForRegion(regionCode))
-                        return true;
-                }
-                return false;
-            }
-            catch
-            {
-                return false;
-            }
-        }
+        private Task<bool> HasCompetitionAccessAsync(int competitionId) =>
+            _auth.HasCompetitionStaffAccessAsync(competitionId);
     }
 }

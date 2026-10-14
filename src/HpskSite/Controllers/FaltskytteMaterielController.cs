@@ -56,17 +56,9 @@ namespace HpskSite.Controllers
             return View("~/Views/FaltskytteMateriel.cshtml", bom);
         }
 
-        // Mirrors FaltskyttePrintController.IsStaffForCompetition.
-        private async Task<bool> IsStaffForCompetition(int competitionId)
-        {
-            if (await _auth.IsCurrentUserAdminAsync()) return true;
-            if (await _auth.IsCompetitionManager(competitionId)) return true;
-            if ((await _auth.GetManagedRegions()).Any()) return true;
-            var comp = _contentService.GetById(competitionId);
-            var clubId = comp?.GetValue<int>("clubId") ?? 0;
-            if (clubId > 0 && (await _auth.IsClubAdminForClub(clubId) || await _auth.IsSkjutledareForClub(clubId)))
-                return true;
-            return false;
-        }
+        // Personalregeln (C3-planen S2, rättat 2026-10-14). Förut släpptes VARJE kretsadmin i landet in
+        // (GetManagedRegions().Any()) — och materiellistan visar banans figurer, som är hemliga.
+        private Task<bool> IsStaffForCompetition(int competitionId) =>
+            _auth.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
     }
 }

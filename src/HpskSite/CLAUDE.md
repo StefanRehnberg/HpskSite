@@ -11377,6 +11377,28 @@ lagringen och posten använder inga `GetAtRoot`/`GetByRoute`/`UrlInfo.Url`/`Desc
   läsningarna, `c3/accepted-s1.json`; nod mot SQL per fråga 0 avvikelser; uppdateringen mot båda). A/B med
   tre fel (standardvärde, sortering, versionskontroll) → 4 röda. Test: `CompetitionInfoTests`.
 
+**S2 (2026-10-14): behörigheten läser tävlingen genom lagringen.** `AdminAuthorizationService` läser
+värd och tävlingsansvariga ur `ICompetitionStore` (aliaset prövas där — ett id som inte är en tävling
+nekas, förut accepterades t.ex. en seriens id). **Två regler, en implementation var:**
+`HasCompetitionStaffAccessAsync` (personalen: tävlingsansvarig, klubbadmin eller skjutledare för
+värdklubben, kretsens admin för en kretsvärdad tävling) och `CanManageCompetitionFinanceAsync` (samma utan
+skjutledare). Båda tar `CompetitionRead.Published` (standard, sidorna) eller `CompetitionRead.Saved` (det
+sparade läget som anmälnings-, faktura-, resultat- och kvittoytorna läst — de skiljer sig bara för en
+tävling med sparade men opublicerade ändringar, 5361). ~25 handskrivna kopior i
+`RegistrationAdmin`, `InvoiceAdmin`, `Competition`, `CompetitionResults`, `CompetitionAdmin` (annonsen),
+`Staffing`, `ParticipantMessage`, `EventMessage`, `Tavlingsplanering` och `Receipt` anropar nu reglerna —
+**skriv aldrig en ny kopia**. Varianter som AVVIKER är medvetet orörda och listade i
+`notes/c3-s2-grindar.md` (de är beslut, inte refaktorering).
+- ⚠️⚠️ **Rättat — fyra ställen där det räckte att vara kretsadmin NÅGONSTANS** (`GetManagedRegions().Any()`,
+  samma form som serierna i 883f83e): `MoveCompetitionToSeries` (nu `IsRegionalAdminForCompetition` som
+  kopiera/ta bort), `CreateCompetition` (nu `RegionalAdminOwnsSeriesHost` — värden måste vara den egna
+  kretsen; en tävling helt utan värd skapar bara sajtadmin), och fältskyttets **materiellista** (banans
+  hemliga figurer), startledare- och patrullistesidans `CanSendOff` (nu personalregeln). **Använd aldrig
+  `GetManagedRegions().Any()` som tävlingsgrind.** Svit `hpsk-verify/c3/c3-move-verify.mjs` 9/9 (A/B: gamla
+  bygget → 4 röda).
+- Behörighetsrapporten och grindproven oförändrade mellan S1- och S2-bygget (`c3-compare` 0 avvikelser i
+  auth/probes; korskontrollen 3092 överens, 0 oense).
+
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
 `Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,

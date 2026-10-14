@@ -22,6 +22,9 @@ namespace HpskSite.Services
         private readonly IContentService _contentService;
         private readonly Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory _databaseFactory;
 
+        // C3-planen S2: tävlingen läses genom lagringen, aldrig som nod (spärrtestet CompetitionStoreGuardTests).
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         // C3-planen F6: en grind som kastar svarar nej OCH loggar varför (OpsSignals.AuthGateFailed, strypt).
         private readonly ILogger<AdminAuthorizationService> _logger;
 
@@ -37,9 +40,11 @@ namespace HpskSite.Services
             HpskSite.Services.Staffing.StaffingService staffingService,
             IContentService contentService,
             Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory databaseFactory,
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
             ILogger<AdminAuthorizationService> logger)
         {
             _logger = logger;
+            _competitions = competitions;
             _memberService = memberService;
             _memberManager = memberManager;
             _memberGroupService = memberGroupService;
@@ -57,6 +62,19 @@ namespace HpskSite.Services
         internal void EvaluateAs(string email) => _evaluateAsEmail = email ?? "";
 
         private sealed record CurrentMemberRef(string? Email);
+
+        /// <summary>
+        /// Vilket läge av tävlingen en grind läser värden ur (C3-planen S2). Det publicerade är vad
+        /// sidorna visar och vad tjänstens grindar alltid läst; det senast sparade är vad anmälnings-,
+        /// faktura- och kvittoytorna läst (<c>IContentService</c>). De skiljer sig bara för en tävling med
+        /// sparade men opublicerade ändringar (5361 i prod 2026-10-14). I tabellen finns bara ett läge.
+        /// </summary>
+        public enum CompetitionRead { Published, Saved }
+
+        /// <summary>Tävlingen ur lagringen. Null när id:t inte är en tävling (LAGEN: aliaset prövas där).</summary>
+        private HpskSite.Models.Competitions.CompetitionInfo? ReadCompetition(int competitionId, CompetitionRead read) =>
+            competitionId <= 0 ? null
+            : read == CompetitionRead.Saved ? _competitions.GetSaved(competitionId) : _competitions.Get(competitionId);
 
         private async Task<CurrentMemberRef?> CurrentMemberAsync()
         {
@@ -220,7 +238,12 @@ namespace HpskSite.Services
         /// exactly their role. Use this for staff SCREENS; use the per-controller edit gate for changing
         /// what the competition IS.
         /// </summary>
-        public async Task<bool> HasCompetitionStaffAccessAsync(int competitionId)
+        /// <remarks>
+        /// C3-planen S2: den ENDA personalregeln. Anmälnings-, bemannings-, meddelande-, planerings- och
+        /// kvittoytorna hade var sin kopia (flera utan loggning när de kastade); de anropar nu den här, med
+        /// <see cref="CompetitionRead.Saved"/> där de läste det sparade läget.
+        /// </remarks>
+        public async Task<bool> HasCompetitionStaffAccessAsync(int competitionId, CompetitionRead read = CompetitionRead.Published)
         {
             try
             {
@@ -228,17 +251,16 @@ namespace HpskSite.Services
                 if (await IsCurrentUserAdminAsync()) return true;
                 if (await IsCompetitionManager(competitionId)) return true;
 
-                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return false;
-                var competition = ctx.Content.GetById(competitionId);
+                var competition = ReadCompetition(competitionId, read);
                 if (competition == null) return false;
 
-                var clubId = competition.Value<int>("clubId");
+                var clubId = competition.ClubId;
                 if (clubId > 0)
                 {
                     if (await IsClubAdminForClub(clubId)) return true;     // folds in the club's regional admins
                     if (await IsSkjutledareForClub(clubId)) return true;
                 }
-                return await IsRegionHostAdminAsync(clubId, competition.Value<string>("regionalFederation"));
+                return await IsRegionHostAdminAsync(clubId, competition.RegionalFederation);
             }
             catch (Exception gateEx)
             {
@@ -255,13 +277,9 @@ namespace HpskSite.Services
         {
             try
             {
-                if (competitionId <= 0) return false;
-                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return false;
-                var competition = ctx.Content.GetById(competitionId);
-                if (competition == null || competition.ContentType.Alias != "competition") return false;
-                return await IsRegionHostAdminAsync(
-                    competition.Value<int>("clubId"),
-                    competition.Value<string>("regionalFederation"));
+                var competition = ReadCompetition(competitionId, CompetitionRead.Published);
+                if (competition == null) return false;
+                return await IsRegionHostAdminAsync(competition.ClubId, competition.RegionalFederation);
             }
             catch (Exception gateEx)
             {
@@ -782,13 +800,9 @@ namespace HpskSite.Services
 
                 if (_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext) && umbracoContext.Content != null)
                 {
-                    var competition = umbracoContext.Content.GetById(competitionId);
+                    var competition = ReadCompetition(competitionId, CompetitionRead.Published);
                     if (competition == null) return false;
-
-                    var json = competition.Value<string>("competitionManagers") ?? "[]";
-                    var managerIds = JsonConvert.DeserializeObject<int[]>(json) ?? Array.Empty<int>();
-
-                    if (managerIds.Contains(member.Id)) return true;
+                    if (competition.ManagerIds.Contains(member.Id)) return true;
                 }
 
                 return HasRosterAppAccess(competitionId, member.Id);
@@ -981,7 +995,8 @@ namespace HpskSite.Services
         /// competition and defers here. Every rule described on <see cref="CanManageCompetitionInvoice"/>
         /// — including the two host shapes and the deliberate exclusion of Skjutledare — lives here.
         /// </summary>
-        public async Task<bool> CanManageCompetitionFinanceAsync(int competitionId)
+        /// <remarks>C3-planen S2: den ENDA ekonomiregeln — fakturaytorna anropar den med <see cref="CompetitionRead.Saved"/>.</remarks>
+        public async Task<bool> CanManageCompetitionFinanceAsync(int competitionId, CompetitionRead read = CompetitionRead.Published)
         {
             try
             {
@@ -989,13 +1004,10 @@ namespace HpskSite.Services
                 if (await IsCurrentUserAdminAsync()) return true;
                 if (await IsCompetitionManager(competitionId)) return true;
 
-                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
-                    return false;
-
-                var competition = ctx.Content.GetById(competitionId);
+                var competition = ReadCompetition(competitionId, read);
                 if (competition == null) return false;
 
-                var clubId = competition.Value<int>("clubId");
+                var clubId = competition.ClubId;
                 if (clubId > 0)
                 {
                     if (await IsClubAdminForClub(clubId)) return true;   // includes regional admin
@@ -1007,7 +1019,7 @@ namespace HpskSite.Services
                 // ones entitled to act on the money. Without this a region-organised competition — which
                 // is what an SM is — has no organiser who can confirm a payment unless someone was
                 // separately named a competition manager on it.
-                return await IsRegionHostAdminAsync(clubId, competition.Value<string>("regionalFederation"));
+                return await IsRegionHostAdminAsync(clubId, competition.RegionalFederation);
             }
             catch (Exception gateEx)
             {

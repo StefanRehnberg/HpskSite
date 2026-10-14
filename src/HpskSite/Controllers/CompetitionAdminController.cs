@@ -952,12 +952,16 @@ namespace HpskSite.Controllers
                 }
             }
 
-            // Check Regional Admin
+            // Check Regional Admin — för den krets tävlingen skapas i (rättat 2026-10-14, C3-planen S2).
+            // Förut räckte det att vara kretsadmin någonstans, så en kretsadmin kunde skapa en tävling
+            // åt vilken klubb eller krets som helst. Samma regel som serierna (RegionalAdminOwnsSeriesHost):
+            // en klubbvärd via IsClubAdminForClub (som viker in klubbens kretsadmin), en kretsvärd måste
+            // vara en av den inloggades kretsar. En tävling utan värd hör inte till någon krets.
             bool isRegionalAdmin = false;
             if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
             {
-                var managedRegions = await _authorizationService.GetManagedRegions();
-                isRegionalAdmin = managedRegions.Any();
+                isRegionalAdmin = await RegionalAdminOwnsSeriesHost(
+                    ReadFieldAsInt(request.Fields, "clubId"), ReadFieldAsString(request.Fields, "regionalFederation"));
             }
 
             // Allow if Site Admin OR Club Admin OR Skjutledare OR Regional Admin
@@ -1716,30 +1720,9 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "This competition is not external. Use internal edit endpoint." });
                 }
 
-                // AUTHORIZATION: Site Admin OR Competition Manager OR Club Admin OR Skjutledare
-                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-                bool isCompetitionManager = await _authorizationService.IsCompetitionManager(competitionId);
-
-                // Check Club Admin / Skjutledare (if competition belongs to a club)
-                bool isClubAdmin = false;
-                bool isSkjutledare = false;
-                var competitionClubId = competition.GetValue<int?>("clubId") ?? 0;
-                if (competitionClubId > 0)
-                {
-                    isClubAdmin = await _authorizationService.IsClubAdminForClub(competitionClubId);
-                    if (!isClubAdmin)
-                        isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
-                }
-                else
-                {
-                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
-                    // CreateCompetition/CopyCompetition/DeleteCompetition already handle this via
-                    // GetManagedRegions / IsRegionalAdminForCompetition; the advert editor did not.
-                    isClubAdmin = await _authorizationService.IsRegionHostAdminAsync(
-                        competitionClubId, competition.GetValue<string>("regionalFederation"));
-                }
-
-                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
+                // AUTHORIZATION: personalregeln (C3-planen S2) — sajtadmin, tävlingsansvarig, klubbadmin eller
+                // skjutledare för värdklubben, eller kretsens admin för en kretsvärdad tävling. Sparat läge.
+                if (!await _authorizationService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved))
                 {
                     return Ok(new { success = false, message = "You don't have permission to edit this competition" });
                 }
@@ -2246,12 +2229,14 @@ namespace HpskSite.Controllers
                         isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
                 }
 
-                // Check Regional Admin
+                // Check Regional Admin — för TÄVLINGENS krets (rättat 2026-10-14, C3-planen S2). Förut räckte
+                // det att vara kretsadmin någonstans (GetManagedRegions().Any()), så vilken kretsadmin som helst
+                // kunde flytta vilken tävling som helst till en annan serie eller årsmapp. Samma regel som
+                // kopiera och ta bort.
                 bool isRegionalAdmin = false;
                 if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
                 {
-                    var managedRegions = await _authorizationService.GetManagedRegions();
-                    isRegionalAdmin = managedRegions.Any();
+                    isRegionalAdmin = await IsRegionalAdminForCompetition(competition);
                 }
 
                 if (!isSiteAdmin && !isClubAdmin && !isSkjutledare && !isRegionalAdmin)

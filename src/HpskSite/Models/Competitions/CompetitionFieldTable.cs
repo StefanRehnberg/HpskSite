@@ -291,12 +291,16 @@ namespace HpskSite.Models.Competitions
             return string.IsNullOrWhiteSpace(t) ? null : t;
         }
 
-        /// <summary>En JSON-array av heltal ("[123,456]"). Oläsbart = tom lista.</summary>
+        /// <summary>
+        /// En JSON-array av heltal ("[123,456]"). Oläsbart = tom lista. Newtonsoft, med flit: grindarna
+        /// läste med den, och den godtar också id som text (<c>["123"]</c>) — en strängare läsare hade tyst
+        /// tagit behörigheten från en tävlingsansvarig.
+        /// </summary>
         public static IReadOnlyList<int> ReadIntArray(string? json)
         {
             if (string.IsNullOrWhiteSpace(json)) return Array.Empty<int>();
-            try { return System.Text.Json.JsonSerializer.Deserialize<int[]>(json) ?? Array.Empty<int>(); }
-            catch (System.Text.Json.JsonException) { return Array.Empty<int>(); }
+            try { return Newtonsoft.Json.JsonConvert.DeserializeObject<int[]>(json) ?? Array.Empty<int>(); }
+            catch (Newtonsoft.Json.JsonException) { return Array.Empty<int>(); }
         }
 
         /// <summary>Ett belopp — samma tolkning som <c>RegistrationFeeCalculator</c>. Null = inget belopp.</summary>

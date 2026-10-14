@@ -1595,26 +1595,7 @@ namespace HpskSite.Controllers
             if (competition == null)
                 return Json(new { success = false, message = "Competition not found" });
 
-            bool authorized = await _authService.IsCurrentUserAdminAsync()
-                || await _authService.IsCompetitionManager(competitionId);
-            if (!authorized)
-            {
-                var competitionClubId = competition.GetValue<int>("clubId");
-                if (competitionClubId > 0)
-                {
-                    // Skjutledare deliberately NOT accepted on the finance surface (2026-08-19) --
-                    // same rule as AdminAuthorizationService.CanManageCompetitionInvoice, whose
-                    // remarks explain why, and how to grant a sekretariat person access instead.
-                    authorized = await _authService.IsClubAdminForClub(competitionClubId);
-                }
-                else
-                {
-                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser, so it is
-                    // the party entitled to chase its own unpaid entries.
-                    authorized = await _authService.IsRegionHostAdminAsync(
-                        competitionClubId, competition.GetValue<string>("regionalFederation"));
-                }
-            }
+            bool authorized = await _authService.CanManageCompetitionFinanceAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
             if (!authorized) return Json(new { success = false, message = "Access denied" });
 
             var swishNumber = competition.GetValue<string>("swishNumber");
@@ -1780,26 +1761,7 @@ namespace HpskSite.Controllers
             if (competition == null)
                 return Json(new { success = false, message = "Competition not found" });
 
-            bool authorized = await _authService.IsCurrentUserAdminAsync()
-                || await _authService.IsCompetitionManager(competitionId);
-            if (!authorized)
-            {
-                var competitionClubId = competition.GetValue<int>("clubId");
-                if (competitionClubId > 0)
-                {
-                    // Skjutledare deliberately NOT accepted on the finance surface (2026-08-19) --
-                    // same rule as AdminAuthorizationService.CanManageCompetitionInvoice, whose
-                    // remarks explain why, and how to grant a sekretariat person access instead.
-                    authorized = await _authService.IsClubAdminForClub(competitionClubId);
-                }
-                else
-                {
-                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser, so it is
-                    // the party entitled to chase its own unpaid entries.
-                    authorized = await _authService.IsRegionHostAdminAsync(
-                        competitionClubId, competition.GetValue<string>("regionalFederation"));
-                }
-            }
+            bool authorized = await _authService.CanManageCompetitionFinanceAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
             if (!authorized) return Json(new { success = false, message = "Access denied" });
 
             var invoicesHub = InvoiceHubs.Hub(competitionId);
@@ -1843,26 +1805,7 @@ namespace HpskSite.Controllers
             if (competition == null)
                 return Json(new { success = false, message = "Competition not found" });
 
-            bool authorized = await _authService.IsCurrentUserAdminAsync()
-                || await _authService.IsCompetitionManager(competitionId);
-            if (!authorized)
-            {
-                var competitionClubId = competition.GetValue<int>("clubId");
-                if (competitionClubId > 0)
-                {
-                    // Skjutledare deliberately NOT accepted on the finance surface (2026-08-19) --
-                    // same rule as AdminAuthorizationService.CanManageCompetitionInvoice, whose
-                    // remarks explain why, and how to grant a sekretariat person access instead.
-                    authorized = await _authService.IsClubAdminForClub(competitionClubId);
-                }
-                else
-                {
-                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser, so it is
-                    // the party entitled to chase its own unpaid entries.
-                    authorized = await _authService.IsRegionHostAdminAsync(
-                        competitionClubId, competition.GetValue<string>("regionalFederation"));
-                }
-            }
+            bool authorized = await _authService.CanManageCompetitionFinanceAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
             if (!authorized) return Json(new { success = false, message = "Access denied" });
 
             var invoicesHub = InvoiceHubs.Hub(competitionId);
@@ -1966,26 +1909,7 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Competition not found" });
 
             // Same four-tier rule as the bulk send.
-            bool authorized = await _authService.IsCurrentUserAdminAsync()
-                || await _authService.IsCompetitionManager(competitionId);
-            if (!authorized)
-            {
-                var competitionClubId = competition.GetValue<int>("clubId");
-                if (competitionClubId > 0)
-                {
-                    // Skjutledare deliberately NOT accepted on the finance surface (2026-08-19) --
-                    // same rule as AdminAuthorizationService.CanManageCompetitionInvoice, whose
-                    // remarks explain why, and how to grant a sekretariat person access instead.
-                    authorized = await _authService.IsClubAdminForClub(competitionClubId);
-                }
-                else
-                {
-                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser, so it is
-                    // the party entitled to chase its own unpaid entries.
-                    authorized = await _authService.IsRegionHostAdminAsync(
-                        competitionClubId, competition.GetValue<string>("regionalFederation"));
-                }
-            }
+            bool authorized = await _authService.CanManageCompetitionFinanceAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
             if (!authorized) return Json(new { success = false, message = "Access denied" });
 
             var swishNumber = competition.GetValue<string>("swishNumber");
@@ -2081,28 +2005,7 @@ namespace HpskSite.Controllers
             var competition = _contentService.GetById(competitionId);
             if (competition == null) return NotFound("Competition not found");
 
-            bool authorized = await _authService.IsCurrentUserAdminAsync()
-                || await _authService.IsCompetitionManager(competitionId);
-            if (!authorized)
-            {
-                var competitionClubId = competition.GetValue<int>("clubId");
-                if (competitionClubId > 0)
-                {
-                    // Skjutledare deliberately NOT accepted on the finance surface (2026-08-19) --
-                    // same rule as AdminAuthorizationService.CanManageCompetitionInvoice, whose
-                    // remarks explain why, and how to grant a sekretariat person access instead.
-                    authorized = await _authService.IsClubAdminForClub(competitionClubId);
-                }
-                else
-                {
-                    // Region-hosted competition: the krets organises it, so its admins own the books.
-                    // Same club-hosted-only assumption that hid region-organised competitions from the
-                    // invoice filter and locked them out of receipts — an SM is region-hosted.
-                    var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                    if (!string.IsNullOrWhiteSpace(regionCode))
-                        authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                }
-            }
+            bool authorized = await _authService.CanManageCompetitionFinanceAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
             if (!authorized) return Forbid();
 
             var invoicesHub = InvoiceHubs.Hub(competitionId);
