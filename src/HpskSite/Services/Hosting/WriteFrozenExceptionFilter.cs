@@ -1,3 +1,4 @@
+using HpskSite.Services.Competitions;
 using HpskSite.Services.Events;
 using HpskSite.Services.Registrations;
 using HpskSite.Services.Results;
@@ -21,7 +22,8 @@ namespace HpskSite.Services.Hosting
         {
             if (context.ExceptionHandled) return;
             if (context.Exception is not (StartListWriteFrozenException or CompetitionResultWriteFrozenException
-                or RegistrationWriteFrozenException or ClubEventWriteFrozenException)) return;
+                or RegistrationWriteFrozenException or ClubEventWriteFrozenException
+                or CompetitionWriteFrozenException)) return;
 
             var message = context.Exception.Message;
             // En ordbok, inte ett anonymt objekt: MVC gör egenskapsnamn till camelCase, och då krockar

@@ -195,7 +195,7 @@ namespace HpskSite.Services
         public static decimal? ReadFeeOrNull(IContent competition, string alias)
             => competition == null ? null : ParseFeeOrNull(competition.GetValue<string>(alias));
 
-        private static decimal? ParseFeeOrNull(string? raw)
+        public static decimal? ParseFeeOrNull(string? raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return null;
             if (decimal.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var v)) return v;

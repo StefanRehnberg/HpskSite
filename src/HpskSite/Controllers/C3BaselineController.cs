@@ -29,17 +29,19 @@ namespace HpskSite.Controllers
         private readonly LegacyCompetitionReadSnapshot _reads;
         private readonly CompetitionAuthorizationReport _report;
         private readonly CompetitionUrlCorpusSource _corpus;
+        private readonly CompetitionStoreComparison _storeComparison;
 
         public C3BaselineController(IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
             ServiceContext services, AppCaches appCaches, IProfilingLogger profilingLogger, IPublishedUrlProvider publishedUrlProvider,
             AdminAuthorizationService auth, LegacyCompetitionReadSnapshot reads, CompetitionAuthorizationReport report,
-            CompetitionUrlCorpusSource corpus)
+            CompetitionUrlCorpusSource corpus, CompetitionStoreComparison storeComparison)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _auth = auth;
             _reads = reads;
             _report = report;
             _corpus = corpus;
+            _storeComparison = storeComparison;
         }
 
         private static readonly JsonSerializerSettings JsonSettings = new()
@@ -86,6 +88,75 @@ namespace HpskSite.Controllers
             if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
             var entries = _corpus.Build(visitorTop);
             return JsonText(new { capturedAt = DateTime.Now, count = entries.Count, entries });
+        }
+
+        // ── S1: posten och lagringarna ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// <c>CompetitionInfo</c> ur nodlagringen mot de gamla läsningarna, fält för fält. Svaret är
+        /// avvikelserna, grupperade per (fält, läsform), med upp till fem exempel var.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> CompetitionInfoVsLegacy()
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
+            var deviations = _storeComparison.CompareWithLegacy();
+            var groups = deviations
+                .GroupBy(d => d.Alias + " " + d.Form)
+                .OrderBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => new { key = g.Key, count = g.Count(), examples = g.Take(5) })
+                .ToList();
+            return JsonText(new { capturedAt = DateTime.Now, total = deviations.Count, groups });
+        }
+
+        /// <summary>Kopierar de publicerade tävlingarna och serierna till tabellerna. BARA på databaskopian.</summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> CopyCompetitionsToTable()
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
+            try
+            {
+                var (competitions, series) = _storeComparison.CopyNodesToTable();
+                return JsonText(new { success = true, competitions, series });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return JsonText(new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>Prövar uppdateringen mot båda lagringarna på en tävling och återställer. BARA på databaskopian.</summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> CompetitionStoreUpdateProbe(int id,
+            [FromServices] HpskSite.Services.Competitions.SwitchingCompetitionStore switching,
+            [FromServices] HpskSite.Services.SiteSettings.SiteSettingService settings)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
+            try
+            {
+                var checks = _storeComparison.UpdateProbe(id, switching, settings);
+                return JsonText(new { success = true, checks });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return JsonText(new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>Samma frågor mot nodlagringen och tabellagringen. BARA på databaskopian. Tom lista = lika.</summary>
+        [HttpGet]
+        public async Task<IActionResult> CompetitionStoreCompare()
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
+            try
+            {
+                var diffs = _storeComparison.CompareNodeVsSql();
+                return JsonText(new { success = true, count = diffs.Count, diffs });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return JsonText(new { success = false, message = ex.Message });
+            }
         }
     }
 }

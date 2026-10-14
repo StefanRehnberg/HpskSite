@@ -11340,6 +11340,43 @@ kandidat) och `UrlCorpus` (varje adress sajten serverar för tävlingarna).
   kretsen (`RegionalAdminOwnsSeriesHost`: klubbserie via `IsClubAdminForClub`, kretsserie mot de egna
   kretsarna). Förut räckte det att vara kretsadmin någonstans.
 
+### ⚠️⚠️ Tävlingen och serien går genom `ICompetitionStore` / `ICompetitionSeriesStore` (C3-planen S1, 2026-10-14)
+
+Posten är `Models/Competitions/CompetitionInfo` (och `CompetitionSeriesInfo`); fälten står i EN tabell,
+`CompetitionFieldTable` / `CompetitionSeriesFieldTable` (nodens alias, postens egenskap = tabellens kolumn,
+läsregel, **Definition** eller **Tillstånd**). Läsarna flyttas dit i S3; till dess låter
+`CompetitionStoreGuardTests` talen bara gå NED (`"competition"` 114, `"competitionSeries"` 33, tävlingens
+egenskaper på en nod 797, seriens 66 — **sänk taket när en läsning flyttas, höj det aldrig**). Ny kod i
+lagringen och posten använder inga `GetAtRoot`/`GetByRoute`/`UrlInfo.Url`/`DescendantsOfType`/
+`.Parent`/`.Children` som egenskap (K4).
+- **Posten bär det LAGRADE värdet, normaliserat men inte omtolkat:** tom text = null, `MinValue` = null,
+  saknat boolskt = false, saknat heltal = 0 — det läsarna redan får av `Value<T>`. Undantaget: nodens
+  `isActive` heter **`IsVisible`** och är sant när värdet saknas (§9a). Tävlingstypen, avgifterna, klasserna
+  och tävlingsansvariga står som de är lagrade; tolkningarna (`TypeId`, `Fee(kind)`, `ClassIds`,
+  `ManagerIds`, `LastDay`, `IsChampionship`) finns på posten, på ett ställe. Normaliseringen av själva
+  värdena görs en gång, i flytten.
+- **Läser råvärdet** (`GetSourceValue` / `GetValue`) genom `CompetitionFieldValues`, aldrig Umbracos typade
+  läsning — FlexibleDropdown kastar på ett rent strängvärde (`competitionScope` i 24 och `scoringMode` i 27
+  tävlingar i prod).
+- **Två läsningar, som i dag:** `Get` = det publicerade (sidorna), `GetSaved` = det senast sparade, även
+  opublicerat (redigeringen). I tabellen samma rad — tabellen har inget publiceringsläge.
+- **`Update(id, expectedVersion, change)`**: `Conflict` och ingenting skrivs om versionen skiljer
+  (`ConflictMessage`); bara ändrade fält skrivs; nodlagringen publicerar om tävlingen var publicerad (som
+  användar-id -1). `change` är ren — avgiftsomräkning och bokföring körs av anroparen efteråt.
+- **Växeln** `Competitions:Store` (`node`) och frysningen `Competitions:WriteFreeze` i `SiteSetting`, för
+  båda; `CompetitionWriteFrozenException` går genom `WriteFrozenExceptionFilter`.
+- **Tabellen i S1 bara mot databaskopian** (`Migrations/create-competition-tables.sql`, S1-formen; den
+  slutliga — `CompetitionManager`, adresser, ändringslogg, mjuk radering — kommer i planens §5).
+  `C3BaselineController`: `CompetitionInfoVsLegacy`, `CopyCompetitionsToTable`, `CompetitionStoreCompare`,
+  `CompetitionStoreUpdateProbe` (de tre sista vägrar utom mot `Umbraco_C3` i Development).
+- **Fält som koden läser men som aldrig funnits på doktypen** (`teamResultSeriesCount`, `contactPerson`,
+  `specialInstructions`, `patrolSize`, `patrolIntervalMinutes`, `autoNotifyParticipants`,
+  `registrationRequired`, `seriesSortOrder`, `pageTitle`, `metaDescription`, `hideFromNavigation`) är inte
+  med i posten — läsarna ska få standardvärdet i S3. **Nya tävlingsfält är frysta** till noderna är borta.
+- Svit: `hpsk-verify/c3/c3-store-verify.mjs` 31/31 mot kopian (bara godkända avvikelser mot de gamla
+  läsningarna, `c3/accepted-s1.json`; nod mot SQL per fråga 0 avvikelser; uppdateringen mot båda). A/B med
+  tre fel (standardvärde, sortering, versionskontroll) → 4 röda. Test: `CompetitionInfoTests`.
+
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
 `Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,
