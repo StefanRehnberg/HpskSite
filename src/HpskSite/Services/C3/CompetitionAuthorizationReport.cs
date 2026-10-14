@@ -42,13 +42,14 @@ namespace HpskSite.Services.C3
         /// <summary>De sammansatta grindarna och var de bor.</summary>
         public static readonly Dictionary<string, string> CompositeSources = new()
         {
-            ["edit"] = "Controllers/CompetitionEditController.cs CanEditCompetitionAsync: management || clubAdminOfHost || regionHostAdmin",
-            ["results"] = "Controllers/CompetitionResultsController.cs CanManageCompetitionResults: management || clubAdminOfHost || regionalAdminOfRegionProperty",
-            ["desk"] = "Controllers/RegistrationAdminController.cs CanManageCompetitionDeskAsync/CanManageRegistrationsAsync: management || (clubId>0 ? clubAdminOfHost || skjutledareOfHost : regionalAdminOfRegionProperty)",
-            ["startList"] = "CompetitionTypes/Precision/Controllers/StartListRequestValidator.cs CanManageCompetition: management || clubAdminOfHost || regionalAdminOfRegionProperty",
-            ["springskytte"] = "CompetitionTypes/Springskytte/Controllers/SpringskytteController.cs HasCompetitionAccess: management || (clubId>0 && (clubAdminOfHost || skjutledareOfHost)) || regionalAdminOfRegionProperty",
-            ["staffing"] = "Controllers/StaffingController.cs HasCompetitionAccessAsync: management || (clubId>0 ? clubAdminOfHost || skjutledareOfHost : regionalAdminOfRegionProperty)",
-            ["adminList"] = "Controllers/CompetitionAdminController.cs IsRegionalAdminForCompetition (kopiera/ta bort): regionalAdminOfRegionProperty || regionalAdminOfClubRegion",
+            // C3-planen S2 (2026-10-14): varje yta anropar en av tre regler i AdminAuthorizationService.
+            ["edit"] = "CompetitionEditController, CompetitionAdmin kopiera/flytta: CanEditCompetitionAsync",
+            ["results"] = "CompetitionResultsController.CanManageCompetitionResults: CanEditCompetitionAsync",
+            ["desk"] = "RegistrationAdminController: HasCompetitionStaffAccessAsync",
+            ["startList"] = "StartListRequestValidator.CanManageCompetition: CanEditCompetitionAsync",
+            ["springskytte"] = "SpringskytteController.HasCompetitionAccess: HasCompetitionStaffAccessAsync",
+            ["staffing"] = "StaffingController.HasCompetitionAccessAsync: HasCompetitionStaffAccessAsync",
+            ["delete"] = "CompetitionAdminController.DeleteCompetition: CanDeleteCompetitionAsync",
         };
 
         public sealed class Candidate
@@ -107,13 +108,17 @@ namespace HpskSite.Services.C3
                 if (regionalOfProperty) Pass("regionalAdminOfRegionProperty", c.MemberId);
                 if (regionalOfClubRegion) Pass("regionalAdminOfClubRegion", c.MemberId);
 
-                if (management || clubAdminOfHost || regionHost) Pass("edit", c.MemberId);
-                if (management || clubAdminOfHost || regionalOfProperty) Pass("results", c.MemberId);
-                if (management || (clubId > 0 ? clubAdminOfHost || skjutledareOfHost : regionalOfProperty)) Pass("desk", c.MemberId);
-                if (management || clubAdminOfHost || regionalOfProperty) Pass("startList", c.MemberId);
-                if (management || (clubId > 0 && (clubAdminOfHost || skjutledareOfHost)) || regionalOfProperty) Pass("springskytte", c.MemberId);
-                if (management || (clubId > 0 ? clubAdminOfHost || skjutledareOfHost : regionalOfProperty)) Pass("staffing", c.MemberId);
-                if (regionalOfProperty || regionalOfClubRegion) Pass("adminList", c.MemberId);
+                // C3-planen S2: ytorna anropar de tre reglerna, så rapporten gör det också — de sammansatta
+                // grindarna är namnen på ytorna, inte egna avskrifter.
+                var edit = await auth.CanEditCompetitionAsync(competitionId);
+                var delete = await auth.CanDeleteCompetitionAsync(competitionId);
+                if (edit) Pass("edit", c.MemberId);
+                if (edit) Pass("results", c.MemberId);
+                if (staff) Pass("desk", c.MemberId);
+                if (edit) Pass("startList", c.MemberId);
+                if (staff) Pass("springskytte", c.MemberId);
+                if (staff) Pass("staffing", c.MemberId);
+                if (delete) Pass("delete", c.MemberId);
             }
 
             return new Dictionary<string, object?>

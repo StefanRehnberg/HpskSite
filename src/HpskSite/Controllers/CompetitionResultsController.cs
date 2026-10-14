@@ -3567,18 +3567,10 @@ namespace HpskSite.Controllers
             }
         }
 
-        private async Task<bool> CanManageCompetitionResults(int competitionId)
-        {
-            if (await _adminAuthorizationService.IsCurrentUserAdminAsync()) return true;
-            if (await _adminAuthorizationService.IsCompetitionManager(competitionId)) return true;
-            var competition = _contentService.GetById(competitionId);
-            var clubId = competition?.GetValue<int>("clubId") ?? 0;
-            if (clubId > 0 && await _adminAuthorizationService.IsClubAdminForClub(clubId)) return true;
-            // Region-hosted (clubless) competition: regional admin of its region can manage it.
-            var region = competition?.GetValue<string>("regionalFederation") ?? "";
-            if (!string.IsNullOrEmpty(region) && await _adminAuthorizationService.IsRegionalAdminForRegion(region)) return true;
-            return false;
-        }
+        // Redigeringsregeln (C3-planen S2, Stefans beslut 2026-10-14). Kretsens admin bara för en kretsvärdad
+        // tävling — förut släpptes kretsen i tävlingens regionalFederation in även när tävlingen var klubbvärdad.
+        private Task<bool> CanManageCompetitionResults(int competitionId) =>
+            _adminAuthorizationService.CanEditCompetitionAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
 
         // ── Class-name overrides ────────────────────────────────────────────────
         // The auto-generated combined class names (e.g. "C2+Dam+Vet") are not always

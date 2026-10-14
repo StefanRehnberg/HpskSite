@@ -4037,36 +4037,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
         // ===== HELPER METHODS =====
 
-        private async Task<bool> HasCompetitionAccess(int competitionId)
-        {
-            bool isSiteAdmin = await _adminAuthorizationService.IsCurrentUserAdminAsync();
-            if (isSiteAdmin) return true;
-
-            bool isCompetitionManager = await _adminAuthorizationService.IsCompetitionManager(competitionId);
-            if (isCompetitionManager) return true;
-
-            var competition = _contentService.GetById(competitionId);
-            var clubId = competition?.GetValue<int>("clubId") ?? 0;
-            if (clubId > 0)
-            {
-                bool isClubAdmin = await _adminAuthorizationService.IsClubAdminForClub(clubId);
-                if (isClubAdmin) return true;
-
-                // Skjutledare of the organising club. StationPage.cshtml already GRANTS them the
-                // /station pads (it accepts Skjutledare_{clubId}), so without this they got a pad that
-                // rendered fully and then refused every read and every save with "Åtkomst nekad." — a
-                // functionary handed a dead screen with no way to tell until they tried to save a
-                // result. Range roles must reach their own club's tools without being separately named
-                // in competitionManagers.
-                if (await _adminAuthorizationService.IsSkjutledareForClub(clubId)) return true;
-            }
-
-            // Region-hosted (clubless) competition: regional admin of its region can manage it.
-            var region = competition?.GetValue<string>("regionalFederation") ?? "";
-            if (!string.IsNullOrEmpty(region) && await _adminAuthorizationService.IsRegionalAdminForRegion(region)) return true;
-
-            return false;
-        }
+        // Personalregeln (C3-planen S2, Stefans beslut 2026-10-14) — skjutledare med, se StationPage. Kretsens admin
+        // bara för en kretsvärdad tävling (förut även en klubbvärdad med regionalFederation satt).
+        private Task<bool> HasCompetitionAccess(int competitionId) =>
+            _adminAuthorizationService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
 
         /// <summary>
         /// Names and clubs for a set of shooters.
