@@ -1,3 +1,4 @@
+using Umbraco.Extensions;
 using Umbraco.Cms.Core.Models.PublishedContent;
 
 namespace HpskSite.Extensions
@@ -8,17 +9,17 @@ namespace HpskSite.Extensions
     public static class CompetitionUrlExtensions
     {
         /// <summary>
-        /// Generates an ID-based URL for a competition
-        /// Format: /competitions/{id}/
+        /// Tävlingens adress i länkar: den FINA adressen (CompetitionUrlProvider). Stefan 2026-10-14
+        /// (C3-planen §9a): en adressform; <c>/competitions/{id}/</c> ger bara 301 dit. Saknar tävlingen en
+        /// fin adress (ingen värd, inget datum) faller länken tillbaka på id-formen, som då visar sidan.
         /// </summary>
-        /// <param name="competition">The competition published content</param>
-        /// <returns>ID-based URL string, or empty string if invalid</returns>
         public static string CompetitionUrl(this IPublishedContent competition)
         {
             if (competition == null || competition.ContentType.Alias != "competition")
                 return string.Empty;
 
-            return $"/competitions/{competition.Id}/";
+            var pretty = competition.Url();
+            return string.IsNullOrEmpty(pretty) || pretty == "#" ? $"/competitions/{competition.Id}/" : pretty;
         }
     }
 }

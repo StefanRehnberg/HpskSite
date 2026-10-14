@@ -27,13 +27,29 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     {
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly IContentService _contentService;
+        private readonly Umbraco.Cms.Core.Web.IUmbracoContextAccessor _umbracoContextAccessor;
+
+        // Den fina adressen till en tävling (C3-planen §9a, en adressform). Tom när den inte går att avgöra —
+        // klienten länkar då inte.
+        private string PrettyUrl(int competitionId)
+        {
+            try
+            {
+                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return "";
+                var c = ctx.Content.GetById(competitionId);
+                return c == null ? "" : HpskSite.Extensions.CompetitionUrlExtensions.CompetitionUrl(c);
+            }
+            catch { return ""; }
+        }
         private readonly ILogger<FaltskytteStatsService> _logger;
 
         public FaltskytteStatsService(
             IUmbracoDatabaseFactory databaseFactory,
             IContentService contentService,
-            ILogger<FaltskytteStatsService> logger)
+            ILogger<FaltskytteStatsService> logger,
+            Umbraco.Cms.Core.Web.IUmbracoContextAccessor umbracoContextAccessor)
         {
+            _umbracoContextAccessor = umbracoContextAccessor;
             _databaseFactory = databaseFactory;
             _contentService = contentService;
             _logger = logger;
@@ -198,6 +214,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                         {
                             Source = "Hosted",
                             CompetitionId = competitionId,
+                            CompetitionUrl = PrettyUrl(competitionId),
                             Date = competitionDate,
                             CompetitionName = competition.Name ?? $"Tävling #{competitionId}",
                             ShootingClass = mine.ShootingClass,
@@ -492,6 +509,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
     {
         public string Source { get; set; } = "";        // "Hosted" | "External"
         public int? CompetitionId { get; set; }         // null for External
+        public string CompetitionUrl { get; set; } = ""; // den fina adressen, tom för External
         public int? TrainingScoreId { get; set; }       // null for Hosted
         public DateTime Date { get; set; }
         public string CompetitionName { get; set; } = "";

@@ -4846,7 +4846,7 @@ function renderFaltskytteResultsTable(rows) {
                 ${rows.map(r => {
                     const dateStr = new Date(r.date).toLocaleDateString('sv-SE');
                     const compLink = r.source === 'Hosted' && r.competitionId
-                        ? `<a href="/competitions/${r.competitionId}">${escapeHtml(r.competitionName)}</a>`
+                        ? `<a href="${escapeHtml(r.competitionUrl || `/competitions/${r.competitionId}/`)}">${escapeHtml(r.competitionName)}</a>`
                         : escapeHtml(r.competitionName);
                     const actions = r.source === 'External'
                         ? `<button class="btn btn-sm btn-outline-secondary me-1" data-fs-row='${escapeHtml(JSON.stringify(r))}' onclick='_faltEditFromButton(this)' title="Redigera"><i class="bi bi-pencil"></i></button>
@@ -5271,7 +5271,7 @@ function renderCompetitionsTable() {
                                         <i class="bi bi-sliders me-2"></i>Åtgärder
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end">
-                                        <li><a class="dropdown-item" href="/competitions/${comp.competitionId}/">
+                                        <li><a class="dropdown-item" href="${escapeHtml(comp.competitionUrl || `/competitions/${comp.competitionId}/`)}">
                                             <i class="bi bi-eye me-2 text-secondary"></i>Öppna tävlingssidan</a></li>
                                         ${(comp.paymentStatus === 'pending' || comp.paymentStatus === 'unpaid') && comp.isPayable ? `
                                             <li><button class="dropdown-item" type="button" onclick="payInvoice(${comp.competitionId}, ${comp.invoiceId})">
@@ -5330,7 +5330,7 @@ function renderCompetitionsCards() {
                         </div>
 
                         <div class="d-grid gap-2">
-                            <a href="/competitions/${comp.competitionId}/" class="btn btn-primary">
+                            <a href="${escapeHtml(comp.competitionUrl || `/competitions/${comp.competitionId}/`)}" class="btn btn-primary">
                                 <i class="bi bi-eye"></i> Visa tävling
                             </a>
                             ${(comp.paymentStatus === 'pending' || comp.paymentStatus === 'unpaid') && comp.isPayable ? `

@@ -707,6 +707,7 @@ namespace HpskSite.Controllers
                         return new
                         {
                             id = comp.Id,
+                            url = HpskSite.Extensions.CompetitionUrlExtensions.CompetitionUrl(comp),
                             name = comp.Value<string>("competitionName") ?? comp.Name,
                             description = comp.Value<string>("description") ?? "",
                             type = comp.Value<string>("competitionType") ?? "Unknown",
