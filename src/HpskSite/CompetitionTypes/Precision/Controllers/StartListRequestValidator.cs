@@ -55,22 +55,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 // also matches RegionalAdmin_{region} for the club's region). Previously this
                 // only accepted site admins + the competitionManagers list, so a club/regional
                 // admin who hosts the competition could not create or publish its start list.
-                if (await _authorizationService.IsCurrentUserAdminAsync()) return true;
-                if (await _authorizationService.IsCompetitionManager(competitionId)) return true;
-
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null) return false;
-
-                var clubId = competition.GetValue<int>("clubId");
-                if (clubId > 0 && await _authorizationService.IsClubAdminForClub(clubId)) return true;
-
-                // Region-hosted (clubless) competition: the regional admin of the competition's
-                // region manages it. (Club-hosted comps already pass above — IsClubAdminForClub
-                // matches the regional admin of the club's region too.)
-                var region = competition.GetValue<string>("regionalFederation") ?? "";
-                if (!string.IsNullOrEmpty(region) && await _authorizationService.IsRegionalAdminForRegion(region)) return true;
-
-                return false;
+                //
+                // C3-planen S2 (Stefans beslut 2026-10-14): redigeringsregeln. Kretsens admin bara för en
+                // kretsvärdad tävling — förut släpptes kretsen i regionalFederation in även för en klubbvärdad.
+                return await _authorizationService.CanEditCompetitionAsync(competitionId, HpskSite.Services.AdminAuthorizationService.CompetitionRead.Saved);
             }
             catch (Exception ex)
             {

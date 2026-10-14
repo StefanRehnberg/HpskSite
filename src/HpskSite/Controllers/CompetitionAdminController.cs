@@ -761,15 +761,11 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetCompetition(int id)
         {
-            // Check if user is site admin OR club admin OR skjutledare OR competition manager
-            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-            var managedClubIds = await _authorizationService.GetManagedClubIds();
-            bool isCompetitionManager = await _authorizationService.IsCompetitionManager(id);
-            var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
-
-            if (!isSiteAdmin && !managedClubIds.Any() && !isCompetitionManager && !skjutledareClubIds.Any())
+            // Personalregeln (C3-planen S2, Stefans beslut 2026-10-14). Förut saknades kretsens väg: en
+            // kretsadmin nådde inte en kretsvärdad tävling i redigeringsdialogen.
+            if (!await _authorizationService.HasCompetitionStaffAccessAsync(id, AdminAuthorizationService.CompetitionRead.Saved))
             {
-                return Ok(new { success = false, message = "Access denied" });
+                return Ok(new { success = false, message = "You don't have permission to view this competition" });
             }
 
             try
@@ -778,16 +774,6 @@ namespace HpskSite.Controllers
                 if (competition == null)
                 {
                     return Ok(new { success = false, message = "Competition not found" });
-                }
-
-                // Check authorization for this specific competition
-                var competitionClubId = competition.GetValue<int?>("clubId") ?? 0;
-                bool isClubAdmin = competitionClubId > 0 && managedClubIds.Contains(competitionClubId);
-                bool isSkjutledare = competitionClubId > 0 && skjutledareClubIds.Contains(competitionClubId);
-
-                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
-                {
-                    return Ok(new { success = false, message = "You don't have permission to view this competition" });
                 }
 
                 // Parse shootingClassIds from JSON array to regular array
@@ -888,7 +874,7 @@ namespace HpskSite.Controllers
                     competitionManagers = GetCompetitionManagerIds(competition),
                     competitionScope = competition.GetValue<string>("competitionScope") ?? "",
                     seriesId = seriesId,
-                    clubId = competitionClubId,
+                    clubId = competition.GetValue<int?>("clubId") ?? 0,
                     regionalFederation = competition.GetValue<string>("regionalFederation") ?? ""
                 };
 
@@ -1985,29 +1971,9 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid competition content type" });
                 }
 
-                // AUTHORIZATION: Site Admin OR Club Admin OR Skjutledare OR Regional Admin (for competition's region)
-                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-
-                // Check Club Admin / Skjutledare (based on source competition's clubId)
-                bool isClubAdmin = false;
-                bool isSkjutledare = false;
-                var competitionClubId = sourceCompetition.GetValue<int>("clubId");
-                if (competitionClubId > 0)
-                {
-                    isClubAdmin = await _authorizationService.IsClubAdminForClub(competitionClubId);
-                    if (!isClubAdmin)
-                        isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
-                }
-
-                // Check Regional Admin (region-hosted comp via regionalFederation,
-                // or club-hosted comp whose club lives in a managed region)
-                bool isRegionalAdmin = false;
-                if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
-                {
-                    isRegionalAdmin = await IsRegionalAdminForCompetition(sourceCompetition);
-                }
-
-                if (!isSiteAdmin && !isClubAdmin && !isSkjutledare && !isRegionalAdmin)
+                // AUTHORIZATION: redigeringsregeln (C3-planen S2, Stefans beslut 2026-10-14) — tävlingsansvarig
+                // med, skjutledare inte; kretsens admin bara för en kretsvärdad tävling.
+                if (!await _authorizationService.CanEditCompetitionAsync(request.SourceCompetitionId, AdminAuthorizationService.CompetitionRead.Saved))
                 {
                     return Ok(new { success = false, message = "Access denied" });
                 }
@@ -2128,29 +2094,10 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid competition content type" });
                 }
 
-                // AUTHORIZATION: Site Admin OR Club Admin OR Skjutledare OR Regional Admin (for competition's region)
-                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-
-                // Check Club Admin / Skjutledare (based on competition's clubId)
-                bool isClubAdmin = false;
-                bool isSkjutledare = false;
-                var competitionClubId = competition.GetValue<int>("clubId");
-                if (competitionClubId > 0)
-                {
-                    isClubAdmin = await _authorizationService.IsClubAdminForClub(competitionClubId);
-                    if (!isClubAdmin)
-                        isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
-                }
-
-                // Check Regional Admin (region-hosted comp via regionalFederation,
-                // or club-hosted comp whose club lives in a managed region)
-                bool isRegionalAdmin = false;
-                if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
-                {
-                    isRegionalAdmin = await IsRegionalAdminForCompetition(competition);
-                }
-
-                if (!isSiteAdmin && !isClubAdmin && !isSkjutledare && !isRegionalAdmin)
+                // AUTHORIZATION: borttagningsregeln (C3-planen S2, Stefans beslut 2026-10-14) — klubbadmin för
+                // värdklubben eller kretsens admin för en kretsvärdad tävling. Varken tävlingsansvarig eller
+                // skjutledare.
+                if (!await _authorizationService.CanDeleteCompetitionAsync(request.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved))
                 {
                     return Ok(new { success = false, message = "Access denied" });
                 }
@@ -2215,31 +2162,11 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid competition content type" });
                 }
 
-                // AUTHORIZATION: Site Admin OR Club Admin OR Skjutledare OR Regional Admin
-                bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-
-                // Check Club Admin / Skjutledare (based on competition's clubId)
-                bool isClubAdmin = false;
-                bool isSkjutledare = false;
-                var competitionClubId = competition.GetValue<int>("clubId");
-                if (competitionClubId > 0)
-                {
-                    isClubAdmin = await _authorizationService.IsClubAdminForClub(competitionClubId);
-                    if (!isClubAdmin)
-                        isSkjutledare = await _authorizationService.IsSkjutledareForClub(competitionClubId);
-                }
-
-                // Check Regional Admin — för TÄVLINGENS krets (rättat 2026-10-14, C3-planen S2). Förut räckte
-                // det att vara kretsadmin någonstans (GetManagedRegions().Any()), så vilken kretsadmin som helst
-                // kunde flytta vilken tävling som helst till en annan serie eller årsmapp. Samma regel som
-                // kopiera och ta bort.
-                bool isRegionalAdmin = false;
-                if (!isSiteAdmin && !isClubAdmin && !isSkjutledare)
-                {
-                    isRegionalAdmin = await IsRegionalAdminForCompetition(competition);
-                }
-
-                if (!isSiteAdmin && !isClubAdmin && !isSkjutledare && !isRegionalAdmin)
+                // AUTHORIZATION: redigeringsregeln (C3-planen S2, Stefans beslut 2026-10-14) — samma som
+                // redigeringsdialogen som anropar flytten när serien byts, så en tävlingsansvarig som får
+                // redigera också får byta serie. Förut släpptes vilken kretsadmin som helst in
+                // (GetManagedRegions().Any()), och tävlingsansvariga nekades.
+                if (!await _authorizationService.CanEditCompetitionAsync(request.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved))
                 {
                     return Ok(new { success = false, message = "Access denied" });
                 }
@@ -2552,34 +2479,8 @@ namespace HpskSite.Controllers
             HpskSite.Services.CompetitionMenuService.Invalidate(_appCaches);
         }
 
-        /// <summary>
-        /// Returns true when the current member is a regional admin for the competition's region.
-        /// The comp's region is `regionalFederation` (region-hosted) or — when `clubId > 0` —
-        /// the host club's `regionalFederation`.
-        /// </summary>
-        private async Task<bool> IsRegionalAdminForCompetition(Umbraco.Cms.Core.Models.IContent competition)
-        {
-            // Direct region property (region-hosted comp)
-            var compRegion = competition.GetValue<string>("regionalFederation") ?? "";
-            if (!string.IsNullOrEmpty(compRegion) && await _authorizationService.IsRegionalAdminForRegion(compRegion))
-            {
-                return true;
-            }
-
-            // Club-hosted: resolve the club's region via the published cache
-            var compClubId = competition.GetValue<int>("clubId");
-            if (compClubId > 0 && _umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
-            {
-                var clubNode = ctx.Content.GetById(compClubId);
-                var clubRegion = clubNode?.Value<string>("regionalFederation") ?? "";
-                if (!string.IsNullOrEmpty(clubRegion) && await _authorizationService.IsRegionalAdminForRegion(clubRegion))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
+        // IsRegionalAdminForCompetition BORTTAGEN 2026-10-14 (C3-planen S2): kopiera och flytta följer
+        // redigeringsregeln, ta bort borttagningsregeln — båda i AdminAuthorizationService.
 
         /// <summary>
         /// Count registrations for a specific competition
@@ -3581,17 +3482,11 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UploadInvitationFile(int competitionId, IFormFile invitationFile)
         {
-            // AUTHORIZATION: Site Admin OR Competition Manager OR Club Admin OR Skjutledare
-            bool isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
-            bool isCompetitionManager = await _authorizationService.IsCompetitionManager(competitionId);
-
-            // Get managed clubs and skjutledare clubs for authorization check
-            var managedClubIds = await _authorizationService.GetManagedClubIds();
-            var skjutledareClubIds = await _authorizationService.GetSkjutledareClubIds();
-
-            if (!isSiteAdmin && !isCompetitionManager && !managedClubIds.Any() && !skjutledareClubIds.Any())
+            // Personalregeln (C3-planen S2, Stefans beslut 2026-10-14). Förut saknades kretsens väg för en
+            // kretsvärdad tävling.
+            if (!await _authorizationService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved))
             {
-                return Ok(new { success = false, message = "Access denied" });
+                return Ok(new { success = false, message = "You don't have permission to upload files for this competition" });
             }
 
             try
@@ -3610,15 +3505,6 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "File upload only available for external competitions" });
                 }
 
-                // Check club admin / skjutledare authorization
-                var competitionClubId = competition.GetValue<int?>("clubId") ?? 0;
-                bool isClubAdmin = competitionClubId > 0 && managedClubIds.Contains(competitionClubId);
-                bool isSkjutledare = competitionClubId > 0 && skjutledareClubIds.Contains(competitionClubId);
-
-                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
-                {
-                    return Ok(new { success = false, message = "You don't have permission to upload files for this competition" });
-                }
 
                 // Validate file
                 if (invitationFile == null || invitationFile.Length == 0)

@@ -69,21 +69,8 @@ namespace HpskSite.Controllers
         /// deliberately NOT included — running the firing line does not include redefining the
         /// competition's fees and classes.
         /// </summary>
-        private async Task<bool> CanEditCompetitionAsync(int competitionId)
-        {
-            if (competitionId <= 0) return false;
-            if (await _authorizationService.IsCurrentUserAdminAsync()) return true;
-            if (await _authorizationService.IsCompetitionManager(competitionId)) return true;
-
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null) return false;
-
-            var clubId = competition.GetValue<int>("clubId");
-            if (clubId > 0 && await _authorizationService.IsClubAdminForClub(clubId)) return true;
-
-            return await _authorizationService.IsRegionHostAdminAsync(
-                clubId, competition.GetValue<string>("regionalFederation"));
-        }
+        private Task<bool> CanEditCompetitionAsync(int competitionId) =>
+            _authorizationService.CanEditCompetitionAsync(competitionId, HpskSite.Services.AdminAuthorizationService.CompetitionRead.Saved);
 
         public class PreviewDirektplaceringRequest
         {

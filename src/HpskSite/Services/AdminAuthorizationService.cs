@@ -1028,6 +1028,40 @@ namespace HpskSite.Services
         }
 
         /// <summary>
+        /// <b>Redigeringsregeln</b> (C3-planen S2, Stefans beslut 2026-10-14): vem som får ändra vad tävlingen
+        /// ÄR — redigera, kopiera, flytta till en serie, resultatlistan och startlistorna. Sajtadmin,
+        /// tävlingsansvarig, klubbadmin för värdklubben (som viker in klubbens kretsadmin) eller — bara för
+        /// en kretsvärdad tävling — kretsens admin. <b>Inte skjutledare</b>: att driva skjutlinjen innefattar
+        /// inte att definiera om tävlingen. Samma innehåll som <see cref="CanManageCompetitionFinanceAsync"/>,
+        /// med flit en implementation.
+        /// </summary>
+        public Task<bool> CanEditCompetitionAsync(int competitionId, CompetitionRead read = CompetitionRead.Published) =>
+            CanManageCompetitionFinanceAsync(competitionId, read);
+
+        /// <summary>
+        /// <b>Borttagningsregeln</b> (C3-planen S2, Stefans beslut 2026-10-14): sajtadmin, klubbadmin för
+        /// värdklubben (som viker in klubbens kretsadmin) eller — bara för en kretsvärdad tävling — kretsens
+        /// admin. <b>Varken tävlingsansvarig eller skjutledare</b>: att ta bort en tävling är föreningens
+        /// beslut, inte den som driver den.
+        /// </summary>
+        public async Task<bool> CanDeleteCompetitionAsync(int competitionId, CompetitionRead read = CompetitionRead.Published)
+        {
+            try
+            {
+                if (competitionId <= 0) return false;
+                if (await IsCurrentUserAdminAsync()) return true;
+                var competition = ReadCompetition(competitionId, read);
+                if (competition == null) return false;
+                if (competition.ClubId > 0) return await IsClubAdminForClub(competition.ClubId);
+                return await IsRegionHostAdminAsync(competition.ClubId, competition.RegionalFederation);
+            }
+            catch (Exception gateEx)
+            {
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, gateEx, "CanDeleteCompetitionAsync", competitionId);
+            }
+        }
+
+        /// <summary>
         /// Checks if the current user can approve a specific member
         /// Returns true if user is site admin OR club admin for the member's applied club
         /// </summary>

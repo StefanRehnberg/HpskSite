@@ -11387,8 +11387,20 @@ sparade läget som anmälnings-, faktura-, resultat- och kvittoytorna läst — 
 tävling med sparade men opublicerade ändringar, 5361). ~25 handskrivna kopior i
 `RegistrationAdmin`, `InvoiceAdmin`, `Competition`, `CompetitionResults`, `CompetitionAdmin` (annonsen),
 `Staffing`, `ParticipantMessage`, `EventMessage`, `Tavlingsplanering` och `Receipt` anropar nu reglerna —
-**skriv aldrig en ny kopia**. Varianter som AVVIKER är medvetet orörda och listade i
-`notes/c3-s2-grindar.md` (de är beslut, inte refaktorering).
+**skriv aldrig en ny kopia**.
+- ⚠️⚠️ **TRE REGLER, Stefans beslut 2026-10-14** (`notes/c3-s2-grindar.md`):
+  - **Personalen** `HasCompetitionStaffAccessAsync` — även springskyttet, att hämta tävlingen i
+    redigeringsdialogen och att ladda upp inbjudan/resultatlista.
+  - **Redigeringen** `CanEditCompetitionAsync` (samma innehåll som ekonomiregeln, en implementation) —
+    redigera, kopiera, flytta till serie, resultatlistan (`CanManageCompetitionResults`), startlistorna
+    (`StartListRequestValidator`). Tävlingsansvarig med, skjutledare inte.
+  - **Borttagningen** `CanDeleteCompetitionAsync` — bara klubbadmin för värdklubben eller kretsens admin för
+    en kretsvärdad tävling; varken tävlingsansvarig eller skjutledare.
+  - Kretsens admin släpps in **bara för en kretsvärdad tävling** (`clubId` tomt). En klubbvärdad tävlings
+    krets kommer in via `IsClubAdminForClub`, som viker in klubbens kretsadmin. Ett `regionalFederation`
+    satt bredvid `clubId` ger ingen egen väg in längre.
+  - `CompetitionAuthorizationReport` anropar samma tre regler (den sammansatta grinden `adminList` heter
+    `delete`). `IsRegionalAdminForCompetition` är borttagen.
 - ⚠️⚠️ **Rättat — fyra ställen där det räckte att vara kretsadmin NÅGONSTANS** (`GetManagedRegions().Any()`,
   samma form som serierna i 883f83e): `MoveCompetitionToSeries` (nu `IsRegionalAdminForCompetition` som
   kopiera/ta bort), `CreateCompetition` (nu `RegionalAdminOwnsSeriesHost` — värden måste vara den egna
