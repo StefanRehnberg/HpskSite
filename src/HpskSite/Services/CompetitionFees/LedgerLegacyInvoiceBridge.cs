@@ -39,6 +39,7 @@ namespace HpskSite.Services.CompetitionFees
 
         private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public LedgerLegacyInvoiceBridge(
             IUmbracoDatabaseFactory databaseFactory,
             IContentService contentService,
@@ -46,8 +47,10 @@ namespace HpskSite.Services.CompetitionFees
             LedgerIssuerResolver issuers,
             LedgerSourceProjectResolver projects,
             ILogger<LedgerLegacyInvoiceBridge> logger,
-            HpskSite.Services.LegacyInvoiceHubs invoiceHubs)
+            HpskSite.Services.LegacyInvoiceHubs invoiceHubs,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _invoiceHubs = invoiceHubs;
             _databaseFactory = databaseFactory;
             _contentService = contentService;
@@ -138,11 +141,11 @@ namespace HpskSite.Services.CompetitionFees
                 var issuer = _issuers.ResolveForCompetition(compId);
                 if (issuer == null || issuer.Value.Type != ownerType || issuer.Value.Id != ownerId) continue;
 
-                var competition = _contentService.GetById(compId);
+                var competition = _competitions.GetSaved(compId);
                 if (competition == null) continue;
-                var compName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "";
+                var compName = competition.CompetitionName ?? competition.Name ?? "";
 
-                foreach (var inv in LoadInvoices(competition))
+                foreach (var inv in LoadInvoices(compId))
                 {
                     var status = (inv.GetValue<string>("paymentStatus") ?? "").Trim().Trim('[', ']').Trim('"', '\'').Trim();
                     if (status != "Paid") continue;
@@ -447,9 +450,9 @@ namespace HpskSite.Services.CompetitionFees
 
         private static string Trunc(string s, int max) => s.Length <= max ? s : s[..max];
 
-        private IEnumerable<IContent> LoadInvoices(IContent competition)
+        private IEnumerable<IContent> LoadInvoices(int competitionId)
         {
-            var hubs = _invoiceHubs.Hubs(competition.Id).ToList();
+            var hubs = _invoiceHubs.Hubs(competitionId).ToList();
             foreach (var hub in hubs)
                 foreach (var inv in _contentService.GetPagedChildren(hub.Id, 0, 5000, out _)
                              .Where(c => c.ContentType.Alias == "registrationInvoice" && !c.Trashed))

@@ -37,10 +37,16 @@ namespace HpskSite.Services
         private readonly AppCaches _appCaches;
         private readonly ILogger<RegionFeeCompetitionService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
         public RegionFeeCompetitionService(IScopeProvider scopeProvider, InvoiceAdminService invoiceAdmin,
             IContentService contentService, IMemberService memberService, MemberClubService memberClubs,
-            ClubService clubService, AppCaches appCaches, ILogger<RegionFeeCompetitionService> logger)
+            ClubService clubService, AppCaches appCaches, ILogger<RegionFeeCompetitionService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Competitions.ICompetitionSeriesStore competitionSeries)
         {
+            _competitions = competitions;
+            _series = competitionSeries;
             _scopeProvider = scopeProvider;
             _invoiceAdmin = invoiceAdmin;
             _contentService = contentService;
@@ -58,24 +64,23 @@ namespace HpskSite.Services
         public List<RegionFeeCandidate> GetCandidates(string regionCode, ISet<int> regionClubIds, int year)
         {
             var seriesNames = new Dictionary<int, string?>();
-            string? SeriesOf(IContent c)
+            string? SeriesOf(HpskSite.Models.Competitions.CompetitionInfo c)
             {
-                if (c.ParentId <= 0) return null;
-                if (seriesNames.TryGetValue(c.ParentId, out var cached)) return cached;
-                var parent = _contentService.GetById(c.ParentId);
-                var name = parent?.ContentType.Alias == "competitionSeries" ? parent.Name : null;
-                seriesNames[c.ParentId] = name;
+                if (c.SeriesId is not int seriesId) return null;
+                if (seriesNames.TryGetValue(seriesId, out var cached)) return cached;
+                var name = _series.GetSaved(seriesId)?.Name;
+                seriesNames[seriesId] = name;
                 return name;
             }
 
             return _invoiceAdmin.GetCompetitionsInRegion(regionCode, regionClubIds)
-                .Where(c => !c.Trashed && !c.GetValue<bool>("isClubOnly"))
+                .Where(c => !c.IsClubOnly)
                 .Select(c => new { c, date = DateOf(c) })
                 .Where(x => x.date?.Year == year)
                 .Select(x =>
                 {
-                    var clubId = x.c.GetValue<int>("clubId");
-                    var type = x.c.GetValue<string>("competitionType") ?? "";
+                    var clubId = x.c.ClubId;
+                    var type = x.c.CompetitionType ?? "";
                     return new RegionFeeCandidate
                     {
                         Id = x.c.Id,
@@ -84,7 +89,7 @@ namespace HpskSite.Services
                         SeriesName = SeriesOf(x.c),
                         TypeLabel = HpskSite.Models.CompetitionTypes.GetFuzzy(type)?.Name ?? type,
                         HostName = clubId > 0 ? (_clubService.GetClubNameById(clubId) ?? "") : "Kretsen",
-                        TakesFee = decimal.TryParse((x.c.GetValue<string>("registrationFee") ?? "").Replace(',', '.'),
+                        TakesFee = decimal.TryParse((x.c.RegistrationFee ?? "").Replace(',', '.'),
                                        System.Globalization.NumberStyles.Number,
                                        System.Globalization.CultureInfo.InvariantCulture, out var fee) && fee > 0
                     };
@@ -93,12 +98,8 @@ namespace HpskSite.Services
                 .ToList();
         }
 
-        // ⚠️ Value<DateTime?> ger DateTime.MinValue för en osatt egenskap, inte null.
-        private static DateTime? DateOf(IContent c)
-        {
-            var d = c.GetValue<DateTime?>("competitionDate");
-            return d is null || d.Value == DateTime.MinValue ? null : d;
-        }
+        // Posten bär redan null för ett osatt datum (inte DateTime.MinValue).
+        private static DateTime? DateOf(HpskSite.Models.Competitions.CompetitionInfo c) => c.CompetitionDate;
 
         public List<int> GetSelection(int regionId, int year)
         {
@@ -180,9 +181,9 @@ namespace HpskSite.Services
         /// <summary>Tävlingens starter: en per (skytt, klass) med resultat.</summary>
         private List<Start> StartsIn(int competitionId)
         {
-            var comp = _contentService.GetById(competitionId);
+            var comp = _competitions.GetSaved(competitionId);
             if (comp is null) return new List<Start>();
-            var type = (comp.GetValue<string>("competitionType") ?? "").Trim();
+            var type = (comp.CompetitionType ?? "").Trim();
             var canonical = HpskSite.Models.CompetitionTypes.GetFuzzy(type)?.Id ?? type;
             var table = CompetitionResultTables.For(canonical);
 

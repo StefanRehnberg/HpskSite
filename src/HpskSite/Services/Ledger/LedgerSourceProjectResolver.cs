@@ -30,13 +30,19 @@ namespace HpskSite.Services.Ledger
         private readonly ILogger<LedgerSourceProjectResolver> _logger;
         private readonly HpskSite.Services.Events.IClubEventStore _events;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
         public LedgerSourceProjectResolver(
             LedgerProjectService projects,
             LedgerProjectGroupService groups,
             IContentService contentService,
             ILogger<LedgerSourceProjectResolver> logger,
-            HpskSite.Services.Events.IClubEventStore events)
+            HpskSite.Services.Events.IClubEventStore events,
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Competitions.ICompetitionSeriesStore competitionSeries)
         {
+            _competitions = competitions;
+            _series = competitionSeries;
             _projects = projects;
             _groups = groups;
             _contentService = contentService;
@@ -60,7 +66,7 @@ namespace HpskSite.Services.Ledger
                 // Händelser via händelselagringen (sajtstrukturen fas 2a); tävlingar är fortfarande noder.
                 var isEvent = kind == LedgerProjectSource.Event;
                 var ev = isEvent ? _events.Get(id) : null;
-                var node = isEvent ? null : _contentService.GetById(id);
+                var competition = isEvent ? null : _competitions.GetSaved(id);
 
                 // ⚠️ En RADERAD tävling har fortfarande pengar — det vanliga fallet är en betalning
                 //    som bekräftades innan händelsen togs bort och bokförs i efterhand. Den får ett
@@ -70,9 +76,11 @@ namespace HpskSite.Services.Ledger
                     ? (ev is null
                         ? new List<string> { $"Borttagen händelse (#{id})" }
                         : LedgerProjectSource.NameCandidates(ev.DisplayName, ev.StartsAt, kind, id))
-                    : node is null
+                    : competition is null
                         ? new List<string> { $"Borttagen tävling (#{id})" }
-                        : LedgerProjectSource.NameCandidates(NameOf(node, kind), DateOf(node, kind), kind, id);
+                        : LedgerProjectSource.NameCandidates(
+                            string.IsNullOrWhiteSpace(competition.CompetitionName) ? competition.Name : competition.CompetitionName,
+                            competition.CompetitionDate, kind, id);
 
                 var ensured = _projects.EnsureForSource(
                     issuerType, issuerId, kind, id, candidates, byMemberId);
@@ -85,8 +93,8 @@ namespace HpskSite.Services.Ledger
                     return null;
                 }
 
-                if (ensured.Value.Created && kind == LedgerProjectSource.Competition && node is not null)
-                    AddToSeriesGroup(issuerType, issuerId, node, ensured.Value.Project.Id);
+                if (ensured.Value.Created && kind == LedgerProjectSource.Competition && competition is not null)
+                    AddToSeriesGroup(issuerType, issuerId, competition, ensured.Value.Project.Id);
 
                 return ensured.Value.Project.Id;
             }
@@ -103,14 +111,14 @@ namespace HpskSite.Services.Ledger
         /// Lägger tävlingens nya projekt i seriens grupp. Serien är den gruppering som redan finns i
         /// datat — "onsdagsserien"-fallet — så ingen inställning behövs.
         /// </summary>
-        private void AddToSeriesGroup(int issuerType, int issuerId, IContent competition, int projectId)
+        private void AddToSeriesGroup(int issuerType, int issuerId, HpskSite.Models.Competitions.CompetitionInfo competition, int projectId)
         {
             try
             {
-                if (competition.ParentId <= 0) return;
+                if (competition.SeriesId is not int seriesId) return;
 
-                var parent = _contentService.GetById(competition.ParentId);
-                if (parent is null || parent.ContentType.Alias != "competitionSeries") return;
+                var parent = _series.GetSaved(seriesId);
+                if (parent is null) return;
 
                 var seriesName = string.IsNullOrWhiteSpace(parent.Name) ? "Serie" : parent.Name!.Trim();
 
@@ -132,32 +140,6 @@ namespace HpskSite.Services.Ledger
                 // Gruppen är en bekvämlighet ovanpå projektet — inte värd att tappa projektet för.
                 _logger.LogWarning(ex, "Tävlingen {Id} kunde inte läggas i sin seriegrupp.", competition.Id);
             }
-        }
-
-        private static string? NameOf(IContent node, string kind)
-        {
-            var name = kind == LedgerProjectSource.Event
-                ? node.GetValue<string>("eventName")
-                : node.GetValue<string>("competitionName");
-
-            return string.IsNullOrWhiteSpace(name) ? node.Name : name;
-        }
-
-        /// <summary>
-        /// Tävlingens eller händelsens datum. <b>Defensivt läst</b> — datumegenskaper ligger i olika
-        /// former i olika delar av trädet, och ett oläsbart datum ska ge ett namn utan årtal, inte
-        /// ett undantag.
-        /// </summary>
-        private static DateTime? DateOf(IContent node, string kind)
-        {
-            var raw = node.GetValue(kind == LedgerProjectSource.Event ? "eventDate" : "competitionDate");
-
-            return raw switch
-            {
-                DateTime d when d.Year > 1900 => d,
-                string s when DateTime.TryParse(s, out var parsed) && parsed.Year > 1900 => parsed,
-                _ => null
-            };
         }
     }
 }

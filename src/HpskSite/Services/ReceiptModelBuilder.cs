@@ -28,14 +28,17 @@ namespace HpskSite.Services
 
         private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public ReceiptModelBuilder(
             IContentService contentService,
             IMemberService memberService,
             IUmbracoContextAccessor umbracoContextAccessor,
             IPublishedUrlProvider publishedUrlProvider,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.LegacyInvoiceHubs invoiceHubs)
+            HpskSite.Services.LegacyInvoiceHubs invoiceHubs,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _invoiceHubs = invoiceHubs;
             _registrations = registrations;
             _contentService = contentService;
@@ -89,7 +92,7 @@ namespace HpskSite.Services
             if (invoice == null || invoice.ContentType.Alias != "registrationInvoice") return null;
 
             var competitionId = invoice.GetValue<int>("competitionId");
-            var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
+            var competition = competitionId > 0 ? _competitions.GetSaved(competitionId) : null;
             if (competition == null) return null;
 
             var memberIdStr = invoice.GetValue<string>("memberId") ?? "";
@@ -154,7 +157,7 @@ namespace HpskSite.Services
             }
 
             // --- Issuer (club or region). ---
-            var issuerClubId = competition.GetValue<int>("clubId");
+            var issuerClubId = competition.ClubId;
             IContent? issuerNode = null;
             if (issuerClubId > 0)
             {
@@ -163,7 +166,7 @@ namespace HpskSite.Services
             }
             else
             {
-                var regionCode = competition.GetValue<string>("regionalFederation") ?? "";
+                var regionCode = competition.RegionalFederation ?? "";
                 if (!string.IsNullOrWhiteSpace(regionCode)) issuerNode = FindRegionByCode(regionCode);
             }
 
@@ -184,8 +187,8 @@ namespace HpskSite.Services
                 MemberName = invoice.GetValue<string>("memberName") ?? member?.Name ?? "",
                 MemberEmail = member?.Email ?? "",
 
-                CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
-                CompetitionDate = competition.GetValue<DateTime?>("competitionDate"),
+                CompetitionName = competition.CompetitionName ?? competition.Name ?? "",
+                CompetitionDate = competition.CompetitionDate,
                 ShootingClasses = classes,
 
                 IssuerName = issuerName,
@@ -224,7 +227,7 @@ namespace HpskSite.Services
 
             var invoice = _contentService.GetById(invoiceId);
             if (invoice == null) return null;
-            var competition = _contentService.GetById(basis.CompetitionId);
+            var competition = _competitions.GetSaved(basis.CompetitionId);
 
             var kind = invoice.GetValue<string>("invoiceKind") ?? "";
             var status = NormalizeStatus(invoice.GetValue<string>("paymentStatus"));
@@ -270,7 +273,7 @@ namespace HpskSite.Services
                 IsSettledByParent = settledBy > 0,
                 SettledByInvoiceId = settledBy,
                 SettledByInvoiceNumber = settledByNumber,
-                SwishNumber = (competition?.GetValue<string>("swishNumber") ?? "").Trim(),
+                SwishNumber = (competition?.SwishNumber ?? "").Trim(),
                 PaymentReference = basis.ReceiptNumber,
                 BilledToName = ResolveBilledTo(invoice)
             };
@@ -317,7 +320,7 @@ namespace HpskSite.Services
         /// or legacy relatedRegistrationIds JSON), scoped to the competition's invoices hub.
         /// Falls back to just the passed invoice if the hub can't be found.
         /// </summary>
-        private List<IContent> GetInvoicesForRegistration(IContent competition, int registrationId, IContent fallback)
+        private List<IContent> GetInvoicesForRegistration(HpskSite.Models.Competitions.CompetitionInfo competition, int registrationId, IContent fallback)
         {
             if (registrationId <= 0) return new List<IContent> { fallback };
 

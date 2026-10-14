@@ -6,6 +6,8 @@ using Umbraco.Cms.Core.Cache;
 using Umbraco.Extensions;
 using Microsoft.Extensions.Logging;
 using HpskSite.Models;
+using HpskSite.Models.Competitions;
+using HpskSite.Services.Competitions;
 using System.Globalization;
 
 namespace HpskSite.Services
@@ -39,6 +41,8 @@ namespace HpskSite.Services
         private static readonly TimeSpan ScanCacheDuration = TimeSpan.FromSeconds(60);
 
         private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
+        private readonly ICompetitionStore _competitions;
+        private readonly ICompetitionSeriesStore _series;
 
         public InvoiceAdminService(
             ILogger<InvoiceAdminService> logger,
@@ -47,9 +51,13 @@ namespace HpskSite.Services
             IMemberService memberService,
             AppCaches appCaches,
             Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory databaseFactory,
-            HpskSite.Services.LegacyInvoiceHubs invoiceHubs)
+            HpskSite.Services.LegacyInvoiceHubs invoiceHubs,
+            ICompetitionStore competitions,
+            ICompetitionSeriesStore series)
         {
             _invoiceHubs = invoiceHubs;
+            _competitions = competitions;
+            _series = series;
             _databaseFactory = databaseFactory ?? throw new ArgumentNullException(nameof(databaseFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _contentService = contentService ?? throw new ArgumentNullException(nameof(contentService));
@@ -64,7 +72,7 @@ namespace HpskSite.Services
         /// </summary>
         private sealed class ContentScan
         {
-            public List<IContent> Competitions { get; init; } = new();
+            public List<CompetitionInfo> Competitions { get; init; } = new();
             public List<IContent> InvoiceHubs { get; init; } = new();
             public List<IContent> Clubs { get; init; } = new();
         }
@@ -83,6 +91,7 @@ namespace HpskSite.Services
 
             var started = DateTime.UtcNow;
             var scan = new ContentScan();
+            var competitionIds = new List<int>();
 
             foreach (var root in _contentService.GetRootContent())
             {
@@ -90,11 +99,19 @@ namespace HpskSite.Services
                 {
                     switch (node.ContentType.Alias)
                     {
-                        case "competition": scan.Competitions.Add(node); break;
+                        // Trädet gås fortfarande för fakturaarkivets mappar; tävlingen själv läses genom lagringen
+                        // (det sparade läget, som skanningen alltid läst). C3-planen S3 område 2.
+                        case "competition": competitionIds.Add(node.Id); break;
                         case "registrationInvoicesHub": scan.InvoiceHubs.Add(node); break;
                         case "club": scan.Clubs.Add(node); break;
                     }
                 }
+            }
+
+            foreach (var id in competitionIds)
+            {
+                var info = _competitions.GetSaved(id);
+                if (info != null) scan.Competitions.Add(info);
             }
 
             _logger.LogInformation(
@@ -154,7 +171,7 @@ namespace HpskSite.Services
                     if (filters.ViewType != "outgoing" && filters.ViewType != "members")
                     {
                         filteredCompetitions = filteredCompetitions
-                            .Where(comp => comp.GetValue<int>("clubId") == filters.ClubId.Value)
+                            .Where(comp => comp.ClubId == filters.ClubId.Value)
                             .ToList();
 
                         _logger.LogInformation("Filtered to {ClubCount} competitions for club {ClubId} (incoming view)",
@@ -181,7 +198,7 @@ namespace HpskSite.Services
                         {
                             if (ResolveCompetitionRegion(comp, clubRegions) != wantedRegion) return false;
                             // Region's own competitions only = no host club.
-                            return !filters.RegionOwnCompetitionsOnly || comp.GetValue<int>("clubId") <= 0;
+                            return !filters.RegionOwnCompetitionsOnly || comp.ClubId <= 0;
                         })
                         .ToList();
 
@@ -301,7 +318,7 @@ namespace HpskSite.Services
         /// source. Then invoices with memberId="team-{teamId}" are matched.
         /// </summary>
         private List<InvoiceInfo> GetOutgoingTeamInvoices(
-            List<IContent> competitions,
+            List<CompetitionInfo> competitions,
             Dictionary<int, List<IContent>> hubsByCompetition,
             int clubId)
         {
@@ -357,7 +374,7 @@ namespace HpskSite.Services
         /// Looks up all members with primaryClubId matching the club, then finds their invoices.
         /// </summary>
         private List<InvoiceInfo> GetMemberInvoices(
-            List<IContent> competitions,
+            List<CompetitionInfo> competitions,
             Dictionary<int, List<IContent>> hubsByCompetition,
             int clubId)
         {
@@ -400,14 +417,13 @@ namespace HpskSite.Services
         /// on, so they were invisible everywhere). Reported after the 2026-08 SM dress rehearsal.
         /// Returns "" when neither host resolves.
         /// </summary>
-        private static string ResolveCompetitionRegion(IContent competition, Dictionary<int, string> clubRegions)
+        private static string ResolveCompetitionRegion(CompetitionInfo competition, Dictionary<int, string> clubRegions)
         {
-            // NB Value<int>/GetValue<int> yields 0 (not null) for an unset property, so test > 0.
-            var clubId = competition.GetValue<int>("clubId");
+            var clubId = competition.ClubId;
             if (clubId > 0 && clubRegions.TryGetValue(clubId, out var clubRegion) && clubRegion.Length > 0)
                 return clubRegion;
 
-            return NormalizeRegionCode(competition.GetValue<string>("regionalFederation"));
+            return NormalizeRegionCode(competition.RegionalFederation);
         }
 
         /// <summary>
@@ -432,11 +448,11 @@ namespace HpskSite.Services
         /// what took the Fakturor page from 12 s to 33 ms when it was pruned and cached, and a second
         /// unrelated caller re-introducing it would quietly undo that.
         /// </summary>
-        public List<IContent> GetCompetitionsHostedByClub(int clubId)
+        public List<CompetitionInfo> GetCompetitionsHostedByClub(int clubId)
         {
-            if (clubId <= 0) return new List<IContent>();
+            if (clubId <= 0) return new List<CompetitionInfo>();
             return GetContentScan().Competitions
-                .Where(c => c.GetValue<int>("clubId") == clubId)
+                .Where(c => c.ClubId == clubId)
                 .ToList();
         }
 
@@ -450,13 +466,13 @@ namespace HpskSite.Services
         /// second half this would also sweep in every club-hosted competition in the region, whose
         /// invoices belong to those clubs and not to the krets.
         /// </summary>
-        public List<IContent> GetCompetitionsHostedByRegion(string regionCode)
+        public List<CompetitionInfo> GetCompetitionsHostedByRegion(string regionCode)
         {
             var wanted = NormalizeRegionCode(regionCode);
-            if (wanted.Length == 0) return new List<IContent>();
+            if (wanted.Length == 0) return new List<CompetitionInfo>();
             return GetContentScan().Competitions
-                .Where(c => c.GetValue<int>("clubId") <= 0
-                         && NormalizeRegionCode(c.GetValue<string>("regionalFederation")) == wanted)
+                .Where(c => c.ClubId <= 0
+                         && NormalizeRegionCode(c.RegionalFederation) == wanted)
                 .ToList();
         }
 
@@ -466,25 +482,23 @@ namespace HpskSite.Services
         /// val av tävlingar — en omgång i Hallandsserien kan ha vilken av formerna som helst. Går genom
         /// den cachade trädskanningen, aldrig en ny.
         /// </summary>
-        public List<IContent> GetCompetitionsInRegion(string regionCode, ISet<int> regionClubIds)
+        public List<CompetitionInfo> GetCompetitionsInRegion(string regionCode, ISet<int> regionClubIds)
         {
             var wanted = NormalizeRegionCode(regionCode);
             // ⚠️ En serieomgång utan egen värd ÄRVER seriens (Hallandsserien 2025: omgångarna har varken
             //    clubId eller regionalFederation, serien har regionalFederation = Halland). Utan arvet
             //    saknades hela serien i kretsens val.
             var parents = new Dictionary<int, (int ClubId, string Region)>();
-            (int ClubId, string Region) HostOf(IContent c)
+            (int ClubId, string Region) HostOf(CompetitionInfo c)
             {
-                var clubId = c.GetValue<int>("clubId");
-                var region = NormalizeRegionCode(c.GetValue<string>("regionalFederation"));
-                if (clubId > 0 || region.Length > 0 || c.ParentId <= 0) return (clubId, region);
-                if (!parents.TryGetValue(c.ParentId, out var host))
+                var clubId = c.ClubId;
+                var region = NormalizeRegionCode(c.RegionalFederation);
+                if (clubId > 0 || region.Length > 0 || c.SeriesId is not int seriesId) return (clubId, region);
+                if (!parents.TryGetValue(seriesId, out var host))
                 {
-                    var parent = _contentService.GetById(c.ParentId);
-                    host = parent?.ContentType.Alias == "competitionSeries"
-                        ? (parent.GetValue<int>("clubId"), NormalizeRegionCode(parent.GetValue<string>("regionalFederation")))
-                        : (0, "");
-                    parents[c.ParentId] = host;
+                    var series = _series.GetSaved(seriesId);
+                    host = series != null ? (series.ClubId, NormalizeRegionCode(series.RegionalFederation)) : (0, "");
+                    parents[seriesId] = host;
                 }
                 return host;
             }
@@ -640,12 +654,11 @@ namespace HpskSite.Services
         /// Check if competition is active (for default filtering)
         /// Active = isActive=true AND registrationCloseDate within last 30 days
         /// </summary>
-        private bool IsCompetitionActive(IContent competition)
+        private bool IsCompetitionActive(CompetitionInfo competition)
         {
-            var isActive = competition.GetValue<bool>("isActive");
-            if (!isActive) return false;
+            if (!competition.IsVisible) return false;
 
-            var regCloseDate = competition.GetValue<DateTime?>("registrationCloseDate");
+            var regCloseDate = competition.RegistrationCloseDate;
             if (!regCloseDate.HasValue) return true; // If no close date, consider active
 
             // Consider active if closed within last 30 days
@@ -655,7 +668,7 @@ namespace HpskSite.Services
         /// <summary>
         /// Get all invoices from a registrationInvoicesHub
         /// </summary>
-        private List<InvoiceInfo> GetInvoicesFromHub(IContent hub, IContent competition)
+        private List<InvoiceInfo> GetInvoicesFromHub(IContent hub, CompetitionInfo competition)
         {
             var invoices = new List<InvoiceInfo>();
 
@@ -720,7 +733,7 @@ namespace HpskSite.Services
         /// Map IContent invoice node to InvoiceInfo DTO
         /// Handles safe reading of paymentStatus (known tricky property)
         /// </summary>
-        private InvoiceInfo MapInvoiceToInfo(IContent invoiceNode, IContent competition)
+        private InvoiceInfo MapInvoiceToInfo(IContent invoiceNode, CompetitionInfo competition)
         {
             // Safe read of paymentStatus - handle JSON array format ["Paid"] or plain string "Paid"
             var paymentStatus = invoiceNode.GetValue<string>("paymentStatus");
@@ -757,7 +770,7 @@ namespace HpskSite.Services
                 Id = invoiceNode.Id,
                 InvoiceNumber = invoiceNode.GetValue<string>("invoiceNumber") ?? "",
                 CompetitionId = competition.Id,
-                CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
+                CompetitionName = competition.CompetitionName ?? competition.Name ?? "",
                 MemberId = invoiceNode.GetValue<string>("memberId") ?? "",
                 MemberName = invoiceNode.GetValue<string>("memberName") ?? "",
                 TotalAmount = invoiceNode.GetValue<decimal>("totalAmount"),

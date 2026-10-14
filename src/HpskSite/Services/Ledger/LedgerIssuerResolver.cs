@@ -33,11 +33,14 @@ namespace HpskSite.Services.Ledger
         private readonly HpskSite.Services.Events.IClubEventStore _events;
         private readonly ILogger<LedgerIssuerResolver> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public LedgerIssuerResolver(
             IUmbracoContextFactory contextFactory,
             ILogger<LedgerIssuerResolver> logger,
-            HpskSite.Services.Events.IClubEventStore events)
+            HpskSite.Services.Events.IClubEventStore events,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _contextFactory = contextFactory;
             _logger = logger;
             _events = events;
@@ -104,10 +107,10 @@ namespace HpskSite.Services.Ledger
             var content = cref.UmbracoContext.Content;
             if (content is null) return null;
 
-            var comp = content.GetById(competitionId);
+            var comp = _competitions.Get(competitionId);
             if (comp is null) return null;
 
-            var clubId = comp.Value<int>("clubId");
+            var clubId = comp.ClubId;
             if (clubId > 0)
             {
                 var club = content.GetById(clubId);
@@ -118,10 +121,8 @@ namespace HpskSite.Services.Ledger
                     "Tävling {Id} pekar på klubb {ClubId} som inte gick att resolva.", competitionId, clubId);
             }
 
-            // ⚠️ Läses UNTYPED. competitionScope och dess släktingar kan bära ett rent strängvärde
-            // från äldre kodvägar, och FlexibleDropdown-konverteraren kastar då. Samma försiktighet
-            // som URL-provideren tillämpar.
-            var regionCode = comp.Value("regionalFederation")?.ToString();
+            // Lagringen läser värdet otypat (FlexibleDropdown kastar på ett rent strängvärde).
+            var regionCode = comp.RegionalFederation;
             if (!string.IsNullOrWhiteSpace(regionCode))
             {
                 var region = LookupRegionByCode(content, regionCode!);

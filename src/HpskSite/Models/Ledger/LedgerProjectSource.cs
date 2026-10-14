@@ -16,7 +16,7 @@ namespace HpskSite.Models.Ledger
     public static class LedgerProjectSource
     {
         /// <summary>Projektet är en tävling. Anmälnings- OCH lagavgifterna delar det.</summary>
-        public const string Competition = "competition";
+        public const string Competition = "competition"; // competitionstore-ok: projektkällans namn i liggaren, inte doktypens alias
 
         /// <summary>Projektet är ett evenemang (<c>clubSimpleEvent</c>) — klubbens eller kretsens.</summary>
         public const string Event = "event";
