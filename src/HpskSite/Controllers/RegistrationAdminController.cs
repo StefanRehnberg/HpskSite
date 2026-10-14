@@ -274,29 +274,8 @@ namespace HpskSite.Controllers
                 var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
 
                 // Four-tier auth — load competition first to find the club
-                bool authorized = await _authService.IsCurrentUserAdminAsync();
-                if (!authorized && competition != null)
-                {
-                    authorized = await _authService.IsCompetitionManager(competitionId);
-                    if (!authorized)
-                    {
-                        var clubId = competition.GetValue<int>("clubId");
-                        if (clubId > 0)
-                        {
-                            authorized = await _authService.IsClubAdminForClub(clubId)
-                                      || await _authService.IsSkjutledareForClub(clubId);
-                        }
-                        else
-                        {
-                            // Region-hosted (clubId unset — the SM shape): the organiser is the krets,
-                            // so its regional admin runs the competition. Without this branch every
-                            // Anmälningar action was refused on an SM.
-                            var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                            if (!string.IsNullOrWhiteSpace(regionCode))
-                                authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                        }
-                    }
-                }
+                bool authorized = await _authService.IsCurrentUserAdminAsync()
+                    || (competition != null && await _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved));
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
 
@@ -666,29 +645,8 @@ namespace HpskSite.Controllers
                 // desk, not just site admins.
                 var competitionId = registration.CompetitionId;
                 var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
-                bool authorized = await _authService.IsCurrentUserAdminAsync();
-                if (!authorized && competition != null)
-                {
-                    authorized = await _authService.IsCompetitionManager(competitionId);
-                    if (!authorized)
-                    {
-                        var clubId = competition.GetValue<int>("clubId");
-                        if (clubId > 0)
-                        {
-                            authorized = await _authService.IsClubAdminForClub(clubId)
-                                      || await _authService.IsSkjutledareForClub(clubId);
-                        }
-                        else
-                        {
-                            // Region-hosted (clubId unset — the SM shape): the organiser is the krets,
-                            // so its regional admin runs the competition. Without this branch every
-                            // Anmälningar action was refused on an SM.
-                            var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                            if (!string.IsNullOrWhiteSpace(regionCode))
-                                authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                        }
-                    }
-                }
+                bool authorized = await _authService.IsCurrentUserAdminAsync()
+                    || (competition != null && await _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved));
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
 
@@ -791,26 +749,7 @@ namespace HpskSite.Controllers
                 // for the competition's club. Same four-tier rule as the rest of the per-competition
                 // surface — late/walk-in registrations are part of running the competition, not a
                 // privileged operation that only site admins can do.
-                bool authorized = await _authService.IsCurrentUserAdminAsync()
-                    || await _authService.IsCompetitionManager(request.CompetitionId);
-                if (!authorized)
-                {
-                    var competitionClubId = competition.GetValue<int>("clubId");
-                    if (competitionClubId > 0)
-                    {
-                        authorized = await _authService.IsClubAdminForClub(competitionClubId)
-                                  || await _authService.IsSkjutledareForClub(competitionClubId);
-                    }
-                    else
-                    {
-                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
-                        // its regional admin runs the competition. Without this branch every
-                        // Anmälningar action was refused on an SM, walk-in registrations included.
-                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                        if (!string.IsNullOrWhiteSpace(regionCode))
-                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                    }
-                }
+                bool authorized = await _authService.HasCompetitionStaffAccessAsync(request.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved);
                 if (!authorized)
                 {
                     return Json(new { success = false, message = "Access denied" });
@@ -1018,26 +957,7 @@ namespace HpskSite.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
-                bool authorized = await _authService.IsCurrentUserAdminAsync()
-                    || await _authService.IsCompetitionManager(competitionId);
-                if (!authorized)
-                {
-                    var clubId = competition.GetValue<int>("clubId");
-                    if (clubId > 0)
-                    {
-                        authorized = await _authService.IsClubAdminForClub(clubId)
-                                  || await _authService.IsSkjutledareForClub(clubId);
-                    }
-                    else
-                    {
-                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
-                        // its regional admin runs the competition. Without this branch every
-                        // Anmälningar action was refused on an SM, walk-in registrations included.
-                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                        if (!string.IsNullOrWhiteSpace(regionCode))
-                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                    }
-                }
+                bool authorized = await _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
                 if (!authorized) return Json(new { success = false, message = "Access denied" });
 
                 // Pick the most recent valid start list (matches GetOfficialStartList's rule).
@@ -1104,26 +1024,7 @@ namespace HpskSite.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
-                bool authorized = await _authService.IsCurrentUserAdminAsync()
-                    || await _authService.IsCompetitionManager(request.CompetitionId);
-                if (!authorized)
-                {
-                    var clubId = competition.GetValue<int>("clubId");
-                    if (clubId > 0)
-                    {
-                        authorized = await _authService.IsClubAdminForClub(clubId)
-                                  || await _authService.IsSkjutledareForClub(clubId);
-                    }
-                    else
-                    {
-                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
-                        // its regional admin runs the competition. Without this branch every
-                        // Anmälningar action was refused on an SM, walk-in registrations included.
-                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                        if (!string.IsNullOrWhiteSpace(regionCode))
-                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                    }
-                }
+                bool authorized = await _authService.HasCompetitionStaffAccessAsync(request.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved);
                 if (!authorized) return Json(new { success = false, message = "Access denied" });
 
                 // Via anmälningslagringen — och anmälan måste höra till tävlingen i begäran.
@@ -1252,26 +1153,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
 
                 // Four-tier auth
-                bool authorized = await _authService.IsCurrentUserAdminAsync()
-                    || await _authService.IsCompetitionManager(competitionId);
-                if (!authorized)
-                {
-                    var clubId = competition.GetValue<int>("clubId");
-                    if (clubId > 0)
-                    {
-                        authorized = await _authService.IsClubAdminForClub(clubId)
-                                  || await _authService.IsSkjutledareForClub(clubId);
-                    }
-                    else
-                    {
-                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
-                        // its regional admin runs the competition. Without this branch every
-                        // Anmälningar action was refused on an SM, walk-in registrations included.
-                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                        if (!string.IsNullOrWhiteSpace(regionCode))
-                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                    }
-                }
+                bool authorized = await _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
 
@@ -1370,26 +1252,7 @@ namespace HpskSite.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
-                bool authorized = await _authService.IsCurrentUserAdminAsync()
-                    || await _authService.IsCompetitionManager(competitionId);
-                if (!authorized)
-                {
-                    var competitionClubId = competition.GetValue<int>("clubId");
-                    if (competitionClubId > 0)
-                    {
-                        authorized = await _authService.IsClubAdminForClub(competitionClubId)
-                                  || await _authService.IsSkjutledareForClub(competitionClubId);
-                    }
-                    else
-                    {
-                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
-                        // its regional admin runs the competition. Without this branch every
-                        // Anmälningar action was refused on an SM, walk-in registrations included.
-                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                        if (!string.IsNullOrWhiteSpace(regionCode))
-                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                    }
-                }
+                bool authorized = await _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
 
@@ -1411,24 +1274,10 @@ namespace HpskSite.Controllers
         /// organising krets. The region branch is not optional: without it an SM locks out the
         /// very krets running it, a bug that has been fixed piecemeal several times already.
         /// </summary>
-        private async Task<bool> CanManageCompetitionDeskAsync(IContent competition, int competitionId)
-        {
-            if (await _authService.IsCurrentUserAdminAsync()) return true;
-            if (await _authService.IsCompetitionManager(competitionId)) return true;
-
-            var clubId = competition.GetValue<int>("clubId");
-            if (clubId > 0)
-            {
-                return await _authService.IsClubAdminForClub(clubId)
-                    || await _authService.IsSkjutledareForClub(clubId);
-            }
-
-            var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-            if (!string.IsNullOrWhiteSpace(regionCode))
-                return await _authService.IsRegionalAdminForRegion(regionCode);
-
-            return false;
-        }
+        /// <remarks>C3-planen S2: personalregeln i <see cref="AdminAuthorizationService.HasCompetitionStaffAccessAsync"/>,
+        /// på det sparade läget som ytan alltid läst. <paramref name="competition"/> behövs inte längre.</remarks>
+        private Task<bool> CanManageCompetitionDeskAsync(IContent competition, int competitionId) =>
+            _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
 
         /// <summary>
         /// Remove ONE orphaned start-list row: a shooter standing in a class they hold no
@@ -2144,22 +1993,7 @@ namespace HpskSite.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
-                bool authorized = await _authService.IsCurrentUserAdminAsync()
-                    || await _authService.IsCompetitionManager(competitionId);
-                if (!authorized)
-                {
-                    var clubId = competition.GetValue<int>("clubId");
-                    if (clubId > 0)
-                        authorized = await _authService.IsClubAdminForClub(clubId)
-                                  || await _authService.IsSkjutledareForClub(clubId);
-                    else
-                    {
-                        // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
-                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                        if (!string.IsNullOrWhiteSpace(regionCode))
-                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                    }
-                }
+                bool authorized = await _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
 
@@ -2309,22 +2143,7 @@ namespace HpskSite.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
-                bool authorized = await _authService.IsCurrentUserAdminAsync()
-                    || await _authService.IsCompetitionManager(request.CompetitionId);
-                if (!authorized)
-                {
-                    var clubId = competition.GetValue<int>("clubId");
-                    if (clubId > 0)
-                        authorized = await _authService.IsClubAdminForClub(clubId)
-                                  || await _authService.IsSkjutledareForClub(clubId);
-                    else
-                    {
-                        // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
-                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                        if (!string.IsNullOrWhiteSpace(regionCode))
-                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                    }
-                }
+                bool authorized = await _authService.HasCompetitionStaffAccessAsync(request.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved);
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
 
@@ -2390,26 +2209,7 @@ namespace HpskSite.Controllers
 
                 // Same four-tier rule as the rest of the per-competition surface, plus the region path
                 // (a region-hosted competition's organiser is the krets).
-                bool authorized = await _authService.IsCurrentUserAdminAsync()
-                    || await _authService.IsCompetitionManager(request.CompetitionId);
-                if (!authorized)
-                {
-                    var clubId = competition.GetValue<int>("clubId");
-                    if (clubId > 0)
-                    {
-                        authorized = await _authService.IsClubAdminForClub(clubId)
-                                  || await _authService.IsSkjutledareForClub(clubId);
-                    }
-                    else
-                    {
-                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
-                        // its regional admin runs the competition. Without this branch every
-                        // Anmälningar action was refused on an SM, walk-in registrations included.
-                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                        if (!string.IsNullOrWhiteSpace(regionCode))
-                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                    }
-                }
+                bool authorized = await _authService.HasCompetitionStaffAccessAsync(request.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved);
                 if (!authorized) return Json(new { success = false, message = "Access denied" });
 
                 var children = _contentService.GetPagedChildren(request.CompetitionId, 0, 200, out _).ToList();
@@ -2515,26 +2315,7 @@ namespace HpskSite.Controllers
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
-                bool authorized = await _authService.IsCurrentUserAdminAsync()
-                    || await _authService.IsCompetitionManager(competitionId);
-                if (!authorized)
-                {
-                    var competitionClubId = competition.GetValue<int>("clubId");
-                    if (competitionClubId > 0)
-                    {
-                        authorized = await _authService.IsClubAdminForClub(competitionClubId)
-                                  || await _authService.IsSkjutledareForClub(competitionClubId);
-                    }
-                    else
-                    {
-                        // Region-hosted (clubId unset — the SM shape): the organiser is the krets, so
-                        // its regional admin runs the competition. Without this branch every
-                        // Anmälningar action was refused on an SM, walk-in registrations included.
-                        var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-                        if (!string.IsNullOrWhiteSpace(regionCode))
-                            authorized = await _authService.IsRegionalAdminForRegion(regionCode);
-                    }
-                }
+                bool authorized = await _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
                 if (!authorized)
                     return Json(new { success = false, message = "Access denied" });
 
@@ -2586,20 +2367,9 @@ namespace HpskSite.Controllers
         /// per-endpoint it has been got wrong repeatedly, always the same way: checking only clubId and
         /// thereby locking the krets out of its own championship.</para>
         /// </summary>
-        private async Task<bool> CanManageRegistrationsAsync(IContent competition, int competitionId)
-        {
-            if (await _authService.IsCurrentUserAdminAsync()) return true;
-            if (await _authService.IsCompetitionManager(competitionId)) return true;
-
-            var clubId = competition.GetValue<int>("clubId");
-            if (clubId > 0)
-                return await _authService.IsClubAdminForClub(clubId)
-                    || await _authService.IsSkjutledareForClub(clubId);
-
-            var regionCode = (competition.GetValue<string>("regionalFederation") ?? "").Trim();
-            return !string.IsNullOrWhiteSpace(regionCode)
-                && await _authService.IsRegionalAdminForRegion(regionCode);
-        }
+        /// <remarks>C3-planen S2: samma personalregel, se <see cref="CanManageCompetitionDeskAsync"/>.</remarks>
+        private Task<bool> CanManageRegistrationsAsync(IContent competition, int competitionId) =>
+            _authService.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
 
         /// <summary>
         /// Every e-mail address for a competition's participants, so the organiser can write to them

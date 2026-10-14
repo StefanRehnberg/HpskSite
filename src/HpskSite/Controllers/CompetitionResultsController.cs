@@ -1191,25 +1191,8 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
                 }
 
-                bool isSiteAdmin = await _adminAuthorizationService.IsCurrentUserAdminAsync();
-                bool isCompetitionManager = await _adminAuthorizationService.IsCompetitionManager(request.CompetitionId);
-
-                bool isClubAdmin = false;
-                bool isSkjutledare = false;
-                var competitionClubId = competition.GetValue<int>("clubId");
-                if (competitionClubId > 0)
-                {
-                    isClubAdmin = await _adminAuthorizationService.IsClubAdminForClub(competitionClubId);
-                    isSkjutledare = await _adminAuthorizationService.IsSkjutledareForClub(competitionClubId);
-                }
-                else
-                {
-                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
-                    isClubAdmin = await _adminAuthorizationService.IsRegionHostAdminAsync(
-                        competitionClubId, competition.GetValue<string>("regionalFederation"));
-                }
-
-                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
+                // Personalregeln (C3-planen S2), på det sparade läget som ytan läst.
+                if (!await _adminAuthorizationService.HasCompetitionStaffAccessAsync(request.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved))
                 {
                     return Json(new { success = false, message = "Du har inte behörighet att ta bort resultat." });
                 }
@@ -4516,24 +4499,8 @@ namespace HpskSite.Controllers
                 }
 
                 // Authorization: site admin OR competition manager OR club admin OR Skjutledare
-                bool isSiteAdmin = await _adminAuthorizationService.IsCurrentUserAdminAsync();
-                bool isCompetitionManager = await _adminAuthorizationService.IsCompetitionManager(request.CompetitionId);
-                bool isClubAdmin = false;
-                bool isSkjutledare = false;
-                var competitionClubId = competition.GetValue<int>("clubId");
-                if (competitionClubId > 0)
-                {
-                    isClubAdmin = await _adminAuthorizationService.IsClubAdminForClub(competitionClubId);
-                    isSkjutledare = await _adminAuthorizationService.IsSkjutledareForClub(competitionClubId);
-                }
-                else
-                {
-                    // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
-                    isClubAdmin = await _adminAuthorizationService.IsRegionHostAdminAsync(
-                        competitionClubId, competition.GetValue<string>("regionalFederation"));
-                }
-
-                if (!isSiteAdmin && !isCompetitionManager && !isClubAdmin && !isSkjutledare)
+                // Personalregeln (C3-planen S2), på det sparade läget som ytan läst.
+                if (!await _adminAuthorizationService.HasCompetitionStaffAccessAsync(request.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved))
                 {
                     return Json(new { success = false, message = "Åtkomst nekad. Du har inte behörighet att ändra vapenklass." });
                 }

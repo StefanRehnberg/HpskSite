@@ -90,26 +90,7 @@ namespace HpskSite.Controllers
             return payerClubId > 0 && await _auth.IsClubAdminForClub(payerClubId);
         }
 
-        private async Task<bool> IsStaffForCompetition(int competitionId)
-        {
-            if (await _auth.IsCurrentUserAdminAsync()) return true;
-            if (await _auth.IsCompetitionManager(competitionId)) return true;
-            var comp = _contentService.GetById(competitionId);
-            var clubId = comp?.GetValue<int>("clubId") ?? 0;
-            if (clubId > 0 && (await _auth.IsClubAdminForClub(clubId) || await _auth.IsSkjutledareForClub(clubId)))
-                return true;
-
-            // Region-hosted competition (clubId unset): the KRETS is the organiser, so its admins are
-            // the staff. Without this a region-organised competition — which is what an SM is — has no
-            // organiser who can open a receipt.
-            if (clubId == 0 && comp != null)
-            {
-                var regionCode = comp.GetValue<string>("regionalFederation") ?? "";
-                if (!string.IsNullOrWhiteSpace(regionCode)
-                    && await _auth.IsRegionalAdminForRegion(regionCode.Trim()))
-                    return true;
-            }
-            return false;
-        }
+        private Task<bool> IsStaffForCompetition(int competitionId) =>
+            _auth.HasCompetitionStaffAccessAsync(competitionId, AdminAuthorizationService.CompetitionRead.Saved);
     }
 }
