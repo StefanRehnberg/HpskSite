@@ -1,3 +1,4 @@
+using HpskSite.Models.Competitions;
 using HpskSite.Models.Events;
 using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Services;
@@ -94,25 +95,21 @@ namespace HpskSite.Services.Events
             => eventId <= 0 ? new List<int>() : Read("WHERE EventId = @0", eventId).Select(r => r.CompetitionId).ToList();
 
         /// <summary>Alla tävlingar ägaren FÅR koppla, oavsett datum.</summary>
-        private List<IContent> Allowed(ClubEventRecord ev)
+        private List<CompetitionInfo> Allowed(ClubEventRecord ev)
         {
             if (ev.OwnerType == ClubEventRecord.OwnerClub)
-                return _invoiceAdmin.GetCompetitionsHostedByClub(ev.OwnerId).Where(c => !c.Trashed).ToList();
+                return _invoiceAdmin.GetCompetitionsHostedByClub(ev.OwnerId);
 
             var regionCode = _contentService.GetById(ev.OwnerId)?.GetValue<string>("regionCode") ?? "";
-            if (regionCode.Length == 0) return new List<IContent>();
+            if (regionCode.Length == 0) return new List<CompetitionInfo>();
             var clubIds = _auth.GetClubsInRegions(new List<string> { regionCode }).ToHashSet();
             return _invoiceAdmin.GetCompetitionsInRegion(regionCode, clubIds)
-                .Where(c => !c.Trashed && !(c.GetValue<int>("clubId") > 0 && c.GetValue<bool>("isClubOnly")))
+                .Where(c => !(c.ClubId > 0 && c.IsClubOnly))
                 .ToList();
         }
 
-        // ⚠️ GetValue<DateTime?> ger DateTime.MinValue för en osatt egenskap, inte null.
-        private static DateTime? DateOf(IContent c)
-        {
-            var d = c.GetValue<DateTime?>("competitionDate");
-            return d is null || d.Value == DateTime.MinValue ? null : d;
-        }
+        // Posten bär redan null för ett osatt datum (inte DateTime.MinValue).
+        private static DateTime? DateOf(CompetitionInfo c) => c.CompetitionDate;
 
         /// <summary>
         /// Tävlingarna att välja bland: från <see cref="PastDays"/> dagar bakåt och framåt, plus de som
@@ -141,7 +138,7 @@ namespace HpskSite.Services.Events
                 .Where(x => x.linked == ev.Id || x.date == null || x.date >= from)
                 .Select(x =>
                 {
-                    var clubId = x.c.GetValue<int>("clubId");
+                    var clubId = x.c.ClubId;
                     int? other = x.linked.HasValue && x.linked != ev.Id && LiveEventName(x.linked.Value) != null ? x.linked : null;
                     return new CompetitionEventLinkCandidate
                     {
@@ -149,7 +146,7 @@ namespace HpskSite.Services.Events
                         Name = x.c.Name ?? "",
                         Date = x.date,
                         HostName = clubId > 0 ? (_clubService.GetClubNameById(clubId) ?? "") : "Kretsen",
-                        IsClubOnly = x.c.GetValue<bool>("isClubOnly"),
+                        IsClubOnly = x.c.IsClubOnly,
                         OtherEventId = other,
                         OtherEventName = other.HasValue ? LiveEventName(other.Value) : null,
                         LinkedHere = x.linked == ev.Id

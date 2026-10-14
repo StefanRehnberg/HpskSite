@@ -11423,6 +11423,16 @@ och tom text är null (så `?? Name` slår till).
   Kvar på noden med flit: fakturaarkivets nodstruktur (`PaymentService`) och tävlingens URL. Taken
   113 → 106 och 796 → 734. Verifierat: fångst utan ej godkända avvikelser, korskontroll 3092/0,
   matrisen 8/8 + 36/36.
+- **Område 2, betalning, avgifter och liggaren (2026-10-14):** fakturalistan (`InvoiceAdminService`),
+  liggarens utställare/projekt/översikt, klubbfakturorna, bryggan för gamla fakturor, kvittot och
+  samlingsfakturan; kretsavgiftens tävlingsval och händelsekopplingen följer med via fakturalistans
+  `GetCompetitionsHostedBy…/InRegion`, som nu returnerar `CompetitionInfo` (seriearvet via
+  `ICompetitionSeriesStore`). ⚠️ **`InvoiceAdminService` är scoped** (var singleton) — lagringen är
+  scoped. Trädet gås fortfarande för fakturaarkivets mappar och klubbarna. Taken 106 → 105, 734 → 717.
+  Verifierat: fångst (en sidavvikelse = kallstart, "Nästa steg" ritar finalvalen först när
+  finalkortet hunnit ladda; `c3/c3-finals-choice-probe.mjs` 4/4), korskontroll 3092/0, matrisen
+  8/8 + 36/36, ekonomisviterna kretsavgift-starter 34, tavlingsavgift 67, ekonomi-projekt 102,
+  consolidated-invoice 40.
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

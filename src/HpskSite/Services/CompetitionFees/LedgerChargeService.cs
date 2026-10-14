@@ -40,6 +40,7 @@ namespace HpskSite.Services.CompetitionFees
         private readonly ClubService _clubService;
         private readonly ILogger<LedgerChargeService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public LedgerChargeService(
             IUmbracoDatabaseFactory databaseFactory,
             IContentService contentService,
@@ -51,8 +52,10 @@ namespace HpskSite.Services.CompetitionFees
             CompetitionPaymentModelService models,
             ConsolidatedInvoiceService payees,
             ClubService clubService,
-            ILogger<LedgerChargeService> logger)
+            ILogger<LedgerChargeService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _databaseFactory = databaseFactory;
             _contentService = contentService;
             _contextFactory = contextFactory;
@@ -113,8 +116,8 @@ namespace HpskSite.Services.CompetitionFees
                 chosen.Add(row);
             }
 
-            var competition = _contentService.GetById(competitionId);
-            var competitionName = competition?.GetValue<string>("competitionName") ?? competition?.Name ?? $"Tävling {competitionId}";
+            var competition = _competitions.GetSaved(competitionId);
+            var competitionName = competition?.CompetitionName ?? competition?.Name ?? $"Tävling {competitionId}";
             var recipientName = _clubService.GetClubNameById(recipientClubId) ?? $"Förening #{recipientClubId}";
             var details = LoadIssuerDetails(issuer.Value.Type, issuer.Value.Id);
             var payee = _payees.ResolvePayee(competitionId);

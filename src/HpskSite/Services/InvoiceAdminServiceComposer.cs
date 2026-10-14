@@ -11,8 +11,9 @@ namespace HpskSite.Services
     {
         public void Compose(IUmbracoBuilder builder)
         {
-            // Register as singleton - service is stateless and can be reused
-            builder.Services.AddSingleton<InvoiceAdminService>();
+            // Scoped (var singleton): den läser tävlingen genom ICompetitionStore, som är scoped (C3-planen S3).
+            // Skanningens cache ligger i AppCaches, så ingenting förloras mellan förfrågningarna.
+            builder.Services.AddScoped<InvoiceAdminService>();
 
             // Consolidated invoices ("samlingsfaktura"). Scoped, not singleton: it writes content via
             // IContentService and depends on PaymentService, which is itself request-scoped.

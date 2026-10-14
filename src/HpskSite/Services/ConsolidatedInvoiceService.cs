@@ -34,13 +34,16 @@ namespace HpskSite.Services
         private readonly InvoiceAuditService _auditService;
         private readonly ILogger<ConsolidatedInvoiceService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public ConsolidatedInvoiceService(
             IContentService contentService,
             PaymentService paymentService,
             ClubService clubService,
             InvoiceAuditService auditService,
-            ILogger<ConsolidatedInvoiceService> logger)
+            ILogger<ConsolidatedInvoiceService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _contentService = contentService;
             _paymentService = paymentService;
             _clubService = clubService;
@@ -84,7 +87,7 @@ namespace HpskSite.Services
             {
                 Number = invoice.GetValue<string>("invoiceNumber") ?? "",
                 Member = invoice.GetValue<string>("memberName") ?? "",
-                CompName = competitionId > 0 ? (_contentService.GetById(competitionId)?.Name ?? "") : ""
+                CompName = competitionId > 0 ? (_competitions.GetSaved(competitionId)?.Name ?? "") : ""
             };
 
             string? reason = null;
@@ -130,12 +133,12 @@ namespace HpskSite.Services
         /// </summary>
         public Payee ResolvePayee(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return new Payee();
 
-            var swish = (competition.GetValue<string>("swishNumber") ?? "").Trim();
+            var swish = (competition.SwishNumber ?? "").Trim();
 
-            var clubId = ReadInt(competition, "clubId");
+            var clubId = competition.ClubId;
             if (clubId > 0)
             {
                 var clubNode = _contentService.GetById(clubId);
@@ -149,7 +152,7 @@ namespace HpskSite.Services
                 };
             }
 
-            var region = InvoiceAdminService.NormalizeRegionCode(competition.GetValue<string>("regionalFederation"));
+            var region = InvoiceAdminService.NormalizeRegionCode(competition.RegionalFederation);
             if (region.Length > 0)
             {
                 var regionNode = FindRegionNodeByCode(region);
@@ -873,7 +876,7 @@ namespace HpskSite.Services
                 Found = true,
                 InvoiceId = parentInvoiceId,
                 InvoiceNumber = parent.GetValue<string>("invoiceNumber") ?? "",
-                CompetitionName = competitionId > 0 ? (_contentService.GetById(competitionId)?.Name ?? "") : "",
+                CompetitionName = competitionId > 0 ? (_competitions.GetSaved(competitionId)?.Name ?? "") : "",
                 PayerName = parent.GetValue<string>("memberName") ?? "",
                 PayerClubId = balance.PayerClubId,
                 Status = balance.Status,

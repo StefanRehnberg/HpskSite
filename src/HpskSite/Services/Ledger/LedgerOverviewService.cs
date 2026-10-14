@@ -22,6 +22,7 @@ namespace HpskSite.Services.Ledger
         private readonly IUmbracoContextFactory _contextFactory;
         private readonly IContentService _contentService;
         private readonly HpskSite.Services.Events.IClubEventStore _events;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly ILogger<LedgerOverviewService> _logger;
 
         /// <summary>Hur många mottagna betalningar panel 2 visar. Den är en puls, inte ett arkiv.</summary>
@@ -35,8 +36,10 @@ namespace HpskSite.Services.Ledger
             IUmbracoContextFactory contextFactory,
             IContentService contentService,
             ILogger<LedgerOverviewService> logger,
-            HpskSite.Services.Events.IClubEventStore events)
+            HpskSite.Services.Events.IClubEventStore events,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _databaseFactory = databaseFactory;
             _contextFactory = contextFactory;
             _contentService = contentService;
@@ -210,44 +213,62 @@ namespace HpskSite.Services.Ledger
                 return $"Borttagen händelse (#{sourceId})";
             }
 
-            try
+            // Tävlingarna genom tävlingslagringen (C3-planen S3 område 2): först det publicerade, sedan
+            // det sparade — samma två uppslag som förut, med samma "(opublicerad)".
+            if (sourceType is LedgerSourceType.CompetitionRegistration or LedgerSourceType.TeamFee
+                    or LedgerSourceType.CompetitionInvoice)
             {
-                using var ctx = _contextFactory.EnsureUmbracoContext();
-                var node = ctx.UmbracoContext.Content?.GetById(sourceId.Value);
-
-                if (node is not null)
+                try
                 {
-                    var name = node.Value<string>("competitionName")
-                               ?? node.Value<string>("eventName")
-                               ?? node.Name;
-
-                    if (!string.IsNullOrWhiteSpace(name)) return name;
-                }
-            }
-            catch
-            {
-                // Faller vidare till innehållstjänsten.
-            }
-
-            try
-            {
-                var content = _contentService.GetById(sourceId.Value);
-
-                if (content is not null)
-                {
-                    var name = content.GetValue<string>("competitionName")
-                               ?? content.GetValue<string>("eventName")
-                               ?? content.Name;
+                    var published = _competitions.Get(sourceId.Value);
+                    var publishedName = published?.CompetitionName ?? published?.Name;
+                    if (!string.IsNullOrWhiteSpace(publishedName)) return publishedName;
 
                     // Opublicerat är ett eget läge, inte ett fel — men kassören ska se det,
                     // för en opublicerad tävling tar inte emot anmälningar.
-                    if (!string.IsNullOrWhiteSpace(name))
-                        return content.Published ? name : $"{name} (opublicerad)";
+                    var saved = _competitions.GetSaved(sourceId.Value);
+                    var savedName = saved?.CompetitionName ?? saved?.Name;
+                    if (!string.IsNullOrWhiteSpace(savedName))
+                        return saved!.IsPublished ? savedName : $"{savedName} (opublicerad)";
+                }
+                catch
+                {
+                    // Faller vidare till det namngivna bortfallet.
                 }
             }
-            catch
+            else
             {
-                // Faller vidare till det namngivna bortfallet.
+                try
+                {
+                    using var ctx = _contextFactory.EnsureUmbracoContext();
+                    var node = ctx.UmbracoContext.Content?.GetById(sourceId.Value);
+
+                    if (node is not null)
+                    {
+                        var name = node.Value<string>("eventName") ?? node.Name;
+                        if (!string.IsNullOrWhiteSpace(name)) return name;
+                    }
+                }
+                catch
+                {
+                    // Faller vidare till innehållstjänsten.
+                }
+
+                try
+                {
+                    var content = _contentService.GetById(sourceId.Value);
+
+                    if (content is not null)
+                    {
+                        var name = content.GetValue<string>("eventName") ?? content.Name;
+                        if (!string.IsNullOrWhiteSpace(name))
+                            return content.Published ? name : $"{name} (opublicerad)";
+                    }
+                }
+                catch
+                {
+                    // Faller vidare till det namngivna bortfallet.
+                }
             }
 
             return sourceType switch
