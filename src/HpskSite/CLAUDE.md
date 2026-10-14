@@ -11325,6 +11325,21 @@ Tävlingarnas värd → Visa listan (ska vara de 8) → Skriv in värden.
 - Test: `OpsTests` (27). Svit: `hpsk-verify/ops-overview-verify.mjs` 22/22 (går mot dev, städar sina rader);
   A/B (bara 5xx räknas + sinken på fel nivå) → 10 röda.
 
+### Skyddsnätet för C3 (C3-planen S0, 2026-10-14)
+
+Bruksanvisning: `notes/c3-s0-skyddsnat.md`. Före och efter varje S-steg fångas sajten mot den frysta
+kopian `Umbraco_C3` (`hpsk-verify/c3/c3-restore.sh`, frusen som `Backup\Umbraco_c3_s0.bak`) med det
+gamla och det nya bygget samma dag, och `c3-compare.mjs` jämför. Appens del är `C3BaselineController`
+(sajtadmin, skriver ingenting): `CompetitionReads` (varje fält med de 91 läsformer koden använder —
+S1 jämför `CompetitionInfo` mot den), `AuthorizationReport` (de riktiga grindarna körda som varje
+kandidat) och `UrlCorpus` (varje adress sajten serverar för tävlingarna).
+- ⚠️ **`AdminAuthorizationService` läser nuvarande medlem BARA genom `CurrentMemberAsync`** — det är
+  vad som låter rapporten köra grindarna som en annan medlem (`EvaluateAs`). Anropa aldrig
+  `_memberManager.GetCurrentMemberAsync()` direkt där; `AuthorizationReportGuardTests` fäller bygget.
+- ⚠️ **Serierna (rättat 2026-10-14):** en kretsadmin hanterar bara serier vars värd ligger i den egna
+  kretsen (`RegionalAdminOwnsSeriesHost`: klubbserie via `IsClubAdminForClub`, kretsserie mot de egna
+  kretsarna). Förut räckte det att vara kretsadmin någonstans.
+
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
 `Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,
