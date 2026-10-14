@@ -2833,6 +2833,10 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Access denied" });
                 }
+                if (isRegionalAdmin && !isSiteAdmin && !await RegionalAdminOwnsSeries(series))
+                {
+                    return Ok(new { success = false, message = "Access denied" });
+                }
 
                 var competitions = _contentService.GetPagedChildren(seriesId, 0, int.MaxValue, out _)
                     .Where(c => c.ContentType.Alias == "competition")
@@ -2875,6 +2879,12 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Access denied: you can only create series for your own club" });
                 }
+            }
+
+            // Kretsadministratörer bara för en klubb eller krets i den egna kretsen.
+            if (isRegionalAdmin && !isSiteAdmin && !await RegionalAdminOwnsSeriesHost(ParseClubId(request.ClubId), request.RegionalFederation))
+            {
+                return Ok(new { success = false, message = "Access denied: du kan bara skapa serier för klubbar och kretsar i din egen krets" });
             }
 
             if (string.IsNullOrEmpty(request.SeriesName))
@@ -3024,6 +3034,14 @@ namespace HpskSite.Controllers
                     }
                 }
 
+                // Kretsadministratörer: serien OCH den nya värden ska ligga i den egna kretsen.
+                if (isRegionalAdmin && !isSiteAdmin
+                    && (!await RegionalAdminOwnsSeries(series)
+                        || !await RegionalAdminOwnsSeriesHost(ParseClubId(request.ClubId), request.RegionalFederation)))
+                {
+                    return Ok(new { success = false, message = "Access denied: serien och dess värd måste ligga i din egen krets" });
+                }
+
                 // Update properties
                 series.SetValue("seriesName", request.SeriesName ?? "");
                 if (!string.IsNullOrEmpty(request.SeriesShortDescription))
@@ -3104,6 +3122,10 @@ namespace HpskSite.Controllers
                 {
                     return Ok(new { success = false, message = "Access denied" });
                 }
+                if (isRegionalAdmin && !isSiteAdmin && !await RegionalAdminOwnsSeries(series))
+                {
+                    return Ok(new { success = false, message = "Access denied" });
+                }
 
                 // Check if series has competitions
                 var competitionCount = _contentService.GetPagedChildren(series.Id, 0, int.MaxValue, out _)
@@ -3169,6 +3191,10 @@ namespace HpskSite.Controllers
 
                 // Club admins can only copy their own club's series
                 if (isClubAdmin && !isSiteAdmin && !isRegionalAdmin && !IsSeriesOwnedByClubs(sourceSeries, managedClubIds))
+                {
+                    return Ok(new { success = false, message = "Access denied" });
+                }
+                if (isRegionalAdmin && !isSiteAdmin && !await RegionalAdminOwnsSeries(sourceSeries))
                 {
                     return Ok(new { success = false, message = "Access denied" });
                 }
@@ -3442,6 +3468,32 @@ namespace HpskSite.Controllers
 
             return (isSiteAdmin, isRegionalAdmin, isClubAdmin, managedClubIds);
         }
+
+        /// <summary>
+        /// Får en KRETSadministratör hantera en serie med den här värden (klubb eller krets)?
+        ///
+        /// <para>C3-planen S0, seriesviten 2026-10-14: serieendpointsen frågade bara "är du kretsadmin
+        /// någonstans" (<c>GetManagedRegions().Any()</c>), så en kretsadmin i Blekinge kunde skapa, ändra,
+        /// kopiera och ta bort Hallands serier. Samma fel som Fältskyttes <c>IsAuthorizedForCompetition</c>
+        /// hade 2026-08-25.</para>
+        ///
+        /// <para>En klubbserie: <see cref="AdminAuthorizationService.IsClubAdminForClub"/>, som viker in
+        /// kretsadministratören för klubbens krets. En kretsserie: kretsen måste vara en av den inloggades.
+        /// En serie utan värd (nationell) hör inte till någon krets.</para>
+        /// </summary>
+        private async Task<bool> RegionalAdminOwnsSeriesHost(int clubId, string? region)
+        {
+            if (clubId > 0) return await _authorizationService.IsClubAdminForClub(clubId);
+            var code = (region ?? "").Trim();
+            if (code.Length == 0) return false;
+            var managed = await _authorizationService.GetManagedRegions();
+            return managed.Any(m => string.Equals(m, code, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private Task<bool> RegionalAdminOwnsSeries(Umbraco.Cms.Core.Models.IContent series) =>
+            RegionalAdminOwnsSeriesHost(series.GetValue<int>("clubId"), series.GetValue<string>("regionalFederation"));
+
+        private static int ParseClubId(string? clubId) => int.TryParse(clubId, out var id) ? id : 0;
 
         /// <summary>
         /// Check if a series belongs to one of the given club IDs
