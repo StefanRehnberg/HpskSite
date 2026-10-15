@@ -11433,6 +11433,16 @@ och tom text är null (så `?? Name` slår till).
   finalkortet hunnit ladda; `c3/c3-finals-choice-probe.mjs` 4/4), korskontroll 3092/0, matrisen
   8/8 + 36/36, ekonomisviterna kretsavgift-starter 34, tavlingsavgift 67, ekonomi-projekt 102,
   consolidated-invoice 40.
+- **Område 3, startlistor (2026-10-15):** `PrecisionStartListController` (typen för resultattabellen,
+  finalseriernas/grundomgångens antal, finalens tidsförslag, egenbokningen, dubbel C) läser `GetSaved`;
+  final- och egenbokningsgenereringen tar `CompetitionInfo`. De publika vyerna `PrecisionStartList` /
+  `PrecisionFinalsStartList` tar namnet ur `Get`. Kvar på noden med flit: `GetQualificationResults`
+  (ger noden till `PrecisionQualifyingResultsService`, område 4) och `autoNotifyParticipants` (inte på
+  doktypen, inte i posten). `CompetitionTableRowsCleanupHandler` markerad (nodens raderingshändelse).
+  Taken 105 → 102, 717 → 704. Verifierat: fångst (samma kallstartsavvikelse på 10362, nu åt andra
+  hållet), korskontroll 3092/0, matrisen 8/8 + 35/36 — `schema-verify` 28/33 med BÅDA byggena
+  (fixturtävling 5312 är 2026-10-11 och har passerat; datum, inte kod), result-table-lookup 6/6,
+  startlist-edit-auth 35/35.
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

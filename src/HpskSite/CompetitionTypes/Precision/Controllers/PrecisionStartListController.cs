@@ -22,6 +22,7 @@ using HpskSite.Services;
 using HpskSite.Services.StartListCoverage;
 using HpskSite.Models.StartLists;
 using HpskSite.Models;
+using HpskSite.Models.Competitions;
 
 namespace HpskSite.CompetitionTypes.Precision.Controllers
 {
@@ -47,6 +48,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         /// <summary>Resultatet av en sparning genom startlistornas lagring.</summary>
         private readonly record struct ListSaveOutcome(bool Success);
 
@@ -90,11 +92,13 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             PrecisionFinalsStartListBuilder finalsBuilder,
             BrokenLaneService brokenLanes,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.StartLists.IStartListStore startLists)
+            HpskSite.Services.StartLists.IStartListStore startLists,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
             _startLists = startLists;
+            _competitions = competitions;
             _memberManager = memberManager;
             _memberService = memberService;
             _contentService = contentService;
@@ -124,7 +128,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Content("Invalid competition ID", "text/plain");
                 }
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                 {
                     return Content("Competition not found", "text/plain");
@@ -1000,7 +1004,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 // Get competition name
                 var competitionId = startList.CompetitionId;
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var competitionName = competition?.Name ?? "Okänd tävling";
 
                 // Save configuration
@@ -1056,7 +1060,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 // Get competition info (needed for both results check and HTML generation)
                 var competitionId = startList.CompetitionId;
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var competitionName = competition?.Name ?? "Okänd tävling";
 
                 // Get configuration
@@ -1117,7 +1121,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         using (var db = _databaseFactory.CreateDatabase())
                         {
                             var resultTable = CompetitionResultTables.For(
-                                competition?.GetValue<string>("competitionType"));
+                                competition?.CompetitionType);
 
                             // ⚠️ Scope the guard to the SAME class as the removal. Result rows are
                             // keyed (competition, member, class, series), so a member-wide count let
@@ -1249,7 +1253,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 // Get competition name
                 var competitionId = startList.CompetitionId;
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var competitionName = competition?.Name ?? "Okänd tävling";
 
                 // Save configuration
@@ -1371,7 +1375,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 // Get competition name
                 var competitionId = startList.CompetitionId;
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var competitionName = competition?.Name ?? "Okänd tävling";
 
                 // Save configuration
@@ -1486,7 +1490,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 // Save and regenerate
                 var competitionId = startList.CompetitionId;
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var competitionName = competition?.Name ?? "Okänd tävling";
 
                 var configJson = JsonConvert.SerializeObject(configuration);
@@ -1526,8 +1530,8 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         private string? ClassRuleConflict(StartListRecord startList, IEnumerable<string?> classes)
         {
             var competitionId = startList.CompetitionId;
-            var competition = competitionId > 0 ? _contentService.GetById(competitionId) : null;
-            var allowDualC = competition?.GetValue<bool>(ClassRegistrationRule.PropertyAlias) ?? false;
+            var competition = competitionId > 0 ? _competitions.GetSaved(competitionId) : null;
+            var allowDualC = competition?.AllowDualCClassRegistration ?? false;
             return ClassRegistrationRule.Conflict(classes, allowDualC);
         }
 
@@ -1614,7 +1618,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 // Save and regenerate cached HTML — same pattern as MoveShooterToTeam.
                 var competitionId = startList.CompetitionId;
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var competitionName = competition?.Name ?? "Okänd tävling";
 
                 startList.ConfigurationData = JsonConvert.SerializeObject(configuration);
@@ -1792,7 +1796,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     t.WeaponClasses = t.Shooters?.Select(s => s.WeaponClass).Distinct().OrderBy(c => c).ToList() ?? new List<string>();
                 }
 
-                var competitionName = _contentService.GetById(competitionId)?.Name ?? "Okänd tävling";
+                var competitionName = _competitions.GetSaved(competitionId)?.Name ?? "Okänd tävling";
                 startList.ConfigurationData = JsonConvert.SerializeObject(configuration);
                 startList.StartListContent = await _renderer.GenerateStartListHtml(configuration, competitionName);
 
@@ -1898,7 +1902,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 // Save and regenerate
                 var competitionId = startList.CompetitionId;
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var competitionName = competition?.Name ?? "Okänd tävling";
 
                 var configJson = JsonConvert.SerializeObject(configuration);
@@ -2011,7 +2015,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 // Save and regenerate start list
                 var competitionId = startList.CompetitionId;
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var competitionName = competition?.Name ?? "Okänd tävling";
 
                 var configJson = JsonConvert.SerializeObject(configuration);
@@ -2049,7 +2053,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     bool resultMigrationFailed = false;
                     try
                     {
-                        var competitionTypeId = competition?.GetValue<string>("competitionType") ?? "Precision";
+                        var competitionTypeId = competition?.CompetitionType ?? "Precision";
                         var resultTable = GetResultTableName(competitionTypeId);
                         using var db = _databaseFactory.CreateDatabase();
                         resultRowsUpdated = await db.ExecuteAsync(
@@ -2208,7 +2212,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
                 // Save and regenerate
                 var competitionId = startList.CompetitionId;
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var competitionName = competition?.Name ?? "Okänd tävling";
 
                 var configJson = JsonConvert.SerializeObject(configuration);
@@ -2249,14 +2253,14 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { Success = false, Message = "Ogiltigt tävlings-ID." });
                 }
 
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                 {
                     return Json(new { Success = false, Message = "Tävlingen hittades inte." });
                 }
 
                 // Check if this is a championship
-                var numberOfFinalSeries = competition.GetValue<int>("numberOfFinalSeries");
+                var numberOfFinalSeries = competition.NumberOfFinalSeries;
                 if (numberOfFinalSeries <= 0)
                 {
                     return Json(new { Success = false, Message = "Denna tävling har ingen final." });
@@ -2273,7 +2277,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 var shooterInfo = await GetShooterInfoDictionary(competitionId);
 
                 // Calculate qualifiers (uses DI-registered singleton, no manual logger construction)
-                var maxShootersPerTeam = competition.GetValue<int>("numberOfSeriesOrStations");
+                var maxShootersPerTeam = competition.NumberOfSeriesOrStations;
                 var qualificationViewModel = _finalsQualificationService.CalculateQualifiers(
                     qualificationResults,
                     shooterInfo,
@@ -2307,7 +2311,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             // "no results" for every other discipline in the family, so anything gating on this
             // silently stopped warning.
             var resultTable = HpskSite.CompetitionTypes.Common.CompetitionResultTables.For(
-                _contentService.GetById(competitionId)?.GetValue<string>("competitionType"));
+                _competitions.GetSaved(competitionId)?.CompetitionType);
             var count = await db.ExecuteScalarAsync<int>(
                 $"SELECT COUNT(*) FROM [{resultTable}] WHERE CompetitionId = @0", competitionId);
             return Json(new { success = true, hasResults = count > 0, resultCount = count });
@@ -2329,7 +2333,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { Success = false, Message = "Ogiltig förfrågan." });
                 }
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                 {
                     return Json(new { Success = false, Message = "Tävlingen hittades inte." });
@@ -2421,7 +2425,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (mode != "clone" && mode != "rerank")
                     return Json(new { Success = false, Message = "Okänt finalläge." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                     return Json(new { Success = false, Message = "Tävlingen hittades inte." });
 
@@ -2432,7 +2436,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (memberData == null || !await _validator.CanManageCompetition(memberData.Id, request.CompetitionId))
                     return Json(new { Success = false, Message = "Du har inte behörighet att hantera denna tävling." });
 
-                if (competition.GetValue<int>("numberOfFinalSeries") <= 0)
+                if (competition.NumberOfFinalSeries <= 0)
                     return Json(new { Success = false, Message = "Denna tävling har inga finalserier konfigurerade." });
 
                 var generatedBy = request.GeneratedBy ?? currentMember.Name ?? "Unknown";
@@ -2491,7 +2495,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         /// finalsStartList node, serializes the config, renders cached HTML, saves + publishes.
         /// </summary>
         private async Task<(bool ok, string message, int id, int totalFinalists, int teams, bool wasPublished, bool adoptedLegacy)> PersistFinalsStartListAsync(
-            IContent competition, StartListConfiguration config, string generatedBy, int maxShootersPerTeam,
+            CompetitionInfo competition, StartListConfiguration config, string generatedBy, int maxShootersPerTeam,
             string weaponGroup, string? finalsDate = null)
         {
             // Trasiga banor gäller finalen också (samma banor, samma tävling). Finalgenereringen
@@ -2635,10 +2639,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             // ⚠️ Skjutlaget skjuter sin final EFTER sin egen grundomgång. Tiderna kopierades
             // tidigare rakt av, så finalen fick samma starttid som serie 1 (Sune-genomgången
             // 2026-10-03). Ordningen och platserna är löftet — inte klockslaget.
-            var comp = _contentService.GetById(competitionId);
+            var comp = _competitions.GetSaved(competitionId);
             int qualSeries = PrecisionFamilyResultReader.QualifyingSeriesCount(
-                comp?.GetValue<int>("numberOfSeriesOrStations") ?? 0, comp?.GetValue<int>("numberOfFinalSeries") ?? 0);
-            int finalSeries = comp?.GetValue<int>("numberOfFinalSeries") ?? 0;
+                comp?.NumberOfSeriesOrStations ?? 0, comp?.NumberOfFinalSeries ?? 0);
+            int finalSeries = comp?.NumberOfFinalSeries ?? 0;
             foreach (var team in qualConfig.Teams)
             {
                 team.StartTime = SkjutlagTiming.ShiftAfterOwnQualification(team.StartTime, qualSeries);
@@ -2911,10 +2915,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
             // Förslag på finalens tider, ur grundomgångens startlista (SkjutlagTiming): första start
             // när grundomgångens sista skjutlag är klart, intervall ur finalseriernas antal.
-            var compNode = _contentService.GetById(competitionId);
+            var compNode = _competitions.GetSaved(competitionId);
             int nsQual = PrecisionFamilyResultReader.QualifyingSeriesCount(
-                compNode?.GetValue<int>("numberOfSeriesOrStations") ?? 0, compNode?.GetValue<int>("numberOfFinalSeries") ?? 0);
-            int nsFinal = compNode?.GetValue<int>("numberOfFinalSeries") ?? 0;
+                compNode?.NumberOfSeriesOrStations ?? 0, compNode?.NumberOfFinalSeries ?? 0);
+            int nsFinal = compNode?.NumberOfFinalSeries ?? 0;
             string? suggestedStart = null;
             try
             {
@@ -2932,12 +2936,12 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 success = true,
                 suggestedFinalsStart = suggestedStart ?? "10:00",
                 suggestedFinalsInterval = SkjutlagTiming.FormatInterval(SkjutlagTiming.DurationMinutes(nsFinal)),
-                competitionDate = compNode?.GetValue<DateTime?>("competitionDate") is DateTime cd && cd.Year > 1 ? cd.ToString("yyyy-MM-dd") : "",
+                competitionDate = compNode?.CompetitionDate is DateTime cd && cd.Year > 1 ? cd.ToString("yyyy-MM-dd") : "",
                 hasResultList = availableRankings.Count > 0,
                 // Vid ett mästerskap märks SHB-valet ut på finalkortet (C.3.6.1.1). Inget förval —
                 // kretsstyrelsen kan ge andra regler (C.3.6.4), och klubbarna gör olika.
                 isChampionship = ChampionshipCategory.IsChampionship(
-                    _contentService.GetById(competitionId)?.GetValue<string>("competitionScope")),
+                    _competitions.GetSaved(competitionId)?.CompetitionScope),
                 perClass = perGroup
             });
         }
@@ -2953,7 +2957,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             if (competitionId <= 0)
                 return Json(new { success = false });
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
@@ -2987,7 +2991,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (memberData == null || !await _validator.CanManageCompetition(memberData.Id, request.CompetitionId))
                     return Json(new { success = false, message = "Du har inte behörighet." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
@@ -3299,7 +3303,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 }
 
                 // Get competition
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                 {
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
@@ -3436,7 +3440,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                     return Json(new { Success = false, Message = "Ogiltigt tävlings-ID." });
                 }
 
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                 {
                     return Json(new { Success = false, Message = "Tävlingen hittades inte." });
@@ -3631,7 +3635,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Content("Tävlingen kunde inte hittas.", "text/plain; charset=utf-8");
 
@@ -3665,7 +3669,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (currentMember == null)
                     return Json(new { success = false, message = "Du måste vara inloggad." });
 
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen kunde inte hittas." });
 
@@ -3675,7 +3679,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                 if (authMember == null || !await _validator.CanManageCompetition(authMember.Id, competitionId))
                     return Json(new { success = false, message = "Du har inte behörighet att generera startlistor för denna tävling." });
 
-                var dpConfig = DirektplaceringConfig.Parse(competition.GetValue<string>("direktplaceringConfig"));
+                var dpConfig = DirektplaceringConfig.Parse(competition.DirektplaceringConfig);
                 if (dpConfig == null)
                     return Json(new { success = false, message = "Direktplacering är inte aktiverat för denna tävling." });
 
@@ -3740,7 +3744,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             }
         }
 
-        private StartListConfiguration BuildDirektplaceringStartListData(IContent competition, DirektplaceringConfig dpConfig)
+        private StartListConfiguration BuildDirektplaceringStartListData(CompetitionInfo competition, DirektplaceringConfig dpConfig)
         {
             // Alla anmälningar via anmälningslagringen (sajtstrukturen fas 1a).
             var registrationDocs = _registrations.List(competition.Id).ToList();
