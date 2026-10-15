@@ -26,7 +26,7 @@ namespace HpskSite.Services.StartLists
         public void Handle(ContentDeletedNotification notification)
         {
             var ids = notification.DeletedEntities
-                .Where(e => e.ContentType.Alias == "competition")
+                .Where(e => e.ContentType.Alias == "competition") // competitionstore-ok: reagerar på att tävlingsNODEN raderas; byts när tävlingarna flyttar till tabellen
                 .Select(e => e.Id)
                 .ToList();
             if (ids.Count == 0) return;

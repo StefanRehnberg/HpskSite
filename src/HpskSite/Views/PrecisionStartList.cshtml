@@ -7,6 +7,7 @@
 @inject IMemberService MemberService
 @inject HpskSite.Services.ClubService ClubService
 @inject HpskSite.Services.StartLists.IStartListStore StartLists
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 
 @functions {
@@ -60,8 +61,7 @@
 		}
 	}
 
-	if (competition?.ContentType.Alias != "competition") competition = null;
-	var competitionName = competition?.Name ?? "Okänd tävling";
+	var competitionName = (competition != null ? Competitions.Get(competition.Id)?.Name : null) ?? "Okänd tävling";
 }
 
 <!DOCTYPE html>
