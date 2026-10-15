@@ -34,12 +34,16 @@ namespace HpskSite.Services
         private readonly IMemberService _memberService;
         private readonly ILogger<MarkenCompetitionSeriesSync> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public MarkenCompetitionSeriesSync(
             IUmbracoDatabaseFactory databaseFactory,
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberService memberService,
-            ILogger<MarkenCompetitionSeriesSync> logger)
+            ILogger<MarkenCompetitionSeriesSync> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _databaseFactory = databaseFactory;
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberService = memberService;
@@ -170,9 +174,9 @@ namespace HpskSite.Services
             foreach (var r in rows)
             {
                 if (comps.ContainsKey(r.CompetitionId)) continue;
-                var node = ctx.Content.GetById(r.CompetitionId);
-                if (node == null || node.ContentType.Alias != "competition") { comps[r.CompetitionId] = (0, "", null); continue; }
-                var compDate = node.Value<DateTime?>("competitionDate");
+                var node = _competitions.Get(r.CompetitionId);
+                if (node == null) { comps[r.CompetitionId] = (0, "", null); continue; }
+                var compDate = node.CompetitionDate;
                 comps[r.CompetitionId] = (compDate?.Year ?? 0, node.Name ?? "Tävling", compDate);
             }
 

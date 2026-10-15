@@ -32,6 +32,8 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Events.IClubEventStore _events;
         private readonly MemberActivityService _activity;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public RegionalStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -46,9 +48,11 @@ namespace HpskSite.Controllers
             ILogger<RegionalStatisticsController> logger,
             HpskSite.Services.Training.ClubTrainingService trainings,
             HpskSite.Services.Events.IClubEventStore events,
-            MemberActivityService activity)
+            MemberActivityService activity,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _activity = activity;
             _trainings = trainings;
             _memberService = memberService;
@@ -173,16 +177,13 @@ namespace HpskSite.Controllers
             var competitionsPerClubMap = new Dictionary<int, int>();
             if (ctx?.Content != null)
             {
-                var root = ctx.Content.GetAtRoot().FirstOrDefault();
-                var compsHub = root?.Children.FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
-                if (compsHub != null)
+                // Tävlingarna ur tävlingslagringen (C3-planen S3).
                 {
-                    var allComps = compsHub.Descendants().Where(c => c.ContentType.Alias == "competition").ToList();
-                    foreach (var c in allComps)
+                    foreach (var c in _competitions.List())
                     {
-                        var cid = c.Value<int>("clubId");
+                        var cid = c.ClubId;
                         if (!clubIdSet.Contains(cid)) continue;
-                        var d = c.Value<DateTime?>("competitionDate");
+                        var d = c.CompetitionDate;
                         if (!d.HasValue || d.Value.Year != today.Year) continue;
                         competitionsThisYear++;
                         competitionsPerClubMap[cid] = competitionsPerClubMap.GetValueOrDefault(cid, 0) + 1;

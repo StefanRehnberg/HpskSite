@@ -60,6 +60,8 @@ namespace HpskSite.Services.Schedule
 
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public MyScheduleService(
             IUmbracoContextFactory ctxFactory,
             IScopeProvider scopeProvider,
@@ -69,8 +71,10 @@ namespace HpskSite.Services.Schedule
             IConfiguration configuration,
             ILogger<MyScheduleService> logger,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.StartLists.IStartListStore startLists)
+            HpskSite.Services.StartLists.IStartListStore startLists,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _registrations = registrations;
             _startLists = startLists;
             _ctxFactory = ctxFactory;
@@ -195,13 +199,15 @@ namespace HpskSite.Services.Schedule
             try
             {
                 using var ctxRef = _ctxFactory.EnsureUmbracoContext();
-                var comp = ctxRef.UmbracoContext.Content?.GetById(competitionId);
-                if (comp == null || comp.ContentType.Alias != "competition") return s;
+                // Fälten ur tävlingslagringen (C3-planen S3); noden för adressen och listornas id.
+                var info = _competitions.Get(competitionId);
+                var comp = info != null ? ctxRef.UmbracoContext.Content?.GetById(competitionId) : null;
+                if (info == null || comp == null) return s;
 
-                s.CompName = comp.Value<string>("competitionName") ?? comp.Name ?? "Tävling";
-                s.Discipline = ReadCompetitionType(comp);
-                s.CompDate = NullIfDefault(comp.Value<DateTime>("competitionDate"));
-                s.CompEndDate = RealDate(comp.Value<DateTime?>("competitionEndDate"));
+                s.CompName = info.CompetitionName ?? info.Name ?? "Tävling";
+                s.Discipline = info.CompetitionType ?? "";
+                s.CompDate = info.CompetitionDate;
+                s.CompEndDate = RealDate(info.CompetitionEndDate);
                 s.CompetitionUrl = comp.Url();
 
                 var items = new List<ScheduleItem>();
@@ -449,7 +455,7 @@ namespace HpskSite.Services.Schedule
             var items = new List<ScheduleItem>();
 
             // Same gate as the public /patrullista wall screen — unpublished patrols stay invisible.
-            if (!comp.Value<bool>("faltskyttePatrolsPublished")) return items;
+            if (!(_competitions.Get(comp.Id)?.FaltskyttePatrolsPublished ?? false)) return items;
 
             List<PatrolRow> rows;
             try
@@ -837,23 +843,6 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
         private static DateTime? RealDate(DateTime? d)
             => d.HasValue && d.Value > DateTime.MinValue && d.Value.Year > 1900 ? d : null;
 
-        private static string ReadCompetitionType(IPublishedContent comp)
-        {
-            // competitionType can be a FlexibleDropdown whose typed read throws on legacy plain-string
-            // values — same defensive pattern as CompetitionUrlProvider.ReadScopeValue.
-            try
-            {
-                var raw = comp.Value("competitionType");
-                return raw switch
-                {
-                    string str => str,
-                    null => "",
-                    _ => raw.ToString() ?? "",
-                };
-            }
-            catch { return ""; }
-        }
-
         private static T? TryDeserialize<T>(string json) where T : class
         {
             try { return JsonConvert.DeserializeObject<T>(json); }
@@ -880,15 +869,12 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
             try
             {
                 using var ctxRef = _ctxFactory.EnsureUmbracoContext();
-                var root = ctxRef.UmbracoContext.Content?.GetAtRoot().FirstOrDefault();
-                var hub = root?.Children().FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
-                if (hub == null) return ids;
-
-                foreach (var c in hub.Descendants().Where(x => x.ContentType.Alias == "competition"))
+                // Tävlingarna ur tävlingslagringen (C3-planen S3) — alla publicerade, som navets underträd gav.
+                foreach (var c in _competitions.List())
                 {
-                    var start = NullIfDefault(c.Value<DateTime>("competitionDate"));
+                    var start = c.CompetitionDate;
                     if (start == null) continue;
-                    var end = RealDate(c.Value<DateTime?>("competitionEndDate")) ?? start;
+                    var end = RealDate(c.CompetitionEndDate) ?? start;
                     // Any overlap between [start,end] and [fromDate,toDate].
                     if (end.Value.Date >= fromDate.Date && start.Value.Date <= toDate.Date) ids.Add(c.Id);
                 }
@@ -906,10 +892,9 @@ ORDER BY p.PatrolNumber", s.CompetitionId, memberId);
             try
             {
                 using var ctxRef = _ctxFactory.EnsureUmbracoContext();
-                var c = ctxRef.UmbracoContext.Content?.GetById(competitionId);
+                var c = _competitions.Get(competitionId);
                 if (c == null) return (null, null);
-                return (NullIfDefault(c.Value<DateTime>("competitionDate")),
-                        RealDate(c.Value<DateTime?>("competitionEndDate")));
+                return (c.CompetitionDate, RealDate(c.CompetitionEndDate));
             }
             catch { return (null, null); }
         }

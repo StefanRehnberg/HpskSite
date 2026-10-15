@@ -51,6 +51,8 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Events.IClubEventStore _events;
         private readonly MemberActivityService _activity;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public AdminStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -68,9 +70,11 @@ namespace HpskSite.Controllers
             HpskSite.Services.Training.ClubTrainingService trainings,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Events.IClubEventStore events,
-            MemberActivityService activity)
+            MemberActivityService activity,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _activity = activity;
             _registrations = registrations;
             _trainings = trainings;
@@ -507,9 +511,9 @@ namespace HpskSite.Controllers
             // Anmälningarna via anmälningslagringen (sajtstrukturen fas 1a), en gång per tävling. Den
             // publicerade cachen såg bara de anmälningar som råkat publiceras.
             var seededByCompetition = new Dictionary<int, bool>();
-            bool IsExcludedCompetition(IPublishedContent c)
+            bool IsExcludedCompetition(HpskSite.Models.Competitions.CompetitionInfo c)
             {
-                var cid = c.Value<int>("clubId");
+                var cid = c.ClubId;
                 if (cid > 0 && excludedClubIds.Contains(cid)) return true;
                 if (!seededByCompetition.TryGetValue(c.Id, out var seeded))
                     seededByCompetition[c.Id] = seeded = _registrations.List(c.Id).Any(r =>
@@ -636,17 +640,15 @@ namespace HpskSite.Controllers
                     // the Count() loop. Note: the main competitions section further down
                     // re-loads allCompetitions for its own purposes — keep them separate
                     // for now since they need slightly different filters.
-                    var clubIdsWithRecentComp = (root.Children
-                            .FirstOrDefault(c => c.ContentType.Alias == "competitionsHub")
-                            ?.Descendants()
-                            .Where(c => c.ContentType.Alias == "competition" && !IsExcludedCompetition(c))
-                            ?? Enumerable.Empty<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>())
+                    // Tävlingarna ur tävlingslagringen (C3-planen S3) — alla publicerade, som navets underträd gav.
+                    var clubIdsWithRecentComp = _competitions.List()
+                        .Where(c => !IsExcludedCompetition(c))
                         .Where(c =>
                         {
-                            var d = c.Value<DateTime?>("competitionDate");
+                            var d = c.CompetitionDate;
                             return d.HasValue && d.Value >= threeMonthsAgo;
                         })
-                        .Select(c => c.Value<int>("clubId"))
+                        .Select(c => c.ClubId)
                         .Where(id => id > 0)
                         .ToHashSet();
 
@@ -678,15 +680,14 @@ namespace HpskSite.Controllers
                     int newClubs30d = earliestMemberByClub.Count(kvp => kvp.Value >= thirtyDaysAgo);
 
                     // ── 3. Competitions ─────────────────────────────────
-                    var competitionsHub = root.Children.FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
-                    var allCompetitions = competitionsHub?.Descendants()
-                        .Where(c => c.ContentType.Alias == "competition" && !IsExcludedCompetition(c))
-                        .ToList() ?? new List<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
+                    var allCompetitions = _competitions.List()
+                        .Where(c => !IsExcludedCompetition(c))
+                        .ToList();
 
                     var competitionsThisYear = allCompetitions
                         .Where(c =>
                         {
-                            var d = c.Value<DateTime?>("competitionDate");
+                            var d = c.CompetitionDate;
                             return d.HasValue && d.Value.Year == now.Year;
                         })
                         .ToList();
@@ -694,7 +695,7 @@ namespace HpskSite.Controllers
                     int competitionsThisYearCount = competitionsThisYear.Count;
 
                     var competitionsByDiscipline = competitionsThisYear
-                        .GroupBy(c => c.Value<string>("competitionType") ?? "Okänd")
+                        .GroupBy(c => c.CompetitionType ?? "Okänd")
                         .Select(g => new { discipline = g.Key, count = g.Count() })
                         .OrderByDescending(g => g.count)
                         .Cast<object>()
@@ -715,7 +716,7 @@ namespace HpskSite.Controllers
                         .Select(c => new
                         {
                             name = c.Name ?? "",
-                            discipline = c.Value<string>("competitionType") ?? "",
+                            discipline = c.CompetitionType ?? "",
                             registrations = regCountByCompetition.GetValueOrDefault(c.Id, 0)
                         })
                         .OrderByDescending(c => c.registrations)
