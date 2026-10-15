@@ -88,8 +88,10 @@ namespace HpskSite.Services
                     }
                 }
 
-                var tmNode = all.FirstOrDefault(n =>
-                    n.UrlSegment != null && n.UrlSegment.Contains("traningsmatch", StringComparison.OrdinalIgnoreCase));
+                // ⚠️ Sidan slås upp på dokumenttypen, aldrig på adressdelen: en tävling som heter
+                // "Träningsmatch" har också segmentet "traningsmatch", och då pekade varje matchlänk i
+                // flödet på den tävlingen (felrapport 2026-10-15, Älmhults PK).
+                var tmNode = all.FirstOrDefault(n => n.ContentType.Alias == "trainingMatch");
                 if (tmNode != null) tmBase = tmNode.Url();
 
                 // club counts per region

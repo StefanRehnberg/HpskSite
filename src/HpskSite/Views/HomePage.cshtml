@@ -39,7 +39,8 @@
 
     var omUrl = Model.Children.FirstOrDefault(c => c.ContentType.Alias == "aboutPage")?.Url() ?? "/om-pistol-nu/";
     var minSidaUrl = Model.Children.FirstOrDefault(c => c.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile-page/";
-    var traningsmatchUrl = Model.Children.FirstOrDefault(x => x.Name?.ToLower().Contains("träningsmatch") == true || x.UrlSegment?.Contains("traningsmatch") == true)?.Url() ?? "/traningsmatch/";
+    // Dokumenttypen, inte namnet: en annan sida med "Träningsmatch" i namnet (t.ex. en film) tog annars länken.
+    var traningsmatchUrl = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "trainingMatch")?.Url() ?? "/traningsmatch/";
     var competitionsUrl = competitionsHub?.Url() ?? "/competitions/";
     var loginUrl = "/login-register/?tab=login";
     var registerUrl = "/login-register/?tab=register";
