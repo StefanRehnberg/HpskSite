@@ -3541,7 +3541,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
 
         private async Task<List<PrecisionResultEntry>> GetQualificationResults(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return new List<PrecisionResultEntry>();
             return await _qualifyingResultsService.GetQualifyingResultsAsync(competition);
         }

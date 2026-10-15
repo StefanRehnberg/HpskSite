@@ -11,11 +11,13 @@
 @inject HpskSite.Services.Kretsgranskning.ResultReviewService ResultReviews
 @inject HpskSite.Services.Kretsgranskning.KretsCalendarService KretsCalendar
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @{
     Layout = null;
     // Sidan visas antingen för resultatnoden (barn till tävlingen) eller, när listorna ligger i
     // tabellen, direkt för tävlingen. Listan läses alltid ur ICompetitionResultStore.
-    var competition = Model.ContentType.Alias == "competition" ? Model : Model.Parent;
+    var competitionInfo = Competitions.Get(Model.Id) ?? (Model.Parent != null ? Competitions.Get(Model.Parent.Id) : null);
+    var competition = competitionInfo != null && competitionInfo.Id == Model.Id ? Model : Model.Parent;
     var resultList = competition == null ? null : ResultLists.GetMany(new[] { competition.Id }).Values.FirstOrDefault();
     
     // Get properties using Value<T>
@@ -25,7 +27,7 @@
     
     // Get competition type
     var competitionTypeId = "";
-    try { competitionTypeId = competition.Value<string>("competitionType") ?? "Precision"; } catch { competitionTypeId = "Precision"; }
+    competitionTypeId = competitionInfo?.CompetitionType ?? "Precision";
     var isSpringskytte = competitionTypeId == "Springskytte";
     var isFaltskytte = competitionTypeId == "Faltskytte" || competitionTypeId == "MagnumFalt";
 
@@ -44,7 +46,7 @@
     {
         var subParam = Context.Request.Query["sub"].ToString();
         isSubCompetitionView = string.Equals(subParam, "true", StringComparison.OrdinalIgnoreCase);
-        subCompetitionName = competition.Value<string>("subCompetitionName") ?? "";
+        subCompetitionName = competitionInfo?.SubCompetitionName ?? "";
         // Defensive: ignore ?sub=true when the competition has no deltävling configured.
         if (string.IsNullOrWhiteSpace(subCompetitionName)) isSubCompetitionView = false;
     }
@@ -52,13 +54,13 @@
 
     // Team results support
     var allowTeams = false;
-    try { allowTeams = competition.Value<bool>("allowTeams"); } catch { }
+    allowTeams = competitionInfo?.AllowTeams ?? false;
 
     // Get competition configuration for finals
     var numberOfSeriesOrStations = 0;
     var numberOfFinalSeries = 0;
-    try { numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations"); } catch { }
-    try { numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries"); } catch { }
+    numberOfSeriesOrStations = competitionInfo?.NumberOfSeriesOrStations ?? 0;
+    numberOfFinalSeries = competitionInfo?.NumberOfFinalSeries ?? 0;
     
     var hasFinalsRound = numberOfFinalSeries > 0;
     var qualificationSeriesCount = hasFinalsRound ? (numberOfSeriesOrStations - numberOfFinalSeries) : numberOfSeriesOrStations;
@@ -92,7 +94,7 @@
 
             var isClubAdmin = false;
             var isSkjutledare = false;
-            var competitionClubId = competition.Value<int>("clubId");
+            var competitionClubId = competitionInfo?.ClubId ?? 0;
             if (competitionClubId > 0)
             {
                 isClubAdmin = await AuthService.IsClubAdminForClub(competitionClubId);
@@ -100,7 +102,7 @@
             }
             // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
             var isRegionHost = await AuthService.IsRegionHostAdminAsync(
-                competitionClubId, competition.Value<string>("regionalFederation"));
+                competitionClubId, competitionInfo?.RegionalFederation);
 
             // ⚠️ Bara i hanteringsvyns inbäddning (?edit=1). På den PUBLIKA sidan såg en inloggad
             // admin 16 röda papperskorgar, och ett feltryck raderade en skytts resultat

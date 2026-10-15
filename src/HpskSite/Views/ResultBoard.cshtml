@@ -1,5 +1,6 @@
 ﻿@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @{
     // Standalone live results board at /live?c=<competitionId>. Chromeless (no Master)
     // so it fills a wall-TV/kiosk screen. Public, but only renders when the competition
@@ -11,19 +12,17 @@
     int competitionId = 0;
     int.TryParse(cStr, out competitionId);
 
-    IPublishedContent? competition = null;
-    if (competitionId > 0)
-    {
-        var node = Umbraco.Content(competitionId);
-        if (node != null && node.ContentType.Alias == "competition") competition = node;
-    }
+    // Tävlingen genom ICompetitionStore (C3-planen S3); noden bara för adressen nedan.
+    var info = competitionId > 0 ? Competitions.Get(competitionId) : null;
+    IPublishedContent? competition = info != null ? Umbraco.Content(competitionId) : null;
+    if (competition == null) info = null;
 
-    var competitionName = competition?.Value<string>("competitionName") ?? competition?.Name ?? "";
-    var competitionType = competition?.Value<string>("competitionType") ?? "Precision";
-    var numberOfSeriesOrStations = competition?.Value<int>("numberOfSeriesOrStations") ?? 0;
-    var numberOfFinalSeries = competition?.Value<int>("numberOfFinalSeries") ?? 0;
-    var showLiveResults = competition?.Value<bool>("showLiveResults") ?? false;
-    var isExternal = competition?.Value<bool>("isExternal") ?? false;
+    var competitionName = info?.CompetitionName ?? info?.Name ?? "";
+    var competitionType = info?.CompetitionType ?? "Precision";
+    var numberOfSeriesOrStations = info?.NumberOfSeriesOrStations ?? 0;
+    var numberOfFinalSeries = info?.NumberOfFinalSeries ?? 0;
+    var showLiveResults = info?.ShowLiveResults ?? false;
+    var isExternal = info?.IsExternal ?? false;
 
     // The competition's weapon groups, from the class registry (JSON array or legacy CSV via
     // ShootingClassIdsValue.ReadIds), in the result-list order. Codes as the registry has them
@@ -31,7 +30,7 @@
     var configuredWCs = new string[0];
     if (competition != null)
     {
-        configuredWCs = HpskSite.Models.ShootingClassIdsValue.ReadIds(competition.Value("shootingClassIds"))
+        configuredWCs = HpskSite.Models.ShootingClassIdsValue.ReadIds(info!.ShootingClassIds)
             .Select(id => HpskSite.Models.ShootingClasses.Resolve(id))
             .Where(sc => sc != null)
             .Select(sc => sc!.Weapon)

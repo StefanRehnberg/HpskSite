@@ -42,6 +42,7 @@ namespace HpskSite.Services
         public const string HonoraryConfigProperty = "honoraryAwardConfig";
 
         private readonly IContentService _contentService;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly CompetitionTeamService _teamService;
         private readonly ShootOffService _shootOffService;
         private readonly FaltskytteShootOffService _faltShootOffService;
@@ -54,9 +55,11 @@ namespace HpskSite.Services
             ShootOffService shootOffService,
             FaltskytteShootOffService faltShootOffService,
             ILogger<PrizeGivingService> logger,
-            HpskSite.Services.Results.ICompetitionResultStore results)
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
             _results = results;
+            _competitions = competitions;
             _contentService = contentService;
             _teamService = teamService;
             _shootOffService = shootOffService;
@@ -69,15 +72,15 @@ namespace HpskSite.Services
 
         public async Task<PrizeGivingModel?> BuildAsync(int competitionId, string? weaponGroup, bool canEdit)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return null;
 
-            var scope = competition.GetValue<string>("competitionScope") ?? "";
-            var competitionType = competition.GetValue<string>("competitionType") ?? "Precision";
+            var scope = competition.CompetitionScope ?? "";
+            var competitionType = competition.CompetitionType ?? "Precision";
             var model = new PrizeGivingModel
             {
                 CompetitionId = competitionId,
-                CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
+                CompetitionName = competition.CompetitionName ?? competition.Name ?? "",
                 CompetitionType = competitionType,
                 IsChampionship = ChampionshipCategory.IsChampionship(scope),
                 SelectedWeaponGroup = (weaponGroup ?? "").Trim(),
@@ -202,7 +205,7 @@ namespace HpskSite.Services
                 model.SelectedWeaponGroup);
 
             // ── Hederspriser ─────────────────────────────────────────────────────────
-            model.Honorary = BuildHonorary(competition, resultNode, artifact, scope,
+            model.Honorary = BuildHonorary(competition, HonoraryPropertyMissing(competitionId), resultNode, artifact, scope,
                 model.SelectedWeaponGroup, model.ScoreUnit);
 
             // ── Varningar som gör ceremonin osäker ───────────────────────────────────
@@ -224,13 +227,13 @@ namespace HpskSite.Services
         /// "Poang" eller "Normal" för fältskyttefamiljen — räknesättet som gäller NU — och null
         /// för grenar som bara har ett. Anroparen jämför det mot artefaktens egna enheter.
         /// </returns>
-        private static string? ApplyDisciplineLabels(PrizeGivingModel model, IContent competition)
+        private static string? ApplyDisciplineLabels(PrizeGivingModel model, HpskSite.Models.Competitions.CompetitionInfo competition)
         {
             var isFalt = model.CompetitionType is "Faltskytte" or "MagnumFalt";
             if (!isFalt) return null;
 
-            var config = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig"));
-            var scoringMode = FaltskytteScoringMode.Resolve(config, competition.GetValue<string>("scoringMode"));
+            var config = FaltskytteConfigParser.Parse(competition.StationConfig);
+            var scoringMode = FaltskytteScoringMode.Resolve(config, competition.ScoringMode);
             var usesPoints = model.CompetitionType == "MagnumFalt"
                           || string.Equals(scoringMode, "Poang", StringComparison.OrdinalIgnoreCase);
 
@@ -262,13 +265,13 @@ namespace HpskSite.Services
                 .ToList();
         }
 
-        private async Task<List<PrizeTeamGroup>> BuildTeamGroupsAsync(IContent competition, bool isChampionship)
+        private async Task<List<PrizeTeamGroup>> BuildTeamGroupsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, bool isChampionship)
         {
             var groups = new List<PrizeTeamGroup>();
             if (!isChampionship) return groups;
 
-            var competitionType = competition.GetValue<string>("competitionType") ?? "Precision";
-            var numberOfSeries = competition.GetValue<int>("numberOfSeriesOrStations");
+            var competitionType = competition.CompetitionType ?? "Precision";
+            var numberOfSeries = competition.NumberOfSeriesOrStations;
 
             var teamGroups = await _teamService.CalculateTeamResultsAsync(competition.Id, competitionType, numberOfSeries);
 
@@ -355,8 +358,16 @@ namespace HpskSite.Services
             return first is 'A' or 'B' or 'C' or 'R' or 'M' or 'L' ? first.ToString() : "";
         }
 
+        /// <summary>
+        /// Saknar tävlingens dokumenttyp hedersprisfältet? Det är en fråga om DOKUMENTTYPEN, som posten
+        /// inte bär — därför noden. Försvinner när tävlingarna flyttar till tabellen (där finns fältet alltid).
+        /// </summary>
+        private bool HonoraryPropertyMissing(int competitionId) =>
+            _contentService.GetById(competitionId)?.HasProperty(HonoraryEnabledProperty) != true;
+
         private PrizeHonorarySection BuildHonorary(
-            IContent competition,
+            HpskSite.Models.Competitions.CompetitionInfo competition,
+            bool honoraryPropertyMissing,
             HpskSite.Models.Results.CompetitionResultRecord? resultNode,
             PrecisionFinalResults artifact,
             string scope,
@@ -365,11 +376,11 @@ namespace HpskSite.Services
         {
             var section = new PrizeHonorarySection
             {
-                PropertyMissing = !competition.HasProperty(HonoraryEnabledProperty)
+                PropertyMissing = honoraryPropertyMissing
             };
 
             // Saknad egenskap läses som "utgår inte", men sidan säger varför i stället för att tiga.
-            section.Enabled = !section.PropertyMissing && competition.GetValue<bool>(HonoraryEnabledProperty);
+            section.Enabled = !section.PropertyMissing && competition.IsAwardingHonoraryAward;
             if (!section.Enabled) return section;
 
             var classGroups = artifact.ClassGroups ?? new List<PrecisionClassGroup>();
@@ -506,7 +517,7 @@ namespace HpskSite.Services
 
         private async Task AddIntegrityWarningsAsync(
             PrizeGivingModel model,
-            IContent competition,
+            HpskSite.Models.Competitions.CompetitionInfo competition,
             HpskSite.Models.Results.CompetitionResultRecord? resultNode,
             PrecisionFinalResults artifact)
         {
@@ -565,8 +576,8 @@ namespace HpskSite.Services
                     + "Kontrollera och publicera den innan prisutdelningen.");
             }
 
-            var numberOfSeries = competition.GetValue<int>("numberOfSeriesOrStations");
-            var numberOfFinalSeries = competition.GetValue<int>("numberOfFinalSeries");
+            var numberOfSeries = competition.NumberOfSeriesOrStations;
+            var numberOfFinalSeries = competition.NumberOfFinalSeries;
             var qualificationSeries = numberOfFinalSeries > 0
                 ? numberOfSeries - numberOfFinalSeries
                 : numberOfSeries;

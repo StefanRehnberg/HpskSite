@@ -26,6 +26,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
     public class PrecisionQualifyingResultsService
     {
         private readonly IContentService _contentService;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly PrecisionFinalsQualificationService _qualificationService;
         private readonly ILogger<PrecisionQualifyingResultsService> _logger;
@@ -38,10 +39,12 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             PrecisionFinalsQualificationService qualificationService,
             ILogger<PrecisionQualifyingResultsService> logger,
             HpskSite.Services.Results.ICompetitionResultStore results,
-            HpskSite.Services.StartLists.IStartListStore startLists)
+            HpskSite.Services.StartLists.IStartListStore startLists,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
             _results = results;
             _startLists = startLists;
+            _competitions = competitions;
             _contentService = contentService;
             _databaseFactory = databaseFactory;
             _qualificationService = qualificationService;
@@ -70,11 +73,11 @@ namespace HpskSite.CompetitionTypes.Precision.Services
 
         public async Task<(bool ok, string message, ClassResultsSnapshot? classSnapshot)> FreezeClassResultsAsync(int competitionId, string groupName, string frozenBy)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return (false, "Tävlingen hittades inte.", null);
 
-            var numberOfFinalSeries = competition.GetValue<int>("numberOfFinalSeries");
+            var numberOfFinalSeries = competition.NumberOfFinalSeries;
             if (numberOfFinalSeries <= 0)
                 return (false, "Denna tävling har inga finalserier konfigurerade.", null);
 
@@ -147,7 +150,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             var result = new Dictionary<string, bool>();
             if (snapshot.ClassSnapshots.Count == 0) return result;
 
-            var rankingsByGroup = (await BuildFullRankingsAsync(competitionId, _contentService.GetById(competitionId)!))
+            var rankingsByGroup = (await BuildFullRankingsAsync(competitionId, _competitions.GetSaved(competitionId)!))
                 .ToDictionary(r => r.ChampionshipClass, r => r);
 
             foreach (var (group, classSnap) in snapshot.ClassSnapshots)
@@ -165,7 +168,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
 
         public async Task<List<ChampionshipClassQualification>> GetAvailableClassRankingsAsync(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return new();
             return await BuildFullRankingsAsync(competitionId, competition);
         }
@@ -192,7 +195,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             }
         }
 
-        private async Task<List<ChampionshipClassQualification>> BuildFullRankingsAsync(int competitionId, IContent competition)
+        private async Task<List<ChampionshipClassQualification>> BuildFullRankingsAsync(int competitionId, HpskSite.Models.Competitions.CompetitionInfo competition)
         {
             var results = await GetQualifyingResultsAsync(competition);
             var shooterInfo = GetShooterInfoFromStartList(competitionId);
@@ -210,7 +213,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
             // ⚠️ Finalklasserna FÖLJER medaljindelningen. Har arrangören valt en uppsättning
             // medaljer per vapengrupp finns ingen egen damfinal att gallra till — en final per
             // kategori och en medalj per vapengrupp vore två olika svar på samma fråga.
-            var scope = competition.GetValue<string>("competitionScope");
+            var scope = competition.CompetitionScope;
             var lookup = ChampionshipCategory.IsChampionship(scope)
                 ? ChampionshipCategory.BuildLookup(
                     results.Select(r => r.ShootingClass).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(),
@@ -224,22 +227,22 @@ namespace HpskSite.CompetitionTypes.Precision.Services
         /// Grundomgångens resultatrader ur GRENENS tabell. ⚠️ Läste hårdkodat PrecisionResultEntry
         /// fram till 2026-10-03, vilket gjorde finalen omöjlig för alla andra grenar i familjen.
         /// </summary>
-        public async Task<List<PrecisionResultEntry>> GetQualifyingResultsAsync(IContent competition)
+        public async Task<List<PrecisionResultEntry>> GetQualifyingResultsAsync(HpskSite.Models.Competitions.CompetitionInfo competition)
         {
             var qualSeriesCount = PrecisionFamilyResultReader.QualifyingSeriesCount(
-                competition.GetValue<int>("numberOfSeriesOrStations"),
-                competition.GetValue<int>("numberOfFinalSeries"));
+                competition.NumberOfSeriesOrStations,
+                competition.NumberOfFinalSeries);
 
             using var db = _databaseFactory.CreateDatabase();
             return await PrecisionFamilyResultReader.FetchAsync(db,
-                competition.GetValue<string>("competitionType"),
+                competition.CompetitionType,
                 "WHERE CompetitionId = @0 AND SeriesNumber <= @1 ORDER BY MemberId, SeriesNumber",
                 competition.Id, qualSeriesCount);
         }
 
         private async Task<string> ComputeGroupChecksumAsync(int competitionId, ChampionshipClassQualification ranking)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return "";
 
             var results = await GetQualifyingResultsAsync(competition);

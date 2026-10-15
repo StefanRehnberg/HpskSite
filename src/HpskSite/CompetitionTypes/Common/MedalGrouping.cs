@@ -69,6 +69,10 @@ namespace HpskSite.CompetitionTypes.Common
         public static bool PerWeaponGroup(string? competitionScope, bool storedValue) =>
             storedValue && CanChoose(competitionScope);
 
+        /// <summary>Läser valet ur tävlingens post (<see cref="HpskSite.Models.Competitions.CompetitionInfo"/>).</summary>
+        public static bool PerWeaponGroup(HpskSite.Models.Competitions.CompetitionInfo? competition) =>
+            competition != null && PerWeaponGroup(competition.CompetitionScope, competition.MedalsPerWeaponGroup);
+
         /// <summary>Läser valet ur en sparad (icke publicerad) nod.</summary>
         public static bool PerWeaponGroup(IContent? competition)
         {
