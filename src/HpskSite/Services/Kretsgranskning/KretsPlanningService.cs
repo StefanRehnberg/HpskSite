@@ -30,9 +30,13 @@ namespace HpskSite.Services.Kretsgranskning
         private readonly IContentService _content;
         private readonly ILogger<KretsPlanningService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public KretsPlanningService(IScopeProvider scopeProvider, KretsCalendarService calendar, IContentService content,
-            ILogger<KretsPlanningService> logger)
+            ILogger<KretsPlanningService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _scopeProvider = scopeProvider;
             _calendar = calendar;
             _content = content;
@@ -146,11 +150,11 @@ namespace HpskSite.Services.Kretsgranskning
                 var items = Checklist(regionId);
                 if (items.Count == 0) return null;
 
-                var comp = _content.GetById(competitionId);
+                var comp = _competitions.GetSaved(competitionId);
                 if (comp == null) return null;
-                var level = CompetitionLevel.Normalize(comp.GetValue<string>("competitionLevel"));
-                var scopeText = ChampionshipCategory.NormalizeScope(comp.GetValue<string>("competitionScope"));
-                var isClubOnly = comp.GetValue<bool>("isClubOnly");
+                var level = CompetitionLevel.Normalize(comp.CompetitionLevel);
+                var scopeText = ChampionshipCategory.NormalizeScope(comp.CompetitionScope);
+                var isClubOnly = comp.IsClubOnly;
                 var kretsOrAbove = CompetitionLevel.IsKretsOrAbove(level)
                     || scopeText is CompetitionScopeHelper.Kretsmasterskap or CompetitionScopeHelper.Landsdelsmasterskap or CompetitionScopeHelper.SvensktMasterskap;
                 var isKm = scopeText == CompetitionScopeHelper.Kretsmasterskap;
@@ -188,7 +192,7 @@ namespace HpskSite.Services.Kretsgranskning
             var toDismiss = cl.Pending.Where(p => dismiss.Contains(p.Id)).ToList();
             if (toAdd.Count == 0 && toDismiss.Count == 0) return (0, 0);
 
-            var compDate = _content.GetById(competitionId)?.GetValue<DateTime?>("competitionDate");
+            var compDate = _competitions.GetSaved(competitionId)?.CompetitionDate;
             if (compDate is { Year: <= 1900 }) compDate = null;
 
             using var scope = _scopeProvider.CreateScope();

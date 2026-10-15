@@ -48,7 +48,7 @@ namespace HpskSite.Models
     /// <summary>Sorterna i banans kalender. Strängar som går ut till klienten oförändrade.</summary>
     public static class RangeCalendarKind
     {
-        public const string Competition = "competition";
+        public const string Competition = "competition"; // competitionstore-ok: kalenderpostens sort, inte doktypens alias
         public const string Training = "training";
         public const string Event = "event";
         /// <summary>En klubbs fasta tid på banan (ClubRangeAllocation), utlagd per dag.</summary>

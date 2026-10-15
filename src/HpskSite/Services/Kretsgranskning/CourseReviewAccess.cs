@@ -32,11 +32,15 @@ namespace HpskSite.Services.Kretsgranskning
         private readonly ILogger<CourseReviewAccess> _logger;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public CourseReviewAccess(CourseReviewService reviews, CompetitionApplicationService apps, KretsUppdragService uppdrag,
             KretsLinkTokenService tokens, KretsCalendarService calendar, AdminAuthorizationService auth, IContentService content,
             EmailService email, IConfiguration config, ClubService clubs, ILogger<CourseReviewAccess> logger,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _registrations = registrations;
             _reviews = reviews;
             _apps = apps;
@@ -171,33 +175,33 @@ namespace HpskSite.Services.Kretsgranskning
         {
             try
             {
-                var comp = _content.GetById(competitionId);
-                if (comp == null || comp.ContentType.Alias != "competition") return null;
-                var type = comp.GetValue<string>("competitionType") ?? "";
-                var level = CompetitionTypes.Common.CompetitionLevel.Normalize(comp.GetValue<string>("competitionLevel"));
-                var scope = CompetitionTypes.Common.ChampionshipCategory.NormalizeScope(publishedScope ?? comp.GetValue<string>("competitionScope"));
-                var date = comp.GetValue<DateTime?>("competitionDate");
+                var comp = _competitions.GetSaved(competitionId);
+                if (comp == null) return null;
+                var type = comp.CompetitionType ?? "";
+                var level = CompetitionTypes.Common.CompetitionLevel.Normalize(comp.CompetitionLevel);
+                var scope = CompetitionTypes.Common.ChampionshipCategory.NormalizeScope(publishedScope ?? comp.CompetitionScope);
+                var date = comp.CompetitionDate;
                 var c = new CourseReviewCompetition
                 {
                     Id = comp.Id,
-                    Name = comp.GetValue<string>("competitionName") is { Length: > 0 } n ? n : comp.Name ?? "",
+                    Name = comp.DisplayName,
                     Date = date.HasValue && date.Value.Year > 1900 ? date : null,
-                    ClubId = comp.GetValue<int>("clubId"),
-                    Venue = comp.GetValue<string>("venue") ?? "",
+                    ClubId = comp.ClubId,
+                    Venue = comp.Venue ?? "",
                     Level = level,
                     Scope = scope,
                     TypeLabel = HpskSite.Models.CompetitionTypes.GetFuzzy(type)?.Name ?? type,
-                    StationConfig = comp.GetValue<string>("stationConfig")
+                    StationConfig = comp.StationConfig
                 };
                 c.HasStations = !string.IsNullOrWhiteSpace(c.StationConfig) && c.StationConfig!.Trim() != "{}";
                 var isSmOrLdm = scope == CompetitionTypes.Common.Utilities.CompetitionScopeHelper.SvensktMasterskap
                                 || scope == CompetitionTypes.Common.Utilities.CompetitionScopeHelper.Landsdelsmasterskap;
                 c.IsNational = level is "Nationell" or "Riks";
-                c.Offered = CourseReviewRules.Offered(type, comp.GetValue<bool>("isClubOnly"),
-                    CompetitionTypes.Common.CompetitionLevel.IsKretsOrAbove(level) || isSmOrLdm, comp.GetValue<bool>("isAwardingStandardMedals"));
+                c.Offered = CourseReviewRules.Offered(type, comp.IsClubOnly,
+                    CompetitionTypes.Common.CompetitionLevel.IsKretsOrAbove(level) || isSmOrLdm, comp.IsAwardingStandardMedals);
                 c.Route = CourseReviewRules.RouteFor(isSmOrLdm);
                 c.OfferBlockedByMissingLevel = !c.Offered && CourseReviewRules.IsFieldType(type)
-                    && !comp.GetValue<bool>("isClubOnly") && string.IsNullOrEmpty(level) && !isSmOrLdm;
+                    && !comp.IsClubOnly && string.IsNullOrEmpty(level) && !isSmOrLdm;
                 var cr =_calendar.CompetitionRegion(competitionId);
                 if (cr != null) { c.RegionId = cr.Value.Region.Id; c.RegionName = cr.Value.Region.Name; }
                 c.Organiser = c.ClubId > 0 ? (_clubs.GetClubNameById(c.ClubId) ?? c.RegionName) : c.RegionName;
