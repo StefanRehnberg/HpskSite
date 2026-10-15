@@ -11473,6 +11473,14 @@ och tom text är null (så `?? Name` slår till).
   matrisen 8/8 + 35/36 (`schema-verify`, datum), auth-region 25, escaping 22, poang-only 26
   (`HPSK_BASE` krävs), prisutdelning-falt 33; startledare 7/12 och tp-faltskytte-crossregion 3/7 lika med
   BÅDA byggena.
+- **Område 7, springskytte (2026-10-15):** `SpringskytteController` (+ `.Stafett`; hjälparna tar
+  `CompetitionInfo`), stafettens resultatsida, startledarens sida, startlistesidan och simuleringen läser
+  `GetSaved`; SM-sidans kontaktuppgifter läser `Get`. Kvar på noden: `SaveSpringskytteMergeConfig`
+  (skriver), `autoNotifyParticipants`, SM-sidans uppslag på adressdelen (S6). Taken 89 → 79, 526 → 491.
+  Verifierat: fångst (kallstarten på 10362), korskontroll 3092/0, matrisen 8/8 + 35/36 (`schema-verify`,
+  datum), verify-spring-all, spring-e2e, spring-deltavling, startpass 27, startpass-total 11,
+  p6-stafett-numbering 36; springskytte-hub 17/19 och verify-stafett FAIL lika med BÅDA byggena;
+  liveboard-springskytte kräver att tidsfixturen seedas om.
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

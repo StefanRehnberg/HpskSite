@@ -58,6 +58,8 @@ namespace HpskSite.Controllers
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public SpringskytteSimulationController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -70,9 +72,11 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authService,
             ClubService clubService,
             PaymentService paymentService,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _memberService = memberService;
             _contentService = contentService;
             _authService = authService;
@@ -128,18 +132,18 @@ namespace HpskSite.Controllers
             if (!await _authService.IsCurrentUserAdminAsync())
                 return Json(new { success = false, message = "Endast webbplatsadministratör kan köra simuleringen." });
 
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null || competition.ContentType.Alias != "competition")
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
             // ── SAFETY GUARD ─────────────────────────────────────────────────────────────
-            var compType = competition.GetValue<string>("competitionType") ?? "";
+            var compType = competition.CompetitionType ?? "";
             if (!string.Equals(compType, "Springskytte", StringComparison.OrdinalIgnoreCase))
                 return Json(new { success = false, message = $"Tävlingen är inte Springskytte (competitionType = '{compType}')." });
 
-            var name = competition.GetValue<string>("competitionName");
+            var name = competition.CompetitionName;
             if (string.IsNullOrWhiteSpace(name)) name = competition.Name ?? "";
-            var isClubOnly = competition.GetValue<bool>("isClubOnly");
+            var isClubOnly = competition.IsClubOnly;
             if (!isClubOnly && !LooksLikePractice(name))
                 return Json(new
                 {
@@ -149,7 +153,7 @@ namespace HpskSite.Controllers
                 });
 
             // Springskytte classes are stored as composite "A-D 21","C-H 35" strings in shootingClassIds.
-            var composites = ParseCompositeClasses(competition.GetValue<string>("shootingClassIds") ?? "");
+            var composites = ParseCompositeClasses(competition.ShootingClassIds ?? "");
             if (composites.Count == 0)
                 return Json(new { success = false, message = "Tävlingen har inga Springskytte-klasser (shootingClassIds tomt). Konfigurera klasser först." });
 
@@ -174,7 +178,7 @@ namespace HpskSite.Controllers
             if (clubInfo == null)
                 return Json(new { success = false, message = $"Hittade ingen klubb som matchar '{club}'. Skapa klubben först." });
 
-            var subName = competition.GetValue<string>("subCompetitionName");
+            var subName = competition.SubCompetitionName;
 
             count = Math.Clamp(count, 1, 300);
             paidRatio = Math.Clamp(paidRatio, 0d, 1d);
@@ -338,12 +342,12 @@ namespace HpskSite.Controllers
             if (!await _authService.IsCurrentUserAdminAsync())
                 return Json(new { success = false, message = "Endast webbplatsadministratör." });
 
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null || competition.ContentType.Alias != "competition")
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-            var isClubOnly = competition.GetValue<bool>("isClubOnly");
-            var name = competition.GetValue<string>("competitionName") ?? competition.Name ?? "";
+            var isClubOnly = competition.IsClubOnly;
+            var name = competition.CompetitionName ?? competition.Name ?? "";
             if (!isClubOnly && !LooksLikePractice(name))
                 return Json(new { success = false, message = "Säkerhetsspärr: vägrar rensa en publik tävling." });
 
@@ -400,17 +404,17 @@ namespace HpskSite.Controllers
             if (!await _authService.IsCurrentUserAdminAsync())
                 return Json(new { success = false, message = "Endast webbplatsadministratör kan köra simuleringen." });
 
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null || competition.ContentType.Alias != "competition")
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
             // ── SAME SAFETY GUARD AS THE REGISTRATION SEEDER ─────────────────────────────
-            var compType = competition.GetValue<string>("competitionType") ?? "";
+            var compType = competition.CompetitionType ?? "";
             if (!string.Equals(compType, "Springskytte", StringComparison.OrdinalIgnoreCase))
                 return Json(new { success = false, message = $"Tävlingen är inte Springskytte (competitionType = '{compType}')." });
-            var name = competition.GetValue<string>("competitionName");
+            var name = competition.CompetitionName;
             if (string.IsNullOrWhiteSpace(name)) name = competition.Name ?? "";
-            if (!competition.GetValue<bool>("isClubOnly") && !LooksLikePractice(name))
+            if (!competition.IsClubOnly && !LooksLikePractice(name))
                 return Json(new
                 {
                     success = false,
@@ -562,12 +566,12 @@ namespace HpskSite.Controllers
             if (!await _authService.IsCurrentUserAdminAsync())
                 return Json(new { success = false, message = "Endast webbplatsadministratör." });
 
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null || competition.ContentType.Alias != "competition")
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-            var name = competition.GetValue<string>("competitionName") ?? competition.Name ?? "";
-            if (!competition.GetValue<bool>("isClubOnly") && !LooksLikePractice(name))
+            var name = competition.CompetitionName ?? competition.Name ?? "";
+            if (!competition.IsClubOnly && !LooksLikePractice(name))
                 return Json(new { success = false, message = "Säkerhetsspärr: vägrar rensa resultat på en publik tävling." });
 
             using var db = _databaseFactory.CreateDatabase();
