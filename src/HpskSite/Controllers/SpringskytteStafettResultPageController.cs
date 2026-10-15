@@ -18,8 +18,12 @@ namespace HpskSite.Controllers
         private readonly IContentService _contentService;
         private readonly IUmbracoDatabaseFactory _dbFactory;
 
-        public SpringskytteStafettResultPageController(IContentService contentService, IUmbracoDatabaseFactory dbFactory)
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
+        public SpringskytteStafettResultPageController(IContentService contentService, IUmbracoDatabaseFactory dbFactory,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _contentService = contentService;
             _dbFactory = dbFactory;
         }
@@ -27,9 +31,9 @@ namespace HpskSite.Controllers
         [HttpGet("")]
         public IActionResult Index(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null || competition.ContentType.Alias != "competition") return NotFound();
-            if ((competition.GetValue<string>("competitionType") ?? "") != "Springskytte") return NotFound();
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null) return NotFound();
+            if ((competition.CompetitionType ?? "") != "Springskytte") return NotFound();
 
             bool isOfficial = false;
             try
@@ -42,7 +46,7 @@ namespace HpskSite.Controllers
             catch { /* table missing → treat as not published */ }
 
             ViewData["CompetitionId"] = competitionId;
-            ViewData["CompetitionName"] = competition.GetValue<string>("competitionName") ?? competition.Name ?? "Tävling";
+            ViewData["CompetitionName"] = competition.CompetitionName ?? competition.Name ?? "Tävling";
             ViewData["IsOfficial"] = isOfficial;
             return View("~/Views/SpringskytteStafettResultPage.cshtml");
         }

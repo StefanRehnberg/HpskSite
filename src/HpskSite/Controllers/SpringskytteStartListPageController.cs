@@ -35,13 +35,17 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public SpringskytteStartListPageController(
             IContentService contentService,
             IMemberManager memberManager,
             IMemberService memberService,
             ClubService clubService,
-            HpskSite.Services.StartLists.IStartListStore startLists)
+            HpskSite.Services.StartLists.IStartListStore startLists,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _startLists = startLists;
             _contentService = contentService;
             _memberManager = memberManager;
@@ -57,9 +61,9 @@ namespace HpskSite.Controllers
 
         private async Task<IActionResult> Render(int competitionId, string? slug)
         {
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null || competition.ContentType.Alias != "competition") return NotFound();
-            if ((competition.GetValue<string>("competitionType") ?? "") != "Springskytte") return NotFound();
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null) return NotFound();
+            if ((competition.CompetitionType ?? "") != "Springskytte") return NotFound();
 
             var (name, club) = await GetViewerAsync();
 
@@ -74,7 +78,7 @@ namespace HpskSite.Controllers
             var model = new SpringskytteStartListPageModel
             {
                 CompetitionId = competitionId,
-                CompetitionName = competition.GetValue<string>("competitionName")
+                CompetitionName = competition.CompetitionName
                                   ?? competition.Name ?? "Tävling",
                 Lists = lists,
                 SelectedSlug = slug,

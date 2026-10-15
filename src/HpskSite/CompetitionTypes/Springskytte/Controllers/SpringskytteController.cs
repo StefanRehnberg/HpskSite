@@ -38,6 +38,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public SpringskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -58,9 +60,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             MemberClubService memberClubService,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Results.ICompetitionResultStore results,
-            HpskSite.Services.StartLists.IStartListStore startLists)
+            HpskSite.Services.StartLists.IStartListStore startLists,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _registrations = registrations;
             _startLists = startLists;
             _results = results;
@@ -93,8 +97,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId))
                     return Json(new SpringskytteResultResponse { Success = false, Message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
-                if (competition != null && competition.GetValue<bool>("isExternal"))
+                var competition = _competitions.GetSaved(request.CompetitionId);
+                if (competition != null && competition.IsExternal)
                     return Json(new SpringskytteResultResponse { Success = false, Message = "Extern tävling - resultat kan inte registreras." });
 
                 // Parse sprint time from input if provided
@@ -129,7 +133,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     if (string.IsNullOrWhiteSpace(shooterStartTime))
                     {
                         // Fall back to start list content nodes
-                        var comp = _contentService.GetById(request.CompetitionId);
+                        var comp = _competitions.GetSaved(request.CompetitionId);
                         if (comp != null)
                         {
                             var slNodes = SpringLists(comp.Id)
@@ -397,7 +401,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 // Load start order from content nodes (authoritative source)
                 var startOrderLookup = new Dictionary<string, int>();
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition != null)
                 {
                     var slNodes = SpringLists(competition.Id)
@@ -439,8 +443,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 // header with permanently empty cells — while the medal LEDGER (and so Min sida) is
                 // correctly populated, leaving the two surfaces disagreeing.
                 // Must run AFTER ApplyTimeAdjustmentsAsync so medals rank on the adjusted totals.
-                var awardingMedals = (competition?.GetValue<bool>("isAwardingStandardMedals") ?? false)
-                    && !(competition?.GetValue<bool>("isClubOnly") ?? false);
+                var awardingMedals = (competition?.IsAwardingStandardMedals ?? false)
+                    && !(competition?.IsClubOnly ?? false);
                 if (awardingMedals)
                     new SpringskytteMedalService().CalculateStandardMedals(shooterResults);
 
@@ -500,8 +504,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 // Surface the medal-award flag so the view can hide the Std column when
                 // the competition doesn't award standard medals (or is club-only per BR-PS.1.3).
-                var isAwardingStandardMedals = (competition?.GetValue<bool>("isAwardingStandardMedals") ?? false)
-                    && !(competition?.GetValue<bool>("isClubOnly") ?? false);
+                var isAwardingStandardMedals = (competition?.IsAwardingStandardMedals ?? false)
+                    && !(competition?.IsClubOnly ?? false);
 
                 // Published/preliminary state of the result list (for the admin status badge).
                 // For the Deltävling view the state lives in subCompetitionIsOfficial.
@@ -550,7 +554,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             {
                 if (!await HasCompetitionAccess(competitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var resultPage = competition == null ? null : _results.Get(competition.Id);
                 if (resultPage == null || !_results.CanStore(HpskSite.Models.Results.CompetitionResultField.SubIsOfficial))
                     return Json(new { success = false, message = "Ingen deltävlingslista att avpublicera." });
@@ -598,7 +602,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     return _scoringService.BuildShooterResult(e, name, club);
                 }).ToList();
 
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
 
                 // Calculate medals on the Deltävling subset (1/9 silver, 1/3 bronze within
                 // the subset). Gated on the competition's isAwardingStandardMedals flag AND
@@ -606,8 +610,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 // Fold manual penalties/reductions before medal ranking on the subset.
                 await ApplyTimeAdjustmentsAsync(shooterResults, competitionId);
 
-                var isAwardingMedals = competition?.GetValue<bool>("isAwardingStandardMedals") ?? false;
-                var isClubOnlyForMedals = competition?.GetValue<bool>("isClubOnly") ?? false;
+                var isAwardingMedals = competition?.IsAwardingStandardMedals ?? false;
+                var isClubOnlyForMedals = competition?.IsClubOnly ?? false;
                 if (isAwardingMedals && !isClubOnlyForMedals)
                 {
                     var subMedalService = new SpringskytteMedalService();
@@ -668,7 +672,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     return Json(new { success = false, message = "Ogiltig begäran." });
                 if (!await HasCompetitionAccess(competitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var resultPage = competition == null ? null : _results.Get(competition.Id);
                 if (resultPage == null)
                     return Json(new { success = false, message = "Ingen resultatlista att avpublicera." });
@@ -751,13 +755,11 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
             return saved != null;
         }
 
-        private Dictionary<string, string> ReadSpringskytteMergeLookup(Umbraco.Cms.Core.Models.IContent? competition)
+        private Dictionary<string, string> ReadSpringskytteMergeLookup(HpskSite.Models.Competitions.CompetitionInfo? competition)
         {
             try
             {
-                var raw = competition != null && competition.HasProperty("mergeConfig")
-                    ? competition.GetValue<string>("mergeConfig")
-                    : null;
+                var raw = competition?.MergeConfig;
                 if (string.IsNullOrWhiteSpace(raw)) return new Dictionary<string, string>();
                 var actions = JsonConvert.DeserializeObject<List<SpringskytteClassMergeAction>>(raw);
                 return SpringskytteClassMergingService.BuildMergeGroupLookup(actions);
@@ -791,7 +793,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(competitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
@@ -815,9 +817,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     .ToList();
 
                 var analysis = new SpringskytteClassMergingService().Analyze(counts);
-                var savedConfig = competition.HasProperty("mergeConfig")
-                    ? competition.GetValue<string>("mergeConfig") ?? ""
-                    : "";
+                var savedConfig = competition.MergeConfig ?? "";
 
                 return Json(new { success = true, analysis, savedConfig });
             }
@@ -931,12 +931,12 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// </summary>
         private async Task MaterializeSpringskytteMedalsAsync(int competitionId, HashSet<string> officialClasses)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return;
             try
             {
-                var awarding = (competition.GetValue<bool>("isAwardingStandardMedals"))
-                    && !(competition.GetValue<bool>("isClubOnly"));
+                var awarding = (competition.IsAwardingStandardMedals)
+                    && !(competition.IsClubOnly);
 
                 var medals = new List<OnSiteMedal>();
                 if (awarding && officialClasses.Count > 0)
@@ -959,8 +959,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                         .ToList();
                 }
 
-                var competitionDate = competition.GetValue<DateTime?>("competitionDate");
-                var competitionName = competition.GetValue<string>("competitionName");
+                var competitionDate = competition.CompetitionDate;
+                var competitionName = competition.CompetitionName;
                 if (string.IsNullOrWhiteSpace(competitionName)) competitionName = competition.Name;
                 await _medalMaterialization.UpsertOnSiteMedalsAsync(
                     competitionId, "Springskytte", competitionDate?.Year ?? DateTime.Now.Year,
@@ -1008,9 +1008,9 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 // Order matters: this used to run BEFORE the adjustments, so snapshot medals were
                 // ranked on unadjusted totals and could disagree with the ledger (which ranks after)
                 // on any competition using the penalty/reduction ledger.
-                var compForMedals = _contentService.GetById(competitionId);
-                var mainAwardingMedals = compForMedals?.GetValue<bool>("isAwardingStandardMedals") ?? false;
-                var mainIsClubOnly = compForMedals?.GetValue<bool>("isClubOnly") ?? false;
+                var compForMedals = _competitions.GetSaved(competitionId);
+                var mainAwardingMedals = compForMedals?.IsAwardingStandardMedals ?? false;
+                var mainIsClubOnly = compForMedals?.IsClubOnly ?? false;
                 if (mainAwardingMedals && !mainIsClubOnly)
                 {
                     var medalService = new SpringskytteMedalService();
@@ -1045,7 +1045,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     .ToList();
 
                 // Store results on competitionResult child node (same pattern as Precision)
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 bool official = false;
                 var officialClasses = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (competition != null)
@@ -1094,7 +1094,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     // (transition only — never re-fires on a recompute of an already-published class).
                     // Opt-in per comp (autoNotifyParticipants, default off); fire-and-forget.
                     var newlyPublished = officialClasses.Except(existingOfficial, StringComparer.OrdinalIgnoreCase).ToList();
-                    if (newlyPublished.Count > 0 && competition.GetValue<bool>("autoNotifyParticipants"))
+                    if (newlyPublished.Count > 0 && _contentService.GetById(competition.Id)?.GetValue<bool>("autoNotifyParticipants") == true)
                     {
                         try
                         {
@@ -1164,7 +1164,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 // Load start list data from content nodes (authoritative source for startOrder/startTime)
                 var startListLookup = new Dictionary<string, (int StartOrder, string StartTime)>();
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition != null)
                 {
                     var startListNodes = SpringLists(competition.Id)
@@ -1351,7 +1351,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     }
                 }
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
 
                 // Store start list as JSON on competition content node
                 var listName = !string.IsNullOrWhiteSpace(request.ListName) ? request.ListName : "Startlista";
@@ -1623,7 +1623,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -1679,7 +1679,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -1802,7 +1802,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -1853,7 +1853,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     return Json(new { success = false, message = "Startlistan hittades inte." });
 
                 // Verify the node belongs to this competition
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null || (node.CompetitionId != competition.Id || node.LegacyHub))
                     return Json(new { success = false, message = "Startlistan tillhör inte denna tävling." });
 
@@ -1919,7 +1919,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                     .ToList();
 
                 // Load existing start list nodes to see which classes are already assigned
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var assignments = new Dictionary<string, (int nodeId, string listName)>();
 
                 if (competition != null)
@@ -1977,7 +1977,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(competitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -2035,7 +2035,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -2236,7 +2236,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// start lists, optionally excluding one node (the list being generated/renumbered). Stafett lists
         /// carry Teams, not Starters, and number separately — they are not part of this pool.
         /// </summary>
-        private HashSet<int> CollectUsedStartNumbers(Umbraco.Cms.Core.Models.IContent competition, int excludeNodeId, string weaponClass)
+        private HashSet<int> CollectUsedStartNumbers(HpskSite.Models.Competitions.CompetitionInfo competition, int excludeNodeId, string weaponClass)
         {
             var used = new HashSet<int>();
             foreach (var (node, cfg) in GetOrderedIndividualStartLists(competition))
@@ -2258,7 +2258,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// Returns a human-readable summary for the audit trail.
         /// </summary>
         private string ApplyNumbersToGeneratedList(
-            Umbraco.Cms.Core.Models.IContent competition,
+            HpskSite.Models.Competitions.CompetitionInfo competition,
             int nodeId,
             SpringskytteStartListConfig config,
             SpringskytteStartListConfig? previousConfig)
@@ -2322,7 +2322,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// modal shows them and the way follow-on numbering walks them: by first start time, then name,
         /// then node id (stable). Stafett nodes are skipped naturally — they carry Teams, not Starters.
         /// </summary>
-        private List<(StartListRecord node, SpringskytteStartListConfig config)> GetOrderedIndividualStartLists(Umbraco.Cms.Core.Models.IContent competition)
+        private List<(StartListRecord node, SpringskytteStartListConfig config)> GetOrderedIndividualStartLists(HpskSite.Models.Competitions.CompetitionInfo competition)
         {
             var nodeConfigs = new List<(StartListRecord node, SpringskytteStartListConfig config)>();
             foreach (var node in SpringLists(competition.Id))
@@ -2355,7 +2355,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// </summary>
         private async Task<(int totalStarters, int listCount)> ApplyRunningSequenceNumberingAsync(int competitionId, string by = "")
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return (0, 0);
 
             var nodeConfigs = GetOrderedIndividualStartLists(competition);
@@ -2441,7 +2441,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(competitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -2749,7 +2749,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 // Starters per weapon class from the start list(s).
                 var startersByClass = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                var comp = _contentService.GetById(competitionId);
+                var comp = _competitions.GetSaved(competitionId);
                 if (comp != null)
                 {
                     foreach (var node in SpringLists(comp.Id))
@@ -2996,7 +2996,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
                 // Find the start-list starter (start time + age class, needed for compute / insert).
                 SpringskytteStartListEntry? starter = null;
-                var comp = _contentService.GetById(request.CompetitionId);
+                var comp = _competitions.GetSaved(request.CompetitionId);
                 if (comp != null)
                 {
                     foreach (var node in SpringLists(comp.Id))
@@ -3182,7 +3182,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         private async Task<SpringTimeline> BuildTimelineAsync(int competitionId)
         {
             var tl = new SpringTimeline();
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return tl;
 
             var statusByKey = new Dictionary<string, string?>();
@@ -3314,10 +3314,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null || competition.ContentType.Alias != "competition")
+                var competition = _competitions.GetSaved(competitionId);
+                if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
-                if ((competition.GetValue<string>("competitionType") ?? "") != "Springskytte")
+                if ((competition.CompetitionType ?? "") != "Springskytte")
                     return Json(new { success = false, message = "Fel tävlingstyp." });
 
                 // Check-in map — informational only (never frees a slot).
@@ -3375,7 +3375,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 return Json(new
                 {
                     success = true,
-                    competitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "Tävling",
+                    competitionName = competition.CompetitionName ?? competition.Name ?? "Tävling",
                     starters,
                     freeSlots = tl.FreeSlots
                 });
@@ -3434,8 +3434,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 var weaponClass = ExtractWeaponClass(request.ShootingClass);
                 var ageGenderClass = ExtractAgeGenderClass(request.ShootingClass);
 
-                var competition = _contentService.GetById(request.CompetitionId);
-                if (competition == null || competition.ContentType.Alias != "competition")
+                var competition = _competitions.GetSaved(request.CompetitionId);
+                if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
                 // Pick the target list: prefer the one whose CoveredClasses covers this registration
@@ -3578,7 +3578,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
 
                 SpringskytteStartListEntry? starter = null;
-                var comp = _contentService.GetById(request.CompetitionId);
+                var comp = _competitions.GetSaved(request.CompetitionId);
                 if (comp != null)
                     foreach (var node in SpringLists(comp.Id))
                     {
@@ -3669,7 +3669,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (competitionId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
                 if (!await HasCompetitionAccess(competitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null) return Json(new { success = false, message = "Tävling hittades inte." });
 
                 var startListNodes = SpringLists(competition.Id)
@@ -3764,7 +3764,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (competitionId <= 0 || memberId <= 0) return Json(new { success = false, message = "Ogiltig begäran." });
                 if (!await HasCompetitionAccess(competitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var comp = _contentService.GetById(competitionId);
+                var comp = _competitions.GetSaved(competitionId);
                 var inLists = new List<object>();
                 if (comp != null)
                     foreach (var node in SpringLists(comp.Id))
@@ -3805,7 +3805,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId)) return Json(new { success = false, message = "Åtkomst nekad." });
 
                 var freed = new List<object>();
-                var comp = _contentService.GetById(request.CompetitionId);
+                var comp = _competitions.GetSaved(request.CompetitionId);
                 if (comp != null)
                     foreach (var node in SpringLists(comp.Id))
                     {
@@ -3924,8 +3924,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
 
             try
             {
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null || competition.ContentType.Alias != "competition")
+                var competition = _competitions.GetSaved(competitionId);
+                if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
                 var wcFilter = (weaponClass ?? "").Trim().ToUpperInvariant();

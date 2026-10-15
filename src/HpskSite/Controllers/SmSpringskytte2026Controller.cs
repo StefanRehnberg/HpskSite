@@ -89,11 +89,15 @@ namespace HpskSite.Controllers
         private static DateTime _cachedAt = DateTime.MinValue;
         private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public SmSpringskytte2026Controller(
             IUmbracoContextAccessor umbracoContextAccessor,
             IConfiguration configuration,
-            IWebHostEnvironment environment)
+            IWebHostEnvironment environment,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _umbracoContextAccessor = umbracoContextAccessor;
             _configuration = configuration;
             _environment = environment;
@@ -148,9 +152,11 @@ namespace HpskSite.Controllers
             ViewData["CompetitionUrl"] = competition?.Url() ?? FallbackCompetitionUrl;
             ViewData["ScheduleTutorials"] = scheduleTutorials;
             ViewData["NotisTutorials"] = notisTutorials;
-            ViewData["ContactName"] = competition?.Value<string>("competitionDirector") ?? "";
-            ViewData["ContactEmail"] = competition?.Value<string>("contactEmail") ?? "";
-            ViewData["ContactPhone"] = competition?.Value<string>("contactPhone") ?? "";
+            // Noden bara för adressen (uppslaget på adressdelen hör till S6); fälten ur posten.
+            var info = competition != null ? _competitions.Get(competition.Id) : null;
+            ViewData["ContactName"] = info?.CompetitionDirector ?? "";
+            ViewData["ContactEmail"] = info?.ContactEmail ?? "";
+            ViewData["ContactPhone"] = info?.ContactPhone ?? "";
 
             // Slås upp här i C# och inte i vyn: en explicit generic i ett Razor-kodblock parsas som
             // HTML-tagg och fäller vyn utan felmeddelande.

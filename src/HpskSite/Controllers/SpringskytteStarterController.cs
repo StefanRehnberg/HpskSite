@@ -22,24 +22,28 @@ namespace HpskSite.Controllers
     {
         private readonly IContentService _contentService;
 
-        public SpringskytteStarterController(IContentService contentService)
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
+        public SpringskytteStarterController(IContentService contentService,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _contentService = contentService;
         }
 
         [HttpGet("")]
         public IActionResult Index(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null || competition.ContentType.Alias != "competition") return NotFound();
-            if ((competition.GetValue<string>("competitionType") ?? "") != "Springskytte") return NotFound();
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null) return NotFound();
+            if ((competition.CompetitionType ?? "") != "Springskytte") return NotFound();
 
             // Optional weapon-class scope (?s=A / ?s=C) so each start line gets its own screen,
             // like scoring/timing. Empty = show a class chooser (A and C are independent sequences).
             var s = Request.Query["s"].ToString().Trim().ToUpperInvariant();
 
             ViewData["CompetitionId"] = competitionId;
-            ViewData["CompetitionName"] = competition.GetValue<string>("competitionName") ?? competition.Name ?? "Tävling";
+            ViewData["CompetitionName"] = competition.CompetitionName ?? competition.Name ?? "Tävling";
             ViewData["PresetWeaponClass"] = s;
             return View("~/Views/SpringskytteStarter.cshtml");
         }

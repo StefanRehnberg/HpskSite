@@ -77,7 +77,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -244,7 +244,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävling hittades inte." });
 
@@ -323,8 +323,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId))
                     return Json(new SpringskytteStafettResultResponse { Success = false, Message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
-                if (competition != null && competition.GetValue<bool>("isExternal"))
+                var competition = _competitions.GetSaved(request.CompetitionId);
+                if (competition != null && competition.IsExternal)
                     return Json(new SpringskytteStafettResultResponse { Success = false, Message = "Extern tävling - resultat kan inte registreras." });
 
                 // Resolve the team (must be a relay team in this competition) for its stafett class.
@@ -567,8 +567,8 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 {
                     try
                     {
-                        var comp = _contentService.GetById(request.CompetitionId);
-                        if (comp != null && comp.GetValue<bool>("autoNotifyParticipants"))
+                        var comp = _competitions.GetSaved(request.CompetitionId);
+                        if (comp != null && _contentService.GetById(comp.Id)?.GetValue<bool>("autoNotifyParticipants") == true)
                         {
                             var notifier = HttpContext?.RequestServices?
                                 .GetService(typeof(HpskSite.Services.Messaging.ParticipantNotificationService))
@@ -639,7 +639,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         /// "claim only unassigned teams" rule and the uniqueness guard read.
         /// </summary>
         private Dictionary<int, (int nodeId, int number, string listName)> CollectStafettTeamAssignments(
-            Umbraco.Cms.Core.Models.IContent competition, int? exceptNodeId)
+            HpskSite.Models.Competitions.CompetitionInfo competition, int? exceptNodeId)
         {
             var map = new Dictionary<int, (int nodeId, int number, string listName)>();
             foreach (var node in SpringLists(competition.Id))
@@ -694,7 +694,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null) return Json(new { success = false, message = "Tävling hittades inte." });
                 var node = _startLists.Get(request.NodeId);
                 if (node == null || (node.CompetitionId != competition.Id || node.LegacyHub))
@@ -747,7 +747,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null) return Json(new { success = false, message = "Tävling hittades inte." });
                 var fromNode = _startLists.Get(request.FromNodeId);
                 var toNode = _startLists.Get(request.ToNodeId);
@@ -832,7 +832,7 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
         }
 
         /// <summary>Finds a relay team's start order + common start time from its stafett start list, if generated.</summary>
-        private (int startOrder, string? startTime) FindStafettStartInfo(Umbraco.Cms.Core.Models.IContent? competition, int teamId)
+        private (int startOrder, string? startTime) FindStafettStartInfo(HpskSite.Models.Competitions.CompetitionInfo? competition, int teamId)
         {
             if (competition == null) return (0, null);
             foreach (var node in SpringLists(competition.Id))
