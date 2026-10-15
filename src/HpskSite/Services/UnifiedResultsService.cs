@@ -18,13 +18,16 @@ namespace HpskSite.Services
     {
         private readonly IScopeProvider _scopeProvider;
         private readonly IContentService _contentService;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
 
         public UnifiedResultsService(
             IScopeProvider scopeProvider,
-            IContentService contentService)
+            IContentService contentService,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
             _scopeProvider = scopeProvider;
             _contentService = contentService;
+            _competitions = competitions;
         }
 
         /// <summary>
@@ -238,9 +241,14 @@ namespace HpskSite.Services
                 var competitionNameMap = new Dictionary<int, string>();
                 if (competitionIds.Any())
                 {
-                    foreach (var comp in _contentService.GetByIds(competitionIds))
+                    // Publicerade i ett svep; det sparade läget bara för de som saknas (opublicerade),
+                    // som den tidigare GetByIds gav.
+                    var comps = _competitions.GetMany(competitionIds).Values.ToList();
+                    comps.AddRange(competitionIds.Where(id => comps.All(c => c.Id != id))
+                        .Select(id => _competitions.GetSaved(id)).Where(c => c != null)!);
+                    foreach (var comp in comps)
                     {
-                        competitionNameMap[comp.Id] = comp.GetValue<string>("competitionName") ?? comp.Name ?? $"Tävling #{comp.Id}";
+                        competitionNameMap[comp.Id] = comp.CompetitionName ?? comp.Name ?? $"Tävling #{comp.Id}";
                     }
                 }
 

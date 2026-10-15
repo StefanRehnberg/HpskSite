@@ -27,15 +27,18 @@ namespace HpskSite.Controllers
         private readonly PrizeGivingService _prizeGiving;
         private readonly ILogger<PrisutdelningController> _logger;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
 
         public PrisutdelningController(
             IContentService contentService,
             AdminAuthorizationService auth,
             PrizeGivingService prizeGiving,
             ILogger<PrisutdelningController> logger,
-            HpskSite.Services.Results.ICompetitionResultStore results)
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
             _results = results;
+            _competitions = competitions;
             _contentService = contentService;
             _auth = auth;
             _prizeGiving = prizeGiving;
@@ -45,8 +48,8 @@ namespace HpskSite.Controllers
         [HttpGet("{competitionId:int}")]
         public async Task<IActionResult> Index(int competitionId, string? grupp = null)
         {
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null || competition.ContentType.Alias != "competition") return NotFound();
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null) return NotFound();
 
             // ⚠️ Grinden är HasCompetitionStaffAccessAsync och inte en egen clubId-kontroll.
             // En tävling är antingen klubbvärdad (clubId satt) eller kretsvärdad (clubId tom,
@@ -75,8 +78,8 @@ namespace HpskSite.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> SaveHonorary(int competitionId, [FromBody] SaveHonoraryRequest? request)
         {
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null || competition.ContentType.Alias != "competition")
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
             if (!await _auth.HasCompetitionManagementAccess(competitionId))

@@ -11443,6 +11443,15 @@ och tom text är null (så `?? Name` slår till).
   hållet), korskontroll 3092/0, matrisen 8/8 + 35/36 — `schema-verify` 28/33 med BÅDA byggena
   (fixturtävling 5312 är 2026-10-11 och har passerat; datum, inte kod), result-table-lookup 6/6,
   startlist-edit-auth 35/35.
+- **Område 4, resultat (2026-10-15):** `CompetitionResultsController` (+ `.NextStep`),
+  `PrecisionQualifyingResultsService` (tar nu `CompetitionInfo`), `PrizeGivingService`,
+  `PrisutdelningController` och `UnifiedResultsService` läser `GetSaved`; resultatsidan och `/live`
+  läser `Get`. `MedalGrouping.PerWeaponGroup(CompetitionInfo)` finns. Kvar på noden med flit:
+  `SetMedalGrouping` (skriver), adressen (`Url()`), `autoNotifyParticipants`, och två frågor om
+  DOKUMENTTYPEN har ett fält (`HasProperty` för medaljindelningen och hederspriserna — posten vet inte
+  det). `CompetitionResultTreeUrlFinder` hör till S6. Taken 102 → 98, 704 → 637. Verifierat: fångst 0
+  avvikelser, korskontroll 3092/0, matrisen 8/8 + 35/36 (`schema-verify`, datum), nastasteg 101/101,
+  resultat-medaljval 8/8, prisutdelning-falt 33/33, precision-hub 14/16 med BÅDA byggena (förbefintligt).
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

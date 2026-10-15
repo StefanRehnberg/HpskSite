@@ -64,6 +64,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -88,12 +89,14 @@ namespace HpskSite.Controllers
             StandardMedalMaterializationService medalMaterialization,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Results.ICompetitionResultStore results,
-            HpskSite.Services.StartLists.IStartListStore startLists)
+            HpskSite.Services.StartLists.IStartListStore startLists,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
             _results = results;
             _startLists = startLists;
+            _competitions = competitions;
             _contentService = contentService;
             _memberService = memberService;
             _contentTypeService = contentTypeService;
@@ -150,8 +153,8 @@ namespace HpskSite.Controllers
                 }
 
                 // VALIDATION: Check if competition is external
-                var competition = _contentService.GetById(request.CompetitionId);
-                if (competition != null && competition.GetValue<bool>("isExternal"))
+                var competition = _competitions.GetSaved(request.CompetitionId);
+                if (competition != null && competition.IsExternal)
                 {
                     _logger.LogWarning("Attempt to save results for external competition: CompetitionId={CompetitionId}", request.CompetitionId);
                     return Json(new ResultEntryResponse
@@ -283,25 +286,25 @@ namespace HpskSite.Controllers
                 }
 
                 // 1. Competition must exist and have allowSelfReporting enabled
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                 {
                     return Json(new ResultEntryResponse { Success = false, Message = "Tävlingen hittades inte." });
                 }
 
-                if (!competition.GetValue<bool>("allowSelfReporting"))
+                if (!competition.AllowSelfReporting)
                 {
                     return Json(new ResultEntryResponse { Success = false, Message = "Denna tävling tillåter inte resultatrapportering." });
                 }
 
-                if (competition.GetValue<bool>("isExternal"))
+                if (competition.IsExternal)
                 {
                     return Json(new ResultEntryResponse { Success = false, Message = "Externa tävlingar stöder inte resultatrapportering." });
                 }
 
                 // 2. Check date range: must be within competitionDate → competitionEndDate
-                var compDate = competition.GetValue<DateTime?>("competitionDate");
-                var compEndDate = competition.GetValue<DateTime?>("competitionEndDate");
+                var compDate = competition.CompetitionDate;
+                var compEndDate = competition.CompetitionEndDate;
                 var now = DateTime.Now;
 
                 if (compDate.HasValue)
@@ -321,7 +324,7 @@ namespace HpskSite.Controllers
                 }
 
                 // 3. Validate series number
-                var maxSeries = competition.GetValue<int>("numberOfSeriesOrStations");
+                var maxSeries = competition.NumberOfSeriesOrStations;
                 if (maxSeries <= 0) maxSeries = 6;
                 if (request.SeriesNumber > maxSeries)
                 {
@@ -452,20 +455,20 @@ namespace HpskSite.Controllers
                     return Json(new DistributedStatusResponse { Success = false, Message = "Ogiltigt tävlings-ID." });
                 }
 
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                 {
                     return Json(new DistributedStatusResponse { Success = false, Message = "Tävlingen hittades inte." });
                 }
 
-                if (!competition.GetValue<bool>("allowSelfReporting"))
+                if (!competition.AllowSelfReporting)
                 {
                     return Json(new DistributedStatusResponse { Success = false, Message = "Denna tävling tillåter inte resultatrapportering." });
                 }
 
                 // Check date range
-                var compDate = competition.GetValue<DateTime?>("competitionDate");
-                var compEndDate = competition.GetValue<DateTime?>("competitionEndDate");
+                var compDate = competition.CompetitionDate;
+                var compEndDate = competition.CompetitionEndDate;
                 var now = DateTime.Now;
                 bool isActive = true;
 
@@ -506,7 +509,7 @@ namespace HpskSite.Controllers
 
                 // Build available classes from competition's shootingClassIds
                 var availableClasses = new List<AvailableClass>();
-                var classIdsRaw = competition.GetValue<string>("shootingClassIds");
+                var classIdsRaw = competition.ShootingClassIds;
                 if (!string.IsNullOrEmpty(classIdsRaw))
                 {
                     string[] classIdArray;
@@ -542,7 +545,7 @@ namespace HpskSite.Controllers
                 var callerPrimaryClubId = int.TryParse(memberData.GetValue<string>("primaryClubId"), out int cpId) ? cpId : 0;
 
                 // Get all registrations
-                var maxSeries = competition.GetValue<int>("numberOfSeriesOrStations");
+                var maxSeries = competition.NumberOfSeriesOrStations;
                 if (maxSeries <= 0) maxSeries = 6;
 
                 var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
@@ -678,19 +681,19 @@ namespace HpskSite.Controllers
                 catch { return Json(new { success = false, message = "Ogiltig e-postadress." }); }
 
                 // 1. Competition validation
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-                if (!competition.GetValue<bool>("allowSelfReporting"))
+                if (!competition.AllowSelfReporting)
                     return Json(new { success = false, message = "Denna tävling tillåter inte resultatrapportering." });
 
-                if (competition.GetValue<bool>("isExternal"))
+                if (competition.IsExternal)
                     return Json(new { success = false, message = "Externa tävlingar stöder inte denna funktion." });
 
                 // Check date range
-                var compDate = competition.GetValue<DateTime?>("competitionDate");
-                var compEndDate = competition.GetValue<DateTime?>("competitionEndDate");
+                var compDate = competition.CompetitionDate;
+                var compEndDate = competition.CompetitionEndDate;
                 var now = DateTime.Now;
                 if (compDate.HasValue)
                 {
@@ -702,7 +705,7 @@ namespace HpskSite.Controllers
                 }
 
                 // 2. Validate shooting class is valid for this competition
-                var classIdsRaw = competition.GetValue<string>("shootingClassIds");
+                var classIdsRaw = competition.ShootingClassIds;
                 var validClassIds = new List<string>();
                 if (!string.IsNullOrEmpty(classIdsRaw))
                 {
@@ -965,9 +968,9 @@ namespace HpskSite.Controllers
                 var memberId = member.Id;
 
                 // Get competition info
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 var competitionName = competition?.Name ?? "Tävling";
-                var competitionDateValue = competition?.GetValue("competitionDate");
+                var competitionDateValue = competition?.CompetitionDate;
                 DateTime? competitionDate = competitionDateValue != null ? (DateTime?)competitionDateValue : null;
 
                 // Query this member's results for the requested class. A member can be registered
@@ -1185,7 +1188,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Ogiltig begäran." });
                 }
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                 {
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
@@ -1734,8 +1737,8 @@ namespace HpskSite.Controllers
         /// </summary>
         private string GetCompetitionTypeId(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
-            return competition?.GetValue<string>("competitionType") ?? "Precision";
+            var competition = _competitions.GetSaved(competitionId);
+            return competition?.CompetitionType ?? "Precision";
         }
 
         /// <summary>
@@ -1795,9 +1798,9 @@ namespace HpskSite.Controllers
             const int ACTIVE_WINDOW = 15, PACE_WINDOW = 10;
             var now = DateTime.Now;   // Precision result timestamps are stored local (DateTime.Now), not UTC.
 
-            var comp = _contentService.GetById(competitionId);
-            int numSeries = comp?.GetValue<int>("numberOfSeriesOrStations") ?? 0;
-            int numFinal = comp?.GetValue<int>("numberOfFinalSeries") ?? 0;
+            var comp = _competitions.GetSaved(competitionId);
+            int numSeries = comp?.NumberOfSeriesOrStations ?? 0;
+            int numFinal = comp?.NumberOfFinalSeries ?? 0;
             int qualSeries = numFinal > 0 ? Math.Max(1, numSeries - numFinal) : Math.Max(1, numSeries);
 
             var rows = await GetCompetitionResultsInternal(competitionId);
@@ -1884,7 +1887,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var comp = _contentService.GetById(competitionId);
+                var comp = _competitions.GetSaved(competitionId);
                 if (comp == null) return null;
                 // Den officiella (annars första) direkt under tävlingen, annars under den äldre hubben.
                 var lists = _startLists.List(competitionId, HpskSite.Models.StartLists.StartListKind.Qualifying);
@@ -2398,7 +2401,7 @@ namespace HpskSite.Controllers
                 if (competitionId <= 0)
                     return Json(new { success = false, message = "Ogiltigt tävlings-ID." });
 
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
@@ -2442,12 +2445,12 @@ namespace HpskSite.Controllers
                 // ⚠️ GetValue<string> och inte Value<string> — samma försiktighet som rad 4003:
                 // en FlexibleDropdown kan ha lagrat omfattningen som en JSON-array, och
                 // ChampionshipCategory.Normalize skalar av den.
-                var scopeForMedals = competition?.GetValue<string>("competitionScope") ?? "";
+                var scopeForMedals = competition?.CompetitionScope ?? "";
                 // Arrangörens val: en uppsättning medaljer per vapengrupp, eller delade
                 // mästerskapsklasser? Se MedalGrouping — nivåspärren ligger där.
                 var perWeaponGroup = MedalGrouping.PerWeaponGroup(competition);
                 var hasFinalsForMedals = CompetitionFinals.Effective(
-                    competition?.GetValue<string>("competitionType"), competition?.GetValue<int>("numberOfFinalSeries") ?? 0) > 0;
+                    competition?.CompetitionType, competition?.NumberOfFinalSeries ?? 0) > 0;
                 var medalGroups = BuildMedalGroups(results, scopeForMedals, perWeaponGroup,
                     hasFinalsForMedals ? GetFinalistStarts(competitionId) : null);
                 var isChampionship = ChampionshipCategory.IsChampionship(scopeForMedals);
@@ -2459,7 +2462,7 @@ namespace HpskSite.Controllers
                 {
                     perWeaponGroup,
                     canChoose = MedalGrouping.CanChoose(scopeForMedals),
-                    propertyExists = competition?.HasProperty(MedalGrouping.PropertyAlias) ?? false,
+                    propertyExists = _contentService.GetById(competitionId)?.HasProperty(MedalGrouping.PropertyAlias) ?? false,
                     description = MedalGrouping.Describe(perWeaponGroup)
                 };
 
@@ -2609,14 +2612,14 @@ namespace HpskSite.Controllers
                 }
 
                 // Get competition
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                 {
                     return Json(new { Success = false, Message = "Tävlingen hittades inte." });
                 }
 
                 // VALIDATION: Check if competition is external
-                if (competition.GetValue<bool>("isExternal"))
+                if (competition.IsExternal)
                 {
                     return Json(new { Success = false, Message = "Detta är en extern tävling. Resultat kan inte skapas i systemet." });
                 }
@@ -2767,7 +2770,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get competition
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                 {
                     return Json(new { Success = false, Message = "Tävlingen hittades inte." });
@@ -2775,7 +2778,7 @@ namespace HpskSite.Controllers
 
                 var resultPage = _results.Get(competition.Id);
 
-                var showLiveResults = competition.GetValue<bool>("showLiveResults");
+                var showLiveResults = competition.ShowLiveResults;
 
                 if (resultPage == null && !showLiveResults)
                 {
@@ -2910,10 +2913,10 @@ namespace HpskSite.Controllers
             }
             
             // Get competition configuration for finals
-            var numberOfSeriesOrStations = competition.GetValue<int>("numberOfSeriesOrStations");
-            var numberOfFinalSeries = competition.GetValue<int>("numberOfFinalSeries");
-            var isAwardingStandardMedals = competition.GetValue<bool>("isAwardingStandardMedals");
-            var competitionTypeId = competition.GetValue<string>("competitionType") ?? "Precision";
+            var numberOfSeriesOrStations = competition.NumberOfSeriesOrStations;
+            var numberOfFinalSeries = competition.NumberOfFinalSeries;
+            var isAwardingStandardMedals = competition.IsAwardingStandardMedals;
+            var competitionTypeId = competition.CompetitionType ?? "Precision";
 
             // Är den SPARADE listan (resultData — den prisutdelningen, granskningen och medaljerna
             // läser) äldre än resultaten? Resultat-fliken räknar då om den av sig själv när den
@@ -2958,7 +2961,7 @@ namespace HpskSite.Controllers
         {
             if (!await CanManageCompetitionResults(competitionId))
                 return Json(new { success = false, message = "Du har inte behörighet för den här tävlingen." });
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
             var resultPage = _results.Get(competition.Id);
             if (resultPage == null) return Json(new { success = true, hasResultPage = false, stale = false });
@@ -2985,14 +2988,14 @@ namespace HpskSite.Controllers
                 }
 
                 // Get competition
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                 {
                     return Json(new { Success = false, Message = "Tävlingen hittades inte." });
                 }
 
                 // VALIDATION: Check if competition is external
-                if (competition.GetValue<bool>("isExternal"))
+                if (competition.IsExternal)
                 {
                     return Json(new { Success = false, Message = "Detta är en extern tävling. Resultat kan inte hanteras i systemet." });
                 }
@@ -3063,7 +3066,7 @@ namespace HpskSite.Controllers
                 // Phase 2 auto-trigger: notify registered shooters that results are published.
                 // Opt-in per competition (autoNotifyParticipants, default off → no behaviour change);
                 // main publish only; fire-and-forget so it can never break publishing.
-                if (newIsOfficial && !request.IsSubCompetition && competition.GetValue<bool>("autoNotifyParticipants"))
+                if (newIsOfficial && !request.IsSubCompetition && _contentService.GetById(request.CompetitionId)?.GetValue<bool>("autoNotifyParticipants") == true)
                 {
                     try
                     {
@@ -3098,14 +3101,14 @@ namespace HpskSite.Controllers
         /// upsert them into the Standardmedalj ledger. Discipline comes from the competition's
         /// competitionType; season year from competitionDate. Never blocks publishing.
         /// </summary>
-        private async Task MaterializeStandardMedalsAsync(Umbraco.Cms.Core.Models.IContent competition, FinalResults freshResults)
+        private async Task MaterializeStandardMedalsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, FinalResults freshResults)
         {
             try
             {
-                var discipline = competition.GetValue<string>("competitionType") ?? StandardMedals.Precision;
-                var competitionDate = competition.GetValue<DateTime?>("competitionDate");
+                var discipline = competition.CompetitionType ?? StandardMedals.Precision;
+                var competitionDate = competition.CompetitionDate;
                 var year = competitionDate?.Year ?? DateTime.Now.Year;
-                var competitionName = competition.GetValue<string>("competitionName");
+                var competitionName = competition.CompetitionName;
                 if (string.IsNullOrWhiteSpace(competitionName)) competitionName = competition.Name;
 
                 var medals = freshResults.ClassGroups
@@ -3331,7 +3334,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null) return false;
 
                 var resultPage = _results.Get(competition.Id);
@@ -3527,7 +3530,7 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                var scope = competition.GetValue<string>("competitionScope");
+                var scope = _competitions.GetSaved(request.CompetitionId)?.CompetitionScope;
                 if (!MedalGrouping.CanChoose(scope))
                 {
                     return Json(new
@@ -3801,9 +3804,9 @@ namespace HpskSite.Controllers
             }
 
             // Get competition configuration for finals
-            var competition = _contentService.GetById(competitionId);
-            var numberOfSeriesOrStations = competition?.GetValue<int>("numberOfSeriesOrStations") ?? 0;
-            var numberOfFinalSeries = competition?.GetValue<int>("numberOfFinalSeries") ?? 0;
+            var competition = _competitions.GetSaved(competitionId);
+            var numberOfSeriesOrStations = competition?.NumberOfSeriesOrStations ?? 0;
+            var numberOfFinalSeries = competition?.NumberOfFinalSeries ?? 0;
             var hasFinalsRound = numberOfFinalSeries > 0;
             var qualificationSeriesCount = hasFinalsRound ? (numberOfSeriesOrStations - numberOfFinalSeries) : numberOfSeriesOrStations;
 
@@ -3877,7 +3880,7 @@ namespace HpskSite.Controllers
                 ShootingClassOrder.Key(shootingClass, ShootingClassOrder.ResultList);
 
             // Determine competition type for type-specific logic
-            var competitionTypeId = competition?.GetValue<string>("competitionType") ?? "Precision";
+            var competitionTypeId = competition?.CompetitionType ?? "Precision";
             var isMilsnabb = competitionTypeId.Equals("Milsnabb", StringComparison.OrdinalIgnoreCase);
             var isDuell = competitionTypeId.Equals("Duell", StringComparison.OrdinalIgnoreCase);
             var isNationellHelmatch = competitionTypeId.Equals("NationellHelmatch", StringComparison.OrdinalIgnoreCase);
@@ -3929,7 +3932,7 @@ namespace HpskSite.Controllers
             // produces the final standings — never a qualifying round. Two shooters level
             // after the grundomgång are not tied for a medal; they simply both go through
             // to the final, which is what separates them.
-            var competitionScope = competition?.GetValue<string>("competitionScope") ?? "";
+            var competitionScope = competition?.CompetitionScope ?? "";
             // Arrangörens val: EN uppsättning medaljer per vapengrupp, eller delade
             // mästerskapsklasser? Nivåspärren (bara klubb och krets) ligger i MedalGrouping.
             var medalsPerWeaponGroup = MedalGrouping.PerWeaponGroup(competition);
@@ -4315,8 +4318,8 @@ namespace HpskSite.Controllers
             }
 
             // Calculate Standard Medal Awards if enabled
-            var isAwardingStandardMedals = competition?.GetValue<bool>("isAwardingStandardMedals") ?? false;
-            var isClubOnly = competition?.GetValue<bool>("isClubOnly") ?? false;
+            var isAwardingStandardMedals = competition?.IsAwardingStandardMedals ?? false;
+            var isClubOnly = competition?.IsClubOnly ?? false;
 
             // Per BR-PS.1.3: Standard medals may not be awarded at Föreningstävlingar (club competitions).
             // The `isClubOnly` flag is the authoritative marker for "this is a club competition" —
@@ -4484,7 +4487,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Get competition
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                 {
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
@@ -4514,7 +4517,7 @@ namespace HpskSite.Controllers
                     var oldKey = ShootingClasses.NormalizeKey(request.OldShootingClass);
                     var classRuleError = ClassRegistrationRule.Conflict(
                         heldClasses.Where(c => ShootingClasses.NormalizeKey(c) != oldKey).Append(newClass.Name),
-                        competition.GetValue<bool>(ClassRegistrationRule.PropertyAlias));
+                        competition.AllowDualCClassRegistration);
                     if (classRuleError != null)
                         return Json(new { success = false, message = classRuleError });
 

@@ -44,14 +44,14 @@ namespace HpskSite.Controllers
 
         private async Task<object> BuildNextStepAsync(int competitionId)
         {
-            var comp = _contentService.GetById(competitionId)
+            var comp = _competitions.GetSaved(competitionId)
                        ?? throw new InvalidOperationException("Tävlingen finns inte.");
             var typeId = GetCompetitionTypeId(competitionId);
             if (!CompetitionSurfaces.HasFunktionarerHub(typeId) || typeId.Contains("Spring", StringComparison.OrdinalIgnoreCase))
                 return new { success = true, supported = false };
 
-            int numSeries = SafeInt(comp, "numberOfSeriesOrStations");
-            int finalSeries = CompetitionFinals.Effective(typeId, SafeInt(comp, "numberOfFinalSeries"));
+            int numSeries = comp.NumberOfSeriesOrStations;
+            int finalSeries = CompetitionFinals.Effective(typeId, comp.NumberOfFinalSeries);
             int qual = PrecisionFamilyResultReader.QualifyingSeriesCount(numSeries, finalSeries);
 
             // ── Anmälningar ────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ namespace HpskSite.Controllers
             DateTime? closes = null;
             try
             {
-                var raw = comp.GetValue<DateTime?>("registrationCloseDate");
+                var raw = comp.RegistrationCloseDate;
                 if (raw.HasValue && raw.Value > DateTime.MinValue.AddYears(1)) closes = raw;
             }
             catch { /* ett oläsbart datum ska inte fälla kortet */ }
@@ -129,7 +129,7 @@ namespace HpskSite.Controllers
             }).ToList();
 
             // Mästerskapsklassernas indelning (C delas i Dam/Vet/Jun eller inte) — samma regel som medaljerna.
-            bool splitC = ChampionshipCategory.SplitsGroupC(SafeString(comp, "competitionScope"), MedalGrouping.PerWeaponGroup(comp));
+            bool splitC = ChampionshipCategory.SplitsGroupC(comp.CompetitionScope ?? "", MedalGrouping.PerWeaponGroup(comp));
 
             // ── Per vapengrupp ─────────────────────────────────────────────────────────
             var groupNames = qualStarts.Select(s => s.Group).Distinct()
@@ -279,23 +279,8 @@ namespace HpskSite.Controllers
                 ties,
                 resultsOfficial,
                 // Prisutdelningssidan gäller mästerskapsmedaljer — utan mästerskap säger den bara "0 medaljer".
-                isChampionship = ChampionshipCategory.IsChampionship(SafeString(comp, "competitionScope"))
+                isChampionship = ChampionshipCategory.IsChampionship(comp.CompetitionScope ?? "")
             };
-        }
-
-        private static int SafeInt(IContent c, string alias)
-        {
-            try { return c.HasProperty(alias) ? c.GetValue<int>(alias) : 0; } catch { return 0; }
-        }
-
-        private static bool SafeBool(IContent c, string alias)
-        {
-            try { return c.HasProperty(alias) && c.GetValue<bool>(alias); } catch { return false; }
-        }
-
-        private static string SafeString(IContent c, string alias)
-        {
-            try { return c.HasProperty(alias) ? (c.GetValue<string>(alias) ?? "") : ""; } catch { return ""; }
         }
     }
 }
