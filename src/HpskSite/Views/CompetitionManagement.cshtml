@@ -10,6 +10,7 @@
 @inject HpskSite.Services.AdminAuthorizationService AuthService
 @inject HpskSite.Services.ClubService ClubService
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -24,11 +25,14 @@
     if (competitionId > 0)
     {
         var node = Umbraco.Content(competitionId);
-        if (node != null && node.ContentType.Alias == "competition")
+        if (node != null && node.ContentType.Alias == "competition") // competitionstore-ok: noden behövs för adressen och barnen (S6), fälten läses ur posten
         {
             competition = node;
         }
     }
+    // Tävlingens post (C3-planen S3). En tom post när tävlingen saknas, så att raderna nedan inte behöver null-kontroll.
+    var compPost = (competition != null ? Competitions.Get(competition.Id) : null)
+        ?? new HpskSite.Models.Competitions.CompetitionInfo { Id = competitionId, Name = competition?.Name ?? "" };
 
     // Set page title based on competition
     if (competitionId == 0)
@@ -41,27 +45,27 @@
     }
     else
     {
-        ViewBag.Title = $"Tävlingshantering - {competition.Value<string>("competitionName")}";
+        ViewBag.Title = $"Tävlingshantering - {compPost.CompetitionName}";
 
         // Pass competition properties to ViewData for partial views
-        ViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
-        ViewData["CompetitionType"] = competition.Value<string>("competitionType") ?? "Precision";
+        ViewData["NumberOfSeriesOrStations"] = compPost.NumberOfSeriesOrStations;
+        ViewData["CompetitionType"] = compPost.CompetitionType ?? "Precision";
         // Live-tavlan (/live) visar bara något när live-resultat är påslaget — samma villkor som
         // ResultBoard.cshtml. Funktionärer-flikarna läser det för att inte länka till en död sida.
         bool showLiveForStaff = false;
-        try { showLiveForStaff = competition.Value<bool>("showLiveResults") && !competition.Value<bool>("isExternal"); } catch { }
+        try { showLiveForStaff = compPost.ShowLiveResults && !compPost.IsExternal; } catch { }
         ViewData["ShowLiveResults"] = showLiveForStaff;
         // EFFEKTIVA finalserier: 0 för en gren utan finalomgång (CompetitionFinals, SHB C.3.6.1.1),
         // så en äldre tävling med felaktigt satta finalserier inte visar en final som inte finns.
         ViewData["NumberOfFinalSeries"] = HpskSite.CompetitionTypes.Common.CompetitionFinals.Effective(
-            ViewData["CompetitionType"]?.ToString(), competition.Value<int>("numberOfFinalSeries"));
+            ViewData["CompetitionType"]?.ToString(), compPost.NumberOfFinalSeries);
 
         // Nuvarande val för "stäng självanmälan när startlistan publiceras". Publiceringsdialogen
         // förkryssar rutan ur detta vid en OMpublicering, så en liten redigering + Publicera aldrig
         // tyst slår på en spärr arrangören medvetet stängt av. Läses här för alla tre grenarnas
         // startliste-partialer; se StartListRegistrationGate.
         ViewData["CloseRegistrationOnStartList"] =
-            competition.Value<bool>(HpskSite.Services.RegistrationGate.StartListRegistrationGate.PropertyAlias);
+            compPost.CloseRegistrationOnStartList;
     }
 
     // Check authorization
@@ -117,7 +121,7 @@
             {
                 // Competition management access: the tävlingsansvariga list OR any Bemanning roster row
                 // (any role — sekretariat, kassa, stationschef …) that was granted app access.
-                var cmJson = competition.Value<string>("competitionManagers") ?? "[]";
+                var cmJson = compPost.CompetitionManagers ?? "[]";
                 int[] cmIds;
                 try { cmIds = Newtonsoft.Json.JsonConvert.DeserializeObject<int[]>(cmJson) ?? Array.Empty<int>(); }
                 catch { cmIds = Array.Empty<int>(); }
@@ -126,7 +130,7 @@
 
                 // Check club admin from roles + regional admin from club's region
                 bool isClubAdminForCompetition = false;
-                var competitionClubId = competition.Value<int>("clubId");
+                var competitionClubId = compPost.ClubId;
                 if (competitionClubId > 0)
                 {
                     isClubAdminForCompetition = isSiteAdmin
@@ -146,7 +150,7 @@
                     // krets, so its regional admin manages it. Without this branch the whole
                     // management page answered "Access Denied" on a region-hosted competition unless
                     // the viewer was a site admin or separately named a competition manager.
-                    var compRegion = (competition.Value<string>("regionalFederation") ?? "").Trim();
+                    var compRegion = (compPost.RegionalFederation ?? "").Trim();
                     if (!string.IsNullOrWhiteSpace(compRegion))
                         isClubAdminForCompetition = roles.Contains($"RegionalAdmin_{compRegion}");
                 }
@@ -193,42 +197,11 @@
 
     if (competition != null)
     {
-        allowDualCClassRegistration = competition.Value<bool>("allowDualCClassRegistration");
+        allowDualCClassRegistration = compPost.AllowDualCClassRegistration;
 
         // Get shooting class IDs
-        var shootingClassIdsRaw = competition.Value("shootingClassIds");
-        shootingClassIds = "";
-
-        // Handle different data types from Umbraco multiselect
-        if (shootingClassIdsRaw is string[] stringArray)
-        {
-            shootingClassIds = string.Join(",", stringArray);
-        }
-        else if (shootingClassIdsRaw is IEnumerable<string> enumerable)
-        {
-            shootingClassIds = string.Join(",", enumerable);
-        }
-        else if (shootingClassIdsRaw is string stringValue)
-        {
-            shootingClassIds = stringValue ?? "";
-        }
-        else if (shootingClassIdsRaw != null)
-        {
-            // Try generic Value<T> approach for Flexible Dropdown
-            try
-            {
-                var typed = competition.Value<IEnumerable<string>>("shootingClassIds");
-                if (typed != null)
-                {
-                    shootingClassIds = string.Join(",", typed);
-                }
-            }
-            catch
-            {
-                // Fallback to empty if all parsing fails
-                shootingClassIds = "";
-            }
-        }
+        // Det lagrade värdet (JSON-array eller äldre CSV), som den publicerade textsträngen gav.
+        shootingClassIds = compPost.ShootingClassIds ?? "";
 
         // Parse shooting class IDs - handle JSON array format
         if (!string.IsNullOrEmpty(shootingClassIds))
@@ -471,7 +444,7 @@
     <div class="cm-head mb-3">
         <div class="cm-head-main">
             <div class="cm-eyebrow"><i class="bi bi-gear me-1"></i>Tävlingshantering</div>
-            <h1 class="cm-title">@(competition?.Value<string>("competitionName") ?? "Okänd tävling")</h1>
+            <h1 class="cm-title">@(compPost?.CompetitionName ?? "Okänd tävling")</h1>
         </div>
         <div class="cm-head-tools">
             <a href="@(competition?.CompetitionUrl() ?? "/")" class="btn btn-outline-secondary" title="Tillbaka till tävlingen">
@@ -479,7 +452,7 @@
             </a>
             @if (canManageCompetition)
             {
-                var isExternalComp = competition?.Value<bool>("isExternal") ?? false;
+                var isExternalComp = compPost?.IsExternal ?? false;
                 <a href="/tavlingsplanering?c=@competitionId" class="btn btn-outline-primary" title="Planera tävlingen — förberedelser och bemanning">
                     <i class="bi bi-clipboard-check"></i> Planering
                 </a>
@@ -615,23 +588,23 @@
                     // Default the quick-create new-member club picker in the walk-in modal
                     // to the competition's organising club. Cashier almost always wants to
                     // add a guest into the host club; saves a click.
-                    regViewData["CompetitionClubId"] = competition?.Value<int>("clubId") ?? 0;
+                    regViewData["CompetitionClubId"] = compPost?.ClubId ?? 0;
                     // Walk-in patrol picker (item #5): only meaningful for Fältskytte/MagnumFält
                     // with rolling start enabled. The partial reads these to decide whether
                     // to render the Patrull dropdown in the walk-in modal.
-                    regViewData["RollingStart"] = competition?.HasProperty("rollingStart") == true
-                        ? (competition.Value<string>("rollingStart") ?? "")
+                    regViewData["RollingStart"] = compPost != null
+                        ? (compPost.RollingStart ?? "")
                         : "";
                     // Walk-in slot picker (item #6): direktplacering / Egenbokning. The partial
                     // probes for `enabled` and renders a Skjutlag dropdown when set.
-                    regViewData["DirektplaceringConfig"] = competition?.HasProperty("direktplaceringConfig") == true
-                        ? (competition.Value<string>("direktplaceringConfig") ?? "")
+                    regViewData["DirektplaceringConfig"] = compPost != null
+                        ? (compPost.DirektplaceringConfig ?? "")
                         : "";
                     // Deltävling: the partial renders a checkbox in the walk-in and edit
                     // modals when this is non-empty. Fee is recomputed server-side via
                     // RegistrationFeeCalculator, so we don't need to pass the fee here.
-                    regViewData["SubCompetitionName"] = competition?.HasProperty("subCompetitionName") == true
-                        ? (competition.Value<string>("subCompetitionName") ?? "")
+                    regViewData["SubCompetitionName"] = compPost != null
+                        ? (compPost.SubCompetitionName ?? "")
                         : "";
 
                     // Late lag/stafett registration at the desk. The public competition page disables
@@ -639,8 +612,8 @@
                     // turning up on the day wanting to enter another lag or stafettlag is routine at an
                     // SM — so the desk gets its own create-team modal with no deadline gate, mirroring
                     // the individual walk-in. Only rendered for the kinds the competition allows.
-                    var allowTeamsHere = competition?.Value<bool>("allowTeams") ?? false;
-                    var allowStafettHere = competition?.Value<bool>("allowStafett") ?? false;
+                    var allowTeamsHere = compPost?.AllowTeams ?? false;
+                    var allowStafettHere = compPost?.AllowStafett ?? false;
                     regViewData["AllowTeams"] = allowTeamsHere;
                     regViewData["AllowStafett"] = allowStafettHere;
 
@@ -686,7 +659,7 @@
                 else if ((ViewData["CompetitionType"]?.ToString() ?? "Precision") is "Faltskytte" or "MagnumFalt")
                 {
                     var slViewData = new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } };
-                    var rsJsonStr = competition?.Value<string>("rollingStart") ?? "";
+                    var rsJsonStr = compPost?.RollingStart ?? "";
                     slViewData["RollingStart"] = rsJsonStr;
                     @await Html.PartialAsync("_StartListCoveragePanel", new ViewDataDictionary(ViewData) { { "CompetitionId", competitionId } })
                     @await Html.PartialAsync("FaltskytteStartListManagement", slViewData)
@@ -694,9 +667,9 @@
                 else
                 {
                     var isDp = false;
-                    try { var dpJson = competition?.HasProperty("direktplaceringConfig") == true ? (competition.Value<string>("direktplaceringConfig") ?? "") : ""; isDp = dpJson.Contains("\"enabled\":true") || dpJson.Contains("\"Enabled\":true"); } catch { }
+                    try { var dpJson = compPost?.DirektplaceringConfig ?? ""; isDp = dpJson.Contains("\"enabled\":true") || dpJson.Contains("\"Enabled\":true"); } catch { }
                     var numFinalSeries = 0;
-                    try { numFinalSeries = competition?.HasProperty("numberOfFinalSeries") == true ? competition.Value<int>("numberOfFinalSeries") : 0; } catch { }
+                    try { numFinalSeries = compPost?.NumberOfFinalSeries ?? 0; } catch { }
                     numFinalSeries = HpskSite.CompetitionTypes.Common.CompetitionFinals.Effective(ViewData["CompetitionType"]?.ToString(), numFinalSeries);
 
                     @* ⚠️ GRUNDOMGÅNG OCH FINAL VISAS EN I TAGET (Stefan 2026-10-04, efter Sune-genomgången).
@@ -762,8 +735,8 @@
                 @{
                     var resultsViewData = new ViewDataDictionary(ViewData);
                     resultsViewData["CompetitionId"] = competitionId;
-                    resultsViewData["CompetitionName"] = competition?.Value<string>("competitionName") ?? "Tävling";
-                    resultsViewData["SubCompetitionName"] = competition?.HasProperty("subCompetitionName") == true ? competition.Value<string>("subCompetitionName") ?? "" : "";
+                    resultsViewData["CompetitionName"] = compPost?.CompetitionName ?? "Tävling";
+                    resultsViewData["SubCompetitionName"] = compPost?.SubCompetitionName ?? "";
                     // Result page URL — used by Fältskytte/Springskytte admin partials to embed the canonical /resultat/ view.
                     // Only set if a competitionResult child node named "Resultat" actually exists; otherwise the
                     // iframe would 404 ("Page not Found"). The partial falls back to a friendly inline message
@@ -891,7 +864,7 @@ function loadOverviewStats_REMOVED() {
         if (data.success) {
             const registrations = data.registrations || [];
             const activeRegistrations = registrations.filter(r => r.isActive);
-            const maxParticipants = @(competition?.Value<int>("maxParticipants", fallback: Fallback.ToDefaultValue, defaultValue: 0) ?? 0);
+            const maxParticipants = @(compPost?.MaxParticipants ?? 0);
 
             document.getElementById('totalRegistrationsCount').textContent = registrations.length;
             document.getElementById('activeRegistrationsCount').textContent = activeRegistrations.length;
@@ -961,7 +934,7 @@ function loadOverviewStats_REMOVED() {
     });
 
     // Calculate days to competition
-    const competitionDate = new Date('@(competition?.Value<DateTime>("competitionDate", fallback: Fallback.ToDefaultValue, defaultValue: DateTime.Now).ToString("yyyy-MM-dd") ?? DateTime.Now.ToString("yyyy-MM-dd"))');
+    const competitionDate = new Date('@((compPost?.CompetitionDate ?? DateTime.Now).ToString("yyyy-MM-dd") ?? DateTime.Now.ToString("yyyy-MM-dd"))');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -1019,7 +992,7 @@ function openResultsTab() {
 @* Competition configuration for registration modal (not needed for Springskytte — it has its own inline JS) *@
 @if (competition != null && competitionType != "Springskytte")
 {
-    var swishNumberMgmt = competition.Value<string>("swishNumber");
+    var swishNumberMgmt = compPost.SwishNumber;
     var hasSwishNumberMgmt = !string.IsNullOrWhiteSpace(swishNumberMgmt);
 
 <script>
@@ -1027,7 +1000,7 @@ function openResultsTab() {
 window.CompetitionConfig = {
     competitionId: @competitionId,
     allowDualCClassRegistration: @(allowDualCClassRegistration.ToString().ToLower()),
-    registrationFee: @(competition.Value<decimal>("registrationFee", fallback: Fallback.ToDefaultValue, defaultValue: 0)),
+    registrationFee: @((compPost.Fee(HpskSite.Models.Competitions.CompetitionFeeKind.Registration) ?? 0m)),
     hasSwishNumber: @(hasSwishNumberMgmt.ToString().ToLower())
 };
 </script>
@@ -1039,11 +1012,11 @@ window.CompetitionConfig = {
 {
     if (competitionType == "Springskytte")
     {
-        var hasSwishSprint = !string.IsNullOrWhiteSpace(competition.Value<string>("swishNumber")) && (competition.Value<decimal?>("registrationFee") ?? 0) > 0;
+        var hasSwishSprint = !string.IsNullOrWhiteSpace(compPost.SwishNumber) && (compPost.Fee(HpskSite.Models.Competitions.CompetitionFeeKind.Registration) ?? 0m) > 0;
         @await Html.PartialAsync("SpringskytteRegistrationModal", new ViewDataDictionary(ViewData)
         {
             { "CompetitionId", competitionId },
-            { "CompetitionName", competition.Value<string>("competitionName") },
+            { "CompetitionName", compPost.CompetitionName },
             { "ShootingClassIds", shootingClassIds },
             { "RegRole", regRole },
             { "RegMemberId", regMemberId },
@@ -1052,7 +1025,7 @@ window.CompetitionConfig = {
             { "RegClubName", regClubName },
             { "AllClubsJson", allClubsJson },
             { "HasSwish", hasSwishSprint },
-            { "RegistrationFee", competition.Value<decimal?>("registrationFee") ?? 0m }
+            { "RegistrationFee", compPost.Fee(HpskSite.Models.Competitions.CompetitionFeeKind.Registration) ?? 0m }
         })
     }
     else
@@ -1060,7 +1033,7 @@ window.CompetitionConfig = {
         @await Html.PartialAsync("CompetitionRegistrationModal", new ViewDataDictionary(ViewData)
         {
             { "CompetitionId", competitionId },
-            { "CompetitionName", competition.Value<string>("competitionName") },
+            { "CompetitionName", compPost.CompetitionName },
             { "AClasses", aClasses },
             { "AOptClasses", aOptClasses },
             { "AMClasses", aMClasses },

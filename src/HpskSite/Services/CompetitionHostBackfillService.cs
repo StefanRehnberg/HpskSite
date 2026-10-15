@@ -32,10 +32,14 @@ namespace HpskSite.Services
         private readonly LegacyInvoiceHubs _legacyInvoices;
         private readonly ILogger<CompetitionHostBackfillService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public CompetitionHostBackfillService(IContentService contentService, IUmbracoContextAccessor umbracoContextAccessor,
             IPublishedUrlProvider urlProvider, IScopeProvider scopeProvider, LegacyInvoiceHubs legacyInvoices,
-            ILogger<CompetitionHostBackfillService> logger)
+            ILogger<CompetitionHostBackfillService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _contentService = contentService;
             _umbracoContextAccessor = umbracoContextAccessor;
             _urlProvider = urlProvider;
@@ -75,15 +79,16 @@ WHERE ct.alias = 'competitionSeries' AND n.trashed = 0");
                 var seriesClub = series.Value<int>("clubId");
                 var seriesRegion = (series.Value<string>("regionalFederation") ?? "").Trim();
                 if (seriesClub <= 0 && seriesRegion.Length == 0) continue;
-                foreach (var comp in series.Children.Where(c => c.ContentType.Alias == "competition"))
+                // Seriens publicerade omgångar ur tävlingslagringen (C3-planen S3).
+                foreach (var comp in _competitions.ListBySeries(series.Id))
                 {
-                    if (comp.Value<int>("clubId") > 0) continue;
-                    if (!string.IsNullOrWhiteSpace(comp.Value<string>("regionalFederation"))) continue;
-                    var date = comp.Value<DateTime?>("competitionDate");
+                    if (comp.ClubId > 0) continue;
+                    if (!string.IsNullOrWhiteSpace(comp.RegionalFederation)) continue;
+                    var date = comp.CompetitionDate;
                     rows.Add(new Row
                     {
                         CompetitionId = comp.Id,
-                        Name = comp.Value<string>("competitionName") ?? comp.Name ?? "",
+                        Name = comp.CompetitionName ?? comp.Name ?? "",
                         Date = date.HasValue && date.Value.Year > 1900 ? date : null,
                         SeriesId = series.Id,
                         SeriesName = series.Name ?? "",

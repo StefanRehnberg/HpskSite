@@ -1027,9 +1027,9 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                var competitionsQuery = umbracoContext.Content.GetAtRoot()
-                    .SelectMany(root => root.DescendantsOfType("competition"))
-                    .Where(comp => comp.Value<bool>("isActive"));
+                // Alla publicerade tävlingar ur tävlingslagringen (C3-planen S3).
+                var competitionsQuery = _competitions.List()
+                    .Where(comp => comp.IsVisible);
 
                 // Filter by region if specified
                 if (!string.IsNullOrEmpty(region) && clubRegions != null)
@@ -1042,7 +1042,7 @@ namespace HpskSite.Controllers
                     var wantedRegion = InvoiceAdminService.NormalizeRegionCode(region);
                     competitionsQuery = competitionsQuery.Where(comp =>
                     {
-                        var clubId = comp.Value<int>("clubId");
+                        var clubId = comp.ClubId;
                         if (clubId > 0)
                         {
                             // The krets's own Fakturor tab defaults to the krets's own competitions.
@@ -1052,17 +1052,17 @@ namespace HpskSite.Controllers
                         }
 
                         return InvoiceAdminService.NormalizeRegionCode(
-                            comp.Value<string>("regionalFederation")) == wantedRegion;
+                            comp.RegionalFederation) == wantedRegion;
                     });
                 }
 
                 var competitions = competitionsQuery
-                    .OrderByDescending(comp => comp.Value<DateTime?>("competitionDate"))
+                    .OrderByDescending(comp => comp.CompetitionDate)
                     .Select(comp => new
                     {
                         id = comp.Id,
                         name = comp.Name,
-                        date = comp.Value<DateTime?>("competitionDate")?.ToString("yyyy-MM-dd")
+                        date = comp.CompetitionDate?.ToString("yyyy-MM-dd")
                     })
                     .ToList();
 

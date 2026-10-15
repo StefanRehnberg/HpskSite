@@ -141,101 +141,87 @@ namespace HpskSite.Controllers
 
             try
             {
-                var content = _contentService.GetById(competitionId);
-                Console.WriteLine($"Content found: {content != null}");
-                if (content != null)
-                {
-                    Console.WriteLine($"Content name: {content.Name}");
-                }
+                // Det sparade läget (redigeringen); tidpunkterna helst ur det publicerade (C3-planen S3).
+                var content = _competitions.GetSaved(competitionId);
                 if (content == null)
                 {
-                    Console.WriteLine($"Competition with ID {competitionId} not found");
                     return NotFound(new { success = false, message = $"Competition with ID {competitionId} not found" });
                 }
-
-                // Get field values from Umbraco content
-                var contactEmailValue = content.GetValue<string>("contactEmail") ?? "";
-                var contactPhoneValue = content.GetValue<string>("contactPhone") ?? "";
-
-                // Get competitionManagers - JSON array of member IDs
-                var competitionManagersJson = content.GetValue<string>("competitionManagers") ?? "[]";
-                int[] competitionManagerIds;
-
-                try
+                var published = _competitions.Get(competitionId);
+                string? DateString(Func<HpskSite.Models.Competitions.CompetitionInfo, DateTime?> read, bool includeTime)
                 {
-                    competitionManagerIds = JsonConvert.DeserializeObject<int[]>(competitionManagersJson) ?? Array.Empty<int>();
-                }
-                catch
-                {
-                    competitionManagerIds = Array.Empty<int>();
+                    var format = includeTime ? "yyyy-MM-dd HH:mm" : "yyyy-MM-dd";
+                    var pub = published == null ? null : read(published);
+                    if (pub.HasValue && pub.Value != DateTime.MinValue) return pub.Value.ToString(format);
+                    var raw = read(content);
+                    return raw.HasValue && raw.Value != DateTime.MinValue ? raw.Value.ToString(format) : null;
                 }
 
-                var allowDualCClassValue = content.GetValue<bool>("allowDualCClassRegistration");
-
-                // Extract competition data - ensure all values are properly serialized
                 // Check if parent is a series
-                var parent = content.ParentId > 0 ? _contentService.GetById(content.ParentId) : null;
-                var isInSeries = parent != null && parent.ContentType.Alias == "competitionSeries";
+                var isInSeries = content.SeriesId != null;
+                var parent = isInSeries ? _contentService.GetById(content.SeriesId!.Value) : null;
+                isInSeries = parent != null;
 
-                var description = HpskSite.Extensions.RteHelper.ExtractMarkup(content.GetValue<string>("description"));
+                var description = HpskSite.Extensions.RteHelper.ExtractMarkup(content.Description);
 
                 var competitionData = new
                 {
                     id = content.Id,
-                    competitionName = content.GetValue<string>("competitionName") ?? "",
+                    competitionName = content.CompetitionName ?? "",
                     description = description,
-                    venue = content.GetValue<string>("venue") ?? "",
-                    competitionDate = GetDateTimeString(content, competitionId, "competitionDate", true),
-                    competitionEndDate = GetDateTimeString(content, competitionId, "competitionEndDate", false),
-                    registrationOpenDate = GetDateTimeString(content, competitionId, "registrationOpenDate", true),
-                    registrationCloseDate = GetDateTimeString(content, competitionId, "registrationCloseDate", true),
-                    maxParticipants = content.GetValue<int>("maxParticipants"),
-                    registrationFee = content.GetValue<decimal>("registrationFee"),
-                    juniorRegistrationFee = content.GetValue<string>("juniorRegistrationFee") ?? "0",
-                    subCompetitionFee = content.GetValue<string>("subCompetitionFee") ?? "0",
-                    subCompetitionFeeMode = content.GetValue<string>("subCompetitionFeeMode") ?? "perClass",
-                    competitionDirector = content.GetValue<string>("competitionDirector") ?? "",
-                    contactEmail = contactEmailValue,
-                    contactPhone = contactPhoneValue,
-                    numberOfSeriesOrStations = content.GetValue<int>("numberOfSeriesOrStations"),
-                    numberOfFinalSeries = content.GetValue<int>("numberOfFinalSeries"),
-                    allowDualCClass = allowDualCClassValue,
-                    showLiveResults = content.GetValue<bool>("showLiveResults"),
-                    addToMenu = content.GetValue<bool>("addToMenu"),
-                    isActive = content.GetValue<bool>("isActive"),
-                    isClubOnly = content.GetValue<bool>("isClubOnly"),
-                    clubId = content.GetValue<int?>("clubId") ?? 0,
-                    regionalFederation = content.GetValue<string>("regionalFederation") ?? "",
-                    swishNumber = content.GetValue<string>("swishNumber") ?? "",
-                    competitionManagers = competitionManagerIds,
-                    shootingClassIds = GetShootingClassIdsString(content),
-                    competitionScope = content.GetValue<string>("competitionScope") ?? "",
+                    venue = content.Venue ?? "",
+                    competitionDate = DateString(c => c.CompetitionDate, true),
+                    competitionEndDate = DateString(c => c.CompetitionEndDate, false),
+                    registrationOpenDate = DateString(c => c.RegistrationOpenDate, true),
+                    registrationCloseDate = DateString(c => c.RegistrationCloseDate, true),
+                    maxParticipants = content.MaxParticipants,
+                    registrationFee = content.Fee(HpskSite.Models.Competitions.CompetitionFeeKind.Registration) ?? 0m,
+                    juniorRegistrationFee = content.JuniorRegistrationFee ?? "0",
+                    subCompetitionFee = content.SubCompetitionFee ?? "0",
+                    subCompetitionFeeMode = content.SubCompetitionFeeMode ?? "perClass",
+                    competitionDirector = content.CompetitionDirector ?? "",
+                    contactEmail = content.ContactEmail ?? "",
+                    contactPhone = content.ContactPhone ?? "",
+                    numberOfSeriesOrStations = content.NumberOfSeriesOrStations,
+                    numberOfFinalSeries = content.NumberOfFinalSeries,
+                    allowDualCClass = content.AllowDualCClassRegistration,
+                    showLiveResults = content.ShowLiveResults,
+                    addToMenu = content.AddToMenu,
+                    isActive = content.IsVisible,
+                    isClubOnly = content.IsClubOnly,
+                    clubId = content.ClubId,
+                    regionalFederation = content.RegionalFederation ?? "",
+                    swishNumber = content.SwishNumber ?? "",
+                    competitionManagers = content.ManagerIds.ToArray(),
+                    shootingClassIds = ShootingClassIdsString(content.ShootingClassIds),
+                    competitionScope = content.CompetitionScope ?? "",
                     // Tom = ej bekräftad; dialogen föreslår då en nivå (_CompetitionLevelField).
-                    competitionLevel = HpskSite.CompetitionTypes.Common.CompetitionLevel.Read(content),
-                    isAwardingStandardMedals = content.GetValue<bool>("isAwardingStandardMedals"),
-                    allowSelfReporting = content.GetValue<bool>("allowSelfReporting"),
-                    isExternal = content.GetValue<bool>("isExternal"),
-                    externalUrl = content.GetValue<string>("externalUrl") ?? "",
-                    externalRegistrationEmail = content.GetValue<string>("externalRegistrationEmail") ?? "",
-                    allowTeams = content.GetValue<bool>("allowTeams"),
-                    teamRegistrationFee = content.GetValue<string>("teamRegistrationFee") ?? "0",
-                    teamResultSeriesCount = content.GetValue<int>("teamResultSeriesCount"),
-                    allowStafett = content.GetValue<bool>("allowStafett"),
-                    stafettRegistrationFee = content.GetValue<string>("stafettRegistrationFee") ?? "0",
+                    competitionLevel = HpskSite.CompetitionTypes.Common.CompetitionLevel.Normalize(content.CompetitionLevel),
+                    isAwardingStandardMedals = content.IsAwardingStandardMedals,
+                    allowSelfReporting = content.AllowSelfReporting,
+                    isExternal = content.IsExternal,
+                    externalUrl = content.ExternalUrl ?? "",
+                    externalRegistrationEmail = content.ExternalRegistrationEmail ?? "",
+                    allowTeams = content.AllowTeams,
+                    teamRegistrationFee = content.TeamRegistrationFee ?? "0",
+                    // teamResultSeriesCount, patrolSize och patrolIntervalMinutes har aldrig funnits på dokumenttypen.
+                    teamResultSeriesCount = 0,
+                    allowStafett = content.AllowStafett,
+                    stafettRegistrationFee = content.StafettRegistrationFee ?? "0",
                     seriesId = isInSeries ? parent!.Id : (int?)null,
                     seriesName = isInSeries ? parent!.Name : null,
-                    competitionType = content.GetValue<string>("competitionType") ?? "Precision",
+                    competitionType = content.CompetitionType ?? "Precision",
                     // Fältskytte-specific fields
-                    scoringMode = content.GetValue<string>("scoringMode") ?? "Normal",
-                    stationConfig = content.GetValue<string>("stationConfig") ?? "",
-                    patrolSize = content.GetValue<int>("patrolSize"),
-                    patrolIntervalMinutes = content.GetValue<int>("patrolIntervalMinutes"),
-                    maxReshoots = content.GetValue<int>("maxReshoots"),
-                    rollingStart = content.HasProperty("rollingStart") ? content.GetValue<string>("rollingStart") ?? "" : "",
-                    faltskytteSelfServiceResults = content.HasProperty("faltskytteSelfServiceResults") && content.GetValue<bool>("faltskytteSelfServiceResults"),
-                    subCompetitionName = content.HasProperty("subCompetitionName") ? content.GetValue<string>("subCompetitionName") ?? "" : "",
+                    scoringMode = content.ScoringMode ?? "Normal",
+                    stationConfig = content.StationConfig ?? "",
+                    patrolSize = 0,
+                    patrolIntervalMinutes = 0,
+                    maxReshoots = content.MaxReshoots,
+                    rollingStart = content.RollingStart ?? "",
+                    faltskytteSelfServiceResults = content.FaltskytteSelfServiceResults,
+                    subCompetitionName = content.SubCompetitionName ?? "",
                     // Direktplacering
-                    direktplaceringConfig = content.HasProperty("direktplaceringConfig") ? content.GetValue<string>("direktplaceringConfig") ?? "" : ""
+                    direktplaceringConfig = content.DirektplaceringConfig ?? ""
                 };
 
                 Console.WriteLine($"Returning competition data for: {content.Name}");
@@ -575,9 +561,9 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Extract shooting class IDs as comma-separated string from competition content.
         /// </summary>
-        private string GetShootingClassIdsString(Umbraco.Cms.Core.Models.IContent content)
+        private static string ShootingClassIdsString(string? stored)
         {
-            var classIdsObj = content.GetValue("shootingClassIds");
+            object? classIdsObj = stored;
 
             if (classIdsObj is string[] classArray && classArray.Length > 0)
             {
@@ -671,46 +657,6 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// Get a date/time string for edit forms. Tries the published content cache first
-        /// (which correctly preserves time via value converters), then falls back to IContent raw values.
-        /// </summary>
-        private string? GetDateTimeString(Umbraco.Cms.Core.Models.IContent content, int contentId, string propertyAlias, bool includeTime)
-        {
-            var format = includeTime ? "yyyy-MM-dd HH:mm" : "yyyy-MM-dd";
-
-            // Try published cache first — it correctly preserves date+time
-            var published = UmbracoContext.Content?.GetById(contentId);
-            if (published != null)
-            {
-                var pubDate = published.Value<DateTime?>(propertyAlias);
-                if (pubDate.HasValue && pubDate.Value != DateTime.MinValue)
-                    return pubDate.Value.ToString(format);
-            }
-
-            // Fallback: IContent raw value
-            var raw = content.GetValue(propertyAlias);
-            if (raw == null) return null;
-
-            if (raw is DateTime dt)
-            {
-                if (dt == DateTime.MinValue) return null;
-                return dt.ToString(format);
-            }
-
-            var str = raw.ToString() ?? "";
-            if (string.IsNullOrWhiteSpace(str)) return null;
-
-            if (DateTime.TryParse(str, System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.None, out var parsed))
-            {
-                if (parsed == DateTime.MinValue) return null;
-                return parsed.ToString(format);
-            }
-
-            return null;
-        }
-
-        /// <summary>
         /// Extract HTML markup from an Umbraco RTE value.
         /// RTE stores as JSON: {"markup":"<p>text</p>","blocks":{...}}
         /// Returns the markup string, or the original value if it's not JSON.
@@ -757,11 +703,12 @@ namespace HpskSite.Controllers
                 if (!await CanEditCompetitionAsync(competitionId))
                     return Json(new { success = false, message = "Behorighet saknas." });
 
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null || competition.ContentType.Alias != "competition")
+                // Läser bara — det sparade läget ur tävlingslagringen (C3-planen S3).
+                var competition = _competitions.GetSaved(competitionId);
+                if (competition == null)
                     return Json(new { success = false, message = "Tavlingen hittades inte." });
 
-                var state = InspectTypeChange(competitionId, competition);
+                var state = InspectTypeChange(competitionId, competition.CompetitionType ?? "");
                 return Json(new
                 {
                     success = true,
@@ -809,7 +756,7 @@ namespace HpskSite.Controllers
                 if (competition == null || competition.ContentType.Alias != "competition")
                     return Json(new { success = false, message = "Tavlingen hittades inte." });
 
-                var state = InspectTypeChange(request.CompetitionId, competition);
+                var state = InspectTypeChange(request.CompetitionId, competition.GetValue<string>("competitionType") ?? "");
                 if (!state.CanChange)
                     return Json(new { success = false, message = state.Reason });
 
@@ -875,11 +822,11 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Sakerhetsregeln pa ETT stalle, last av bade lasningen och skrivningen.
         /// </summary>
-        private TypeChangeState InspectTypeChange(int competitionId, Umbraco.Cms.Core.Models.IContent competition)
+        private TypeChangeState InspectTypeChange(int competitionId, string currentType)
         {
             var state = new TypeChangeState
             {
-                CurrentType = competition.GetValue<string>("competitionType") ?? ""
+                CurrentType = currentType
             };
 
             using var db = _databaseFactory.CreateDatabase();
