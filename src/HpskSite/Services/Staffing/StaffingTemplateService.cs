@@ -18,8 +18,12 @@ namespace HpskSite.Services.Staffing
         private readonly IContentService _contentService;
         private readonly WorkBreakdownService _work;
 
-        public StaffingTemplateService(IScopeProvider scopeProvider, IContentService contentService, WorkBreakdownService work)
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
+        public StaffingTemplateService(IScopeProvider scopeProvider, IContentService contentService, WorkBreakdownService work,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _scopeProvider = scopeProvider;
             _contentService = contentService;
             _work = work;
@@ -85,7 +89,7 @@ namespace HpskSite.Services.Staffing
             var ownerKey = ownerType == StaffingTemplateOwner.Region ? (host.RegionCode ?? host.OwnerKey) : host.OwnerKey;
 
             DateTime? compDate = null;
-            try { var c = _contentService.GetById(competitionId)?.GetValue<DateTime?>("competitionDate"); if (c is { } cd && cd != default) compDate = cd; } catch { }
+            try { var c = _competitions.GetSaved(competitionId)?.CompetitionDate; if (c is { } cd && cd != default) compDate = cd; } catch { }
 
             var rows = new StaffingTemplateRows();
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
@@ -118,7 +122,7 @@ namespace HpskSite.Services.Staffing
                     Name = name.Trim().Length > 120 ? name.Trim()[..120] : name.Trim(),
                     OwnerType = ownerType,
                     OwnerKey = ownerKey,
-                    Discipline = _contentService.GetById(competitionId)?.GetValue<string>("competitionType") ?? "*",
+                    Discipline = _competitions.GetSaved(competitionId)?.CompetitionType ?? "*",
                     RowsJson = JsonConvert.SerializeObject(rows),
                     CreatedByMemberId = byMemberId,
                     CreatedDate = DateTime.UtcNow,

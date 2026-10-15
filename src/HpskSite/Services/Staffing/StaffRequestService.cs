@@ -25,9 +25,13 @@ namespace HpskSite.Services.Staffing
         private readonly BrevoEmailService _brevo;
         private readonly ILogger<StaffRequestService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public StaffRequestService(IScopeProvider scopeProvider, IMemberService memberService, IContentService contentService,
-            StaffingSignupService signup, EmailService email, WebPushService webPush, BrevoEmailService brevo, ILogger<StaffRequestService> logger)
+            StaffingSignupService signup, EmailService email, WebPushService webPush, BrevoEmailService brevo, ILogger<StaffRequestService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _scopeProvider = scopeProvider;
             _memberService = memberService;
             _contentService = contentService;
@@ -60,7 +64,7 @@ namespace HpskSite.Services.Staffing
             var scopes = _signup.GetScopes(competitionId);
             if (scopes.Count == 0) return (false, "Öppna först för självanmälan (välj klubb/krets) — då vet vi vilka som ska få förfrågan.", 0, 0, 0);
 
-            var compName = _contentService.GetById(competitionId)?.GetValue<string>("competitionName") ?? "en tävling";
+            var compName = _competitions.GetSaved(competitionId)?.CompetitionName ?? "en tävling";
             var link = $"https://pistol.nu/bemanna?c={competitionId}";
             var extra = string.IsNullOrWhiteSpace(message) ? "" : $"<p>{System.Net.WebUtility.HtmlEncode(message!.Trim())}</p>";
             int sent = 0, push = 0, recipients;

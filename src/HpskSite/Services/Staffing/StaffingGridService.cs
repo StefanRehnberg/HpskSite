@@ -27,6 +27,8 @@ namespace HpskSite.Services.Staffing
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly ILogger<StaffingGridService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public StaffingGridService(
             StaffingService staffing,
             RoleCatalogService roles,
@@ -36,8 +38,10 @@ namespace HpskSite.Services.Staffing
             IMemberService memberService,
             ClubService clubService,
             IUmbracoContextAccessor umbracoContextAccessor,
-            ILogger<StaffingGridService> logger)
+            ILogger<StaffingGridService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _staffing = staffing;
             _roles = roles;
             _days = days;
@@ -53,9 +57,7 @@ namespace HpskSite.Services.Staffing
         {
             try
             {
-                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return null;
-                var d = ctx.Content.GetById(competitionId)?.Value<DateTime>("competitionDate");
-                return d == default ? null : d;
+                return _competitions.Get(competitionId)?.CompetitionDate;
             }
             catch { return null; }
         }

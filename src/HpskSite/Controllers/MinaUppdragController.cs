@@ -30,6 +30,8 @@ namespace HpskSite.Controllers
         private readonly StaffHelpService _help;
         private readonly IDataProtectionProvider _dataProtection;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public MinaUppdragController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberManager memberManager,
@@ -37,8 +39,10 @@ namespace HpskSite.Controllers
             StaffingService staffing,
             StaffingSignupService signup,
             StaffHelpService help,
-            IDataProtectionProvider dataProtection)
+            IDataProtectionProvider dataProtection,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -132,11 +136,11 @@ namespace HpskSite.Controllers
             if (current?.Email == null)
                 return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/bemanna?c={c}")}");
 
-            var comp = c > 0 ? ctx.Content.GetById(c) : null;
-            var isComp = comp != null && comp.ContentType.Alias == "competition";
+            var comp = c > 0 ? _competitions.Get(c) : null;
+            var isComp = comp != null;
             ViewData["CompetitionId"] = c;
             ViewData["CompetitionExists"] = isComp;
-            ViewData["CompetitionName"] = isComp ? (comp!.Value<string>("competitionName") ?? "Tävling") : "";
+            ViewData["CompetitionName"] = isComp ? (comp!.CompetitionName ?? "Tävling") : "";
             // Preview mode: a manager verifying how the page looks for a fresh, not-yet-signed-up member.
             ViewData["Preview"] = Request.Query.ContainsKey("preview");
             return View("Bemanna", rootNode);
@@ -155,12 +159,11 @@ namespace HpskSite.Controllers
             {
                 try
                 {
-                    if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
                     {
-                        var comp = ctx.Content.GetById(competitionId);
-                        compName = comp?.Value<string>("competitionName") ?? "Tävling";
-                        var d = comp?.Value<DateTime?>("competitionDate");
-                        if (d is { } dd && dd != default) compDate = dd.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                        var comp = _competitions.Get(competitionId);
+                        compName = comp?.CompetitionName ?? "Tävling";
+                        var d = comp?.CompetitionDate;
+                        if (d is { } dd) compDate = dd.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
                     }
                 }
                 catch { }
