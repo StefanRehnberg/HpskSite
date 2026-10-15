@@ -223,14 +223,16 @@ namespace HpskSite.Controllers
                         .ToDictionary(g => g.Key, g => g.First().GetValue<string>("regionalFederation") ?? "");
                 }
 
-                var competitionsQuery = allContent.Where(c => c.ContentType.Alias == "competition");
+                // Trädet (även opublicerade) avgör urvalet; fälten ur tävlingslagringen (C3-planen S3).
+                var competitionIds = allContent.Where(c => c.ContentType.Alias == "competition").Select(c => c.Id).ToList(); // competitionstore-ok: listan tar även opublicerade tävlingar ur trädet (S6)
+                var competitionsQuery = HpskSite.Services.Competitions.CompetitionStoreExtensions.GetManyIncludingUnpublished(_competitions, competitionIds).Values.AsEnumerable();
 
                 if (isRegionalAdmin && clubRegions != null)
                 {
                     var managedRegionSet = new HashSet<string>(managedRegions, StringComparer.OrdinalIgnoreCase);
                     competitionsQuery = competitionsQuery.Where(comp =>
                     {
-                        var clubId = comp.GetValue<int?>("clubId") ?? 0;
+                        var clubId = comp.ClubId;
                         return clubId > 0
                             && clubRegions.TryGetValue(clubId, out var clubRegion)
                             && managedRegionSet.Contains(clubRegion);

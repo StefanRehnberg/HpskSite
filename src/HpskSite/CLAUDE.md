@@ -11512,6 +11512,16 @@ och tom text är null (så `?? Name` slår till).
   (fångsten gav 500 på varje tävlings- och seriesida innan det rättades). ⚠️ Vyerna läses från
   arbetskatalogen, så det gamla bygget fångades med vyerna i `git stash`. Taken 62 → 43, 431 → 301.
   Verifierat: fångst (kallstarten på 10362), korskontroll 3092/0, matrisen 8/8 + 35/36 (`schema-verify`, datum).
+- **Område 11, admin (2026-10-15):** `CompetitionAdminController` (adminlistan ur `List()`, serien ur
+  `ICompetitionSeriesStore`, noden bara för adressen och beskrivningen; `GetCompetition` och seriens
+  tävlingslista ur `GetSaved`), `CompetitionEditController` (`GetCompetitionData`, grenbytets läskontroll),
+  `CompetitionManagement`, `AdminCompetitionManagement`, `CompetitionEditModal`, fakturornas och
+  registreringsbordets tävlingsval och värdkortets förhandsvisning. Osatta datum i adminlistan är nu `null`
+  i stället för `0001-01-01` (godkänt i `c3/accepted-s3k.json` efter fält-för-fält-kontroll). Kvar på noden
+  med flit: skrivvägarna och seedarna (S4), adressuppslagen (S6) och `Models/Competition.cs` (läses av
+  skyddsnätets `LegacyCompetitionReadSnapshot`). Taken 43 → 34, 301 → 175. Verifierat: fångst grön,
+  korskontroll 3092/0, matrisen 8/8 + 35/36 (`schema-verify`, datum), competition-edit-dispatch 29,
+  compedit-catalog 26, row-action-menus 60, comptype-filter 25. **S3 är klart.**
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

@@ -5,6 +5,7 @@
 @using System.Linq;
 @using System;
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @{
     // Get competition ID from query string
     var competitionIdStr = Context.Request.Query["competitionId"].FirstOrDefault();
@@ -17,17 +18,18 @@
     {
         // Direct cache lookup (O(1) instead of full tree scan)
         var node = Umbraco.Content(competitionId);
-        if (node != null && node.ContentType.Alias == "competition")
+        if (node != null && node.ContentType.Alias == "competition") // competitionstore-ok: noden behövs för adressen (S6), fälten läses ur posten
         {
             competition = node;
         }
     }
+    var compPost = competition != null ? Competitions.Get(competition.Id) : null;
 
     // Pass competition properties to ViewData for partial views
-    if (competition != null)
+    if (compPost != null)
     {
-        ViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
-        ViewData["CompetitionType"] = competition.Value<string>("competitionType") ?? "Precision";
+        ViewData["NumberOfSeriesOrStations"] = compPost.NumberOfSeriesOrStations;
+        ViewData["CompetitionType"] = compPost.CompetitionType ?? "Precision";
     }
 
     // Simplified approach - just check if user is logged in

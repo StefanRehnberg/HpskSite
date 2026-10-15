@@ -54,6 +54,8 @@ namespace HpskSite.Controllers
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _seriesStore;
         public CompetitionAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -69,11 +71,15 @@ namespace HpskSite.Controllers
             MediaFileManager mediaFileManager,
             SeriesCalculationService seriesCalculationService,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.Results.ICompetitionResultStore results)
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Competitions.ICompetitionSeriesStore seriesStore)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
             _results = results;
+            _competitions = competitions;
+            _seriesStore = seriesStore;
             _contentService = contentService;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -504,11 +510,8 @@ namespace HpskSite.Controllers
                     return Ok(new { success = true, data = new List<object>() });
                 }
 
-                // Collect all competitions from competitionsHub subtree (published cache)
-                // Structure: competitionsHub → year folder (contentPage) or competitionSeries → competition
-                var allCompetitions = competitionsHub.Descendants()
-                    .Where(c => c.ContentType.Alias == "competition")
-                    .ToList();
+                // Alla publicerade tävlingar ur tävlingslagringen (C3-planen S3) — de ligger under navet.
+                var allCompetitions = _competitions.List();
 
                 // Build club -> region lookup from published cache (only if needed for region filtering)
                 // Resolved once, not per competition — the filter runs over every node in the hub.
@@ -540,10 +543,10 @@ namespace HpskSite.Controllers
 
                 // Apply server-side filters
                 var filteredCompetitions = allCompetitions
-                    .Where(comp => isSiteAdmin || isRegionalAdmin || managedClubIds.Contains(comp.Value<int?>("clubId") ?? 0) || skjutledareClubIds.Contains(comp.Value<int?>("clubId") ?? 0))
+                    .Where(comp => isSiteAdmin || isRegionalAdmin || managedClubIds.Contains(comp.ClubId) || skjutledareClubIds.Contains(comp.ClubId))
                     .Where(comp =>
                     {
-                        var compDate = comp.Value<DateTime?>("competitionDate");
+                        var compDate = comp.CompetitionDate;
 
                         // Year filter
                         if (year.HasValue && compDate.HasValue && compDate.Value.Year != filterYear)
@@ -552,7 +555,7 @@ namespace HpskSite.Controllers
                         // Status filter - exclude completed unless requested
                         if (!includeCompleted && compDate.HasValue)
                         {
-                            var compEndDate = comp.Value<DateTime?>("competitionEndDate");
+                            var compEndDate = comp.CompetitionEndDate;
                             var effectiveEnd = (compEndDate.HasValue && compEndDate.Value.Year > 1900) ? compEndDate.Value.Date : compDate.Value.Date;
                             var isCompleted = effectiveEnd < today;
                             if (isCompleted) return false;
@@ -564,7 +567,7 @@ namespace HpskSite.Controllers
                         // when the value is not a known type at all.
                         if (!string.IsNullOrEmpty(type))
                         {
-                            var compType = comp.Value<string>("competitionType") ?? "";
+                            var compType = comp.CompetitionType ?? "";
                             var actualType = wantedType == null ? null : Models.CompetitionTypes.GetFuzzy(compType);
                             if (wantedType != null && actualType != null)
                             {
@@ -581,19 +584,19 @@ namespace HpskSite.Controllers
                         // admin needs to be able to fold them away without losing krets/nationella.
                         if (!string.IsNullOrEmpty(clubScope) && !clubScope.Equals("all", StringComparison.OrdinalIgnoreCase))
                         {
-                            var compClubIdScope = comp.Value<int?>("clubId") ?? 0;
+                            var compClubIdScope = comp.ClubId;
                             if (clubScope.Equals("noClub", StringComparison.OrdinalIgnoreCase) && compClubIdScope > 0)
                                 return false;
                             if (clubScope.Equals("noInternal", StringComparison.OrdinalIgnoreCase)
-                                && compClubIdScope > 0 && comp.Value<bool>("isClubOnly"))
+                                && compClubIdScope > 0 && comp.IsClubOnly)
                                 return false;
                         }
 
                         // Region filter
                         if (!string.IsNullOrEmpty(effectiveRegion))
                         {
-                            var compClubId = comp.Value<int?>("clubId") ?? 0;
-                            var compRegion = comp.Value<string>("regionalFederation") ?? "";
+                            var compClubId = comp.ClubId;
+                            var compRegion = comp.RegionalFederation ?? "";
 
                             if (compClubId > 0)
                             {
@@ -609,8 +612,8 @@ namespace HpskSite.Controllers
                         }
                         else if (effectiveRegions != null && effectiveRegions.Any())
                         {
-                            var compClubId = comp.Value<int?>("clubId") ?? 0;
-                            var compRegion = comp.Value<string>("regionalFederation") ?? "";
+                            var compClubId = comp.ClubId;
+                            var compRegion = comp.RegionalFederation ?? "";
 
                             if (compClubId > 0)
                             {
@@ -663,12 +666,14 @@ namespace HpskSite.Controllers
                 var competitions = filteredCompetitions
                     .Select(comp =>
                     {
-                        var parent = comp.Parent;
-                        var isInSeries = parent != null && parent.ContentType.Alias == "competitionSeries";
+                        // Noden bara för adressen och beskrivningen (RTE); serien ur serielagringen.
+                        var node = umbracoContext.Content.GetById(comp.Id);
+                        var series = comp.SeriesId is int sid ? _seriesStore.Get(sid) : null;
+                        var isInSeries = series != null;
 
-                        var isActive = comp.Value<bool>("isActive");
-                        var compDate = comp.Value<DateTime?>("competitionDate");
-                        var compEndDate = comp.Value<DateTime?>("competitionEndDate");
+                        var isActive = comp.IsVisible;
+                        var compDate = comp.CompetitionDate;
+                        var compEndDate = comp.CompetitionEndDate;
                         var effectiveEndDate = (compEndDate.HasValue && compEndDate.Value.Year > 1900) ? compEndDate.Value.Date : compDate?.Date;
 
                         // Calculate status
@@ -707,27 +712,27 @@ namespace HpskSite.Controllers
                         return new
                         {
                             id = comp.Id,
-                            url = HpskSite.Extensions.CompetitionUrlExtensions.CompetitionUrl(comp),
-                            name = comp.Value<string>("competitionName") ?? comp.Name,
-                            description = comp.Value<string>("description") ?? "",
-                            type = comp.Value<string>("competitionType") ?? "Unknown",
+                            url = node == null ? "" : HpskSite.Extensions.CompetitionUrlExtensions.CompetitionUrl(node),
+                            name = comp.CompetitionName ?? comp.Name,
+                            description = node?.Value<string>("description") ?? "",
+                            type = comp.CompetitionType ?? "Unknown",
                             startDate = compDate,
                             endDate = compEndDate,
-                            registrationOpenDate = comp.Value<DateTime?>("registrationOpenDate"),
-                            registrationCloseDate = comp.Value<DateTime?>("registrationCloseDate"),
+                            registrationOpenDate = comp.RegistrationOpenDate,
+                            registrationCloseDate = comp.RegistrationCloseDate,
                             isActive = isActive,
-                            isClubOnly = comp.Value<bool>("isClubOnly"),
+                            isClubOnly = comp.IsClubOnly,
                             // Bekräftad nivå eller tomt; listan faller då tillbaka på värdbrickan.
-                            competitionLevel = HpskSite.CompetitionTypes.Common.CompetitionLevel.Read(comp),
-                            isExternal = comp.Value<bool>("isExternal"),
-                            clubId = comp.Value<int?>("clubId") ?? 0,
+                            competitionLevel = HpskSite.CompetitionTypes.Common.CompetitionLevel.Normalize(comp.CompetitionLevel),
+                            isExternal = comp.IsExternal,
+                            clubId = comp.ClubId,
                             // Surfaced so the list can tag each row Klubb / Krets / Nationell — lets a
                             // regional admin who mis-scoped a comp recognise where it actually landed.
-                            regionalFederation = comp.Value<string>("regionalFederation") ?? "",
+                            regionalFederation = comp.RegionalFederation ?? "",
                             registrationCount = regCount,
-                            allowSelfReporting = comp.Value<bool>("allowSelfReporting"),
-                            seriesId = isInSeries ? parent!.Id : (int?)null,
-                            seriesName = isInSeries ? (parent!.Value<string>("seriesName") ?? parent.Name) : null,
+                            allowSelfReporting = comp.AllowSelfReporting,
+                            seriesId = isInSeries ? series!.Id : (int?)null,
+                            seriesName = isInSeries ? (series!.SeriesName ?? series.Name) : null,
                             status = status
                         };
                     })
@@ -770,15 +775,17 @@ namespace HpskSite.Controllers
 
             try
             {
-                var competition = _contentService.GetById(id);
+                // Det sparade läget (redigeringen), tidpunkterna helst ur det publicerade (C3-planen S3).
+                var competition = _competitions.GetSaved(id);
                 if (competition == null)
                 {
                     return Ok(new { success = false, message = "Competition not found" });
                 }
+                var publishedComp = _competitions.Get(id);
 
-                // Parse shootingClassIds from JSON array to regular array
+                // shootingClassIds: JSON-array eller äldre CSV.
                 string[] shootingClassIds = Array.Empty<string>();
-                var shootingClassIdsValue = competition.GetValue<string>("shootingClassIds");
+                var shootingClassIdsValue = competition.ShootingClassIds;
                 if (!string.IsNullOrEmpty(shootingClassIdsValue))
                 {
                     try
@@ -799,83 +806,67 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // Get parent series ID if competition is in a series
-                int? seriesId = null;
-                if (competition.ParentId > 0)
-                {
-                    var parent = _contentService.GetById(competition.ParentId);
-                    if (parent != null && parent.ContentType.Alias == "competitionSeries")
-                    {
-                        seriesId = parent.Id;
-                    }
-                }
+                // Serien tävlingen ingår i (föräldern när den är en serie).
+                int? seriesId = competition.SeriesId;
 
                 // Format dates for Flatpickr (Y-m-d H:i or Y-m-d)
-                // Use published cache first (preserves time), fall back to IContent
-                Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent? publishedComp = null;
-                if (_umbracoContextAccessor.TryGetUmbracoContext(out var getCompCtx) && getCompCtx.Content != null)
-                    publishedComp = getCompCtx.Content.GetById(id);
-
-                string FormatDate(string alias, bool includeTime = true)
+                string FormatDate(Func<HpskSite.Models.Competitions.CompetitionInfo, DateTime?> read, bool includeTime = true)
                 {
                     var fmt = includeTime ? "yyyy-MM-dd HH:mm" : "yyyy-MM-dd";
-                    if (publishedComp != null)
-                    {
-                        var dt = publishedComp.Value<DateTime?>(alias);
-                        if (dt.HasValue && dt.Value != DateTime.MinValue)
-                            return dt.Value.ToString(fmt);
-                    }
-                    var raw = competition.GetValue<DateTime?>(alias);
+                    var dt = publishedComp == null ? null : read(publishedComp);
+                    if (dt.HasValue && dt.Value != DateTime.MinValue)
+                        return dt.Value.ToString(fmt);
+                    var raw = read(competition);
                     if (!raw.HasValue || raw.Value == DateTime.MinValue) return "";
                     return raw.Value.ToString(fmt);
                 }
 
-                // Read description from published cache (returns rendered HTML) or extract from RTE JSON
-                var descriptionValue = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.GetValue<string>("description"));
+                var descriptionValue = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.Description);
 
                 var competitionData = new
                 {
                     id = competition.Id,
-                    competitionName = competition.GetValue<string>("competitionName") ?? "",
-                    competitionType = competition.GetValue<string>("competitionType") ?? "Precision",
+                    competitionName = competition.CompetitionName ?? "",
+                    competitionType = competition.CompetitionType ?? "Precision",
                     description = descriptionValue,
-                    venue = competition.GetValue<string>("venue") ?? "",
-                    competitionDate = FormatDate("competitionDate", true),
-                    competitionEndDate = FormatDate("competitionEndDate", false),
-                    registrationOpenDate = FormatDate("registrationOpenDate", true),
-                    registrationCloseDate = FormatDate("registrationCloseDate", true),
-                    numberOfSeriesOrStations = competition.GetValue<int>("numberOfSeriesOrStations"),
-                    numberOfFinalSeries = competition.GetValue<int>("numberOfFinalSeries"),
+                    venue = competition.Venue ?? "",
+                    competitionDate = FormatDate(c => c.CompetitionDate, true),
+                    competitionEndDate = FormatDate(c => c.CompetitionEndDate, false),
+                    registrationOpenDate = FormatDate(c => c.RegistrationOpenDate, true),
+                    registrationCloseDate = FormatDate(c => c.RegistrationCloseDate, true),
+                    numberOfSeriesOrStations = competition.NumberOfSeriesOrStations,
+                    numberOfFinalSeries = competition.NumberOfFinalSeries,
                     shootingClassIds = shootingClassIds,
-                    externalUrl = competition.GetValue<string>("externalUrl") ?? "",
-                    externalRegistrationEmail = competition.GetValue<string>("externalRegistrationEmail") ?? "",
-                    isExternal = competition.GetValue<bool>("isExternal"),
-                    allowSelfReporting = competition.GetValue<bool>("allowSelfReporting"),
-                    showLiveResults = competition.GetValue<bool>("showLiveResults"),
-                    isActive = competition.GetValue<bool>("isActive"),
-                    allowDualCClass = competition.GetValue<bool>(HpskSite.Models.ClassRegistrationRule.PropertyAlias),
-                    addToMenu = competition.GetValue<bool>("addToMenu"),
-                    isAwardingStandardMedals = competition.GetValue<bool>("isAwardingStandardMedals"),
-                    isClubOnly = competition.GetValue<bool>("isClubOnly"),
-                    maxParticipants = competition.GetValue<int>("maxParticipants"),
-                    registrationFee = competition.GetValue<decimal>("registrationFee"),
-                    juniorRegistrationFee = competition.GetValue<string>("juniorRegistrationFee") ?? "0",
-                    subCompetitionFee = competition.GetValue<string>("subCompetitionFee") ?? "0",
-                    subCompetitionFeeMode = competition.GetValue<string>("subCompetitionFeeMode") ?? "perClass",
-                    competitionDirector = competition.GetValue<string>("competitionDirector") ?? "",
-                    contactEmail = competition.GetValue<string>("contactEmail") ?? "",
-                    contactPhone = competition.GetValue<string>("contactPhone") ?? "",
-                    swishNumber = competition.GetValue<string>("swishNumber") ?? "",
-                    allowTeams = competition.GetValue<bool>("allowTeams"),
-                    teamRegistrationFee = competition.GetValue<string>("teamRegistrationFee") ?? "0",
-                    teamResultSeriesCount = competition.GetValue<int>("teamResultSeriesCount"),
-                    allowStafett = competition.GetValue<bool>("allowStafett"),
-                    stafettRegistrationFee = competition.GetValue<string>("stafettRegistrationFee") ?? "0",
-                    competitionManagers = GetCompetitionManagerIds(competition),
-                    competitionScope = competition.GetValue<string>("competitionScope") ?? "",
+                    externalUrl = competition.ExternalUrl ?? "",
+                    externalRegistrationEmail = competition.ExternalRegistrationEmail ?? "",
+                    isExternal = competition.IsExternal,
+                    allowSelfReporting = competition.AllowSelfReporting,
+                    showLiveResults = competition.ShowLiveResults,
+                    isActive = competition.IsVisible,
+                    allowDualCClass = competition.AllowDualCClassRegistration,
+                    addToMenu = competition.AddToMenu,
+                    isAwardingStandardMedals = competition.IsAwardingStandardMedals,
+                    isClubOnly = competition.IsClubOnly,
+                    maxParticipants = competition.MaxParticipants,
+                    registrationFee = competition.Fee(HpskSite.Models.Competitions.CompetitionFeeKind.Registration) ?? 0m,
+                    juniorRegistrationFee = competition.JuniorRegistrationFee ?? "0",
+                    subCompetitionFee = competition.SubCompetitionFee ?? "0",
+                    subCompetitionFeeMode = competition.SubCompetitionFeeMode ?? "perClass",
+                    competitionDirector = competition.CompetitionDirector ?? "",
+                    contactEmail = competition.ContactEmail ?? "",
+                    contactPhone = competition.ContactPhone ?? "",
+                    swishNumber = competition.SwishNumber ?? "",
+                    allowTeams = competition.AllowTeams,
+                    teamRegistrationFee = competition.TeamRegistrationFee ?? "0",
+                    // Aldrig på dokumenttypen — standardvärdet.
+                    teamResultSeriesCount = 0,
+                    allowStafett = competition.AllowStafett,
+                    stafettRegistrationFee = competition.StafettRegistrationFee ?? "0",
+                    competitionManagers = competition.ManagerIds.ToArray(),
+                    competitionScope = competition.CompetitionScope ?? "",
                     seriesId = seriesId,
-                    clubId = competition.GetValue<int?>("clubId") ?? 0,
-                    regionalFederation = competition.GetValue<string>("regionalFederation") ?? ""
+                    clubId = competition.ClubId,
+                    regionalFederation = competition.RegionalFederation ?? ""
                 };
 
                 return Ok(new
@@ -2398,19 +2389,6 @@ namespace HpskSite.Controllers
             return value;
         }
 
-        private int[] GetCompetitionManagerIds(Umbraco.Cms.Core.Models.IContent competition)
-        {
-            var json = competition.GetValue<string>("competitionManagers") ?? "[]";
-            try
-            {
-                return Newtonsoft.Json.JsonConvert.DeserializeObject<int[]>(json) ?? Array.Empty<int>();
-            }
-            catch
-            {
-                return Array.Empty<int>();
-            }
-        }
-
         private List<Umbraco.Cms.Core.Models.IContent> GetFlatDescendants(Umbraco.Cms.Core.Models.IContent root)
         {
             var result = new List<Umbraco.Cms.Core.Models.IContent>();
@@ -2498,12 +2476,16 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Determine competition status based on dates
         /// </summary>
-        private string GetCompetitionStatus(Umbraco.Cms.Core.Models.IContent competition)
+        private string GetCompetitionStatus(Umbraco.Cms.Core.Models.IContent competition) =>
+            GetCompetitionStatus(competition.GetValue<DateTime?>("competitionDate"), competition.GetValue<DateTime?>("competitionEndDate"));
+
+        private static string GetCompetitionStatus(HpskSite.Models.Competitions.CompetitionInfo competition) =>
+            GetCompetitionStatus(competition.CompetitionDate, competition.CompetitionEndDate);
+
+        private static string GetCompetitionStatus(DateTime? startDate, DateTime? endDate)
         {
             try
             {
-                var startDate = competition.GetValue<DateTime?>("competitionDate");
-                var endDate = competition.GetValue<DateTime?>("competitionEndDate");
 
                 if (!startDate.HasValue)
                     return "Draft";
@@ -2725,13 +2707,15 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied" });
                 }
 
+                // Seriens barn ur trädet (även opublicerade), fälten ur tävlingens sparade läge (C3-planen S3).
                 var competitions = _contentService.GetPagedChildren(seriesId, 0, int.MaxValue, out _)
-                    .Where(c => c.ContentType.Alias == "competition")
+                    .Select(c => _competitions.GetSaved(c.Id))
+                    .Where(c => c != null)
                     .Select(c => new
                     {
-                        id = c.Id,
-                        name = c.GetValue<string>("competitionName") ?? c.Name,
-                        competitionDate = c.GetValue<DateTime>("competitionDate"),
+                        id = c!.Id,
+                        name = c.CompetitionName ?? c.Name,
+                        competitionDate = c.CompetitionDate ?? DateTime.MinValue,
                         status = GetCompetitionStatus(c)
                     })
                     .OrderBy(c => c.competitionDate)
@@ -3016,7 +3000,7 @@ namespace HpskSite.Controllers
 
                 // Check if series has competitions
                 var competitionCount = _contentService.GetPagedChildren(series.Id, 0, int.MaxValue, out _)
-                    .Count(c => c.ContentType.Alias == "competition");
+                    .Count(c => c.ContentType.Alias == "competition"); // competitionstore-ok: spärren räknar trädets barn, även opublicerade och i papperskorgen-läge
 
                 if (competitionCount > 0)
                 {
