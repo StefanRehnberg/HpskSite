@@ -26,13 +26,13 @@ namespace HpskSite.Tests
     public class CompetitionStoreGuardTests
     {
         /// <summary>Levande <c>"competition"</c>-litteraler 2026-10-14. Sänk — höj aldrig.</summary>
-        private const int CompetitionAliasBaseline = 62; // 2026-10-15 S3 omr 9
+        private const int CompetitionAliasBaseline = 43; // 2026-10-15 S3 omr 10
 
         /// <summary>Levande <c>"competitionSeries"</c>-litteraler 2026-10-14. Sänk — höj aldrig.</summary>
         private const int SeriesAliasBaseline = 33;
 
         /// <summary>Levande läsningar och skrivningar av tävlingens egenskaper på en nod 2026-10-14. Sänk — höj aldrig.</summary>
-        private const int CompetitionPropertyBaseline = 431; // 2026-10-15 S3 omr 9
+        private const int CompetitionPropertyBaseline = 301; // 2026-10-15 S3 omr 10
 
         /// <summary>Samma för serien.</summary>
         private const int SeriesPropertyBaseline = 66;

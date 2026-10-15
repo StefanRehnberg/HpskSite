@@ -1,6 +1,4 @@
 using HpskSite.Services.RegistrationGate;
-using Umbraco.Cms.Core.Models.PublishedContent;
-using Umbraco.Extensions;
 
 namespace HpskSite.Services.Events
 {
@@ -21,23 +19,24 @@ namespace HpskSite.Services.Events
         public string? PrimaryUrl { get; init; }
         public string? PrimaryIcon { get; init; }
 
+        /// <param name="comp">Tävlingens post ur <c>ICompetitionStore</c> (det publicerade läget).</param>
+        /// <param name="url">Tävlingens publika adress (byggs av noden, S6).</param>
         /// <param name="result">Tävlingens resultatlista ur <c>ICompetitionResultStore</c>, eller null.</param>
         /// <param name="startLists">Startlistornas lagring — kortet frågar efter den officiella listan.</param>
-        public static CompetitionLinkCard Describe(IPublishedContent comp, DateTime now, HpskSite.Models.Results.CompetitionResultRecord? result,
+        public static CompetitionLinkCard Describe(HpskSite.Models.Competitions.CompetitionInfo comp, string url, DateTime now, HpskSite.Models.Results.CompetitionResultRecord? result,
             HpskSite.Services.StartLists.IStartListStore startLists)
         {
-            var url = comp.Url();
-            var date = comp.Value<DateTime>("competitionDate");
+            var date = comp.CompetitionDate ?? DateTime.MinValue;
 
             // Resultat: resultatnoden "Resultat" med isOfficial (precisionsfamiljen, spring), eller
             // fältskyttets flagga på tävlingen.
-            var resultsOfficial = (result?.IsOfficial ?? false) || comp.Value<bool>("faltskytteResultsOfficial");
+            var resultsOfficial = (result?.IsOfficial ?? false) || comp.FaltskytteResultsOfficial;
             if (resultsOfficial && result != null)
                 return Card(comp, url, date, "Resultat publicerade", true, "Resultat", url.TrimEnd('/') + "/resultat/", "bi-trophy");
 
             if (StartListRegistrationGate.HasPublishedStartList(comp, startLists))
             {
-                var type = comp.Value<string>("competitionType") ?? "";
+                var type = comp.CompetitionType ?? "";
                 string? listUrl = null;
                 if (type.StartsWith("Springskytte", StringComparison.OrdinalIgnoreCase))
                     listUrl = $"/startlista/{comp.Id}";
@@ -52,9 +51,9 @@ namespace HpskSite.Services.Events
                 return Card(comp, url, date, "Startlista publicerad", true, "Startlista", listUrl ?? url, "bi-list-ol");
             }
 
-            var isActive = comp.Value<bool>("isActive");
-            var opens = comp.Value<DateTime>("registrationOpenDate");
-            var closes = comp.Value<DateTime>("registrationCloseDate");
+            var isActive = comp.IsVisible;
+            var opens = comp.RegistrationOpenDate ?? DateTime.MinValue;
+            var closes = comp.RegistrationCloseDate ?? DateTime.MinValue;
             if (isActive && opens != DateTime.MinValue && now < opens)
                 return Card(comp, url, date, "Anmälan öppnar " + opens.ToString("d MMM", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")), false, null, null, null);
             // Samma jämförelse som tävlingssidan (now <= registrationCloseDate), så de två ytorna inte
@@ -67,7 +66,7 @@ namespace HpskSite.Services.Events
             return Card(comp, url, date, "Anmälan stängd", false, null, null, null);
         }
 
-        private static CompetitionLinkCard Card(IPublishedContent comp, string url, DateTime date, string status, bool positive,
+        private static CompetitionLinkCard Card(HpskSite.Models.Competitions.CompetitionInfo comp, string url, DateTime date, string status, bool positive,
             string? label, string? primaryUrl, string? icon) => new()
         {
             Id = comp.Id,

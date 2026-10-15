@@ -29,13 +29,17 @@ namespace HpskSite.Services.Mail
         private readonly IContentService _content;
         private readonly ILogger<ReplyContactResolver> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public ReplyContactResolver(
             ClubService clubs,
             IMemberService members,
             MemberClubService memberClubs,
             IContentService content,
-            ILogger<ReplyContactResolver> logger)
+            ILogger<ReplyContactResolver> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _clubs = clubs;
             _members = members;
             _memberClubs = memberClubs;
@@ -205,8 +209,8 @@ namespace HpskSite.Services.Mail
 
             try
             {
-                var comp = _content.GetById(competitionId);
-                if (comp is null || comp.ContentType.Alias != "competition")
+                var comp = _competitions.GetSaved(competitionId);
+                if (comp is null)
                 {
                     _logger.LogDebug("ReplyContactResolver: tävling {Id} hittades inte.", competitionId);
                     return MailReplyTo.SiteAdmin;
@@ -216,7 +220,7 @@ namespace HpskSite.Services.Mail
                 var hostName = "";
                 var hostEmail = "";
 
-                var clubId = comp.GetValue<int>("clubId");
+                var clubId = comp.ClubId;
                 if (clubId > 0)
                 {
                     var club = _clubs.GetClubById(clubId);
@@ -225,7 +229,7 @@ namespace HpskSite.Services.Mail
                 }
                 else
                 {
-                    var region = FindRegionByCode(comp.GetValue<string>("regionalFederation") ?? "");
+                    var region = FindRegionByCode(comp.RegionalFederation ?? "");
                     if (region is not null)
                     {
                         hostName = region.GetValue<string>("regionName") ?? region.Name ?? "";
@@ -233,7 +237,7 @@ namespace HpskSite.Services.Mail
                     }
                 }
 
-                var compEmail = comp.GetValue<string>("contactEmail") ?? "";
+                var compEmail = comp.ContactEmail ?? "";
                 var email = string.IsNullOrWhiteSpace(compEmail) ? hostEmail : compEmail;
 
                 return MailReplyTo.FromClub(hostName, email);

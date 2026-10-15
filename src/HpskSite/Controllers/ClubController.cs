@@ -44,6 +44,8 @@ namespace HpskSite.Controllers
         private readonly RangeCalendarService _rangeCalendar;
         private readonly ILogger<ClubController> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public ClubController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -64,9 +66,11 @@ namespace HpskSite.Controllers
             RangeCalendarService rangeCalendar,
             ILogger<ClubController> logger,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.Events.IClubEventStore events)
+            HpskSite.Services.Events.IClubEventStore events,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _registrations = registrations;
             _events = events;
             _antiforgery = antiforgery;
@@ -128,16 +132,16 @@ namespace HpskSite.Controllers
                     // dessutom bara såg de anmälningar som råkat publiceras. Samma regel som förut:
                     // en klubbintern tävling räknas bara när den är den här klubbens.
                     var activeClubMemberIds = new HashSet<int>();
-                    var compCache = new Dictionary<int, IPublishedContent?>();
+                    var compCache = new Dictionary<int, HpskSite.Models.Competitions.CompetitionInfo?>();
                     foreach (var (memberId, compId) in _registrations.CompetitionsForMembers(clubMemberIds))
                     {
                         if (activeClubMemberIds.Contains(memberId)) continue;
                         if (!compCache.TryGetValue(compId, out var competition))
-                            compCache[compId] = competition = UmbracoContext.Content.GetById(compId);
+                            compCache[compId] = competition = _competitions.Get(compId);
                         if (competition == null) continue;
 
-                        var isClubOnly = competition.Value<bool>("isClubOnly");
-                        var compClubId = competition.Value<int>("clubId");
+                        var isClubOnly = competition.IsClubOnly;
+                        var compClubId = competition.ClubId;
                         if (!isClubOnly || compClubId == clubId)
                             activeClubMemberIds.Add(memberId);
                     }
@@ -147,22 +151,19 @@ namespace HpskSite.Controllers
 
                 // Count upcoming events (competitions for this club in next 30 days)
                 var upcomingEventCount = 0;
-                if (UmbracoContext.Content != null)
                 {
+                    // Tävlingarna ur tävlingslagringen (C3-planen S3).
                     // ⚠️ Förut GetAllDescendants (dynamic) över HELA sajten, och GetValue på ett dynamic
                     // kastade alltid — klubbsidans statistik svarade "Error loading club stats" för
                     // varje klubb (rättat 2026-10-12, skalplanen). Bara tävlingsträdet, typat.
-                    var hub = UmbracoContext.Content.GetAtRoot()
-                        .SelectMany(r => r.Children ?? Enumerable.Empty<IPublishedContent>())
-                        .FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
-                    var competitions = hub?.DescendantsOfType("competition").ToList() ?? new List<IPublishedContent>();
+                    var competitions = _competitions.List();
 
                     upcomingEventCount = competitions.Count(c =>
                     {
-                        var compDate = c.Value<DateTime?>("competitionDate");
-                        var isActive = c.Value<bool>("isActive");
-                        var isClubOnly = c.Value<bool>("isClubOnly");
-                        var compClubId = c.Value<int>("clubId");
+                        var compDate = c.CompetitionDate;
+                        var isActive = c.IsVisible;
+                        var isClubOnly = c.IsClubOnly;
+                        var compClubId = c.ClubId;
 
                         return isActive &&
                                compDate.HasValue &&
@@ -191,7 +192,7 @@ namespace HpskSite.Controllers
 
         // Kalenderns fyra filter (fas C, beslut 2026-10-03). Klienten speglar strängarna i ClubCalendar.
         private const string CalendarScopeTraining = "training";
-        private const string CalendarScopeCompetition = "competition";
+        private const string CalendarScopeCompetition = "competition"; // competitionstore-ok: kalenderfiltrets namn
         private const string CalendarScopeClub = "club";
         private const string CalendarScopeOutside = "outside";
 
@@ -352,17 +353,14 @@ namespace HpskSite.Controllers
                                 clubRegionLookup[node.Id] = nodeRegion;
                         }
 
-                        foreach (var compDyn in allNodes)
+                        // Tävlingarna ur tävlingslagringen (C3-planen S3); noden bara för adressen.
+                        foreach (var publishedComp in _competitions.List())
                         {
-                            // Cast to IPublishedContent to access Value<T> extension methods
-                            var publishedComp = compDyn as IPublishedContent;
-                            if (publishedComp == null || publishedComp.ContentType.Alias != "competition") continue;
-
-                            var compDate = publishedComp.Value<DateTime?>("competitionDate");
-                            var isActive = publishedComp.Value<bool>("isActive");
-                            var isClubOnly = publishedComp.Value<bool>("isClubOnly");
-                            var compClubId = publishedComp.Value<int>("clubId");
-                            var name = publishedComp.Value<string>("competitionName") ?? publishedComp.Name;
+                            var compDate = publishedComp.CompetitionDate;
+                            var isActive = publishedComp.IsVisible;
+                            var isClubOnly = publishedComp.IsClubOnly;
+                            var compClubId = publishedComp.ClubId;
+                            var name = publishedComp.CompetitionName ?? publishedComp.Name;
 
                             if (!isActive ||
                                 !compDate.HasValue ||
@@ -390,7 +388,7 @@ namespace HpskSite.Controllers
                             }
                             else
                             {
-                                var compRegion = publishedComp.Value<string>("regionalFederation") ?? "";
+                                var compRegion = publishedComp.RegionalFederation ?? "";
                                 if (string.IsNullOrEmpty(compRegion) && compClubId > 0)
                                     clubRegionLookup.TryGetValue(compClubId, out compRegion);
 
@@ -408,9 +406,9 @@ namespace HpskSite.Controllers
                                     // Klubbens egna tävlingar är "Tävlingar"; kretsens och andra
                                     // klubbars öppna tävlingar ligger "utanför klubben".
                                     scope = compClubId == clubId ? CalendarScopeCompetition : CalendarScopeOutside,
-                                    url = publishedComp.CompetitionUrl(),
-                                    description = publishedComp.Value<string>("description") ?? "",
-                                    venue = publishedComp.Value<string>("venue") ?? ""
+                                    url = UmbracoContext.Content?.GetById(publishedComp.Id)?.CompetitionUrl() ?? "",
+                                    description = publishedComp.Description ?? "",
+                                    venue = publishedComp.Venue ?? ""
                                 });
                             }
                         }

@@ -11499,6 +11499,19 @@ och tom text är null (så `?? Name` slår till).
   startat" är klockberoende — ställningen identisk), korskontroll 3092/0, matrisen 8/8 + 35/36,
   activity-summary 105, marken-compseries-sync 64; `schema-dated-verify` (flyttar 5312 till i morgon och
   tillbaka) 30/33 och ekonomi-statistik (sandlådeantal) lika med BÅDA byggena.
+- **Område 10, klubb- och kretssidor (2026-10-15):** `ClubController` (medlemmarna, kommande tävlingar,
+  kalendern — adressen via `GetById(id).CompetitionUrl()`, kalenderns beskrivning är postens råvärde),
+  `SeriesCalculationService` (omgångarna med `GetSaved`, ordnade på datum), `WhatsHappeningService`
+  (⚠️ singleton: lagringen ur ett eget scope inne i `EnsureUmbracoContext`), `ReplyContactResolver`,
+  `EventMessageController`. Vyerna (navet, säsongen, serien, klubbens och kretsens tävlingslistor,
+  tävlingssidan) läser fälten genom **`CompetitionPostCache`** (scoped, `Posts.Of(node)`; en publicerad
+  post per begäran, tom post med nodens namn för en nod som inte är en publicerad tävling) — noden står
+  kvar för adressen och trädet (S6). Startsidans och kretssidans räknare tar `List()`. `CompetitionLinkCard.Describe`
+  tar posten + adressen; grindens nodvarianter är borttagna. ⚠️ `ShootingClassIds` är en sträng — en vy
+  som mönstermatchar `is string[]` måste deklarera variabeln som `object?`, annars kompilerar inte vyn
+  (fångsten gav 500 på varje tävlings- och seriesida innan det rättades). ⚠️ Vyerna läses från
+  arbetskatalogen, så det gamla bygget fångades med vyerna i `git stash`. Taken 62 → 43, 431 → 301.
+  Verifierat: fångst (kallstarten på 10362), korskontroll 3092/0, matrisen 8/8 + 35/36 (`schema-verify`, datum).
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

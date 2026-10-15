@@ -16,13 +16,17 @@
 @inject HpskSite.Services.Events.CompetitionEventLinkService CompetitionLinks
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inject HpskSite.Services.StartLists.IStartListStore StartLists
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
 	Layout = "Master.cshtml";
-	ViewBag.Title = Model.Value<string>("competitionName") ?? "Competition";
+	// Tävlingens fält ur tävlingslagringen (C3-planen S3). Noden (Model) bär fortfarande adressen,
+	// trädet (serien, klubben) och mediavalen.
+	var compPost = Competitions.Get(Model.Id) ?? new HpskSite.Models.Competitions.CompetitionInfo { Id = Model.Id, Name = Model.Name ?? "" };
+	ViewBag.Title = compPost.CompetitionName ?? "Competition";
 
 	// Get competition manager IDs from JSON array
-	var competitionManagersJson = Model.Value<string>("competitionManagers") ?? "[]";
+	var competitionManagersJson = compPost.CompetitionManagers ?? "[]";
 	int[] managerIds;
 	try
 	{
@@ -33,13 +37,13 @@
 		managerIds = Array.Empty<int>();
 	}
 
-    var competitionName = Model.Value<string>("competitionName") ?? "";
+    var competitionName = compPost.CompetitionName ?? "";
     // Arrangörens händelsesida för tävlingen (sajtstrukturen fas 2) — en enda länkrad under rubriken.
     var linkedEvent = CompetitionLinks.EventForCompetition(Model.Id);
     var description = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("description"));
-    var competitionDate = Model.Value<DateTime>("competitionDate");
-    var competitionEndDate = Model.Value<DateTime?>("competitionEndDate");
-    var venue = Model.Value<string>("venue") ?? "";
+    var competitionDate = (compPost.CompetitionDate ?? DateTime.MinValue);
+    var competitionEndDate = compPost.CompetitionEndDate;
+    var venue = compPost.Venue ?? "";
     // Delningsbeskrivning (C3-planen F4): datum och plats, sedan början av beskrivningen.
     {
         var compMeta = HpskSite.Models.PageMeta.For(Context);
@@ -69,14 +73,14 @@
     var durationInfo = isMultiDay ?
         $"({(competitionEndDate.Value.Date - competitionDate.Date).Days + 1} dagar)" :
         "(1 dag)";
-    var maxParticipants = Model.Value<int>("maxParticipants");
-    var registrationFee = Model.Value<string>("registrationFee") ?? "";
-    var juniorRegistrationFeeStr = Model.Value<string>("juniorRegistrationFee") ?? "";
-    var subCompetitionFeeStr = Model.Value<string>("subCompetitionFee") ?? "";
-    var subCompetitionFeeModeRaw = Model.HasProperty("subCompetitionFeeMode") ? Model.Value<string>("subCompetitionFeeMode") ?? "" : "";
-    var subCompetitionNameRaw = Model.HasProperty("subCompetitionName") ? Model.Value<string>("subCompetitionName") ?? "" : "";
-    var teamRegistrationFeeStr = Model.Value<string>("teamRegistrationFee") ?? "";
-    var stafettRegistrationFeeStr = Model.Value<string>("stafettRegistrationFee") ?? "";
+    var maxParticipants = compPost.MaxParticipants;
+    var registrationFee = compPost.RegistrationFee ?? "";
+    var juniorRegistrationFeeStr = compPost.JuniorRegistrationFee ?? "";
+    var subCompetitionFeeStr = compPost.SubCompetitionFee ?? "";
+    var subCompetitionFeeModeRaw = compPost.SubCompetitionFeeMode ?? "";
+    var subCompetitionNameRaw = compPost.SubCompetitionName ?? "";
+    var teamRegistrationFeeStr = compPost.TeamRegistrationFee ?? "";
+    var stafettRegistrationFeeStr = compPost.StafettRegistrationFee ?? "";
     decimal.TryParse(registrationFee, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var registrationFeeVal);
     // ⚠️ Ifylld-till-0 är INTE samma sak som tom. Se RegistrationFeeCalculator.CalculateTotal.
     var juniorRegistrationFeeHasValue = decimal.TryParse(juniorRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var juniorRegistrationFeeVal);
@@ -84,14 +88,14 @@
     decimal.TryParse(teamRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var teamRegistrationFeeVal);
     decimal.TryParse(stafettRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var stafettRegistrationFeeVal);
     var subCompetitionFeeIsPerRegistration = string.Equals(subCompetitionFeeModeRaw, "perRegistration", StringComparison.OrdinalIgnoreCase);
-    var registrationOpenDate = Model.Value<DateTime>("registrationOpenDate");
-    var registrationCloseDate = Model.Value<DateTime>("registrationCloseDate");
-    var competitionDirector = Model.Value<string>("competitionDirector") ?? "";
-    var contactEmail = Model.Value<string>("contactEmail") ?? "";
-    var contactPhone = Model.Value<string>("contactPhone") ?? "";
-    var isActive = Model.Value<bool>("isActive");
-    var showLiveResults = Model.Value<bool>("showLiveResults");
-    var competitionTypeStr = Model.Value<string>("competitionType") ?? "Precision";
+    var registrationOpenDate = (compPost.RegistrationOpenDate ?? DateTime.MinValue);
+    var registrationCloseDate = (compPost.RegistrationCloseDate ?? DateTime.MinValue);
+    var competitionDirector = compPost.CompetitionDirector ?? "";
+    var contactEmail = compPost.ContactEmail ?? "";
+    var contactPhone = compPost.ContactPhone ?? "";
+    var isActive = compPost.IsVisible;
+    var showLiveResults = compPost.ShowLiveResults;
+    var competitionTypeStr = compPost.CompetitionType ?? "Precision";
     // competitionType lagras som STRÄNG — oftast id:t ("Milsnabb"), på äldre tävlingar ibland
     // visningsnamnet ("Magnum Fält"). Den lästes tidigare som en innehållsnod, alltså alltid null,
     // och typen syntes aldrig på sidan. Exakt matchning, inte GetFuzzy (prefixmatchning).
@@ -106,7 +110,7 @@
     {
         if (Model.HasProperty("direktplaceringConfig"))
         {
-            dpConfigJson = Model.Value<string>("direktplaceringConfig") ?? "";
+            dpConfigJson = compPost.DirektplaceringConfig ?? "";
             if (!string.IsNullOrEmpty(dpConfigJson))
             {
                 isDirektplacering = dpConfigJson.Contains("\"enabled\":true") || dpConfigJson.Contains("\"Enabled\":true");
@@ -114,16 +118,16 @@
         }
     }
     catch { }
-    var rsJson = Model.HasProperty("rollingStart") ? Model.Value<string>("rollingStart") : "";
+    var rsJson = compPost.RollingStart ?? "";
     object rsConfig = null;
     if (!string.IsNullOrEmpty(rsJson)) { try { rsConfig = Newtonsoft.Json.JsonConvert.DeserializeObject(rsJson); } catch {} }
-    var numberOfSeriesOrStations = Model.Value<int>("numberOfSeriesOrStations");
-    var numberOfFinalSeries = Model.Value<int>("numberOfFinalSeries");
+    var numberOfSeriesOrStations = compPost.NumberOfSeriesOrStations;
+    var numberOfFinalSeries = compPost.NumberOfFinalSeries;
 
     // External competition properties
-    var isExternal = Model.Value<bool>("isExternal");
-    var externalUrl = Model.Value<string>("externalUrl");
-    var externalRegistrationEmail = Model.Value<string>("externalRegistrationEmail");
+    var isExternal = compPost.IsExternal;
+    var externalUrl = compPost.ExternalUrl;
+    var externalRegistrationEmail = compPost.ExternalRegistrationEmail;
     IPublishedContent? invitationFile = null;
     try
     {
@@ -153,7 +157,7 @@
         : competitionDate.Date;
     var competitionIsPast = compEffectiveEnd < DateTime.Today;
     // Get multiple shooting classes support - handle both string array and comma-separated string
-    var shootingClassIdsRaw = Model.Value("shootingClassIds");
+    object? shootingClassIdsRaw = compPost.ShootingClassIds;
     var shootingClassIds = "";
 
     // Handle different data types from Umbraco multiselect
@@ -187,10 +191,10 @@
         }
     }
 
-    var allowDualCClassRegistration = Model.Value<bool>("allowDualCClassRegistration");
-    var allowSelfReporting = Model.Value<bool>("allowSelfReporting");
-    var allowTeams = Model.Value<bool>("allowTeams");
-    var allowStafett = Model.Value<bool>("allowStafett");
+    var allowDualCClassRegistration = compPost.AllowDualCClassRegistration;
+    var allowSelfReporting = compPost.AllowSelfReporting;
+    var allowTeams = compPost.AllowTeams;
+    var allowStafett = compPost.AllowStafett;
 
     // Get competition shooting classes using Models.ShootingClasses
     var competitionShootingClasses = new List<ShootingClass>();
@@ -452,7 +456,7 @@
             // Competition management — compute from already-loaded roles and managerIds
             // isCompetitionManager already computed above (line ~288)
             bool isClubAdminForCompetition = false;
-            var competitionClubId = Model.Value<int>("clubId");
+            var competitionClubId = compPost.ClubId;
             if (competitionClubId > 0)
             {
                 // Check direct club admin, site admin, or regional admin for the club's region
@@ -472,7 +476,7 @@
                 // Region-hosted (clubId unset — the SM shape): the krets is the organiser, so its
                 // regional admin manages it. Without this the management affordances on the public
                 // competition page were hidden from a region-hosted competition's own organisers.
-                var compRegion = (Model.Value<string>("regionalFederation") ?? "").Trim();
+                var compRegion = (compPost.RegionalFederation ?? "").Trim();
                 if (!string.IsNullOrWhiteSpace(compRegion))
                     isClubAdminForCompetition = roles.Contains($"RegionalAdmin_{compRegion}");
             }
@@ -518,7 +522,7 @@
     // svar — en knapp som är släckt medan endpointen tar emot anmälan är värre än ingen spärr alls.
     // Grinden är härledd (arrangörens val OCH en publicerad lista), så en avpublicering öppnar
     // anmälan igen utan att något behöver skrivas.
-    var startListGateActive = HpskSite.Services.RegistrationGate.StartListRegistrationGate.IsClosed(Model, StartLists);
+    var startListGateActive = HpskSite.Services.RegistrationGate.StartListRegistrationGate.IsClosed(compPost, StartLists);
 
     // ⚠️ Funktionärer undantas ÄVEN HÄR, inte bara i endpointen. Arrangören anmäler rutinmässigt
     // någon annan via den här modalen (targetMemberId), så en släckt knapp för dem hade gjort
@@ -618,12 +622,12 @@
                 //   • the comp is club-only (it belongs solely to that club), OR
                 //   • the visitor arrived from the club's Tävlingar tab (?fromClub=<clubId> marker on those links).
                 // An open comp reached from the general list keeps the normal "Tävlingar" crumb.
-                var hostClubId = Model.Value<int>("clubId");
+                var hostClubId = compPost.ClubId;
                 var hostClubNode = hostClubId > 0 ? Umbraco.Content(hostClubId) : null;
                 if (hostClubNode != null && hostClubNode.ContentType.Alias != "club") hostClubNode = null;
                 var cameFromClubTab = hostClubId > 0
                     && string.Equals(Context.Request.Query["fromClub"].ToString(), hostClubId.ToString(), StringComparison.Ordinal);
-                var showClubCrumb = hostClubNode != null && (Model.Value<bool>("isClubOnly") || cameFromClubTab);
+                var showClubCrumb = hostClubNode != null && (compPost.IsClubOnly || cameFromClubTab);
                 var hostClubCompUrl = hostClubNode != null ? hostClubNode.Url().TrimEnd('/') + "/#clubCompetitions" : "";
             }
             <nav aria-label="breadcrumb">
@@ -1505,7 +1509,7 @@
 							{
 								@* Patrullista opens its own public page (clubhouse screen) — mirrors "Visa resultat".
 								   Shown once the organiser publishes the patrols; no login (a clubhouse screen isn't logged in). *@
-								@if (Model.Value<bool>("faltskyttePatrolsPublished"))
+								@if (compPost.FaltskyttePatrolsPublished)
 								{
 									<a href="/patrullista/@Model.Id" class="btn btn-info w-100" target="_blank" rel="noopener">
 										<i class="bi bi-people me-1"></i> Visa patrullista
@@ -1754,9 +1758,9 @@
 			{ "RegClubId", regClubId },
 			{ "RegClubName", regClubName },
 			{ "AllClubsJson", allClubsJson },
-			{ "HasSwish", !string.IsNullOrWhiteSpace(Model.Value<string>("swishNumber")) && decimal.TryParse(registrationFee, out var _springFee) && _springFee > 0 },
+			{ "HasSwish", !string.IsNullOrWhiteSpace(compPost.SwishNumber) && decimal.TryParse(registrationFee, out var _springFee) && _springFee > 0 },
 			{ "RegistrationFee", decimal.TryParse(registrationFee, out var _springFeeVal) ? _springFeeVal : 0m },
-			{ "SubCompetitionName", Model.HasProperty("subCompetitionName") ? Model.Value<string>("subCompetitionName") ?? "" : "" }
+			{ "SubCompetitionName", compPost.SubCompetitionName ?? "" }
 		})
 	}
 	else
@@ -1789,9 +1793,9 @@
 
 
 	@* Team Registration Modal *@
-	var teamRegFeeStr = Model.Value<string>("teamRegistrationFee") ?? "0";
+	var teamRegFeeStr = compPost.TeamRegistrationFee ?? "0";
 	decimal.TryParse(teamRegFeeStr, out var teamRegFee);
-	var teamHasSwish = allowTeams && !string.IsNullOrWhiteSpace(Model.Value<string>("swishNumber")) && teamRegFee > 0;
+	var teamHasSwish = allowTeams && !string.IsNullOrWhiteSpace(compPost.SwishNumber) && teamRegFee > 0;
 	if (allowTeams)
 	{
 		@await Html.PartialAsync("CompetitionTeamRegistrationModal", new ViewDataDictionary(ViewData)
@@ -1811,9 +1815,9 @@
 	}
 
 	@* Stafett Registration Modal *@
-	var stafettRegFeeStr = Model.Value<string>("stafettRegistrationFee") ?? "0";
+	var stafettRegFeeStr = compPost.StafettRegistrationFee ?? "0";
 	decimal.TryParse(stafettRegFeeStr, out var stafettRegFee);
-	var stafettHasSwish = allowStafett && !string.IsNullOrWhiteSpace(Model.Value<string>("swishNumber")) && stafettRegFee > 0;
+	var stafettHasSwish = allowStafett && !string.IsNullOrWhiteSpace(compPost.SwishNumber) && stafettRegFee > 0;
 	if (allowStafett)
 	{
 		@await Html.PartialAsync("StafettRegistrationModal", new ViewDataDictionary(ViewData)
@@ -1855,7 +1859,7 @@
 
 @* JavaScript Configuration and Script Reference *@
 @{
-    var swishNumber = Model.Value<string>("swishNumber");
+    var swishNumber = compPost.SwishNumber;
     var hasSwishNumberValue = !string.IsNullOrWhiteSpace(swishNumber);
 }
 @* DEBUG: swishNumber = "@swishNumber", hasSwishNumber = @hasSwishNumberValue *@
@@ -1881,7 +1885,7 @@ window.CompetitionConfig = {
     clubs: @Html.Raw(allClubsJson),
     competitionType: '@competitionTypeStr',
     rollingStart: @(rsConfig != null ? Html.Raw(rsJson) : Html.Raw("null")),
-    subCompetitionName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(Model.HasProperty("subCompetitionName") ? Model.Value<string>("subCompetitionName") ?? "" : ""))',
+    subCompetitionName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(compPost.SubCompetitionName ?? ""))',
     isDirektplacering: @(isDirektplacering.ToString().ToLower()),
     direktplaceringConfig: @(isDirektplacering ? Html.Raw(dpConfigJson) : Html.Raw("null"))
 };

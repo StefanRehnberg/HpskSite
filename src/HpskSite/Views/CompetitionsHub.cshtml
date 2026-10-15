@@ -6,6 +6,7 @@
 @using Umbraco.Cms.Core.Models;
 @using Umbraco.Cms.Core.Services;
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@inject HpskSite.Services.Competitions.CompetitionPostCache Posts
 @inject IMemberManager _memberManager
 @inject IMemberService _memberService
 @inject HpskSite.Services.MemberClubService _memberClubService
@@ -30,7 +31,7 @@
     {
         var sName = s.Value<string>("seriesName") ?? s.Name;
         var sUrl = s.Url();
-        foreach (var child in s.Children().Where(x => x.ContentType.Alias == "competition"))
+        foreach (var child in s.Children().Where(x => x.ContentType.Alias == "competition")) // competitionstore-ok: noden behövs för adressen och trädet (S6), fälten läses ur posten
         {
             seriesInfoByCompetitionId[child.Id] = (sName, sUrl);
         }
@@ -73,8 +74,8 @@
     //    your own club's internal competition was invisible on the page that lists competitions.
     //    They are now shown to members of that club only, badged "Endast klubb".
     var allCompetitions = allContent
-        .Where(x => x.ContentType.Alias == "competition")
-        .Where(x => !x.Value<bool>("isClubOnly") || myClubIds.Contains(x.Value<int>("clubId")))
+        .Where(x => x.ContentType.Alias == "competition") // competitionstore-ok: noden behövs för adressen och trädet (S6), fälten läses ur posten
+        .Where(x => !Posts.Of(x).IsClubOnly || myClubIds.Contains(Posts.Of(x).ClubId))
         .ToList();
 
     // Grannkretsarna, ur det handskrivna gränsschemat i Models/RegionAdjacency.cs. Egna kretsar
@@ -90,13 +91,13 @@
     var inheritedRegionsByCompetitionId = new Dictionary<int, List<string>>();
     foreach (var srs in allCompetitionSeries)
     {
-        var kids = srs.Children().Where(x => x.ContentType.Alias == "competition").ToList();
+        var kids = srs.Children().Where(x => x.ContentType.Alias == "competition").ToList(); // competitionstore-ok: noden behövs för adressen och trädet (S6), fälten läses ur posten
         Func<IPublishedContent, string> ownRegionOf = k =>
         {
-            var kcid = k.Value<int>("clubId");
+            var kcid = Posts.Of(k).ClubId;
             return kcid > 0 && clubRegionLookup.TryGetValue(kcid, out var kr)
                 ? kr
-                : k.Value<string>("regionalFederation") ?? "";
+                : Posts.Of(k).RegionalFederation ?? "";
         };
         var seriesRegionSet = kids
             .Select(ownRegionOf)
@@ -123,11 +124,11 @@
     Func<IPublishedContent, int> localityTier = comp =>
     {
         if (myClubIds.Count == 0 && myRegions.Count == 0) return 2;
-        var ccid = comp.Value<int>("clubId");
+        var ccid = Posts.Of(comp).ClubId;
         if (ccid > 0 && myClubIds.Contains(ccid)) return 0;
         var region = ccid > 0 && clubRegionLookup.TryGetValue(ccid, out var cr)
             ? cr
-            : comp.Value<string>("regionalFederation") ?? "";
+            : Posts.Of(comp).RegionalFederation ?? "";
         // Egen krets först, sedan de ärvda (bara relevant för en region-lös serieomgång).
         var candidates = !string.IsNullOrWhiteSpace(region)
             ? new List<string> { region }
@@ -170,12 +171,12 @@
     }
 
     // Get unique venues for filtering
-    var allVenues = allCompetitions.Select(c => c.Value<string>("venue")).Where(v => !string.IsNullOrEmpty(v)).Distinct().OrderBy(v => v).ToList();
+    var allVenues = allCompetitions.Select(c => Posts.Of(c).Venue).Where(v => !string.IsNullOrEmpty(v)).Distinct().OrderBy(v => v).ToList();
 
     // Get unique competition types for filtering (from actual competition data)
     var allCompetitionTypes = allCompetitions
         .Select(c => {
-            var typeId = c.Value<string>("competitionType") ?? "";
+            var typeId = Posts.Of(c).CompetitionType ?? "";
             var typeObj = HpskSite.Models.CompetitionTypes.GetById(typeId);
             var typeName = typeObj?.Name ?? (!string.IsNullOrEmpty(typeId) ? typeId : null);
             return new { Id = typeId, Name = typeName };
@@ -190,36 +191,36 @@
     var now = DateTime.Now;
     var openCompetitions = allCompetitions.Where(c =>
     {
-        var isActive = c.Value<bool>("isActive");
-        var regOpenDate = c.Value<DateTime>("registrationOpenDate");
-        var regCloseDate = c.Value<DateTime>("registrationCloseDate");
+        var isActive = Posts.Of(c).IsVisible;
+        var regOpenDate = (Posts.Of(c).RegistrationOpenDate ?? DateTime.MinValue);
+        var regCloseDate = (Posts.Of(c).RegistrationCloseDate ?? DateTime.MinValue);
         return isActive && regOpenDate <= now && regCloseDate >= now;
     }).ToList();
 
     var upcomingCompetitions = allCompetitions.Where(c =>
     {
-        var isActive = c.Value<bool>("isActive");
-        var regOpenDate = c.Value<DateTime>("registrationOpenDate");
+        var isActive = Posts.Of(c).IsVisible;
+        var regOpenDate = (Posts.Of(c).RegistrationOpenDate ?? DateTime.MinValue);
         return isActive && regOpenDate > now;
     }).ToList();
 
     var activeCompetitions = allCompetitions.Where(c =>
     {
-        var isActive = c.Value<bool>("isActive");
-        var regCloseDate = c.Value<DateTime>("registrationCloseDate");
-        var compDate = c.Value<DateTime>("competitionDate");
+        var isActive = Posts.Of(c).IsVisible;
+        var regCloseDate = (Posts.Of(c).RegistrationCloseDate ?? DateTime.MinValue);
+        var compDate = (Posts.Of(c).CompetitionDate ?? DateTime.MinValue);
         return isActive && regCloseDate < now && compDate >= now;
     }).ToList();
 
     var completedCompetitions = allCompetitions.Where(c =>
     {
-        var compDate = c.Value<DateTime>("competitionDate");
-        var compEndDate = c.Value<DateTime?>("competitionEndDate");
+        var compDate = (Posts.Of(c).CompetitionDate ?? DateTime.MinValue);
+        var compEndDate = Posts.Of(c).CompetitionEndDate;
         var effectiveEnd = (compEndDate.HasValue && compEndDate.Value.Year > 1900) ? compEndDate.Value.Date : compDate.Date;
         return effectiveEnd < now.Date;
     }).OrderByDescending(c =>
     {
-        return c.Value<DateTime>("competitionDate");
+        return (Posts.Of(c).CompetitionDate ?? DateTime.MinValue);
     }).ToList();
 }
 
@@ -437,12 +438,12 @@
                 try
                 {
                 // Get competition details
-                var compDate = competition.Value<DateTime>("competitionDate");
-                var compEndDate = competition.Value<DateTime?>("competitionEndDate");
-                var regCloseDate = competition.Value<DateTime>("registrationCloseDate");
-                var regOpenDate = competition.Value<DateTime>("registrationOpenDate");
+                var compDate = (Posts.Of(competition).CompetitionDate ?? DateTime.MinValue);
+                var compEndDate = Posts.Of(competition).CompetitionEndDate;
+                var regCloseDate = (Posts.Of(competition).RegistrationCloseDate ?? DateTime.MinValue);
+                var regOpenDate = (Posts.Of(competition).RegistrationOpenDate ?? DateTime.MinValue);
                 var description = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.Value<string>("description"));
-                var venue = competition.Value<string>("venue");
+                var venue = Posts.Of(competition).Venue;
 
                 // Check if multi-day competition
                 var hasValidEndDate = compEndDate.HasValue &&
@@ -457,15 +458,15 @@
                 var durationInfo = isMultiDay ?
                     $"({(compEndDate.Value.Date - compDate.Date).Days + 1} dagar)" :
                     "(1 dag)";
-                var maxParticipants = competition.Value<int>("maxParticipants");
-                var registrationFee = competition.Value<string>("registrationFee");
-                var competitionTypeId = competition.Value<string>("competitionType") ?? "";
+                var maxParticipants = Posts.Of(competition).MaxParticipants;
+                var registrationFee = Posts.Of(competition).RegistrationFee;
+                var competitionTypeId = Posts.Of(competition).CompetitionType ?? "";
                 var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId)
                     ?? HpskSite.Models.CompetitionTypes.GetByName(competitionTypeId)
                     ?? HpskSite.Models.CompetitionTypes.GetFuzzy(competitionTypeId);
                 var competitionTypeName = competitionTypeObj?.Name ?? (!string.IsNullOrEmpty(competitionTypeId) ? competitionTypeId : "Okänd typ");
-                var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
-                var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
+                var numberOfSeriesOrStations = Posts.Of(competition).NumberOfSeriesOrStations;
+                var numberOfFinalSeries = Posts.Of(competition).NumberOfFinalSeries;
 
                 // Build competition type display name with series info (skip for Springskytte)
                 var competitionTypeDisplayName = competitionTypeName;
@@ -490,7 +491,7 @@
                 string[] classIdArray = Array.Empty<string>();
                 try
                 {
-                    shootingClassIdsRaw = competition.Value("shootingClassIds");
+                    shootingClassIdsRaw = Posts.Of(competition).ShootingClassIds;
                     if (shootingClassIdsRaw is string[] stringArray)
                     {
                         classIdArray = stringArray;
@@ -532,10 +533,10 @@
                 var hasClassesForDisplay = isSpringskytteComp ? classIdArray.Length > 0 : competitionShootingClasses.Any();
                 var allShootingClassIds = string.Join(",", competitionShootingClasses.Select(sc => sc.Id));
                 var allWeaponClasses = string.Join(",", competitionShootingClasses.Select(sc => sc.Weapon.ToString()).Distinct());
-                var isActive = competition.Value<bool>("isActive");
+                var isActive = Posts.Of(competition).IsVisible;
 
                 // Get region - from club if competition has clubId, otherwise from direct regionalFederation
-                var competitionClubId = competition.Value<int>("clubId");
+                var competitionClubId = Posts.Of(competition).ClubId;
                 var competitionRegion = "";
                 if (competitionClubId > 0 && clubRegionLookup.TryGetValue(competitionClubId, out var clubRegion))
                 {
@@ -543,11 +544,11 @@
                 }
                 else
                 {
-                    competitionRegion = competition.Value<string>("regionalFederation") ?? "";
+                    competitionRegion = Posts.Of(competition).RegionalFederation ?? "";
                 }
 
                 // External competition properties
-                var isExternal = competition.Value<bool>("isExternal");
+                var isExternal = Posts.Of(competition).IsExternal;
                 IPublishedContent? invitationFile = null;
                 try
                 {
@@ -558,8 +559,8 @@
                     // Invalid invitation file path - ignore and continue
                 }
                 var hasInvitation = invitationFile != null;
-                var externalUrl = competition.Value<string>("externalUrl");
-                var externalRegistrationEmail = competition.Value<string>("externalRegistrationEmail");
+                var externalUrl = Posts.Of(competition).ExternalUrl;
+                var externalRegistrationEmail = Posts.Of(competition).ExternalRegistrationEmail;
 
                 // Get season information - check if competition's parent is a season
                 var seasonId = "";
@@ -576,7 +577,7 @@
                     seriesId = parent.Id.ToString();
                 }
                 seriesInfoByCompetitionId.TryGetValue(competition.Id, out var partOfSeries);
-                var isClubOnlyComp = competition.Value<bool>("isClubOnly");
+                var isClubOnlyComp = Posts.Of(competition).IsClubOnly;
                 var compTier = localityTierByCompetitionId.TryGetValue(competition.Id, out var ct) ? ct : 2;
                 // Kretsen rubriken ska namnge: den egna, annars den ärvda (serieomgång utan värd).
                 var effectiveRegion = !string.IsNullOrWhiteSpace(competitionRegion)
@@ -638,7 +639,7 @@
                      data-season="@seasonId"
                      data-series="@seriesId"
                      data-date="@compDate.ToString("yyyy-MM-dd")"
-                     data-range-id="@(competition.HasProperty("rangeId") ? competition.Value<int>("rangeId") : 0)"
+                     data-range-id="@(Posts.Of(competition).RangeId)"
                      data-comp-name="@competition.Name"
                      data-comp-url="@competition.CompetitionUrl()"
                      data-tier="@compTier"
@@ -795,12 +796,12 @@
                     @foreach (var competition in allCompetitions)
                     {
                         // Get competition details (reuse same logic as card view)
-                        var compDate = competition.Value<DateTime>("competitionDate");
-                        var compEndDate = competition.Value<DateTime?>("competitionEndDate");
-                        var regCloseDate = competition.Value<DateTime>("registrationCloseDate");
-                        var regOpenDate = competition.Value<DateTime>("registrationOpenDate");
+                        var compDate = (Posts.Of(competition).CompetitionDate ?? DateTime.MinValue);
+                        var compEndDate = Posts.Of(competition).CompetitionEndDate;
+                        var regCloseDate = (Posts.Of(competition).RegistrationCloseDate ?? DateTime.MinValue);
+                        var regOpenDate = (Posts.Of(competition).RegistrationOpenDate ?? DateTime.MinValue);
                         var description = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.Value<string>("description"));
-                        var venue = competition.Value<string>("venue");
+                        var venue = Posts.Of(competition).Venue;
 
                         // Check if multi-day competition
                         var hasValidEndDate = compEndDate.HasValue &&
@@ -813,15 +814,15 @@
                         var durationInfo = isMultiDay ?
                             $"({(compEndDate.Value.Date - compDate.Date).Days + 1} dagar)" :
                             "(1 dag)";
-                        var maxParticipants = competition.Value<int>("maxParticipants");
-                        var registrationFee = competition.Value<string>("registrationFee");
-                        var competitionTypeId = competition.Value<string>("competitionType") ?? "";
+                        var maxParticipants = Posts.Of(competition).MaxParticipants;
+                        var registrationFee = Posts.Of(competition).RegistrationFee;
+                        var competitionTypeId = Posts.Of(competition).CompetitionType ?? "";
                         var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId)
                             ?? HpskSite.Models.CompetitionTypes.GetByName(competitionTypeId)
                             ?? HpskSite.Models.CompetitionTypes.GetFuzzy(competitionTypeId);
                         var competitionTypeName = competitionTypeObj?.Name ?? (!string.IsNullOrEmpty(competitionTypeId) ? competitionTypeId : "Okänd typ");
-                        var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
-                        var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
+                        var numberOfSeriesOrStations = Posts.Of(competition).NumberOfSeriesOrStations;
+                        var numberOfFinalSeries = Posts.Of(competition).NumberOfFinalSeries;
 
                         // Build competition type display name with series info (skip for Springskytte)
                         var competitionTypeDisplayName = competitionTypeName;
@@ -846,7 +847,7 @@
                         string[] listClassIdArray = Array.Empty<string>();
                         try
                         {
-                            shootingClassIdsRaw = competition.Value("shootingClassIds");
+                            shootingClassIdsRaw = Posts.Of(competition).ShootingClassIds;
                             if (shootingClassIdsRaw is string[] stringArray)
                             {
                                 listClassIdArray = stringArray;
@@ -890,11 +891,11 @@
                         var hasClassesForDisplay = isSpringskytteComp ? listClassIdArray.Length > 0 : competitionShootingClasses.Any();
                         var allShootingClassIds = string.Join(",", competitionShootingClasses.Select(sc => sc.Id));
                         var allWeaponClasses = string.Join(",", competitionShootingClasses.Select(sc => sc.Weapon.ToString()).Distinct());
-                        var isActive = competition.Value<bool>("isActive");
-                        var isExternal = competition.Value<bool>("isExternal");
+                        var isActive = Posts.Of(competition).IsVisible;
+                        var isExternal = Posts.Of(competition).IsExternal;
 
                         // Get region - from club if competition has clubId, otherwise from direct regionalFederation
-                        var listCompetitionClubId = competition.Value<int>("clubId");
+                        var listCompetitionClubId = Posts.Of(competition).ClubId;
                         var competitionRegion = "";
                         if (listCompetitionClubId > 0 && clubRegionLookup.TryGetValue(listCompetitionClubId, out var listClubRegion))
                         {
@@ -902,7 +903,7 @@
                         }
                         else
                         {
-                            competitionRegion = competition.Value<string>("regionalFederation") ?? "";
+                            competitionRegion = Posts.Of(competition).RegionalFederation ?? "";
                         }
 
                         // Get season information - check if competition's parent is a season
@@ -920,7 +921,7 @@
                             seriesId = parent.Id.ToString();
                         }
                         seriesInfoByCompetitionId.TryGetValue(competition.Id, out var partOfSeries);
-                        var isClubOnlyComp = competition.Value<bool>("isClubOnly");
+                        var isClubOnlyComp = Posts.Of(competition).IsClubOnly;
                         var compTier = localityTierByCompetitionId.TryGetValue(competition.Id, out var ct2) ? ct2 : 2;
                         var effectiveRegion = !string.IsNullOrWhiteSpace(competitionRegion)
                             ? competitionRegion

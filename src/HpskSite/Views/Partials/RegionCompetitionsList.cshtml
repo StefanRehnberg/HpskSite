@@ -3,6 +3,7 @@
 @using HpskSite.Models;
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@inject HpskSite.Services.Competitions.CompetitionPostCache Posts
 @{
     var regionCode = ViewBag.regionCode as string ?? "";
     var today = DateTime.Today;
@@ -22,12 +23,12 @@
     // Region-hosted: clubId == 0 (or unset) + competition's regionalFederation matches
     // Club-hosted invitations: clubId belongs to a club in this region AND !isClubOnly
     var allCompetitions = allContent
-        .Where(x => x.ContentType.Alias == "competition")
+        .Where(x => x.ContentType.Alias == "competition") // competitionstore-ok: noden behövs för adressen och trädet (S6), fälten läses ur posten
         .Where(x =>
         {
-            var compClubId = x.Value<int>("clubId");
-            var compRegion = x.Value<string>("regionalFederation") ?? "";
-            var isClubOnly = x.Value<bool>("isClubOnly");
+            var compClubId = Posts.Of(x).ClubId;
+            var compRegion = Posts.Of(x).RegionalFederation ?? "";
+            var isClubOnly = Posts.Of(x).IsClubOnly;
 
             if (compClubId <= 0
                 && string.Equals(compRegion, regionCode, StringComparison.OrdinalIgnoreCase))
@@ -39,7 +40,7 @@
         .ToList();
 
     var availableYears = allCompetitions
-        .Select(c => c.Value<DateTime>("competitionDate").Year)
+        .Select(c => (Posts.Of(c).CompetitionDate ?? DateTime.MinValue).Year)
         .Where(y => y > 1900)
         .Distinct()
         .OrderByDescending(y => y)
@@ -95,27 +96,27 @@
                     </thead>
                     <tbody id="regionCompetitionsTableBody">
                         @{ var officialResultLists = ResultLists.OfficialByCompetition(allCompetitions.Select(c => c.Id).ToList()); }
-                        @foreach (var comp in allCompetitions.OrderByDescending(c => c.Value<DateTime>("competitionDate")))
+                        @foreach (var comp in allCompetitions.OrderByDescending(c => (Posts.Of(c).CompetitionDate ?? DateTime.MinValue)))
                         {
-                            var compDate = comp.Value<DateTime>("competitionDate");
-                            var compEndDate = comp.Value<DateTime?>("competitionEndDate");
+                            var compDate = (Posts.Of(comp).CompetitionDate ?? DateTime.MinValue);
+                            var compEndDate = Posts.Of(comp).CompetitionEndDate;
                             var hasValidEnd = compEndDate.HasValue && compEndDate.Value.Year > 1900 && compEndDate.Value.Date >= compDate.Date;
                             var effectiveEnd = hasValidEnd ? compEndDate!.Value.Date : compDate.Date;
                             var isPast = effectiveEnd < today;
                             var isOngoing = compDate.Date <= today && effectiveEnd >= today;
                             var year = compDate.Year;
 
-                            var compTypeId = comp.Value<string>("competitionType") ?? "";
+                            var compTypeId = Posts.Of(comp).CompetitionType ?? "";
                             var compTypeObj = CompetitionTypes.GetById(compTypeId)
                                 ?? CompetitionTypes.GetByName(compTypeId)
                                 ?? CompetitionTypes.GetFuzzy(compTypeId);
                             var compTypeName = compTypeObj?.Name ?? (string.IsNullOrEmpty(compTypeId) ? "Okänd typ" : compTypeId);
                             var iconId = compTypeObj?.Id ?? "";
 
-                            var isExternal = comp.Value<bool>("isExternal");
+                            var isExternal = Posts.Of(comp).IsExternal;
 
                             // Resolve host: club name (if hosted by club) or "Kretsen" for region-hosted
-                            var compClubId = comp.Value<int>("clubId");
+                            var compClubId = Posts.Of(comp).ClubId;
                             string host;
                             if (compClubId > 0)
                             {
@@ -164,7 +165,7 @@
                                     linkText = "Resultat";
                                 }
                                 else if ((compTypeId == "Faltskytte" || compTypeId == "MagnumFalt")
-                                         && comp.Value<bool>("faltskytteResultsOfficial"))
+                                         && Posts.Of(comp).FaltskytteResultsOfficial)
                                 {
                                     // Legacy Fältskytte: results are official on the competition itself
                                     // but the result page node hasn't been backfilled yet — link to the

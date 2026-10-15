@@ -17,12 +17,16 @@ namespace HpskSite.Services
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
         private const string CacheKeyPrefix = "SeriesResults_";
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public SeriesCalculationService(
             IContentService contentService,
             IEnumerable<ISeriesScoreSource> scoreSources,
             IMemoryCache cache,
-            ILogger<SeriesCalculationService> logger)
+            ILogger<SeriesCalculationService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _contentService = contentService;
             _scoreSources = scoreSources;
             _cache = cache;
@@ -79,18 +83,22 @@ namespace HpskSite.Services
             }
 
             // Get child competitions ordered by sortOrder then date
+            // Barnen ur trädet (seriens struktur), varje omgång ur tävlingslagringen i SPARAT läge, som
+            // content service gav. seriesSortOrder har aldrig funnits på doktypen (CompetitionFieldTable),
+            // så ordningen är datumet.
             var childCompetitions = _contentService.GetPagedChildren(seriesContentId, 0, int.MaxValue, out _)
-                .Where(c => c.ContentType.Alias == "competition")
-                .OrderBy(c => c.GetValue<int?>("seriesSortOrder") ?? int.MaxValue)
-                .ThenBy(c => c.GetValue<DateTime>("competitionDate"))
+                .Select(c => _competitions.GetSaved(c.Id))
+                .Where(c => c != null)
+                .Select(c => c!)
+                .OrderBy(c => c.CompetitionDate ?? DateTime.MinValue)
                 .ToList();
 
             var competitions = childCompetitions
                 .Select(c => new SeriesCompetitionInfo
                 {
                     CompetitionId = c.Id,
-                    Name = c.GetValue<string>("competitionName") ?? c.Name,
-                    Date = c.GetValue<DateTime>("competitionDate")
+                    Name = c.CompetitionName ?? c.Name,
+                    Date = c.CompetitionDate ?? DateTime.MinValue
                 })
                 .ToList();
 
@@ -108,7 +116,7 @@ namespace HpskSite.Services
             }
 
             // All competitions in a series are the same discipline; the first one names it.
-            var competitionType = childCompetitions[0].GetValue<string>("competitionType") ?? "";
+            var competitionType = childCompetitions[0].CompetitionType ?? "";
             var scoreSource = _scoreSources.FirstOrDefault(s => s.Supports(competitionType));
             if (scoreSource == null)
             {

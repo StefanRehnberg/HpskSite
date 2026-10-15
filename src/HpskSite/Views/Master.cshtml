@@ -498,7 +498,7 @@
                                                       (calendarPage != null && calendarPage.IsAncestorOrSelf(Model)) ||
                                                       (resultsPage != null && resultsPage.IsAncestorOrSelf(Model)) ||
                                                       (seriesPage != null && seriesPage.IsAncestorOrSelf(Model)) ||
-                                                      Model.ContentType.Alias == "competition" ||
+                                                      Model.ContentType.Alias == "competition" || // competitionstore-ok: vilken sida som visas (menyns markering), inte en läsning
                                                       Model.ContentType.Alias == "competitionType" ||
                                                       Model.ContentType.Alias == "competitionSeason";
                         }

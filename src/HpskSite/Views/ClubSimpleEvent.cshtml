@@ -9,6 +9,7 @@
 @inject HpskSite.Services.RangeCalendarService RangeCalendar
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inject HpskSite.Services.StartLists.IStartListStore StartLists
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -64,9 +65,9 @@
     var contentBlocksJson = string.IsNullOrWhiteSpace(ev.ContentBlocksJson) ? "[]" : ev.ContentBlocksJson;
     // Tävlingarna händelsen är kopplad till (kortet i sidospalten).
     var linkedCards = CompetitionLinks.CompetitionsForEvent(ev.Id)
-        .Select(id => Umbraco.Content(id))
-        .Where(c => c != null && c.ContentType.Alias == "competition")
-        .Select(c => HpskSite.Services.Events.CompetitionLinkCard.Describe(c!, DateTime.Now, ResultLists.Get(c!.Id), StartLists))
+        .Select(id => Competitions.Get(id))
+        .Where(c => c != null)
+        .Select(c => HpskSite.Services.Events.CompetitionLinkCard.Describe(c!, Umbraco.Content(c!.Id)?.Url() ?? "", DateTime.Now, ResultLists.Get(c!.Id), StartLists))
         .OrderBy(c => c.Date ?? DateTime.MaxValue).ThenBy(c => c.Name)
         .ToList();
     var quickLinksJson = string.IsNullOrWhiteSpace(ev.QuickLinksJson) ? "[]" : ev.QuickLinksJson;

@@ -103,31 +103,29 @@ namespace HpskSite.Services
                     regionByCode.TryGetValue(regionCode, out var r) ? r.Name : regionCode;
 
                 // competitions
-                foreach (var node in all)
+                // Tävlingarna ur tävlingslagringen (C3-planen S3); noden bara för adressen.
+                // ⚠️ Tjänsten är en singleton och lagringen är scoped — hämta den ur ett eget scope, inne i
+                // EnsureUmbracoContext så att den publicerade läsningen har en kontext.
+                using var storeScope = _scopeFactory.CreateScope();
+                var competitionStore = storeScope.ServiceProvider.GetRequiredService<HpskSite.Services.Competitions.ICompetitionStore>();
+                foreach (var node in competitionStore.List())
                 {
-                    if (node.ContentType.Alias != "competition") continue;
-                    if (!node.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true)) continue;
+                    if (!node.IsVisible) continue;
 
-                    var date = node.Value<DateTime?>("competitionDate");
+                    var date = node.CompetitionDate;
                     if (date == null || date.Value.Date < today || date.Value.Date > horizon) continue;
 
-                    var clubId = node.Value<int>("clubId");
-                    var isClubOnly = node.Value<bool>("isClubOnly");
+                    var clubId = node.ClubId;
+                    var isClubOnly = node.IsClubOnly;
                     var regionCode = "";
                     var clubName = "";
                     if (clubId > 0 && clubInfo.TryGetValue(clubId, out var ci)) { regionCode = ci.Region; clubName = ci.Name; }
-                    if (string.IsNullOrWhiteSpace(regionCode)) regionCode = node.Value<string>("regionalFederation") ?? "";
+                    if (string.IsNullOrWhiteSpace(regionCode)) regionCode = node.RegionalFederation ?? "";
 
                     // competitionType may be a content-picker (IPublishedContent) OR a plain string
                     // (FlexibleDropdown / textstring storing the discipline name, e.g. "Precision").
                     // Read untyped + type-switch — Value<string>() would throw on a FlexibleDropdown.
-                    var ctRaw = node.Value("competitionType");
-                    var discipline = ctRaw switch
-                    {
-                        IPublishedContent ct => ct.Name ?? "",
-                        string s => s,
-                        _ => ctRaw?.ToString() ?? ""
-                    };
+                    var discipline = node.CompetitionType ?? "";
                     if (string.IsNullOrWhiteSpace(discipline)) discipline = "Tävling";
 
                     data.Items.Add(new FeedItem
@@ -146,10 +144,10 @@ namespace HpskSite.Services
                         SourceLabel = "Tävling",
                         TypeLabel = discipline,
                         MaskedTypeLabel = discipline,
-                        Title = node.Value<string>("competitionName") ?? node.Name ?? "",
+                        Title = node.CompetitionName ?? node.Name ?? "",
                         ClubName = clubName,
-                        Venue = node.Value<string>("venue") ?? "",
-                        Url = node.Url()
+                        Venue = node.Venue ?? "",
+                        Url = content.GetById(node.Id)?.Url() ?? ""
                     });
                 }
 
