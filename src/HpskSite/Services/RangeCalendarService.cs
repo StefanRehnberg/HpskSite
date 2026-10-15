@@ -41,14 +41,18 @@ namespace HpskSite.Services
         private readonly HpskSite.Services.Events.IClubEventStore _events;
         private readonly ILogger<RangeCalendarService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public RangeCalendarService(
             IUmbracoDatabaseFactory databaseFactory,
             IUmbracoContextFactory contextFactory,
             AppCaches caches,
             ClubService clubs,
             HpskSite.Services.Events.IClubEventStore events,
-            ILogger<RangeCalendarService> logger)
+            ILogger<RangeCalendarService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _events = events;
             _databaseFactory = databaseFactory;
             _contextFactory = contextFactory;
@@ -440,23 +444,24 @@ GROUP BY RangeId ORDER BY COUNT(*) DESC, MAX([Date]) DESC", clubId) ?? 0;
                     .ToDictionary(g => g.Key, g => g.First().Value<string>("regionName") ?? g.First().Name ?? g.Key,
                         StringComparer.OrdinalIgnoreCase);
 
-                foreach (var c in root.Descendants().Where(d => d.ContentType.Alias == "competition"))
+                // Tävlingarna genom tävlingslagringen (C3-planen S3); noden bara för adressen.
+                foreach (var c in _competitions.List())
                 {
-                    var rangeId = c.HasProperty("rangeId") ? c.Value<int>("rangeId") : 0;
+                    var rangeId = c.RangeId;
                     if (rangeId <= 0) continue;
-                    var date = ClubEvents.RealDate(c.Value<DateTime?>("competitionDate"));
+                    var date = ClubEvents.RealDate(c.CompetitionDate);
                     if (date == null) continue;
-                    var end = ClubEvents.RealDate(c.Value<DateTime?>("competitionEndDate"));
-                    var clubId = c.Value<int>("clubId");
+                    var end = ClubEvents.RealDate(c.CompetitionEndDate);
+                    var clubId = c.ClubId;
                     string owner;
                     if (clubId > 0) owner = ClubShort(clubId);
                     else
                     {
-                        var code = c.Value<string>("regionalFederation") ?? "";
+                        var code = c.RegionalFederation ?? "";
                         owner = regionNames.TryGetValue(code, out var rn) ? rn : code;
                     }
-                    var row = new CompetitionRow(c.Id, c.Value<string>("competitionName") ?? c.Name ?? "Tävling",
-                        date.Value.Date, end?.Date, clubId, owner, c.Url());
+                    var row = new CompetitionRow(c.Id, c.CompetitionName ?? c.Name ?? "Tävling",
+                        date.Value.Date, end?.Date, clubId, owner, cref.UmbracoContext.Content?.GetById(c.Id)?.Url() ?? "");
                     if (!index.TryGetValue(rangeId, out var list)) index[rangeId] = list = new();
                     list.Add(row);
                 }

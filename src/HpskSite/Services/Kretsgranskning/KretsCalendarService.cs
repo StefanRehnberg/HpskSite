@@ -37,11 +37,17 @@ namespace HpskSite.Services.Kretsgranskning
         private readonly StomprogramService _stomprogram;
         private readonly ILogger<KretsCalendarService> _logger;
         private readonly HpskSite.Services.Events.IClubEventStore _events;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
 
         public KretsCalendarService(IUmbracoContextFactory contextFactory, AppCaches caches,
             CompetitionApplicationService applications, ClubService clubs, StomprogramService stomprogram, ILogger<KretsCalendarService> logger,
-            HpskSite.Services.Events.IClubEventStore events)
+            HpskSite.Services.Events.IClubEventStore events,
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Competitions.ICompetitionSeriesStore series)
         {
+            _competitions = competitions;
+            _series = series;
             _contextFactory = contextFactory;
             _caches = caches;
             _applications = applications;
@@ -172,7 +178,8 @@ namespace HpskSite.Services.Kretsgranskning
                 var rinfo = regionByCode.GetValueOrDefault(c.RegionCode);
                 list.Add(new KretsCalendarEntry
                 {
-                    Kind = "competition", Id = c.Id, Name = c.Name, Date = c.Date, EndDate = c.EndDate,
+                    Kind = "competition", Id = c.Id, // competitionstore-ok: kalenderpostens sort, inte doktypens alias
+ Name = c.Name, Date = c.Date, EndDate = c.EndDate,
                     Discipline = c.Discipline, DisciplineLabel = ActivityDiscipline.Label(c.Discipline),
                     Level = c.Level,
                     Organiser = c.ClubId > 0 ? idx.ClubName.GetValueOrDefault(c.ClubId, "") : (rinfo?.Name ?? ""),
@@ -324,40 +331,38 @@ namespace HpskSite.Services.Kretsgranskning
                     idx.ClubName[club.Id] = club.Value<string>("clubName") ?? club.Name ?? "";
                 }
 
-                foreach (var c in root.Descendants().Where(d => d.ContentType.Alias == "competition"))
+                // Tävlingarna genom tävlingslagringen (C3-planen S3); noden bara för adressen.
+                foreach (var c in _competitions.List())
                 {
-                    var date = c.Value<DateTime?>("competitionDate");
-                    var clubId = c.Value<int>("clubId");
-                    var regionCode = c.Value<string>("regionalFederation") ?? "";
+                    var clubId = c.ClubId;
+                    var regionCode = c.RegionalFederation ?? "";
                     if (string.IsNullOrEmpty(regionCode) && clubId > 0) idx.ClubRegion.TryGetValue(clubId, out regionCode);
                     // ⚠️ En serieomgång utan egen värd ÄRVER seriens krets (som i kretsavgiften).
-                    if (string.IsNullOrEmpty(regionCode) && c.Parent?.ContentType.Alias == "competitionSeries")
-                        regionCode = c.Parent.Value<string>("regionalFederation") ?? "";
+                    if (string.IsNullOrEmpty(regionCode) && c.SeriesId is int sid)
+                        regionCode = _series.Get(sid)?.RegionalFederation ?? "";
                     if (string.IsNullOrEmpty(regionCode)) continue;
 
-                    var endRaw = c.Value<DateTime?>("competitionEndDate");
-                    var realDate = date is { } dd && dd != DateTime.MinValue ? dd : (DateTime?)null;
-                    var realEnd = endRaw is { } ee && ee != DateTime.MinValue ? ee : (DateTime?)null;
+                    var realDate = c.CompetitionDate;
+                    var realEnd = c.CompetitionEndDate;
+                    var name = c.CompetitionName ?? c.Name ?? "";
                     // Every competition, active or not, for CompetitionRegion (the review gate).
-                    idx.CompetitionRegion[c.Id] = new CompetitionRegionInfo(c.Id, regionCode ?? "", realDate, realEnd,
-                        c.Value<string>("competitionName") ?? c.Name ?? "");
+                    idx.CompetitionRegion[c.Id] = new CompetitionRegionInfo(c.Id, regionCode ?? "", realDate, realEnd, name);
 
                     if (realDate is null) continue;
-                    if (!c.Value<bool>("isActive")) continue;
-                    date = realDate;
+                    if (!c.IsVisible) continue;
                     idx.Competitions.Add(new CompRow(
                         c.Id,
-                        c.Value<string>("competitionName") ?? c.Name ?? "",
-                        date.Value,
-                        endRaw is { } e && e != DateTime.MinValue ? e : null,
-                        ActivityDiscipline.Canonical(c.Value("competitionType")?.ToString()),
-                        CompetitionLevel.Read(c),
-                        CompetitionScopeHelper.ReadScope(c),
+                        name,
+                        realDate.Value,
+                        realEnd,
+                        ActivityDiscipline.Canonical(c.CompetitionType),
+                        CompetitionLevel.Normalize(c.CompetitionLevel),
+                        CompetitionScopeHelper.NormalizeScopeValue(c.CompetitionScope),
                         clubId,
                         regionCode ?? "",
-                        c.Value<bool>("isClubOnly"),
-                        SafeUrl(c),
-                        c.Value<string>("venue") ?? ""));
+                        c.IsClubOnly,
+                        content?.GetById(c.Id) is { } node ? SafeUrl(node) : "",
+                        c.Venue ?? ""));
                 }
             }
             catch (Exception ex)

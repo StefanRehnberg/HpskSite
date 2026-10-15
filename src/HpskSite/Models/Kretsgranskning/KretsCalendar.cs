@@ -79,7 +79,7 @@ namespace HpskSite.Models.Kretsgranskning
         /// inte något som kan skjutas när som helst.
         /// </summary>
         public static bool IsPeriod(KretsCalendarEntry e) =>
-            e.Kind is "competition" or "application" && e.EndDate != null
+            e.Kind is "competition" or "application" && e.EndDate != null // competitionstore-ok: kalenderpostens sort
             && (e.EndDate.Value.Date - e.Date.Date).TotalDays + 1 >= PeriodMinDays;
 
         public static void Mark(IReadOnlyList<KretsCalendarEntry> entries)

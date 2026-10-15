@@ -53,6 +53,8 @@ namespace HpskSite.Controllers
         private readonly ILogger<ResultReviewController> _logger;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public ResultReviewController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -75,9 +77,11 @@ namespace HpskSite.Controllers
             ReplyContactResolver replyTo,
             ClubService clubs,
             ILogger<ResultReviewController> logger,
-            HpskSite.Services.Results.ICompetitionResultStore results)
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _results = results;
             _reviews = reviews;
             _gate = gate;
@@ -606,24 +610,25 @@ namespace HpskSite.Controllers
 
         private CompCtx? ContextCore(int competitionId)
         {
-            var comp = UmbracoContext.Content?.GetById(competitionId);
-            if (comp == null || comp.ContentType.Alias != "competition") return null;
+            // Tävlingen genom tävlingslagringen (C3-planen S3); noden bara för adressen.
+            var comp = _competitions.Get(competitionId);
+            if (comp == null) return null;
             var c = new CompCtx
             {
                 Id = comp.Id,
-                Name = comp.Value<string>("competitionName") is { Length: > 0 } n ? n : comp.Name ?? "",
-                Date = RealDate(comp.Value<DateTime?>("competitionDate")),
-                End = RealDate(comp.Value<DateTime?>("competitionEndDate")),
-                ClubId = comp.Value<int>("clubId"),
-                Venue = comp.Value<string>("venue") ?? "",
-                Level = comp.Value<string>("competitionLevel") ?? "",
-                Scope = ChampionshipCategory.NormalizeScope(CompetitionScopeHelper.ReadScope(comp)),
-                IsClubOnly = comp.Value<bool>("isClubOnly"),
-                Url = comp.Url()
+                Name = comp.DisplayName,
+                Date = RealDate(comp.CompetitionDate),
+                End = RealDate(comp.CompetitionEndDate),
+                ClubId = comp.ClubId,
+                Venue = comp.Venue ?? "",
+                Level = comp.CompetitionLevel ?? "",
+                Scope = ChampionshipCategory.NormalizeScope(CompetitionScopeHelper.NormalizeScopeValue(comp.CompetitionScope)),
+                IsClubOnly = comp.IsClubOnly,
+                Url = UmbracoContext.Content?.GetById(competitionId)?.Url() ?? ""
             };
-            var type = comp.Value<string>("competitionType") ?? "";
+            var type = comp.CompetitionType ?? "";
             c.TypeLabel = HpskSite.Models.CompetitionTypes.GetFuzzy(type)?.Name ?? type;
-            c.Offered = ResultReviewRules.Offered(comp.Value<bool>("isAwardingStandardMedals"), c.IsClubOnly);
+            c.Offered = ResultReviewRules.Offered(comp.IsAwardingStandardMedals, c.IsClubOnly);
             c.IsChampionship = CompetitionScopeHelper.IsChampionshipScope(c.Scope);
             c.IsSmOrLandsdel = c.Scope == CompetitionScopeHelper.SvensktMasterskap || c.Scope == CompetitionScopeHelper.Landsdelsmasterskap;
 

@@ -11481,6 +11481,14 @@ och tom text är null (så `?? Name` slår till).
   datum), verify-spring-all, spring-e2e, spring-deltavling, startpass 27, startpass-total 11,
   p6-stafett-numbering 36; springskytte-hub 17/19 och verify-stafett FAIL lika med BÅDA byggena;
   liveboard-springskytte kräver att tidsfixturen seedas om.
+- **Område 8, kretsgranskning och kalendrar (2026-10-15):** `CourseReviewAccess`, `KretsPlanningService`,
+  `ResultReviewReminderService` läser `GetSaved`; `ResultReviewController` läser `Get`;
+  `KretsCalendarService` och `RangeCalendarService` tar tävlingarna ur `List()` (noden bara för adressen;
+  seriens krets via `ICompetitionSeriesStore`). ⚠️ Lagringens publicerade läsning går genom
+  `IUmbracoContextAccessor` — i ett bakgrundssvep fungerar den INNE i `EnsureUmbracoContext()`. Påminnelsens
+  `contactPerson` (aldrig på doktypen) ger standardvärdet. Kalendrarnas sort `"competition"` är markerad.
+  Taken 79 → 71, 491 → 460. Verifierat: fångst grön, korskontroll 3092/0, matrisen 8/8 + 35/36
+  (`schema-verify`, datum), resultatgranskning-fas2 79, bangranskning-fas3 60, range-calendar 62.
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

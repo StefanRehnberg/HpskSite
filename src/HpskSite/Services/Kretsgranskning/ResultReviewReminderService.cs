@@ -27,10 +27,14 @@ namespace HpskSite.Services.Kretsgranskning
         private readonly ClubService _clubs;
         private readonly ILogger<ResultReviewReminderService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public ResultReviewReminderService(ResultReviewService reviews, ResultReviewHooks hooks, ResultReviewGate gate, CompetitionApplicationService apps,
             KretsCalendarService calendar, IContentService contentService, EmailService email, ReplyContactResolver replyTo,
-            ClubService clubs, ILogger<ResultReviewReminderService> logger)
+            ClubService clubs, ILogger<ResultReviewReminderService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _reviews = reviews;
             _hooks = hooks;
             _gate = gate;
@@ -59,8 +63,8 @@ namespace HpskSite.Services.Kretsgranskning
                 if (!_gate.GateApplies(c.CompetitionId)) continue;
                 var days = (today.Date - end.Value.Date).TotalDays;
                 if (days < ResultReviewReminders.ArrangerFirstDays || days > ResultReviewReminders.ArrangerWindowDays) continue;
-                var node = _contentService.GetById(c.CompetitionId);
-                if (node == null || !ResultReviewRules.Offered(node.GetValue<bool>("isAwardingStandardMedals"), node.GetValue<bool>("isClubOnly"))) continue;
+                var node = _competitions.GetSaved(c.CompetitionId);
+                if (node == null || !ResultReviewRules.Offered(node.IsAwardingStandardMedals, node.IsClubOnly)) continue;
                 var region = _calendar.CompetitionRegion(c.CompetitionId);
                 if (region == null) continue;
                 candidates.Add(new ResultReviewReminders.Candidate(c.CompetitionId, region.Value.Region.Id, end.Value));
@@ -82,9 +86,9 @@ namespace HpskSite.Services.Kretsgranskning
 
         private async Task<int> ArrangerAsync(ResultReviewReminders.Due d)
         {
-            var node = _contentService.GetById(d.CompetitionId);
+            var node = _competitions.GetSaved(d.CompetitionId);
             if (node == null) return 0;
-            var name = node.GetValue<string>("competitionName") is { Length: > 0 } n ? n : node.Name ?? "";
+            var name = node.DisplayName;
             var region = _calendar.Region(d.RegionId)?.Name ?? "kretsen";
             var info = _calendar.CompetitionRegion(d.CompetitionId)?.Competition;
             var deadline = (info?.EndDate ?? info?.Date)?.AddDays(14).ToString("yyyy-MM-dd") ?? "";
@@ -92,8 +96,8 @@ namespace HpskSite.Services.Kretsgranskning
             var to = new List<(string Email, string Name)>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             void Add(string? e, string nm) { if (!string.IsNullOrWhiteSpace(e) && seen.Add(e.Trim())) to.Add((e.Trim(), nm)); }
-            Add(node.GetValue<string>("contactEmail"), node.GetValue<string>("contactPerson") ?? "");
-            var clubId = node.GetValue<int>("clubId");
+            Add(node.ContactEmail, ""); // contactPerson har aldrig funnits på doktypen (CompetitionFieldTable)
+            var clubId = node.ClubId;
             if (clubId > 0) Add(_clubs.GetClubById(clubId)?.ContactEmail, _clubs.GetClubNameById(clubId) ?? "");
 
             var url = $"{_hooks.SiteUrl}/competitionmanagement?competitionId={d.CompetitionId}";
