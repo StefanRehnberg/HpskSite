@@ -43,12 +43,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         }
         private readonly ILogger<FaltskytteStatsService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public FaltskytteStatsService(
             IUmbracoDatabaseFactory databaseFactory,
             IContentService contentService,
             ILogger<FaltskytteStatsService> logger,
-            Umbraco.Cms.Core.Web.IUmbracoContextAccessor umbracoContextAccessor)
+            Umbraco.Cms.Core.Web.IUmbracoContextAccessor umbracoContextAccessor,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _umbracoContextAccessor = umbracoContextAccessor;
             _databaseFactory = databaseFactory;
             _contentService = contentService;
@@ -101,19 +105,19 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             {
                 try
                 {
-                    var competition = _contentService.GetById(competitionId);
+                    var competition = _competitions.GetSaved(competitionId);
                     if (competition == null) continue;
 
-                    var competitionDate = competition.GetValue<DateTime?>("competitionDate") ?? DateTime.MinValue;
+                    var competitionDate = competition.CompetitionDate ?? DateTime.MinValue;
                     if (year.HasValue && competitionDate.Year != year.Value) continue;
 
-                    var competitionType = competition.GetValue<string>("competitionType") ?? "Faltskytte";
+                    var competitionType = competition.CompetitionType ?? "Faltskytte";
                     if (competitionType != "Faltskytte" && competitionType != "MagnumFalt") continue;
 
-                    var competitionConfig = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig"));
+                    var competitionConfig = FaltskytteConfigParser.Parse(competition.StationConfig);
                     // Config's own _scoringMode wins — the competition property is a mirror
                     // that only syncs at Anslut time. See FaltskytteScoringMode.
-                    var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.GetValue<string>("scoringMode"));
+                    var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.ScoringMode);
                     var firstWcConfig = competitionConfig.WeaponConfigs.Values.FirstOrDefault();
                     var stationCount = firstWcConfig?.Stations.Count ?? 0;
 
@@ -157,7 +161,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                     // Apply class merging config so placement reflects what the published
                     // result list shows.
                     var mergeLookup = new Dictionary<string, string>();
-                    var mergeJson = competition.HasProperty("mergeConfig") ? competition.GetValue<string>("mergeConfig") ?? "" : "";
+                    var mergeJson = competition.MergeConfig ?? "";
                     if (!string.IsNullOrEmpty(mergeJson))
                     {
                         try

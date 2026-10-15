@@ -20,8 +20,12 @@ namespace HpskSite.Controllers
         private readonly IContentService _contentService;
         private readonly AdminAuthorizationService _auth;
 
-        public FaltskytteStartledareController(IContentService contentService, AdminAuthorizationService auth)
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
+        public FaltskytteStartledareController(IContentService contentService, AdminAuthorizationService auth,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _contentService = contentService;
             _auth = auth;
         }
@@ -29,17 +33,16 @@ namespace HpskSite.Controllers
         [HttpGet("")]
         public async Task<IActionResult> Index(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return NotFound();
-            var compType = competition.GetValue<string>("competitionType") ?? "";
+            var compType = competition.CompetitionType ?? "";
             if (compType is not ("Faltskytte" or "MagnumFalt")) return NotFound();
 
             var model = new FaltskyttePatrolListModel
             {
                 CompetitionId = competitionId,
-                CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
-                Published = competition.HasProperty("faltskyttePatrolsPublished")
-                    && competition.GetValue<bool>("faltskyttePatrolsPublished"),
+                CompetitionName = competition.CompetitionName ?? competition.Name ?? "",
+                Published = competition.FaltskyttePatrolsPublished,
                 // Operator screen is staff-only. A non-staff visitor gets an access notice, not controls.
                 CanSendOff = await IsStaffForCompetition(competitionId)
             };

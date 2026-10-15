@@ -40,6 +40,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -61,9 +63,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             FaltskytteResultArtifactService resultArtifact,
             HpskSite.Services.Kretsgranskning.CourseReviewAccess courseReviewAccess,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.Results.ICompetitionResultStore results)
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _registrations = registrations;
             _results = results;
             _contentService = contentService;
@@ -132,10 +136,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
         private bool IsSelfServiceEnabledFor(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             return competition != null
-                && competition.HasProperty("faltskytteSelfServiceResults")
-                && competition.GetValue<bool>("faltskytteSelfServiceResults");
+                && competition.FaltskytteSelfServiceResults;
         }
 
         /// <summary>
@@ -233,15 +236,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (!await CanReadStationAsync(competitionId))
                 return Json(new { success = false, message = "Du har inte behörighet att se den här tävlingens stationer." });
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
             var config = ParseCompetitionConfig(competition);
             // Config's own _scoringMode wins over the competition's mirrored property,
             // which only syncs at Anslut time. See FaltskytteScoringMode.
-            var scoringMode = FaltskytteScoringMode.Resolve(config, competition.GetValue<string>("scoringMode"));
-            var maxReshoots = competition.GetValue<int>("maxReshoots");
+            var scoringMode = FaltskytteScoringMode.Resolve(config, competition.ScoringMode);
+            var maxReshoots = competition.MaxReshoots;
 
             return Json(new { success = true, config, scoringMode, maxReshoots });
         }
@@ -253,7 +256,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             FaltskytteResultsBuilder.GetClassSortOrder(className);
 
         /// <summary>Parses the station config from competition, handling both old and new format.</summary>
-        private static FaltskytteCompetitionConfig ParseCompetitionConfig(Umbraco.Cms.Core.Models.IContent competition) =>
+        private static FaltskytteCompetitionConfig ParseCompetitionConfig(HpskSite.Models.Competitions.CompetitionInfo competition) =>
             FaltskytteResultsBuilder.ParseCompetitionConfig(competition);
 
         /// <summary>Gets station config for a specific weapon class and station number.</summary>
@@ -313,7 +316,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (!await IsAuthorizedForCompetition(competitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
@@ -325,7 +328,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 .Distinct().OrderBy(n => n).ToList();
 
             var managers = new Dictionary<string, StationManagerDto>();
-            var mgrJson = competition.GetValue<string>("faltskytteStationManagers");
+            var mgrJson = competition.FaltskytteStationManagers;
             if (!string.IsNullOrWhiteSpace(mgrJson))
             {
                 try { managers = JsonConvert.DeserializeObject<Dictionary<string, StationManagerDto>>(mgrJson) ?? new(); }
@@ -410,7 +413,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             int? attachedConfigId = null;
             try
             {
-                var rawCfg = competition.GetValue<string>("stationConfig");
+                var rawCfg = competition.StationConfig;
                 if (!string.IsNullOrWhiteSpace(rawCfg))
                     attachedConfigId = Newtonsoft.Json.Linq.JObject.Parse(rawCfg).Value<int?>("_attachedConfigId");
             }
@@ -462,12 +465,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         [HttpGet]
         public async Task<IActionResult> GetPatrolListState(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-            var published = competition.HasProperty("faltskyttePatrolsPublished")
-                && competition.GetValue<bool>("faltskyttePatrolsPublished");
+            var published = competition.FaltskyttePatrolsPublished;
             if (!published)
                 return Json(new { success = true, published = false, patrols = Array.Empty<object>() });
 
@@ -553,13 +555,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (!await CanReadStationAsync(competitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
             // Get station config (per-weapon-class)
             var competitionConfig = ParseCompetitionConfig(competition);
-            var maxReshoots = competition.GetValue<int>("maxReshoots");
+            var maxReshoots = competition.MaxReshoots;
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
 
@@ -608,7 +610,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             // Build per-weapon-class station configs for this station number
             // Tävlingstyp from the config first (the property is a stale-able mirror).
-            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.GetValue<string>("scoringMode"));
+            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.ScoringMode);
             var wcStations = new Dictionary<string, FaltskytteStationConfig>();
             foreach (var kvp in competitionConfig.WeaponConfigs)
             {
@@ -696,8 +698,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (!await CanReadStationAsync(competitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
-            var competition = _contentService.GetById(competitionId);
-            var maxReshoots = competition?.GetValue<int>("maxReshoots") ?? 0;
+            var competition = _competitions.GetSaved(competitionId);
+            var maxReshoots = competition?.MaxReshoots ?? 0;
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
             List<FaltskytteResultEntry> entries;
@@ -890,11 +892,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-                var compType = competition.GetValue<string>("competitionType") ?? "Faltskytte";
+                var compType = competition.CompetitionType ?? "Faltskytte";
 
                 using var db = _umbracoDatabaseFactory.CreateDatabase();
 
@@ -927,7 +929,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 }
                 else
                 {
-                    savedConfig = competition.HasProperty("mergeConfig") ? competition.GetValue<string>("mergeConfig") ?? "" : "";
+                    savedConfig = competition.MergeConfig ?? "";
                 }
 
                 return Json(new { success = true, analysis, savedConfig });
@@ -1057,7 +1059,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (!await IsAuthorizedForCompetition(competitionId))
                     return Json(new { success = false, message = "Du har inte behörighet." });
 
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
 
                 var json = _results.Get(competition.Id)?.ShootOffConfigFor(subCompetitionOnly) ?? "";
@@ -1081,7 +1083,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (!await IsAuthorizedForCompetition(request.CompetitionId))
                     return Json(new { success = false, message = "Du har inte behörighet." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
 
                 var shootOffField = HpskSite.Models.Results.CompetitionResultFields.ShootOffConfigFor(request.IsSubCompetition);
@@ -1203,7 +1205,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
                 // Materialize won Standard medals into the ledger (Fältskytte computes medals
                 // live, so we compute them here rather than from a stored snapshot).
-                await MaterializeFaltskytteMedalsAsync(competition, request.IsOfficial);
+                await MaterializeFaltskytteMedalsAsync(_competitions.GetSaved(request.CompetitionId)!, request.IsOfficial);
             }
 
             // Ensure a competitionResult child page exists so the comp gets a /resultat/ URL.
@@ -1276,7 +1278,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         /// On publish (official=true) the medals are computed live and upserted; on un-publish
         /// the on-site awards are removed. Never blocks the publish flow.
         /// </summary>
-        private async Task MaterializeFaltskytteMedalsAsync(Umbraco.Cms.Core.Models.IContent competition, bool isOfficial)
+        private async Task MaterializeFaltskytteMedalsAsync(HpskSite.Models.Competitions.CompetitionInfo competition, bool isOfficial)
         {
             try
             {
@@ -1286,10 +1288,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     return;
                 }
 
-                var discipline = competition.GetValue<string>("competitionType") ?? StandardMedals.Faltskytte;
-                var competitionDate = competition.GetValue<DateTime?>("competitionDate");
+                var discipline = competition.CompetitionType ?? StandardMedals.Faltskytte;
+                var competitionDate = competition.CompetitionDate;
                 var year = competitionDate?.Year ?? DateTime.Now.Year;
-                var competitionName = competition.GetValue<string>("competitionName");
+                var competitionName = competition.CompetitionName;
                 if (string.IsNullOrWhiteSpace(competitionName)) competitionName = competition.Name;
 
                 var medals = await ComputeFaltskytteOnSiteMedalsAsync(competition);
@@ -1308,18 +1310,18 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         /// on the flat per-(member,class) result list (class merging is display-only and does not
         /// affect medal assignment). Returns empty when medals aren't awarded for this competition.
         /// </summary>
-        private async Task<List<OnSiteMedal>> ComputeFaltskytteOnSiteMedalsAsync(Umbraco.Cms.Core.Models.IContent competition)
+        private async Task<List<OnSiteMedal>> ComputeFaltskytteOnSiteMedalsAsync(HpskSite.Models.Competitions.CompetitionInfo competition)
         {
             var result = new List<OnSiteMedal>();
 
             // BR-PS.1.3: club competitions never award standard medals.
-            if (!competition.GetValue<bool>("isAwardingStandardMedals") || competition.GetValue<bool>("isClubOnly"))
+            if (!competition.IsAwardingStandardMedals || competition.IsClubOnly)
                 return result;
 
             var competitionConfig = ParseCompetitionConfig(competition);
             // Tävlingstyp from the config first (the property is a stale-able mirror) —
             // standardmedalj thresholds differ between Normalfält and Poängfält.
-            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.GetValue<string>("scoringMode"));
+            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.ScoringMode);
             var firstWcConfig = competitionConfig.WeaponConfigs.Values.FirstOrDefault();
             var stationCount = firstWcConfig?.Stations.Count(s => !s.IsShootOffOnly) ?? 0;
             var shootOffOnlyStationNumbers = (firstWcConfig?.Stations
@@ -1356,7 +1358,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     };
                 }).ToList();
 
-            var scope = competition.GetValue<string>("competitionScope") ?? "";
+            var scope = competition.CompetitionScope ?? "";
             var isSmOrLdm = scope == CompetitionScopeHelper.SvensktMasterskap
                          || scope == CompetitionScopeHelper.Landsdelsmasterskap;
             new Services.FaltskytteStandardMedalService().CalculateStandardMedals(shooterResults, scoringMode, stationCount, isSmOrLdm);
@@ -1382,15 +1384,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (!await _adminAuthorizationService.IsCurrentUserAdminAsync())
                 return Json(new { success = false, message = "Endast sajtadmin." });
 
-            var candidates = UmbracoContext.Content.GetAtRoot()
-                .SelectMany(r => r.DescendantsOrSelf())
-                .Where(c => c.ContentType.Alias == "competition")
-                .Where(c =>
-                {
-                    var t = c.Value<string>("competitionType") ?? "";
-                    return t == "Faltskytte" || t == "MagnumFalt";
-                })
-                .Where(c => c.Value<bool>("faltskytteResultsOfficial"))
+            var candidates = _competitions.List()
+                .Where(c => c.CompetitionType is "Faltskytte" or "MagnumFalt")
+                .Where(c => c.FaltskytteResultsOfficial)
                 .ToList();
 
             int created = 0, alreadyOk = 0, synced = 0, failed = 0, medalsMaterialized = 0;
@@ -1401,7 +1397,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             {
                 try
                 {
-                    var compContent = _contentService.GetById(compNode.Id);
+                    var compContent = _competitions.GetSaved(compNode.Id);
                     if (compContent == null) { failed++; continue; }
 
                     // Re-materialize won Standard medals into the ledger (idempotent upsert; the
@@ -1966,8 +1962,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             {
                 var registrations = await _startListRepository.GetCompetitionRegistrations(competitionId);
 
-                var competition = _contentService.GetById(competitionId);
-                var compType = competition?.GetValue<string>("competitionType") ?? "Faltskytte";
+                var competition = _competitions.GetSaved(competitionId);
+                var compType = competition?.CompetitionType ?? "Faltskytte";
                 var isMagnumFalt = compType == "MagnumFalt";
 
                 // Extract unique weapon classes/groups
@@ -2007,7 +2003,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (!await IsAuthorizedForCompetition(request.CompetitionId))
                     return Json(new { success = false, message = "Du har inte behörighet." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
@@ -2431,8 +2427,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             // Patrol capacity for "nästa lediga" — from the rolling-start config (default 6). Lets a
             // walk-in fall into a patrol that has a free (or DNS-freed) seat before a new one is made.
             int walkInPatrolSize = 6;
-            var walkInCompNode = _contentService.GetById(request.CompetitionId);
-            var walkInRsJson = walkInCompNode?.GetValue<string>("rollingStart");
+            var walkInCompNode = _competitions.GetSaved(request.CompetitionId);
+            var walkInRsJson = walkInCompNode?.RollingStart;
             if (!string.IsNullOrEmpty(walkInRsJson))
             {
                 try
@@ -2950,12 +2946,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         [HttpGet]
         public async Task<IActionResult> GetPublicPatrols(int competitionId)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-            var published = competition.HasProperty("faltskyttePatrolsPublished")
-                && competition.GetValue<bool>("faltskyttePatrolsPublished");
+            var published = competition.FaltskyttePatrolsPublished;
             if (!published)
                 return Json(new { success = true, published = false, patrols = Array.Empty<object>() });
 

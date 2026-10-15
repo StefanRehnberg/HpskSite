@@ -38,13 +38,17 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly IServiceProvider _services;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public FaltskytteResultArtifactService(
             IContentService contentService,
             FaltskytteResultsBuilder builder,
             ILogger<FaltskytteResultArtifactService> logger,
             IServiceProvider services,
-            HpskSite.Services.Results.ICompetitionResultStore results)
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _results = results;
             _contentService = contentService;
             _builder = builder;
@@ -61,7 +65,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null) return false;
 
                 var resultPage = _results.Get(competition.Id);
@@ -115,11 +119,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
         /// <summary>Publik för att kunna A/B-provas: samma indata i normalfält och poängfält
         /// måste ge olika tal OCH olika enheter. Se FaltskytteScoreReaderTests.</summary>
-        public static PrecisionFinalResults BuildArtifact(IContent competition, FaltskytteResultsBuildResult build)
+        public static PrecisionFinalResults BuildArtifact(HpskSite.Models.Competitions.CompetitionInfo competition, FaltskytteResultsBuildResult build)
         {
             var results = build.Results!;
-            var competitionType = competition.GetValue<string>("competitionType") ?? "Faltskytte";
-            var scope = competition.GetValue<string>("competitionScope") ?? "";
+            var competitionType = competition.CompetitionType ?? "Faltskytte";
+            var scope = competition.CompetitionScope ?? "";
             var scoring = new FaltskytteScoreReader(competitionType, results.ScoringMode);
 
             var artifact = new PrecisionFinalResults
