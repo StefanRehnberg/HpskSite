@@ -1,4 +1,5 @@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @using System.Globalization
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @inject Umbraco.Cms.Core.Services.IMemberService MemberService
@@ -32,9 +33,10 @@
     var upcomingComps = 0;
     if (competitionsHub != null)
     {
-        var comps = competitionsHub.Descendants().Where(c => c.ContentType.Alias == "competition").ToList();
-        compsThisYear = comps.Count(c => c.Value<DateTime>("competitionDate").Year == thisYear);
-        upcomingComps = comps.Count(c => c.Value<DateTime>("competitionDate") >= DateTime.Today);
+        // Alla publicerade tävlingar ligger under navet; lagringen ger dem (C3-planen S3).
+        var comps = Competitions.List();
+        compsThisYear = comps.Count(c => (c.CompetitionDate ?? DateTime.MinValue).Year == thisYear);
+        upcomingComps = comps.Count(c => (c.CompetitionDate ?? DateTime.MinValue) >= DateTime.Today);
     }
 
     var omUrl = Model.Children.FirstOrDefault(c => c.ContentType.Alias == "aboutPage")?.Url() ?? "/om-pistol-nu/";

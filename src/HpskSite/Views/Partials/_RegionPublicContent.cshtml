@@ -1,5 +1,6 @@
 ﻿@using System.Globalization;
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @{
     var clubsPage = ViewData["clubsPage"] as Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent;
     var clubsUrl = ViewData["clubsUrl"] as string ?? "";
@@ -35,10 +36,9 @@
             // Count upcoming competitions for clubs in this region
             if (competitionsHub != null && regionClubIds.Any())
             {
-                upcomingCompetitionsCount = competitionsHub.Descendants()
-                    .Where(c => c.ContentType.Alias == "competition")
-                    .Where(c => c.Value<DateTime>("competitionDate") >= DateTime.Today)
-                    .Count(c => regionClubIds.Contains(c.Value<int>("clubId")));
+                upcomingCompetitionsCount = Competitions.List()
+                    .Where(c => (c.CompetitionDate ?? DateTime.MinValue) >= DateTime.Today)
+                    .Count(c => regionClubIds.Contains(c.ClubId));
             }
         }
         <div class="card mb-4">

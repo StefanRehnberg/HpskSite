@@ -70,9 +70,6 @@ namespace HpskSite.Services.RegistrationGate
         public static bool HasPublishedStartList(HpskSite.Models.Competitions.CompetitionInfo competition, HpskSite.Services.StartLists.IStartListStore startLists) =>
             competition != null && HasPublishedStartList(competition.Id, competition.FaltskyttePatrolsPublished, startLists);
 
-        /// <summary>Samma fråga för en anropare som håller den publicerade noden (tävlingssidan). Flyttas till posten med vyn.</summary>
-        public static bool HasPublishedStartList(IPublishedContent competition, HpskSite.Services.StartLists.IStartListStore startLists) =>
-            competition != null && HasPublishedStartList(competition.Id, competition.Value<bool>("faltskyttePatrolsPublished"), startLists);
 
         private static bool HasPublishedStartList(int competitionId, bool patrolsPublished, HpskSite.Services.StartLists.IStartListStore startLists)
         {
@@ -95,9 +92,6 @@ namespace HpskSite.Services.RegistrationGate
         public static bool IsClosed(HpskSite.Models.Competitions.CompetitionInfo competition, HpskSite.Services.StartLists.IStartListStore startLists) =>
             competition != null && competition.CloseRegistrationOnStartList && HasPublishedStartList(competition, startLists);
 
-        /// <summary>Samma grind för den publicerade noden (tävlingssidan). Flyttas till posten med vyn.</summary>
-        public static bool IsClosed(IPublishedContent competition, HpskSite.Services.StartLists.IStartListStore startLists) =>
-            competition != null && competition.Value<bool>(PropertyAlias) && HasPublishedStartList(competition, startLists);
 
         /// <summary>
         /// The gate for a caller that only has the id (the registration endpoint). Resolves from the

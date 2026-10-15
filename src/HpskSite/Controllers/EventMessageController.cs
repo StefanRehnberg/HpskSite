@@ -32,6 +32,8 @@ namespace HpskSite.Controllers
         private readonly EventMessageService _messages;
         private readonly ILogger<EventMessageController> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public EventMessageController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -43,9 +45,11 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             AdminAuthorizationService auth,
             EventMessageService messages,
-            ILogger<EventMessageController> logger)
+            ILogger<EventMessageController> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _memberManager = memberManager;
             _memberService = memberService;
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -188,12 +192,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
-                {
-                    var comp = ctx.Content.GetById(competitionId);
-                    // competitionType is stored as a plain string (FlexibleDropdown); read untyped to be safe.
-                    return comp?.Value("competitionType")?.ToString() ?? "";
-                }
+                return _competitions.Get(competitionId)?.CompetitionType ?? "";
             }
             catch { /* best-effort — discipline is informational */ }
             return "";

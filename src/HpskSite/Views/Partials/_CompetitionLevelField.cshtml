@@ -32,7 +32,7 @@
     var levelPropertyExists = false;
     try
     {
-        levelPropertyExists = LevelContentTypeService.Get("competition")?.PropertyTypeExists(CompetitionLevel.PropertyAlias) ?? false;
+        levelPropertyExists = LevelContentTypeService.Get("competition")?.PropertyTypeExists(CompetitionLevel.PropertyAlias) ?? false; // competitionstore-ok: frågan gäller dokumenttypen, inte en tävling
     }
     catch { levelPropertyExists = false; }
     var selectId = prefix + CompetitionLevel.PropertyAlias;

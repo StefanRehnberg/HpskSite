@@ -3,18 +3,19 @@
 @using HpskSite.Extensions
 @inject HpskSite.Services.AdminAuthorizationService AuthService
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@inject HpskSite.Services.Competitions.CompetitionPostCache Posts
 @{
     Layout = "Master.cshtml";
     ViewBag.Title = Model.Value<string>("seriesName") ?? Model.Name;
 
     // Get all competitions in this series - order by seriesSortOrder first, then by date
-    var seriesCompetitions = Model.Children().Where(x => x.ContentType.Alias == "competition")
+    var seriesCompetitions = Model.Children().Where(x => x.ContentType.Alias == "competition") // competitionstore-ok: noden behövs för adressen och trädet (S6), fälten läses ur posten
                                           .OrderBy(x => x.Value<int?>("seriesSortOrder") ?? int.MaxValue)
-                                          .ThenBy(x => x.Value<DateTime>("competitionDate"))
+                                          .ThenBy(x => (Posts.Of(x).CompetitionDate ?? DateTime.MinValue))
                                           .ToList();
 
     var now = DateTime.Now;
-    var completedCompetitions = seriesCompetitions.Where(c => c.Value<DateTime>("competitionDate").Date < now.Date).Count();
+    var completedCompetitions = seriesCompetitions.Where(c => (Posts.Of(c).CompetitionDate ?? DateTime.MinValue).Date < now.Date).Count();
     var totalCompetitions = seriesCompetitions.Count();
     var progressPercentage = totalCompetitions > 0 ? (completedCompetitions * 100 / totalCompetitions) : 0;
 
@@ -23,8 +24,8 @@
     // last round is the interesting one, so land there instead.
     var currentRoundIndex = seriesCompetitions.FindIndex(c =>
     {
-        var start = c.Value<DateTime>("competitionDate").Date;
-        var end = c.Value<DateTime?>("competitionEndDate");
+        var start = (Posts.Of(c).CompetitionDate ?? DateTime.MinValue).Date;
+        var end = Posts.Of(c).CompetitionEndDate;
         var effectiveEndDate = (end.HasValue && end.Value.Date >= start) ? end.Value.Date : start;
         return effectiveEndDate >= now.Date;
     });
@@ -168,12 +169,12 @@
                             @foreach (var competition in seriesCompetitions)
                             {
                                 // Get competition details (same as competitions hub)
-                                var compDate = competition.Value<DateTime>("competitionDate");
-                                var compEndDate = competition.Value<DateTime?>("competitionEndDate");
-                                var regCloseDate = competition.Value<DateTime>("registrationCloseDate");
-                                var regOpenDate = competition.Value<DateTime>("registrationOpenDate");
+                                var compDate = (Posts.Of(competition).CompetitionDate ?? DateTime.MinValue);
+                                var compEndDate = Posts.Of(competition).CompetitionEndDate;
+                                var regCloseDate = (Posts.Of(competition).RegistrationCloseDate ?? DateTime.MinValue);
+                                var regOpenDate = (Posts.Of(competition).RegistrationOpenDate ?? DateTime.MinValue);
                                 var description = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.Value<string>("description"));
-                                var venue = competition.Value<string>("venue");
+                                var venue = Posts.Of(competition).Venue;
 
                                 // Check if multi-day competition
                                 var hasValidEndDate = compEndDate.HasValue &&
@@ -189,13 +190,13 @@
                                     $"({(compEndDate.Value.Date - compDate.Date).Days + 1} dagar)" :
                                     "(1 dag)";
 
-                                var maxParticipants = competition.Value<int>("maxParticipants");
-                                var registrationFee = competition.Value<string>("registrationFee");
-                                var competitionTypeId = competition.Value<string>("competitionType") ?? "";
+                                var maxParticipants = Posts.Of(competition).MaxParticipants;
+                                var registrationFee = Posts.Of(competition).RegistrationFee;
+                                var competitionTypeId = Posts.Of(competition).CompetitionType ?? "";
                                 var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId);
                                 var competitionTypeName = competitionTypeObj?.Name ?? (!string.IsNullOrEmpty(competitionTypeId) ? competitionTypeId : "Okänd typ");
-                                var numberOfSeriesOrStations = competition.Value<int>("numberOfSeriesOrStations");
-                                var numberOfFinalSeries = competition.Value<int>("numberOfFinalSeries");
+                                var numberOfSeriesOrStations = Posts.Of(competition).NumberOfSeriesOrStations;
+                                var numberOfFinalSeries = Posts.Of(competition).NumberOfFinalSeries;
 
                                 // Build competition type display name with series info (skip for Springskytte)
                                 var competitionTypeDisplayName = competitionTypeName;
@@ -213,7 +214,7 @@
                                 }
 
                                 // Multiple shooting classes support - handle string array, JSON array, or CSV
-                                var shootingClassIdsRaw = competition.Value("shootingClassIds");
+                                object? shootingClassIdsRaw = Posts.Of(competition).ShootingClassIds;
                                 string[] classIdArray = Array.Empty<string>();
                                 try
                                 {
@@ -256,7 +257,7 @@
                                     : competitionShootingClasses.Any()
                                         ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
                                         : "Inga klasser";
-                                var isCompetitionActive = competition.Value<bool>("isActive");
+                                var isCompetitionActive = Posts.Of(competition).IsVisible;
 
                                 // Calculate status (same logic as competitions hub)
                                 var effectiveEnd = hasValidEndDate ? compEndDate!.Value.Date : compDate.Date;

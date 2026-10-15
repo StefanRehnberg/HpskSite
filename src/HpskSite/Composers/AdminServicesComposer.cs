@@ -228,6 +228,7 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Competitions.SwitchingCompetitionStore>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.ICompetitionStore>(
                 sp => sp.GetRequiredService<HpskSite.Services.Competitions.SwitchingCompetitionStore>());
+            builder.Services.AddScoped<HpskSite.Services.Competitions.CompetitionPostCache>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.NodeCompetitionSeriesStore>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.SqlCompetitionSeriesStore>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.SwitchingCompetitionSeriesStore>();
