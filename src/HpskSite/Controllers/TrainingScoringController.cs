@@ -32,6 +32,8 @@ namespace HpskSite.Controllers
         private readonly StandardMedalLedgerService _medalLedger;
         private readonly StandardMedalProofStorage _proofStorage;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public TrainingScoringController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -46,9 +48,11 @@ namespace HpskSite.Controllers
             IShooterStatisticsService statisticsService,
             FaltskytteStatsService faltskytteStatsService,
             StandardMedalLedgerService medalLedger,
-            StandardMedalProofStorage proofStorage)
+            StandardMedalProofStorage proofStorage,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _memberManager = memberManager;
             _memberService = memberService;
             _databaseFactory = databaseFactory;
@@ -1109,12 +1113,11 @@ namespace HpskSite.Controllers
                 var competitionDates = new Dictionary<int, DateTime>();
                 if (competitionIds.Any())
                 {
-                    var competitions = _contentService.GetByIds(competitionIds);
+                    var competitions = HpskSite.Services.Competitions.CompetitionStoreExtensions.GetManyIncludingUnpublished(_competitions, competitionIds).Values;
                     foreach (var comp in competitions)
                     {
                         competitionNames[comp.Id] = comp.Name ?? $"Tävling #{comp.Id}";
-                        var compDate = comp.GetValue<DateTime>("competitionDate");
-                        if (compDate != default) competitionDates[comp.Id] = compDate;
+                        if (comp.CompetitionDate is DateTime compDate) competitionDates[comp.Id] = compDate;
                     }
                 }
 

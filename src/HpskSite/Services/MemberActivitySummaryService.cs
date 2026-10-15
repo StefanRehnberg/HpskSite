@@ -46,14 +46,18 @@ namespace HpskSite.Services
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public MemberActivitySummaryService(
             IScopeProvider scopeProvider,
             IContentService contentService,
             IMemberService memberService,
             ClubEventParticipationService events,
             ILogger<MemberActivitySummaryService> logger,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _registrations = registrations;
             _scopeProvider = scopeProvider;
             _contentService = contentService;
@@ -693,13 +697,13 @@ namespace HpskSite.Services
             // gör gränsen omöjlig att gå in i av misstag (minnet sql-in-list-parameter-cap).
             foreach (var batch in ids.Chunk(500))
             {
-                foreach (var node in _contentService.GetByIds(batch))
+                foreach (var node in HpskSite.Services.Competitions.CompetitionStoreExtensions.GetManyIncludingUnpublished(_competitions, batch).Values)
                 {
                     map[node.Id] = new CompetitionInfo
                     {
-                        Name = node.GetValue<string>("competitionName") ?? node.Name ?? $"Tävling #{node.Id}",
-                        Date = node.GetValue<DateTime?>("competitionDate") ?? node.CreateDate,
-                        Venue = node.GetValue<string>("venue") ?? "",
+                        Name = node.CompetitionName ?? node.Name ?? $"Tävling #{node.Id}",
+                        Date = node.CompetitionDate ?? node.CreateDate,
+                        Venue = node.Venue ?? "",
                         // ⚠️ Läs UNTYPED och normalisera. competitionType lagras som id på de
                         // flesta noder men som visningsNAMN på några — mätt i prod 2026-09-02: två
                         // tävlingar bär "Magnum Fält" i stället för "MagnumFalt". En literal
@@ -708,7 +712,7 @@ namespace HpskSite.Services
                         // Untyped är dessutom nödvändigt av samma skäl som competitionScope läses
                         // så: FlexibleDropdown-konverteraren kastar på ett rent strängvärde som
                         // äldre kodvägar lagrat (se Models/Competition.cs).
-                        Discipline = ActivityDiscipline.Canonical(node.GetValue<string>("competitionType"))
+                        Discipline = ActivityDiscipline.Canonical(node.CompetitionType)
                     };
                 }
             }

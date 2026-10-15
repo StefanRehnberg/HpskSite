@@ -47,12 +47,16 @@ namespace HpskSite.Services
         private readonly AppCaches _appCaches;
         private readonly ILogger<MedalHandoutService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public MedalHandoutService(
             IUmbracoContextAccessor umbracoContextAccessor,
             PrizeGivingService prizeGiving,
             AppCaches appCaches,
-            ILogger<MedalHandoutService> logger)
+            ILogger<MedalHandoutService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _umbracoContextAccessor = umbracoContextAccessor;
             _prizeGiving = prizeGiving;
             _appCaches = appCaches;
@@ -133,23 +137,23 @@ namespace HpskSite.Services
                 if (unresolved) line.Note = "Minst en av dem saknar ännu mottagare — se nedan.";
             }
 
-            foreach (var comp in competitions.OrderBy(c => c.Value<DateTime?>("competitionDate") ?? DateTime.MinValue))
+            foreach (var comp in competitions.OrderBy(c => c.CompetitionDate ?? DateTime.MinValue))
             {
                 // ⚠️ Value<DateTime?> ger DateTime.MinValue (inte null) för en osatt egenskap, så
                 // ett tomt slutdatum måste rensas — annars ser varje tävling ut att ha avslutats
                 // år 1 och skulle räknas som avgjord.
-                var endDate = comp.Value<DateTime?>("competitionEndDate");
+                var endDate = comp.CompetitionEndDate;
                 if (endDate == DateTime.MinValue) endDate = null;
 
                 var row = new MedalHandoutCompetition
                 {
                     CompetitionId = comp.Id,
-                    Name = comp.Value<string>("competitionName") ?? comp.Name ?? "Tävling",
-                    Date = comp.Value<DateTime?>("competitionDate"),
+                    Name = comp.CompetitionName ?? comp.Name ?? "Tävling",
+                    Date = comp.CompetitionDate,
                     EndDate = endDate,
                     // Råvärdet av samma skäl som omfattningen: grenen är en dropdown på en del
                     // tävlingar och en ren sträng på andra, och konverteraren kastar på den senare.
-                    CompetitionType = comp.GetProperty("competitionType")?.GetSourceValue()?.ToString() ?? ""
+                    CompetitionType = comp.CompetitionType ?? ""
                 };
 
                 // ⚠️ Mäts på SISTA tävlingsdagen, och "i dag" räknas som kommande: en tävling som
@@ -363,20 +367,20 @@ namespace HpskSite.Services
 
         // ── Tävlingsurvalet ──────────────────────────────────────────────────────
 
-        private List<IPublishedContent> SelectCompetitions(
+        private List<HpskSite.Models.Competitions.CompetitionInfo> SelectCompetitions(
             CompetitionScan scan, string scopeType, string scopeId, int year, string wantedScope)
         {
-            var result = new List<IPublishedContent>();
+            var result = new List<HpskSite.Models.Competitions.CompetitionInfo>();
 
             foreach (var comp in scan.Competitions)
             {
-                if ((comp.Value<DateTime?>("competitionDate")?.Year ?? 0) != year) continue;
+                if ((comp.CompetitionDate?.Year ?? 0) != year) continue;
 
                 // ⚠️ MÅSTE gå genom ReadScope. Även den OTYPADE Value() kör FlexibleDropdownens
                 // värdekonverterare, som JSON-deserialiserar värdet och kastar på en tävling vars
                 // omfattning lagrats som ren sträng — mätt i dev: hela listan föll med
                 // "'K' is an invalid start of a value". ReadScope läser råvärdet i stället.
-                var scope = CompetitionScopeHelper.ReadScope(comp);
+                var scope = CompetitionScopeHelper.NormalizeScopeValue(comp.CompetitionScope);
                 if (!string.Equals(scope, wantedScope, StringComparison.Ordinal)) continue;
 
                 if (scopeType == ScopeRegion)
@@ -392,7 +396,7 @@ namespace HpskSite.Services
                 }
                 else
                 {
-                    if (comp.Value<int>("clubId").ToString() != scopeId) continue;
+                    if (comp.ClubId.ToString() != scopeId) continue;
                 }
 
                 result.Add(comp);
@@ -401,12 +405,12 @@ namespace HpskSite.Services
             return result;
         }
 
-        private static string ResolveRegion(CompetitionScan scan, IPublishedContent competition)
+        private static string ResolveRegion(CompetitionScan scan, HpskSite.Models.Competitions.CompetitionInfo competition)
         {
-            var clubId = competition.Value<int>("clubId");
+            var clubId = competition.ClubId;
             if (clubId > 0 && scan.ClubRegions.TryGetValue(clubId, out var clubRegion) && clubRegion.Length > 0)
                 return clubRegion;
-            return NormalizeRegionCode(competition.Value("regionalFederation")?.ToString());
+            return NormalizeRegionCode(competition.RegionalFederation);
         }
 
         /// <summary>En dropdown-backad egenskap kan ligga som JSON-array (["Halland"]).</summary>
@@ -429,7 +433,7 @@ namespace HpskSite.Services
 
         private sealed class CompetitionScan
         {
-            public List<IPublishedContent> Competitions { get; } = new();
+            public List<HpskSite.Models.Competitions.CompetitionInfo> Competitions { get; } = new();
             public List<IPublishedContent> Clubs { get; } = new();
             public List<IPublishedContent> Regions { get; } = new();
             public Dictionary<int, string> ClubRegions { get; } = new();
@@ -452,12 +456,14 @@ namespace HpskSite.Services
                     {
                         switch (node.ContentType.Alias)
                         {
-                            case "competition": scan.Competitions.Add(node); break;
                             case "club": scan.Clubs.Add(node); break;
                             case "regionalPage": scan.Regions.Add(node); break;
                         }
                     }
             }
+
+            // Tävlingarna ur tävlingslagringen (C3-planen S3), inte trädsvepet.
+            scan.Competitions.AddRange(_competitions.List());
 
             foreach (var club in scan.Clubs)
                 scan.ClubRegions[club.Id] = NormalizeRegionCode(club.Value("regionalFederation")?.ToString());

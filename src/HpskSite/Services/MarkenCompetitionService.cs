@@ -50,8 +50,12 @@ namespace HpskSite.Services
         private readonly IUmbracoDatabaseFactory _databaseFactory;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
 
-        public MarkenCompetitionService(IUmbracoDatabaseFactory databaseFactory, IUmbracoContextAccessor umbracoContextAccessor)
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
+        public MarkenCompetitionService(IUmbracoDatabaseFactory databaseFactory, IUmbracoContextAccessor umbracoContextAccessor,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _databaseFactory = databaseFactory;
             _umbracoContextAccessor = umbracoContextAccessor;
         }
@@ -219,22 +223,22 @@ namespace HpskSite.Services
             {
                 if (!compInfo.TryGetValue(compId, out var ci))
                 {
-                    var comp = ctx.Content.GetById(compId);
-                    if (comp == null || comp.ContentType.Alias != "competition")
+                    var comp = _competitions.Get(compId);
+                    if (comp == null)
                         ci = (0, "", false);
                     else
                     {
                         // ReadScope — even the untyped Value("competitionScope") can throw on a
                         // plain-string value (see CompetitionScopeHelper.ReadScope).
-                        var scope = CompetitionScopeHelper.ReadScope(comp);
+                        var scope = CompetitionScopeHelper.NormalizeScopeValue(comp.CompetitionScope);
                         // Krets level counts whether it comes from the championship OR from a
                         // CONFIRMED competition level (an open krets competition without a
                         // championship was never counted before). An unconfirmed level is only a
                         // suggestion and is never read here — badge awards are one-way.
                         bool eligible = !def.RequiresKretsScope
                             || IsKretsOrAbove(scope)
-                            || CompetitionLevel.IsKretsOrAbove(CompetitionLevel.Read(comp));
-                        ci = (comp.Value<DateTime?>("competitionDate")?.Year ?? 0, comp.Name ?? "Tävling", eligible);
+                            || CompetitionLevel.IsKretsOrAbove(CompetitionLevel.Normalize(comp.CompetitionLevel));
+                        ci = (comp.CompetitionDate?.Year ?? 0, comp.Name ?? "Tävling", eligible);
                     }
                     compInfo[compId] = ci;
                 }

@@ -34,6 +34,8 @@ namespace HpskSite.Controllers
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Events.IClubEventStore _events;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public ClubStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -49,9 +51,11 @@ namespace HpskSite.Controllers
             HpskSite.Services.Training.ClubTrainingService trainings,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Events.IClubEventStore events,
-            MemberActivityService activity)
+            MemberActivityService activity,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _activity = activity;
             _registrations = registrations;
             _trainings = trainings;
@@ -256,16 +260,13 @@ namespace HpskSite.Controllers
             var topCompetitions = new List<object>();
             if (ctx?.Content != null)
             {
-                var root = ctx.Content.GetAtRoot().FirstOrDefault();
-                var compsHub = root?.Children.FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
-                if (compsHub != null)
+                // Tävlingarna ur tävlingslagringen (C3-planen S3).
                 {
-                    var clubCompsThisYear = compsHub.Descendants()
-                        .Where(c => c.ContentType.Alias == "competition")
-                        .Where(c => c.Value<int>("clubId") == clubId)
+                    var clubCompsThisYear = _competitions.List()
+                        .Where(c => c.ClubId == clubId)
                         .Where(c =>
                         {
-                            var d = c.Value<DateTime?>("competitionDate");
+                            var d = c.CompetitionDate;
                             return d.HasValue && d.Value.Year == today.Year;
                         })
                         .ToList();
@@ -273,7 +274,7 @@ namespace HpskSite.Controllers
                     competitionsThisYear = clubCompsThisYear.Count;
 
                     competitionsByDiscipline = clubCompsThisYear
-                        .GroupBy(c => c.Value<string>("competitionType") ?? "Okänd")
+                        .GroupBy(c => c.CompetitionType ?? "Okänd")
                         .Select(g => (object)new { discipline = g.Key, count = g.Count() })
                         .OrderByDescending(o => ((dynamic)o).count)
                         .ToList();
@@ -293,7 +294,7 @@ namespace HpskSite.Controllers
                         .Select(c => new
                         {
                             name = c.Name ?? "",
-                            discipline = c.Value<string>("competitionType") ?? "",
+                            discipline = c.CompetitionType ?? "",
                             registrations = regCountByCompetition.GetValueOrDefault(c.Id, 0)
                         })
                         .OrderByDescending(c => c.registrations)

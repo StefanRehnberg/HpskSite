@@ -11489,6 +11489,16 @@ och tom text är null (så `?? Name` slår till).
   `contactPerson` (aldrig på doktypen) ger standardvärdet. Kalendrarnas sort `"competition"` är markerad.
   Taken 79 → 71, 491 → 460. Verifierat: fångst grön, korskontroll 3092/0, matrisen 8/8 + 35/36
   (`schema-verify`, datum), resultatgranskning-fas2 79, bangranskning-fas3 60, range-calendar 62.
+- **Område 9, märken, schema och statistik (2026-10-15):** `MyScheduleService` (läser posten inne i
+  `EnsureUmbracoContext`, så påminnelsesvepet får samma svar), `MedalHandoutService`, sajtens/klubbens/
+  kretsens statistik, `MarkenCompetitionSeriesSync`, `MarkenCompetitionService`,
+  `MemberActivitySummaryService` och träningsloggens tävlingsresultat. Svepen genom navets underträd tar
+  `List()` (alla publicerade tävlingar ligger under navet, 128/128 i dev). Nytt:
+  `CompetitionStoreExtensions.GetManyIncludingUnpublished` (publicerade i ett svep + det sparade för resten)
+  för listor som läste `GetByIds`. Taken 71 → 62, 460 → 431. Verifierat: fångst (live-tavlans band "Nyss
+  startat" är klockberoende — ställningen identisk), korskontroll 3092/0, matrisen 8/8 + 35/36,
+  activity-summary 105, marken-compseries-sync 64; `schema-dated-verify` (flyttar 5312 till i morgon och
+  tillbaka) 30/33 och ekonomi-statistik (sandlådeantal) lika med BÅDA byggena.
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
