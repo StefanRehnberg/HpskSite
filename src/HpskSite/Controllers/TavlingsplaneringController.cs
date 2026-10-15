@@ -33,6 +33,8 @@ namespace HpskSite.Controllers
         private readonly StaffingGridService _grid;
         private readonly HpskSite.Services.Schedule.CompetitionAgendaService _agenda;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public TavlingsplaneringController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IMemberManager memberManager,
@@ -41,8 +43,10 @@ namespace HpskSite.Controllers
             StaffingService staffing,
             WorkBreakdownService work,
             StaffingGridService grid,
-            HpskSite.Services.Schedule.CompetitionAgendaService agenda)
+            HpskSite.Services.Schedule.CompetitionAgendaService agenda,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -67,13 +71,13 @@ namespace HpskSite.Controllers
             if (currentMember?.Email == null)
                 return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/tavlingsplanering?c={c}")}");
 
-            var competition = c > 0 ? ctx.Content.GetById(c) : null;
-            var isCompetition = competition != null && competition.ContentType.Alias == "competition";
+            var competition = c > 0 ? _competitions.Get(c) : null;
+            var isCompetition = competition != null;
 
             ViewData["CompetitionId"] = c;
             ViewData["CompetitionExists"] = isCompetition;
-            ViewData["CompetitionName"] = isCompetition ? (competition!.Value<string>("competitionName") ?? "Tävling") : "";
-            ViewData["Discipline"] = isCompetition ? (competition!.Value("competitionType")?.ToString() ?? "Precision") : "Precision";
+            ViewData["CompetitionName"] = isCompetition ? (competition!.CompetitionName ?? "Tävling") : "";
+            ViewData["Discipline"] = isCompetition ? (competition!.CompetitionType ?? "Precision") : "Precision";
             ViewData["ManageUrl"] = $"/competitionmanagement?competitionId={c}";
             ViewData["CanAccess"] = isCompetition && await HasCompetitionAccessAsync(c);
 
@@ -91,8 +95,8 @@ namespace HpskSite.Controllers
             if (currentMember?.Email == null)
                 return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/tavlingsplanering/blad?c={c}")}");
 
-            var competition = c > 0 ? ctx.Content.GetById(c) : null;
-            var isCompetition = competition != null && competition.ContentType.Alias == "competition";
+            var competition = c > 0 ? _competitions.Get(c) : null;
+            var isCompetition = competition != null;
             var canAccess = isCompetition && await HasCompetitionAccessAsync(c);
 
             var model = new PlaneringBladModel
@@ -101,14 +105,14 @@ namespace HpskSite.Controllers
                 Vy = PlaneringBladVy.Normalise(vy),
                 Exists = isCompetition,
                 CanAccess = canAccess,
-                CompName = isCompetition ? (competition!.Value<string>("competitionName") ?? "Tävling") : "",
-                Discipline = isCompetition ? (competition!.Value("competitionType")?.ToString() ?? "Precision") : "Precision",
+                CompName = isCompetition ? (competition!.CompetitionName ?? "Tävling") : "",
+                Discipline = isCompetition ? (competition!.CompetitionType ?? "Precision") : "Precision",
             };
 
             if (canAccess)
             {
-                var d = competition!.Value<DateTime?>("competitionDate");
-                if (d.HasValue && d.Value != default)
+                var d = competition!.CompetitionDate;
+                if (d.HasValue)
                     model.CompDate = d.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
                 // Build only what this sheet shows — the grid and the prep breakdown are both expensive.
                 if (model.ShowBemanning)

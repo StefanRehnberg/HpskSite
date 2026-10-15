@@ -11452,6 +11452,16 @@ och tom text är null (så `?? Name` slår till).
   det). `CompetitionResultTreeUrlFinder` hör till S6. Taken 102 → 98, 704 → 637. Verifierat: fångst 0
   avvikelser, korskontroll 3092/0, matrisen 8/8 + 35/36 (`schema-verify`, datum), nastasteg 101/101,
   resultat-medaljval 8/8, prisutdelning-falt 33/33, precision-hub 14/16 med BÅDA byggena (förbefintligt).
+- **Område 5, bemanning (2026-10-15):** `StaffingService` (stationscheferna i rostern, inbjudan, mina
+  uppdrag, avstämningen av tävlingsansvariga), `StaffingSignupService`, `MaterielEstimateService`,
+  `StaffingTemplateService`, `StaffRequestService` läser `GetSaved`; `StaffingGridService`,
+  `StaffingController`, `TavlingsplaneringController`, `MinaUppdragController` och `SkjutledareView` läser
+  `Get` (de läste den publicerade cachen). Kvar på noden med flit: `SyncCompetitionManagers` och
+  `SyncStationManagers` (skriver). ⚠️ `SkjutledareView` bär en handskriven kopia av personalregeln — bara
+  läsningarna flyttades. Taken 98 → 93, 637 → 599. Verifierat: fångst (kallstarten på 10362), korskontroll
+  3092/0, matrisen 8/8 + 35/36 (`schema-verify`, datum), uppdrag-grace 11, grid-fixes 19, personpanel 16,
+  behorighet 13, epost 10, tp-sec04-skjutledare 7; `uppdrag-verify` 14/16 och skjutledare-invoice-gate
+  (ingen väntande faktura) lika med BÅDA byggena; `staffing-verify` är föråldrad (`#bemSubNav` borta).
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

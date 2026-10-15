@@ -26,16 +26,19 @@ namespace HpskSite.Services.Staffing
     {
         private readonly IScopeProvider _scopeProvider;
         private readonly IContentService _contentService;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly IMemberService _memberService;
         private readonly RoleCatalogService _roles;
         private readonly ILogger<StaffingService> _logger;
 
         private const string TavlingsledningRole = "tavlingsledning";
 
-        public StaffingService(IScopeProvider scopeProvider, IContentService contentService, IMemberService memberService, RoleCatalogService roles, ILogger<StaffingService> logger)
+        public StaffingService(IScopeProvider scopeProvider, IContentService contentService, IMemberService memberService, RoleCatalogService roles, ILogger<StaffingService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
             _scopeProvider = scopeProvider;
             _contentService = contentService;
+            _competitions = competitions;
             _memberService = memberService;
             _roles = roles;
             _logger = logger;
@@ -197,9 +200,7 @@ namespace HpskSite.Services.Staffing
         {
             try
             {
-                var content = _contentService.GetById(competitionId);
-                var json = content?.HasProperty("faltskytteStationManagers") == true
-                    ? content.GetValue<string>("faltskytteStationManagers") : null;
+                var json = _competitions.GetSaved(competitionId)?.FaltskytteStationManagers;
                 if (string.IsNullOrWhiteSpace(json)) return;
 
                 var group = resp.Groups.FirstOrDefault(g => string.Equals(g.RoleKey, "stationschef", StringComparison.OrdinalIgnoreCase));
@@ -785,9 +786,9 @@ namespace HpskSite.Services.Staffing
         {
             var a = GetById(assignmentId);
             if (a == null) return null;
-            var content = _contentService.GetById(a.CompetitionId);
-            var compName = content?.GetValue<string>("competitionName") ?? "Tävling";
-            var discipline = content?.GetValue<string>("competitionType") ?? "";
+            var content = _competitions.GetSaved(a.CompetitionId);
+            var compName = content?.CompetitionName ?? "Tävling";
+            var discipline = content?.CompetitionType ?? "";
             var role = _roles.Resolve(a.CompetitionId, discipline, a.RoleKey);
             return new InviteResponseModel
             {
@@ -840,11 +841,11 @@ namespace HpskSite.Services.Staffing
             var result = new List<MyCompetitionGroup>();
             foreach (var compId in compIds)
             {
-                var content = _contentService.GetById(compId);
+                var content = _competitions.GetSaved(compId);
                 if (content == null) continue;
-                var name = content.GetValue<string>("competitionName") ?? "Tävling";
-                var discipline = content.GetValue<string>("competitionType") ?? "";
-                var date = content.GetValue<DateTime?>("competitionDate");
+                var name = content.CompetitionName ?? "Tävling";
+                var discipline = content.CompetitionType ?? "";
+                var date = content.CompetitionDate;
 
                 var grp = new MyCompetitionGroup
                 {
@@ -893,10 +894,10 @@ namespace HpskSite.Services.Staffing
         {
             try
             {
-                var content = _contentService.GetById(competitionId);
-                if (content == null || !content.HasProperty("competitionManagers")) return;
+                var content = _competitions.GetSaved(competitionId);
+                if (content == null) return;
 
-                var json = content.GetValue<string>("competitionManagers") ?? "[]";
+                var json = content.CompetitionManagers ?? "[]";
                 int[] managerIds;
                 try { managerIds = JsonConvert.DeserializeObject<int[]>(json) ?? Array.Empty<int>(); }
                 catch { managerIds = Array.Empty<int>(); }

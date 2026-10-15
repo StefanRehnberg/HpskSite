@@ -3,6 +3,7 @@
 @inject Umbraco.Cms.Core.Services.IMemberService MemberService
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @inject HpskSite.Services.AdminAuthorizationService AuthService
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -15,7 +16,7 @@
     int.TryParse(cStr, out competitionId);
     int.TryParse(lStr, out lagNumber);
 
-    IPublishedContent? competition = null;
+    HpskSite.Models.Competitions.CompetitionInfo? competition = null;
     string competitionName = "";
     string competitionType = "";
     int numberOfSeries = 0;
@@ -23,14 +24,14 @@
 
     if (competitionId > 0)
     {
-        var node = Umbraco.Content(competitionId);
-        if (node != null && node.ContentType.Alias == "competition")
+        var node = Competitions.Get(competitionId);
+        if (node != null)
         {
             competition = node;
-            competitionName = node.Value<string>("competitionName") ?? "";
-            competitionType = node.Value<string>("competitionType") ?? "Precision";
-            numberOfSeries = node.Value<int>("numberOfSeriesOrStations");
-            numberOfFinalSeries = node.Value<int>("numberOfFinalSeries");
+            competitionName = node.CompetitionName ?? "";
+            competitionType = node.CompetitionType ?? "Precision";
+            numberOfSeries = node.NumberOfSeriesOrStations;
+            numberOfFinalSeries = node.NumberOfFinalSeries;
         }
     }
 
@@ -54,14 +55,14 @@
             bool isSiteAdmin = roles.Contains("Administrators");
 
             // Tävlingsansvariga list OR a Bemanning roster row of ANY role granted app access.
-            var cmJson = competition.Value<string>("competitionManagers") ?? "[]";
+            var cmJson = competition.CompetitionManagers ?? "[]";
             int[] cmIds;
             try { cmIds = JsonConvert.DeserializeObject<int[]>(cmJson) ?? Array.Empty<int>(); }
             catch { cmIds = Array.Empty<int>(); }
             bool isCompetitionManager = cmIds.Contains(memberData.Id)
                 || AuthService.HasRosterAppAccess(competition.Id, memberData.Id);
 
-            int competitionClubId = competition.Value<int>("clubId");
+            int competitionClubId = competition.ClubId;
             bool isClubStaff = competitionClubId > 0
                 && (roles.Contains($"ClubAdmin_{competitionClubId}")
                     || roles.Contains($"Skjutledare_{competitionClubId}"));
@@ -70,7 +71,7 @@
             // skjutledare screen too.
             if (!isClubStaff && competitionClubId == 0)
             {
-                var compRegion = (competition.Value<string>("regionalFederation") ?? "").Trim();
+                var compRegion = (competition.RegionalFederation ?? "").Trim();
                 if (!string.IsNullOrWhiteSpace(compRegion))
                     isClubStaff = roles.Contains($"RegionalAdmin_{compRegion}");
             }

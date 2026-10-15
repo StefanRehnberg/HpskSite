@@ -53,6 +53,8 @@ namespace HpskSite.Controllers
         private readonly IDataProtectionProvider _dataProtection;
         private readonly ILogger<StaffingController> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public StaffingController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -82,9 +84,11 @@ namespace HpskSite.Controllers
             EmailService email,
             WebPushService webPush,
             IDataProtectionProvider dataProtection,
-            ILogger<StaffingController> logger)
+            ILogger<StaffingController> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
             _memberManager = memberManager;
             _memberService = memberService;
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -1281,11 +1285,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
-                {
-                    var comp = ctx.Content.GetById(competitionId);
-                    return comp?.Value("competitionType")?.ToString() ?? "";
-                }
+                return _competitions.Get(competitionId)?.CompetitionType ?? "";
             }
             catch { }
             return "";
@@ -1297,12 +1297,8 @@ namespace HpskSite.Controllers
             var name = "tävlingen";
             try
             {
-                if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
-                {
-                    var comp = ctx.Content.GetById(competitionId);
-                    var n = comp?.Value<string>("competitionName");
-                    if (!string.IsNullOrWhiteSpace(n)) name = n!;
-                }
+                var n = _competitions.Get(competitionId)?.CompetitionName;
+                if (!string.IsNullOrWhiteSpace(n)) name = n!;
             }
             catch { }
             return (name, $"/tavlingsplanering?c={competitionId}");
@@ -1341,13 +1337,9 @@ namespace HpskSite.Controllers
         {
             try
             {
-                if (_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content != null)
-                {
-                    var comp = ctx.Content.GetById(competitionId);
-                    var d = comp?.Value<DateTime?>("competitionDate");
-                    if (d.HasValue && d.Value != default)
-                        return (d.Value, (int)(d.Value.Date - DateTime.Now.Date).TotalDays);
-                }
+                var d = _competitions.Get(competitionId)?.CompetitionDate;
+                if (d.HasValue)
+                    return (d.Value, (int)(d.Value.Date - DateTime.Now.Date).TotalDays);
             }
             catch { }
             return (null, null);
@@ -1362,13 +1354,12 @@ namespace HpskSite.Controllers
             if (discipline is not ("Faltskytte" or "MagnumFalt")) return null;
             try
             {
-                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return null;
-                var comp = ctx.Content.GetById(competitionId);
+                var comp = _competitions.Get(competitionId);
                 if (comp == null) return null;
 
-                var stationCount = comp.Value<int>("numberOfSeriesOrStations");
+                var stationCount = comp.NumberOfSeriesOrStations;
                 int attachedConfigId = 0;
-                var cfgJson = comp.HasProperty("stationConfig") ? comp.Value<string>("stationConfig") : null;
+                var cfgJson = comp.StationConfig;
                 if (!string.IsNullOrWhiteSpace(cfgJson))
                 {
                     try
@@ -1565,9 +1556,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return null;
-                var d = ctx.Content.GetById(competitionId)?.Value<DateTime>("competitionDate");
-                return d == default ? null : d;
+                return _competitions.Get(competitionId)?.CompetitionDate;
             }
             catch { return null; }
         }

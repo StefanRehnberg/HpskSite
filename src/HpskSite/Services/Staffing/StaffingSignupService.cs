@@ -18,8 +18,12 @@ namespace HpskSite.Services.Staffing
         private readonly ClubService _clubService;
         private readonly RoleCatalogService _roles;
 
-        public StaffingSignupService(IScopeProvider scopeProvider, IContentService contentService, IMemberService memberService, ClubService clubService, RoleCatalogService roles)
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
+        public StaffingSignupService(IScopeProvider scopeProvider, IContentService contentService, IMemberService memberService, ClubService clubService, RoleCatalogService roles,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _scopeProvider = scopeProvider;
             _contentService = contentService;
             _memberService = memberService;
@@ -114,14 +118,14 @@ namespace HpskSite.Services.Staffing
             var result = new List<OpenSignupView>();
             foreach (var compId in compIds)
             {
-                var comp = _contentService.GetById(compId);
-                if (comp == null || comp.ContentType.Alias != "competition") continue;
-                var discipline = comp.GetValue<string>("competitionType") ?? "";
-                var date = comp.GetValue<DateTime?>("competitionDate");
+                var comp = _competitions.GetSaved(compId);
+                if (comp == null) continue;
+                var discipline = comp.CompetitionType ?? "";
+                var date = comp.CompetitionDate;
                 result.Add(new OpenSignupView
                 {
                     CompetitionId = compId,
-                    CompName = comp.GetValue<string>("competitionName") ?? comp.Name ?? "Tävling",
+                    CompName = comp.CompetitionName ?? comp.Name ?? "Tävling",
                     CompDate = date is { } d && d != default ? d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : null,
                     Discipline = discipline,
                     Roles = _roles.ForCompetition(compId, discipline)
@@ -137,9 +141,9 @@ namespace HpskSite.Services.Staffing
             // Re-check eligibility server-side.
             if (!GetOpenSignups(memberId).Any(o => o.CompetitionId == competitionId))
                 return (false, "Tävlingen är inte öppen för anmälan för dig.");
-            var comp = _contentService.GetById(competitionId);
+            var comp = _competitions.GetSaved(competitionId);
             if (comp == null) return (false, "Tävlingen hittades inte.");
-            var discipline = comp.GetValue<string>("competitionType") ?? "";
+            var discipline = comp.CompetitionType ?? "";
             var role = _roles.Resolve(competitionId, discipline, roleKey);
             if (role == null || role.Key == "tavlingsledning") return (false, "Ogiltig roll.");
 

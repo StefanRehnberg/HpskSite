@@ -15,9 +15,13 @@ namespace HpskSite.Services.Staffing
         private readonly IContentService _contentService;
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public MaterielEstimateService(IContentService contentService,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _contentService = contentService;
             _registrations = registrations;
         }
@@ -27,11 +31,11 @@ namespace HpskSite.Services.Staffing
 
         public MaterielEstimateResponse Estimate(int competitionId)
         {
-            var comp = _contentService.GetById(competitionId);
+            var comp = _competitions.GetSaved(competitionId);
             if (comp == null) return new MaterielEstimateResponse { Success = false, Message = "Tävlingen hittades inte." };
 
-            var discipline = comp.GetValue<string>("competitionType") ?? "";
-            var series = comp.GetValue<int>("numberOfSeriesOrStations");
+            var discipline = comp.CompetitionType ?? "";
+            var series = comp.NumberOfSeriesOrStations;
 
             // Anmälningarna via lagringen (sajtstrukturen fas 1a).
             int participants = 0, starts = 0;
