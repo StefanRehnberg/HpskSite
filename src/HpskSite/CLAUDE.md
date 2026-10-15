@@ -11462,6 +11462,17 @@ och tom text är null (så `?? Name` slår till).
   3092/0, matrisen 8/8 + 35/36 (`schema-verify`, datum), uppdrag-grace 11, grid-fixes 19, personpanel 16,
   behorighet 13, epost 10, tp-sec04-skjutledare 7; `uppdrag-verify` 14/16 och skjutledare-invoice-gate
   (ingen väntande faktura) lika med BÅDA byggena; `staffing-verify` är föråldrad (`#bemSubNav` borta).
+- **Område 6, fältskytte (2026-10-15):** `FaltskytteController`, `FaltskytteResultsBuilder` (+
+  `ParseCompetitionConfig(CompetitionInfo)`), `FaltskytteResultArtifactService` (`BuildArtifact(CompetitionInfo)`),
+  `FaltskytteStatsService`, `FaltskytteSeriesScoreSource`, patrullista/startledare/utskrift
+  (`BuildModel(CompetitionInfo)`)/materiel/statistik och kretsens `bana-stationer` läser `GetSaved`;
+  `StationPage.cshtml` (även QR-1) läser `Get`. `BackfillResultPages` tar kandidaterna ur `List()`. Kvar på
+  noden: de fem endpoints som skriver (stationskonfig, stationschefer, sammanslagning, publicering av
+  resultat och patrullista) och `autoNotifyParticipants`. ⚠️ `StationPage` bär en handskriven kopia av
+  personalregeln. Taken 93 → 89, 599 → 526. Verifierat: fångst (kallstarten på 10362), korskontroll 3092/0,
+  matrisen 8/8 + 35/36 (`schema-verify`, datum), auth-region 25, escaping 22, poang-only 26
+  (`HPSK_BASE` krävs), prisutdelning-falt 33; startledare 7/12 och tp-faltskytte-crossregion 3/7 lika med
+  BÅDA byggena.
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

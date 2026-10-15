@@ -21,8 +21,12 @@ namespace HpskSite.Controllers
         private readonly IUmbracoDatabaseFactory _dbFactory;
         private readonly AdminAuthorizationService _auth;
 
-        public FaltskytteStatsController(IContentService contentService, IUmbracoDatabaseFactory dbFactory, AdminAuthorizationService auth)
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
+        public FaltskytteStatsController(IContentService contentService, IUmbracoDatabaseFactory dbFactory, AdminAuthorizationService auth,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _contentService = contentService;
             _dbFactory = dbFactory;
             _auth = auth;
@@ -33,12 +37,12 @@ namespace HpskSite.Controllers
         {
             if (!await IsStaffForCompetition(competitionId)) return Unauthorized();
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return NotFound();
-            var compType = competition.GetValue<string>("competitionType") ?? "";
+            var compType = competition.CompetitionType ?? "";
             if (compType is not ("Faltskytte" or "MagnumFalt")) return NotFound();
 
-            var config = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig") ?? "");
+            var config = FaltskytteConfigParser.Parse(competition.StationConfig ?? "");
             var firstWc = config.WeaponConfigs.Values.FirstOrDefault();
             var allStations = firstWc?.Stations ?? new List<FaltskytteStationConfig>();
             var stationNumbers = allStations.Where(s => !s.IsShootOffOnly).Select(s => s.Station).Distinct().OrderBy(n => n).ToList();
@@ -94,7 +98,7 @@ namespace HpskSite.Controllers
 
             var model = new FaltskytteStatsModel
             {
-                CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
+                CompetitionName = competition.CompetitionName ?? competition.Name ?? "",
                 PatrolCount = compl.Select(c => c.PatrolNumber).Distinct().Count(),
                 StationCount = stationNumbers.Count,
                 BottleneckStation = bottleneck,

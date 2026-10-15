@@ -31,12 +31,16 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly ClubService _clubService;
         private readonly ILogger<FaltskytteSeriesScoreSource> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public FaltskytteSeriesScoreSource(
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
             IContentService contentService,
             ClubService clubService,
-            ILogger<FaltskytteSeriesScoreSource> logger)
+            ILogger<FaltskytteSeriesScoreSource> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _umbracoDatabaseFactory = umbracoDatabaseFactory;
             _contentService = contentService;
             _clubService = clubService;
@@ -58,9 +62,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
 
             foreach (var compId in competitionIds)
             {
-                var competition = _contentService.GetById(compId);
-                var config = FaltskytteConfigParser.Parse(competition?.GetValue<string>("stationConfig"));
-                modeByCompetition[compId] = FaltskytteScoringMode.IsPoang(config, competition?.GetValue<string>("scoringMode"));
+                var competition = _competitions.GetSaved(compId);
+                var config = FaltskytteConfigParser.Parse(competition?.StationConfig);
+                modeByCompetition[compId] = FaltskytteScoringMode.IsPoang(config, competition?.ScoringMode);
 
                 var firstWcConfig = config.WeaponConfigs.Values.FirstOrDefault();
                 shootOffStations[compId] = firstWcConfig?.Stations

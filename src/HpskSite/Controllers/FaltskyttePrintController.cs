@@ -20,8 +20,12 @@ namespace HpskSite.Controllers
         private readonly IContentService _contentService;
         private readonly AdminAuthorizationService _auth;
 
-        public FaltskyttePrintController(IContentService contentService, AdminAuthorizationService auth)
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
+        public FaltskyttePrintController(IContentService contentService, AdminAuthorizationService auth,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _contentService = contentService;
             _auth = auth;
         }
@@ -32,9 +36,9 @@ namespace HpskSite.Controllers
             if (!await IsStaffForCompetition(competitionId))
                 return Unauthorized();
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return NotFound();
-            var compType = competition.GetValue<string>("competitionType") ?? "";
+            var compType = competition.CompetitionType ?? "";
             if (compType is not ("Faltskytte" or "MagnumFalt")) return NotFound();
 
             var model = BuildModel(competition, competitionId, station, $"{Request.Scheme}://{Request.Host}", withQr: true);
@@ -46,9 +50,9 @@ namespace HpskSite.Controllers
         /// Stationskortens modell ur tävlingens stationConfig. Delas med kretsens bangranskning
         /// (KretsenController, utan QR-koder), så granskaren ser samma kort som arrangören skriver ut.
         /// </summary>
-        internal static FaltskyttePrintStationCardsModel BuildModel(Umbraco.Cms.Core.Models.IContent competition, int competitionId, int? station, string baseUrl, bool withQr)
+        internal static FaltskyttePrintStationCardsModel BuildModel(HpskSite.Models.Competitions.CompetitionInfo competition, int competitionId, int? station, string baseUrl, bool withQr)
         {
-                var config = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig") ?? "");
+                var config = FaltskytteConfigParser.Parse(competition.StationConfig ?? "");
                 var firstWc = config.WeaponConfigs.Values.FirstOrDefault();
                 var stationNumbers = (firstWc?.Stations ?? new List<FaltskytteStationConfig>())
                     .Where(s => !s.IsShootOffOnly)
@@ -59,11 +63,11 @@ namespace HpskSite.Controllers
     
                 var model = new FaltskyttePrintStationCardsModel
                 {
-                    CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "",
+                    CompetitionName = competition.CompetitionName ?? competition.Name ?? "",
                     // Config wins over the competition's mirrored property — see
                     // FaltskytteScoringMode. Keeps this card and the QR Förutsättningar
                     // page (StationPage's ?t= branch) in agreement about Max träff/fig.
-                    ScoringMode = FaltskytteScoringMode.Resolve(config, competition.GetValue<string>("scoringMode")),
+                    ScoringMode = FaltskytteScoringMode.Resolve(config, competition.ScoringMode),
                     Stations = stationNumbers.Select(n =>
                     {
                         var byWc = new Dictionary<string, FaltskytteStationConfig>();

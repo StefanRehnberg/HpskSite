@@ -7,6 +7,7 @@
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @inject Umbraco.Cms.Core.Services.IContentService ContentService
 @inject HpskSite.Services.ClubService ClubService
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @inject HpskSite.Services.AdminAuthorizationService AuthService
 @inject Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory DbFactory
 @inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider DataProtection
@@ -64,12 +65,11 @@
             var parts = raw.Split(':');
             if (parts.Length == 2 && int.TryParse(parts[0], out var infoCompId) && int.TryParse(parts[1], out infoStation))
             {
-                var infoNode = Umbraco.Content(infoCompId);
+                var infoNode = Competitions.Get(infoCompId);
                 if (infoNode != null
-                    && infoNode.ContentType.Alias == "competition"
-                    && SafeStr(infoNode, "competitionType") is "Faltskytte" or "MagnumFalt")
+                    && infoNode.CompetitionType is "Faltskytte" or "MagnumFalt")
                 {
-                    var cfg = FaltskytteConfigParser.Parse(SafeStr(infoNode, "stationConfig"));
+                    var cfg = FaltskytteConfigParser.Parse(infoNode.StationConfig ?? "");
                     var byWc = new Dictionary<string, FaltskytteStationConfig>();
                     foreach (var kv in cfg.WeaponConfigs)
                     {
@@ -79,7 +79,7 @@
                     if (byWc.Count > 0)
                     {
                         infoStations = byWc;
-                        var n = SafeStr(infoNode, "competitionName");
+                        var n = infoNode.CompetitionName;
                         infoCompName = !string.IsNullOrEmpty(n) ? n : (infoNode.Name ?? "");
                         // Tävlingstyp: the configuration's own _scoringMode wins over the
                         // competition's mirrored property, which goes stale whenever the
@@ -87,7 +87,7 @@
                         // the property alone made this page show "Max träff/fig: 2" — a
                         // legacy stored default — on a Poängfält competition whose printed
                         // station card (correctly) omitted it.
-                        infoScoringMode = FaltskytteScoringMode.Resolve(cfg, SafeStr(infoNode, "scoringMode"));
+                        infoScoringMode = FaltskytteScoringMode.Resolve(cfg, infoNode.ScoringMode);
                         infoTokenValid = true;
                     }
                 }
@@ -97,20 +97,20 @@
     }
 
     // Load competition
-    IPublishedContent? competition = null;
+    HpskSite.Models.Competitions.CompetitionInfo? competition = null;
     string competitionName = "";
     string competitionType = "";
     int competitionClubId = 0;
 
     if (competitionId > 0)
     {
-        var node = Umbraco.Content(competitionId);
-        if (node != null && node.ContentType.Alias == "competition")
+        var node = Competitions.Get(competitionId);
+        if (node != null)
         {
             competition = node;
-            competitionName = node.Value<string>("competitionName") ?? "";
-            competitionType = node.Value<string>("competitionType") ?? "Precision";
-            competitionClubId = node.Value<int>("clubId");
+            competitionName = node.CompetitionName ?? "";
+            competitionType = node.CompetitionType ?? "Precision";
+            competitionClubId = node.ClubId;
         }
     }
 
@@ -129,7 +129,7 @@
 
             // Competition management access: tävlingsansvariga list OR a Bemanning roster row of ANY
             // role (stationschef, sekretariat, kassa …) that was granted app access.
-            var cmJson = competition.Value<string>("competitionManagers") ?? "[]";
+            var cmJson = competition.CompetitionManagers ?? "[]";
             int[] cmIds;
             try { cmIds = JsonConvert.DeserializeObject<int[]>(cmJson) ?? Array.Empty<int>(); }
             catch { cmIds = Array.Empty<int>(); }
@@ -148,7 +148,7 @@
             // its regional admin gets the pads. Without this a region-hosted SM handed its own
             // organisers no scoring or timing screen at all.
             bool isRegionHost = await AuthService.IsRegionHostAdminAsync(
-                competitionClubId, competition.Value<string>("regionalFederation"));
+                competitionClubId, competition.RegionalFederation);
 
             canEnterResults = isSiteAdmin || isCompetitionManager || isClubStaff || isRegionHost;
         }
@@ -177,7 +177,7 @@
     {
         try
         {
-            var rawCfg = competition.Value<string>("stationConfig") ?? "";
+            var rawCfg = competition.StationConfig ?? "";
             if (!string.IsNullOrEmpty(rawCfg))
             {
                 var parsedCfg = FaltskytteConfigParser.Parse(rawCfg);
@@ -197,8 +197,7 @@
     // forced into the chief view. 0 destinations → no access; 1 → go straight
     // there; 2+ → chooser.
     bool selfServiceFlag = competition != null
-        && competition.HasProperty("faltskytteSelfServiceResults")
-        && competition.Value<bool>("faltskytteSelfServiceResults");
+        && competition.FaltskytteSelfServiceResults;
 
     var memberPatrols = new List<FaltskyttePatrol>();
     if (isFaltskytte && isLoggedIn && competition != null && selfServiceFlag)
@@ -350,7 +349,7 @@
             var entryViewData = new ViewDataDictionary(ViewData);
             entryViewData["CompetitionId"] = competitionId;
             entryViewData["CompetitionName"] = competitionName;
-            entryViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
+            entryViewData["NumberOfSeriesOrStations"] = competition.NumberOfSeriesOrStations;
             entryViewData["CompetitionType"] = competitionType;
             entryViewData["IsStationPage"] = true;
             entryViewData["PresetWeaponClass"] = sStr ?? "";
@@ -362,8 +361,8 @@
             var entryViewData = new ViewDataDictionary(ViewData);
             entryViewData["CompetitionId"] = competitionId;
             entryViewData["CompetitionName"] = competitionName;
-            entryViewData["NumberOfSeriesOrStations"] = competition.Value<int>("numberOfSeriesOrStations");
-            entryViewData["NumberOfFinalSeries"] = competition.Value<int>("numberOfFinalSeries");
+            entryViewData["NumberOfSeriesOrStations"] = competition.NumberOfSeriesOrStations;
+            entryViewData["NumberOfFinalSeries"] = competition.NumberOfFinalSeries;
             entryViewData["CompetitionType"] = competitionType;
             entryViewData["IsStationPage"] = true;
             entryViewData["PresetTeamNumber"] = stationNumber;

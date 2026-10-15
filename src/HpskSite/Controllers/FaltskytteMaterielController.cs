@@ -20,8 +20,12 @@ namespace HpskSite.Controllers
         private readonly IUmbracoDatabaseFactory _dbFactory;
         private readonly AdminAuthorizationService _auth;
 
-        public FaltskytteMaterielController(IContentService contentService, IUmbracoDatabaseFactory dbFactory, AdminAuthorizationService auth)
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
+        public FaltskytteMaterielController(IContentService contentService, IUmbracoDatabaseFactory dbFactory, AdminAuthorizationService auth,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _contentService = contentService;
             _dbFactory = dbFactory;
             _auth = auth;
@@ -33,12 +37,12 @@ namespace HpskSite.Controllers
             if (!await IsStaffForCompetition(competitionId))
                 return Unauthorized();
 
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null) return NotFound();
-            var compType = competition.GetValue<string>("competitionType") ?? "";
+            var compType = competition.CompetitionType ?? "";
             if (compType is not ("Faltskytte" or "MagnumFalt")) return NotFound();
 
-            var config = FaltskytteConfigParser.Parse(competition.GetValue<string>("stationConfig") ?? "");
+            var config = FaltskytteConfigParser.Parse(competition.StationConfig ?? "");
 
             // Figurkatalog size lookup (Name → SizeGroup) so BOM rows can show storleksgrupp.
             var sizeByName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -51,7 +55,7 @@ namespace HpskSite.Controllers
             catch { /* catalog is best-effort — BOM still works without size groups */ }
 
             var bom = FaltskytteBom.Build(config, sizeByName);
-            bom.CompetitionName = competition.GetValue<string>("competitionName") ?? competition.Name ?? "";
+            bom.CompetitionName = competition.CompetitionName ?? competition.Name ?? "";
 
             return View("~/Views/FaltskytteMateriel.cshtml", bom);
         }

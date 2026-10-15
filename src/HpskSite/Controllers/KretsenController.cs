@@ -237,10 +237,9 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> BanaStationer(int? c, string? t, int? print)
         {
             if (c is not > 0) return NotFound();
-            var content = HttpContext.RequestServices.GetRequiredService<IContentService>();
-            var comp = content.GetById(c.Value);
-            if (comp == null || comp.ContentType.Alias != "competition") return NotFound();
-            var type = comp.GetValue<string>("competitionType") ?? "";
+            var comp = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.ICompetitionStore>().GetSaved(c.Value);
+            if (comp == null) return NotFound();
+            var type = comp.CompetitionType ?? "";
             if (type is not ("Faltskytte" or "MagnumFalt")) return NotFound();
 
             var access = HttpContext.RequestServices.GetRequiredService<CourseReviewAccess>();
@@ -254,7 +253,7 @@ namespace HpskSite.Controllers
                 var link = access.ReadLink(t);
                 var r = link != null && reviews.TablesExist() ? reviews.Get(link.CaseId) : null;
                 allowed = r != null && r.CompetitionId == c.Value && r.Checksum == link!.Checksum
-                          && r.Checksum == HpskSite.Models.Kretsgranskning.CourseReviewRules.Checksum(comp.GetValue<string>("stationConfig"));
+                          && r.Checksum == HpskSite.Models.Kretsgranskning.CourseReviewRules.Checksum(comp.StationConfig);
             }
             if (!allowed)
             {

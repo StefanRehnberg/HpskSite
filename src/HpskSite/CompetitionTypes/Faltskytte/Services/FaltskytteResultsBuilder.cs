@@ -54,6 +54,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         private readonly ILogger<FaltskytteResultsBuilder> _logger;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
         public FaltskytteResultsBuilder(
             IContentService contentService,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -61,8 +63,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             UmbracoStartListRepository startListRepository,
             FaltskytteShootOffService shootOffService,
             ILogger<FaltskytteResultsBuilder> logger,
-            HpskSite.Services.Results.ICompetitionResultStore results)
+            HpskSite.Services.Results.ICompetitionResultStore results,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _results = results;
             _contentService = contentService;
             _umbracoDatabaseFactory = umbracoDatabaseFactory;
@@ -80,23 +84,23 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         public static int GetClassSortOrder(string className) =>
             ShootingClassOrder.Key(className, ShootingClassOrder.Faltskytte);
 
-        public static FaltskytteCompetitionConfig ParseCompetitionConfig(IContent competition)
+        public static FaltskytteCompetitionConfig ParseCompetitionConfig(HpskSite.Models.Competitions.CompetitionInfo competition)
         {
-            var configJson = competition.GetValue<string>("stationConfig");
+            var configJson = competition.StationConfig;
             return FaltskytteConfigParser.Parse(configJson);
         }
 
         public async Task<FaltskytteResultsBuildResult> BuildAsync(
             int competitionId, string? mergeConfig = null, bool subCompetitionOnly = false)
         {
-            var competition = _contentService.GetById(competitionId);
+            var competition = _competitions.GetSaved(competitionId);
             if (competition == null)
                 return FaltskytteResultsBuildResult.Failed("Tävlingen hittades inte.");
 
             var competitionConfig = ParseCompetitionConfig(competition);
             // Tävlingstyp from the config first (the property is a stale-able mirror) —
             // this decides Normalfält "32/22" vs Poängfält "54 p" scoring below.
-            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.GetValue<string>("scoringMode"));
+            var scoringMode = FaltskytteScoringMode.Resolve(competitionConfig, competition.ScoringMode);
             // For result display, use the first available weapon class config to determine station count.
             // Stations marked IsShootOffOnly are NOT counted — they don't contribute to the qualification
             // ranking and they're filtered out everywhere else (admin links, public station card).
@@ -194,7 +198,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
                 }
                 else
                 {
-                    mergeConfig = competition.HasProperty("mergeConfig") ? competition.GetValue<string>("mergeConfig") ?? "" : "";
+                    mergeConfig = competition.MergeConfig ?? "";
                 }
             }
             if (!string.IsNullOrEmpty(mergeConfig))
@@ -233,9 +237,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             // isAwardingStandardMedals AND !isClubOnly per BR-PS.1.3 (club competitions
             // never award standard medals). When either gate fails the StandardMedal field
             // on each shooter stays empty and the views drop the Std column.
-            var isAwardingStandardMedals = competition.GetValue<bool>("isAwardingStandardMedals");
-            var isClubOnly = competition.GetValue<bool>("isClubOnly");
-            var competitionScope = competition.GetValue<string>("competitionScope") ?? "";
+            var isAwardingStandardMedals = competition.IsAwardingStandardMedals;
+            var isClubOnly = competition.IsClubOnly;
+            var competitionScope = competition.CompetitionScope ?? "";
             // SHB 2026: standard medals are split per C-category at SM AND Landsdelsmästerskap
             // (pre-existing hardcode; KrM/KM use the merged C grouping). Keep the SM-only split here
             // because the StandardMedalService's `isChampionship` flag specifically gates the C-split.
@@ -262,7 +266,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             //
             // Resultatlistan visar fortfarande C1/C2/C3 var för sig — det är bara medaljfrågan
             // som ställs per kategori.
-            var competitionType = competition.GetValue<string>("competitionType") ?? "Faltskytte";
+            var competitionType = competition.CompetitionType ?? "Faltskytte";
             var medalCategoryTies = new List<FaltskytteMedalCategoryTies>();
             var categoryStandings = new List<FaltskytteCategoryStanding>();
 
@@ -340,12 +344,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             // Header metadata for the result-list printout / on-screen card —
             // matches what the Precision result page surfaces (competition
             // name, date, organiser, status).
-            var competitionName = competition.Name ?? competition.GetValue<string>("competitionName") ?? "";
-            var competitionDateValue = competition.GetValue<DateTime?>("competitionDate");
+            var competitionName = competition.Name ?? competition.CompetitionName ?? "";
+            var competitionDateValue = competition.CompetitionDate;
             var competitionDateStr = competitionDateValue.HasValue
                 ? competitionDateValue.Value.ToString("yyyy-MM-dd")
                 : "";
-            var organizerClubId = competition.GetValue<int>("clubId");
+            var organizerClubId = competition.ClubId;
             var organizerName = organizerClubId > 0
                 ? (_clubService.GetClubNameById(organizerClubId) ?? "")
                 : "";
@@ -360,13 +364,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             }
             else
             {
-                isOfficialForPayload = competition.HasProperty("faltskytteResultsOfficial")
-                    && competition.GetValue<bool>("faltskytteResultsOfficial");
+                isOfficialForPayload = competition.FaltskytteResultsOfficial;
             }
 
-            var subCompetitionName = competition.HasProperty("subCompetitionName")
-                ? competition.GetValue<string>("subCompetitionName") ?? ""
-                : "";
+            var subCompetitionName = competition.SubCompetitionName ?? "";
 
             return new FaltskytteResultsBuildResult
             {
