@@ -1561,7 +1561,7 @@ namespace HpskSite.Controllers
                 var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                 {
-                    return Ok(new { success = false, message = "Competition not found" });
+                    return Ok(new { success = false, message = "Tävlingen finns inte." });
                 }
 
                 // AUTHORIZATION: borttagningsregeln (C3-planen S2, Stefans beslut 2026-10-14) — klubbadmin för
@@ -1569,7 +1569,7 @@ namespace HpskSite.Controllers
                 // skjutledare.
                 if (!await _authorizationService.CanDeleteCompetitionAsync(request.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved))
                 {
-                    return Ok(new { success = false, message = "Access denied" });
+                    return Ok(new { success = false, message = "Du har inte behörighet att ta bort tävlingen." });
                 }
 
                 // Check for registrations
@@ -1579,7 +1579,7 @@ namespace HpskSite.Controllers
                     return Ok(new
                     {
                         success = false,
-                        message = $"Cannot delete competition with {registrationCount} registration(s). Please remove registrations first."
+                        message = $"Tävlingen kan inte tas bort — den har {registrationCount} {(registrationCount == 1 ? "anmälan" : "anmälningar")}. Ta bort dem först, eller låt tävlingen vara kvar."
                     });
                 }
 
@@ -1596,7 +1596,7 @@ namespace HpskSite.Controllers
                 var trashed = _competitions.Trash(competition.Id);
                 if (!trashed.Ok)
                 {
-                    return Ok(new { success = false, message = "Competition not found" });
+                    return Ok(new { success = false, message = "Tävlingen finns inte." });
                 }
 
                 // Invalidate caches
@@ -1610,7 +1610,7 @@ namespace HpskSite.Controllers
             }
             catch (Exception ex)
             {
-                return Ok(new { success = false, message = "Error deleting competition: " + ex.Message });
+                return Ok(new { success = false, message = "Tävlingen kunde inte tas bort: " + ex.Message });
             }
         }
 
@@ -2363,17 +2363,17 @@ namespace HpskSite.Controllers
                 var series = _seriesStore.GetSaved(request.SeriesId);
                 if (series == null)
                 {
-                    return Ok(new { success = false, message = "Series not found" });
+                    return Ok(new { success = false, message = "Serien finns inte." });
                 }
 
                 // Club admins can only delete their own club's series
                 if (isClubAdmin && !isSiteAdmin && !isRegionalAdmin && !IsSeriesOwnedByClubs(series, managedClubIds))
                 {
-                    return Ok(new { success = false, message = "Access denied" });
+                    return Ok(new { success = false, message = "Du har inte behörighet att ta bort serien." });
                 }
                 if (isRegionalAdmin && !isSiteAdmin && !await RegionalAdminOwnsSeries(series))
                 {
-                    return Ok(new { success = false, message = "Access denied" });
+                    return Ok(new { success = false, message = "Du har inte behörighet att ta bort serien." });
                 }
 
                 // Check if series has competitions
@@ -2385,7 +2385,7 @@ namespace HpskSite.Controllers
                     return Ok(new
                     {
                         success = false,
-                        message = $"Cannot delete series with {competitionCount} competition(s). Remove competitions first."
+                        message = $"Serien kan inte tas bort — den har {competitionCount} {(competitionCount == 1 ? "tävling" : "tävlingar")}. Flytta eller ta bort dem först."
                     });
                 }
 
@@ -2393,17 +2393,17 @@ namespace HpskSite.Controllers
                 var trashed = _seriesStore.Trash(series.Id);
                 if (!trashed.Ok)
                 {
-                    return Ok(new { success = false, message = "Failed to delete series" });
+                    return Ok(new { success = false, message = "Serien kunde inte tas bort." });
                 }
 
                 // Invalidate caches
                 InvalidateCompetitionCaches();
 
-                return Ok(new { success = true, message = "Series deleted successfully" });
+                return Ok(new { success = true, message = "Serien ligger nu i papperskorgen och kan läggas tillbaka av en sajtadministratör." });
             }
             catch (Exception ex)
             {
-                return Ok(new { success = false, message = "Error deleting series: " + ex.Message });
+                return Ok(new { success = false, message = "Serien kunde inte tas bort: " + ex.Message });
             }
         }
 
