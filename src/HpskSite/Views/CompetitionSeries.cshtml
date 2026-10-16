@@ -861,11 +861,17 @@ function toggleSeriesDescription() {
                     html += '<h3 class="mb-0"><i class="bi bi-bar-chart me-2"></i>Serieresultat</h3>';
                     html += '<small>' + escapeHtmlSeries(result.strategyName) + '</small>';
                     html += '</div>';
+                    html += '<div class="d-flex flex-wrap gap-2 ms-2 mt-1">';
+                    // Resultatlistan för utskrift (/serieresultat/{id}) — samma utseende som tävlingarnas listor.
+                    html += '<a class="btn btn-sm btn-light" href="/serieresultat/' + seriesId + '" target="_blank" rel="noopener" title="Öppna resultatlistan för utskrift i en ny flik">';
+                    html += '<i class="bi bi-printer me-1"></i>Skriv ut resultatlistan';
+                    html += '</a>';
                     if (isAdmin) {
-                        html += '<button class="btn btn-sm btn-outline-light ms-2 mt-1" id="recalcSeriesBtn" title="Beräkna om serieresultat">';
+                        html += '<button class="btn btn-sm btn-outline-light" id="recalcSeriesBtn" title="Beräkna om serieresultat">';
                         html += '<i class="bi bi-arrow-clockwise"></i> Beräkna om';
                         html += '</button>';
                     }
+                    html += '</div>';
                     html += '</div>';
                     html += '<div class="card-body p-0">';
 
