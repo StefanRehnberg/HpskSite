@@ -37,9 +37,11 @@ namespace HpskSite.Controllers
         [HttpGet("{seriesId:int}")]
         public async Task<IActionResult> Index(int seriesId)
         {
-            // Bara en publicerad serie — samma som seriesidan visar.
+            // En publicerad serie — samma som seriesidan visar. ⚠️ Inte IsVisible: seriesidan visar även en
+            // serie märkt "Inaktiv" med sina resultat (Säters fältserie 2026 i prod), och utskriften ska
+            // inte vara strängare än sidan den skriver ut.
             var series = _series.Get(seriesId);
-            if (series == null || !series.IsVisible) return NotFound();
+            if (series == null) return NotFound();
 
             SeriesResultData? result = null;
             string? error = null;
