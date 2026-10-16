@@ -24,8 +24,9 @@
                 <div class="alert alert-warning mb-3" role="alert">
                     <small>
                         <i class="bi bi-info-circle me-1"></i>
-                        <strong>Warning:</strong> This action cannot be undone. 
-                        Ensure there are no registrations for this competition.
+                        Tävlingen läggs i papperskorgen och kan läggas tillbaka av en sajtadministratör.
+                        Den går inte att ta bort så länge den har anmälningar, lag, resultat, avgifter eller
+                        funktionärer.
                     </small>
                 </div>
 
@@ -83,7 +84,7 @@ function confirmDeleteCompetition() {
             button.innerHTML = '<i class="bi bi-trash me-1"></i>Delete';
 
             if (data.success) {
-                alert('Competition deleted successfully!');
+                alert(data.message || 'Tävlingen ligger nu i papperskorgen.');
                 bootstrap.Modal.getInstance(document.getElementById('competitionDeleteConfirmModal')).hide();
 
                 // OPTIMIZED: Remove from table instead of full reload

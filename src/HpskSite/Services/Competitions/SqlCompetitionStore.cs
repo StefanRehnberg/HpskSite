@@ -39,9 +39,17 @@ namespace HpskSite.Services.Competitions
                 ? new Dictionary<string, object?> { ["SeriesId"] = after.SeriesId }
                 : new Dictionary<string, object?>());
 
-        /// <summary>Byggs med tabellens slutliga form (planens §5) — där bestäms id-golvet och adressen.</summary>
+        internal const string NotYet = "Skapa, flytta och ta bort i tabellen byggs med tabellens slutliga form (C3-planen §5).";
+
+        /// <summary>Byggs med tabellens slutliga form (planens §5) — där bestäms id-golvet, adressen och den mjuka raderingen.</summary>
         public CompetitionUpdateResult<CompetitionInfo> Create(int parentId, string name, Action<CompetitionInfo> init) =>
-            throw new NotSupportedException("Att skapa tävlingar i tabellen byggs med tabellens slutliga form (C3-planen §5).");
+            throw new NotSupportedException(NotYet);
+
+        public CompetitionUpdateResult<CompetitionInfo> MoveToSeries(int id, int? seriesId) =>
+            throw new NotSupportedException(NotYet);
+
+        public CompetitionUpdateResult<CompetitionInfo> Trash(int id) =>
+            throw new NotSupportedException(NotYet);
 
         private static void Fill(CompetitionInfo c, IDictionary<string, object?> row, SqlMeta m)
         {
@@ -75,6 +83,12 @@ namespace HpskSite.Services.Competitions
 
         public CompetitionUpdateResult<CompetitionSeriesInfo> Update(int id, long? expectedVersion, Action<CompetitionSeriesInfo> change) =>
             _core.Update(id, expectedVersion, change, (_, _) => new Dictionary<string, object?>());
+
+        public CompetitionUpdateResult<CompetitionSeriesInfo> Create(int parentId, string name, Action<CompetitionSeriesInfo> init) =>
+            throw new NotSupportedException(SqlCompetitionStore.NotYet);
+
+        public CompetitionUpdateResult<CompetitionSeriesInfo> Trash(int id) =>
+            throw new NotSupportedException(SqlCompetitionStore.NotYet);
 
         private static void Fill(CompetitionSeriesInfo s, IDictionary<string, object?> row, SqlMeta m)
         {

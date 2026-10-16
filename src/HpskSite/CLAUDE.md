@@ -11590,7 +11590,22 @@ JsonElement som Umbraco inte kunde lagra); skapandet sparar `maxReshoots` som re
 `c3-s5b-compare.mjs` — samma payload mot båda byggena, nodens lagrade värden jämförda på SHA1; kvar är bara de
 avsedda skillnaderna och NULL ≈ 0/tomt (ett oförändrat fält skrivs inte). `c3-copy-competition-verify.mjs`
 kräver nu att tillståndet INTE följer med. Test: `CompetitionFieldBagTests` (8). Taken 28 → 21, 33 → 23,
-149 → 117, 66 → 61.
+149 → 117, 66 → 61. ⚠️ Skapandet gick hela innehållsträdet med en fråga per nod för att hitta navet — 14 s per
+ny tävling, före S5b också (aa0f9e4).
+
+**S5c (ta bort, flytta, serierna, 2026-10-16):** `ICompetitionStore.MoveToSeries(id, seriesId?)` (serien, eller
+årsmappen för tävlingens datum) och `Trash(id)`; `ICompetitionSeriesStore.Create` och `Trash`. **⚠️ Borttagning
+= papperskorgen** (mjuk radering, §9a) — förut en permanent radering som tog med anmälningsnav, gamla fakturor och
+resultatnoden. **`CompetitionDeleteGuard`** är spärren (efter anmälningarna): lag, inmatade resultat (alla
+resultattabeller), avgifter/betalningar i liggaren (dbo + sbx, ej makulerade), gamla fakturor under noden,
+standardmedaljer, märkesserier, funktionärsuppdrag, evenemangskoppling, tävlingsansökan; meddelandet räknar upp
+dem. Rekord och mästartitlar bär bara tävlingens NAMN och spärrar inte. En saknad tabell räknas som tom.
+**`CompetitionTreePlacement`** (Hub, YearFolderId) är enda stället navet och årsmappen letas upp (sex kopior
+borta). Serierna skapas, redigeras, kopieras och tas bort genom serielagringen; redigeringen publicerar bara en
+publicerad serie, och en kopierad serie läser synligheten med §9a-regeln (saknat isActive = synlig; förut blev
+kopian dold). Tabellagringen kastar `NotSupported` för skapa/flytta/ta bort tills §5. Svit:
+`hpsk-verify/c3/c3-s5c-verify.mjs` 22/22 (bara mot kopian; A/B mot s5b2: 8 röda). Dialogerna säger papperskorgen.
+Taken 21 → 19, 23 → 16, 117 → 116, 61 → 34. Seedarna (bara dev) skriver fortfarande noder direkt.
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

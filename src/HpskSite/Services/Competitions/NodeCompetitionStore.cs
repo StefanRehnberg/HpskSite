@@ -26,10 +26,14 @@ namespace HpskSite.Services.Competitions
     public class NodeCompetitionStore : ICompetitionStore
     {
         private readonly NodeStoreCore<CompetitionInfo> _core;
+        private readonly IContentService _contentService;
+        private readonly CompetitionTreePlacement _placement;
 
         public NodeCompetitionStore(IContentService contentService, IUmbracoContextAccessor umbracoContextAccessor,
-            IScopeProvider scopeProvider, ILogger<NodeCompetitionStore> logger)
+            IScopeProvider scopeProvider, ILogger<NodeCompetitionStore> logger, CompetitionTreePlacement placement)
         {
+            _contentService = contentService;
+            _placement = placement;
             _core = new NodeStoreCore<CompetitionInfo>(CompetitionFieldTable.NodeAlias, CompetitionFieldTable.Fields,
                 contentService, umbracoContextAccessor, scopeProvider, logger, Fill, c => c.Name);
         }
@@ -45,6 +49,31 @@ namespace HpskSite.Services.Competitions
 
         public CompetitionUpdateResult<CompetitionInfo> Create(int parentId, string name, Action<CompetitionInfo> init) =>
             _core.Create(parentId, name, init);
+
+        /// <summary>
+        /// Serien, eller årsmappen för tävlingens datum (dagens år när datumet saknas) — samma placering
+        /// som flytten alltid haft.
+        /// </summary>
+        public CompetitionUpdateResult<CompetitionInfo> MoveToSeries(int id, int? seriesId)
+        {
+            var current = _core.GetSaved(id);
+            if (current is null) return new CompetitionUpdateResult<CompetitionInfo> { Outcome = CompetitionUpdateOutcome.NotFound };
+            int parentId;
+            if (seriesId is > 0)
+            {
+                var series = _contentService.GetById(seriesId.Value);
+                if (series is null || series.Trashed || series.ContentType.Alias != CompetitionSeriesFieldTable.NodeAlias)
+                    throw new InvalidOperationException("Serien finns inte.");
+                parentId = series.Id;
+            }
+            else
+            {
+                parentId = _placement.YearFolderId((current.CompetitionDate ?? DateTime.Now).Year);
+            }
+            return _core.Move(id, parentId);
+        }
+
+        public CompetitionUpdateResult<CompetitionInfo> Trash(int id) => _core.Trash(id);
 
         private static void Fill(CompetitionInfo c, NodeMeta m)
         {
@@ -75,6 +104,11 @@ namespace HpskSite.Services.Competitions
 
         public CompetitionUpdateResult<CompetitionSeriesInfo> Update(int id, long? expectedVersion, Action<CompetitionSeriesInfo> change) =>
             _core.Update(id, expectedVersion, change);
+
+        public CompetitionUpdateResult<CompetitionSeriesInfo> Create(int parentId, string name, Action<CompetitionSeriesInfo> init) =>
+            _core.Create(parentId, name, init);
+
+        public CompetitionUpdateResult<CompetitionSeriesInfo> Trash(int id) => _core.Trash(id);
 
         private static void Fill(CompetitionSeriesInfo s, NodeMeta m)
         {
@@ -251,6 +285,40 @@ namespace HpskSite.Services.Competitions
                 ChangedFields = written.Select(f => f.Alias).ToList(),
                 PublishProblem = publishProblem,
             };
+        }
+
+        /// <summary>Flyttar noden under <paramref name="parentId"/> (ingenting om den redan ligger där).</summary>
+        public CompetitionUpdateResult<T> Move(int id, int parentId)
+        {
+            var node = id > 0 ? _contentService.GetById(id) : null;
+            if (node is null || node.Trashed || node.ContentType.Alias != _alias)
+                return new CompetitionUpdateResult<T> { Outcome = CompetitionUpdateOutcome.NotFound };
+            if (node.ParentId != parentId)
+            {
+                var moved = _contentService.Move(node, parentId, -1);
+                if (!moved.Success)
+                    throw new InvalidOperationException($"{_alias} {id} kunde inte flyttas: " +
+                        string.Join(", ", moved.EventMessages?.GetAll().Select(e => e.Message) ?? Array.Empty<string>()));
+            }
+            var saved = _contentService.GetById(id) ?? node;
+            return new CompetitionUpdateResult<T> { Outcome = CompetitionUpdateOutcome.Saved, Record = FromContent(saved) };
+        }
+
+        /// <summary>
+        /// Lägger noden i papperskorgen (avpubliceras av Umbraco). Inget under den raderas — en permanent
+        /// radering tog förut med sig anmälningsnav, gamla fakturor och resultatnoden.
+        /// </summary>
+        public CompetitionUpdateResult<T> Trash(int id)
+        {
+            var node = id > 0 ? _contentService.GetById(id) : null;
+            if (node is null || node.Trashed || node.ContentType.Alias != _alias)
+                return new CompetitionUpdateResult<T> { Outcome = CompetitionUpdateOutcome.NotFound };
+            var before = FromContent(node);
+            var trashed = _contentService.MoveToRecycleBin(node, -1);
+            if (!trashed.Success)
+                throw new InvalidOperationException($"{_alias} {id} kunde inte läggas i papperskorgen: " +
+                    string.Join(", ", trashed.EventMessages?.GetAll().Select(e => e.Message) ?? Array.Empty<string>()));
+            return new CompetitionUpdateResult<T> { Outcome = CompetitionUpdateOutcome.Saved, Record = before };
         }
 
         private void WriteFields(IContent node, IEnumerable<CompetitionFieldDef<T>> fields, T record)

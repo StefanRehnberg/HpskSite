@@ -65,6 +65,18 @@ namespace HpskSite.Services.Competitions
             if (CompetitionStoreSettings.IsWriteFrozen(_settings)) throw new CompetitionWriteFrozenException();
             return Current.Create(parentId, name, init);
         }
+
+        public CompetitionUpdateResult<CompetitionInfo> MoveToSeries(int id, int? seriesId)
+        {
+            if (CompetitionStoreSettings.IsWriteFrozen(_settings)) throw new CompetitionWriteFrozenException();
+            return Current.MoveToSeries(id, seriesId);
+        }
+
+        public CompetitionUpdateResult<CompetitionInfo> Trash(int id)
+        {
+            if (CompetitionStoreSettings.IsWriteFrozen(_settings)) throw new CompetitionWriteFrozenException();
+            return Current.Trash(id);
+        }
     }
 
     /// <summary>Den registrerade <see cref="ICompetitionSeriesStore"/>. Samma växel som tävlingarna.</summary>
@@ -92,6 +104,18 @@ namespace HpskSite.Services.Competitions
         {
             if (CompetitionStoreSettings.IsWriteFrozen(_settings)) throw new CompetitionWriteFrozenException();
             return Current.Update(id, expectedVersion, change);
+        }
+
+        public CompetitionUpdateResult<CompetitionSeriesInfo> Create(int parentId, string name, Action<CompetitionSeriesInfo> init)
+        {
+            if (CompetitionStoreSettings.IsWriteFrozen(_settings)) throw new CompetitionWriteFrozenException();
+            return Current.Create(parentId, name, init);
+        }
+
+        public CompetitionUpdateResult<CompetitionSeriesInfo> Trash(int id)
+        {
+            if (CompetitionStoreSettings.IsWriteFrozen(_settings)) throw new CompetitionWriteFrozenException();
+            return Current.Trash(id);
         }
     }
 }

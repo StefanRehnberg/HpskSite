@@ -4774,7 +4774,7 @@ function deleteClubCompetition(competitionId, competitionName) {
         .then(data => {
             if (data.success) {
                 loadClubCompetitions();
-                alert('Tävling raderad!');
+                alert(data.message || 'Tävlingen ligger nu i papperskorgen.');
             } else {
                 alert('Fel: ' + (data.message || 'Kunde inte radera tävlingen'));
             }
