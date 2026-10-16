@@ -225,6 +225,9 @@ namespace HpskSite.Composers
             // på node; tabellen används i S1 bara mot databaskopian. Läsarna flyttas hit i S3.
             builder.Services.AddScoped<HpskSite.Services.Competitions.CompetitionTreePlacement>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.CompetitionDeleteGuard>();
+            // C3-planen S5d: ändringsloggen (per begäran, läser den inloggade) och versionsraden (en per instans).
+            builder.Services.AddScoped<HpskSite.Services.Competitions.CompetitionChangeRecorder>();
+            builder.Services.AddSingleton<HpskSite.Services.Competitions.CompetitionCacheVersion>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.NodeCompetitionStore>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.SqlCompetitionStore>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.SwitchingCompetitionStore>();

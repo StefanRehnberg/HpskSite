@@ -11607,6 +11607,27 @@ kopian dold). Tabellagringen kastar `NotSupported` för skapa/flytta/ta bort til
 `hpsk-verify/c3/c3-s5c-verify.mjs` 22/22 (bara mot kopian; A/B mot s5b2: 8 röda). Dialogerna säger papperskorgen.
 Taken 21 → 19, 23 → 16, 117 → 116, 61 → 34. Seedarna (bara dev) skriver fortfarande noder direkt.
 
+**S5d (ändringsloggen, versionsraden, synlig frysning, 2026-10-16):** `Services/Competitions/CompetitionChangeRecorder.cs`.
+- **`CompetitionChangeRecorder`** (scoped) anropas av `NodeStoreCore` vid Update (ändrade fält före/efter +
+  `@name`), Create (skrivna fält, `@name`, `@parentId`), Move (`@parentId`) och Trash (`@trashed`, ursprunglig
+  förälder). En rad i `dbo.CompetitionChange` (TargetKind `competition`/`competitionSeries`, Action, MemberId,
+  AtUtc, Changes som JSON), räknar upp `dbo.CompetitionStoreVersion` och tömmer instansens cachar. ⚠️ Sväljer
+  sina fel (varnar högst var 10:e minut) — en loggmiss får aldrig fälla en sparning. En oförändrad sparning
+  skriver ingen rad. **Ny skrivväg i lagringen: anropa recordern.**
+- **`CompetitionCacheVersion`** (singleton): `EnsureFresh()` läser versionsraden högst var 5:e sekund och
+  tömmer menyn, adressindexet och adminlistorna (`InvalidateLocal`) när en ANNAN instans skrivit. Anropas i
+  `CompetitionMenuService.Get`, `CompetitionUrlContentFinder` och `GetCompetitionsList`/`GetSeriesList`.
+  **Ny cache över tävlingar: töm den i `InvalidateLocal` och anropa `EnsureFresh` där den läses.**
+- **Frysningen syns:** `Views/Partials/_CompetitionFreezeNotice.cshtml` (Master, inloggade) visar en banderoll
+  och stoppar tävlings- och seriedialogerna; servern svarar `maintenance:true` (controllrarnas `catch` släpper
+  `CompetitionWriteFrozenException` till `WriteFrozenExceptionFilter`).
+- `CompetitionHealthService` varnar när ändringsloggen saknas och när tävlingarna är frysta.
+  `C3BaselineController.CompetitionCacheProbe` (sajtadmin) visar instansens cachar.
+- **Operatörssteg:** `Migrations/create-competition-change-tables.sql` **FÖRE deployen**. Körd i dev och i
+  kopian (`c3-restore.sh` kör den), **EJ i prod**. Svit: `hpsk-verify/c3/c3-s5d-verify.mjs` 18/18 (bara mot
+  kopian; versionsraden prövas genom att räkna upp den i SQL — två instanser på samma maskin delar identitet).
+  Test: `OpsTests` (två nya hälsoregler).
+
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
 `Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,

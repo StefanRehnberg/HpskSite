@@ -80,7 +80,7 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                     new { competitionId }
                 );
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return CompetitionEditResult.ErrorResult(
                     "Error saving competition",

@@ -118,6 +118,24 @@ namespace HpskSite.Tests
         [Fact] public void Health_ignores_floor_in_node_mode() => Eval(Store(store: "node", next: 11025, highest: 11051)).Status.Should().Be("OK");
         [Fact] public void Health_warns_when_frozen() => Eval(Store(frozen: true)).Status.Should().Be("WARN");
 
+        // C3-planen S5d: en okörd migrering och en frysning syns som varning, aldrig som ett fel.
+        [Fact]
+        public void Health_warns_without_change_log_tables()
+        {
+            var r = new CompetitionHealthService.Report { Stores = new() { Store() }, ChangeLogExists = false };
+            CompetitionHealthService.Evaluate(r);
+            r.Status.Should().Be("WARN");
+            r.Warnings.Should().ContainSingle(w => w.Contains("create-competition-change-tables.sql"));
+        }
+
+        [Fact]
+        public void Health_warns_when_competitions_frozen()
+        {
+            var r = new CompetitionHealthService.Report { Stores = new() { Store() }, CompetitionsFrozen = true };
+            CompetitionHealthService.Evaluate(r);
+            r.Status.Should().Be("WARN");
+        }
+
         [Fact]
         public void Health_warns_on_competitions_without_url()
         {

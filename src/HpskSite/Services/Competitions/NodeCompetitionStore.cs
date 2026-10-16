@@ -30,12 +30,13 @@ namespace HpskSite.Services.Competitions
         private readonly CompetitionTreePlacement _placement;
 
         public NodeCompetitionStore(IContentService contentService, IUmbracoContextAccessor umbracoContextAccessor,
-            IScopeProvider scopeProvider, ILogger<NodeCompetitionStore> logger, CompetitionTreePlacement placement)
+            IScopeProvider scopeProvider, ILogger<NodeCompetitionStore> logger, CompetitionTreePlacement placement,
+            CompetitionChangeRecorder recorder)
         {
             _contentService = contentService;
             _placement = placement;
             _core = new NodeStoreCore<CompetitionInfo>(CompetitionFieldTable.NodeAlias, CompetitionFieldTable.Fields,
-                contentService, umbracoContextAccessor, scopeProvider, logger, Fill, c => c.Name);
+                contentService, umbracoContextAccessor, scopeProvider, logger, Fill, c => c.Name, recorder);
         }
 
         public CompetitionInfo? Get(int id) => _core.Get(id);
@@ -91,10 +92,11 @@ namespace HpskSite.Services.Competitions
         private readonly NodeStoreCore<CompetitionSeriesInfo> _core;
 
         public NodeCompetitionSeriesStore(IContentService contentService, IUmbracoContextAccessor umbracoContextAccessor,
-            IScopeProvider scopeProvider, ILogger<NodeCompetitionSeriesStore> logger)
+            IScopeProvider scopeProvider, ILogger<NodeCompetitionSeriesStore> logger,
+            CompetitionChangeRecorder recorder)
         {
             _core = new NodeStoreCore<CompetitionSeriesInfo>(CompetitionSeriesFieldTable.NodeAlias, CompetitionSeriesFieldTable.Fields,
-                contentService, umbracoContextAccessor, scopeProvider, logger, Fill, s => s.Name);
+                contentService, umbracoContextAccessor, scopeProvider, logger, Fill, s => s.Name, recorder);
         }
 
         public CompetitionSeriesInfo? Get(int id) => _core.Get(id);
@@ -134,12 +136,14 @@ namespace HpskSite.Services.Competitions
         private readonly ILogger _logger;
         private readonly Action<T, NodeMeta> _fill;
         private readonly Func<T, string> _nameOf;
+        private readonly CompetitionChangeRecorder _recorder;
 
         public NodeStoreCore(string alias, IReadOnlyList<CompetitionFieldDef<T>> fields, IContentService contentService,
             IUmbracoContextAccessor umbracoContextAccessor, IScopeProvider scopeProvider, ILogger logger, Action<T, NodeMeta> fill,
-            Func<T, string> nameOf)
+            Func<T, string> nameOf, CompetitionChangeRecorder recorder)
         {
             _nameOf = nameOf;
+            _recorder = recorder;
             _alias = alias;
             _fields = fields;
             _contentService = contentService;
@@ -236,6 +240,10 @@ namespace HpskSite.Services.Competitions
             _contentService.Save(node);
             var publishProblem = wasPublished ? Publish(node) : null;
 
+            var log = changed.ToDictionary(f => f.Alias, f => (f.Get(before), f.Get(after)));
+            if (renamed) log["@name"] = (_nameOf(before), newName.Trim());
+            _recorder.Record(_alias, id, "Update", log);
+
             var saved = _contentService.GetById(id) ?? node;
             return new CompetitionUpdateResult<T>
             {
@@ -277,6 +285,11 @@ namespace HpskSite.Services.Competitions
             }
             var publishProblem = Publish(node);
 
+            var log = written.ToDictionary(f => f.Alias, f => ((object?)null, f.Get(after)));
+            log["@name"] = (null, node.Name);
+            log["@parentId"] = (null, parentId);
+            _recorder.Record(_alias, node.Id, "Create", log);
+
             var saved = _contentService.GetById(node.Id) ?? node;
             return new CompetitionUpdateResult<T>
             {
@@ -295,10 +308,12 @@ namespace HpskSite.Services.Competitions
                 return new CompetitionUpdateResult<T> { Outcome = CompetitionUpdateOutcome.NotFound };
             if (node.ParentId != parentId)
             {
+                var from = node.ParentId;
                 var moved = _contentService.Move(node, parentId, -1);
                 if (!moved.Success)
                     throw new InvalidOperationException($"{_alias} {id} kunde inte flyttas: " +
                         string.Join(", ", moved.EventMessages?.GetAll().Select(e => e.Message) ?? Array.Empty<string>()));
+                _recorder.Record(_alias, id, "Move", new Dictionary<string, (object?, object?)> { ["@parentId"] = (from, parentId) });
             }
             var saved = _contentService.GetById(id) ?? node;
             return new CompetitionUpdateResult<T> { Outcome = CompetitionUpdateOutcome.Saved, Record = FromContent(saved) };
@@ -314,10 +329,12 @@ namespace HpskSite.Services.Competitions
             if (node is null || node.Trashed || node.ContentType.Alias != _alias)
                 return new CompetitionUpdateResult<T> { Outcome = CompetitionUpdateOutcome.NotFound };
             var before = FromContent(node);
+            var fromParent = node.ParentId;
             var trashed = _contentService.MoveToRecycleBin(node, -1);
             if (!trashed.Success)
                 throw new InvalidOperationException($"{_alias} {id} kunde inte läggas i papperskorgen: " +
                     string.Join(", ", trashed.EventMessages?.GetAll().Select(e => e.Message) ?? Array.Empty<string>()));
+            _recorder.Record(_alias, id, "Trash", new Dictionary<string, (object?, object?)> { ["@trashed"] = (false, true), ["@parentId"] = (fromParent, null) });
             return new CompetitionUpdateResult<T> { Outcome = CompetitionUpdateOutcome.Saved, Record = before };
         }
 
