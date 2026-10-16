@@ -132,19 +132,15 @@ WHERE ct.alias = 'competitionSeries' AND n.trashed = 0");
                 if (row.Blocked.Length > 0) { result.Add((id, false, row.Blocked, "")); continue; }
                 try
                 {
-                    var content = _contentService.GetById(id);
-                    if (content == null) { result.Add((id, false, "Tävlingen finns inte.", "")); continue; }
-                    if (row.NewClubId > 0) content.SetValue("clubId", row.NewClubId);
-                    if (row.NewRegion.Length > 0) content.SetValue("regionalFederation", row.NewRegion);
-                    var published = content.Published;
-                    _contentService.Save(content);
-                    // Umbracos användar-id, inte medlemmens: en medlem är ingen backoffice-användare
-                    // (FK_umbracoContentVersion_umbracoUser_id). Medlemmen står i loggraden.
-                    if (published)
+                    // Genom tävlingslagringen (C3-planen S5), som publicerar en publicerad tävling som användar-id -1
+                    // (en medlem är ingen backoffice-användare). Medlemmen står i loggraden.
+                    var saved = _competitions.Update(id, null, c =>
                     {
-                        var pub = _contentService.Publish(content, new[] { "*" }, -1);
-                        if (!pub.Success) { result.Add((id, false, "Sparad men inte publicerad: " + pub.Result, "")); continue; }
-                    }
+                        if (row.NewClubId > 0) c.ClubId = row.NewClubId;
+                        if (row.NewRegion.Length > 0) c.RegionalFederation = row.NewRegion;
+                    });
+                    if (saved.Outcome == HpskSite.Services.Competitions.CompetitionUpdateOutcome.NotFound) { result.Add((id, false, "Tävlingen finns inte.", "")); continue; }
+                    if (saved.PublishProblem != null) { result.Add((id, false, saved.PublishProblem, "")); continue; }
                     _logger.LogWarning("Värdrättelsen (F5): tävling {Id} \"{Name}\" fick klubb {Club} och krets {Region} från serien {Series} (medlem {Actor}). Gammal adress {Url}",
                         id, row.Name, row.NewClubId, row.NewRegion, row.SeriesId, actorMemberId, row.OldUrl);
                     result.Add((id, true, "", _urlProvider.GetUrl(id)));

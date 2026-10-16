@@ -25,6 +25,7 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly ClubService _clubService;
         private readonly IContentService _contentService;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly RangeDocumentStorage _docStorage;
         private readonly MemberClubService _memberClubs;
         private readonly RangeCalendarService _calendar;
@@ -47,10 +48,12 @@ namespace HpskSite.Controllers
             MemberClubService memberClubs,
             RangeCalendarService calendar,
             ClubEventParticipationService participation,
-            ILogger<ShootingRangeController> logger)
+            ILogger<ShootingRangeController> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _calendar = calendar;
+            _competitions = competitions;
             _participation = participation;
             _rangeService = rangeService;
             _authService = authService;
@@ -812,23 +815,23 @@ namespace HpskSite.Controllers
                 var memberId = await _rangeService.GetCurrentMemberIdAsync();
                 if (memberId == null) return Json(new { success = false, message = "Inloggning krävs." });
 
-                var comp = _contentService.GetById(req.CompetitionId);
-                if (comp == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
+                if (_competitions.GetSaved(req.CompetitionId) == null)
+                    return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-                bool isSiteAdmin = await _rangeService.IsSiteAdminAsync();
-                bool isCompManager = await _authService.IsCompetitionManager(req.CompetitionId);
-                bool isClubAdmin = false;
-                int clubId = comp.HasProperty("clubId") ? comp.GetValue<int>("clubId") : 0;
-                if (clubId > 0) isClubAdmin = await _authService.IsClubAdminForClub(clubId);
-                if (!isSiteAdmin && !isCompManager && !isClubAdmin)
+                // Redigeringsregeln (C3-planen S2) — förut en handskriven kontroll som bara läste clubId och
+                // därmed låste ute kretsen från en kretsvärdad tävling.
+                if (!await _authService.CanEditCompetitionAsync(req.CompetitionId, AdminAuthorizationService.CompetitionRead.Saved))
                     return Json(new { success = false, message = "Behörighet saknas." });
 
-                if (!comp.HasProperty("rangeId"))
+                // Genom tävlingslagringen (C3-planen S5); en saknad doktypsegenskap kastar där.
+                HpskSite.Services.Competitions.CompetitionUpdateResult<HpskSite.Models.Competitions.CompetitionInfo> saved;
+                try { saved = _competitions.Update(req.CompetitionId, null, c => c.RangeId = req.RangeId > 0 ? req.RangeId : 0); }
+                catch (InvalidOperationException)
+                {
                     return Json(new { success = false, message = "Egenskapen 'rangeId' saknas på tävlingsdoctypen. Lägg till den i backoffice." });
-
-                comp.SetValue("rangeId", req.RangeId > 0 ? req.RangeId : 0);
-                _contentService.Save(comp);
-                if (comp.Published) _contentService.Publish(comp, new[] { "*" }, -1);
+                }
+                if (saved.PublishProblem != null)
+                    return Json(new { success = false, message = saved.PublishProblem });
                 // Banans kalender läser tävlingarna ur ett index som annars lever två minuter.
                 AppCaches.RuntimeCache.Clear(RangeCalendarService.CompetitionIndexKey);
 

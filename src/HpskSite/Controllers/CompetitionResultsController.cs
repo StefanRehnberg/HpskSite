@@ -3542,11 +3542,10 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                competition.SetValue(MedalGrouping.PropertyAlias, request.PerWeaponGroup);
-                _contentService.Save(competition);
-                // Publicera bara en redan publicerad tävling — att publicera ett utkast som
-                // sidoeffekt av en medaljinställning skulle göra en opublicerad tävling publik.
-                if (competition.Published) _contentService.Publish(competition, new[] { "*" }, -1);
+                // Genom tävlingslagringen (C3-planen S5), som bara publicerar en redan publicerad tävling.
+                var saved = _competitions.Update(request.CompetitionId, null, c => c.MedalsPerWeaponGroup = request.PerWeaponGroup);
+                if (saved.PublishProblem != null)
+                    return Json(new { success = false, message = saved.PublishProblem });
 
                 var refreshed = await RefreshResultArtifactAsync(
                     request.CompetitionId, "medaljindelningen ändrad");

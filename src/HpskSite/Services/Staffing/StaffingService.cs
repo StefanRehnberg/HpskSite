@@ -951,8 +951,9 @@ namespace HpskSite.Services.Staffing
         {
             try
             {
-                var content = _contentService.GetById(competitionId);
-                if (content == null || !content.HasProperty("competitionManagers")) return;
+                // Genom tävlingslagringen (C3-planen S5).
+                var content = _competitions.GetSaved(competitionId);
+                if (content == null) return;
 
                 List<StaffAssignment> rows;
                 using (var scope = _scopeProvider.CreateScope(autoComplete: true))
@@ -967,16 +968,16 @@ namespace HpskSite.Services.Staffing
                                  .OrderBy(x => x)
                                  .ToArray();
 
-                var currentJson = content.GetValue<string>("competitionManagers") ?? "[]";
+                var currentJson = content.CompetitionManagers ?? "[]";
                 int[] current;
                 try { current = JsonConvert.DeserializeObject<int[]>(currentJson) ?? Array.Empty<int>(); }
                 catch { current = Array.Empty<int>(); }
 
                 if (current.OrderBy(x => x).SequenceEqual(wanted)) return; // no change → don't republish
 
-                content.SetValue("competitionManagers", JsonConvert.SerializeObject(wanted));
-                _contentService.Save(content);
-                _contentService.Publish(content, new[] { "*" }, -1);
+                var saved = _competitions.Update(competitionId, null, c => c.CompetitionManagers = JsonConvert.SerializeObject(wanted));
+                if (saved.PublishProblem != null)
+                    _logger.LogWarning("Staffing: competitionManagers for competition {CompetitionId}: {Problem}", competitionId, saved.PublishProblem);
             }
             catch (Exception ex)
             {
@@ -998,12 +999,13 @@ namespace HpskSite.Services.Staffing
         {
             try
             {
-                var content = _contentService.GetById(competitionId);
-                if (content == null || !content.HasProperty("faltskytteStationManagers")) return;
-                var type = content.GetValue<string>("competitionType") ?? "";
+                // Genom tävlingslagringen (C3-planen S5).
+                var content = _competitions.GetSaved(competitionId);
+                if (content == null) return;
+                var type = content.CompetitionType ?? "";
                 if (!FunctionaryRoles.FaltFamily.Contains(type, StringComparer.OrdinalIgnoreCase)) return;
 
-                var json = content.GetValue<string>("faltskytteStationManagers") ?? "";
+                var json = content.FaltskytteStationManagers ?? "";
                 Newtonsoft.Json.Linq.JObject obj;
                 try { obj = string.IsNullOrWhiteSpace(json) ? new Newtonsoft.Json.Linq.JObject() : Newtonsoft.Json.Linq.JObject.Parse(json); }
                 catch { obj = new Newtonsoft.Json.Linq.JObject(); }
@@ -1033,9 +1035,9 @@ namespace HpskSite.Services.Staffing
 
                 var newJson = obj.ToString(Newtonsoft.Json.Formatting.None);
                 if (string.Equals(newJson, json, StringComparison.Ordinal)) return;   // no change → don't republish
-                content.SetValue("faltskytteStationManagers", newJson);
-                _contentService.Save(content);
-                _contentService.Publish(content, new[] { "*" }, -1);
+                var saved = _competitions.Update(competitionId, null, c => c.FaltskytteStationManagers = newJson);
+                if (saved.PublishProblem != null)
+                    _logger.LogWarning("Staffing: station managers for competition {CompetitionId}: {Problem}", competitionId, saved.PublishProblem);
             }
             catch (Exception ex)
             {

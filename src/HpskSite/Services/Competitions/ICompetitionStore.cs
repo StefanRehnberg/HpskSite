@@ -76,6 +76,13 @@ namespace HpskSite.Services.Competitions
         /// <summary>Fälten (nodens alias) som skrevs.</summary>
         public IReadOnlyList<string> ChangedFields { get; init; } = Array.Empty<string>();
 
+        /// <summary>
+        /// Satt när ändringen sparades men en publicerad tävling inte kunde publiceras om (t.ex. ett obligatoriskt
+        /// fält är tomt): då ser sidorna fortfarande det gamla. Anroparen ska säga det i stället för att rapportera
+        /// lyckat. Null = publicerat, eller inget att publicera (utkast, tabelläget).
+        /// </summary>
+        public string? PublishProblem { get; init; }
+
         public bool Ok => Outcome == CompetitionUpdateOutcome.Saved;
 
         public const string ConflictMessage = "Någon annan har ändrat tävlingen sedan du öppnade den. Ladda om och gör ändringen igen.";

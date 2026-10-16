@@ -847,9 +847,10 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!competition.HasProperty("mergeConfig"))
                     return Json(new { success = false, message = "Egenskapen 'mergeConfig' saknas på dokumenttypen competition — sammanslagningen kan inte sparas förrän den läggs till." });
 
-                competition.SetValue("mergeConfig", request.MergeConfig ?? "");
-                _contentService.Save(competition);
-                _contentService.Publish(competition, new[] { "*" }, -1);
+                // Genom tävlingslagringen (C3-planen S5): publicerar bara en tävling som redan var publicerad.
+                var saved = _competitions.Update(request.CompetitionId, null, c => c.MergeConfig = request.MergeConfig ?? "");
+                if (saved.PublishProblem != null)
+                    return Json(new { success = false, message = saved.PublishProblem });
 
                 return Json(new { success = true });
             }

@@ -194,11 +194,18 @@ namespace HpskSite.Services.Competitions
 
             var wasPublished = node.Published;
             _contentService.Save(node);
+            string? publishProblem = null;
             if (wasPublished)
             {
                 var publish = _contentService.Publish(node, new[] { "*" }, -1);
                 if (!publish.Success)
-                    _logger.LogWarning("{Alias} {Id} sparades men publicerades inte: {Result}", _alias, id, publish.Result);
+                {
+                    var invalid = publish.InvalidProperties != null && publish.InvalidProperties.Any()
+                        ? " Ogiltiga eller obligatoriska fält: " + string.Join(", ", publish.InvalidProperties.Select(p => p.Alias)) + "."
+                        : "";
+                    publishProblem = $"Ändringen sparades men kunde inte publiceras ({publish.Result}).{invalid}";
+                    _logger.LogWarning("{Alias} {Id} sparades men publicerades inte: {Result}{Invalid}", _alias, id, publish.Result, invalid);
+                }
             }
 
             var saved = _contentService.GetById(id) ?? node;
@@ -207,6 +214,7 @@ namespace HpskSite.Services.Competitions
                 Outcome = CompetitionUpdateOutcome.Saved,
                 Record = FromContent(saved),
                 ChangedFields = changed.Select(f => f.Alias).ToList(),
+                PublishProblem = publishProblem,
             };
         }
 

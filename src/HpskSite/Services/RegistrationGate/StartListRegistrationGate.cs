@@ -116,20 +116,6 @@ namespace HpskSite.Services.RegistrationGate
         }
 
         /// <summary>
-        /// Writes the organiser's choice onto an <c>IContent</c> the caller is about to save anyway
-        /// (Fältskytte's PublishPatrolList already saves + publishes the competition node, and a
-        /// second publish there would be a wasted version bump).
-        /// </summary>
-        /// <returns>False when the doctype property is missing — the caller must say so.</returns>
-        public static bool SetChoice(IContent competition, bool? closeRegistration)
-        {
-            if (competition == null || closeRegistration == null) return true;   // nothing asked for
-            if (!competition.HasProperty(PropertyAlias)) return false;
-            competition.SetValue(PropertyAlias, closeRegistration.Value);
-            return true;
-        }
-
-        /// <summary>
         /// Writes and persists the choice for callers whose publish does not otherwise touch the
         /// competition node (Precision, Springskytte).
         ///
@@ -142,23 +128,19 @@ namespace HpskSite.Services.RegistrationGate
         {
             if (closeRegistration == null || competitionId <= 0) return (true, null);
 
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null) return (true, null);
-
-            if (!SetChoice(competition, closeRegistration))
+            // Genom tävlingslagringen (C3-planen S5). En saknad doktypsegenskap kastar där och rapporteras här.
+            HpskSite.Services.Competitions.CompetitionUpdateResult<HpskSite.Models.Competitions.CompetitionInfo> saved;
+            try
+            {
+                saved = _competitions.Update(competitionId, null, c => c.CloseRegistrationOnStartList = closeRegistration.Value);
+            }
+            catch (InvalidOperationException)
             {
                 return (false, $"Startlistan publicerades, men anmälan kunde inte stängas: egenskapen '{PropertyAlias}' saknas på dokumenttypen competition. Lägg till den (True/False) i backoffice.");
             }
-
-            _contentService.Save(competition);
-            var pub = _contentService.Publish(competition, new[] { "*" }, -1);
-            if (!pub.Success)
-            {
-                var invalid = pub.InvalidProperties != null && pub.InvalidProperties.Any()
-                    ? " Ogiltiga/obligatoriska fält: " + string.Join(", ", pub.InvalidProperties.Select(p => p.Alias))
-                    : "";
-                return (false, $"Startlistan publicerades, men inställningen för anmälan kunde inte publiceras ({pub.Result}).{invalid} Åtgärda i tävlingens inställningar och publicera startlistan igen.");
-            }
+            if (saved.Outcome == HpskSite.Services.Competitions.CompetitionUpdateOutcome.NotFound) return (true, null);
+            if (saved.PublishProblem != null)
+                return (false, $"Startlistan publicerades, men inställningen för anmälan kunde inte publiceras. {saved.PublishProblem} Åtgärda i tävlingens inställningar och publicera startlistan igen.");
 
             return (true, null);
         }
