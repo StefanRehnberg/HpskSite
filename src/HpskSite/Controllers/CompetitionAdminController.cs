@@ -1062,7 +1062,7 @@ namespace HpskSite.Controllers
                     }
 
                     // Find "Competitions" folder under root (homepage)
-                    var competitionsFolder = GetFlatDescendants(rootContent)
+                    var competitionsFolder = CompetitionsHubCandidates(rootContent)
                         .FirstOrDefault(c => c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase)
                                           || c.ContentType.Alias == "competitionsHub");
 
@@ -1282,7 +1282,7 @@ namespace HpskSite.Controllers
                         return Ok(new { success = false, message = "Root content not found" });
                     }
 
-                    var competitionsFolder = GetFlatDescendants(rootContent)
+                    var competitionsFolder = CompetitionsHubCandidates(rootContent)
                         .FirstOrDefault(c => c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase)
                                           || c.ContentType.Alias == "competitionsHub");
 
@@ -1735,7 +1735,7 @@ namespace HpskSite.Controllers
                         return Ok(new { success = false, message = "Root content not found" });
                     }
 
-                    var competitionsFolder = GetAllDescendants(rootContent)
+                    var competitionsFolder = CompetitionsHubCandidates(rootContent)
                         .FirstOrDefault(c => c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase)
                                           || c.ContentType.Alias == "competitionsHub");
 
@@ -1816,7 +1816,7 @@ namespace HpskSite.Controllers
                 var rootContent = _contentService.GetRootContent().FirstOrDefault();
                 var competitionsHub = rootContent == null
                     ? null
-                    : GetFlatDescendants(rootContent).FirstOrDefault(c =>
+                    : CompetitionsHubCandidates(rootContent).FirstOrDefault(c =>
                         c.ContentType.Alias == "competitionsHub"
                         || c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase));
                 if (competitionsHub == null)
@@ -1928,6 +1928,24 @@ namespace HpskSite.Controllers
             }
             catch { }
             return value;
+        }
+
+        /// <summary>
+        /// Där tävlingsnavet kan ligga: startsidans barn först (en fråga — navet ligger där), sedan varje nod
+        /// av typen <c>competitionsHub</c>. Lat, så anroparens <c>FirstOrDefault</c> stannar vid första träffen.
+        ///
+        /// <para>⚠️ Förut gick skapandet igenom HELA innehållsträdet med en fråga per nod för att hitta navet —
+        /// 14 sekunder per ny tävling på prodkopian (mätt 2026-10-16).</para>
+        /// </summary>
+        private IEnumerable<Umbraco.Cms.Core.Models.IContent> CompetitionsHubCandidates(Umbraco.Cms.Core.Models.IContent root)
+        {
+            yield return root;
+            foreach (var child in _contentService.GetPagedChildren(root.Id, 0, int.MaxValue, out _))
+                yield return child;
+            var hubType = Services.ContentTypeService.Get("competitionsHub");
+            if (hubType == null) yield break;
+            foreach (var hub in _contentService.GetPagedOfType(hubType.Id, 0, 10, out _, null))
+                if (!hub.Trashed) yield return hub;
         }
 
         private List<Umbraco.Cms.Core.Models.IContent> GetFlatDescendants(Umbraco.Cms.Core.Models.IContent root)
@@ -2337,7 +2355,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Root content not found" });
                 }
 
-                var competitionsFolder = GetAllDescendants(rootContent)
+                var competitionsFolder = CompetitionsHubCandidates(rootContent)
                     .FirstOrDefault(c => c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase)
                                       || c.ContentType.Alias == "competitionsHub");
 
@@ -2642,7 +2660,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Root content not found" });
                 }
 
-                var competitionsFolder = GetAllDescendants(rootContent)
+                var competitionsFolder = CompetitionsHubCandidates(rootContent)
                     .FirstOrDefault(c => c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase)
                                       || c.ContentType.Alias == "competitionsHub");
                 if (competitionsFolder == null)
