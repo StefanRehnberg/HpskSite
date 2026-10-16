@@ -223,6 +223,8 @@ namespace HpskSite.Composers
 
             // C3-planen S1: tävlingarnas och seriernas lagring. Växeln (SiteSetting Competitions:Store) står
             // på node; tabellen används i S1 bara mot databaskopian. Läsarna flyttas hit i S3.
+            builder.Services.AddScoped<HpskSite.Services.Competitions.CompetitionTreePlacement>();
+            builder.Services.AddScoped<HpskSite.Services.Competitions.CompetitionDeleteGuard>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.NodeCompetitionStore>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.SqlCompetitionStore>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.SwitchingCompetitionStore>();

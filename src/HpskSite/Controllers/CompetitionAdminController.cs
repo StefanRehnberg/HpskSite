@@ -56,6 +56,8 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _seriesStore;
+        private readonly HpskSite.Services.Competitions.CompetitionTreePlacement _placement;
+        private readonly HpskSite.Services.Competitions.CompetitionDeleteGuard _deleteGuard;
         public CompetitionAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -73,13 +75,17 @@ namespace HpskSite.Controllers
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Results.ICompetitionResultStore results,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.Competitions.ICompetitionSeriesStore seriesStore)
+            HpskSite.Services.Competitions.ICompetitionSeriesStore seriesStore,
+            HpskSite.Services.Competitions.CompetitionTreePlacement placement,
+            HpskSite.Services.Competitions.CompetitionDeleteGuard deleteGuard)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _registrations = registrations;
             _results = results;
             _competitions = competitions;
             _seriesStore = seriesStore;
+            _placement = placement;
+            _deleteGuard = deleteGuard;
             _contentService = contentService;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -1054,41 +1060,9 @@ namespace HpskSite.Controllers
                 }
                 else
                 {
-                    // Otherwise, find or create year folder (original logic)
-                    var rootContent = _contentService.GetRootContent().FirstOrDefault();
-                    if (rootContent == null)
-                    {
-                        return Ok(new { success = false, message = "Root content not found" });
-                    }
-
-                    // Find "Competitions" folder under root (homepage)
-                    var competitionsFolder = CompetitionsHubCandidates(rootContent)
-                        .FirstOrDefault(c => c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase)
-                                          || c.ContentType.Alias == "competitionsHub");
-
-                    if (competitionsFolder == null)
-                    {
-                        return Ok(new { success = false, message = "Competitions folder not found. Please create it in Umbraco at /homepage/competitions/" });
-                    }
-
-                    // Find or create year folder
-                    string yearFolderName = competitionDate.Year.ToString();
-                    var yearFolder = _contentService.GetPagedChildren(competitionsFolder.Id, 0, int.MaxValue, out var totalRecords)
-                        .FirstOrDefault(c => c.Name == yearFolderName);
-
-                    if (yearFolder == null)
-                    {
-                        // Create year folder (use contentPage or similar basic document type)
-                        yearFolder = _contentService.Create(yearFolderName, competitionsFolder.Id, "contentPage");
-                        var saveYearResult = _contentService.Save(yearFolder);
-                        if (!saveYearResult.Success)
-                        {
-                            return Ok(new { success = false, message = "Failed to create year folder: " + yearFolderName });
-                        }
-                        _contentService.Publish(yearFolder, new[] { "*" }, -1);
-                    }
-
-                    parentId = yearFolder.Id;
+                    // Årsmappen under tävlingsnavet (CompetitionTreePlacement, C3-planen S5c).
+                    try { parentId = _placement.YearFolderId(competitionDate.Year); }
+                    catch (InvalidOperationException ex) { return Ok(new { success = false, message = ex.Message }); }
                 }
 
                 // Bara sajtadmin lägger en tävling i den nationella menyn (Stefan 2026-10-13).
@@ -1275,38 +1249,9 @@ namespace HpskSite.Controllers
                 }
                 else
                 {
-                    // Find or create year folder
-                    var rootContent = _contentService.GetRootContent().FirstOrDefault();
-                    if (rootContent == null)
-                    {
-                        return Ok(new { success = false, message = "Root content not found" });
-                    }
-
-                    var competitionsFolder = CompetitionsHubCandidates(rootContent)
-                        .FirstOrDefault(c => c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase)
-                                          || c.ContentType.Alias == "competitionsHub");
-
-                    if (competitionsFolder == null)
-                    {
-                        return Ok(new { success = false, message = "Competitions folder not found" });
-                    }
-
-                    string yearFolderName = competitionDate.Year.ToString();
-                    var yearFolder = _contentService.GetPagedChildren(competitionsFolder.Id, 0, int.MaxValue, out var totalRecords)
-                        .FirstOrDefault(c => c.Name == yearFolderName);
-
-                    if (yearFolder == null)
-                    {
-                        yearFolder = _contentService.Create(yearFolderName, competitionsFolder.Id, "contentPage");
-                        var saveYearResult = _contentService.Save(yearFolder);
-                        if (!saveYearResult.Success)
-                        {
-                            return Ok(new { success = false, message = "Failed to create year folder: " + yearFolderName });
-                        }
-                        _contentService.Publish(yearFolder, new[] { "*" }, -1);
-                    }
-
-                    parentId = yearFolder.Id;
+                    // Årsmappen under tävlingsnavet (CompetitionTreePlacement, C3-planen S5c).
+                    try { parentId = _placement.YearFolderId(competitionDate.Year); }
+                    catch (InvalidOperationException ex) { return Ok(new { success = false, message = ex.Message }); }
                 }
 
                 // Annonsen skapas genom lagringen och fältpåsen genom den gemensamma regeln (C3-planen S5b).
@@ -1613,15 +1558,10 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId);
                 if (competition == null)
                 {
                     return Ok(new { success = false, message = "Competition not found" });
-                }
-
-                if (competition.ContentType.Alias != "competition")
-                {
-                    return Ok(new { success = false, message = "Invalid competition content type" });
                 }
 
                 // AUTHORIZATION: borttagningsregeln (C3-planen S2, Stefans beslut 2026-10-14) — klubbadmin för
@@ -1643,18 +1583,20 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                // Unpublish first
-                _contentService.Unpublish(competition, null);
-
-                // Delete the content
-                var deleteResult = _contentService.Delete(competition);
-                if (!deleteResult.Success)
+                // Allt annat som hänger på tävlingen (C3-planen S5c): lag, resultat, betalningar, gamla fakturor,
+                // medaljer, märkesserier, bemanning, evenemangskoppling, ansökan.
+                var refusal = _deleteGuard.Refusal(competition.Id);
+                if (refusal != null)
                 {
-                    return Ok(new
-                    {
-                        success = false,
-                        message = "Failed to delete competition: " + string.Join(", ", deleteResult.EventMessages?.GetAll().Select(e => e.Message))
-                    });
+                    return Ok(new { success = false, message = refusal });
+                }
+
+                // ⚠️ MJUK RADERING: papperskorgen, inte en permanent radering. Den permanenta tog med sig allt
+                // under tävlingen (anmälningsnav, gamla fakturor, resultatnoden) och gick inte att ångra.
+                var trashed = _competitions.Trash(competition.Id);
+                if (!trashed.Ok)
+                {
+                    return Ok(new { success = false, message = "Competition not found" });
                 }
 
                 // Invalidate caches
@@ -1663,7 +1605,7 @@ namespace HpskSite.Controllers
                 return Ok(new
                 {
                     success = true,
-                    message = "Competition deleted successfully"
+                    message = "Tävlingen ligger nu i papperskorgen och kan läggas tillbaka av en sajtadministratör."
                 });
             }
             catch (Exception ex)
@@ -1681,15 +1623,9 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var competition = _contentService.GetById(request.CompetitionId);
-                if (competition == null)
+                if (_competitions.GetSaved(request.CompetitionId) == null)
                 {
                     return Ok(new { success = false, message = "Competition not found" });
-                }
-
-                if (competition.ContentType.Alias != "competition")
-                {
-                    return Ok(new { success = false, message = "Invalid competition content type" });
                 }
 
                 // AUTHORIZATION: redigeringsregeln (C3-planen S2, Stefans beslut 2026-10-14) — samma som
@@ -1701,77 +1637,16 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied" });
                 }
 
-                int newParentId;
-
-                // If seriesId is provided, move to series
-                if (request.SeriesId.HasValue && request.SeriesId.Value > 0)
+                // Genom lagringen (C3-planen S5c): serien, eller årsmappen för tävlingens datum.
+                try
                 {
-                    var series = _contentService.GetById(request.SeriesId.Value);
-                    if (series == null)
-                    {
-                        return Ok(new { success = false, message = "Series not found" });
-                    }
-
-                    if (series.ContentType.Alias != "competitionSeries")
-                    {
-                        return Ok(new { success = false, message = "Invalid series content type" });
-                    }
-
-                    newParentId = series.Id;
+                    var moved = _competitions.MoveToSeries(request.CompetitionId,
+                        request.SeriesId is > 0 ? request.SeriesId : null);
+                    if (!moved.Ok) return Ok(new { success = false, message = "Competition not found" });
                 }
-                else
+                catch (InvalidOperationException ex)
                 {
-                    // Move to year folder
-                    var competitionDate = competition.GetValue<DateTime>("competitionDate");
-                    if (competitionDate == default)
-                    {
-                        competitionDate = DateTime.Now;
-                    }
-
-                    // Find competitions folder
-                    var rootContent = _contentService.GetRootContent().FirstOrDefault();
-                    if (rootContent == null)
-                    {
-                        return Ok(new { success = false, message = "Root content not found" });
-                    }
-
-                    var competitionsFolder = CompetitionsHubCandidates(rootContent)
-                        .FirstOrDefault(c => c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase)
-                                          || c.ContentType.Alias == "competitionsHub");
-
-                    if (competitionsFolder == null)
-                    {
-                        return Ok(new { success = false, message = "Competitions folder not found" });
-                    }
-
-                    // Find or create year folder
-                    string yearFolderName = competitionDate.Year.ToString();
-                    var yearFolder = _contentService.GetPagedChildren(competitionsFolder.Id, 0, int.MaxValue, out var totalRecords)
-                        .FirstOrDefault(c => c.Name == yearFolderName);
-
-                    if (yearFolder == null)
-                    {
-                        yearFolder = _contentService.Create(yearFolderName, competitionsFolder.Id, "contentPage");
-                        var saveYearResult = _contentService.Save(yearFolder);
-                        if (!saveYearResult.Success)
-                        {
-                            return Ok(new { success = false, message = "Failed to create year folder: " + yearFolderName });
-                        }
-                        _contentService.Publish(yearFolder, new[] { "*" }, -1);
-                    }
-
-                    newParentId = yearFolder.Id;
-                }
-
-                // Move the competition
-                var moveResult = _contentService.Move(competition, newParentId);
-                if (!moveResult.Success)
-                {
-                    return Ok(new
-                    {
-                        success = false,
-                        message = "Failed to move competition: " + string.Join(", ", moveResult.EventMessages?.GetAll().Select(e => e.Message))
-                    });
+                    return Ok(new { success = false, message = ex.Message });
                 }
 
                 // Invalidate caches so competition list and series list reflect the move
@@ -1813,12 +1688,7 @@ namespace HpskSite.Controllers
                 // uppslaget hittade den aldrig och den här endpointen har svarat
                 // "Competitions hub not found" sedan den skrevs — den har alltså aldrig migrerat
                 // något. Samma uppslag som CreateCompetition använder, av samma skäl.
-                var rootContent = _contentService.GetRootContent().FirstOrDefault();
-                var competitionsHub = rootContent == null
-                    ? null
-                    : CompetitionsHubCandidates(rootContent).FirstOrDefault(c =>
-                        c.ContentType.Alias == "competitionsHub"
-                        || c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase));
+                var competitionsHub = _placement.Hub();
                 if (competitionsHub == null)
                 {
                     return Ok(new { success = false, message = "Competitions hub not found" });
@@ -1928,24 +1798,6 @@ namespace HpskSite.Controllers
             }
             catch { }
             return value;
-        }
-
-        /// <summary>
-        /// Där tävlingsnavet kan ligga: startsidans barn först (en fråga — navet ligger där), sedan varje nod
-        /// av typen <c>competitionsHub</c>. Lat, så anroparens <c>FirstOrDefault</c> stannar vid första träffen.
-        ///
-        /// <para>⚠️ Förut gick skapandet igenom HELA innehållsträdet med en fråga per nod för att hitta navet —
-        /// 14 sekunder per ny tävling på prodkopian (mätt 2026-10-16).</para>
-        /// </summary>
-        private IEnumerable<Umbraco.Cms.Core.Models.IContent> CompetitionsHubCandidates(Umbraco.Cms.Core.Models.IContent root)
-        {
-            yield return root;
-            foreach (var child in _contentService.GetPagedChildren(root.Id, 0, int.MaxValue, out _))
-                yield return child;
-            var hubType = Services.ContentTypeService.Get("competitionsHub");
-            if (hubType == null) yield break;
-            foreach (var hub in _contentService.GetPagedOfType(hubType.Id, 0, 10, out _, null))
-                if (!hub.Trashed) yield return hub;
         }
 
         private List<Umbraco.Cms.Core.Models.IContent> GetFlatDescendants(Umbraco.Cms.Core.Models.IContent root)
@@ -2274,8 +2126,8 @@ namespace HpskSite.Controllers
 
             try
             {
-                var series = _contentService.GetById(seriesId);
-                if (series == null || series.ContentType.Alias != "competitionSeries")
+                var series = _seriesStore.GetSaved(seriesId);
+                if (series == null)
                 {
                     return Ok(new { success = false, message = "Series not found" });
                 }
@@ -2348,83 +2200,35 @@ namespace HpskSite.Controllers
 
             try
             {
-                // Find or create the competitions folder
-                var rootContent = _contentService.GetRootContent().FirstOrDefault();
-                if (rootContent == null)
+                // Årsmappen under tävlingsnavet (CompetitionTreePlacement, C3-planen S5c).
+                int yearFolderId;
+                try { yearFolderId = _placement.YearFolderId((request.SeriesStartDate?.Year ?? DateTime.Now.Year)); }
+                catch (InvalidOperationException ex) { return Ok(new { success = false, message = ex.Message }); }
+
+                // Genom serielagringen (C3-planen S5c). Samma värden som förut; ett tomt fält skrivs inte.
+                var created = _seriesStore.Create(yearFolderId, request.SeriesName, s =>
                 {
-                    return Ok(new { success = false, message = "Root content not found" });
-                }
-
-                var competitionsFolder = CompetitionsHubCandidates(rootContent)
-                    .FirstOrDefault(c => c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase)
-                                      || c.ContentType.Alias == "competitionsHub");
-
-                if (competitionsFolder == null)
-                {
-                    return Ok(new { success = false, message = "Competitions folder not found" });
-                }
-
-                // Find or create year folder based on series start date
-                string yearFolderName = (request.SeriesStartDate?.Year ?? DateTime.Now.Year).ToString();
-                var yearFolder = _contentService.GetPagedChildren(competitionsFolder.Id, 0, int.MaxValue, out _)
-                    .FirstOrDefault(c => c.Name == yearFolderName);
-
-                if (yearFolder == null)
-                {
-                    yearFolder = _contentService.Create(yearFolderName, competitionsFolder.Id, "contentPage");
-                    var saveYearResult = _contentService.Save(yearFolder);
-                    if (!saveYearResult.Success)
-                    {
-                        return Ok(new { success = false, message = "Failed to create year folder" });
-                    }
-                    _contentService.Publish(yearFolder, new[] { "*" }, -1);
-                }
-
-                // Create new series
-                var newSeries = _contentService.Create(request.SeriesName, yearFolder.Id, "competitionSeries");
-                if (newSeries == null)
-                {
-                    return Ok(new { success = false, message = "Failed to create series content" });
-                }
-
-                // Set all properties
-                newSeries.SetValue("seriesName", request.SeriesName);
-                if (!string.IsNullOrEmpty(request.SeriesShortDescription))
-                    newSeries.SetValue("seriesShortDescription", request.SeriesShortDescription);
-                if (!string.IsNullOrEmpty(request.SeriesDescription))
-                    newSeries.SetValue("seriesDescription", request.SeriesDescription);
-                if (request.SeriesStartDate.HasValue)
-                    newSeries.SetValue("seriesStartDate", request.SeriesStartDate.Value);
-                if (request.SeriesEndDate.HasValue)
-                    newSeries.SetValue("seriesEndDate", request.SeriesEndDate.Value);
-                // Bara sajtadmin lägger serier i den nationella menyn (Stefan 2026-10-13).
-                newSeries.SetValue("showInMenu", isSiteAdmin && request.ShowInMenu);
-                newSeries.SetValue("isActive", request.IsActive);
-                if (!string.IsNullOrEmpty(request.ClubId) && request.ClubId != "0")
-                    newSeries.SetValue("clubId", int.Parse(request.ClubId));
-                if (!string.IsNullOrEmpty(request.RegionalFederation))
-                    newSeries.SetValue("regionalFederation", request.RegionalFederation);
-                newSeries.SetValue("seriesCalculationStrategy", request.SeriesCalculationStrategy ?? "");
-                newSeries.SetValue("seriesCalculationConfig", request.SeriesCalculationConfig ?? "");
-
-                var saveResult = _contentService.Save(newSeries);
-                if (!saveResult.Success)
+                    s.SeriesName = request.SeriesName;
+                    if (!string.IsNullOrEmpty(request.SeriesShortDescription)) s.SeriesShortDescription = request.SeriesShortDescription;
+                    if (!string.IsNullOrEmpty(request.SeriesDescription)) s.SeriesDescription = request.SeriesDescription;
+                    s.SeriesStartDate = request.SeriesStartDate;
+                    s.SeriesEndDate = request.SeriesEndDate;
+                    // Bara sajtadmin lägger serier i den nationella menyn (Stefan 2026-10-13).
+                    s.ShowInMenu = isSiteAdmin && request.ShowInMenu;
+                    s.IsVisible = request.IsActive;
+                    var club = ParseClubId(request.ClubId);
+                    if (club > 0) s.ClubId = club;
+                    if (!string.IsNullOrEmpty(request.RegionalFederation)) s.RegionalFederation = request.RegionalFederation;
+                    s.SeriesCalculationStrategy = string.IsNullOrEmpty(request.SeriesCalculationStrategy) ? null : request.SeriesCalculationStrategy;
+                    s.SeriesCalculationConfig = string.IsNullOrEmpty(request.SeriesCalculationConfig) ? null : request.SeriesCalculationConfig;
+                });
+                var newSeries = created.Record!;
+                if (created.PublishProblem != null)
                 {
                     return Ok(new
                     {
                         success = false,
-                        message = "Failed to save series: " + string.Join(", ", saveResult.EventMessages?.GetAll().Select(e => e.Message))
-                    });
-                }
-
-                // Publish the series
-                var publishResult = _contentService.Publish(newSeries, new[] { "*" }, -1);
-                if (!publishResult.Success)
-                {
-                    return Ok(new
-                    {
-                        success = false,
-                        message = "Series saved but failed to publish: " + DescribeSeriesPublishFailure(publishResult)
+                        message = "Series saved but failed to publish: " + created.PublishProblem
                     });
                 }
 
@@ -2468,8 +2272,8 @@ namespace HpskSite.Controllers
 
             try
             {
-                var series = _contentService.GetById(request.SeriesId);
-                if (series == null || series.ContentType.Alias != "competitionSeries")
+                var series = _seriesStore.GetSaved(request.SeriesId);
+                if (series == null)
                 {
                     return Ok(new { success = false, message = "Series not found" });
                 }
@@ -2496,44 +2300,35 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied: serien och dess värd måste ligga i din egen krets" });
                 }
 
-                // Update properties
-                series.SetValue("seriesName", request.SeriesName ?? "");
-                if (!string.IsNullOrEmpty(request.SeriesShortDescription))
-                    series.SetValue("seriesShortDescription", request.SeriesShortDescription);
-                if (!string.IsNullOrEmpty(request.SeriesDescription))
-                    series.SetValue("seriesDescription", request.SeriesDescription);
-                if (request.SeriesStartDate.HasValue)
-                    series.SetValue("seriesStartDate", request.SeriesStartDate.Value);
-                if (request.SeriesEndDate.HasValue)
-                    series.SetValue("seriesEndDate", request.SeriesEndDate.Value);
-                // Bara sajtadmin lägger serier i den nationella menyn (Stefan 2026-10-13); för andra står värdet kvar.
-                if (isSiteAdmin) series.SetValue("showInMenu", request.ShowInMenu);
-                series.SetValue("isActive", request.IsActive);
-
-                // Clear both organizer fields first, then set the relevant one
-                series.SetValue("clubId", 0);
-                series.SetValue("regionalFederation", "");
-                if (!string.IsNullOrEmpty(request.ClubId) && request.ClubId != "0")
-                    series.SetValue("clubId", int.Parse(request.ClubId));
-                else if (!string.IsNullOrEmpty(request.RegionalFederation))
-                    series.SetValue("regionalFederation", request.RegionalFederation);
-                series.SetValue("seriesCalculationStrategy", request.SeriesCalculationStrategy ?? "");
-                series.SetValue("seriesCalculationConfig", request.SeriesCalculationConfig ?? "");
-
-                var saveResult = _contentService.Save(series);
-                if (!saveResult.Success)
+                // Genom serielagringen (C3-planen S5c), samma regler som förut: beskrivningarna och datumen
+                // ändras bara när de skickas, värden är klubben ELLER kretsen. ⚠️ Lagringen publicerar bara en
+                // serie som redan var publicerad (förut alltid).
+                var updated = _seriesStore.Update(request.SeriesId, null, s =>
                 {
-                    return Ok(new { success = false, message = "Failed to save series changes" });
+                    s.SeriesName = string.IsNullOrEmpty(request.SeriesName) ? null : request.SeriesName;
+                    if (!string.IsNullOrEmpty(request.SeriesShortDescription)) s.SeriesShortDescription = request.SeriesShortDescription;
+                    if (!string.IsNullOrEmpty(request.SeriesDescription)) s.SeriesDescription = request.SeriesDescription;
+                    if (request.SeriesStartDate.HasValue) s.SeriesStartDate = request.SeriesStartDate.Value;
+                    if (request.SeriesEndDate.HasValue) s.SeriesEndDate = request.SeriesEndDate.Value;
+                    // Bara sajtadmin lägger serier i den nationella menyn (Stefan 2026-10-13); för andra står värdet kvar.
+                    if (isSiteAdmin) s.ShowInMenu = request.ShowInMenu;
+                    s.IsVisible = request.IsActive;
+                    var club = ParseClubId(request.ClubId);
+                    s.ClubId = club > 0 ? club : 0;
+                    s.RegionalFederation = club <= 0 && !string.IsNullOrEmpty(request.RegionalFederation) ? request.RegionalFederation : null;
+                    s.SeriesCalculationStrategy = string.IsNullOrEmpty(request.SeriesCalculationStrategy) ? null : request.SeriesCalculationStrategy;
+                    s.SeriesCalculationConfig = string.IsNullOrEmpty(request.SeriesCalculationConfig) ? null : request.SeriesCalculationConfig;
+                });
+                if (!updated.Ok)
+                {
+                    return Ok(new { success = false, message = "Series not found" });
                 }
-
-                // Publish the series changes
-                var publishResult = _contentService.Publish(series, new[] { "*" }, -1);
-                if (!publishResult.Success)
+                if (updated.PublishProblem != null)
                 {
                     return Ok(new
                     {
                         success = false,
-                        message = "Series changes saved but failed to publish: " + DescribeSeriesPublishFailure(publishResult)
+                        message = "Series changes saved but failed to publish: " + updated.PublishProblem
                     });
                 }
 
@@ -2565,8 +2360,8 @@ namespace HpskSite.Controllers
 
             try
             {
-                var series = _contentService.GetById(request.SeriesId);
-                if (series == null || series.ContentType.Alias != "competitionSeries")
+                var series = _seriesStore.GetSaved(request.SeriesId);
+                if (series == null)
                 {
                     return Ok(new { success = false, message = "Series not found" });
                 }
@@ -2594,12 +2389,9 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                // Unpublish first
-                _contentService.Unpublish(series);
-
-                // Then delete
-                var deleteResult = _contentService.Delete(series);
-                if (!deleteResult.Success)
+                // Mjuk radering (C3-planen S5c): papperskorgen, inte en permanent radering.
+                var trashed = _seriesStore.Trash(series.Id);
+                if (!trashed.Ok)
                 {
                     return Ok(new { success = false, message = "Failed to delete series" });
                 }
@@ -2637,8 +2429,8 @@ namespace HpskSite.Controllers
 
             try
             {
-                var sourceSeries = _contentService.GetById(request.SourceSeriesId);
-                if (sourceSeries == null || sourceSeries.ContentType.Alias != "competitionSeries")
+                var sourceSeries = _seriesStore.GetSaved(request.SourceSeriesId);
+                if (sourceSeries == null)
                 {
                     return Ok(new { success = false, message = "Source series not found" });
                 }
@@ -2653,90 +2445,41 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied" });
                 }
 
-                // Determine year folder based on StartDate
-                var rootContent = _contentService.GetRootContent().FirstOrDefault();
-                if (rootContent == null)
-                {
-                    return Ok(new { success = false, message = "Root content not found" });
-                }
+                // Årsmappen under tävlingsnavet (CompetitionTreePlacement, C3-planen S5c).
+                int parentId;
+                try { parentId = _placement.YearFolderId(request.StartDate.Value.Year); }
+                catch (InvalidOperationException ex) { return Ok(new { success = false, message = ex.Message }); }
 
-                var competitionsFolder = CompetitionsHubCandidates(rootContent)
-                    .FirstOrDefault(c => c.Name.Equals("Competitions", StringComparison.OrdinalIgnoreCase)
-                                      || c.ContentType.Alias == "competitionsHub");
-                if (competitionsFolder == null)
-                {
-                    return Ok(new { success = false, message = "Competitions folder not found" });
-                }
-
-                // Find or create year folder based on StartDate
-                string yearFolderName = request.StartDate.Value.Year.ToString();
-                var yearFolder = _contentService.GetPagedChildren(competitionsFolder.Id, 0, int.MaxValue, out _)
-                    .FirstOrDefault(c => c.Name == yearFolderName);
-
-                if (yearFolder == null)
-                {
-                    yearFolder = _contentService.Create(yearFolderName, competitionsFolder.Id, "contentPage");
-                    var saveYearResult = _contentService.Save(yearFolder);
-                    if (!saveYearResult.Success)
-                    {
-                        return Ok(new { success = false, message = "Failed to create year folder" });
-                    }
-                    _contentService.Publish(yearFolder, new[] { "*" }, -1);
-                }
-
-                var parentId = yearFolder.Id;
-
-                var newSeriesName = (sourceSeries.GetValue<string>("seriesName") ?? sourceSeries.Name);
+                var newSeriesName = sourceSeries.SeriesName ?? sourceSeries.Name;
                 if (!newSeriesName.Contains(" - Copy"))
                 {
                     newSeriesName += " - Copy";
                 }
 
-                var newSeries = _contentService.Create(newSeriesName, parentId, "competitionSeries");
-
-                // Copy properties with new dates
-                newSeries.SetValue("seriesName", newSeriesName);
-                newSeries.SetValue("seriesShortDescription", sourceSeries.GetValue<string>("seriesShortDescription") ?? "");
-                newSeries.SetValue("seriesDescription", sourceSeries.GetValue<string>("seriesDescription") ?? "");
-                // Set dates from request
-                newSeries.SetValue("seriesStartDate", request.StartDate.Value);
-                if (request.EndDate.HasValue)
+                // Genom serielagringen (C3-planen S5c). Samma fält som förut: namn, beskrivningar, värd och
+                // beräkningen följer med; datumen kommer ur begäran; menyn bara för sajtadmin. ⚠️ Synligheten
+                // läses nu med §9a-regeln (saknat värde = synlig) — förut blev en serie utan isActive dold.
+                var createdSeries = _seriesStore.Create(parentId, newSeriesName, s =>
                 {
-                    newSeries.SetValue("seriesEndDate", request.EndDate.Value);
-                }
-                newSeries.SetValue("showInMenu", isSiteAdmin && sourceSeries.GetValue<bool>("showInMenu"));
-                newSeries.SetValue("isActive", sourceSeries.GetValue<bool>("isActive"));
-
-                // Copy organizer properties
-                var sourceClubId = sourceSeries.GetValue<int>("clubId");
-                if (sourceClubId > 0)
-                    newSeries.SetValue("clubId", sourceClubId);
-                var sourceRegion = sourceSeries.GetValue<string>("regionalFederation");
-                if (!string.IsNullOrEmpty(sourceRegion))
-                    newSeries.SetValue("regionalFederation", sourceRegion);
-
-                // Copy series calculation properties
-                var sourceStrategy = sourceSeries.GetValue<string>("seriesCalculationStrategy");
-                if (!string.IsNullOrEmpty(sourceStrategy))
-                    newSeries.SetValue("seriesCalculationStrategy", sourceStrategy);
-                var sourceConfig = sourceSeries.GetValue<string>("seriesCalculationConfig");
-                if (!string.IsNullOrEmpty(sourceConfig))
-                    newSeries.SetValue("seriesCalculationConfig", sourceConfig);
-
-                var saveSeriesResult = _contentService.Save(newSeries);
-                if (!saveSeriesResult.Success)
-                {
-                    return Ok(new { success = false, message = "Failed to create copied series" });
-                }
-
-                // Publish the copied series
-                var publishSeriesResult = _contentService.Publish(newSeries, new[] { "*" }, -1);
-                if (!publishSeriesResult.Success)
+                    s.SeriesName = newSeriesName;
+                    s.SeriesShortDescription = sourceSeries.SeriesShortDescription;
+                    s.SeriesDescription = sourceSeries.SeriesDescription;
+                    s.SeriesStartDate = request.StartDate.Value;
+                    s.SeriesEndDate = request.EndDate;
+                    s.ShowInMenu = isSiteAdmin && sourceSeries.ShowInMenu;
+                    s.IsVisible = sourceSeries.IsVisible;
+                    if (sourceSeries.ClubId > 0) s.ClubId = sourceSeries.ClubId;
+                    s.RegionalFederation = sourceSeries.RegionalFederation;
+                    s.SeriesCalculationStrategy = sourceSeries.SeriesCalculationStrategy;
+                    s.SeriesCalculationConfig = sourceSeries.SeriesCalculationConfig;
+                });
+                var newSeries = createdSeries.Record!;
+                if (createdSeries.PublishProblem != null)
                 {
                     return Ok(new
                     {
                         success = false,
-                        message = "Series copy saved but failed to publish: " + string.Join(", ", publishSeriesResult.EventMessages?.GetAll().Select(e => e.Message))
+                        message = "Series copy saved but failed to publish: " + createdSeries.PublishProblem
                     });
                 }
 
@@ -2788,7 +2531,7 @@ namespace HpskSite.Controllers
                         startDate = request.StartDate,
                         endDate = request.EndDate,
                         competitionCount = copiedCompetitionCount,
-                        isActive = newSeries.GetValue<bool>("isActive")
+                        isActive = newSeries.IsVisible
                     }
                 });
             }
@@ -2929,17 +2672,17 @@ namespace HpskSite.Controllers
             return managed.Any(m => string.Equals(m, code, StringComparison.OrdinalIgnoreCase));
         }
 
-        private Task<bool> RegionalAdminOwnsSeries(Umbraco.Cms.Core.Models.IContent series) =>
-            RegionalAdminOwnsSeriesHost(series.GetValue<int>("clubId"), series.GetValue<string>("regionalFederation"));
+        private Task<bool> RegionalAdminOwnsSeries(HpskSite.Models.Competitions.CompetitionSeriesInfo series) =>
+            RegionalAdminOwnsSeriesHost(series.ClubId, series.RegionalFederation);
 
         private static int ParseClubId(string? clubId) => int.TryParse(clubId, out var id) ? id : 0;
 
         /// <summary>
         /// Check if a series belongs to one of the given club IDs
         /// </summary>
-        private bool IsSeriesOwnedByClubs(Umbraco.Cms.Core.Models.IContent series, HashSet<int> managedClubIds)
+        private static bool IsSeriesOwnedByClubs(HpskSite.Models.Competitions.CompetitionSeriesInfo series, HashSet<int> managedClubIds)
         {
-            var seriesClubId = series.GetValue<int>("clubId");
+            var seriesClubId = series.ClubId;
             return seriesClubId > 0 && managedClubIds.Contains(seriesClubId);
         }
 

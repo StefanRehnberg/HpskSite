@@ -1727,7 +1727,7 @@
         .then(function(data) {
             if (data.success) {
                 loadRegionCompetitions();
-                alert('Tävling raderad!');
+                alert(data.message || 'Tävlingen ligger nu i papperskorgen.');
             } else {
                 alert('Fel: ' + (data.message || 'Kunde inte radera tävlingen'));
             }

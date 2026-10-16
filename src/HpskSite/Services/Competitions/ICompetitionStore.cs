@@ -49,6 +49,19 @@ namespace HpskSite.Services.Competitions
         /// <see cref="CompetitionUpdateResult{T}.PublishProblem"/> säger om publiceringen inte gick.
         /// </summary>
         CompetitionUpdateResult<CompetitionInfo> Create(int parentId, string name, Action<CompetitionInfo> init);
+
+        /// <summary>
+        /// Lägger tävlingen i serien, eller (<paramref name="seriesId"/> null) utanför serier. Kastar
+        /// <see cref="InvalidOperationException"/> med ett meddelande som kan visas när serien inte finns.
+        /// </summary>
+        CompetitionUpdateResult<CompetitionInfo> MoveToSeries(int id, int? seriesId);
+
+        /// <summary>
+        /// <b>Mjuk radering</b> (§9a): tävlingen läggs i papperskorgen och kan läggas tillbaka; inget under
+        /// den raderas. Spärrarna (lag, resultat, betalningar …) prövas av anroparen genom
+        /// <see cref="CompetitionDeleteGuard"/> först.
+        /// </summary>
+        CompetitionUpdateResult<CompetitionInfo> Trash(int id);
     }
 
     /// <summary>Seriernas lagring — samma regler som <see cref="ICompetitionStore"/>.</summary>
@@ -59,6 +72,12 @@ namespace HpskSite.Services.Competitions
         IReadOnlyDictionary<int, CompetitionSeriesInfo> GetMany(IReadOnlyCollection<int> ids);
         IReadOnlyList<CompetitionSeriesInfo> List();
         CompetitionUpdateResult<CompetitionSeriesInfo> Update(int id, long? expectedVersion, Action<CompetitionSeriesInfo> change);
+
+        /// <summary>En ny serie under <paramref name="parentId"/> (årsmappen). Publiceras.</summary>
+        CompetitionUpdateResult<CompetitionSeriesInfo> Create(int parentId, string name, Action<CompetitionSeriesInfo> init);
+
+        /// <summary>Mjuk radering: serien läggs i papperskorgen. Anroparen prövar först att den är tom.</summary>
+        CompetitionUpdateResult<CompetitionSeriesInfo> Trash(int id);
     }
 
     public enum CompetitionUpdateOutcome
