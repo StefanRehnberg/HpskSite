@@ -42,6 +42,13 @@ namespace HpskSite.Services.Competitions
         /// bokföring. Sådant körs av anroparen EFTER att uppdateringen lyckats.</para>
         /// </summary>
         CompetitionUpdateResult<CompetitionInfo> Update(int id, long? expectedVersion, Action<CompetitionInfo> change);
+
+        /// <summary>
+        /// En ny tävling under <paramref name="parentId"/> (serien eller årsmappen). <paramref name="init"/> fyller
+        /// posten — samma regel som <see cref="Update"/>: ren, ingen I/O. Tävlingen publiceras.
+        /// <see cref="CompetitionUpdateResult{T}.PublishProblem"/> säger om publiceringen inte gick.
+        /// </summary>
+        CompetitionUpdateResult<CompetitionInfo> Create(int parentId, string name, Action<CompetitionInfo> init);
     }
 
     /// <summary>Seriernas lagring — samma regler som <see cref="ICompetitionStore"/>.</summary>

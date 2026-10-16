@@ -158,9 +158,23 @@ namespace HpskSite.Models.Competitions
         public static CompetitionInfo CopyDefinition(CompetitionInfo source)
         {
             var copy = new CompetitionInfo();
-            foreach (var f in Fields.Where(f => f.Kind == CompetitionFieldKind.Definition))
-                f.Set(copy, f.Get(source));
+            CopyDefinitionInto(source, copy);
             return copy;
+        }
+
+        /// <summary>
+        /// Lägger källans definition på en befintlig post (en ny tävling som lagringen just skapat).
+        /// Datumfälten flyttas <paramref name="shiftYears"/> år; <c>null</c> lämnar dem tomma.
+        /// </summary>
+        public static void CopyDefinitionInto(CompetitionInfo source, CompetitionInfo target, int? shiftYears = 0)
+        {
+            foreach (var f in Fields.Where(f => f.Kind == CompetitionFieldKind.Definition))
+            {
+                var value = f.Get(source);
+                if (f.Shape == CompetitionFieldShape.Date)
+                    value = shiftYears is int y && value is DateTime d ? d.AddYears(y) : null;
+                f.Set(target, value);
+            }
         }
     }
 

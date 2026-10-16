@@ -1091,174 +1091,25 @@ namespace HpskSite.Controllers
                     parentId = yearFolder.Id;
                 }
 
-                // Create new competition under the determined parent (series or year folder)
-                var newCompetition = _contentService.Create(competitionName, parentId, "competition");
-
-                if (newCompetition == null)
-                {
-                    return Ok(new { success = false, message = "Failed to create competition content" });
-                }
-
-                // Set competition type as a string property
-                newCompetition.SetValue("competitionType", competitionTypeId);
-
-                // Set competitionName as a property as well (in addition to the content name)
-                newCompetition.SetValue("competitionName", competitionName);
-
                 // Bara sajtadmin lägger en tävling i den nationella menyn (Stefan 2026-10-13).
                 if (!isSiteAdmin) request.Fields?.Remove("addToMenu");
 
-                // Set all other properties from fields
-                foreach (var field in request.Fields)
+                // Tävlingen skapas genom lagringen och fältpåsen genom den gemensamma regeln (C3-planen S5b).
+                // Synlig om inte formuläret säger annat; namn och gren sätts sist, ur de prövade värdena.
+                var created = _competitions.Create(parentId, competitionName, c =>
                 {
-                    try
-                    {
-                        // Skip fields already handled or not content properties
-                        if (field.Key == "competitionName" || field.Key == "competitionType" || field.Key == "seriesId")
-                            continue;
-
-                        var value = field.Value;
-
-                        // Convert value to appropriate type based on field name
-                        if (field.Key.Contains("Date") && value != null)
-                        {
-                            if (DateTime.TryParse(value.ToString(), out DateTime dateValue))
-                            {
-                                value = dateValue;
-                            }
-                        }
-                        else if ((field.Key == "registrationFee" || field.Key == "teamRegistrationFee" || field.Key == "stafettRegistrationFee"
-                                   || field.Key == "juniorRegistrationFee" || field.Key == "subCompetitionFee") && value != null)
-                        {
-                            // registrationFee must be stored as decimal (not int) for Model.Value<decimal?> to work
-                            if (value is System.Text.Json.JsonElement jsonElementDec)
-                            {
-                                if (jsonElementDec.ValueKind == System.Text.Json.JsonValueKind.Number)
-                                {
-                                    value = jsonElementDec.GetDecimal();
-                                }
-                                else if (jsonElementDec.ValueKind == System.Text.Json.JsonValueKind.String &&
-                                         decimal.TryParse(jsonElementDec.GetString(), out decimal parsedDec))
-                                {
-                                    value = parsedDec;
-                                }
-                            }
-                            else if (decimal.TryParse(value.ToString(), out decimal decValue))
-                            {
-                                value = decValue;
-                            }
-                        }
-                        else if ((field.Key == "maxParticipants" || field.Key == "numberOfSeriesOrStations" ||
-                                  field.Key == "numberOfFinalSeries" || field.Key == "teamResultSeriesCount" || field.Key == "clubId" || field.Key == "rangeId") && value != null)
-                        {
-                            // Handle JsonElement numbers
-                            if (value is System.Text.Json.JsonElement jsonElement)
-                            {
-                                if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.Number)
-                                {
-                                    value = jsonElement.GetInt32();
-                                }
-                                else if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.String &&
-                                         int.TryParse(jsonElement.GetString(), out int parsedValue))
-                                {
-                                    value = parsedValue;
-                                }
-                            }
-                            else if (int.TryParse(value.ToString(), out int intValue))
-                            {
-                                value = intValue;
-                            }
-                        }
-                        else if ((field.Key == "showLiveResults" || field.Key == "addToMenu" ||
-                                  field.Key == "allowDualCClass" || field.Key == "isActive" || field.Key == "isClubOnly" ||
-                                  field.Key == "allowSelfReporting" || field.Key == "allowTeams" || field.Key == "allowStafett" ||
-                                  field.Key == "isAwardingStandardMedals") && value != null)
-                        {
-                            // Handle JsonElement booleans
-                            if (value is System.Text.Json.JsonElement jsonElement)
-                            {
-                                if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.True)
-                                {
-                                    value = true;
-                                }
-                                else if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.False)
-                                {
-                                    value = false;
-                                }
-                                else if (jsonElement.ValueKind == System.Text.Json.JsonValueKind.String &&
-                                         bool.TryParse(jsonElement.GetString(), out bool parsedValue))
-                                {
-                                    value = parsedValue;
-                                }
-                            }
-                            else if (bool.TryParse(value.ToString(), out bool boolValue))
-                            {
-                                value = boolValue;
-                            }
-                        }
-                        else if (field.Key == "stationConfig" && value != null)
-                        {
-                            // stationConfig is a JSON object — ensure stored as string
-                            if (value is System.Text.Json.JsonElement scJsonElement)
-                            {
-                                value = scJsonElement.GetRawText();
-                            }
-                        }
-                        else if (field.Key == "shootingClassIds" && value != null)
-                        {
-                            // ⚠️ Kartan bor i HpskSite.Models.ShootingClassIdsValue. Den här grenen
-                            // testade tidigare `value is string`, men fields deserialiseras till
-                            // Dictionary<string, object> så värdet är ALLTID ett JsonElement — och
-                            // guiden skickar en CSV-STRÄNG, alltså ValueKind == String, som varken
-                            // sträng- eller Array-grenen fångade. Det råa elementet lagrades och
-                            // varje guide-skapad tävling fick CSV i stället för JSON.
-                            value = HpskSite.Models.ShootingClassIdsValue.Normalize(value);
-                        }
-                        else if (field.Key == HpskSite.CompetitionTypes.Common.CompetitionLevel.PropertyAlias)
-                        {
-                            // Kanoniskt värde; tomt skrivs inte (= ej bekräftad). Validerat ovan.
-                            var level = HpskSite.CompetitionTypes.Common.CompetitionLevel.Normalize(ReadFieldAsString(request.Fields, field.Key));
-                            value = level == "" ? null : level;
-                        }
-
-                        if (value != null)
-                        {
-                            // ⚠️ Fältnamnet är inte alltid egenskapen — se PropertyAliasFor.
-                            newCompetition.SetValue(
-                                HpskSite.CompetitionTypes.Common.CompetitionFieldCatalog.PropertyAliasFor(field.Key), value);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        // Log but continue with other properties
-                        Console.WriteLine($"Error setting property {field.Key}: {ex.Message}");
-                    }
-                }
-
-                // Ensure new competitions are active by default
-                if (!request.Fields.ContainsKey("isActive"))
-                {
-                    newCompetition.SetValue("isActive", true);
-                }
-
-                var saveResult = _contentService.Save(newCompetition);
-                if (!saveResult.Success)
+                    c.IsVisible = true;
+                    HpskSite.Services.Competitions.CompetitionFieldBag.Apply(c, request.Fields, CreateHandledElsewhere);
+                    c.CompetitionType = competitionTypeId;
+                    c.CompetitionName = competitionName;
+                });
+                var newCompetition = created.Record!;
+                if (created.PublishProblem != null)
                 {
                     return Ok(new
                     {
                         success = false,
-                        message = "Failed to save competition: " + string.Join(", ", saveResult.EventMessages?.GetAll().Select(e => e.Message))
-                    });
-                }
-
-                // Publish the competition ("*" = publish invariant content)
-                var publishResult = _contentService.Publish(newCompetition, new[] { "*" });
-                if (!publishResult.Success)
-                {
-                    return Ok(new
-                    {
-                        success = false,
-                        message = "Competition saved but failed to publish: " + string.Join(", ", publishResult.EventMessages?.GetAll().Select(e => e.Message))
+                        message = "Competition saved but failed to publish: " + created.PublishProblem
                     });
                 }
 
@@ -1289,7 +1140,7 @@ namespace HpskSite.Controllers
                         id = newCompetition.Id,
                         name = newCompetition.Name,
                         type = competitionTypeId,
-                        startDate = newCompetition.GetValue<DateTime?>("competitionDate"),
+                        startDate = newCompetition.CompetitionDate,
                         status = GetCompetitionStatus(newCompetition),
                         registrationCount = 0 // New competition has no registrations
                     },
@@ -1458,174 +1309,37 @@ namespace HpskSite.Controllers
                     parentId = yearFolder.Id;
                 }
 
-                // Create new competition
-                var newCompetition = _contentService.Create(competitionName, parentId, "competition");
-                if (newCompetition == null)
+                // Annonsen skapas genom lagringen och fältpåsen genom den gemensamma regeln (C3-planen S5b).
+                // En annons är alltid extern, synlig och öppen; serieantalet har sina standardvärden, och
+                // klubb och bana sätts bara när de är valda.
+                var created = _competitions.Create(parentId, competitionName, c =>
                 {
-                    return Ok(new { success = false, message = "Failed to create competition content" });
-                }
-
-                // Set competition type
-                newCompetition.SetValue("competitionType", competitionTypeId);
-                newCompetition.SetValue("competitionName", competitionName);
-
-                // CRITICAL: Set external competition flags
-                newCompetition.SetValue("isExternal", true);
-                newCompetition.SetValue("isActive", true);
-                newCompetition.SetValue("isClubOnly", false);
-
-                // Set series/final series fields with defaults
-                int numberOfSeries = 6; // Default
-                if (fields.TryGetValue("numberOfSeriesOrStations", out var seriesObj) && seriesObj != null)
-                {
-                    if (int.TryParse(seriesObj.ToString(), out int parsedSeries) && parsedSeries > 0)
-                    {
-                        numberOfSeries = parsedSeries;
-                    }
-                }
-                newCompetition.SetValue("numberOfSeriesOrStations", numberOfSeries);
-
-                int numberOfFinalSeries = 0; // Default
-                if (fields.TryGetValue("numberOfFinalSeries", out var finalObj) && finalObj != null)
-                {
-                    if (int.TryParse(finalObj.ToString(), out int parsedFinal) && parsedFinal >= 0)
-                    {
-                        numberOfFinalSeries = parsedFinal;
-                    }
-                }
-                newCompetition.SetValue("numberOfFinalSeries", numberOfFinalSeries);
-
-                // Handle clubId with proper type conversion
-                if (fields.TryGetValue("clubId", out var clubIdObj) && clubIdObj != null)
-                {
-                    int clubId = 0;
-                    if (clubIdObj is System.Text.Json.JsonElement jsonClubElement)
-                    {
-                        if (jsonClubElement.ValueKind == System.Text.Json.JsonValueKind.Number)
-                        {
-                            clubId = jsonClubElement.GetInt32();
-                        }
-                        else if (jsonClubElement.ValueKind == System.Text.Json.JsonValueKind.String &&
-                                 int.TryParse(jsonClubElement.GetString(), out int parsed))
-                        {
-                            clubId = parsed;
-                        }
-                    }
-                    else if (int.TryParse(clubIdObj.ToString(), out int parsedClubId))
-                    {
-                        clubId = parsedClubId;
-                    }
-
-                    if (clubId > 0)
-                    {
-                        newCompetition.SetValue("clubId", clubId);
-                    }
-                }
-
-                // Handle rangeId (link to a shooting range in the Skjutbanedatabas)
-                if (fields.TryGetValue("rangeId", out var rangeIdObj) && rangeIdObj != null)
-                {
-                    int rangeId = 0;
-                    if (rangeIdObj is System.Text.Json.JsonElement jsonRangeElement)
-                    {
-                        if (jsonRangeElement.ValueKind == System.Text.Json.JsonValueKind.Number)
-                        {
-                            rangeId = jsonRangeElement.GetInt32();
-                        }
-                        else if (jsonRangeElement.ValueKind == System.Text.Json.JsonValueKind.String &&
-                                 int.TryParse(jsonRangeElement.GetString(), out int parsedRange))
-                        {
-                            rangeId = parsedRange;
-                        }
-                    }
-                    else if (int.TryParse(rangeIdObj.ToString(), out int parsedRangeId))
-                    {
-                        rangeId = parsedRangeId;
-                    }
-
-                    if (rangeId > 0)
-                    {
-                        newCompetition.SetValue("rangeId", rangeId);
-                    }
-                }
-
-                // Set all other properties from fields
-                foreach (var field in fields)
-                {
-                    try
-                    {
-                        // Skip fields already handled or special fields
-                        if (field.Key == "competitionName" || field.Key == "competitionType" ||
-                            field.Key == "isExternal" || field.Key == "isActive" || field.Key == "isClubOnly" ||
-                            field.Key == "clubId" || field.Key == "rangeId" ||
-                            field.Key == "invitationFile" || field.Key == "resultListFile") // Skip file upload fields - handle separately
-                            continue;
-
-                        var value = field.Value;
-
-                        // Convert value to appropriate type
-                        if (field.Key.Contains("Date") && value != null)
-                        {
-                            if (DateTime.TryParse(value.ToString(), out DateTime dateValue))
-                            {
-                                value = dateValue;
-                            }
-                        }
-                        else if (field.Key == "stationConfig" && value != null)
-                        {
-                            // stationConfig is a JSON object — ensure stored as string
-                            if (value is System.Text.Json.JsonElement scJsonElement)
-                            {
-                                value = scJsonElement.GetRawText();
-                            }
-                        }
-                        else if (field.Key == "shootingClassIds" && value != null)
-                        {
-                            // ⚠️ Kartan bor i HpskSite.Models.ShootingClassIdsValue. Den här grenen
-                            // testade tidigare `value is string`, men fields deserialiseras till
-                            // Dictionary<string, object> så värdet är ALLTID ett JsonElement — och
-                            // guiden skickar en CSV-STRÄNG, alltså ValueKind == String, som varken
-                            // sträng- eller Array-grenen fångade. Det råa elementet lagrades och
-                            // varje guide-skapad tävling fick CSV i stället för JSON.
-                            value = HpskSite.Models.ShootingClassIdsValue.Normalize(value);
-                        }
-
-                        if (value != null)
-                        {
-                            // ⚠️ Fältnamnet är inte alltid egenskapen — se PropertyAliasFor.
-                            newCompetition.SetValue(
-                                HpskSite.CompetitionTypes.Common.CompetitionFieldCatalog.PropertyAliasFor(field.Key), value);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error setting property {field.Key}: {ex.Message}");
-                    }
-                }
+                    HpskSite.Services.Competitions.CompetitionFieldBag.Apply(c, fields, AdvertisementHandledElsewhere);
+                    c.CompetitionType = competitionTypeId;
+                    c.CompetitionName = competitionName;
+                    c.IsExternal = true;
+                    c.IsVisible = true;
+                    c.IsClubOnly = false;
+                    c.NumberOfSeriesOrStations = AdvertisementSeriesCount(fields);
+                    c.NumberOfFinalSeries = AdvertisementFinalSeriesCount(fields);
+                    var club = ReadFieldAsInt(fields, "clubId");
+                    if (club > 0) c.ClubId = club;
+                    var range = ReadFieldAsInt(fields, "rangeId");
+                    if (range > 0) c.RangeId = range;
+                });
+                var newCompetition = created.Record!;
 
                 // TODO: Handle file upload for invitation
                 // File uploads for new competitions via this endpoint are not supported yet
                 // Users can add invitation files via the Edit modal after creation
                 // This keeps the CreateAdvertisement endpoint simpler and avoids media API complexity
 
-                // Save and publish
-                var saveResult = _contentService.Save(newCompetition);
-                if (!saveResult.Success)
+                if (created.PublishProblem != null)
                 {
                     return Ok(new
                     {
                         success = false,
-                        message = "Failed to save advertisement: " + string.Join(", ", saveResult.EventMessages?.GetAll().Select(e => e.Message))
-                    });
-                }
-
-                var publishResult = _contentService.Publish(newCompetition, new[] { "*" }, -1);
-                if (!publishResult.Success)
-                {
-                    return Ok(new
-                    {
-                        success = false,
-                        message = "Advertisement saved but failed to publish: " + string.Join(", ", publishResult.EventMessages?.GetAll().Select(e => e.Message))
+                        message = "Advertisement saved but failed to publish: " + created.PublishProblem
                     });
                 }
 
@@ -1641,7 +1355,7 @@ namespace HpskSite.Controllers
                         id = newCompetition.Id,
                         name = newCompetition.Name,
                         type = competitionTypeId,
-                        startDate = newCompetition.GetValue<DateTime?>("competitionDate"),
+                        startDate = newCompetition.CompetitionDate,
                         isExternal = true
                     }
                 });
@@ -1684,15 +1398,14 @@ namespace HpskSite.Controllers
                 }
 
                 // Get existing competition
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                 {
                     return Ok(new { success = false, message = "Competition not found" });
                 }
 
                 // Validate isExternal flag (ensure we're only editing external competitions)
-                bool isExternal = competition.GetValue<bool>("isExternal");
-                if (!isExternal)
+                if (!competition.IsExternal)
                 {
                     return Ok(new { success = false, message = "This competition is not external. Use internal edit endpoint." });
                 }
@@ -1743,169 +1456,37 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                // Update competition name
+                // Genom lagringen och den gemensamma fältregeln (C3-planen S5b). Förut skrevs den råa
+                // formulärnyckeln som alias, så t.ex. allowDualCClass gick aldrig att spara här.
+                // ⚠️ Lagringen publicerar bara en annons som redan var publicerad (förut alltid).
                 string competitionName = nameObj.ToString()!;
-                competition.Name = competitionName;
-                competition.SetValue("competitionName", competitionName);
-
-                // Explicitly handle numberOfSeriesOrStations and numberOfFinalSeries with proper type conversion
-                int numberOfSeries = 6; // Default
-                if (fields.TryGetValue("numberOfSeriesOrStations", out var seriesObjValue) && seriesObjValue != null)
+                var result = _competitions.Update(competitionId, null, c =>
                 {
-                    // Handle both direct int and JsonElement
-                    if (seriesObjValue is System.Text.Json.JsonElement jsonSeriesElement)
-                    {
-                        if (jsonSeriesElement.ValueKind == System.Text.Json.JsonValueKind.Number)
-                        {
-                            numberOfSeries = jsonSeriesElement.GetInt32();
-                        }
-                        else if (jsonSeriesElement.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(jsonSeriesElement.GetString(), out int parsed))
-                        {
-                            numberOfSeries = parsed;
-                        }
-                    }
-                    else if (int.TryParse(seriesObjValue.ToString(), out int parsedSeries) && parsedSeries > 0)
-                    {
-                        numberOfSeries = parsedSeries;
-                    }
-                }
-                competition.SetValue("numberOfSeriesOrStations", numberOfSeries);
-
-                int numberOfFinalSeries = 0; // Default
-                if (fields.TryGetValue("numberOfFinalSeries", out var finalObjValue) && finalObjValue != null)
+                    HpskSite.Services.Competitions.CompetitionFieldBag.Apply(c, fields, AdvertisementHandledElsewhere);
+                    c.Name = competitionName;
+                    c.CompetitionName = competitionName;
+                    c.IsExternal = true;
+                    var type = ReadFieldAsString(fields, "competitionType");
+                    if (!string.IsNullOrWhiteSpace(type)) c.CompetitionType = type;
+                    c.NumberOfSeriesOrStations = AdvertisementSeriesCount(fields);
+                    c.NumberOfFinalSeries = AdvertisementFinalSeriesCount(fields);
+                    // Klubben sätts när fältet skickas (0 tar bort klubben); banan likaså (0 = ingen bana).
+                    if (fields.TryGetValue("clubId", out var clubRaw) && clubRaw != null) c.ClubId = Math.Max(0, ReadFieldAsInt(fields, "clubId"));
+                    if (fields.TryGetValue("rangeId", out var rangeRaw) && rangeRaw != null) c.RangeId = Math.Max(0, ReadFieldAsInt(fields, "rangeId"));
+                });
+                if (!result.Ok || result.Record == null)
                 {
-                    // Handle both direct int and JsonElement
-                    if (finalObjValue is System.Text.Json.JsonElement jsonFinalElement)
-                    {
-                        if (jsonFinalElement.ValueKind == System.Text.Json.JsonValueKind.Number)
-                        {
-                            numberOfFinalSeries = jsonFinalElement.GetInt32();
-                        }
-                        else if (jsonFinalElement.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(jsonFinalElement.GetString(), out int parsed))
-                        {
-                            numberOfFinalSeries = parsed;
-                        }
-                    }
-                    else if (int.TryParse(finalObjValue.ToString(), out int parsedFinal) && parsedFinal >= 0)
-                    {
-                        numberOfFinalSeries = parsedFinal;
-                    }
+                    return Ok(new { success = false, message = "Competition not found" });
                 }
-                competition.SetValue("numberOfFinalSeries", numberOfFinalSeries);
-
-                // Handle clubId with proper type conversion
-                if (fields.TryGetValue("clubId", out var clubIdObjValue) && clubIdObjValue != null)
-                {
-                    int clubIdValue = 0;
-                    if (clubIdObjValue is System.Text.Json.JsonElement jsonClubElement)
-                    {
-                        if (jsonClubElement.ValueKind == System.Text.Json.JsonValueKind.Number)
-                        {
-                            clubIdValue = jsonClubElement.GetInt32();
-                        }
-                        else if (jsonClubElement.ValueKind == System.Text.Json.JsonValueKind.String &&
-                                 int.TryParse(jsonClubElement.GetString(), out int parsed))
-                        {
-                            clubIdValue = parsed;
-                        }
-                    }
-                    else if (int.TryParse(clubIdObjValue.ToString(), out int parsedClubId))
-                    {
-                        clubIdValue = parsedClubId;
-                    }
-
-                    // Set clubId (allow 0 to clear the club)
-                    competition.SetValue("clubId", clubIdValue);
-                }
-
-                // Handle rangeId (link to a shooting range in the Skjutbanedatabas; 0 clears the link)
-                if (fields.TryGetValue("rangeId", out var rangeIdObjValue) && rangeIdObjValue != null)
-                {
-                    int rangeIdValue = 0;
-                    if (rangeIdObjValue is System.Text.Json.JsonElement jsonRangeElement)
-                    {
-                        if (jsonRangeElement.ValueKind == System.Text.Json.JsonValueKind.Number)
-                        {
-                            rangeIdValue = jsonRangeElement.GetInt32();
-                        }
-                        else if (jsonRangeElement.ValueKind == System.Text.Json.JsonValueKind.String &&
-                                 int.TryParse(jsonRangeElement.GetString(), out int parsedRange))
-                        {
-                            rangeIdValue = parsedRange;
-                        }
-                    }
-                    else if (int.TryParse(rangeIdObjValue.ToString(), out int parsedRangeId))
-                    {
-                        rangeIdValue = parsedRangeId;
-                    }
-
-                    competition.SetValue("rangeId", rangeIdValue > 0 ? rangeIdValue : 0);
-                }
-
-                // Update all properties from fields
-                foreach (var field in fields)
-                {
-                    try
-                    {
-                        // Skip special fields already handled
-                        if (field.Key == "competitionId" || field.Key == "invitationFile" || field.Key == "resultListFile" ||
-                            field.Key == "competitionName" || field.Key == "numberOfSeriesOrStations" ||
-                            field.Key == "numberOfFinalSeries" || field.Key == "clubId" || field.Key == "rangeId")
-                            continue;
-
-                        var value = field.Value;
-
-                        // Convert dates
-                        if (field.Key.Contains("Date") && value != null)
-                        {
-                            if (DateTime.TryParse(value.ToString(), out DateTime dateValue))
-                            {
-                                value = dateValue;
-                            }
-                        }
-                        // Convert shooting class IDs to JSON array
-                        else if (field.Key == "shootingClassIds" && value != null)
-                        {
-                            // ⚠️ Kartan bor i HpskSite.Models.ShootingClassIdsValue. Den här grenen
-                            // testade tidigare `value is string`, men fields deserialiseras till
-                            // Dictionary<string, object> så värdet är ALLTID ett JsonElement — och
-                            // guiden skickar en CSV-STRÄNG, alltså ValueKind == String, som varken
-                            // sträng- eller Array-grenen fångade. Det råa elementet lagrades och
-                            // varje guide-skapad tävling fick CSV i stället för JSON.
-                            value = HpskSite.Models.ShootingClassIdsValue.Normalize(value);
-                        }
-
-                        if (value != null)
-                        {
-                            competition.SetValue(field.Key, value);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error setting property {field.Key}: {ex.Message}");
-                    }
-                }
-
-                // Save and publish
-                var saveResult = _contentService.Save(competition);
-                if (!saveResult.Success)
+                if (result.PublishProblem != null)
                 {
                     return Ok(new
                     {
                         success = false,
-                        message = "Failed to save advertisement: " + string.Join(", ", saveResult.EventMessages?.GetAll().Select(e => e.Message) ?? new List<string>())
+                        message = "Advertisement saved but failed to publish: " + result.PublishProblem
                     });
                 }
-
-                var publishResult = _contentService.Publish(competition, new[] { "*" }, -1);
-                if (!publishResult.Success)
-                {
-                    return Ok(new
-                    {
-                        success = false,
-                        message = "Advertisement saved but failed to publish: " + string.Join(", ", publishResult.EventMessages?.GetAll().Select(e => e.Message) ?? new List<string>())
-                    });
-                }
+                var saved = result.Record;
 
                 // Invalidate cache so updates show up immediately
                 InvalidateCompetitionCaches();
@@ -1916,10 +1497,10 @@ namespace HpskSite.Controllers
                     message = "Competition advertisement updated successfully",
                     data = new
                     {
-                        id = competition.Id,
-                        name = competition.GetValue<string>("competitionName") ?? competition.Name,
-                        type = competition.GetValue<string>("competitionType"),
-                        startDate = competition.GetValue<DateTime?>("competitionDate"),
+                        id = saved.Id,
+                        name = saved.CompetitionName ?? saved.Name,
+                        type = saved.CompetitionType,
+                        startDate = saved.CompetitionDate,
                         isExternal = true
                     }
                 });
@@ -1951,15 +1532,10 @@ namespace HpskSite.Controllers
             try
             {
                 // Get source competition
-                var sourceCompetition = _contentService.GetById(request.SourceCompetitionId);
+                var sourceCompetition = _competitions.GetSaved(request.SourceCompetitionId);
                 if (sourceCompetition == null)
                 {
                     return Ok(new { success = false, message = "Source competition not found" });
-                }
-
-                if (sourceCompetition.ContentType.Alias != "competition")
-                {
-                    return Ok(new { success = false, message = "Invalid competition content type" });
                 }
 
                 // AUTHORIZATION: redigeringsregeln (C3-planen S2, Stefans beslut 2026-10-14) — tävlingsansvarig
@@ -1976,68 +1552,31 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Cannot determine competition container" });
                 }
 
-                // Create new competition with incremented name and dates
+                // ⚠️ BARA DEFINITIONEN följer med (C3-planen S5b, CompetitionFieldTable.CopyDefinitionInto):
+                // publicerade patruller, officiella resultat, stationschefer, sammanslagning, medaljindelning
+                // och de uppladdade filerna hör till den gamla tävlingen. Förut kopierades varje egenskap, så en
+                // kopia kunde födas med "resultaten är officiella" och förra årets inbjudan.
+                // Datumen flyttas ett år; kopian är synlig, och bara sajtadmin får lägga den i menyn.
+                var isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 var newName = $"{sourceCompetition.Name} {DateTime.Now.Year + 1}";
-                var newCompetition = _contentService.Create(newName, parentId, "competition");
-
-                if (newCompetition == null)
+                var created = _competitions.Create(parentId, newName, c =>
                 {
-                    return Ok(new { success = false, message = "Failed to create competition copy" });
-                }
-
-                // Copy all properties from source to new, incrementing dates by 1 year
-                foreach (var property in sourceCompetition.Properties)
-                {
-                    try
-                    {
-                        var value = sourceCompetition.GetValue(property.Alias);
-
-                        // Special handling for date properties - add 1 year
-                        if (property.Alias.Contains("Date") || property.Alias.Contains("date"))
-                        {
-                            if (value is DateTime dateValue)
-                            {
-                                value = dateValue.AddYears(1);
-                            }
-                        }
-
-                        if (value != null)
-                        {
-                            newCompetition.SetValue(property.Alias, value);
-                        }
-                    }
-                    catch
-                    {
-                        // Skip properties that can't be copied
-                    }
-                }
-
-                // Ensure copied competition is active (boolean properties may not copy correctly)
-                newCompetition.SetValue("isActive", true);
-
-                var saveResult = _contentService.Save(newCompetition);
-                if (!saveResult.Success)
+                    HpskSite.Models.Competitions.CompetitionFieldTable.CopyDefinitionInto(sourceCompetition, c, shiftYears: 1);
+                    c.IsVisible = true;
+                    c.AddToMenu = isSiteAdmin && sourceCompetition.AddToMenu;
+                });
+                var newCompetition = created.Record!;
+                if (created.PublishProblem != null)
                 {
                     return Ok(new
                     {
                         success = false,
-                        message = "Failed to save competition copy: " + string.Join(", ", saveResult.EventMessages?.GetAll().Select(e => e.Message))
-                    });
-                }
-
-                // Publish the competition copy ("*" = publish invariant content)
-                var publishResult = _contentService.Publish(newCompetition, new[] { "*" });
-                if (!publishResult.Success)
-                {
-                    return Ok(new
-                    {
-                        success = false,
-                        message = "Competition copy saved but failed to publish: " + string.Join(", ", publishResult.EventMessages?.GetAll().Select(e => e.Message))
+                        message = "Competition copy saved but failed to publish: " + created.PublishProblem
                     });
                 }
 
                 // Eager Resultat page for Fältskytte/MagnumFält copies — no-op for other types.
-                EnsureCompetitionResultPage(newCompetition, newCompetition.GetValue<string>("competitionType"));
+                EnsureCompetitionResultPage(newCompetition, newCompetition.CompetitionType);
 
                 // Invalidate caches
                 InvalidateCompetitionCaches();
@@ -2051,8 +1590,8 @@ namespace HpskSite.Controllers
                     {
                         id = newCompetition.Id,
                         name = newCompetition.Name,
-                        type = newCompetition.GetValue<string>("competitionType") ?? "Unknown",
-                        startDate = newCompetition.GetValue<DateTime?>("competitionDate"),
+                        type = newCompetition.CompetitionType ?? "Unknown",
+                        startDate = newCompetition.CompetitionDate,
                         status = GetCompetitionStatus(newCompetition),
                         registrationCount = 0, // Copied competition has no registrations
                         sourceId = sourceCompetition.Id
@@ -2435,7 +1974,7 @@ namespace HpskSite.Controllers
         /// Säkert publikt: noden skapas med <c>isOfficial=false</c>, och Competition.cshtml
         /// kräver <c>hasResultPage &amp;&amp; isResultsOfficial</c> för "Visa resultat"-knappen.
         /// </summary>
-        private void EnsureCompetitionResultPage(Umbraco.Cms.Core.Models.IContent competition, string? competitionType)
+        private void EnsureCompetitionResultPage(HpskSite.Models.Competitions.CompetitionInfo? competition, string? competitionType)
         {
             if (competition == null) return;
             try
@@ -2447,6 +1986,30 @@ namespace HpskSite.Controllers
                 Console.WriteLine($"Could not create Resultat page for competition {competition.Id} (type {competitionType}): {ex.Message}");
             }
         }
+
+        /// <summary>Nycklar som skapandet sköter själv och som fältpåsen inte ska skriva (C3-planen S5b).</summary>
+        private static readonly HashSet<string> CreateHandledElsewhere = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "competitionName", "competitionType", "seriesId", "applicationId", "competitionManagerIds"
+        };
+
+        /// <summary>Nycklar som annonsdialogerna sköter själva (C3-planen S5b) — filerna har egna uppladdningar.</summary>
+        private static readonly HashSet<string> AdvertisementHandledElsewhere = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "competitionId", "competitionName", "competitionType", "seriesId", "isExternal", "isActive", "isClubOnly",
+            "clubId", "rangeId", "numberOfSeriesOrStations", "numberOfFinalSeries", "invitationFile", "resultListFile"
+        };
+
+        /// <summary>Annonsens antal serier: det angivna när det är större än noll, annars 6 (som förut).</summary>
+        private static int AdvertisementSeriesCount(Dictionary<string, object>? fields)
+        {
+            var n = ReadFieldAsInt(fields, "numberOfSeriesOrStations");
+            return n > 0 ? n : 6;
+        }
+
+        /// <summary>Annonsens antal finalserier: det angivna när det inte är negativt, annars 0.</summary>
+        private static int AdvertisementFinalSeriesCount(Dictionary<string, object>? fields) =>
+            Math.Max(0, ReadFieldAsInt(fields, "numberOfFinalSeries"));
 
         /// <summary>
         /// Invalidate all competition and series caches
@@ -3160,50 +2723,35 @@ namespace HpskSite.Controllers
                 }
 
                 // Copy selected competitions if any
+                // ⚠️ Bara definitionen följer med (C3-planen S5b), utan datum — omgångarna får sina datum när
+                // de planeras. Kopiorna är dolda tills arrangören visar dem, och bara sajtadmin får lägga dem i menyn.
                 int copiedCompetitionCount = 0;
                 if (request.CompetitionIdsToCopy != null && request.CompetitionIdsToCopy.Any())
                 {
                     foreach (var compId in request.CompetitionIdsToCopy)
                     {
-                        var sourceComp = _contentService.GetById(compId);
-                        if (sourceComp != null && sourceComp.ContentType.Alias == "competition")
+                        var sourceComp = _competitions.GetSaved(compId);
+                        if (sourceComp == null) continue;
+
+                        var compName = sourceComp.CompetitionName ?? sourceComp.Name;
+                        try
                         {
-                            // Clone competition
-                            var compName = sourceComp.GetValue<string>("competitionName") ?? sourceComp.Name;
-                            var newComp = _contentService.Create(compName, newSeries.Id, "competition");
-
-                            // Copy all properties except dates and isActive
-                            var allProperties = sourceComp.Properties;
-                            foreach (var prop in allProperties)
+                            var created = _competitions.Create(newSeries.Id, compName, c =>
                             {
-                                try
-                                {
-                                    var value = sourceComp.GetValue(prop.Alias);
-                                    // Skip date fields - keep them from new competition
-                                    // Skip isActive - we'll set it to false explicitly
-                                    if (!prop.Alias.Contains("Date") && prop.Alias != "isActive")
-                                    {
-                                        newComp.SetValue(prop.Alias, value);
-                                    }
-                                }
-                                catch { /* Skip properties that can't be copied */ }
-                            }
-
-                            // Set isActive to false for copied competition
-                            newComp.SetValue("isActive", false);
-
-                            var saveCompResult = _contentService.Save(newComp);
-                            if (saveCompResult.Success)
+                                HpskSite.Models.Competitions.CompetitionFieldTable.CopyDefinitionInto(sourceComp, c, shiftYears: null);
+                                c.IsVisible = false;
+                                c.AddToMenu = isSiteAdmin && sourceComp.AddToMenu;
+                            });
+                            if (created.PublishProblem == null)
                             {
-                                // Publish the copied competition
-                                var publishCompResult = _contentService.Publish(newComp, new[] { "*" }, -1);
-                                if (publishCompResult.Success)
-                                {
-                                    copiedCompetitionCount++;
-                                    // Eager Resultat page for Fältskytte/MagnumFält — no-op otherwise.
-                                    EnsureCompetitionResultPage(newComp, newComp.GetValue<string>("competitionType"));
-                                }
+                                copiedCompetitionCount++;
+                                // Eager Resultat page for Fältskytte/MagnumFält — no-op otherwise.
+                                EnsureCompetitionResultPage(created.Record, created.Record?.CompetitionType);
                             }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Could not copy competition {compId} into series {newSeries.Id}: {ex.Message}");
                         }
                     }
                 }

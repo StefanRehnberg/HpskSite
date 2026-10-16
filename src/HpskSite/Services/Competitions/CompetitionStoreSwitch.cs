@@ -59,6 +59,12 @@ namespace HpskSite.Services.Competitions
             if (CompetitionStoreSettings.IsWriteFrozen(_settings)) throw new CompetitionWriteFrozenException();
             return Current.Update(id, expectedVersion, change);
         }
+
+        public CompetitionUpdateResult<CompetitionInfo> Create(int parentId, string name, Action<CompetitionInfo> init)
+        {
+            if (CompetitionStoreSettings.IsWriteFrozen(_settings)) throw new CompetitionWriteFrozenException();
+            return Current.Create(parentId, name, init);
+        }
     }
 
     /// <summary>Den registrerade <see cref="ICompetitionSeriesStore"/>. Samma växel som tävlingarna.</summary>
