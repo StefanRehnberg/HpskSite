@@ -67,11 +67,15 @@ namespace HpskSite.Routing
             ChildSlugs.Contains(segment)
             || HpskSite.CompetitionTypes.Precision.Models.FinalsWeaponGroup.IsFinalsSlug(segment);
 
+        private readonly HpskSite.Services.Competitions.CompetitionCacheVersion _cacheVersion;
+
         public CompetitionUrlContentFinder(IUmbracoContextAccessor umbracoContextAccessor,
             ILogger<CompetitionUrlContentFinder> logger, AppCaches caches,
             IHttpContextAccessor http,
-            IShortStringHelper shortStrings)
+            IShortStringHelper shortStrings,
+            HpskSite.Services.Competitions.CompetitionCacheVersion cacheVersion)
         {
+            _cacheVersion = cacheVersion;
             _umbracoContextAccessor = umbracoContextAccessor;
             _logger = logger;
             _caches = caches;
@@ -341,6 +345,7 @@ namespace HpskSite.Routing
         {
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                 yield break;
+            _cacheVersion.EnsureFresh(); // en annan instans kan ha skrivit (C3-planen S5d)
             var index = _caches.RuntimeCache.GetCacheItem(HpskSite.Services.CompetitionNavigationCaches.UrlIndexKey,
                             BuildYearSlugIndex, HpskSite.Services.CompetitionNavigationCaches.CacheFor)
                         ?? new Dictionary<string, List<int>>();

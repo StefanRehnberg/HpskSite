@@ -142,7 +142,7 @@ namespace HpskSite.Controllers
                     data = clubs
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error loading clubs: " + ex.Message });
             }
@@ -331,7 +331,7 @@ namespace HpskSite.Controllers
                     clubs = clubs
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error loading clubs: " + ex.Message });
             }
@@ -358,7 +358,7 @@ namespace HpskSite.Controllers
                     data = competitionTypes
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error loading competition types: " + ex.Message });
             }
@@ -375,6 +375,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetCompetitionsList(int? year = null, bool includeCompleted = false, string? type = null, string? region = null, string? clubScope = null)
         {
+            (HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Competitions.CompetitionCacheVersion)) as HpskSite.Services.Competitions.CompetitionCacheVersion)?.EnsureFresh(); // C3-planen S5d
             // --- AUTH: fetch member + roles ONCE (instead of ~12 redundant DB calls) ---
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember == null)
@@ -760,7 +761,7 @@ namespace HpskSite.Controllers
 
                 return Ok(result);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error loading competitions: " + ex.Message });
             }
@@ -881,7 +882,7 @@ namespace HpskSite.Controllers
                     competition = competitionData
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error loading competition: " + ex.Message });
             }
@@ -1121,7 +1122,7 @@ namespace HpskSite.Controllers
                     applicationNote
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error creating competition: " + ex.Message });
             }
@@ -1155,7 +1156,7 @@ namespace HpskSite.Controllers
                 cal?.Invalidate();
                 return linked == null ? err : null;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 (HttpContext.RequestServices.GetService(typeof(Microsoft.Extensions.Logging.ILogger<CompetitionAdminController>)) as Microsoft.Extensions.Logging.ILogger)?.LogError(ex, "Competition {Comp}: linking to application {App} failed.", competitionId, appId);
                 return "Tävlingen är skapad, men kopplingen till ansökan misslyckades.";
@@ -1305,7 +1306,7 @@ namespace HpskSite.Controllers
                     }
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error creating advertisement: " + ex.Message });
             }
@@ -1450,7 +1451,7 @@ namespace HpskSite.Controllers
                     }
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 //_logger.LogError(ex, "Error saving advertisement");
                 return Ok(new { success = false, message = "Error saving advertisement: " + ex.Message });
@@ -1543,7 +1544,7 @@ namespace HpskSite.Controllers
                     }
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error copying competition: " + ex.Message });
             }
@@ -1608,7 +1609,7 @@ namespace HpskSite.Controllers
                     message = "Tävlingen ligger nu i papperskorgen och kan läggas tillbaka av en sajtadministratör."
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Tävlingen kunde inte tas bort: " + ex.Message });
             }
@@ -1658,7 +1659,7 @@ namespace HpskSite.Controllers
                     message = "Competition moved successfully"
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error moving competition: " + ex.Message });
             }
@@ -1741,7 +1742,7 @@ namespace HpskSite.Controllers
                             errors.Add($"Competition {competition.Id} ({competition.Name}): Failed to save");
                         }
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
                     {
                         errorCount++;
                         errors.Add($"Competition {competition.Id} ({competition.Name}): {ex.Message}");
@@ -1759,7 +1760,7 @@ namespace HpskSite.Controllers
                     errors
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error during migration: " + ex.Message });
             }
@@ -1851,7 +1852,7 @@ namespace HpskSite.Controllers
             {
                 _results.Ensure(competition.Id);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 Console.WriteLine($"Could not create Resultat page for competition {competition.Id} (type {competitionType}): {ex.Message}");
             }
@@ -1950,6 +1951,7 @@ namespace HpskSite.Controllers
         [HttpGet]
         public async Task<IActionResult> GetSeriesList(string? region = null)
         {
+            (HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Competitions.CompetitionCacheVersion)) as HpskSite.Services.Competitions.CompetitionCacheVersion)?.EnsureFresh(); // C3-planen S5d
             // Auth context drives filtering, not access. Series metadata (name/dates) is
             // already public on /competitions/<series>/, and competition managers (who can
             // open the edit modal) need this list to assign their competition to a series.
@@ -2106,7 +2108,7 @@ namespace HpskSite.Controllers
 
                 return Ok(result);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error loading series: " + ex.Message });
             }
@@ -2158,7 +2160,7 @@ namespace HpskSite.Controllers
 
                 return Ok(new { success = true, data = competitions });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error loading competitions: " + ex.Message });
             }
@@ -2250,7 +2252,7 @@ namespace HpskSite.Controllers
                     }
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error creating series: " + ex.Message });
             }
@@ -2338,7 +2340,7 @@ namespace HpskSite.Controllers
 
                 return Ok(new { success = true, message = "Series updated successfully" });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error updating series: " + ex.Message });
             }
@@ -2401,7 +2403,7 @@ namespace HpskSite.Controllers
 
                 return Ok(new { success = true, message = "Serien ligger nu i papperskorgen och kan läggas tillbaka av en sajtadministratör." });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Serien kunde inte tas bort: " + ex.Message });
             }
@@ -2510,7 +2512,7 @@ namespace HpskSite.Controllers
                                 EnsureCompetitionResultPage(created.Record, created.Record?.CompetitionType);
                             }
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
                         {
                             Console.WriteLine($"Could not copy competition {compId} into series {newSeries.Id}: {ex.Message}");
                         }
@@ -2535,7 +2537,7 @@ namespace HpskSite.Controllers
                     }
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error copying series: " + ex.Message });
             }
@@ -2597,7 +2599,7 @@ namespace HpskSite.Controllers
 
                 return Ok(new { success = true, data = result });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error calculating series results: " + ex.Message });
             }
@@ -2753,7 +2755,7 @@ namespace HpskSite.Controllers
                     clearedCount = clearedCount
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error clearing invalid data: " + ex.Message });
             }
@@ -2898,7 +2900,7 @@ namespace HpskSite.Controllers
                     fileName = fileName
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error uploading file: " + ex.Message });
             }
@@ -3039,7 +3041,7 @@ namespace HpskSite.Controllers
                     fileName = fileName
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return Ok(new { success = false, message = "Error uploading file: " + ex.Message });
             }

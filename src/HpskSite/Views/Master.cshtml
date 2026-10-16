@@ -754,6 +754,11 @@
         </nav>
     </header>
 
+    @if (isLoggedIn)
+    {
+        @await Html.PartialAsync("_CompetitionFreezeNotice")
+    }
+
     <main class="container-fluid mt-4">
         @RenderBody()
     </main>

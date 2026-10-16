@@ -20,6 +20,7 @@ namespace HpskSite.Services
         public const string CacheKey = CompetitionNavigationCaches.MenuKey;
         private static readonly TimeSpan CacheFor = CompetitionNavigationCaches.CacheFor;
         private readonly AppCaches _caches;
+        private readonly HpskSite.Services.Competitions.CompetitionCacheVersion _cacheVersion;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
         private readonly Umbraco.Cms.Core.Web.IUmbracoContextAccessor _umbracoContextAccessor;
@@ -28,8 +29,10 @@ namespace HpskSite.Services
         public CompetitionMenuService(AppCaches caches,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
             HpskSite.Services.Competitions.ICompetitionSeriesStore series,
-            Umbraco.Cms.Core.Web.IUmbracoContextAccessor umbracoContextAccessor)
+            Umbraco.Cms.Core.Web.IUmbracoContextAccessor umbracoContextAccessor,
+            HpskSite.Services.Competitions.CompetitionCacheVersion cacheVersion)
         {
+            _cacheVersion = cacheVersion;
             _caches = caches;
             _competitions = competitions;
             _series = series;
@@ -41,6 +44,7 @@ namespace HpskSite.Services
         public IReadOnlyList<MenuItem> Get(IPublishedContent? competitionsHub)
         {
             if (competitionsHub == null) return Array.Empty<MenuItem>();
+            _cacheVersion.EnsureFresh(); // en annan instans kan ha skrivit (C3-planen S5d)
             return _caches.RuntimeCache.GetCacheItem(CacheKey, () => Build(DateTime.Today), CacheFor)
                    ?? (IReadOnlyList<MenuItem>)Array.Empty<MenuItem>();
         }

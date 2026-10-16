@@ -60,6 +60,28 @@ namespace HpskSite.Controllers
 
         private IActionResult Refused() => StatusCode(403, "Bara sajtadministratör.");
 
+        /// <summary>
+        /// C3-planen S5d: vilka tävlingscachar finns i den här instansen just nu (meny, adressindex,
+        /// adminlistor), och vilken versionsrad den senast såg. Läser bara. <paramref name="check"/> = kör
+        /// versionskontrollen först (som menyn och listorna gör).
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> CompetitionCacheProbe(bool check = false)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
+            if (check)
+                (HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Competitions.CompetitionCacheVersion))
+                    as HpskSite.Services.Competitions.CompetitionCacheVersion)?.EnsureFresh();
+            var caches = (Umbraco.Cms.Core.Cache.AppCaches)HttpContext.RequestServices.GetService(typeof(Umbraco.Cms.Core.Cache.AppCaches))!;
+            return JsonText(new
+            {
+                menu = caches.RuntimeCache.Get(HpskSite.Services.CompetitionNavigationCaches.MenuKey) != null,
+                urlIndex = caches.RuntimeCache.Get(HpskSite.Services.CompetitionNavigationCaches.UrlIndexKey) != null,
+                competitionLists = caches.RuntimeCache.SearchByKey("admin_competitions_list_").Count(),
+                seriesLists = caches.RuntimeCache.SearchByKey("admin_series_list").Count(),
+            });
+        }
+
         [HttpGet]
         public async Task<IActionResult> CompetitionReads(int? id = null)
         {

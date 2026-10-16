@@ -1,0 +1,33 @@
+@using HpskSite.Services.Competitions
+@inject HpskSite.Services.SiteSettings.SiteSettingService SiteSettings
+@*
+    C3-planen S5d: frysningen syns. När skrivningarna till tävlingarna är frysta (underhållsfönstret,
+    SiteSetting Competitions:WriteFreeze = 1) visas en banderoll för inloggade, och tävlings- och
+    seriedialogerna stoppas redan när de öppnas — i stället för att arrangören fyller i en hel dialog
+    och får nej först vid Spara. Servern vägrar ändå (CompetitionWriteFrozenException).
+    Renderas av Master, bara för inloggade (utloggade skriver inga tävlingar).
+*@
+@{
+    var frozen = false;
+    try { frozen = CompetitionStoreSettings.IsWriteFrozen(SiteSettings); } catch { frozen = false; }
+}
+@if (frozen)
+{
+    <div class="alert alert-warning rounded-0 mb-0 text-center" role="status" id="competitionFreezeNotice">
+        <i class="bi bi-tools me-2"></i>@CompetitionStoreSettings.WriteFreezeMessage
+        Tävlingarna går att läsa som vanligt.
+    </div>
+    <script>
+    (function () {
+        window.hpskCompetitionsFrozen = true;
+        var ids = ['competitionWizardModal', 'competitionEditModal', 'springEditModal', 'competitionAdvertModal',
+                   'competitionAdvertEditModal', 'competitionDeleteConfirmModal', 'seriesEditModal', 'seriesCopyModal',
+                   'seriesDeleteConfirmModal'];
+        document.addEventListener('show.bs.modal', function (e) {
+            if (!e.target || ids.indexOf(e.target.id) < 0) return;
+            e.preventDefault();
+            alert(@Html.Raw(System.Text.Json.JsonSerializer.Serialize(CompetitionStoreSettings.WriteFreezeMessage)));
+        }, true);
+    })();
+    </script>
+}

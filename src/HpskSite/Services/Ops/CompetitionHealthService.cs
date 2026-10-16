@@ -71,6 +71,10 @@ namespace HpskSite.Services.Ops
             public long AuthErrors { get; init; }
             public DateTime SignalsSince { get; init; }
             public string? CompetitionError { get; init; }
+            /// <summary>C3-planen S5d: dbo.CompetitionChange och dbo.CompetitionStoreVersion finns. Standard sant.</summary>
+            public bool ChangeLogExists { get; init; } = true;
+            /// <summary>Skrivningarna till tävlingar och serier är frysta (Competitions:WriteFreeze).</summary>
+            public bool CompetitionsFrozen { get; init; }
             public string Status { get; set; } = "OK";
             public List<string> Problems { get; set; } = new();
             public List<string> Warnings { get; set; } = new();
@@ -113,6 +117,8 @@ namespace HpskSite.Services.Ops
                 StoreMisses = OpsSignals.Count(OpsSignals.KindStoreMiss),
                 AuthErrors = OpsSignals.Count(OpsSignals.KindAuthError),
                 SignalsSince = OpsSignals.Since,
+                ChangeLogExists = ChangeLogTablesExist(),
+                CompetitionsFrozen = SafeFrozen(),
             };
             Evaluate(report);
             return report;
@@ -141,10 +147,34 @@ namespace HpskSite.Services.Ops
                 if (s.WriteFrozen)
                     r.Warnings.Add($"{s.Name}: skrivningar är frysta.");
             }
+            if (!r.ChangeLogExists)
+                r.Warnings.Add("Tävlingarnas ändringslogg saknas — kör Migrations/create-competition-change-tables.sql.");
+            if (r.CompetitionsFrozen)
+                r.Warnings.Add("Tävlingar: skrivningar är frysta.");
             if (r.CompetitionError != null) r.Problems.Add("Tävlingarna: kunde inte läsas (" + r.CompetitionError + ").");
             if (r.CompetitionsWithoutUrl.Count > 0)
                 r.Warnings.Add($"{r.CompetitionsWithoutUrl.Count} publicerade tävlingar saknar adress.");
             r.Status = r.Problems.Count > 0 ? "FAIL" : r.Warnings.Count > 0 ? "WARN" : "OK";
+        }
+
+        private bool ChangeLogTablesExist()
+        {
+            try
+            {
+                using var db = _databaseFactory.CreateDatabase();
+                return db.ExecuteScalar<int>("SELECT COUNT(*) FROM sys.tables WHERE name IN ('CompetitionChange', 'CompetitionStoreVersion')") == 2;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Hälsokontrollen kunde inte läsa ändringsloggens tabeller.");
+                return true;
+            }
+        }
+
+        private bool SafeFrozen()
+        {
+            try { return HpskSite.Services.Competitions.CompetitionStoreSettings.IsWriteFrozen(_settings); }
+            catch { return false; }
         }
 
         private StoreState ReadStore(string name, string table, string storeKey, string freezeKey, string[] aliases,

@@ -123,7 +123,7 @@ namespace HpskSite.Controllers
                     })
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 _logger.LogError(ex, "PreviewDirektplacering failed for competition {CompetitionId}", request.CompetitionId);
                 return Json(new { success = false, message = "Kunde inte förhandsgranska egenbokningen: " + ex.Message });
@@ -227,7 +227,7 @@ namespace HpskSite.Controllers
                 Console.WriteLine($"Returning competition data for: {content.Name}");
                 return Ok(new { success = true, data = competitionData });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 Console.WriteLine($"Exception in GetCompetitionData: {ex.Message}");
                 Console.WriteLine($"Stack trace: {ex.StackTrace}");
@@ -260,7 +260,7 @@ namespace HpskSite.Controllers
 
                 return Ok(new { success = true, data = classOptions });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return StatusCode(500, new { success = false, message = ex.Message });
             }
@@ -427,7 +427,7 @@ namespace HpskSite.Controllers
                             er.Message = (er.Message ?? "") + note;
                         }
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
                     {
                         // The competition IS saved; say that the seating did not happen instead of
                         // reporting the whole save as failed.
@@ -445,7 +445,7 @@ namespace HpskSite.Controllers
 
                 return Ok(result);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return StatusCode(500, new
                 {
@@ -635,7 +635,7 @@ namespace HpskSite.Controllers
                     data = result.Data
                 };
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 return new
                 {
@@ -712,7 +712,7 @@ namespace HpskSite.Controllers
                         .ToList()
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 _logger.LogError(ex, "GetCompetitionTypeChangeability failed for {Id}", competitionId);
                 return Json(new { success = false, message = "Fel: " + ex.Message });
@@ -787,7 +787,7 @@ namespace HpskSite.Controllers
                     message = $"Grenen andrad till {known.Name}. Valj klasser for den nya grenen och spara."
                 });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {
                 _logger.LogError(ex, "ChangeCompetitionType failed");
                 return Json(new { success = false, message = "Fel: " + ex.Message });
@@ -844,7 +844,7 @@ namespace HpskSite.Controllers
                     total += db.ExecuteScalar<int>(
                         $"SELECT COUNT(*) FROM [{t}] WHERE CompetitionId = @0", competitionId);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
                 {
                     // En tabell vi inte kan lasa far inte tolkas som "inga resultat" —
                     // det ar precis det svaret som skulle tillata ett farligt byte.
