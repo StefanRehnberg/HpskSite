@@ -11521,7 +11521,18 @@ och tom text är null (så `?? Name` slår till).
   med flit: skrivvägarna och seedarna (S4), adressuppslagen (S6) och `Models/Competition.cs` (läses av
   skyddsnätets `LegacyCompetitionReadSnapshot`). Taken 43 → 34, 301 → 175. Verifierat: fångst grön,
   korskontroll 3092/0, matrisen 8/8 + 35/36 (`schema-verify`, datum), competition-edit-dispatch 29,
-  compedit-catalog 26, row-action-menus 60, comptype-filter 25. **S3 är klart.**
+  compedit-catalog 26, row-action-menus 60, comptype-filter 25. **S3 är klart** (deployat 2026-10-16).
+
+**S4 (listorna och trädgenomgångarna, 2026-10-16):** tävlingsmenyn (`CompetitionMenuService`, nu scoped)
+läser serierna och tävlingarna ur lagringarna — menyregeln är oförändrad. Tävlingssidans seriebanner
+("Omgång N av M", föregående/nästa) räknar `ListBySeries` (publicerade, ordnade på datum). Tävlingsnavet
+och kretsens lista tar `List()` och behåller trädets ordning (`treeIndex` över den trädgenomgång vyn redan
+gör för klubbarna); säsongen och serien tar `List()`/`ListBySeries`; klubbens lista går inte längre igenom
+hela trädet (tävlingar med samma datum ordnas på förälder + sortOrder — den gamla ordningen var den
+publicerade cachens, utan regel; godkänt i `c3/accepted-s4.json`). Markerat kvar i trädet: fakturaskanningens
+mappar och anmälningarnas nodlagring. Rutterna → S6, skrivvägarna och seedarna → S5. Taken 34 → 30,
+175 → 172. Verifierat: fångst grön, korskontroll 3092/0, matrisen 8/8 + 35/36 (`schema-verify`, datum),
+competitions-hub-findability 26/34 (kända), club-whats-happening 17, faltserie 38, comp-schema-link 11.
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

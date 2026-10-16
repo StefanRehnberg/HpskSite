@@ -2,12 +2,20 @@
 @using HpskSite.Extensions
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject HpskSite.Services.Competitions.CompetitionPostCache Posts
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @{
     Layout = "Master.cshtml";
     ViewBag.Title = Model.Value<string>("pageTitle") ?? Model.Name;
 
     // Get competitions in this season
-    var allCompetitions = Model.Children.Where(x => x.ContentType.Alias == "competition").ToList(); // competitionstore-ok: noden behövs för adressen och trädet (S6), fälten läses ur posten
+    // Säsongens publicerade tävlingar ur tävlingslagringen (C3-planen S4), i trädets ordning; noden för adressen.
+    var allCompetitions = Competitions.List()
+        .Where(p => p.ParentId == Model.Id)
+        .OrderBy(p => p.SortOrder)
+        .Select(p => Umbraco.Content(p.Id))
+        .Where(n => n != null)
+        .Cast<IPublishedContent>()
+        .ToList();
 
     // Get unique venues for filtering
     var allVenues = allCompetitions.Select(c => Posts.Of(c).Venue).Where(v => !string.IsNullOrEmpty(v)).Distinct().OrderBy(v => v).ToList();

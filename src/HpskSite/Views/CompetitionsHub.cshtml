@@ -7,6 +7,7 @@
 @using Umbraco.Cms.Core.Services;
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject HpskSite.Services.Competitions.CompetitionPostCache Posts
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @inject IMemberManager _memberManager
 @inject IMemberService _memberService
 @inject HpskSite.Services.MemberClubService _memberClubService
@@ -23,6 +24,15 @@
     var allContent = Model.Root().DescendantsOrSelf().ToList();
 
     var allCompetitionSeries = allContent.Where(x => x.ContentType.Alias == "competitionSeries").ToList();
+    // Tävlingarna ur tävlingslagringen (C3-planen S4); noden bara för adressen och kortets RTE/media (S6).
+    // Trädets ordning behålls, så sidan ritar korten i samma ordning som förut.
+    var treeIndex = new Dictionary<int, int>();
+    for (var i = 0; i < allContent.Count; i++) treeIndex[allContent[i].Id] = i;
+    Func<IEnumerable<HpskSite.Models.Competitions.CompetitionInfo>, List<IPublishedContent>> nodesOf = posts => posts
+        .Where(p => treeIndex.ContainsKey(p.Id))
+        .OrderBy(p => treeIndex[p.Id])
+        .Select(p => allContent[treeIndex[p.Id]])
+        .ToList();
 
     // Which competitions belong to a series, and what to call it. A series round is now a NORMAL
     // competition card carrying a "Del av <serien>" badge — see the note on allCompetitions below.
@@ -31,7 +41,7 @@
     {
         var sName = s.Value<string>("seriesName") ?? s.Name;
         var sUrl = s.Url();
-        foreach (var child in s.Children().Where(x => x.ContentType.Alias == "competition")) // competitionstore-ok: noden behövs för adressen och trädet (S6), fälten läses ur posten
+        foreach (var child in Competitions.ListBySeries(s.Id))
         {
             seriesInfoByCompetitionId[child.Id] = (sName, sUrl);
         }
@@ -73,10 +83,8 @@
     //  • isClubOnly competitions were excluded for everyone, including the club's own members, so
     //    your own club's internal competition was invisible on the page that lists competitions.
     //    They are now shown to members of that club only, badged "Endast klubb".
-    var allCompetitions = allContent
-        .Where(x => x.ContentType.Alias == "competition") // competitionstore-ok: noden behövs för adressen och trädet (S6), fälten läses ur posten
-        .Where(x => !Posts.Of(x).IsClubOnly || myClubIds.Contains(Posts.Of(x).ClubId))
-        .ToList();
+    var allCompetitions = nodesOf(Competitions.List()
+        .Where(p => !p.IsClubOnly || myClubIds.Contains(p.ClubId)));
 
     // Grannkretsarna, ur det handskrivna gränsschemat i Models/RegionAdjacency.cs. Egna kretsar
     // filtreras bort där, så en granne som samtidigt är min egen krets aldrig kan hamna i två
@@ -91,7 +99,7 @@
     var inheritedRegionsByCompetitionId = new Dictionary<int, List<string>>();
     foreach (var srs in allCompetitionSeries)
     {
-        var kids = srs.Children().Where(x => x.ContentType.Alias == "competition").ToList(); // competitionstore-ok: noden behövs för adressen och trädet (S6), fälten läses ur posten
+        var kids = nodesOf(Competitions.ListBySeries(srs.Id));
         Func<IPublishedContent, string> ownRegionOf = k =>
         {
             var kcid = Posts.Of(k).ClubId;
