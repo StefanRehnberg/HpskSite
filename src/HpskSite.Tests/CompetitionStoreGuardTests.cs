@@ -26,16 +26,16 @@ namespace HpskSite.Tests
     public class CompetitionStoreGuardTests
     {
         /// <summary>Levande <c>"competition"</c>-litteraler 2026-10-14. Sänk — höj aldrig.</summary>
-        private const int CompetitionAliasBaseline = 28; // 2026-10-16 S5a
+        private const int CompetitionAliasBaseline = 21; // 2026-10-16 S5b
 
         /// <summary>Levande <c>"competitionSeries"</c>-litteraler 2026-10-14. Sänk — höj aldrig.</summary>
-        private const int SeriesAliasBaseline = 33;
+        private const int SeriesAliasBaseline = 23; // 2026-10-16 S5b
 
         /// <summary>Levande läsningar och skrivningar av tävlingens egenskaper på en nod 2026-10-14. Sänk — höj aldrig.</summary>
-        private const int CompetitionPropertyBaseline = 149; // 2026-10-16 S5a
+        private const int CompetitionPropertyBaseline = 117; // 2026-10-16 S5b
 
         /// <summary>Samma för serien.</summary>
-        private const int SeriesPropertyBaseline = 66;
+        private const int SeriesPropertyBaseline = 61; // 2026-10-16 S5b
 
         private static readonly string[] SkipDirectories =
             { "bin", "obj", "node_modules", "lib", "Migrations", "Documentation", "KnowledgeBase", "App_Data", "umbraco", "media", "App_Plugins", "wwwroot" };

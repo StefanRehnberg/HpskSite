@@ -39,6 +39,10 @@ namespace HpskSite.Services.Competitions
                 ? new Dictionary<string, object?> { ["SeriesId"] = after.SeriesId }
                 : new Dictionary<string, object?>());
 
+        /// <summary>Byggs med tabellens slutliga form (planens §5) — där bestäms id-golvet och adressen.</summary>
+        public CompetitionUpdateResult<CompetitionInfo> Create(int parentId, string name, Action<CompetitionInfo> init) =>
+            throw new NotSupportedException("Att skapa tävlingar i tabellen byggs med tabellens slutliga form (C3-planen §5).");
+
         private static void Fill(CompetitionInfo c, IDictionary<string, object?> row, SqlMeta m)
         {
             c.Id = m.Id; c.Key = m.Key; c.Name = m.Name; c.Version = m.Version;

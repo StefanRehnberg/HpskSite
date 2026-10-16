@@ -31,7 +31,7 @@ namespace HpskSite.Services.Competitions
             IScopeProvider scopeProvider, ILogger<NodeCompetitionStore> logger)
         {
             _core = new NodeStoreCore<CompetitionInfo>(CompetitionFieldTable.NodeAlias, CompetitionFieldTable.Fields,
-                contentService, umbracoContextAccessor, scopeProvider, logger, Fill);
+                contentService, umbracoContextAccessor, scopeProvider, logger, Fill, c => c.Name);
         }
 
         public CompetitionInfo? Get(int id) => _core.Get(id);
@@ -42,6 +42,9 @@ namespace HpskSite.Services.Competitions
 
         public CompetitionUpdateResult<CompetitionInfo> Update(int id, long? expectedVersion, Action<CompetitionInfo> change) =>
             _core.Update(id, expectedVersion, change);
+
+        public CompetitionUpdateResult<CompetitionInfo> Create(int parentId, string name, Action<CompetitionInfo> init) =>
+            _core.Create(parentId, name, init);
 
         private static void Fill(CompetitionInfo c, NodeMeta m)
         {
@@ -62,7 +65,7 @@ namespace HpskSite.Services.Competitions
             IScopeProvider scopeProvider, ILogger<NodeCompetitionSeriesStore> logger)
         {
             _core = new NodeStoreCore<CompetitionSeriesInfo>(CompetitionSeriesFieldTable.NodeAlias, CompetitionSeriesFieldTable.Fields,
-                contentService, umbracoContextAccessor, scopeProvider, logger, Fill);
+                contentService, umbracoContextAccessor, scopeProvider, logger, Fill, s => s.Name);
         }
 
         public CompetitionSeriesInfo? Get(int id) => _core.Get(id);
@@ -96,10 +99,13 @@ namespace HpskSite.Services.Competitions
         private readonly IScopeProvider _scopeProvider;
         private readonly ILogger _logger;
         private readonly Action<T, NodeMeta> _fill;
+        private readonly Func<T, string> _nameOf;
 
         public NodeStoreCore(string alias, IReadOnlyList<CompetitionFieldDef<T>> fields, IContentService contentService,
-            IUmbracoContextAccessor umbracoContextAccessor, IScopeProvider scopeProvider, ILogger logger, Action<T, NodeMeta> fill)
+            IUmbracoContextAccessor umbracoContextAccessor, IScopeProvider scopeProvider, ILogger logger, Action<T, NodeMeta> fill,
+            Func<T, string> nameOf)
         {
+            _nameOf = nameOf;
             _alias = alias;
             _fields = fields;
             _contentService = contentService;
@@ -182,31 +188,19 @@ namespace HpskSite.Services.Competitions
             change(after);
 
             var changed = _fields.Where(f => !Equals(f.Get(before), f.Get(after))).ToList();
-            if (changed.Count == 0)
+            // Nodens namn följer med (redigeringen byter det när tävlingens namn ändras). Ett tomt namn
+            // skrivs aldrig — en nod utan namn går inte att spara.
+            var newName = _nameOf(after);
+            var renamed = !string.IsNullOrWhiteSpace(newName) && newName != _nameOf(before);
+            if (changed.Count == 0 && !renamed)
                 return new CompetitionUpdateResult<T> { Outcome = CompetitionUpdateOutcome.Saved, Record = before };
 
-            foreach (var f in changed)
-            {
-                if (!node.HasProperty(f.Alias))
-                    throw new InvalidOperationException($"Kan inte spara {f.Alias} — egenskapen saknas på doktypen {_alias}.");
-                node.SetValue(f.Alias, CompetitionFieldValues.ToNode(f.Shape, f.Get(after)));
-            }
+            WriteFields(node, changed, after);
+            if (renamed) node.Name = newName.Trim();
 
             var wasPublished = node.Published;
             _contentService.Save(node);
-            string? publishProblem = null;
-            if (wasPublished)
-            {
-                var publish = _contentService.Publish(node, new[] { "*" }, -1);
-                if (!publish.Success)
-                {
-                    var invalid = publish.InvalidProperties != null && publish.InvalidProperties.Any()
-                        ? " Ogiltiga eller obligatoriska fält: " + string.Join(", ", publish.InvalidProperties.Select(p => p.Alias)) + "."
-                        : "";
-                    publishProblem = $"Ändringen sparades men kunde inte publiceras ({publish.Result}).{invalid}";
-                    _logger.LogWarning("{Alias} {Id} sparades men publicerades inte: {Result}{Invalid}", _alias, id, publish.Result, invalid);
-                }
-            }
+            var publishProblem = wasPublished ? Publish(node) : null;
 
             var saved = _contentService.GetById(id) ?? node;
             return new CompetitionUpdateResult<T>
@@ -216,6 +210,69 @@ namespace HpskSite.Services.Competitions
                 ChangedFields = changed.Select(f => f.Alias).ToList(),
                 PublishProblem = publishProblem,
             };
+        }
+
+        /// <summary>
+        /// Skapar en ny nod under <paramref name="parentId"/>, låter <paramref name="init"/> fylla posten och
+        /// skriver de fält som fick ett värde. Publiceras alltid, som skapandet alltid gjort.
+        ///
+        /// <para>⚠️ Fält där ett saknat värde betyder sant (<c>isActive</c>) skrivs alltid uttryckligen: en
+        /// läsare utanför lagringen läser annars ett saknat värde som falskt och gömmer tävlingen.</para>
+        /// </summary>
+        public CompetitionUpdateResult<T> Create(int parentId, string name, Action<T> init)
+        {
+            if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Namnet saknas.", nameof(name));
+            var node = _contentService.Create(name.Trim(), parentId, _alias);
+
+            var blank = FromContent(node);
+            var after = FromContent(node);
+            init(after);
+
+            var written = _fields
+                .Where(f => f.Shape == CompetitionFieldShape.BoolDefaultTrue || !Equals(f.Get(blank), f.Get(after)))
+                .ToList();
+            WriteFields(node, written, after);
+            var newName = _nameOf(after);
+            if (!string.IsNullOrWhiteSpace(newName) && newName.Trim() != node.Name) node.Name = newName.Trim();
+
+            var save = _contentService.Save(node);
+            if (!save.Success)
+            {
+                var msg = string.Join(", ", save.EventMessages?.GetAll().Select(e => e.Message) ?? Array.Empty<string>());
+                throw new InvalidOperationException($"{_alias} kunde inte sparas: {msg}");
+            }
+            var publishProblem = Publish(node);
+
+            var saved = _contentService.GetById(node.Id) ?? node;
+            return new CompetitionUpdateResult<T>
+            {
+                Outcome = CompetitionUpdateOutcome.Saved,
+                Record = FromContent(saved),
+                ChangedFields = written.Select(f => f.Alias).ToList(),
+                PublishProblem = publishProblem,
+            };
+        }
+
+        private void WriteFields(IContent node, IEnumerable<CompetitionFieldDef<T>> fields, T record)
+        {
+            foreach (var f in fields)
+            {
+                if (!node.HasProperty(f.Alias))
+                    throw new InvalidOperationException($"Kan inte spara {f.Alias} — egenskapen saknas på doktypen {_alias}.");
+                node.SetValue(f.Alias, CompetitionFieldValues.ToNode(f.Shape, f.Get(record)));
+            }
+        }
+
+        /// <summary>Publicerar som användar-id -1. Null = publicerad, annars vad som gick fel.</summary>
+        private string? Publish(IContent node)
+        {
+            var publish = _contentService.Publish(node, new[] { "*" }, -1);
+            if (publish.Success) return null;
+            var invalid = publish.InvalidProperties != null && publish.InvalidProperties.Any()
+                ? " Ogiltiga eller obligatoriska fält: " + string.Join(", ", publish.InvalidProperties.Select(p => p.Alias)) + "."
+                : "";
+            _logger.LogWarning("{Alias} {Id} sparades men publicerades inte: {Result}{Invalid}", _alias, node.Id, publish.Result, invalid);
+            return $"Ändringen sparades men kunde inte publiceras ({publish.Result}).{invalid}";
         }
 
         // ── Mappning ───────────────────────────────────────────────────────────────────────

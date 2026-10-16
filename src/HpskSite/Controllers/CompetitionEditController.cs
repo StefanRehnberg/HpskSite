@@ -395,18 +395,8 @@ namespace HpskSite.Controllers
                 if (finalsRefusal != null)
                     return Ok(new { success = false, message = finalsRefusal });
 
-                // Persist the shooting-range link here (type-agnostic): the per-type save
-                // services map only their own fields and would drop "rangeId". Only act when
-                // the field is actually present so a partial-update client can't clear it by
-                // omission. The type-specific service re-loads + publishes the node afterwards,
-                // so this saved value gets published with the rest. SetValue is a no-op if the
-                // doctype lacks the (optional) rangeId property.
-                if (request.Fields != null && request.Fields.ContainsKey("rangeId"))
-                {
-                    int newRangeId = ReadFieldOrContentAsInt(request.Fields, "rangeId", content);
-                    content.SetValue("rangeId", newRangeId > 0 ? newRangeId : 0);
-                    _contentService.Save(content);
-                }
+                // Banan (rangeId) sparas med resten genom fältpåsen (C3-planen S5b) — förut en egen
+                // sparning före grenvalet. Bara när fältet skickas, som förut.
 
                 // Route to type-specific save logic
                 var result = await RouteToTypeSpecificSave(request, content);
@@ -634,7 +624,7 @@ namespace HpskSite.Controllers
         {
             try
             {
-                var service = new PrecisionCompetitionEditService(_contentService);
+                var service = new PrecisionCompetitionEditService(_competitions, _logger);
                 var result = await service.SaveCompetitionAsync(request.CompetitionId, request.Fields);
                 
                 return new
@@ -752,43 +742,37 @@ namespace HpskSite.Controllers
                 if (known == null)
                     return Json(new { success = false, message = $"Okand gren: \"{newType}\"." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
-                if (competition == null || competition.ContentType.Alias != "competition")
+                var competition = _competitions.GetSaved(request.CompetitionId);
+                if (competition == null)
                     return Json(new { success = false, message = "Tavlingen hittades inte." });
 
-                var state = InspectTypeChange(request.CompetitionId, competition.GetValue<string>("competitionType") ?? "");
+                var state = InspectTypeChange(request.CompetitionId, competition.CompetitionType ?? "");
                 if (!state.CanChange)
                     return Json(new { success = false, message = state.Reason });
 
                 if (string.Equals(state.CurrentType, known.Id, StringComparison.OrdinalIgnoreCase))
                     return Json(new { success = true, message = "Grenen var redan " + known.Name + ".", changed = false });
 
-                competition.SetValue("competitionType", known.Id);
-
-                // Den nya grenen har kanske ingen finalomgång (SHB C.3.6.1.1). Nollställ då
-                // finalserierna i samma handling — kvar hade de gjort tävlingen osparbar.
-                if (!HpskSite.CompetitionTypes.Common.CompetitionFinals.Supports(known.Id)
-                    && competition.GetValue<int>("numberOfFinalSeries") > 0)
+                // Genom lagringen (C3-planen S5b), som bara publicerar om en redan publicerad tävling.
+                var result = _competitions.Update(request.CompetitionId, null, c =>
                 {
-                    competition.SetValue("numberOfFinalSeries", 0);
-                }
+                    c.CompetitionType = known.Id;
 
-                // ⚠ Klasserna tillhor grenen. Springskytte anvander vapen- och
-                // aldersklasser, precisionsfamiljen sina egna — att lamna kvar den
-                // gamla uppsattningen ger en tavling vars klasser inte finns i dess
-                // gren. Nollstall dem, sa arrangoren far valja om i samma modal.
-                competition.SetValue("shootingClassIds", "");
+                    // Den nya grenen har kanske ingen finalomgång (SHB C.3.6.1.1). Nollställ då
+                    // finalserierna i samma handling — kvar hade de gjort tävlingen osparbar.
+                    if (!HpskSite.CompetitionTypes.Common.CompetitionFinals.Supports(known.Id) && c.NumberOfFinalSeries > 0)
+                        c.NumberOfFinalSeries = 0;
 
-                var result = _contentService.Save(competition);
-                if (!result.Success)
+                    // ⚠ Klasserna tillhor grenen. Springskytte anvander vapen- och
+                    // aldersklasser, precisionsfamiljen sina egna — att lamna kvar den
+                    // gamla uppsattningen ger en tavling vars klasser inte finns i dess
+                    // gren. Nollstall dem, sa arrangoren far valja om i samma modal.
+                    c.ShootingClassIds = null;
+                });
+                if (!result.Ok)
                     return Json(new { success = false, message = "Kunde inte spara grenbytet." });
-
-                // Bara redan publicerade tavlingar publiceras om. Att publicera ett
-                // utkast som sidoeffekt av ett grenbyte vore fel.
-                if (competition.Published)
-                {
-                    _contentService.Publish(competition, Array.Empty<string>());
-                }
+                if (result.PublishProblem != null)
+                    _logger.LogWarning("Competition {Id}: grenbytet sparades men publicerades inte: {Problem}", request.CompetitionId, result.PublishProblem);
 
                 _logger.LogInformation(
                     "Competition {Id} type changed {From} -> {To} (registrations {Regs}, results {Res})",

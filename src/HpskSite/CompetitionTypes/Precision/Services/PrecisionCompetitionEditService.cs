@@ -17,13 +17,22 @@ namespace HpskSite.CompetitionTypes.Precision.Services
     /// </summary>
     public class PrecisionCompetitionEditService : ICompetitionEditService
     {
-        private readonly IContentService _contentService;
-        private readonly ILogger<PrecisionCompetitionEditService>? _logger;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly ILogger? _logger;
 
-        public PrecisionCompetitionEditService(IContentService contentService,
-                                               ILogger<PrecisionCompetitionEditService>? logger = null)
+        /// <summary>
+        /// Nycklar som sköts på annat håll och inte skrivs här: serien flyttas med Move efter sparningen,
+        /// klienten omvandlar <c>competitionManagerIds</c> till <c>competitionManagers</c>, och grenen byts bara
+        /// genom grenbytet (<c>ChangeCompetitionType</c>), som prövar att tävlingen är orörd.
+        /// </summary>
+        private static readonly HashSet<string> HandledElsewhere = new(StringComparer.OrdinalIgnoreCase)
         {
-            _contentService = contentService;
+            "seriesId", "competitionManagerIds", "competitionType"
+        };
+
+        public PrecisionCompetitionEditService(HpskSite.Services.Competitions.ICompetitionStore competitions, ILogger? logger = null)
+        {
+            _competitions = competitions;
             _logger = logger;
         }
 
@@ -41,55 +50,34 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                     );
                 }
 
-                // Get the competition content
-                var content = _contentService.GetById(competitionId);
-                if (content == null)
+                // Fältpåsen genom den gemensamma regeln (C3-planen S5b), och nodens namn följer tävlingens.
+                // ⚠️ Lagringen publicerar bara en tävling som redan var publicerad — redigeringen publicerade
+                // förut alltid, även ett utkast.
+                List<string> ignored = new();
+                var result = _competitions.Update(competitionId, null, c =>
                 {
+                    ignored = HpskSite.Services.Competitions.CompetitionFieldBag.Apply(c, fields, HandledElsewhere).Ignored;
+                    if (!string.IsNullOrWhiteSpace(c.CompetitionName)) c.Name = c.CompetitionName!;
+                });
+                if (result.Outcome == HpskSite.Services.Competitions.CompetitionUpdateOutcome.NotFound)
                     return CompetitionEditResult.ErrorResult("Competition not found");
-                }
 
-                // Apply field updates to content
-                foreach (var field in fields)
-                {
-                    // Map field names to Umbraco property aliases
-                    var propertyAlias = MapFieldNameToAlias(field.Key);
-                    if (string.IsNullOrEmpty(propertyAlias))
-                    {
-                        continue; // Skip unknown fields
-                    }
+                // ⚠️ SÄG IFRÅN. Ett okänt fält är antingen en klient som skickar skräp eller ett nytt fält
+                // någon glömt — och det andra är en tyst dataförlust.
+                foreach (var key in ignored)
+                    _logger?.LogWarning("SaveCompetition: fältet {Field} känns inte igen och SPARAS INTE.", key);
 
-                    // Convert value to appropriate type
-                    var convertedValue = ConvertFieldValue(field.Key, field.Value);
-
-                    // Set the property on the content
-                    if (content.Properties.FirstOrDefault(p => p.Alias == propertyAlias) != null)
-                    {
-                        content.SetValue(propertyAlias, convertedValue);
-                    }
-                }
-
-                // Sync Umbraco node name with competitionName property
-                var updatedName = content.GetValue<string>("competitionName");
-                if (!string.IsNullOrEmpty(updatedName))
-                {
-                    content.Name = updatedName;
-                }
-
-                // Save first, then publish as system user (-1) to ensure publish succeeds
-                _contentService.Save(content);
-                var publishResult = _contentService.Publish(content, new[] { "*" }, -1);
-
-                if (!publishResult.Success)
+                if (result.PublishProblem != null)
                 {
                     return CompetitionEditResult.SuccessResult(
                         "Competition saved (publish pending)",
-                        new { competitionId = content.Id }
+                        new { competitionId }
                     );
                 }
 
                 return CompetitionEditResult.SuccessResult(
                     "Competition updated successfully",
-                    new { competitionId = content.Id }
+                    new { competitionId }
                 );
             }
             catch (Exception ex)
@@ -304,260 +292,6 @@ namespace HpskSite.CompetitionTypes.Precision.Services
                 "registrationCloseDate" => ValidateDateTime(value, "Anmälan stänger"),
                 _ => null // Unknown field, skip validation
             };
-        }
-
-        /// <summary>
-        /// Map UI field names to Umbraco property aliases.
-        /// </summary>
-        /// <summary>
-        /// Fält som får sparas men INTE står i <see cref="CompetitionFieldCatalog"/> — de är
-        /// inte redigerbara formulärfält utan sätts av kod (systemflaggor, härledda värden,
-        /// och sammansatta konfigurationer som serialiseras till JSON).
-        /// </summary>
-        private static readonly HashSet<string> ExtraSparbaraFalt = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "isActive",
-            "competitionManagers",        // klienten skickar id-ARRAYEN under det här namnet
-            "patrolSize",
-            "patrolIntervalMinutes",
-            "direktplaceringConfig"
-        };
-
-        /// <summary>
-        /// Katalogfält som sätts på ANNAT håll och därför inte får skrivas här — annars
-        /// finns två skribenter till samma egenskap, med var sin konvertering.
-        /// </summary>
-        private static readonly HashSet<string> HanterasAnnorstades = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "rangeId",                    // CompetitionEditController läser och sätter den själv
-            "seriesId",                   // serien flyttas med Move EFTER sparningen
-            "competitionManagerIds"       // klienten omvandlar den till competitionManagers
-        };
-
-        /// <summary>
-        /// Vilka fält får skrivas, och till vilken egenskapsalias.
-        ///
-        /// ⚠️ HÄRLEDD UR KATALOGEN, inte handskriven. Det här var en FJÄRDE lista över samma
-        /// fältnamn — där varje rad mappade ett namn till sig självt — och `_ => null`
-        /// släppte tyst allt den inte kände igen. Glömdes ett nytt fält här sparades det
-        /// aldrig, utan felmeddelande. Det är det värsta stället att tappa något på:
-        /// användaren SER att fältet är ifyllt, och nästa öppning visar det tomt igen.
-        ///
-        /// Namn och alias är identiska i hela registret; skulle de någon gång skilja sig är
-        /// det katalogen som ska bära avvikelsen, inte en switch här.
-        /// </summary>
-        private string? MapFieldNameToAlias(string fieldName)
-        {
-            if (string.IsNullOrWhiteSpace(fieldName)) return null;
-            if (HanterasAnnorstades.Contains(fieldName)) return null;
-
-            var catalogField = CompetitionFieldCatalog.Find(fieldName);
-            if (catalogField != null) return catalogField.Alias;
-            if (ExtraSparbaraFalt.Contains(fieldName)) return fieldName;
-
-            // ⚠️ SÄG IFRÅN. Ett okänt fält är antingen en klient som skickar skräp eller ett
-            // nytt fält någon glömt lägga i katalogen — och det andra fallet är en tyst
-            // dataförlust som annars bara upptäcks av den som undrar vart värdet tog vägen.
-            _logger?.LogWarning(
-                "SaveCompetition: fältet {Field} känns inte igen och SPARAS INTE. " +
-                "Lägg det i CompetitionFieldCatalog om det är ett redigerbart fält.",
-                fieldName);
-            return null;
-        }
-
-        /// <summary>
-        /// Convert field values to appropriate types for Umbraco properties.
-        /// </summary>
-        /// <summary>
-        /// Fält vars värde är ett BELOPP och ska lagras som decimal. Allt annat numeriskt
-        /// är ett antal och lagras som int.
-        ///
-        /// ⚠️ Den här listan är den enda som INTE går att härleda ur katalogen: där heter
-        /// både antal och belopp <c>FieldControl.Number</c>, eftersom katalogen beskriver
-        /// formuläret och inte lagringen. Att lägga in lagringstyp där hade gett katalogen
-        /// ett andra ansvar för att spara fem rader här.
-        /// </summary>
-        private static readonly HashSet<string> BeloppsFalt = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "registrationFee", "teamRegistrationFee", "stafettRegistrationFee",
-            "juniorRegistrationFee", "subCompetitionFee"
-        };
-
-        /// <summary>
-        /// Katalogfält som lagras som HELTAL trots att kontrollen inte är
-        /// <see cref="FieldControl.Number"/>.
-        ///
-        /// ⚠️ <c>clubId</c> är en dropdown i formuläret men ett heltal i lagringen. Utan den
-        /// här listan skulle den härledas till text — och en klubbreferens lagrad som sträng
-        /// är en dokumenterad fälla här: <c>GetValue&lt;int&gt;</c> på en strängegenskap ger
-        /// TYST 0, vilket har gett både walk-in-anmälningar med <c>clubId=0</c> och
-        /// "Okänd klubb" på startlistan.
-        /// </summary>
-        private static readonly HashSet<string> HeltalsFalt = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "clubId"
-        };
-
-        /// <summary>
-        /// Fält med egen serialisering — sammansatta värden som inte är en enkel typ.
-        /// </summary>
-        private static readonly HashSet<string> EgenKonvertering = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "shootingClassIds", "competitionManagers"
-        };
-
-        /// <summary>
-        /// Konverterar ett inkommande fältvärde till den typ egenskapen lagras som.
-        ///
-        /// ⚠️ TYPEN HÄRLEDS UR <see cref="CompetitionFieldCatalog"/> där det går. Det här var
-        /// en femte handskriven fältlista, och tre av dess grupper (bool, datum, tid) sa
-        /// exakt samma sak som <see cref="FieldControl"/> redan gör. Två beskrivningar av
-        /// samma sak glider isär; det är hela skälet att katalogen finns.
-        ///
-        /// Fallbacken är strängen — en ny textruta fungerar därför av sig själv. Men ett
-        /// NUMERISKT fält som varken är belopp eller känt av katalogen skulle tyst lagras
-        /// som text, och det säger vi ifrån om i stället.
-        /// </summary>
-        private object ConvertFieldValue(string fieldName, object value)
-        {
-            if (value == null || string.IsNullOrWhiteSpace(value.ToString()))
-                return null;
-
-            var text = value.ToString();
-
-            if (EgenKonvertering.Contains(fieldName))
-            {
-                return fieldName.Equals("shootingClassIds", StringComparison.OrdinalIgnoreCase)
-                    ? ConvertShootingClassIds(text)
-                    : ConvertCompetitionManagers(value);
-            }
-
-            // Kanoniskt värde, eller null (= ej bekräftad) för okänt — CompetitionEditController
-            // har redan vägrat ett okänt värde innan vi kommer hit.
-            if (fieldName.Equals(CompetitionLevel.PropertyAlias, StringComparison.OrdinalIgnoreCase))
-            {
-                var level = CompetitionLevel.Normalize(text);
-                return level == "" ? null : level;
-            }
-
-            if (BeloppsFalt.Contains(fieldName))
-                return decimal.TryParse(text, out var dec) && dec >= 0 ? dec : (object?)null;
-
-            if (HeltalsFalt.Contains(fieldName))
-                return int.TryParse(text, out var hi) && hi >= 0 ? hi : (object?)null;
-
-            var falt = CompetitionFieldCatalog.Find(fieldName);
-            if (falt != null)
-            {
-                switch (falt.Control)
-                {
-                    case FieldControl.Checkbox:
-                        return bool.TryParse(text, out var b) && b;
-                    case FieldControl.Date:
-                    case FieldControl.DateTime:
-                        return ConvertDateTime(text);
-                    case FieldControl.Number:
-                        return int.TryParse(text, out var i) && i >= 0 ? i : (object?)null;
-                }
-                return text;
-            }
-
-            // Fält utanför katalogen: systemflaggor och härledda värden. De få som finns
-            // är kända, resten är text.
-            if (fieldName.Equals("isActive", StringComparison.OrdinalIgnoreCase))
-                return bool.TryParse(text, out var ab) && ab;
-            if (fieldName.Equals("patrolSize", StringComparison.OrdinalIgnoreCase)
-                || fieldName.Equals("patrolIntervalMinutes", StringComparison.OrdinalIgnoreCase))
-                return int.TryParse(text, out var ai) && ai >= 0 ? ai : (object?)null;
-
-            return text;
-        }
-
-
-        private object ConvertDateTime(string dateStr)
-        {
-            if (string.IsNullOrEmpty(dateStr))
-                return null;
-
-            // Handle datetime-local format (ISO 8601): "2025-01-20T14:30"
-            if (DateTime.TryParse(dateStr, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var dateVal))
-            {
-                // Validate the date is within SQL Server range
-                if (dateVal >= new DateTime(1753, 1, 1) && dateVal <= new DateTime(9999, 12, 31))
-                {
-                    return dateVal;
-                }
-            }
-
-            return null; // Invalid date
-        }
-
-        /// <summary>
-        /// Den här vägen var KORREKT hela tiden — den gör <c>value.ToString()</c> innan den
-        /// konverterar, så CSV:n nådde fram. Den delegerar ändå, så att skapa- och redigera-vägen
-        /// inte kan glida isär om formen ändras. Se <see cref="HpskSite.Models.ShootingClassIdsValue"/>.
-        /// </summary>
-        private object ConvertShootingClassIds(string value)
-        {
-            return HpskSite.Models.ShootingClassIdsValue.FromText(value);
-        }
-
-        private object ConvertCompetitionManagers(object value)
-        {
-            if (value == null)
-                return "[]";
-
-            // Handle array of integers (from frontend)
-            if (value is int[] intArray)
-            {
-                return JsonConvert.SerializeObject(intArray);
-            }
-
-            // Handle JSON array string
-            if (value is string strValue && !string.IsNullOrEmpty(strValue))
-            {
-                // If already valid JSON array, return as-is
-                if (strValue.TrimStart().StartsWith("["))
-                {
-                    try
-                    {
-                        // Validate it's a valid JSON array of ints
-                        JsonConvert.DeserializeObject<int[]>(strValue);
-                        return strValue;
-                    }
-                    catch
-                    {
-                        return "[]";
-                    }
-                }
-
-                // Try to parse CSV of IDs (migration scenario)
-                var ids = strValue.Split(',')
-                    .Select(s => s.Trim())
-                    .Where(s => !string.IsNullOrEmpty(s) && int.TryParse(s, out _))
-                    .Select(s => int.Parse(s))
-                    .ToArray();
-
-                return JsonConvert.SerializeObject(ids);
-            }
-
-            // Handle System.Text.Json.JsonElement (from model binding)
-            if (value.GetType().Name == "JsonElement")
-            {
-                try
-                {
-                    var jsonStr = value.ToString();
-                    // Validate and reserialize
-                    var ids = JsonConvert.DeserializeObject<int[]>(jsonStr);
-                    return JsonConvert.SerializeObject(ids ?? Array.Empty<int>());
-                }
-                catch
-                {
-                    return "[]";
-                }
-            }
-
-            return "[]";
         }
 
         // Validation Helper Methods

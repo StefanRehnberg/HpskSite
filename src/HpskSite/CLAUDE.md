@@ -810,11 +810,14 @@ checklistan. Kortversionen:
    (`wizard_` / `edit_` / `springEdit_`).
 2. En rad i `CompetitionTypes/Common/CompetitionFieldCatalog.cs`.
 3. Egenskapen på doctypen `competition` — utan den är `SetValue` en TYST no-op.
-4. Bara för belopp eller udda heltal: en rad i `BeloppsFalt` / `HeltalsFalt`.
+4. Bara för belopp eller udda heltal: en rad i `AmountFields` / klubbens heltalsregel i
+   `Services/Competitions/CompetitionFieldBag` (C3-planen S5b — förut `BeloppsFalt`/`HeltalsFalt` i
+   redigeringstjänsten).
 
 Ur katalograden följer **ifyllnaden** (`_CompetitionFieldMap.cshtml`), **serverns
-sparlista** (`MapFieldNameToAlias`), **typkonverteringen** (`ConvertFieldValue`, via
-`FieldControl`) och **testerna**. Ingen av dem behöver en rad till per fält.
+sparregel** (`CompetitionFieldBag.FieldFor` + `ToNodeValue`, samma för skapa, redigera, annonsen
+och kopian), **typkonverteringen** (via `FieldControl`) och **testerna**. Ingen av dem behöver en
+rad till per fält.
 
 **⚠️ Registret finns för att göra TYSTNADEN omöjlig, inte för att spara rader.** Fälten
 var handskrivna på fyra till fem ställen och listorna hann glida isär. Följden var inte
@@ -831,7 +834,7 @@ fältinsamling) · `_CompetitionFieldMap` (katalogdriven ifyllnad) · `_DateInpu
 själva**, aldrig värdsidan — samma regel som `_HtmlEscape`.
 
 **⚠️ Säkerhetskontraktet vid varje refaktorering är PAYLOAD-LIKHET.** Sparvägen är en
-field bag utan typkontroll (`MapFieldNameToAlias` släpper tyst okända fält), så "samma
+field bag utan typkontroll (`CompetitionFieldBag` hoppar över okända fält och loggar dem), så "samma
 payload in = samma beteende" är det enda som håller. Fånga före, jämför efter:
 `compedit-baseline-capture.mjs` + `payload-diff.mjs` (täcker både payloaden och det
 ifyllda formuläret). **⚠️ Olika fixturer prövar olika VÄRDETILLSTÅND** — baselinens sju
@@ -2512,7 +2515,7 @@ inställningen är på — förut delades de villkorslöst, så C2 + C Vet Y gic
 **⚠️⚠️ INSTÄLLNINGEN GICK ALDRIG ATT SLÅ PÅ.** Formulären heter `allowDualCClass`, doctypen bär bara
 `allowDualCClassRegistration` (som anmälan läser), och `SetValue` på en saknad egenskap är en tyst
 no-op. Katalogfältet bär nu `alias:` → **`CompetitionFieldCatalog.PropertyAliasFor(name)`** /
-`CompetitionField.Alias`, som `MapFieldNameToAlias` och `CreateCompetition` skriver genom. Ett
+`CompetitionField.Alias`, som `CompetitionFieldBag` (alla skrivvägar sedan C3-planen S5b) skriver genom. Ett
 fält vars formulärnamn skiljer sig från egenskapen ska ha ett alias — lägg aldrig till en till
 sådan skillnad utan det.
 
@@ -11567,6 +11570,27 @@ kopian; A/B mot `s4a`: en klubbs id gav 500 i stället för "hittades inte"; kop
 publicera alls, så utkastprovet är ett regressionsskydd, inte en skiljelinje). Taken 30 → 28, 172 → 149.
 Verifierat: fångst grön (`accepted-s5.json`), korskontroll 3092/0, matrisen 8/8 + 35/36, behorighet 13,
 resultat-medaljval 8, bangranskning-fas3 60, personpanel 16.
+
+**S5b (skapa, annons, redigera, kopiera — EN fältregel, 2026-10-16):** `Services/Competitions/CompetitionFieldBag`
+är enda regeln för hur formulärens fältpåse blir en tävling: formulärnyckel → alias (katalogen bär avvikelserna)
+→ fältet i `CompetitionFieldTable` → redigeringens konvertering (flyttad hit ur `PrecisionCompetitionEditService`)
+→ `CompetitionFieldValues.Read`. **Bara definitionsfält skrivs ur ett formulär**; övriga nycklar returneras i
+`Ignored` (redigeringen loggar dem). `ICompetitionStore.Create(parentId, name, init)` (nodlagringen; tabellen kastar
+`NotSupported` till §5) skriver fälten som fick ett värde, alltid `isActive`, och publicerar. `Update` byter nu
+nodens namn när `Name` ändras. Skrivs genom lagringen: `CreateCompetition`, `CreateAdvertisement`,
+`SaveAdvertisement`, `SaveCompetition` (banan med resten — den egna sparningen före grenvalet är borta),
+`ChangeCompetitionType`, `CopyCompetition` och omgångarna i `CopySeriesWithCompetitions`. **Kopian tar bara
+definitionen** (`CompetitionFieldTable.CopyDefinitionInto`, datumen +1 år respektive tomma i en seriekopia):
+publicerade patruller, officiella resultat, stationschefer, sammanslagning, medaljindelning och filer följer inte
+med, och `addToMenu` bara när en sajtadmin kopierar. **Beteendeändringar:** redigeringen och annonsens sparning
+publicerar inte längre ett utkast (Stefan 2026-10-16: "det ska inte vara ngn som gör ändringar i backoffice utom
+i undantagsfall"); annonsen sparar nu `allowDualCClass` och kryssrutorna (förut den råa nyckeln, och ett
+JsonElement som Umbraco inte kunde lagra); skapandet sparar `maxReshoots` som redigeringen och lagrar inte längre
+`""` i ett tomt `stationConfig`. Svit: `hpsk-verify/c3/c3-s5b-capture.mjs` (payloads/apply) +
+`c3-s5b-compare.mjs` — samma payload mot båda byggena, nodens lagrade värden jämförda på SHA1; kvar är bara de
+avsedda skillnaderna och NULL ≈ 0/tomt (ett oförändrat fält skrivs inte). `c3-copy-competition-verify.mjs`
+kräver nu att tillståndet INTE följer med. Test: `CompetitionFieldBagTests` (8). Taken 28 → 21, 33 → 23,
+149 → 117, 66 → 61.
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
