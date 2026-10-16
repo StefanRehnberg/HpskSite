@@ -197,7 +197,7 @@ namespace HpskSite.Composers
                 sp => sp.GetRequiredService<HpskSite.Services.Registrations.SwitchingRegistrationStore>());
             builder.Services.AddHostedService<HpskSite.Services.Registrations.CompetitionRegistrationSchemaGuardHostedService>();
             builder.Services.AddHostedService<HpskSite.Services.Hosting.IdentityFloorHostedService>();
-            builder.Services.AddSingleton<HpskSite.Services.CompetitionMenuService>();
+            builder.Services.AddScoped<HpskSite.Services.CompetitionMenuService>();
             builder.Services.AddSingleton<HpskSite.Services.LegacyInvoiceHubs>();
             builder.Services.AddScoped<HpskSite.Services.CompetitionHostBackfillService>();
 

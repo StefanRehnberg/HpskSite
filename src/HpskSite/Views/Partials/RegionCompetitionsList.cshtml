@@ -4,6 +4,7 @@
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject HpskSite.Services.Competitions.CompetitionPostCache Posts
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @{
     var regionCode = ViewBag.regionCode as string ?? "";
     var today = DateTime.Today;
@@ -22,8 +23,13 @@
 
     // Region-hosted: clubId == 0 (or unset) + competition's regionalFederation matches
     // Club-hosted invitations: clubId belongs to a club in this region AND !isClubOnly
-    var allCompetitions = allContent
-        .Where(x => x.ContentType.Alias == "competition") // competitionstore-ok: noden behövs för adressen och trädet (S6), fälten läses ur posten
+    // Tävlingarna ur tävlingslagringen (C3-planen S4), i trädets ordning; noden för adressen.
+    var treeIndex = new Dictionary<int, int>();
+    for (var i = 0; i < allContent.Count; i++) treeIndex[allContent[i].Id] = i;
+    var allCompetitions = Competitions.List()
+        .Where(p => treeIndex.ContainsKey(p.Id))
+        .OrderBy(p => treeIndex[p.Id])
+        .Select(p => allContent[treeIndex[p.Id]])
         .Where(x =>
         {
             var compClubId = Posts.Of(x).ClubId;

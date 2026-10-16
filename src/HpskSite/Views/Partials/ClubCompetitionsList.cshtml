@@ -4,6 +4,7 @@
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject HpskSite.Services.Competitions.CompetitionPostCache Posts
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
 @{
     var clubId = ViewBag.clubId as int? ?? 0;
     var today = DateTime.Today;
@@ -11,10 +12,15 @@
     // Single tree traversal — same pattern as CompetitionsHub.cshtml.
     // Show every competition where this club is set as "Ansvarig klubb"
     // (the competition's clubId points at this club), regardless of isClubOnly.
+    // Klubbens tävlingar ur tävlingslagringen (C3-planen S4) — ingen trädgenomgång; noden för adressen.
     var allCompetitions = clubId > 0
-        ? Model.Root().DescendantsOrSelf()
-            .Where(x => x.ContentType.Alias == "competition" // competitionstore-ok: noden behövs för adressen och trädet (S6), fälten läses ur posten
-                     && Posts.Of(x).ClubId == clubId)
+        ? Competitions.List()
+            .Where(p => p.ClubId == clubId)
+            // Trädets ordning bland syskon, så tävlingar med samma datum står som förut.
+            .OrderBy(p => p.ParentId).ThenBy(p => p.SortOrder)
+            .Select(p => Umbraco.Content(p.Id))
+            .Where(n => n != null)
+            .Cast<IPublishedContent>()
             .ToList()
         : new List<IPublishedContent>();
 

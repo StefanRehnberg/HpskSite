@@ -675,10 +675,12 @@
         var seriesContent = Model.Parent;
         var seriesName = seriesContent.Value<string>("seriesName") ?? seriesContent.Name;
         var seriesLogo = seriesContent.Value<IPublishedContent>("seriesLogo");
-        var allSeriesCompetitions = seriesContent.Children.Where(x => x.ContentType.Alias == "competition")
-                                                          .OrderBy(x => x.Value<int?>("seriesSortOrder") ?? int.MaxValue)
-                                                          .ThenBy(x => x.Value<DateTime>("competitionDate"))
-                                                          .ToList();
+        // Seriens publicerade omgångar ur tävlingslagringen (C3-planen S4), ordnade på datum
+        // (seriesSortOrder har aldrig funnits på dokumenttypen). Noden bara för adressen.
+        var allSeriesCompetitions = Competitions.ListBySeries(seriesContent.Id)
+                                                .OrderBy(x => x.CompetitionDate ?? DateTime.MinValue)
+                                                .ThenBy(x => x.SortOrder)
+                                                .ToList();
         var currentIndex = allSeriesCompetitions.FindIndex(x => x.Id == Model.Id);
         var roundNumber = currentIndex + 1;
         var totalRounds = allSeriesCompetitions.Count();
@@ -716,7 +718,7 @@
                                 <div class="col-6 col-md-4">
                                     @if (previousCompetition != null)
                                     {
-                                        <a href="@previousCompetition.CompetitionUrl()" class="btn btn-outline-secondary btn-sm">
+                                        <a href="@(Umbraco.Content(previousCompetition.Id)?.CompetitionUrl())" class="btn btn-outline-secondary btn-sm">
                                             <i class="bi bi-chevron-left"></i> Föregående
                                         </a>
                                     }
@@ -731,7 +733,7 @@
                                 <div class="col-6 col-md-4 text-end">
                                     @if (nextCompetition != null)
                                     {
-                                        <a href="@nextCompetition.CompetitionUrl()" class="btn btn-outline-secondary btn-sm">
+                                        <a href="@(Umbraco.Content(nextCompetition.Id)?.CompetitionUrl())" class="btn btn-outline-secondary btn-sm">
                                             Nästa <i class="bi bi-chevron-right"></i>
                                         </a>
                                     }
