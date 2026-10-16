@@ -9,7 +9,7 @@
             <!-- Modal Header -->
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title">
-                    <i class="bi bi-exclamation-triangle-fill me-2"></i>Delete Series
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>Ta bort serien
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
@@ -17,7 +17,7 @@
             <!-- Modal Body -->
             <div class="modal-body">
                 <p class="mb-3">
-                    Are you sure you want to delete the series <strong id="deleteSeriesName">-</strong>?
+                    Vill du ta bort serien <strong id="deleteSeriesName">-</strong>?
                 </p>
 
                 <div class="alert alert-warning">
@@ -35,9 +35,9 @@
 
             <!-- Modal Footer -->
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Avbryt</button>
                 <button type="button" class="btn btn-danger" id="deleteSeriesBtn" onclick="confirmDeleteSeries()">
-                    <i class="bi bi-trash me-1"></i>Delete Series
+                    <i class="bi bi-trash me-1"></i>Ta bort serien
                 </button>
             </div>
         </div>
@@ -48,7 +48,7 @@
 // Confirm delete series
 function confirmDeleteSeries() {
     if (!window.deleteSeriesId) {
-        alert('Error: Series ID not found');
+        alert('Ingen serie vald.');
         return;
     }
 
@@ -75,7 +75,7 @@ function confirmDeleteSeries() {
         deleteBtn.innerHTML = originalText;
 
         if (data.success) {
-            showNotification('Serie borttagen framgångsrikt!', 'success');
+            showNotification(data.message || 'Serien ligger nu i papperskorgen.', 'success');
             bootstrap.Modal.getInstance(document.getElementById('seriesDeleteConfirmModal')).hide();
 
             if (typeof removeSeriesFromTable === 'function') {
