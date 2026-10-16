@@ -722,6 +722,25 @@ if (stringValue.TrimStart().StartsWith("[")) {
 - Preserves HTML content with data attributes
 - Integration with Umbraco RTE storage format
 
+### Seriens resultatlista för utskrift — /serieresultat/{seriesId} (2026-10-16)
+
+Önskemål från Säters PSF (fältserie). Routad `SeriesResultPrintController` (ingen nod, öppen som
+seriesidan) → `Views/SeriesResultPrint.cshtml`, ritad på SERVERN ur samma `SeriesCalculationService`
+som seriesidan, med resultatlistans utseende (`CompetitionResult.cshtml`: klassrubrik, `.results-table`,
+"Utskriven"-fot). Knappen **Skriv ut resultatlistan** i seriesidans resultatkort (ny flik).
+- Klubbtävlingen först, som seriesidan. Omgångar som inte räknas (bästa N) överstrukna; placeringspoäng
+  under resultatet. En rad ovanför tabellerna förklarar Omg. 1…N (namn + datum).
+- ⚠️ Kolumnbredderna: namn/klubb får alltid sin plats och omgångarna delar resten (`OmgPct`) — med fasta
+  bredder blev namnkolumnerna noll breda vid 18 omgångar. Resultatcellerna kapas aldrig (`td.round`).
+  Fler än tio omgångar: rubriken bär bara numret. Fler än sex: A4 liggande.
+- Telefon/smal skärm: tabellerna rullar i sidled (`--minw` per tabell), utskriften rörs inte.
+- ⚠️ Razor-fällor som kostade en runda (UmbracoCompilationException utan meddelande): en loopvariabel som
+  heter `section` (`@section` är ett direktiv) och `@` direkt efter en bokstav (`text-center@(...)` läses
+  som en e-postadress). Bisektera genom att korta vyn.
+- Svit: `hpsk-verify/serieresultat-verify.mjs [id…]` (läser bara; `HPSK_BASE=https://pistol.nu` + 3935 för
+  Säters serie med överstrukna omgångar — dev har ingen sådan serie). Fixat på vägen: `Okänd klubb/skytt`
+  var trasiga tecken i `PrecisionFamilySeriesScoreSource` (syntes på seriesidan).
+
 ### Serieberäkning per gren — ISeriesScoreSource (2026-08-18)
 
 **The six calculation strategies were never the precision-only part.** `IndividualSumAll` /

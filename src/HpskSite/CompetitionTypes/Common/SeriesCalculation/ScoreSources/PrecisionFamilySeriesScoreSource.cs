@@ -98,7 +98,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources
                     {
                         var (name, club, clubId) = shooterLookup.TryGetValue(g.Key.MemberId, out var info)
                             ? info
-                            : ("Ok�nd skytt", "Ok�nd klubb", 0);
+                            : ("Okänd skytt", "Okänd klubb", 0);
 
                         return new ShooterCompetitionScore
                         {
@@ -128,22 +128,22 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources
                     var member = _memberService.GetById(memberId);
                     if (member != null)
                     {
-                        var name = member.Name ?? "Ok�nd";
+                        var name = member.Name ?? "Okänd";
                         var clubId = member.GetValue<int>("primaryClubId");
                         var clubName = clubId > 0
-                            ? (_clubService.GetClubNameById(clubId) ?? "Ok�nd klubb")
-                            : "Ok�nd klubb";
+                            ? (_clubService.GetClubNameById(clubId) ?? "Okänd klubb")
+                            : "Okänd klubb";
                         lookup[memberId] = (name, clubName, clubId);
                     }
                     else
                     {
-                        lookup[memberId] = ("Ok�nd skytt", "Ok�nd klubb", 0);
+                        lookup[memberId] = ("Okänd skytt", "Okänd klubb", 0);
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to look up member {MemberId}", memberId);
-                    lookup[memberId] = ("Ok�nd skytt", "Ok�nd klubb", 0);
+                    lookup[memberId] = ("Okänd skytt", "Okänd klubb", 0);
                 }
             }
 

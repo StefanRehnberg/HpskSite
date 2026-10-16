@@ -1,0 +1,302 @@
+@model HpskSite.Controllers.SeriesResultPrintModel
+@using HpskSite.CompetitionTypes.Common.SeriesCalculation.Models
+@{
+    Layout = null;
+    var sv = System.Globalization.CultureInfo.GetCultureInfo("sv-SE");
+    var result = Model.Result;
+    var competitions = Model.Competitions;
+    var roundCount = competitions.Count;
+    var scoreLabel = string.IsNullOrWhiteSpace(result?.ScoreLabel) ? "Totalt" : result!.ScoreLabel;
+    var secondaryLabel = string.IsNullOrWhiteSpace(result?.SecondaryLabel) ? "X" : result!.SecondaryLabel;
+
+    // Klubbtävlingen först, som på seriesidan.
+    var sections = Model.Sections;
+    var hasRows = sections.Any(s => s.ClassStandings.Any(c => c.Rows.Count > 0));
+
+    // Placeringspoäng: en cell bär både resultatet och poängen när de skiljer sig (samma regel som seriesidan).
+    bool UsesPoints(SeriesResultSection s) => s.ClassStandings.Any(c => c.Rows.Any(r => r.CompetitionScores.Any(x =>
+        x.Points != null && x.Score != null && x.Points != x.Score)));
+    var anyNotCounting = sections.Any(s => s.ClassStandings.Any(c => c.Rows.Any(r => r.CompetitionScores.Any(x =>
+        x.Score != null && !x.Counting))));
+
+    // Kolumnbredderna i procent, så att alla klassers tabeller linjerar och sidan ryms i bredd.
+    // ⚠️ Namn och klubb får alltid sin plats; omgångarna delar på resten. Med fasta omgångsbredder
+    // blev namnkolumnerna noll breda i en serie med 18 omgångar.
+    double OmgPct(bool club) => roundCount == 0 ? 0 : Math.Min(7.0, Math.Max(2.4, (100.0 - 4 - 8 - (club ? 0 : 5) - (club ? 22 : 28)) / roundCount));
+    // Många omgångar: rubriken bär bara numret (förklaringen ovanför tabellerna säger vilken tävling).
+    var shortHeads = roundCount > 10;
+    var landscape = roundCount > 6;
+    string Pct(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "%";
+}
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Resultat - @Model.SeriesName</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        /* Samma utseende som tävlingens resultatlista (CompetitionResult.cshtml). */
+        body { padding: 20px; background-color: #f8f9fa; font-family: Arial, sans-serif; }
+        .print-only { display: none; }
+
+        .results-table {
+            font-size: 11px;
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+            background: white;
+            table-layout: fixed;
+        }
+        .results-table th,
+        .results-table td {
+            padding: 3px 6px;
+            border: 1px solid #ddd;
+            text-align: left;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .results-table th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+            font-size: 10px;
+            text-align: center;
+        }
+        .results-table td { font-size: 11px; }
+        .results-table .text-center { text-align: center; }
+        .results-table .total-col { font-weight: bold; }
+        /* Resultaten kapas aldrig — en siffra som blir "2…" går inte att läsa. Smal utfyllnad räcker. */
+        .results-table td.round, .results-table th.round { padding-left: 1px; padding-right: 1px; overflow: visible; text-overflow: clip; }
+
+        /* En omgång som inte räknas (bästa N): överstruken och nedtonad, som på seriesidan. */
+        .not-counting { color: #888; text-decoration: line-through; }
+        .round-points { display: block; font-size: 9px; color: #198754; font-weight: bold; }
+        .not-counting .round-points { color: #888; }
+
+        .class-header {
+            background-color: #e9ecef;
+            padding: 8px 12px;
+            margin: 20px 0 5px 0;
+            border-left: 4px solid #007bff;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .class-header .count { font-weight: normal; color: #555; font-size: 12px; }
+        .class-results-section { margin-bottom: 25px; break-inside: avoid; }
+        .section-heading { font-size: 18px; font-weight: bold; margin: 24px 0 4px; }
+        .round-legend { font-size: 11px; color: #444; margin: 0 0 4px; }
+        .round-legend span { white-space: nowrap; margin-right: 12px; }
+
+        /* Skärm, smal (telefon, surfplatta i stående): tabellen rullar i sidled i stället för att siffrorna
+           trycks ihop. Varje tabell bär sin lägsta bredd i --minw. Gäller inte utskriften. */
+        .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .rotate-hint { display: none; }
+        @@media screen and (max-width: 991.98px) {
+            .results-table { min-width: var(--minw, 0); }
+            .rotate-hint { display: block; }
+        }
+
+        @@media print {
+            @@page { size: A4 @(landscape ? "landscape" : "portrait"); margin: 10mm; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            body { background-color: white; padding: 0; font-size: 10px; }
+            .results-table { font-size: 9px; }
+            .results-table th, .results-table td { padding: 2px 4px; }
+            /* Namn och klubb radbryts på papper i stället för att kapas. */
+            .results-table td.wrap { white-space: normal; overflow: visible; }
+            .class-header { font-size: 12px; margin-top: 12px; }
+            .section-heading { font-size: 14px; }
+            .round-legend { font-size: 9px; }
+            .print-footer {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                text-align: right;
+                font-size: 9px;
+                color: #555;
+                padding: 4px 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="d-flex flex-wrap gap-3 justify-content-between align-items-center mb-4 no-print">
+            <div>
+                <h1><i class="bi bi-trophy text-warning me-2"></i>Resultat</h1>
+                <p class="text-muted mb-0">@Model.SeriesName</p>
+            </div>
+            <div class="d-flex gap-2">
+                @if (!string.IsNullOrEmpty(Model.SeriesUrl))
+                {
+                    <a class="btn btn-outline-secondary" href="@Model.SeriesUrl"><i class="bi bi-arrow-left me-1"></i>Till serien</a>
+                }
+                @if (hasRows)
+                {
+                    <button class="btn btn-outline-secondary" onclick="window.print()"><i class="bi bi-printer me-1"></i>Skriv ut</button>
+                }
+            </div>
+        </div>
+
+        <div class="print-only mb-3">
+            <h1>Resultat @Model.SeriesName</h1>
+            <hr>
+        </div>
+
+        <div class="print-footer print-only">
+            Utskriven: <span id="printTimestamp"></span>
+        </div>
+
+        @if (Model.Error != null)
+        {
+            <div class="alert alert-warning">@Model.Error</div>
+        }
+        else if (result == null)
+        {
+            <div class="alert alert-secondary">Serien har ingen resultatberäkning inställd.</div>
+        }
+        else if (!hasRows)
+        {
+            <div class="alert alert-secondary">@(result.UnsupportedMessage ?? "Det finns inga resultat i serien ännu.")</div>
+        }
+        else
+        {
+            <p class="mb-1"><strong>@result.StrategyName</strong> · beräknat @result.CalculatedAt.ToLocalTime().ToString("d MMMM yyyy HH:mm", sv)</p>
+            <p class="round-legend">
+                @for (var i = 0; i < competitions.Count; i++)
+                {
+                    var c = competitions[i];
+                    <span><strong>Omg. @(i + 1)</strong> @(c.Name + (c.Date > DateTime.MinValue.AddYears(1) ? " (" + c.Date.ToString("d MMM", sv) + ")" : ""))</span>
+                }
+            </p>
+            <p class="round-legend rotate-hint no-print"><i class="bi bi-phone-landscape me-1"></i>Tabellerna rullar i sidled. Vrid telefonen för att se fler omgångar, eller skriv ut listan.</p>
+            @if (anyNotCounting)
+            {
+                <p class="round-legend">Överstrukna omgångar räknas inte i totalen.</p>
+            }
+
+            @foreach (var part in sections)
+            {
+                var usesPoints = UsesPoints(part);
+                var isClub = part.SectionType == "Club";
+                var totalHeading = usesPoints ? "Poäng" : scoreLabel;
+                var totalPct = 8.0;
+                var secPct = isClub ? 0.0 : (secondaryLabel.Length > 4 ? 8.0 : 5.0);
+                var rankPct = 4.0;
+                var omgPct = OmgPct(isClub);
+                var textShare = 100.0 - (roundCount * omgPct + totalPct + secPct + rankPct);
+
+                if (sections.Count > 1)
+                {
+                    <div class="section-heading">@part.Title</div>
+                }
+
+                foreach (var cls in part.ClassStandings.Where(c => c.Rows.Count > 0))
+                {
+                    <div class="class-results-section">
+                        <div class="class-header">@cls.ClassName <span class="count">(@cls.Rows.Count)</span></div>
+                        <div class="table-scroll">
+                        <table class="results-table" style="--minw:@(40 + (isClub ? 160 : 260) + roundCount * 38 + 60 + (isClub ? 0 : 40))px">
+                            <colgroup>
+                                <col style="width:@Pct(rankPct)" />
+                                @if (isClub)
+                                {
+                                    <col style="width:@Pct(textShare)" />
+                                }
+                                else
+                                {
+                                    <col style="width:@Pct(textShare / 2)" />
+                                    <col style="width:@Pct(textShare / 2)" />
+                                }
+                                @for (var i = 0; i < roundCount; i++)
+                                {
+                                    <col style="width:@Pct(omgPct)" />
+                                }
+                                <col style="width:@Pct(totalPct)" />
+                                @if (!isClub)
+                                {
+                                    <col style="width:@Pct(secPct)" />
+                                }
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    @if (isClub)
+                                    {
+                                        <th>Klubb</th>
+                                    }
+                                    else
+                                    {
+                                        <th>Namn</th>
+                                        <th>Klubb</th>
+                                    }
+                                    @for (var i = 0; i < roundCount; i++)
+                                    {
+                                        <th class="round" title="@competitions[i].Name">@(shortHeads ? (i + 1).ToString() : "Omg. " + (i + 1))</th>
+                                    }
+                                    <th>@totalHeading</th>
+                                    @if (!isClub)
+                                    {
+                                        <th>@secondaryLabel</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in cls.Rows)
+                                {
+                                    <tr>
+                                        <td class="text-center">@row.Rank</td>
+                                        <td class="wrap" title="@row.Name">@row.Name</td>
+                                        @if (!isClub)
+                                        {
+                                            <td class="wrap" title="@row.Club">@row.Club</td>
+                                        }
+                                        @foreach (var cell in row.CompetitionScores)
+                                        {
+                                            if (cell.Score == null)
+                                            {
+                                                <td class="text-center text-muted round">-</td>
+                                            }
+                                            else
+                                            {
+                                                <td class="@(cell.Counting ? "text-center round" : "text-center round not-counting")">
+                                                    @cell.Score
+                                                    @if (usesPoints && cell.Points != null)
+                                                    {
+                                                        <span class="round-points">@(cell.Points)p</span>
+                                                    }
+                                                </td>
+                                            }
+                                        }
+                                        <td class="text-center total-col">@row.TotalSeriesScore</td>
+                                        @if (!isClub)
+                                        {
+                                            <td class="text-center">@row.TotalXCount</td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        </div>
+                    </div>
+                }
+            }
+        }
+    </div>
+
+    <script>
+        (function () {
+            var now = new Date();
+            var pad = function (n) { return n < 10 ? '0' + n : n; };
+            var el = document.getElementById('printTimestamp');
+            if (el) el.textContent = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate())
+                + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+        })();
+    </script>
+</body>
+</html>
