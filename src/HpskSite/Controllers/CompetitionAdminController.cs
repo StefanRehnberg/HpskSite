@@ -2285,15 +2285,19 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Competitions hub not found" });
                 }
 
+                // Trädet (även opublicerade) avgör urvalet; tävlingen läses och skrivs genom lagringen (C3-planen S5).
                 var allCompetitions = GetFlatDescendants(competitionsHub)
-                    .Where(c => c.ContentType.Alias == "competition")
+                    .Where(c => c.ContentType.Alias == "competition") // competitionstore-ok: underhållsverktyget går trädet, även opublicerade
+                    .Select(c => _competitions.GetSaved(c.Id))
+                    .Where(c => c != null)
+                    .Cast<HpskSite.Models.Competitions.CompetitionInfo>()
                     .ToList();
 
                 foreach (var competition in allCompetitions)
                 {
                     try
                     {
-                        var shootingClassIds = competition.GetValue<string>("shootingClassIds");
+                        var shootingClassIds = competition.ShootingClassIds;
 
                         if (string.IsNullOrEmpty(shootingClassIds))
                         {
@@ -2316,12 +2320,10 @@ namespace HpskSite.Controllers
                         }
 
                         // Update the competition
-                        competition.SetValue("shootingClassIds", jsonArray);
-                        var result = _contentService.Save(competition);
+                        var result = _competitions.Update(competition.Id, null, c => c.ShootingClassIds = jsonArray);
 
-                        if (result.Success)
+                        if (result.Ok && result.PublishProblem == null)
                         {
-                            _contentService.Publish(competition, new[] { "*" }, -1);
                             fixedCount++;
                         }
                         else
@@ -3415,35 +3417,24 @@ namespace HpskSite.Controllers
             try
             {
                 int clearedCount = 0;
-                var allCompetitions = _contentService.GetRootContent()
+                // Trädet (även opublicerade) avgör urvalet; skrivningen går genom lagringen (C3-planen S5).
+                var allIds = _contentService.GetRootContent()
                     .SelectMany(root => GetFlatDescendants(root))
-                    .Where(c => c.ContentType.Alias == "competition")
+                    .Where(c => c.ContentType.Alias == "competition") // competitionstore-ok: underhållsverktyget går trädet, även opublicerade
+                    .Select(c => c.Id)
                     .ToList();
 
-                foreach (var competition in allCompetitions)
+                static bool Invalid(string? v) => !string.IsNullOrEmpty(v) && !v.StartsWith("umb://");
+                foreach (var id in allIds)
                 {
-                    bool changed = false;
-
-                    var invitationFileValue = competition.GetValue<string>("invitationFile");
-                    if (!string.IsNullOrEmpty(invitationFileValue) && !invitationFileValue.StartsWith("umb://"))
+                    var competition = _competitions.GetSaved(id);
+                    if (competition == null || (!Invalid(competition.InvitationFile) && !Invalid(competition.ResultListFile))) continue;
+                    var result = _competitions.Update(id, null, c =>
                     {
-                        competition.SetValue("invitationFile", null);
-                        changed = true;
-                    }
-
-                    var resultListFileValue = competition.GetValue<string>("resultListFile");
-                    if (!string.IsNullOrEmpty(resultListFileValue) && !resultListFileValue.StartsWith("umb://"))
-                    {
-                        competition.SetValue("resultListFile", null);
-                        changed = true;
-                    }
-
-                    if (changed)
-                    {
-                        _contentService.Save(competition);
-                        _contentService.Publish(competition, new[] { "*" }, -1);
-                        clearedCount++;
-                    }
+                        if (Invalid(c.InvitationFile)) c.InvitationFile = null;
+                        if (Invalid(c.ResultListFile)) c.ResultListFile = null;
+                    });
+                    if (result.Ok) clearedCount++;
                 }
 
                 return Ok(new
@@ -3476,14 +3467,14 @@ namespace HpskSite.Controllers
             try
             {
                 // Get competition
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                 {
                     return Ok(new { success = false, message = "Competition not found" });
                 }
 
                 // Verify it's an external competition
-                bool isExternal = competition.GetValue<bool>("isExternal");
+                bool isExternal = competition.IsExternal;
                 if (!isExternal)
                 {
                     return Ok(new { success = false, message = "File upload only available for external competitions" });
@@ -3579,17 +3570,17 @@ namespace HpskSite.Controllers
                 }
 
                 // Link media item to competition
-                competition.SetValue("invitationFile", mediaItem.GetUdi().ToString());
-
-                // Save competition
-                var competitionSaveResult = _contentService.Save(competition);
-                if (!competitionSaveResult.Success)
+                // Genom tävlingslagringen (C3-planen S5): publicerar bara en tävling som redan var publicerad.
+                var udi = mediaItem.GetUdi().ToString();
+                var linked = _competitions.Update(competitionId, null, c => c.InvitationFile = udi);
+                if (!linked.Ok)
                 {
                     return Ok(new { success = false, message = "Failed to link file to competition" });
                 }
-
-                // Publish competition
-                _contentService.Publish(competition, new[] { "*" }, -1);
+                if (linked.PublishProblem != null)
+                {
+                    return Ok(new { success = false, message = linked.PublishProblem });
+                }
 
                 return Ok(new
                 {
@@ -3625,19 +3616,19 @@ namespace HpskSite.Controllers
 
             try
             {
-                var competition = _contentService.GetById(competitionId);
+                var competition = _competitions.GetSaved(competitionId);
                 if (competition == null)
                 {
                     return Ok(new { success = false, message = "Competition not found" });
                 }
 
-                bool isExternal = competition.GetValue<bool>("isExternal");
+                bool isExternal = competition.IsExternal;
                 if (!isExternal)
                 {
                     return Ok(new { success = false, message = "File upload only available for external competitions" });
                 }
 
-                var competitionClubId = competition.GetValue<int?>("clubId") ?? 0;
+                var competitionClubId = competition.ClubId;
                 bool isClubAdmin = competitionClubId > 0 && managedClubIds.Contains(competitionClubId);
                 bool isSkjutledare = competitionClubId > 0 && skjutledareClubIds.Contains(competitionClubId);
 
@@ -3720,15 +3711,17 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                competition.SetValue("resultListFile", mediaItem.GetUdi().ToString());
-
-                var competitionSaveResult = _contentService.Save(competition);
-                if (!competitionSaveResult.Success)
+                // Genom tävlingslagringen (C3-planen S5): publicerar bara en tävling som redan var publicerad.
+                var udi = mediaItem.GetUdi().ToString();
+                var linked = _competitions.Update(competitionId, null, c => c.ResultListFile = udi);
+                if (!linked.Ok)
                 {
                     return Ok(new { success = false, message = "Failed to link file to competition" });
                 }
-
-                _contentService.Publish(competition, new[] { "*" }, -1);
+                if (linked.PublishProblem != null)
+                {
+                    return Ok(new { success = false, message = linked.PublishProblem });
+                }
 
                 return Ok(new
                 {

@@ -277,13 +277,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (!await IsAuthorizedForCompetition(request.CompetitionId))
                     return Json(new { success = false, message = "Du har inte behörighet." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
-                if (competition == null)
+                // Genom tävlingslagringen (C3-planen S5): publicerar bara en tävling som redan var publicerad.
+                var saved = _competitions.Update(request.CompetitionId, null, c => c.StationConfig = request.StationConfigJson ?? "");
+                if (saved.Outcome == HpskSite.Services.Competitions.CompetitionUpdateOutcome.NotFound)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
-
-                competition.SetValue("stationConfig", request.StationConfigJson ?? "");
-                _contentService.Save(competition);
-                _contentService.Publish(competition, new[] { "*" }, -1);
+                if (saved.PublishProblem != null)
+                    return Json(new { success = false, message = saved.PublishProblem });
 
                 _logger.LogInformation("Saved Fältskytte station config for competition {CompId}", request.CompetitionId);
 
@@ -430,13 +429,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (request == null || !await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
-            var competition = _contentService.GetById(request.CompetitionId);
-            if (competition == null)
+            var saved = _competitions.Update(request.CompetitionId, null, c => c.FaltskytteStationManagers = request.ManagersJson ?? "");
+            if (saved.Outcome == HpskSite.Services.Competitions.CompetitionUpdateOutcome.NotFound)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
-
-            competition.SetValue("faltskytteStationManagers", request.ManagersJson ?? "");
-            _contentService.Save(competition);
-            _contentService.Publish(competition, new[] { "*" }, -1);
+            if (saved.PublishProblem != null)
+                return Json(new { success = false, message = saved.PublishProblem });
 
             return Json(new { success = true, message = "Stationschefer sparade." });
         }
@@ -997,9 +994,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                     _logger.LogWarning("Competition {CompId} missing 'mergeConfig' property — merge config not saved.", request.CompetitionId);
                     return Json(new { success = false, message = "Egenskapen 'mergeConfig' saknas på dokumenttypen competition — sammanslagningen kan inte sparas förrän den läggs till." });
                 }
-                competition.SetValue("mergeConfig", request.MergeConfig ?? "");
-                _contentService.Save(competition);
-                _contentService.Publish(competition, new[] { "*" }, -1);
+                var mergeSaved = _competitions.Update(competition.Id, null, c => c.MergeConfig = request.MergeConfig ?? "");
+                if (mergeSaved.PublishProblem != null)
+                    return Json(new { success = false, message = mergeSaved.PublishProblem });
             }
 
             // Sammanslagningen ändrar vilka som tävlar mot vilka, alltså vem som får medalj.
@@ -1199,9 +1196,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             if (!request.IsSubCompetition)
             {
-                competition.SetValue("faltskytteResultsOfficial", request.IsOfficial);
-                _contentService.Save(competition);
-                _contentService.Publish(competition, new[] { "*" }, -1);
+                var officialSaved = _competitions.Update(request.CompetitionId, null, c => c.FaltskytteResultsOfficial = request.IsOfficial);
+                if (officialSaved.PublishProblem != null)
+                    return Json(new { success = false, message = officialSaved.PublishProblem });
 
                 // Materialize won Standard medals into the ledger (Fältskytte computes medals
                 // live, so we compute them here rather than from a stored snapshot).
@@ -2870,38 +2867,42 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
-            var competition = _contentService.GetById(request.CompetitionId);
-            if (competition == null)
+            var current = _competitions.GetSaved(request.CompetitionId);
+            if (current == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
             // Already published? Distinguishes a first publish from a re-publish, which say different
             // things to a shooter ("dina tider finns nu" vs "tiderna kan ha ändrats").
-            var wasPublished = competition.HasProperty("faltskyttePatrolsPublished")
-                && competition.GetValue<bool>("faltskyttePatrolsPublished");
+            var wasPublished = current.FaltskyttePatrolsPublished;
 
-            competition.SetValue("faltskyttePatrolsPublished", request.Publish);
-
-            // The publish dialog's "stäng självanmälan" checkbox rides along on the save this method
-            // already does — a second Save()+Publish() of the same node would only bump the version.
-            // A missing doctype property is reported rather than silently no-op'd (SetValue on a
-            // property that does not exist writes nothing and returns nothing).
-            var gatePropertyMissing = !HpskSite.Services.RegistrationGate.StartListRegistrationGate
-                .SetChoice(competition, request.CloseRegistration);
-
-            _contentService.Save(competition);
-            var pub = _contentService.Publish(competition, new[] { "*" }, -1);
-
-            // Don't report a false success: if the competition node itself fails to publish (e.g. a
-            // mandatory field is empty), the flag stays only on the draft and the public competition
-            // page — which reads the PUBLISHED cache — keeps showing "har inte publicerats än".
-            if (!pub.Success)
+            // Genom tävlingslagringen (C3-planen S5), i EN uppdatering: flaggan och publiceringsdialogens
+            // "stäng självanmälan". En saknad doktypsegenskap för grinden rapporteras i stället för att
+            // tyst bli en no-op — då sparas flaggan ensam.
+            var gatePropertyMissing = false;
+            HpskSite.Services.Competitions.CompetitionUpdateResult<HpskSite.Models.Competitions.CompetitionInfo> saved;
+            try
             {
-                var invalid = pub.InvalidProperties != null && pub.InvalidProperties.Any()
-                    ? " Ogiltiga/obligatoriska fält: " + string.Join(", ", pub.InvalidProperties.Select(p => p.Alias))
-                    : "";
-                _logger.LogWarning("PublishPatrolList: node publish failed for comp {CompetitionId}: {Result}{Invalid}",
-                    request.CompetitionId, pub.Result, invalid);
-                return Json(new { success = false, message = $"Patrullistan sparades men tävlingen kunde inte publiceras ({pub.Result}).{invalid} Åtgärda detta i tävlingens inställningar och publicera igen." });
+                saved = _competitions.Update(request.CompetitionId, null, c =>
+                {
+                    c.FaltskyttePatrolsPublished = request.Publish;
+                    if (request.CloseRegistration != null) c.CloseRegistrationOnStartList = request.CloseRegistration.Value;
+                });
+            }
+            catch (InvalidOperationException) when (request.CloseRegistration != null)
+            {
+                gatePropertyMissing = true;
+                saved = _competitions.Update(request.CompetitionId, null, c => c.FaltskyttePatrolsPublished = request.Publish);
+            }
+            if (saved.Outcome == HpskSite.Services.Competitions.CompetitionUpdateOutcome.NotFound)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            // Don't report a false success: if the competition fails to publish (e.g. a mandatory field is
+            // empty), the flag stays only on the draft and the public page keeps showing "har inte
+            // publicerats än".
+            if (saved.PublishProblem != null)
+            {
+                _logger.LogWarning("PublishPatrolList: node publish failed for comp {CompetitionId}: {Problem}", request.CompetitionId, saved.PublishProblem);
+                return Json(new { success = false, message = $"Patrullistan sparades, men tävlingen kunde inte publiceras. {saved.PublishProblem} Åtgärda detta i tävlingens inställningar och publicera igen." });
             }
 
             // Shooter-facing "patrullistan är publicerad / tiderna har ändrats". Opt-in per competition
@@ -2911,7 +2912,8 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             {
                 try
                 {
-                    if (competition.GetValue<bool>("autoNotifyParticipants"))
+                    // autoNotifyParticipants finns inte på doktypen och inte i posten — läses på noden.
+                    if (_contentService.GetById(request.CompetitionId)?.GetValue<bool>("autoNotifyParticipants") == true)
                     {
                         var notifier = HttpContext?.RequestServices
                             .GetService(typeof(HpskSite.Services.Messaging.ParticipantNotificationService))

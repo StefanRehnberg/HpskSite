@@ -11553,6 +11553,21 @@ mappar och anmälningarnas nodlagring. Rutterna → S6, skrivvägarna och seedar
 175 → 172. Verifierat: fångst grön, korskontroll 3092/0, matrisen 8/8 + 35/36 (`schema-verify`, datum),
 competitions-hub-findability 26/34 (kända), club-whats-happening 17, faltserie 38, comp-schema-link 11.
 
+**S5a (de enkla skrivningarna, 2026-10-16):** Fältskyttets stationskonfiguration, stationschefer,
+sammanslagning, resultatens och patrullistans publicering, Springskyttets sammanslagning, bemanningens synk
+av tävlingsansvariga och stationschefer, anmälningsgrindens `PersistChoice`, medaljindelningen, banan
+(`SetCompetitionRange`), värdskriptet (F5), filuppladdningarna och de två underhållsverktygen skriver genom
+`ICompetitionStore.Update`. **Följd:** lagringen publicerar bara en tävling som redan var publicerad — ett
+dussin av vägarna publicerade förut villkorslöst och kunde publicera ett utkast. `CompetitionUpdateResult.PublishProblem`
+bär ett misslyckat ompublicerande (t.ex. ett tomt obligatoriskt fält); anroparna rapporterar det i stället för
+lyckat. En saknad doktypsegenskap kastar `InvalidOperationException` i lagringen. ⚠️ `SetCompetitionRange` hade
+en handskriven behörighet som bara läste `clubId` (låste ute kretsen) — nu `CanEditCompetitionAsync`.
+`StartListRegistrationGate.SetChoice` är borttagen. Svit: `hpsk-verify/c3/c3-s5a-verify.mjs` 24/24 (bara mot
+kopian; A/B mot `s4a`: en klubbs id gav 500 i stället för "hittades inte"; kopians utkast går inte att
+publicera alls, så utkastprovet är ett regressionsskydd, inte en skiljelinje). Taken 30 → 28, 172 → 149.
+Verifierat: fångst grön (`accepted-s5.json`), korskontroll 3092/0, matrisen 8/8 + 35/36, behorighet 13,
+resultat-medaljval 8, bangranskning-fas3 60, personpanel 16.
+
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
 `Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,
