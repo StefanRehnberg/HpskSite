@@ -1,5 +1,6 @@
 using HpskSite.CompetitionTypes.Common.Utilities;
 using Microsoft.Extensions.Logging;
+using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Web;
@@ -23,6 +24,10 @@ namespace HpskSite.Routing
     /// </summary>
     public class CompetitionUrlProvider : IUrlProvider
     {
+        // Umbraco 17 kräver ett unikt alias per adressgivare.
+        public const string ProviderAlias = "Hpsk.CompetitionUrlProvider";
+        public string Alias => ProviderAlias;
+
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly ILogger<CompetitionUrlProvider> _logger;
 
@@ -51,7 +56,7 @@ namespace HpskSite.Routing
                 if (alias == "competition")
                 {
                     var url = BuildCompetitionUrl(content);
-                    return url == null ? null : UrlInfo.Url(url, culture);
+                    return url == null ? null : UrlInfo.AsUrl(url, ProviderAlias, culture);
                 }
 
                 if (ChildAliases.Contains(alias))
@@ -60,7 +65,7 @@ namespace HpskSite.Routing
                     if (parent?.ContentType.Alias != "competition") return null;
                     var parentUrl = BuildCompetitionUrl(parent);
                     if (parentUrl == null) return null;
-                    return UrlInfo.Url(parentUrl + content.UrlSegment + "/", culture);
+                    return UrlInfo.AsUrl(parentUrl + content.UrlSegment + "/", ProviderAlias, culture);
                 }
 
                 return null;
@@ -73,6 +78,10 @@ namespace HpskSite.Routing
         }
 
         public IEnumerable<UrlInfo> GetOtherUrls(int id, Uri current) => Enumerable.Empty<UrlInfo>();
+
+        // Förhandsvisningen anpassas inte — Umbracos egen adressgivare tar den.
+        public Task<UrlInfo?> GetPreviewUrlAsync(IContent content, string? culture, string? segment)
+            => Task.FromResult<UrlInfo?>(null);
 
         /// <summary>
         /// Builds the URL for a competition. Priority chain:
