@@ -120,7 +120,7 @@ namespace HpskSite.Services
 
             var paidAt = latestPaidDate
                 ?? invoice.GetValue<DateTime?>("paymentDate")
-                ?? invoice.UpdateDate;
+                ?? UmbracoTime.Local(invoice.UpdateDate);
 
             var paymentMethod = invoice.GetValue<string>("paymentMethod") ?? "";
             var transactionId = invoice.GetValue<string>("transactionId") ?? "";
@@ -266,7 +266,7 @@ namespace HpskSite.Services
                 PaidAt = basis.PaidAt,
                 IsPaid = basis.IsPaid,
 
-                IssuedAt = invoice.GetValue<DateTime?>("createdDate") ?? invoice.CreateDate,
+                IssuedAt = invoice.GetValue<DateTime?>("createdDate") ?? UmbracoTime.Local(invoice.CreateDate),
                 PaymentStatus = status,
                 IsCreditNote = kind == "creditNote",
                 IsCancelled = status.Equals("Cancelled", StringComparison.OrdinalIgnoreCase),

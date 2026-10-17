@@ -17,7 +17,9 @@ namespace HpskSite.Services
         /// <summary>Klubben är medlemmens huvudklubb (<c>primaryClubId</c>).</summary>
         public bool IsPrimary { get; set; }
         public string MembershipStatus { get; set; } = "";
-        public DateTime CreateDate { get; set; }
+        // umbracoNode.createDate är UTC i Umbraco 17; resten av sajten räknar i lokal tid.
+        private DateTime _createDate;
+        public DateTime CreateDate { get => _createDate; set => _createDate = UmbracoTime.FromDbUtc(value); }
         /// <summary>Råvärdet av <c>primaryClubId</c> (strängegenskap).</summary>
         public string PrimaryClubIdRaw { get; set; } = "";
         /// <summary>Råvärdet av <c>memberClubIds</c> (CSV).</summary>

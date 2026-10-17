@@ -296,8 +296,8 @@ WHERE n.trashed = 0", ClubEvents.EventAlias, ownerAlias).Select(r => (r.Id, r.Pa
             SwishNumber = (n.GetValue<string>(ClubEvents.SwishProperty) ?? "").Trim(),
             ContentBlocksJson = n.GetValue<string>("contentBlocks") ?? "",
             QuickLinksJson = n.GetValue<string>("quickLinks") ?? "",
-            CreatedDate = n.CreateDate,
-            UpdatedDate = n.UpdateDate
+            CreatedDate = UmbracoTime.Local(n.CreateDate),
+            UpdatedDate = UmbracoTime.Local(n.UpdateDate)
         };
 
         private static ClubEventRecord MapPublished(IPublishedContent n, string ownerType, int ownerId)
@@ -341,8 +341,8 @@ WHERE n.trashed = 0", ClubEvents.EventAlias, ownerAlias).Select(r => (r.Id, r.Pa
                 ContentBlocksJson = S("contentBlocks"),
                 QuickLinksJson = S("quickLinks"),
                 Url = n.Url(),
-                CreatedDate = n.CreateDate,
-                UpdatedDate = n.UpdateDate
+                CreatedDate = UmbracoTime.Local(n.CreateDate),
+                UpdatedDate = UmbracoTime.Local(n.UpdateDate)
             };
         }
 

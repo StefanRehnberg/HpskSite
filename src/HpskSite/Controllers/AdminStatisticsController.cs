@@ -522,7 +522,7 @@ namespace HpskSite.Controllers
             }
 
             int totalMembers = approvedMembers.Count;
-            int newMembers30d = approvedMembers.Count(m => m.CreateDate >= thirtyDaysAgo);
+            int newMembers30d = approvedMembers.Count(m => UmbracoTime.Local(m.CreateDate) >= thirtyDaysAgo);
 
             // New members per day (last 30 days, oldest first). Every day in the window is
             // emitted, zeros included, so the x-axis is a real calendar — a bulk club import
@@ -535,7 +535,7 @@ namespace HpskSite.Controllers
                     return new
                     {
                         day = day.ToString("yyyy-MM-dd"),
-                        count = approvedMembers.Count(m => m.CreateDate.Date == day)
+                        count = approvedMembers.Count(m => UmbracoTime.Local(m.CreateDate).Date == day)
                     };
                 })
                 .ToList();
@@ -549,7 +549,7 @@ namespace HpskSite.Controllers
                     return new
                     {
                         month = monthStart.ToString("yyyy-MM"),
-                        count = approvedMembers.Count(m => m.CreateDate >= monthStart && m.CreateDate < monthEnd)
+                        count = approvedMembers.Count(m => UmbracoTime.Local(m.CreateDate) >= monthStart && UmbracoTime.Local(m.CreateDate) < monthEnd)
                     };
                 })
                 .ToList();
@@ -670,7 +670,7 @@ namespace HpskSite.Controllers
                         {
                             var clubIdStr = m.GetValue<string>("primaryClubId");
                             if (!string.IsNullOrEmpty(clubIdStr) && int.TryParse(clubIdStr, out var cid))
-                                return new { ClubId = cid, m.CreateDate };
+                                return new { ClubId = cid, CreateDate = UmbracoTime.Local(m.CreateDate) };
                             return null;
                         })
                         .Where(x => x != null)

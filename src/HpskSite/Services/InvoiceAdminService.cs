@@ -780,7 +780,7 @@ namespace HpskSite.Services
                 CoveredCount = CountCoveredInvoices(invoiceNode),
                 PaymentStatus = paymentStatus,
                 PaymentMethod = invoiceNode.GetValue<string>("paymentMethod") ?? "Swish",
-                CreatedDate = invoiceNode.GetValue<DateTime?>("createdDate") ?? invoiceNode.CreateDate,
+                CreatedDate = invoiceNode.GetValue<DateTime?>("createdDate") ?? UmbracoTime.Local(invoiceNode.CreateDate),
                 PaymentDate = invoiceNode.GetValue<DateTime?>("paymentDate"),
                 RegistrationId = invoiceNode.GetValue<int>("registrationId"),
                 IsActive = invoiceNode.GetValue<bool?>("isActive") ?? true,

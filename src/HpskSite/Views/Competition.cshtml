@@ -1435,7 +1435,7 @@
 						}
 
 						// Calculate "Senast uppdaterad" from Model.UpdateDate
-						var updateDate = Model.UpdateDate;
+						var updateDate = HpskSite.Services.Hosting.UmbracoTime.Local(Model.UpdateDate);
 						var timeSinceUpdate = DateTime.Now - updateDate;
 						string updateText;
 						if (timeSinceUpdate.TotalMinutes < 1)

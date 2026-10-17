@@ -2000,7 +2000,7 @@ namespace HpskSite.Controllers
                             Region = region ?? "",
                             ClubAdminCount = clubAdminCount,
                             RegionalAdminCount = regionalAdminCount,
-                            RegistrationDate = m.CreateDate
+                            RegistrationDate = UmbracoTime.Local(m.CreateDate)
                         };
                     })
                     // Apply region filter (always enforced for regional admins)

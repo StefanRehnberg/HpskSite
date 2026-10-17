@@ -715,8 +715,8 @@ namespace HpskSite.Services
                 name = member.Name,
                 email = member.Email,
                 username = member.Username,
-                created = member.CreateDate,
-                lastLogin = member.LastLoginDate,
+                created = UmbracoTime.Local(member.CreateDate),
+                lastLogin = UmbracoTime.Local(member.LastLoginDate),
                 roles = _memberService.GetAllRoles(member.Id).ToList(),
                 properties = props,
                 clubMemberships = memberships
@@ -794,8 +794,8 @@ namespace HpskSite.Services
             PersonNumber = Prop(m, "personNumber") ?? "",
             ShooterIdNumber = Prop(m, "shooterIdNumber") ?? "",
             PhoneNumber = Prop(m, "phoneNumber") ?? "",
-            Created = m.CreateDate,
-            LastLogin = m.LastLoginDate,
+            Created = UmbracoTime.Local(m.CreateDate),
+            LastLogin = UmbracoTime.Local(m.LastLoginDate),
             InClub = IsInClub(m, clubId),
             FilledFields = MergeableFields.Count(f => ReadForMerge(m, f.Alias).Length > 0)
         };

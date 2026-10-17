@@ -702,7 +702,7 @@ namespace HpskSite.Services
                     map[node.Id] = new CompetitionInfo
                     {
                         Name = node.CompetitionName ?? node.Name ?? $"Tävling #{node.Id}",
-                        Date = node.CompetitionDate ?? node.CreateDate,
+                        Date = node.CompetitionDate ?? UmbracoTime.Local(node.CreateDate),
                         Venue = node.Venue ?? "",
                         // ⚠️ Läs UNTYPED och normalisera. competitionType lagras som id på de
                         // flesta noder men som visningsNAMN på några — mätt i prod 2026-09-02: två

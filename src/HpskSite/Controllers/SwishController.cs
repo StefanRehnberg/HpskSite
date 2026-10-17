@@ -400,7 +400,7 @@ namespace HpskSite.Controllers
                                     amount = amount,
                                     memberName = inv.Value<string>("memberName") ?? "",
                                     status = status,
-                                    createdDate = inv.CreateDate.ToString("yyyy-MM-dd"),
+                                    createdDate = UmbracoTime.Local(inv.CreateDate).ToString("yyyy-MM-dd"),
                                     isTeam = false,
                                     noInvoice = false
                                 });
@@ -422,7 +422,7 @@ namespace HpskSite.Controllers
                                             amount = amount,
                                             memberName = inv.Value<string>("memberName") ?? "",
                                             status = status,
-                                            createdDate = inv.CreateDate.ToString("yyyy-MM-dd"),
+                                            createdDate = UmbracoTime.Local(inv.CreateDate).ToString("yyyy-MM-dd"),
                                             isTeam = true,
                                             noInvoice = false
                                         });

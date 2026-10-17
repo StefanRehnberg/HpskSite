@@ -129,7 +129,7 @@ namespace HpskSite.Services
                     }
 
                     // 12-month growth: members whose CreateDate is within last 12 months
-                    if (m.CreateDate >= twelveMonthsAgo)
+                    if (UmbracoTime.Local(m.CreateDate) >= twelveMonthsAgo)
                     {
                         snapshot.NewMembers12mPerClub[cid] = snapshot.NewMembers12mPerClub.GetValueOrDefault(cid, 0) + 1;
                     }
