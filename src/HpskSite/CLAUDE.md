@@ -11671,6 +11671,42 @@ _contentService.Unpublish(content);
 _contentService.Delete(content);
 ```
 
+## ⚠️⚠️ Umbraco 17 på .NET 10 (fas E, branch `umbraco-17`, 2026-10-17)
+
+Umbraco.Cms 17.7.1, net10.0. `HpskSite.Shared` bär både net9.0 och net10.0, eftersom mobilappen kör .NET 9.
+Läs det här innan du rör datum, NPoco eller adresser.
+
+- **⚠️⚠️ DATUMEN — målet är att varje datum ser EXAKT ut som i 16. Mätt med samma sond på 16 och 17:**
+  - **Umbracos systemdatum är UTC i 17** (`CreateDate`, `UpdateDate`, `LastLoginDate`, kolumnerna i `umbracoNode`,
+    `cmsMember`, `umbracoContentVersion` …; migreringen `MigrateSystemDatesToUtc`); 16 gav dem som lokal tid med
+    Kind = Local. Läs dem genom **`UmbracoTime.Local(...)`** (API → Kind Local) eller **`UmbracoTime.FromDbUtc(...)`**
+    (SQL → lokal tid, Kind Unspecified, som 16:s SQL gav).
+  - **Våra tabeller och `IContent.GetValue` för datumegenskaper:** Kind = Utc på ett lokalt värde i BÅDA
+    versionerna (`UmbracoDefaultMapper` finns redan i 16). Rör inte — JSON får `Z` som förut. ⚠️ En första utsåga
+    (`WallClockDateMapper`) tog bort märkningen och ÄNDRADE därmed 16:s beteende; den togs bort när 16 mättes.
+  - **Den publicerade cachen:** 16 märkte datumegenskaperna Utc, 17 Unspecified. **`HpskDatePickerValueConverter`**
+    ersätter `DatePickerValueConverter` och ger märkningen tillbaka utan att ändra värdet.
+  - **`PropertyDateKindNormalizer`** tar bort Kind från datumvärden innan ett dokument eller en medlem sparas:
+    `SetValue(x, DateTime.Now)` lagrades rätt men räknades om till UTC i 17:s publicerade cache.
+  - ⚠️ **Prod-servern kör i UTC** (`DateTime.Now` = UTC där; se kommentaren i `CompetitionRegistrationManagement`).
+    Migreringen räknar om med serverns tidszon, alltså ingenting i prod.
+- **NPoco 6:** de asynkrona metoderna tar `object[] args` utan `params`. **`NPocoAsyncParamsExtensions`**
+  (global using i `GlobalUsings.cs`) tar anrop i den gamla formen. De synkrona metoderna är oförändrade.
+- **`GetAtRoot()`/`GetByRoute()`** är borta ur den publicerade cachen. **`PublishedCacheNavigationExtensions`**
+  är en brygga med samma namn — använd den inte i ny kod (C3-planen K4: `ISiteNodes`, controllers i S7).
+- **`CompetitionUrlProvider`** har `Alias` och `GetPreviewUrlAsync`, som `IUrlProvider` kräver i 17.
+- **Körtidskompileringen av vyerna** ligger i paketet `Umbraco.Cms.DevelopmentMode.Backoffice`. Utan det
+  startar inte dev (ModelsBuilder `InMemoryAuto`). ⚠️ Mätt: en vy som laddas upp till det PUBLICERADE bygget
+  slår inte igenom förrän appen startar om — varken på 16 eller 17 med prods inställningar.
+- **⚠️ Adresserna:** 17 routar och lämnar ut `UrlSegment` ur `umbracoDocumentUrl`. Dev-databasens tabell var
+  gammal (adressdelar med `&` och `:`), prods var rensad. Deployen tvingar fram en ombyggnad
+  (`UPDATE umbracoKeyValue SET value = 'ombyggnad-fas-e' WHERE [key] = 'UmbracoUrlGeneration'` före första
+  starten), så tabellen följer dagens regler. Bygger om ~8 000 adresser på några sekunder.
+- **Säkerhetshål:** Pkcs 10.0.13 och MessagePack 3.1.12 låsta. ImageSharp 3.1.12 kvar (hålen i TIFF-kodaren och
+  histogramutjämningen, som sajten inte använder; rättningen finns bara i 4.x).
+- Verifiering: kopian `Umbraco_U17` (dev-databasen uppgraderad), `$SP/u17run.sh`, och skyddsnätet 16 mot 17 på
+  den frysta kopian (`$SP/s0capture-u17.sh`, `$SP/e-all.sh`). Sviter som läser databasen följer `HPSK_DB`.
+
 ## ⚠️⚠️ Bakgrundstjänster ärver `IsolatedBackgroundService` — ALDRIG `BackgroundService` (2026-09-24)
 
 **Ska du bygga en ny bakgrundstjänst?** Ärv `HpskSite.Services.Hosting.IsolatedBackgroundService`
