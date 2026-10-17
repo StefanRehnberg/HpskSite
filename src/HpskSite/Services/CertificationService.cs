@@ -139,7 +139,7 @@ namespace HpskSite.Services
                 MemberId = req.MemberId,
                 CertificationType = req.CertificationType,
                 CertifiedByMemberId = req.CertifiedByMemberId,
-                CertifiedAt = req.CertifiedAt ?? DateTime.UtcNow,
+                CertifiedAt = req.CertifiedAt ?? DateTime.Today,
                 ExpiresAt = req.ExpiresAt,
                 CertificateNumber = req.CertificateNumber,
                 IsActive = true,

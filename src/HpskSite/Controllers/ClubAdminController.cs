@@ -2837,7 +2837,7 @@ namespace HpskSite.Controllers
             if (elapsed.TotalMinutes < 60) return $"{(int)elapsed.TotalMinutes} min sedan";
             if (elapsed.TotalHours < 24) return $"{(int)elapsed.TotalHours}h sedan";
             if (elapsed.TotalDays < 7) return $"{(int)elapsed.TotalDays}d sedan";
-            return lastActive.Value.ToLocalTime().ToString("yyyy-MM-dd");
+            return SwedishTime.FromUtc(lastActive.Value).ToString("yyyy-MM-dd");
         }
     }
 }

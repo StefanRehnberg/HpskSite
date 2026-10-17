@@ -409,7 +409,8 @@ function saveSeries() {
                 // Flatpickr already gives us date in Y-m-d format, convert to ISO
                 const dateParts = value.split('-');
                 if (dateParts.length === 3) {
-                    fields[key] = new Date(`${dateParts[0]}-${dateParts[1]}-${dateParts[2]}T00:00:00`).toISOString();
+                    // Datumet skickas som det är. toISOString() gav kvällen före i UTC (fas E).
+                    fields[key] = `${dateParts[0]}-${dateParts[1]}-${dateParts[2]}`;
                 }
             }
         } else {

@@ -48,7 +48,7 @@ window.HpskFees = (function () {
         if (isNaN(d)) return String(iso).slice(0, 10);
         return d.getDate() + ' ' + MONTHS[d.getMonth()];
     }
-    function today() { const d = new Date(); return d.toISOString().slice(0, 10); }
+    function today() { const d = new Date(); return hpskLocalDate(d); }
     function datePicker(input) {
         if (window.flatpickr) {
             window.flatpickr(input, { locale: (window.flatpickr.l10ns && window.flatpickr.l10ns.sv) || 'default', dateFormat: 'Y-m-d', allowInput: true });
@@ -521,7 +521,7 @@ window.HpskFees = (function () {
             + '<button type="button" class="btn btn-outline-primary hf-create">Skapa utan att skicka</button>'
             + '<button type="button" class="btn btn-primary hf-create-send">Skapa och skicka</button>';
         const due = new Date(); due.setDate(due.getDate() + 30);
-        const dueEl = m.body.querySelector('.hf-due'); dueEl.value = due.toISOString().slice(0, 10); datePicker(dueEl);
+        const dueEl = m.body.querySelector('.hf-due'); dueEl.value = hpskLocalDate(due); datePicker(dueEl);
 
         const showClub = () => {
             const c = d.clubs.find(x => x.clubId === +m.body.querySelector('.hf-club').value);

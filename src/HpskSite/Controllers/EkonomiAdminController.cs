@@ -3081,7 +3081,7 @@ namespace HpskSite.Controllers
                         Method = p.Method,
                         // ConfirmedUtc kan inte vara null här — kön är definierad som bekräftad
                         // utan verifikation — men läs den försiktigt ändå.
-                        ConfirmedDate = (p.ConfirmedUtc ?? p.CreatedUtc).Date,
+                        ConfirmedDate = SwedishTime.FromUtc(p.ConfirmedUtc ?? p.CreatedUtc).Date,
                         Description = LedgerPaymentService.DescribeFor(p)
                     })
                     .ToList();
@@ -3154,7 +3154,7 @@ namespace HpskSite.Controllers
                 {
                     invoiceId = x.InvoiceId, number = x.InvoiceNumber, competition = x.CompetitionName,
                     payer = x.PayerName, amount = x.Amount, reason = x.Reason, by = x.DismissedByName,
-                    date = x.DismissedUtc.ToLocalTime().ToString("yyyy-MM-dd")
+                    date = SwedishTime.FromUtc(x.DismissedUtc).ToString("yyyy-MM-dd")
                 })
             });
         }

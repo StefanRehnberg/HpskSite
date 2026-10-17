@@ -161,7 +161,9 @@ namespace HpskSite.Controllers
                               CAST(VisitedAt AS DATE) AS [Day],
                               SessionHash,
                               COUNT(*) AS PageCount
-                          FROM [VisitorLogs]
+                          FROM (SELECT CAST(CAST(VisitedAt AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'W. Europe Standard Time' AS datetime2) AS VisitedAt,
+                                       SessionHash, [Path]
+                                  FROM [VisitorLogs] WHERE VisitedAt >= DATEADD(day, -1, @0)) AS v
                           WHERE VisitedAt >= @0
                           GROUP BY CAST(VisitedAt AS DATE), SessionHash
                           HAVING COUNT(DISTINCT [Path]) >= 2
@@ -199,7 +201,9 @@ namespace HpskSite.Controllers
                               DATEADD(day, -((DATEDIFF(day, '19000101', VisitedAt)) % 7), CAST(VisitedAt AS DATE)) AS WeekStart,
                               SessionHash,
                               COUNT(*) AS PageCount
-                          FROM [VisitorLogs]
+                          FROM (SELECT CAST(CAST(VisitedAt AS datetime2) AT TIME ZONE 'UTC' AT TIME ZONE 'W. Europe Standard Time' AS datetime2) AS VisitedAt,
+                                       SessionHash, [Path]
+                                  FROM [VisitorLogs] WHERE VisitedAt >= DATEADD(day, -1, @0)) AS v
                           WHERE VisitedAt >= @0
                           GROUP BY DATEADD(day, -((DATEDIFF(day, '19000101', VisitedAt)) % 7), CAST(VisitedAt AS DATE)), SessionHash
                           HAVING COUNT(DISTINCT [Path]) >= 2
@@ -1684,7 +1688,7 @@ namespace HpskSite.Controllers
             var messages30d = entries.Count(e => e.Timestamp >= thirtyDaysAgo);
 
             var perMonth = entries
-                .GroupBy(e => e.Timestamp.ToString("yyyy-MM"))
+                .GroupBy(e => SwedishTime.FromUtc(e.Timestamp).ToString("yyyy-MM"))
                 .OrderBy(g => g.Key)
                 .Select(g => new { month = g.Key, count = g.Count() })
                 .ToList();
@@ -1696,7 +1700,7 @@ namespace HpskSite.Controllers
                 // it must NOT be truncated — the whole point is reading the answer that was given.
                 .Select(e => new
                 {
-                    timestamp = e.Timestamp.ToString("yyyy-MM-dd HH:mm"),
+                    timestamp = SwedishTime.FromUtc(e.Timestamp).ToString("yyyy-MM-dd HH:mm"),
                     question = e.Question,
                     answer = Truncate(CollapseWhitespace(e.Answer), 200),
                     answerFull = e.Answer

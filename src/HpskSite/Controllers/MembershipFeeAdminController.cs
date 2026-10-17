@@ -153,14 +153,14 @@ namespace HpskSite.Controllers
             amount = c.Amount,
             status = c.PaymentStatus,
             covered = c.HouseholdCoveredByChargeId.HasValue,
-            requestSentDate = c.RequestSentDate?.ToString("yyyy-MM-dd"),
-            paymentSentDate = c.PaymentSentDate?.ToString("yyyy-MM-dd"),
-            paidDate = c.PaidDate?.ToString("yyyy-MM-dd"),
+            requestSentDate = SwedishTime.FromUtc(c.RequestSentDate)?.ToString("yyyy-MM-dd"),
+            paymentSentDate = SwedishTime.FromUtc(c.PaymentSentDate)?.ToString("yyyy-MM-dd"),
+            paidDate = SwedishTime.FromUtc(c.PaidDate)?.ToString("yyyy-MM-dd"),
             // Medlemmen väljer medlemstyp på betalsidan (0 kr, ingen kategori ännu).
             needsTypeChoice = c.NeedsTypeChoice,
             // ⚠️ Kassören ska SE att medlemmen valt själv — ett förtroendesystem, inte ett osynligt.
             memberChosenType = c.MemberChosenType,
-            memberChosenAt = c.MemberChosenAt?.ToString("yyyy-MM-dd")
+            memberChosenAt = SwedishTime.FromUtc(c.MemberChosenAt)?.ToString("yyyy-MM-dd")
         };
 
         /// <summary>Klubbens aktiva medlemmar (utom utträdda och avlidna) som underlag för avgiften.</summary>
@@ -198,9 +198,9 @@ namespace HpskSite.Controllers
             c.MemberEmail,
             c.Amount,
             c.PaymentStatus,
-            paymentSentDate = c.PaymentSentDate?.ToString("yyyy-MM-dd HH:mm"),
+            paymentSentDate = SwedishTime.FromUtc(c.PaymentSentDate)?.ToString("yyyy-MM-dd HH:mm"),
             c.PaymentSentBy,
-            paidDate = c.PaidDate?.ToString("yyyy-MM-dd HH:mm"),
+            paidDate = SwedishTime.FromUtc(c.PaidDate)?.ToString("yyyy-MM-dd HH:mm"),
             hasEmail = !string.IsNullOrWhiteSpace(c.MemberEmail),
             covered = c.HouseholdCoveredByChargeId.HasValue
         };
@@ -526,10 +526,10 @@ namespace HpskSite.Controllers
             startCount = c.StartCount,
             competitionCount = c.CompetitionCount,
             status = c.PaymentStatus,
-            requestSentDate = c.RequestSentDate?.ToString("yyyy-MM-dd"),
-            paymentSentDate = c.PaymentSentDate?.ToString("yyyy-MM-dd"),
+            requestSentDate = SwedishTime.FromUtc(c.RequestSentDate)?.ToString("yyyy-MM-dd"),
+            paymentSentDate = SwedishTime.FromUtc(c.PaymentSentDate)?.ToString("yyyy-MM-dd"),
             paymentSentBy = c.PaymentSentBy,
-            paidDate = c.PaidDate?.ToString("yyyy-MM-dd"),
+            paidDate = SwedishTime.FromUtc(c.PaidDate)?.ToString("yyyy-MM-dd"),
             lines = c.Lines.Select(l => new
             {
                 id = l.Id, kind = l.Kind, description = l.Description,

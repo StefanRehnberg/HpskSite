@@ -550,8 +550,8 @@ namespace HpskSite.Controllers
                         EscapeCsvField(memberRegion),
                         EscapeCsvField(string.Join("; ", memberRoles)),
                         m.IsApproved ? "Godkänd" : "Väntande",
-                        lastActive?.ToString("yyyy-MM-dd HH:mm") ?? "",
-                        lastMobileActive?.ToString("yyyy-MM-dd HH:mm") ?? ""
+                        SwedishTime.FromUtc(lastActive)?.ToString("yyyy-MM-dd HH:mm") ?? "",
+                        SwedishTime.FromUtc(lastMobileActive)?.ToString("yyyy-MM-dd HH:mm") ?? ""
                     ));
                 }
 
@@ -1249,7 +1249,7 @@ namespace HpskSite.Controllers
                         lockoutEndUtc = lockoutEnd?.UtcDateTime,
                         lockoutEndLocal = lockoutEnd.HasValue ? lockoutEnd.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : null,
                         accessFailedCount = accessFailedCount,
-                        lastActiveDate = lastActive,
+                        lastActiveDate = SwedishTime.FromUtc(lastActive),
                         lastActiveDisplay = FormatLastActive(lastActive),
                         hasPassword = hasPassword,
                         isApproved = member.IsApproved
@@ -2228,7 +2228,7 @@ namespace HpskSite.Controllers
             }
 
             // 7 days or more - show date only (no time)
-            return lastActive.Value.ToLocalTime().ToString("yyyy-MM-dd");
+            return SwedishTime.FromUtc(lastActive.Value).ToString("yyyy-MM-dd");
         }
 
         #endregion

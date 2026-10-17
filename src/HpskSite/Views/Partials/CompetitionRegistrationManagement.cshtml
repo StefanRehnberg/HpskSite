@@ -1514,14 +1514,14 @@
 // and JavaScript reads an offset-less datetime as the BROWSER's local time. Two different
 // clocks are stored behind that identical shape:
 //   • registrationDate — written with DateTime.Now, i.e. the SERVER's local time. Prod runs
-//     UTC, so the desk saw 18:15 for a 20:15 registration; dev runs Swedish time, so a fixed
-//     "add two hours" would be wrong there. The server's own offset is stamped in below at
-//     render time, which makes both environments come out right.
+//     Swedish time (prod and dev both — measured 2026-10-17; an older note here said prod ran
+//     UTC, which was wrong). The server's own offset is stamped in below at render time, so the
+//     value is read in the clock it was written in, wherever the app runs.
 //   • occurredAt (invoice audit trail) — written with DateTime.UtcNow, so it is UTC regardless
 //     of where the app runs.
 // Both are then rendered in Europe/Stockholm, which is the clock the desk is working to.
 // (Caveat: SERVER_UTC_OFFSET is the offset as of page render, so on a dev machine a timestamp
-// from the other side of a DST switch can be an hour out. On prod the offset is always +00:00.)
+// from the other side of a DST switch can be an hour out.)
 const SERVER_UTC_OFFSET = '@Html.Raw(serverUtcOffset)';
 const SWEDISH_DATETIME_FORMAT = {
     year: 'numeric', month: '2-digit', day: '2-digit',

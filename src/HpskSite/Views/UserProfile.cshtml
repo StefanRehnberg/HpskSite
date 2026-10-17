@@ -1164,7 +1164,7 @@ function openPracticeLogModal() {
             plFlatpickr.setDate(new Date().toLocaleDateString('sv-SE'), true);
         }
     } else {
-        dateEl.value = new Date().toISOString().slice(0, 10);
+        dateEl.value = hpskLocalDate();
     }
 
     new bootstrap.Modal(document.getElementById('practiceLogModal')).show();

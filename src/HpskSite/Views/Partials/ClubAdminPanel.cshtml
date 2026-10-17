@@ -3544,7 +3544,7 @@ function clubSeriesEscapeHtml(text) {
 function clubSeriesFormatDateForInput(dateStr) {
     if (!dateStr) return '';
     const date = new Date(dateStr);
-    return date.toISOString().split('T')[0];
+    return hpskLocalDate(date);
 }
 
 function lockSeriesOrganizerToClub() {
@@ -4282,7 +4282,7 @@ function editEvent(eventId) {
             if (fp) {
                 fp.setDate(eventDate);
             } else {
-                document.getElementById('eventDate').value = eventDate.toISOString().slice(0, 16);
+                document.getElementById('eventDate').value = hpskLocalDateTime(eventDate);
             }
         }
     }

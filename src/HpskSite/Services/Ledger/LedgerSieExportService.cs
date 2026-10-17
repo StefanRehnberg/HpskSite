@@ -193,7 +193,7 @@ namespace HpskSite.Services.Ledger
 
                 sb.AppendLine(SieFormat.Post("VER", series, e.Number.ToString(),
                     SieFormat.Date(e.AccountingDate), e.Description ?? "",
-                    SieFormat.Date(e.RegisteredUtc)));
+                    SieFormat.Date(SwedishTime.FromUtc(e.RegisteredUtc))));
 
                 sb.AppendLine("{");
 

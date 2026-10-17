@@ -490,7 +490,7 @@
         document.getElementById('certGrantMember-' + instanceKey).innerHTML = '<option value="">— Laddar medlemmar —</option>';
         document.getElementById('certGrantGrantor-' + instanceKey).innerHTML = '<option value="">— Välj utbildare / utfärdare —</option>';
         if (fpCertifiedAt) { fpCertifiedAt.setDate(new Date(), true); }
-        else { document.getElementById('certGrantCertifiedAt-' + instanceKey).value = new Date().toISOString().slice(0, 10); }
+        else { document.getElementById('certGrantCertifiedAt-' + instanceKey).value = hpskLocalDate(); }
         if (fpExpiresAt) { fpExpiresAt.clear(); }
         else { document.getElementById('certGrantExpiresAt-' + instanceKey).value = ''; }
         document.getElementById('certGrantNumber-' + instanceKey).value = '';

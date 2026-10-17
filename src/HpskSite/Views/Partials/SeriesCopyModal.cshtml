@@ -243,11 +243,11 @@ window.performSeriesCopy = function() {
     try {
         if (startDateStr) {
             const dateParts = startDateStr.split('-');
-            startDate = new Date(`${dateParts[0]}-${dateParts[1]}-${dateParts[2]}T00:00:00`).toISOString();
+            startDate = `${dateParts[0]}-${dateParts[1]}-${dateParts[2]}`; // som det är — toISOString() gav kvällen före i UTC
         }
         if (endDateStr) {
             const dateParts = endDateStr.split('-');
-            endDate = new Date(`${dateParts[0]}-${dateParts[1]}-${dateParts[2]}T00:00:00`).toISOString();
+            endDate = `${dateParts[0]}-${dateParts[1]}-${dateParts[2]}`;
         }
     } catch (e) {
         errorMessage.textContent = 'Invalid date format';

@@ -2777,9 +2777,21 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
             using var db = _umbracoDatabaseFactory.CreateDatabase();
+            // Dialogen frågar bara efter ett klockslag ("HH:mm") och byggde tiden på DAGENS datum, och en tom
+            // ruta ("lämna tomt för att inte ändra") raderade tiden. Klockslaget läggs därför på patrullens
+            // befintliga dag (annars tävlingens), och utan klockslag står den gamla tiden kvar (fas E).
+            DateTime? startTime = null;
+            if (request.StartTime is DateTime requested)
+            {
+                var existing = await db.ExecuteScalarAsync<DateTime?>(
+                    "SELECT StartTime FROM FaltskyttePatrol WHERE Id = @0 AND CompetitionId = @1",
+                    request.PatrolId, request.CompetitionId);
+                var day = existing?.Date ?? _competitions.GetSaved(request.CompetitionId)?.CompetitionDate?.Date ?? requested.Date;
+                startTime = day + requested.TimeOfDay;
+            }
             await db.ExecuteAsync(
-                "UPDATE FaltskyttePatrol SET StartTime = @0, Label = @1 WHERE Id = @2 AND CompetitionId = @3",
-                request.StartTime,
+                "UPDATE FaltskyttePatrol SET StartTime = COALESCE(@0, StartTime), Label = @1 WHERE Id = @2 AND CompetitionId = @3",
+                startTime,
                 string.IsNullOrWhiteSpace(request.Label) ? null : request.Label.Trim(),
                 request.PatrolId,
                 request.CompetitionId);

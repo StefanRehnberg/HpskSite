@@ -278,7 +278,7 @@
 
     function reset() {
         init();
-        if (fpDate) fpDate.setDate(new Date(), true); else el('reDate').value = new Date().toISOString().slice(0, 10);
+        if (fpDate) fpDate.setDate(new Date(), true); else el('reDate').value = hpskLocalDate();
         el('reScore').value = '';
         el('reCompetition').value = '';
         el('reHolderName').value = '';

@@ -206,7 +206,7 @@ namespace HpskSite.Services.Kretsgranskning
                 {
                     area = new WorkArea
                     {
-                        CompetitionId = competitionId, Name = areaName, CreatedByMemberId = actorId, CreatedDate = DateTime.Now,
+                        CompetitionId = competitionId, Name = areaName, CreatedByMemberId = actorId, CreatedDate = DateTime.UtcNow,
                         SortOrder = db.ExecuteScalar<int>("SELECT ISNULL(MAX(SortOrder), 0) + 1 FROM WorkArea WHERE CompetitionId = @0", competitionId)
                     };
                     db.Insert(area);
@@ -222,7 +222,7 @@ namespace HpskSite.Services.Kretsgranskning
                             CompetitionId = competitionId, WorkAreaId = area.Id, Title = p.Title, Description = p.Description,
                             DueDate = compDate != null && p.DaysBeforeComp != null ? compDate.Value.Date.AddDays(-p.DaysBeforeComp.Value) : null,
                             Status = WorkItemStatus.Planerad, ScopeType = ChecklistScopeType, ScopeKey = p.Id.ToString(),
-                            SortOrder = ++sort, CreatedByMemberId = actorId, CreatedDate = DateTime.Now, ModifiedDate = DateTime.Now
+                            SortOrder = ++sort, CreatedByMemberId = actorId, CreatedDate = DateTime.UtcNow, ModifiedDate = DateTime.UtcNow
                         });
                         added++;
                     }

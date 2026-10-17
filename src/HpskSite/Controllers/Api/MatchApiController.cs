@@ -196,8 +196,8 @@ namespace HpskSite.Controllers.Api
                 MatchName = request.MatchName,
                 CreatedByMemberId = memberId.Value,
                 WeaponClass = request.WeaponClass?.ToUpper() ?? "A",
-                CreatedDate = DateTime.UtcNow,
-                StartDate = request.StartDate,
+                CreatedDate = DateTime.Now,
+                StartDate = request.StartDate is DateTime sd && sd.Kind == DateTimeKind.Utc ? sd.ToLocalTime() : request.StartDate, // svensk tid, som webben (fas E)
                 Status = "Active",
                 IsOpen = request.IsOpen,
                 HasHandicap = request.HasHandicap,
@@ -289,7 +289,7 @@ namespace HpskSite.Controllers.Api
             {
                 TrainingMatchId = match.Id,
                 MemberId = memberId.Value,
-                JoinedDate = DateTime.UtcNow,
+                JoinedDate = DateTime.Now,
                 DisplayOrder = 1,
                 FrozenHandicapPerSeries = frozenHandicap,
                 FrozenIsProvisional = frozenIsProvisional,
@@ -498,7 +498,7 @@ namespace HpskSite.Controllers.Api
             {
                 TrainingMatchId = match.Id,
                 MemberId = memberId.Value,
-                JoinedDate = DateTime.UtcNow,
+                JoinedDate = DateTime.Now,
                 DisplayOrder = maxOrder + 1,
                 FrozenHandicapPerSeries = frozenHandicap,
                 FrozenIsProvisional = frozenIsProvisional,
@@ -937,7 +937,7 @@ namespace HpskSite.Controllers.Api
 
             // Update status
             match.Status = "Completed";
-            match.CompletedDate = DateTime.UtcNow;
+            match.CompletedDate = DateTime.Now;
             await db.UpdateAsync(match);
 
             // Recalculate statistics for participants with enough series (min 4)
@@ -1128,7 +1128,7 @@ namespace HpskSite.Controllers.Api
                 existingScore.SeriesScores = JsonSerializer.Serialize(seriesList);
                 existingScore.TotalScore = totalScore;
                 existingScore.XCount = totalXCount;
-                existingScore.UpdatedAt = DateTime.UtcNow;
+                existingScore.UpdatedAt = DateTime.Now;
                 await db.UpdateAsync(existingScore);
             }
             else
@@ -1139,7 +1139,7 @@ namespace HpskSite.Controllers.Api
                 {
                     MemberId = memberId.Value,
                     TrainingMatchId = match.Id,
-                    TrainingDate = DateTime.UtcNow,
+                    TrainingDate = DateTime.Now,
                     WeaponClass = match.WeaponClass,
                     IsCompetition = false,
                     SeriesScores = seriesJson,
@@ -1147,8 +1147,8 @@ namespace HpskSite.Controllers.Api
                     XCount = request.XCount,
                     Notes = $"Träningsmatch: {match.MatchName}",
                     Discipline = match.Discipline ?? "Precision",
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now,
+                    UpdatedAt = DateTime.Now
                 };
                 await db.InsertAsync(score);
             }
@@ -1289,7 +1289,7 @@ namespace HpskSite.Controllers.Api
                 series["targetPhotoUrl"] = relativeUrl;
 
                 existingScore.SeriesScores = JsonSerializer.Serialize(seriesList);
-                existingScore.UpdatedAt = DateTime.UtcNow;
+                existingScore.UpdatedAt = DateTime.Now;
                 await db.UpdateAsync(existingScore);
 
                 scope.Complete();
@@ -1429,7 +1429,7 @@ namespace HpskSite.Controllers.Api
 
             // Save back to database
             targetScore.SeriesScores = JsonSerializer.Serialize(seriesList);
-            targetScore.UpdatedAt = DateTime.UtcNow;
+            targetScore.UpdatedAt = DateTime.Now;
             await db.UpdateAsync(targetScore);
 
             scope.Complete();
@@ -1878,7 +1878,7 @@ namespace HpskSite.Controllers.Api
                 @"INSERT INTO TrainingMatchJoinRequests (TrainingMatchId, MemberId, MemberName, MemberProfilePictureUrl, Status, RequestDate)
                   OUTPUT INSERTED.Id
                   VALUES (@0, @1, @2, @3, @4, @5)",
-                match.Id, memberId.Value, memberName, profilePictureUrl ?? "", "Pending", DateTime.UtcNow);
+                match.Id, memberId.Value, memberName, profilePictureUrl ?? "", "Pending", DateTime.Now);
 
             scope.Complete();
 
@@ -1937,7 +1937,7 @@ namespace HpskSite.Controllers.Api
 
             // Update request status
             joinRequest.Status = request.Action == "Accept" ? "Accepted" : "Blocked";
-            joinRequest.ResponseDate = DateTime.UtcNow;
+            joinRequest.ResponseDate = DateTime.Now;
             joinRequest.ResponseByMemberId = memberId.Value;
             await db.UpdateAsync(joinRequest);
 
@@ -1983,7 +1983,7 @@ namespace HpskSite.Controllers.Api
                 {
                     TrainingMatchId = match.Id,
                     MemberId = joinRequest.MemberId,
-                    JoinedDate = DateTime.UtcNow,
+                    JoinedDate = DateTime.Now,
                     DisplayOrder = maxOrder + 1,
                     FrozenHandicapPerSeries = frozenHandicap,
                     FrozenIsProvisional = frozenIsProvisional
@@ -2241,7 +2241,7 @@ namespace HpskSite.Controllers.Api
                 MemberId = null, // Guest has no member ID
                 GuestParticipantId = guest.Id,
                 GuestHandicapClass = request.HandicapClass,
-                JoinedDate = DateTime.UtcNow,
+                JoinedDate = DateTime.Now,
                 DisplayOrder = maxOrder + 1,
                 FrozenHandicapPerSeries = frozenHandicap,
                 FrozenIsProvisional = frozenIsProvisional,

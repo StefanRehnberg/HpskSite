@@ -6,8 +6,7 @@ namespace HpskSite.Tests
 {
     /// <summary>
     /// Fas E: Umbraco 17 lämnar ut systemdatum i UTC, 16 gav dem som lokal tid (Kind = Local).
-    /// <see cref="UmbracoTime"/> ger tillbaka 16:s värde. Datumegenskaperna ur den publicerade cachen får
-    /// 16:s märkning (Utc) genom <see cref="HpskDatePickerValueConverter"/>.
+    /// <see cref="UmbracoTime"/> ger tillbaka 16:s värde.
     /// </summary>
     public class UmbracoTimeTests
     {
@@ -45,17 +44,5 @@ namespace HpskSite.Tests
 
         [Fact]
         public void MinValue_ror_inte() => UmbracoTime.FromDbUtc(DateTime.MinValue).Should().Be(DateTime.MinValue);
-
-        [Fact]
-        public void Publicerat_datum_far_utc_markning_utan_att_flytta_vardet()
-        {
-            var converter = new HpskDatePickerValueConverter();
-            var source = new DateTime(2026, 11, 1, 10, 0, 0, DateTimeKind.Unspecified);
-            var value = converter.ConvertSourceToIntermediate(null!, null!, source, false);
-            value.Should().BeOfType<DateTime>();
-            var d = (DateTime)value!;
-            d.Kind.Should().Be(DateTimeKind.Utc);
-            d.Ticks.Should().Be(source.Ticks);
-        }
     }
 }

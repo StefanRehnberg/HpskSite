@@ -957,7 +957,7 @@ function loadOverviewStats_REMOVED() {
     }
     
     // Update last updated timestamp
-    document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+    document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString('sv-SE', { timeZone: 'Europe/Stockholm' });
 }
 
 function refreshAllData() {
