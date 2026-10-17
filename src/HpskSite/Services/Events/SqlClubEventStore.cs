@@ -11,11 +11,11 @@ namespace HpskSite.Services.Events
 {
     /// <summary>
     /// Händelserna i tabellen <c>ClubEvent</c> (sajtstrukturen fas 2c), med adresshistorik i
-    /// <c>ClubEventUrl</c> och sidans block i <c>LandingPage</c>. Väljs av växeln <c>Events:Store</c>.
+    /// <c>PageAddress</c> (C3-planen S6, delad med tävlingarna och serierna; förut <c>ClubEventUrl</c>) och sidans block i <c>LandingPage</c>. Väljs av växeln <c>Events:Store</c>.
     ///
     /// <para><b>Adressen är <c>/{ägarens adress}/{år}/{slug}/</c>.</b> Året och sluggen sätts när
     /// händelsen skapas; byter den namn eller år får den en NY aktuell adress och den gamla står kvar
-    /// i historiken, så att <see cref="HpskSite.Routing.ClubEventUrlContentFinder"/> kan 301:a den.
+    /// i historiken, så att <see cref="HpskSite.Routing.PageAddressContentFinder"/> kan 301:a den.
     /// En krock inom samma ägare och år ger <c>-2</c>, <c>-3</c> …</para>
     ///
     /// <para><b>Inget Umbraco-lås.</b> Att skapa en händelse är en tabellrad, inte en nodsparning som
@@ -27,10 +27,13 @@ namespace HpskSite.Services.Events
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
         private readonly IShortStringHelper _shortStrings;
         private readonly ILogger<SqlClubEventStore> _logger;
+        private readonly HpskSite.Services.Addresses.PageAddressService _addresses;
 
         public SqlClubEventStore(IScopeProvider scopeProvider, IUmbracoContextAccessor umbracoContextAccessor,
-            IShortStringHelper shortStrings, ILogger<SqlClubEventStore> logger)
+            IShortStringHelper shortStrings, ILogger<SqlClubEventStore> logger,
+            HpskSite.Services.Addresses.PageAddressService addresses)
         {
+            _addresses = addresses;
             _scopeProvider = scopeProvider;
             _umbracoContextAccessor = umbracoContextAccessor;
             _shortStrings = shortStrings;
@@ -83,11 +86,11 @@ e.CreatedDate, e.UpdatedDate, lp.ContentBlocksJson, lp.QuickLinksJson";
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var row = urlYear == null
                 ? scope.Database.FirstOrDefault<AddressRow>(@"
-SELECT TOP 1 u.EventId, u.IsCurrent FROM dbo.ClubEventUrl u
-WHERE u.OwnerType = @0 AND u.OwnerId = @1 AND u.UrlYear IS NULL AND u.Slug = @2", ownerType, ownerId, slug)
+SELECT TOP 1 u.TargetId AS EventId, u.IsCurrent FROM dbo.PageAddress u
+WHERE u.OwnerType = @0 AND u.OwnerId = @1 AND u.UrlYear IS NULL AND u.Slug = @2 AND u.TargetKind = 'event'", ownerType, ownerId, slug)
                 : scope.Database.FirstOrDefault<AddressRow>(@"
-SELECT TOP 1 u.EventId, u.IsCurrent FROM dbo.ClubEventUrl u
-WHERE u.OwnerType = @0 AND u.OwnerId = @1 AND u.UrlYear = @2 AND u.Slug = @3", ownerType, ownerId, urlYear.Value, slug);
+SELECT TOP 1 u.TargetId AS EventId, u.IsCurrent FROM dbo.PageAddress u
+WHERE u.OwnerType = @0 AND u.OwnerId = @1 AND u.UrlYear = @2 AND u.Slug = @3 AND u.TargetKind = 'event'", ownerType, ownerId, urlYear.Value, slug);
             return row == null ? null : (row.EventId, row.IsCurrent);
         }
 
@@ -100,13 +103,25 @@ WHERE u.OwnerType = @0 AND u.OwnerId = @1 AND u.UrlYear = @2 AND u.Slug = @3", o
                 return Task.FromResult((0, (string?)"Händelsen saknar ägare."));
 
             var now = DateTime.Now;
-            using var scope = _scopeProvider.CreateScope();
+            var addressChanged = false;
+            (int, string?) result;
+            // ⚠️ Scopet stängs (= transaktionen skrivs) FÖRE adresscachen töms — Complete() skriver ingenting själv.
+            using (var scope = _scopeProvider.CreateScope())
+            {
+                result = SaveInScope(scope, r, now, ref addressChanged);
+            }
+            if (addressChanged) _addresses.Invalidate();
+            return Task.FromResult(result);
+        }
+
+        private (int, string?) SaveInScope(IScope scope, ClubEventRecord r, DateTime now, ref bool addressChanged)
+        {
             var db = scope.Database;
             int id;
             int? landingPageId = null;
 
             var existing = r.Id > 0 ? db.FirstOrDefault<RowData>($"SELECT {Columns} FROM dbo.ClubEvent e LEFT JOIN dbo.LandingPage lp ON lp.Id = e.LandingPageId WHERE e.Id = @0", r.Id) : null;
-            if (r.Id > 0 && existing == null) return Task.FromResult((0, (string?)"Händelsen hittades inte."));
+            if (r.Id > 0 && existing == null) return (0, "Händelsen hittades inte.");
 
             var year = UrlYearFor(r, existing?.CreatedDate ?? now);
             var baseSlug = SlugFor(r);
@@ -144,8 +159,9 @@ SELECT CAST(SCOPE_IDENTITY() AS INT);",
                     r.RegistrationRequired, Blank(r.RegistrationUrl), Math.Max(0, r.MaxParticipants), r.RegistrationDeadline?.Date,
                     r.IsMandatory, r.LanevapenOffered, Blank(r.PricesJson), EventAudience.Normalise(r.Audience),
                     Blank(r.SwishNumber?.Trim()), landingPageId, r.CreatedDate == default ? now : r.CreatedDate);
-                db.Execute("INSERT INTO dbo.ClubEventUrl (OwnerType, OwnerId, UrlYear, Slug, EventId, IsCurrent) VALUES (@0, @1, @2, @3, @4, 1)",
+                db.Execute("INSERT INTO dbo.PageAddress (OwnerType, OwnerId, UrlYear, Slug, TargetKind, TargetId, IsCurrent) VALUES (@0, @1, @2, @3, 'event', @4, 1)",
                     r.OwnerType, r.OwnerId, year, slug, id);
+                addressChanged = true;
             }
             else
             {
@@ -156,14 +172,11 @@ SELECT CAST(SCOPE_IDENTITY() AS INT);",
                 var urlYear = existing.UrlYear;
                 if (year != existing.UrlYear || !string.Equals(baseSlug, BaseOf(existing.Slug), StringComparison.Ordinal))
                 {
-                    slug = UniqueSlug(db, r.OwnerType, r.OwnerId, year, baseSlug, exceptId: id);
+                    // Adresstabellen delas med tävlingarna och serierna (C3-planen S6): sluggen väljs där.
+                    slug = HpskSite.Services.Addresses.PageAddressService.SetCurrent(db, HpskSite.Services.Addresses.PageAddressKinds.Event, id,
+                        new HpskSite.Services.Addresses.PageAddressOwner(r.OwnerType, r.OwnerId), year, baseSlug).Slug;
                     urlYear = year;
-                    db.Execute("UPDATE dbo.ClubEventUrl SET IsCurrent = 0 WHERE EventId = @0", id);
-                    var reused = db.Execute("UPDATE dbo.ClubEventUrl SET IsCurrent = 1, EventId = @4 WHERE OwnerId = @1 AND UrlYear = @2 AND Slug = @3 AND OwnerType = @0",
-                        r.OwnerType, r.OwnerId, year, slug, id);
-                    if (reused == 0)
-                        db.Execute("INSERT INTO dbo.ClubEventUrl (OwnerType, OwnerId, UrlYear, Slug, EventId, IsCurrent) VALUES (@0, @1, @2, @3, @4, 1)",
-                            r.OwnerType, r.OwnerId, year, slug, id);
+                    addressChanged = true;
                 }
                 db.Execute(@"
 UPDATE dbo.ClubEvent SET
@@ -183,7 +196,7 @@ WHERE Id = @0",
 
             scope.Complete();
             r.Id = id;
-            return Task.FromResult((id, (string?)null));
+            return (id, null);
         }
 
         public bool Delete(int id)
@@ -191,8 +204,9 @@ WHERE Id = @0",
             if (id <= 0) return false;
             using var scope = _scopeProvider.CreateScope();
             var page = scope.Database.ExecuteScalar<int?>("SELECT LandingPageId FROM dbo.ClubEvent WHERE Id = @0", id);
-            // Adresshistoriken följer med (ON DELETE CASCADE).
+            // Adresshistoriken: PageAddress har ingen främmande nyckel (den bär flera sorter) och tas bort här.
             var n = scope.Database.Execute("DELETE FROM dbo.ClubEvent WHERE Id = @0", id);
+            if (n > 0) HpskSite.Services.Addresses.PageAddressService.DeleteFor(scope.Database, HpskSite.Services.Addresses.PageAddressKinds.Event, id);
             if (n > 0 && page.HasValue)
                 scope.Database.Execute(@"DELETE FROM dbo.LandingPage WHERE Id = @0
                     AND NOT EXISTS (SELECT 1 FROM dbo.ClubEvent WHERE LandingPageId = @0)", page.Value);
@@ -233,7 +247,7 @@ WHERE Id = @0",
             string ownerType, int ownerId, int year, string baseSlug, int exceptId)
         {
             var taken = db.Fetch<string>(@"
-SELECT Slug FROM dbo.ClubEventUrl WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2 AND EventId <> @3
+SELECT Slug FROM dbo.PageAddress WITH (UPDLOCK, HOLDLOCK) WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2 AND NOT (TargetKind = 'event' AND TargetId = @3)
 UNION SELECT Slug FROM dbo.ClubEvent WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2 AND Id <> @3",
                 ownerType, ownerId, year, exceptId).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (!taken.Contains(baseSlug)) return baseSlug;

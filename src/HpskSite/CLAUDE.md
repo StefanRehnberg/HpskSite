@@ -11628,6 +11628,37 @@ Taken 21 → 19, 23 → 16, 117 → 116, 61 → 34. Seedarna (bara dev) skriver 
   kopian; versionsraden prövas genom att räkna upp den i SQL — två instanser på samma maskin delar identitet).
   Test: `OpsTests` (två nya hälsoregler).
 
+### ⚠️⚠️ Adresserna — `PageAddress` (C3-planen S6, branch `umbraco-17`, 2026-10-17)
+
+Stefans beslut (§9a): ingen `/competitions/` längre. Klubbens tävling `/{krets}/klubbar/{klubb}/{år}/{tävling}/`,
+kretsens `/{krets}/{år}/{tävling}/`, SM `/sm/{år}/{tävling}/`, landsdel `/ssm|vsm|osm|nsm/{år}/{tävling}/`, serien
+`/{värd}/{år}/{serie}/`, listan `/tavlingar/`, säsongen `/tavlingar/{år}/`. Barnen som förut (`…/resultat/` …).
+Varje gammal adress ger 301.
+- **EN tabell, `dbo.PageAddress`**, för alla sidor utanför trädet: händelser, tävlingar, serier
+  (`TargetKind` + `TargetId`). Nycklad **relativt ägaren** (`OwnerType` Club/Region eller sm/ssm…, `OwnerId`,
+  `UrlYear`, `Slug`), unik i databasen — tävlingar och händelser under samma klubb och år kan aldrig krocka.
+  Ägarens adress läses ur den publicerade cachen vid varje uppslag, så en klubb som byter adress tar alla sina
+  sidor med sig; den gamla klubbadressen följs via Umbracos omdirigering av klubbsidan. `ClubEventUrl` skrivs
+  inte längre (händelselagringen och flytten skriver `PageAddress`).
+- **`PageAddressService`** (singleton): `Find`, `Current` (cache över alla aktuella rader, töms i
+  `CompetitionCacheVersion.InvalidateLocal`), `SetCurrent` (ny aktuell bara när ägare, år eller slug ändras;
+  krock → `-2`; i anroparens transaktion). Reglerna rena i `PageAddressRules` (`PageAddressRulesTests`).
+- **`CompetitionAddressService`** (scoped) räknar tävlingens ägare som den gamla adressgivaren: SM → landsdel
+  (kretsens `area`) → klubben (en satt klubb som inte går att lösa upp ger INGEN adress) → kretsen. År =
+  tävlingsdatumet, annars seriens/säsongens, annars skapandeåret. Slug = nodens `UrlSegment`. Ingen värd = ingen
+  ny adress, och sidan behåller trädadressen. Körs av **`PageAddressPublishedHandler`** vid varje publicering och
+  av **`PageAddressSeedHostedService`** vid start (som också, EN gång, kopierar `ClubEventUrl`-rader som den gamla
+  koden hann skriva efter migreringen — `SiteSetting PageAddress:EventCopyDone`).
+- **Upplösningen:** `PageAddressContentFinder` (först i kedjan; ersätter `ClubEventUrlContentFinder`),
+  `CompetitionTreeRedirectFinder` (index 1: trädadresser under navet → 301), och `CompetitionUrlContentFinder`
+  (gamla `/competitions/{år}/…`-former → 301). ⚠️ Ett barnsegment 301:as bara om det FINNS (resultatet eller en
+  publicerad lista) — ett omdöpt barn har en rad i `umbracoRedirectUrl` som ska få svara.
+- **Årssidan** `/halland/2026/`, `/sm/2026/` och `/sm/` → 301 till `/tavlingar/`.
+- **`PageAddressReservedNames`** vägrar en nod direkt under startsidan som heter `sm`, `ssm` … `tavlingar`.
+- **Operatörssteg:** `Migrations/create-page-address-table.sql` **FÖRE deployen** (kopierar händelsernas adresser).
+- Svit: `hpsk-verify/c3/s6-corpus-check.mjs <korpus>` — varje adress i korpusen 200 eller 301→200; jämförs mot
+  samma körning på bygget före S6.
+
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
 `Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,
