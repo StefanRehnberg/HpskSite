@@ -146,7 +146,7 @@ namespace HpskSite.Controllers
                 .ToList();
 
             int totalMembers = regionMembers.Count;
-            int newMembers30d = regionMembers.Count(m => m.CreateDate >= thirtyDaysAgo);
+            int newMembers30d = regionMembers.Count(m => UmbracoTime.Local(m.CreateDate) >= thirtyDaysAgo);
 
             var lastSeen = _activity.GetAll();
             int active30d = regionMembers.Count(m =>
@@ -272,7 +272,7 @@ namespace HpskSite.Controllers
                     return (object)new
                     {
                         month = ms.ToString("yyyy-MM"),
-                        count = regionMembers.Count(m => m.CreateDate >= ms && m.CreateDate < me)
+                        count = regionMembers.Count(m => UmbracoTime.Local(m.CreateDate) >= ms && UmbracoTime.Local(m.CreateDate) < me)
                     };
                 })
                 .ToList();

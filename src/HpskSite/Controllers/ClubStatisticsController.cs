@@ -128,7 +128,7 @@ namespace HpskSite.Controllers
             var pendingApprovals = rosterMembers.Count(m => !m.IsApproved);
 
             int totalMembers = clubMembers.Count;
-            int newMembers30d = clubMembers.Count(m => m.CreateDate >= thirtyDaysAgo);
+            int newMembers30d = clubMembers.Count(m => UmbracoTime.Local(m.CreateDate) >= thirtyDaysAgo);
 
             var lastSeen = _activity.GetAll();
             int active30d = clubMembers.Count(m =>
@@ -139,7 +139,7 @@ namespace HpskSite.Controllers
 
             int inactive90d = clubMembers.Count(m =>
             {
-                if (m.CreateDate >= ninetyDaysAgo) return false;
+                if (UmbracoTime.Local(m.CreateDate) >= ninetyDaysAgo) return false;
                 var seen = lastSeen.TryGetValue(m.Id, out var s) ? s.Any : null;
                 return !seen.HasValue || seen.Value < ninetyDaysAgo;
             });
@@ -153,7 +153,7 @@ namespace HpskSite.Controllers
                     return new
                     {
                         month = monthStart.ToString("yyyy-MM"),
-                        count = clubMembers.Count(m => m.CreateDate >= monthStart && m.CreateDate < monthEnd)
+                        count = clubMembers.Count(m => UmbracoTime.Local(m.CreateDate) >= monthStart && UmbracoTime.Local(m.CreateDate) < monthEnd)
                     };
                 })
                 .ToList();
@@ -399,7 +399,7 @@ namespace HpskSite.Controllers
             var comparison = _comparisonService.GetForClub(clubId, snapshot);
 
             // 12-month growth %
-            int newMembers12m = clubMembers.Count(m => m.CreateDate >= twelveMonthsAgo);
+            int newMembers12m = clubMembers.Count(m => UmbracoTime.Local(m.CreateDate) >= twelveMonthsAgo);
             int prior = totalMembers - newMembers12m;
             int growthPct12m = prior <= 0 ? (newMembers12m > 0 ? 100 : 0) : (int)Math.Round(newMembers12m * 100.0 / prior);
 

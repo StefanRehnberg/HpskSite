@@ -373,7 +373,7 @@ namespace HpskSite.Services.Competitions
                 f.Set(r, CompetitionFieldValues.Read(f.Shape, raw));
             }
             var parentId = ParentIdFromPath(pub.Path);
-            _fill(r, new NodeMeta(pub.Id, pub.Key, pub.Name ?? "", pub.UpdateDate.Ticks, pub.CreateDate, pub.UpdateDate,
+            _fill(r, new NodeMeta(pub.Id, pub.Key, pub.Name ?? "", pub.UpdateDate.Ticks, UmbracoTime.Local(pub.CreateDate), UmbracoTime.Local(pub.UpdateDate),
                 pub.SortOrder, true, parentId, ParentAlias(parentId), pub.UrlSegment ?? ""));
             return r;
         }
@@ -384,7 +384,7 @@ namespace HpskSite.Services.Competitions
             foreach (var f in _fields)
                 f.Set(r, CompetitionFieldValues.Read(f.Shape, node.HasProperty(f.Alias) ? node.GetValue(f.Alias) : null));
             var segment = Cache()?.GetById(node.Id)?.UrlSegment ?? "";
-            _fill(r, new NodeMeta(node.Id, node.Key, node.Name ?? "", VersionOf(node), node.CreateDate, node.UpdateDate,
+            _fill(r, new NodeMeta(node.Id, node.Key, node.Name ?? "", VersionOf(node), UmbracoTime.Local(node.CreateDate), UmbracoTime.Local(node.UpdateDate),
                 node.SortOrder, node.Published, node.ParentId, ParentAlias(node.ParentId), segment));
             return r;
         }
