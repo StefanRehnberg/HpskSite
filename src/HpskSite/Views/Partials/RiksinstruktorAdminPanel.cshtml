@@ -317,7 +317,7 @@
         document.getElementById('riksMemberLockedWrap').classList.add('d-none');
         clearMemberSearch();
 
-        setDate(fpRiksCertifiedAt, 'riksGrantCertifiedAt', new Date().toISOString().slice(0, 10));
+        setDate(fpRiksCertifiedAt, 'riksGrantCertifiedAt', hpskLocalDate());
         setDate(fpRiksExpiresAt, 'riksGrantExpiresAt', '');
         document.getElementById('riksGrantNumber').value = '';
         document.getElementById('riksGrantNotes').value = '';

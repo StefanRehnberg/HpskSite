@@ -436,7 +436,7 @@
 
     let svCreating = false;
     function newMeetingDialog() {
-        const def = new Date().toISOString().slice(0, 10) + ' 18:30';
+        const def = hpskLocalDate() + ' 18:30';
         formModal({
             title: 'Nytt möte', okLabel: 'Skapa mötet', wide: false,
             html: `<label class="sv-label" for="nmType">Typ av möte</label>
@@ -1702,7 +1702,7 @@
             title: 'Lägg in en motion som kommit på papper', okLabel: 'Lägg in motionen', wide: true,
             html: `<p class="sv-help">För en motion som kommit in på papper eller i ett mejl, så att den finns med i handlingarna.</p>
                 <div class="row g-2"><div class="col-12 col-md-8"><label class="sv-label" for="pmName">Motionär</label><input type="text" id="pmName" class="form-control" placeholder="För- och efternamn"></div>
-                <div class="col-12 col-md-4"><label class="sv-label" for="pmDate">Inkom</label><input type="text" id="pmDate" class="form-control" value="${new Date().toISOString().slice(0, 10)}"></div></div>
+                <div class="col-12 col-md-4"><label class="sv-label" for="pmDate">Inkom</label><input type="text" id="pmDate" class="form-control" value="${hpskLocalDate()}"></div></div>
                 <label class="sv-label mt-3" for="pmTitle">Rubrik</label><input type="text" id="pmTitle" class="form-control mb-3" maxlength="300">
                 <label class="sv-label" for="pmBg">Bakgrund</label><textarea id="pmBg" class="form-control mb-3" rows="4"></textarea>
                 <span class="sv-label">Förslag till beslut</span>${proposalsEditor('pm', [])}`,
@@ -1866,7 +1866,7 @@
                     const el = $('arElected').value, y = parseInt($('arYears').value, 10);
                     if (!el || !y) return;
                     const dd = new Date(el + 'T00:00:00'); if (isNaN(dd)) return;
-                    dd.setFullYear(dd.getFullYear() + y); ends.setDate(dd.toISOString().slice(0, 10), false);
+                    dd.setFullYear(dd.getFullYear() + y); ends.setDate(hpskLocalDate(dd), false);
                 };
                 datePick($('arElected'), false, { onChange: fill });
                 $('arYears').addEventListener('input', fill);

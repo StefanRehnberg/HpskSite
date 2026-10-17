@@ -228,7 +228,7 @@ namespace HpskSite.Controllers
             issuedDate = k.IssuedDate?.ToString("yyyy-MM-dd") ?? "",
             returnedDate = k.ReturnedDate?.ToString("yyyy-MM-dd") ?? "",
             notes = k.Notes,
-            createdDate = k.CreatedDate.ToString("yyyy-MM-dd"),
+            createdDate = SwedishTime.FromUtc(k.CreatedDate).ToString("yyyy-MM-dd"),
             createdByMemberId = k.CreatedByMemberId
         };
     }

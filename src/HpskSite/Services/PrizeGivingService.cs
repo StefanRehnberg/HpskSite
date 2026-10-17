@@ -541,7 +541,7 @@ namespace HpskSite.Services
                 // först behövdes.
                 var newest = model.CompetitionType is "Faltskytte" or "MagnumFalt"
                     ? (await _faltShootOffService.GetEntriesForCompetitionAsync(model.CompetitionId))
-                        .Select(e => (DateTime?)e.LastModified).Max()
+                        .Select(e => (DateTime?)SwedishTime.FromUtc(e.LastModified)).Max()
                     : (await _shootOffService.GetEntriesForCompetitionAsync(model.CompetitionId))
                         .Select(e => (DateTime?)e.LastModified).Max();
 

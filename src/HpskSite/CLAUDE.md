@@ -11676,20 +11676,23 @@ _contentService.Delete(content);
 Umbraco.Cms 17.7.1, net10.0. `HpskSite.Shared` bär både net9.0 och net10.0, eftersom mobilappen kör .NET 9.
 Läs det här innan du rör datum, NPoco eller adresser.
 
-- **⚠️⚠️ DATUMEN — målet är att varje datum ser EXAKT ut som i 16. Mätt med samma sond på 16 och 17:**
-  - **Umbracos systemdatum är UTC i 17** (`CreateDate`, `UpdateDate`, `LastLoginDate`, kolumnerna i `umbracoNode`,
-    `cmsMember`, `umbracoContentVersion` …; migreringen `MigrateSystemDatesToUtc`); 16 gav dem som lokal tid med
-    Kind = Local. Läs dem genom **`UmbracoTime.Local(...)`** (API → Kind Local) eller **`UmbracoTime.FromDbUtc(...)`**
-    (SQL → lokal tid, Kind Unspecified, som 16:s SQL gav).
-  - **Våra tabeller och `IContent.GetValue` för datumegenskaper:** Kind = Utc på ett lokalt värde i BÅDA
-    versionerna (`UmbracoDefaultMapper` finns redan i 16). Rör inte — JSON får `Z` som förut. ⚠️ En första utsåga
-    (`WallClockDateMapper`) tog bort märkningen och ÄNDRADE därmed 16:s beteende; den togs bort när 16 mättes.
-  - **Den publicerade cachen:** 16 märkte datumegenskaperna Utc, 17 Unspecified. **`HpskDatePickerValueConverter`**
-    ersätter `DatePickerValueConverter` och ger märkningen tillbaka utan att ändra värdet.
-  - **`PropertyDateKindNormalizer`** tar bort Kind från datumvärden innan ett dokument eller en medlem sparas:
-    `SetValue(x, DateTime.Now)` lagrades rätt men räknades om till UTC i 17:s publicerade cache.
-  - ⚠️ **Prod-servern kör i UTC** (`DateTime.Now` = UTC där; se kommentaren i `CompetitionRegistrationManagement`).
-    Migreringen räknar om med serverns tidszon, alltså ingenting i prod.
+- **⚠️⚠️ DATUMEN — ALL TID VISAS I SVENSK TID (Stefan 2026-10-17).** Prod-servern kör i svensk tid
+  (hälsosidans "at" bär +02:00), så `DateTime.Now` = svensk tid. Regeln:
+  - **Lagrad tid är svensk tid** — utom kolumnerna i **`StoredTimeBasis.UtcColumns`** ("Tabell.Kolumn"), som är UTC.
+    Ny kolumn som skrivs med `UtcNow`: lägg den i registret (`StoredTimeBasisTests` fäller bygget för en `…Utc`-kolumn
+    som saknas). Blanda aldrig `Now` och `UtcNow` i samma kolumn.
+  - **`StoredTimeMapper`** (först bland NPoco-mapparna) märker vid läsning: registrerad kolumn → Kind Utc, övriga
+    kolumner i våra `[TableName]`-tabeller och `PropertyDataDto.DateValue` → Unspecified. JSON får alltså `Z` bara på
+    riktig UTC, och webbläsaren visar båda rätt. (16 märkte ALLT Utc → en svensk 07:22 visades 09:22.)
+  - **En UTC-tid som visas på servern** eller läses med rå SQL / en DTO utan `[TableName]` (Kind okänd):
+    **`SwedishTime.FromUtc(...)`** — aldrig `.ToLocalTime()`, som inte flyttar ett Unspecified-värde.
+  - **Umbracos systemdatum är UTC i 17** (`CreateDate`, `UpdateDate`, `LastLoginDate`, `umbracoNode` …;
+    `MigrateSystemDatesToUtc`). Läs dem genom **`UmbracoTime.Local(...)`** (API) eller **`UmbracoTime.FromDbUtc(...)`** (SQL).
+  - **Inkommande JSON:** `SwedishDateTimeJsonConverter` räknar om en tid med `Z`/offset till svensk tid; en tid utan
+    zon lämnas. **Webbläsaren:** `wwwroot/js/swedish-dates.js` — `hpskLocalDate()` / `hpskLocalDateTime()` i stället
+    för `toISOString()` (som ger UTC och därmed dagen före vid midnatt).
+  - **`PropertyDateKindNormalizer`** tar bort Kind från datumvärden innan ett dokument eller en medlem sparas.
+  - Datareparation: `Migrations/fix-series-dates-utc-shift.sql` (seriedatum lagrade kvällen före).
 - **NPoco 6:** de asynkrona metoderna tar `object[] args` utan `params`. **`NPocoAsyncParamsExtensions`**
   (global using i `GlobalUsings.cs`) tar anrop i den gamla formen. De synkrona metoderna är oförändrade.
 - **`GetAtRoot()`/`GetByRoute()`** är borta ur den publicerade cachen. **`PublishedCacheNavigationExtensions`**

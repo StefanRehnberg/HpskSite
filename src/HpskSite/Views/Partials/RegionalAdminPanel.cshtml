@@ -1934,7 +1934,7 @@
     function regionSeriesFormatDateForInput(dateStr) {
         if (!dateStr) return '';
         var d = new Date(dateStr);
-        return d.toISOString().split('T')[0];
+        return hpskLocalDate(d);
     }
 
     // Only this krets's own series. GetSeriesList also returns national series (no club, no

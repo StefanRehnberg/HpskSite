@@ -865,11 +865,11 @@ namespace HpskSite.Controllers
                 clubId = r.ClubId,
                 clubName = GetClubName(r.ClubId),
                 requestedByName = requester != null ? MemberDisplayName(requester) : "Okänd",
-                requestedAt = r.RequestedAt.ToString("yyyy-MM-dd"),
+                requestedAt = SwedishTime.FromUtc(r.RequestedAt).ToString("yyyy-MM-dd"),
                 requestNote = r.RequestNote,
                 status = r.Status,
                 reviewedByName = reviewer != null ? MemberDisplayName(reviewer) : null,
-                reviewedAt = r.ReviewedAt?.ToString("yyyy-MM-dd"),
+                reviewedAt = SwedishTime.FromUtc(r.ReviewedAt)?.ToString("yyyy-MM-dd"),
                 reviewNote = r.ReviewNote
             };
         }

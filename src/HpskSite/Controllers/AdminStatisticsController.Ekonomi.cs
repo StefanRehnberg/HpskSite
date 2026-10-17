@@ -570,7 +570,7 @@ namespace HpskSite.Controllers
                         paymentsConfirmed = o.Live.PaymentsConfirmed,
                         modules = EkonomiModules.Where(m => m.Key != "egna" && m.Key != "betalning" && m.Volume(o.Live) > 0).Select(m => m.Label).ToList(),
                         sandboxModules = EkonomiModules.Where(m => m.Volume(o.Sandbox) > 0 && m.Volume(o.Live) == 0).Select(m => m.Label).ToList(),
-                        lastActivity = last?.ToString("yyyy-MM-dd") ?? ""
+                        lastActivity = SwedishTime.FromUtc(last)?.ToString("yyyy-MM-dd") ?? ""
                     };
                 })
                 .OrderByDescending(x => x.ownEntries)

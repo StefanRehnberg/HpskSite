@@ -954,7 +954,7 @@ namespace HpskSite.Controllers
             e.IssuedByMemberId,
             e.IssuedByName,
             e.Notes,
-            createdDate = e.CreatedDate.ToString("yyyy-MM-dd"),
+            createdDate = SwedishTime.FromUtc(e.CreatedDate).ToString("yyyy-MM-dd"),
             // Går raden att skriva ut? Bara när dokumentet sparades vid utfärdandet. Snapshotten
             // SKICKAS INTE med — den bär personnummer och hela intyget, och listan är en översikt.
             canPrint = !string.IsNullOrWhiteSpace(e.Snapshot)

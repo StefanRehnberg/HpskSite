@@ -4229,7 +4229,7 @@
         // ⚠️ Idag som förval, inte fakturadatumet: betaldagen är det som gäller under
         //    kontantmetoden, och kassören betalar nästan alltid samma dag hen klickar.
         if (!el('utPayDate').value)
-            setDateField('utPayDate', new Date().toISOString().substring(0, 10));
+            setDateField('utPayDate', hpskLocalDate());
 
         openModal('utPayModal');
     }
@@ -4733,7 +4733,7 @@
         disposingId = id;
         el('aDisposeTitle').textContent = 'Utrangera ' + (a ? a.name : '');
         el('aDisposeReason').value = '';
-        setDateField('aDisposeDate', new Date().toISOString().substring(0, 10));
+        setDateField('aDisposeDate', hpskLocalDate());
         // Förlustkontot behövs bara när något värde återstår. Färdigavskrivet = inget att välja.
         show(el('aDisposeLossWrap'), !a || a.bookValue > 0);
         loadAssetAccounts().then(function () {
@@ -6450,7 +6450,7 @@
         var note = el('bYearNote');
         if (status.workingYear) {
             var iso = function (d) { return String(d).slice(0, 10); };
-            var today = new Date().toISOString().slice(0, 10);
+            var today = hpskLocalDate();
             var from = iso(status.workingYearStart), to = iso(status.workingYearEnd);
             var inside = today >= from && today <= to;
 
@@ -6831,7 +6831,7 @@
 
     // ⚠️ Sätts om i render() så fort statusen är läst — då vet vi vilket räkenskapsår
     //    föreningen arbetar i. Det här är bara ett värde att stå med innan dess.
-    setDateField('bDate', new Date().toISOString().slice(0, 10));
+    setDateField('bDate', hpskLocalDate());
 
     // ── Under test-rutan ────────────────────────────────────────────────────────────────────
     // ⚠️ "Skapa en sandlåda" i rutan går SAMMA väg som knappen i menyn (bekräftelse, fel, omladdning)
