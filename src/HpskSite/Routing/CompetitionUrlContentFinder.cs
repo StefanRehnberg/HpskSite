@@ -166,11 +166,16 @@ namespace HpskSite.Routing
                 {
                     var listCompetition = FindCompetition(year, segments.AsSpan(2, segments.Length - 3).ToArray());
                     // Bara en PUBLICERAD lista ur lagringen visas — aldrig en godtycklig barnnod.
-                    if (listCompetition != null)
-                        return Task.FromResult(TryServeStartListPage(request, listCompetition, segments[^1], _http, _shortStrings));
+                    // ⚠️ Bara en lista som FINNS — ett omdöpt segment har en rad i Umbracos omdirigeringar.
+                    if (listCompetition != null && HasPublishedList(listCompetition.Id, segments[^1]))
+                        return Task.FromResult(RedirectToNewAddress(request, listCompetition, segments[^1])
+                            || TryServeStartListPage(request, listCompetition, segments[^1], _http, _shortStrings));
                 }
 
                 if (competition == null) return Task.FromResult(false);
+
+                // C3-planen S6: den gamla adressformen ger 301 till tävlingens adress i PageAddress.
+                if (RedirectToNewAddress(request, competition, childSegment)) return Task.FromResult(true);
 
                 IPublishedContent target = competition;
                 if (childSegment != null)
@@ -194,6 +199,24 @@ namespace HpskSite.Routing
                 _logger.LogWarning(ex, "CompetitionUrlContentFinder failed for {Path}", request.Uri.AbsolutePath);
                 return Task.FromResult(false);
             }
+        }
+
+        /// <summary>
+        /// 301 till tävlingens nya adress (+ barnsegmentet) när den har en. Saknar den en (ingen värd) är
+        /// adressen fortfarande den gamla, och sidan visas här som förut.
+        /// </summary>
+        private bool HasPublishedList(int competitionId, string segment)
+            => _http.HttpContext?.RequestServices.GetService<IStartListStore>()?.ListPublished(competitionId)
+                .Any(r => string.Equals(r.UrlSegment, segment, StringComparison.OrdinalIgnoreCase)) == true;
+
+        private static bool RedirectToNewAddress(IPublishedRequestBuilder request, IPublishedContent competition, string? childSegment)
+        {
+            var url = competition.Url();
+            if (string.IsNullOrEmpty(url) || url == "#" || url.StartsWith("/competitions/", StringComparison.OrdinalIgnoreCase))
+                return false;
+            var target = (url.EndsWith('/') ? url : url + "/") + (childSegment == null ? "" : childSegment + "/");
+            request.SetRedirectPermanent(target + request.Uri.Query);
+            return true;
         }
 
         /// <summary>Tävlingen bakom segmenten efter årtalet, eller null. Formerna, se klassens kommentar.</summary>

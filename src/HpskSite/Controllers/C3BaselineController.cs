@@ -1,6 +1,7 @@
 using HpskSite.Services;
 using HpskSite.Services.C3;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
@@ -65,6 +66,17 @@ namespace HpskSite.Controllers
         /// adminlistor), och vilken versionsrad den senast såg. Läser bara. <paramref name="check"/> = kör
         /// versionskontrollen först (som menyn och listorna gör).
         /// </summary>
+        /// <summary>C3-planen S6: sidans adresser — tjänstens cachade aktuella, databasens rader och den byggda adressen.</summary>
+        [HttpGet]
+        public async Task<IActionResult> PageAddressProbe(string kind, int id)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
+            var svc = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Addresses.PageAddressService>();
+            var urls = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Addresses.PageAddressUrls>();
+            var cached = svc.Current(kind, id);
+            return JsonText(new { cached, rows = svc.AllFor(kind, id), url = urls.UrlFor(kind, id) });
+        }
+
         [HttpGet]
         public async Task<IActionResult> CompetitionCacheProbe(bool check = false)
         {

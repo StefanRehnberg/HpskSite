@@ -139,6 +139,7 @@ namespace HpskSite.Services.Competitions
         {
             CompetitionNavigationCaches.Invalidate(caches);
             caches.RuntimeCache.ClearByKey("admin_series_list");
+            HpskSite.Services.Addresses.PageAddressService.InvalidateLocal(caches);
             caches.RuntimeCache.ClearByRegex("^admin_series_list_");
             caches.RuntimeCache.ClearByRegex("^admin_competitions_list_");
         }

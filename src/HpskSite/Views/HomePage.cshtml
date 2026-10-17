@@ -43,7 +43,7 @@
     var minSidaUrl = Model.Children.FirstOrDefault(c => c.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile-page/";
     // Dokumenttypen, inte namnet: en annan sida med "Träningsmatch" i namnet (t.ex. en film) tog annars länken.
     var traningsmatchUrl = Model.Children.FirstOrDefault(x => x.ContentType.Alias == "trainingMatch")?.Url() ?? "/traningsmatch/";
-    var competitionsUrl = competitionsHub?.Url() ?? "/competitions/";
+    var competitionsUrl = competitionsHub?.Url() ?? "/tavlingar/";
     var loginUrl = "/login-register/?tab=login";
     var registerUrl = "/login-register/?tab=register";
 

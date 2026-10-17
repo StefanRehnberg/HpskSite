@@ -59,6 +59,7 @@ namespace HpskSite.Services.Events
             new("sbx.LedgerProject", "SELECT MAX(SourceId) FROM sbx.LedgerProject WHERE SourceType = 'event'"),
             new("dbo.ClubEventRange", "SELECT MAX(EventId) FROM dbo.ClubEventRange"),
             new("dbo.CompetitionEventLink", "SELECT MAX(EventId) FROM dbo.CompetitionEventLink"),
+            new("dbo.PageAddress", "SELECT MAX(TargetId) FROM dbo.PageAddress WHERE TargetKind = 'event'"),
             IdentityFloor.NodesOfType("clubSimpleEvent"),
         };
 
@@ -79,6 +80,7 @@ namespace HpskSite.Services.Events
             var db = scope.Database;
             var rows = db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.ClubEvent");
             db.Execute(@"DELETE FROM dbo.ClubEventUrl;
+DELETE FROM dbo.PageAddress WHERE TargetKind = 'event';
 UPDATE dbo.ClubEvent SET LandingPageId = NULL;
 DELETE FROM dbo.ClubEvent;
 DELETE FROM dbo.LandingPage;
@@ -98,7 +100,7 @@ DBCC CHECKIDENT('dbo.LandingPage', RESEED, 0) WITH NO_INFOMSGS;");
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var missing = new List<string>();
-            foreach (var t in new[] { "ClubEvent", "ClubEventUrl", "LandingPage", "SiteSetting" })
+            foreach (var t in new[] { "ClubEvent", "PageAddress", "LandingPage", "SiteSetting" })
                 if (scope.Database.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID(@0, 'U') IS NULL THEN 0 ELSE 1 END", "dbo." + t) == 0)
                     missing.Add(t);
             return missing;
@@ -203,12 +205,13 @@ VALUES (@0,@1,@2,@3,@4,@5,@6,@7,@8,@9,@10,@11,@12,@13,@14,@15,@16,@17,@18,@19,@2
                             db.Execute("SET IDENTITY_INSERT dbo.ClubEvent OFF");
                         }
 
-                        db.Execute("INSERT INTO dbo.ClubEventUrl (OwnerType, OwnerId, UrlYear, Slug, EventId, IsCurrent) VALUES (@0, @1, @2, @3, @4, 1)",
+                        // Adresserna i PageAddress (C3-planen S6, delad med tävlingarna och serierna).
+                        db.Execute("INSERT INTO dbo.PageAddress (OwnerType, OwnerId, UrlYear, Slug, TargetKind, TargetId, IsCurrent) VALUES (@0, @1, @2, @3, 'event', @4, 1)",
                             r.OwnerType, r.OwnerId, p.UrlYear, p.Slug, r.Id);
                         if (p.LegacySlug.Length > 0
-                            && db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.ClubEventUrl WHERE OwnerId = @0 AND UrlYear IS NULL AND Slug = @1", r.OwnerId, p.LegacySlug) == 0)
+                            && db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear IS NULL AND Slug = @2", r.OwnerType, r.OwnerId, p.LegacySlug) == 0)
                         {
-                            db.Execute("INSERT INTO dbo.ClubEventUrl (OwnerType, OwnerId, UrlYear, Slug, EventId, IsCurrent) VALUES (@0, @1, NULL, @2, @3, 0)",
+                            db.Execute("INSERT INTO dbo.PageAddress (OwnerType, OwnerId, UrlYear, Slug, TargetKind, TargetId, IsCurrent) VALUES (@0, @1, NULL, @2, 'event', @3, 0)",
                                 r.OwnerType, r.OwnerId, p.LegacySlug, r.Id);
                             gl++;
                         }
