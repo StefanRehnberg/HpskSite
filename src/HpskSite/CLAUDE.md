@@ -11671,6 +11671,38 @@ Varje gammal adress ger 301.
 - Svit: `hpsk-verify/c3/s6-corpus-check.mjs <korpus>` — varje adress i korpusen 200 eller 301→200; jämförs mot
   samma körning på bygget före S6.
 
+### Tabellagringen kan skriva (C3-planen §5a, branch `umbraco-17`, 2026-10-18)
+
+Arbetsplan för hela §5: `notes/c3-s5-tabeller-2026-10-18.md` (5a lagringen, 5b flytten, 5c den virtuella noden,
+5d sista nodberoendena, 5e rensningen).
+- **Gränssnittet är placeringsfritt:** `ICompetitionStore.Create(int? seriesId, name, init)` och
+  `ICompetitionSeriesStore.Create(name, init)`. Var noden hamnar (serien, eller årsmappen för datumet) är
+  nodlagringens sak — den kör `init` en gång på en tom post för att läsa datumet, så **`init` ska vara ren och tåla
+  två körningar**. Kontrollern letar inte längre upp årsmappen. ⚠️ Följd: en kopierad tävling utan serie hamnar i
+  årsmappen för sitt NYA datum (förut originalets mapp, ett år fel) — adressen räknas ur datumet, inte trädet.
+- **`ListAllInSeries(seriesId)`** = seriens omgångar även opublicerade (nod: trädets barn i sparat läge; tabell:
+  raderna). Seriens tävlingslista i admin och spärren mot att ta bort en serie med tävlingar går genom den.
+- **`SqlCompetitionStore`/`SqlCompetitionSeriesStore`:** `Create` (INSERT + `SCOPE_IDENTITY`, aldrig `OUTPUT`;
+  `UrlSegment` = namnet genom `ToUrlSegment(IShortStringHelper)`, samma teckenbyten som noderna; sist i serien),
+  `MoveToSeries` (serien måste finnas och inte vara raderad, annars "Serien finns inte."; `SeriesId` +
+  `LegacyParentId/Kind` = serien, sist i den), `Trash` (**mjuk**: `DeletedUtc`/`DeletedBy`). Ett namnbyte i
+  `Update` byter också `UrlSegment` (som Umbraco vid publiceringen). `CreatedBy`/`UpdatedBy`/`DeletedBy` =
+  `CompetitionChangeRecorder.CurrentMemberId()`.
+- **⚠️ Varje läsning och skrivning går förbi raderade rader** (`SqlStoreCore.NotDeleted`): `Get`, `GetMany`, `List`,
+  `Exists` och `Update` (en raderad rad svarar NotFound och går inte att ändra). Adressraden ligger kvar — sidan
+  svarar 404 tills raden läggs tillbaka.
+- **Efter varje skrivning, när transaktionen är stängd:** ändringsloggen (`CompetitionChangeRecorder.Record`, som
+  räknar upp versionsraden) och adressen (`CompetitionAddressService.SyncCompetition/SyncSeries`, löst ur
+  `IServiceProvider` — tjänsten hänger på växeln som hänger på tabellagringen). I tabelläget finns ingen publicering
+  som triggar `PageAddressPublishedHandler`. Ett fel i adressen loggas som varning och fäller aldrig skrivningen.
+- **Kolumnerna** `CreatedBy`, `UpdatedBy`, `DeletedUtc`, `DeletedBy` på båda tabellerna, i
+  `Migrations/create-competition-tables.sql` (idempotent ALTER). Id-golvet (`IdentityFloor`) kommer med flytten (5b).
+- `C3BaselineController.SetCompetitionStore?mode=node|table` — BARA på databaskopian.
+- Svit: `hpsk-verify/c3/c3-s5a-table-verify.mjs` 34/34 mot kopian i tabelläget (raden, loggen, adressen, ingen nod,
+  mjuk radering, spärren på serien; ställer alltid tillbaka lagringen). A/B (utan filtret för raderade och utan
+  adressynk) → 4 röda. Nodläget oförändrat: `c3-s5c-verify` 22/22, `c3-series-verify` 39/39,
+  `c3-copy-competition-verify` 33/33 (påståendet om föräldern bytt till årsmappsregeln).
+
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
 `Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,

@@ -177,6 +177,30 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// C3-planen §5a: växlar tävlingarnas lagring (<c>node</c>/<c>table</c>). BARA på databaskopian — i dev och
+        /// prod växlas den i underhållsfönstret, efter flytten och jämförelsen.
+        /// </summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetCompetitionStore(string mode,
+            [FromServices] HpskSite.Services.SiteSettings.SiteSettingService settings)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
+            if (mode != HpskSite.Services.Competitions.CompetitionStoreSettings.StoreNode
+                && mode != HpskSite.Services.Competitions.CompetitionStoreSettings.StoreTable)
+                return JsonText(new { success = false, message = "Läget är node eller table." });
+            try
+            {
+                _storeComparison.EnsureCopyDatabase();
+                settings.Set(HpskSite.Services.Competitions.CompetitionStoreSettings.StoreKey, mode, null);
+                return JsonText(new { success = true, mode });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return JsonText(new { success = false, message = ex.Message });
+            }
+        }
+
         /// <summary>Samma frågor mot nodlagringen och tabellagringen. BARA på databaskopian. Tom lista = lika.</summary>
         [HttpGet]
         public async Task<IActionResult> CompetitionStoreCompare()

@@ -1047,23 +1047,10 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                int parentId;
-
-                // If seriesId is provided, use series as parent
-                if (seriesId.HasValue)
+                // Serien prövas genom serielagringen; var tävlingen hamnar är lagringens sak (C3-planen §5).
+                if (seriesId.HasValue && _seriesStore.GetSaved(seriesId.Value) == null)
                 {
-                    var series = _contentService.GetById(seriesId.Value);
-                    if (series == null)
-                    {
-                        return Ok(new { success = false, message = "Selected series not found" });
-                    }
-                    parentId = series.Id;
-                }
-                else
-                {
-                    // Årsmappen under tävlingsnavet (CompetitionTreePlacement, C3-planen S5c).
-                    try { parentId = _placement.YearFolderId(competitionDate.Year); }
-                    catch (InvalidOperationException ex) { return Ok(new { success = false, message = ex.Message }); }
+                    return Ok(new { success = false, message = "Selected series not found" });
                 }
 
                 // Bara sajtadmin lägger en tävling i den nationella menyn (Stefan 2026-10-13).
@@ -1071,7 +1058,7 @@ namespace HpskSite.Controllers
 
                 // Tävlingen skapas genom lagringen och fältpåsen genom den gemensamma regeln (C3-planen S5b).
                 // Synlig om inte formuläret säger annat; namn och gren sätts sist, ur de prövade värdena.
-                var created = _competitions.Create(parentId, competitionName, c =>
+                var created = _competitions.Create(seriesId, competitionName, c =>
                 {
                     c.IsVisible = true;
                     HpskSite.Services.Competitions.CompetitionFieldBag.Apply(c, request.Fields, CreateHandledElsewhere);
@@ -1236,29 +1223,16 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                int parentId;
-
-                // Determine parent (series or year folder)
-                if (seriesId.HasValue)
+                // Serien prövas genom serielagringen; var tävlingen hamnar är lagringens sak (C3-planen §5).
+                if (seriesId.HasValue && _seriesStore.GetSaved(seriesId.Value) == null)
                 {
-                    var series = _contentService.GetById(seriesId.Value);
-                    if (series == null)
-                    {
-                        return Ok(new { success = false, message = "Selected series not found" });
-                    }
-                    parentId = series.Id;
-                }
-                else
-                {
-                    // Årsmappen under tävlingsnavet (CompetitionTreePlacement, C3-planen S5c).
-                    try { parentId = _placement.YearFolderId(competitionDate.Year); }
-                    catch (InvalidOperationException ex) { return Ok(new { success = false, message = ex.Message }); }
+                    return Ok(new { success = false, message = "Selected series not found" });
                 }
 
                 // Annonsen skapas genom lagringen och fältpåsen genom den gemensamma regeln (C3-planen S5b).
                 // En annons är alltid extern, synlig och öppen; serieantalet har sina standardvärden, och
                 // klubb och bana sätts bara när de är valda.
-                var created = _competitions.Create(parentId, competitionName, c =>
+                var created = _competitions.Create(seriesId, competitionName, c =>
                 {
                     HpskSite.Services.Competitions.CompetitionFieldBag.Apply(c, fields, AdvertisementHandledElsewhere);
                     c.CompetitionType = competitionTypeId;
@@ -1491,13 +1465,6 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied" });
                 }
 
-                // Get parent container
-                var parentId = sourceCompetition.ParentId;
-                if (parentId <= 0)
-                {
-                    return Ok(new { success = false, message = "Cannot determine competition container" });
-                }
-
                 // ⚠️ BARA DEFINITIONEN följer med (C3-planen S5b, CompetitionFieldTable.CopyDefinitionInto):
                 // publicerade patruller, officiella resultat, stationschefer, sammanslagning, medaljindelning
                 // och de uppladdade filerna hör till den gamla tävlingen. Förut kopierades varje egenskap, så en
@@ -1505,7 +1472,9 @@ namespace HpskSite.Controllers
                 // Datumen flyttas ett år; kopian är synlig, och bara sajtadmin får lägga den i menyn.
                 var isSiteAdmin = await _authorizationService.IsCurrentUserAdminAsync();
                 var newName = $"{sourceCompetition.Name} {DateTime.Now.Year + 1}";
-                var created = _competitions.Create(parentId, newName, c =>
+                // Kopian hamnar i originalets serie, annars utanför serier (C3-planen §5: nodlagringen lägger den i
+                // årsmappen för det NYA datumet — förut i originalets mapp, ett år fel).
+                var created = _competitions.Create(sourceCompetition.SeriesId, newName, c =>
                 {
                     HpskSite.Models.Competitions.CompetitionFieldTable.CopyDefinitionInto(sourceCompetition, c, shiftYears: 1);
                     c.IsVisible = true;
@@ -2144,10 +2113,8 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied" });
                 }
 
-                // Seriens barn ur trädet (även opublicerade), fälten ur tävlingens sparade läge (C3-planen S3).
-                var competitions = _contentService.GetPagedChildren(seriesId, 0, int.MaxValue, out _)
-                    .Select(c => _competitions.GetSaved(c.Id))
-                    .Where(c => c != null)
+                // Seriens alla omgångar, även opublicerade, i det sparade läget (C3-planen §5: lagringen vet var de finns).
+                var competitions = _competitions.ListAllInSeries(seriesId)
                     .Select(c => new
                     {
                         id = c!.Id,
@@ -2202,13 +2169,8 @@ namespace HpskSite.Controllers
 
             try
             {
-                // Årsmappen under tävlingsnavet (CompetitionTreePlacement, C3-planen S5c).
-                int yearFolderId;
-                try { yearFolderId = _placement.YearFolderId((request.SeriesStartDate?.Year ?? DateTime.Now.Year)); }
-                catch (InvalidOperationException ex) { return Ok(new { success = false, message = ex.Message }); }
-
                 // Genom serielagringen (C3-planen S5c). Samma värden som förut; ett tomt fält skrivs inte.
-                var created = _seriesStore.Create(yearFolderId, request.SeriesName, s =>
+                var created = _seriesStore.Create(request.SeriesName, s =>
                 {
                     s.SeriesName = request.SeriesName;
                     if (!string.IsNullOrEmpty(request.SeriesShortDescription)) s.SeriesShortDescription = request.SeriesShortDescription;
@@ -2446,8 +2408,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Check if series has competitions
-                var competitionCount = _contentService.GetPagedChildren(series.Id, 0, int.MaxValue, out _)
-                    .Count(c => c.ContentType.Alias == "competition"); // competitionstore-ok: spärren räknar trädets barn, även opublicerade och i papperskorgen-läge
+                var competitionCount = _competitions.ListAllInSeries(series.Id).Count;
 
                 if (competitionCount > 0)
                 {
@@ -2514,11 +2475,6 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Access denied" });
                 }
 
-                // Årsmappen under tävlingsnavet (CompetitionTreePlacement, C3-planen S5c).
-                int parentId;
-                try { parentId = _placement.YearFolderId(request.StartDate.Value.Year); }
-                catch (InvalidOperationException ex) { return Ok(new { success = false, message = ex.Message }); }
-
                 var newSeriesName = sourceSeries.SeriesName ?? sourceSeries.Name;
                 if (!newSeriesName.Contains(" - Copy"))
                 {
@@ -2528,7 +2484,7 @@ namespace HpskSite.Controllers
                 // Genom serielagringen (C3-planen S5c). Samma fält som förut: namn, beskrivningar, värd och
                 // beräkningen följer med; datumen kommer ur begäran; menyn bara för sajtadmin. ⚠️ Synligheten
                 // läses nu med §9a-regeln (saknat värde = synlig) — förut blev en serie utan isActive dold.
-                var createdSeries = _seriesStore.Create(parentId, newSeriesName, s =>
+                var createdSeries = _seriesStore.Create(newSeriesName, s =>
                 {
                     s.SeriesName = newSeriesName;
                     s.SeriesShortDescription = sourceSeries.SeriesShortDescription;

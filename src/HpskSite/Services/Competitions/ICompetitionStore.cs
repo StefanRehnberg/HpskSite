@@ -33,6 +33,12 @@ namespace HpskSite.Services.Competitions
         IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId);
 
         /// <summary>
+        /// Seriens alla omgångar i det sparade läget, även opublicerade — för seriens admin och spärren mot att
+        /// ta bort en serie som har tävlingar. (I tabellen samma rader som <see cref="ListBySeries"/>.)
+        /// </summary>
+        IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId);
+
+        /// <summary>
         /// Läser tävlingen färskt, kör <paramref name="change"/> och sparar de fält som ändrades.
         /// <paramref name="expectedVersion"/> = den version användaren såg (<see cref="CompetitionInfo.Version"/>);
         /// skiljer den sig svarar lagringen <see cref="CompetitionUpdateOutcome.Conflict"/> och skriver ingenting.
@@ -44,11 +50,15 @@ namespace HpskSite.Services.Competitions
         CompetitionUpdateResult<CompetitionInfo> Update(int id, long? expectedVersion, Action<CompetitionInfo> change);
 
         /// <summary>
-        /// En ny tävling under <paramref name="parentId"/> (serien eller årsmappen). <paramref name="init"/> fyller
-        /// posten — samma regel som <see cref="Update"/>: ren, ingen I/O. Tävlingen publiceras.
-        /// <see cref="CompetitionUpdateResult{T}.PublishProblem"/> säger om publiceringen inte gick.
+        /// En ny tävling i serien <paramref name="seriesId"/>, eller (null) utanför serier. <paramref name="init"/>
+        /// fyller posten — samma regel som <see cref="Update"/>: ren, ingen I/O, <b>och den kan köras två gånger</b>
+        /// (nodlagringen läser datumet ur den för att välja årsmapp). Tävlingen publiceras.
+        /// <see cref="CompetitionUpdateResult{T}.PublishProblem"/> säger om publiceringen inte gick. Kastar
+        /// <see cref="InvalidOperationException"/> med ett meddelande som kan visas när serien inte finns.
+        ///
+        /// <para>Var i trädet den hamnar är nodlagringens sak (C3-planen §5) — tabellen har inget träd.</para>
         /// </summary>
-        CompetitionUpdateResult<CompetitionInfo> Create(int parentId, string name, Action<CompetitionInfo> init);
+        CompetitionUpdateResult<CompetitionInfo> Create(int? seriesId, string name, Action<CompetitionInfo> init);
 
         /// <summary>
         /// Lägger tävlingen i serien, eller (<paramref name="seriesId"/> null) utanför serier. Kastar
@@ -73,8 +83,8 @@ namespace HpskSite.Services.Competitions
         IReadOnlyList<CompetitionSeriesInfo> List();
         CompetitionUpdateResult<CompetitionSeriesInfo> Update(int id, long? expectedVersion, Action<CompetitionSeriesInfo> change);
 
-        /// <summary>En ny serie under <paramref name="parentId"/> (årsmappen). Publiceras.</summary>
-        CompetitionUpdateResult<CompetitionSeriesInfo> Create(int parentId, string name, Action<CompetitionSeriesInfo> init);
+        /// <summary>En ny serie. Publiceras. <paramref name="init"/> kan köras två gånger (se tävlingarnas Create).</summary>
+        CompetitionUpdateResult<CompetitionSeriesInfo> Create(string name, Action<CompetitionSeriesInfo> init);
 
         /// <summary>Mjuk radering: serien läggs i papperskorgen. Anroparen prövar först att den är tom.</summary>
         CompetitionUpdateResult<CompetitionSeriesInfo> Trash(int id);
