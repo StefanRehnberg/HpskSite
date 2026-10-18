@@ -49,10 +49,11 @@ namespace HpskSite.Services.Competitions
         public const string ArchiveTable = "dbo.CompetitionNodeArchive";
 
         /// <summary>
-        /// ⚠️ Tabelläget visar sidorna ur noderna tills den virtuella noden finns (§5c) och de sista nodberoendena är
-        /// borta (§5d). Byts till sant i §5d — förut vägrar <see cref="Switch"/> att slå om till tabellen.
+        /// Sidorna kan visas utan noder (den virtuella noden §5c, de sista nodberoendena §5d). Slogs om till sant
+        /// 2026-10-18 efter Stefans beslut och läskontrollen mot prod (<c>check-prod-c3-s5-flytt-2026-10-18.sql</c>).
+        /// Sätts den till falskt vägrar <see cref="Switch"/> igen att slå om till tabellen.
         /// </summary>
-        public const bool PagesReadyForTable = false;
+        public const bool PagesReadyForTable = true;
 
         private readonly NodeCompetitionStore _nodeCompetitions;
         private readonly NodeCompetitionSeriesStore _nodeSeries;
