@@ -33,11 +33,11 @@
     var isLoggedIn = currentMember != null;
 
     // Same login lookup pattern Master.cshtml uses
-    var loginPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Login & Register")
-                    ?? Model.Root().Children.FirstOrDefault(x => x.Name.ToLower().Contains("login"));
+    var loginPage = Model.SiteRoot().Children.FirstOrDefault(x => x.Name == "Login & Register")
+                    ?? Model.SiteRoot().Children.FirstOrDefault(x => x.Name.ToLower().Contains("login"));
     var loginUrl = loginPage?.Url() ?? "/login-register";
 
-    var userProfileUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url()
+    var userProfileUrl = Model.SiteRoot().Children.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url()
                          ?? "/user-profile-page/";
 
     // About page contact channel is admin's inbox — not the generic Contact page

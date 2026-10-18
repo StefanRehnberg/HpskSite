@@ -366,29 +366,65 @@ namespace HpskSite.Routing
             if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
                 yield break;
             _cacheVersion.EnsureFresh(); // en annan instans kan ha skrivit (C3-planen S5d)
-            var index = _caches.RuntimeCache.GetCacheItem(HpskSite.Services.CompetitionNavigationCaches.UrlIndexKey,
-                            BuildYearSlugIndex, HpskSite.Services.CompetitionNavigationCaches.CacheFor)
-                        ?? new Dictionary<string, List<int>>();
+            // C3-planen §5e: i tabelläget byggs indexet ur lagringen och tävlingarna ges som virtuella noder —
+            // de gamla adressformerna fungerar då även när noderna är avpublicerade. Läget ligger i det cachade
+            // svaret, så ett byte av lagring bygger om indexet.
+            var pageNodes = _http.HttpContext?.RequestServices.GetService(typeof(HpskSite.Services.Competitions.VirtualCompetitionNodes))
+                as HpskSite.Services.Competitions.VirtualCompetitionNodes;
+            var tableMode = pageNodes?.TableMode ?? false;
+            var cached = _caches.RuntimeCache.GetCacheItem(HpskSite.Services.CompetitionNavigationCaches.UrlIndexKey,
+                            () => (tableMode, BuildYearSlugIndex(tableMode)), HpskSite.Services.CompetitionNavigationCaches.CacheFor);
+            if (cached.tableMode != tableMode)
+            {
+                _caches.RuntimeCache.ClearByKey(HpskSite.Services.CompetitionNavigationCaches.UrlIndexKey);
+                cached = (tableMode, BuildYearSlugIndex(tableMode));
+            }
+            var index = cached.Item2 ?? new Dictionary<string, List<int>>();
             if (!index.TryGetValue(IndexKey(year, compSlug), out var ids)) yield break;
             foreach (var id in ids)
             {
+                if (tableMode)
+                {
+                    var virtualNode = pageNodes!.PageNode(id);
+                    if (virtualNode != null) yield return virtualNode;
+                    continue;
+                }
                 var node = ctx.Content.GetById(id);
-                if (node?.ContentType.Alias == "competition") yield return node;
+                if (node?.ContentType.Alias == "competition") yield return node; // competitionstore-ok: nodläget
             }
         }
 
         private static string IndexKey(int year, string slug) => year + "|" + (slug ?? "").ToLowerInvariant();
 
-        private Dictionary<string, List<int>> BuildYearSlugIndex()
+        private Dictionary<string, List<int>> BuildYearSlugIndex(bool tableMode)
         {
             var index = new Dictionary<string, List<int>>();
-            foreach (var (id, year, slug) in AllCompetitionsByYear())
+            foreach (var (id, year, slug) in tableMode ? AllCompetitionsByYearFromStore() : AllCompetitionsByYear())
             {
                 var key = IndexKey(year, slug);
                 if (!index.TryGetValue(key, out var list)) index[key] = list = new List<int>();
                 list.Add(id);
             }
             return index;
+        }
+
+        /// <summary>Tabelläget: samma år och slug som nodläget räknar (datumet, annars seriens namn).</summary>
+        private IEnumerable<(int Id, int Year, string Slug)> AllCompetitionsByYearFromStore()
+        {
+            var services = _http.HttpContext?.RequestServices;
+            var competitions = services?.GetService(typeof(HpskSite.Services.Competitions.ICompetitionStore)) as HpskSite.Services.Competitions.ICompetitionStore;
+            var series = services?.GetService(typeof(HpskSite.Services.Competitions.ICompetitionSeriesStore)) as HpskSite.Services.Competitions.ICompetitionSeriesStore;
+            if (competitions == null) yield break;
+            foreach (var c in competitions.List())
+            {
+                var year = c.CompetitionDate?.Year ?? 0;
+                if (year == 0 && c.SeriesId is > 0 && series?.Get(c.SeriesId.Value) is { } s)
+                {
+                    if (int.TryParse(s.Name, out var y) && y > 1900) year = y;
+                    else if (int.TryParse(s.UrlSegment, out var y2) && y2 > 1900) year = y2;
+                }
+                if (year > 0) yield return (c.Id, year, c.UrlSegment ?? "");
+            }
         }
 
         private IEnumerable<(int Id, int Year, string Slug)> AllCompetitionsByYear()

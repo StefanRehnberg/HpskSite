@@ -54,6 +54,7 @@ namespace HpskSite.Services.Competitions
         public IReadOnlyList<CompetitionInfo> List() => Current.List();
         public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId) => Current.ListBySeries(seriesId);
         public IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId) => Current.ListAllInSeries(seriesId);
+        public bool CanStore(string alias) => Current.CanStore(alias);
 
         public CompetitionUpdateResult<CompetitionInfo> Update(int id, long? expectedVersion, Action<CompetitionInfo> change)
         {

@@ -95,7 +95,7 @@
 
             if (isRegionalAdmin)
             {
-                var allRegionPages = Model.Root().Children.Where(x => x.ContentType.Alias == "regionalPage").ToList();
+                var allRegionPages = Model.SiteRoot().Children.Where(x => x.ContentType.Alias == "regionalPage").ToList();
                 foreach (var regionCode in managedRegionCodes)
                 {
                     var regionPage = allRegionPages.FirstOrDefault(r =>
@@ -429,10 +429,10 @@
         <!-- Combined Compact Navigation Header -->
         <nav class="navbar navbar-expand-lg navbar-dark navbar-custom">
             <div class="container-fluid">
-                <a class="navbar-brand" href="@Model.Root().Url()">
+                <a class="navbar-brand" href="@Model.SiteRoot().Url()">
                     <div>
-                        <div class="site-title">@(Model.Root().Value<string>("siteTitle") ?? "Hallands Pistolskytteförbund")</div>
-                        <div class="site-subtitle">@(Model.Root().Value<string>("siteSubtitle") ?? "Välkommen till Pistol.nu - Kom till skjutbanan och träffa kompisar")</div>
+                        <div class="site-title">@(Model.SiteRoot().Value<string>("siteTitle") ?? "Hallands Pistolskytteförbund")</div>
+                        <div class="site-subtitle">@(Model.SiteRoot().Value<string>("siteSubtitle") ?? "Välkommen till Pistol.nu - Kom till skjutbanan och träffa kompisar")</div>
                     </div>
                 </a>
                 
@@ -445,12 +445,12 @@
                         <li class="nav-item">
                             @* ⚠️ Routade sidor (/min-kurs, /styrelse, /ekonomi …) renderas med startsidan som
                                modell, så "modellen är roten" räcker inte — adressen måste också vara rotens. *@
-                            <a class="nav-link @(Model.Id == Model.Root().Id && string.Equals((Context.Request.Path.Value ?? "").TrimEnd('/'), (Model.Root().Url() ?? "").TrimEnd('/'), StringComparison.OrdinalIgnoreCase) ? "active" : "")"
-                               href="@Model.Root().Url()">Hem</a>
+                            <a class="nav-link @(Model.Id == Model.SiteRoot().Id && string.Equals((Context.Request.Path.Value ?? "").TrimEnd('/'), (Model.SiteRoot().Url() ?? "").TrimEnd('/'), StringComparison.OrdinalIgnoreCase) ? "active" : "")"
+                               href="@Model.SiteRoot().Url()">Hem</a>
                         </li>
 
                         @{
-                            var aboutPage = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "aboutPage");
+                            var aboutPage = Model.SiteRoot().Children.FirstOrDefault(x => x.ContentType.Alias == "aboutPage");
                             bool isAboutActive = (aboutPage != null && aboutPage.IsAncestorOrSelf(Model)) || Model.Url().Contains("om-pistol-nu");
                         }
                         <li class="nav-item">
@@ -459,7 +459,7 @@
                         </li>
 
                         @{
-                            var trainingStairsPage = Model.Root().Children.FirstOrDefault(x => x.Url().Contains("skyttetrappan"));
+                            var trainingStairsPage = Model.SiteRoot().Children.FirstOrDefault(x => x.Url().Contains("skyttetrappan"));
                             var currentPath = Context.Request.Path.Value ?? "";
                             bool isTrainingActive = (trainingStairsPage != null && trainingStairsPage.IsAncestorOrSelf(Model)) || Model.Url().Contains("skyttetrappan") || currentPath.Contains("siktbild") || currentPath.Contains("utbildning");
                         }
@@ -490,10 +490,10 @@
                         </li>
                         
                         @{
-                            var competitionsPage = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
-                            var calendarPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Calendar");
-                            var resultsPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Results");
-                            var seriesPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Series");
+                            var competitionsPage = Model.SiteRoot().Children.FirstOrDefault(x => x.ContentType.Alias == "competitionsHub");
+                            var calendarPage = Model.SiteRoot().Children.FirstOrDefault(x => x.Name == "Calendar");
+                            var resultsPage = Model.SiteRoot().Children.FirstOrDefault(x => x.Name == "Results");
+                            var seriesPage = Model.SiteRoot().Children.FirstOrDefault(x => x.Name == "Series");
 
                             bool isCompetitionActive = (competitionsPage != null && competitionsPage.IsAncestorOrSelf(Model)) ||
                                                       (calendarPage != null && calendarPage.IsAncestorOrSelf(Model)) ||
@@ -559,9 +559,9 @@
                         </li>
                         
                         @{
-                            var contactPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Contact");
-                            var clubsPage = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "clubsPage");
-                            var regionalPages = Model.Root().Children.Where(x => x.ContentType.Alias == "regionalPage").ToList();
+                            var contactPage = Model.SiteRoot().Children.FirstOrDefault(x => x.Name == "Contact");
+                            var clubsPage = Model.SiteRoot().Children.FirstOrDefault(x => x.ContentType.Alias == "clubsPage");
+                            var regionalPages = Model.SiteRoot().Children.Where(x => x.ContentType.Alias == "regionalPage").ToList();
                             // "Min klubb" (nedan) täcker medlemmens egna klubbar och kretsar. En klubbsida ligger
                             // under kretsen i trädet, så utan undantaget lyste BÅDA menyerna på den egna
                             // klubbens sida (Anders, Hästveda, 2026-10-11). Bara en meny får vara vald.
@@ -692,7 +692,7 @@
                                 </a>
                                 <ul class="dropdown-menu dropdown-menu-end">
                                     @{
-                                        var userProfileUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile-page/";
+                                        var userProfileUrl = Model.SiteRoot().Children.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url() ?? "/user-profile-page/";
                                     }
                                     <li><a class="dropdown-item" href="@userProfileUrl"><i class="bi bi-person"></i> Min Sida</a></li>
                                     <li><a class="dropdown-item" href="/mina-uppdrag"><i class="bi bi-person-check"></i> Mina uppdrag</a></li>
@@ -715,7 +715,7 @@
                                        vägar till samma sida i samma navigering är sin egen förvirring. *@
                                     @if (hasAdminAccess)
                                     {
-                                        var adminPageUrl = Model.Root().Children.FirstOrDefault(x => x.ContentType.Alias == "adminPage")?.Url() ?? "/admin";
+                                        var adminPageUrl = Model.SiteRoot().Children.FirstOrDefault(x => x.ContentType.Alias == "adminPage")?.Url() ?? "/admin";
                                         <li><a class="dropdown-item" href="@adminPageUrl"><i class="bi bi-gear"></i> Administration</a></li>
                                     }
                                     <li><hr class="dropdown-divider"></li>
@@ -735,8 +735,8 @@
                     }
                     else
                     {
-                        var loginPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Login & Register")
-                                        ?? Model.Root().Children.FirstOrDefault(x => x.Name.ToLower().Contains("login"));
+                        var loginPage = Model.SiteRoot().Children.FirstOrDefault(x => x.Name == "Login & Register")
+                                        ?? Model.SiteRoot().Children.FirstOrDefault(x => x.Name.ToLower().Contains("login"));
                         var loginUrl = loginPage?.Url() ?? "/login-register";
 
                         <div class="navbar-nav d-flex flex-row gap-2 align-items-center ms-lg-2">

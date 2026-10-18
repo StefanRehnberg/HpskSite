@@ -40,12 +40,16 @@ namespace HpskSite.Services.Kretsgranskning
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _series;
 
+        private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
+
         public KretsCalendarService(IUmbracoContextFactory contextFactory, AppCaches caches,
             CompetitionApplicationService applications, ClubService clubs, StomprogramService stomprogram, ILogger<KretsCalendarService> logger,
             HpskSite.Services.Events.IClubEventStore events,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.Competitions.ICompetitionSeriesStore series)
+            HpskSite.Services.Competitions.ICompetitionSeriesStore series,
+            HpskSite.Services.Competitions.CompetitionLinks links)
         {
+            _links = links;
             _competitions = competitions;
             _series = series;
             _contextFactory = contextFactory;
@@ -361,7 +365,7 @@ namespace HpskSite.Services.Kretsgranskning
                         clubId,
                         regionCode ?? "",
                         c.IsClubOnly,
-                        content?.GetById(c.Id) is { } node ? SafeUrl(node) : "",
+                        _links.Url(c.Id), // C3-planen §5d: utan nod
                         c.Venue ?? ""));
                 }
             }

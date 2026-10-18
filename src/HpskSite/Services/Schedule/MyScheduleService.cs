@@ -62,6 +62,8 @@ namespace HpskSite.Services.Schedule
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
 
+        private readonly HpskSite.Services.Competitions.VirtualCompetitionNodes _pageNodes;
+
         public MyScheduleService(
             IUmbracoContextFactory ctxFactory,
             IScopeProvider scopeProvider,
@@ -72,9 +74,11 @@ namespace HpskSite.Services.Schedule
             ILogger<MyScheduleService> logger,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.StartLists.IStartListStore startLists,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Competitions.VirtualCompetitionNodes pageNodes)
         {
             _competitions = competitions;
+            _pageNodes = pageNodes;
             _registrations = registrations;
             _startLists = startLists;
             _ctxFactory = ctxFactory;
@@ -201,7 +205,7 @@ namespace HpskSite.Services.Schedule
                 using var ctxRef = _ctxFactory.EnsureUmbracoContext();
                 // Fälten ur tävlingslagringen (C3-planen S3); noden för adressen och listornas id.
                 var info = _competitions.Get(competitionId);
-                var comp = info != null ? ctxRef.UmbracoContext.Content?.GetById(competitionId) : null;
+                var comp = info != null ? _pageNodes.PageNode(info) : null; // C3-planen §5d: virtuell i tabelläget
                 if (info == null || comp == null) return s;
 
                 s.CompName = info.CompetitionName ?? info.Name ?? "Tävling";

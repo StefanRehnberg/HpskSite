@@ -11711,7 +11711,10 @@ Underhåll på `/admin-page`. Samma steg som startlistorna: Torrkör → (frys, 
   utan adress (ingen sida i tabelläget) och värden som inte överlever läsregeln
   (`CompetitionFieldValues.LossReason`, `CompetitionFieldValuesLossTests`).
 - **Flytten:** en rad per nod med nodens id (`IDENTITY_INSERT`), serierna först, en nod per transaktion,
-  idempotent. **Utkastet flyttas** (det senast sparade). **Opublicerade och papperskorgens noder blir RADERADE
+  idempotent. **⚠️ En publicerad nod flyttas i sitt PUBLICERADE läge** (`NodeStoreCore.ReadForMigration`) — det
+  sajten visat och sajtens redigering skrivit (den publicerar alltid). Ett utkast före det kommer bara ur backoffice
+  och har aldrig synts: KM C 5361 hade ett utkast utan klubben och hade blivit öppet för alla och försvunnit från
+  Falkenbergs sida. Utkastet finns kvar i arkivet; opublicerade flyttas i sitt sparade läge. **Opublicerade och papperskorgens noder blir RADERADE
   rader** (`DeletedUtc`) — tabellen har inget publiceringsläge. Varje nod arkiveras i **`CompetitionNodeArchive`**
   (alla egenskaper, utkast och publicerat, som JSON) — det som finns kvar när noderna tas bort (§5e).
 - **⚠️ Id-golvet:** `CompetitionIdSources` / `SeriesIdSources`. **`IdentityFloor.ColumnsLike`** läser schemat vid
@@ -11724,8 +11727,55 @@ Underhåll på `/admin-page`. Samma steg som startlistorna: Torrkör → (frys, 
   renderas ur noderna tills §5c–5d. Tillbaka till noderna och tömningen vägras när en rad bara finns i tabellen
   (`force=1` går tillbaka ändå). Avpubliceringen hör till rensningen (§5e).
 - **`CompetitionNodeGuard`** vägrar nya `competition`/`competitionSeries`-noder när tabellen gäller (dev-seedarna).
-- Svit: `hpsk-verify/c3/c3-s5b-migration-verify.mjs` 32/32 mot nyåterställd kopia (`$SP/s5b-migration.sh`); A/B
+- Svit: `hpsk-verify/c3/c3-s5b-migration-verify.mjs` 33/33 (med 5361-påståendet) mot nyåterställd kopia (`$SP/s5b-migration.sh`); A/B
   (utan schemakällan i golvet + opublicerade som synliga) → 2 röda. Kortet i Underhåll prövas i samma svit.
+
+### Den virtuella noden och sidorna utan noder (C3-planen §5c–5e, 2026-10-18)
+
+- **`VirtualCompetitionContent`** (`Services/Competitions/VirtualCompetitionContent.cs`): en tävling eller serie som
+  sidmodell utan nod, med dokumenttypens RIKTIGA `IPublishedContentType` — varje egenskap går genom typens egen
+  konverterare (media, RTE, tal). Källvärdet är postens fält i nodens lagrade form (`CompetitionFieldValues.ToNode`;
+  ett val som JSON-array). `Parent` = den virtuella serien, annars tävlingsnavet; inga barn.
+- **⚠️⚠️ `Parent()`, `Children()`, `Root()` och `Ancestors()` (förlängningsmetoderna) går via Umbracos
+  navigeringstjänst på nodens nyckel** — en virtuell nod är okänd där. Därför: **`Model.SiteRoot()`** i stället för
+  `Model.Root()` i alla vyer (`Services/Hosting/SiteRootExtensions.cs`, startsidan ur den publicerade cachen), och
+  egenskapen `Model.Parent` i stället för `Model.Parent()` i tävlings- och seriesidan. **Skriv aldrig `Model.Root()`
+  i en vy igen**, och anropa aldrig `Parent()`/`Children()` på en nod ur `PageNode` — seriens id står i posten
+  (`Posts.Of(c).SeriesId`). Navet kastade `KeyNotFoundException` för en tävling som bara finns i tabellen.
+- **⚠️ `HasValue` frågar typens konverterare nivå för nivå och tål att en nivå kastar** — RTE-konverteraren kastar
+  för `Source` (seriesidorna gav 500 på `seriesDescription`); sist en enkel tomhetskoll.
+- **⚖️ Id-lagen, regel 1, i tabelläget:** en ny tävling kan få ett nummer som en mediennod eller annan nod redan har
+  (golvet räknar bara tävlingens egna referenser). Det är lagligt — id:t följs av sin sort — men därför får ett
+  tävlings-id aldrig slås upp med `Umbraco.Content(id)` utan aliaskontroll (`PageNode` och `CompetitionLinks` kollar).
+- **`VirtualCompetitionNodes`** (scoped) är fabriken och den ENDA vägen till "sidans nod för tävlingen":
+  `PageNode(c)` / `PageNode(id)` / `SeriesPageNode(s)` ger den publicerade noden i nodläget och den virtuella i
+  tabelläget, så ingenting ändras i nodläget. `TableMode`, `Hub()`.
+- **`CompetitionLinks`** (singleton): tävlingens adress ur id:t utan nod — `PageAddress`, i nodläget annars nodens
+  adress, sist `/competitions/{id}/`. Ersätter `GetById(id).CompetitionUrl()` överallt.
+- **`ICompetitionStore.CanStore(alias)`** ersätter `GetById(id).HasProperty(alias)` (nod: doktypen har egenskapen;
+  tabell: alla fält). `ListAllInSeries` ersätter trädets barn.
+- **Sidorna i tabelläget:** `CompetitionPagesController` renderar tävlingen och serien med den virtuella noden ur
+  lagringen (även när en gammal nod ligger kvar). Listorna (navet, säsongen, serien, kretsens lista) tar noderna ur
+  fabriken; navet och kretsens lista tar posterna ur lagringen i stället för trädet i tabelläget.
+- **De gamla adresserna utan noder (§5e):** `CompetitionUrlContentFinder` bygger sitt index ur lagringen och ger
+  virtuella noder i tabelläget; `CompetitionTreeRedirectFinder` söker trädadressens sista segment i lagringen (årtal i
+  adressen avgör flera träffar); `CompetitionContentFinder` skickar `/competitions/{id}/` vidare via `CompetitionLinks`.
+- **Nodvakten** vägrar i tabelläget nya tävlings-/serienoder OCH publicering av befintliga.
+  **Avpubliceringen** (`CompetitionMigrationService.UnpublishNodes`, Underhåll → Avpublicera) bara i tabelläget;
+  raderar ingenting. ⚠️ Gamla fakturor (`registrationInvoicesHub` under tävlingsnoden, `PaymentService`) bor kvar
+  under noderna — **ta aldrig bort tävlingsnoder** som bär fakturor (borttagningen av noder är inte byggd, med flit).
+- **Kvar på noder, medvetet:** `autoNotifyParticipants` (finns inte på doktypen; svarar falskt även utan nod),
+  `PaymentService` (gamla fakturor), skyddsnätets verktyg (`C3Baseline`, `CompetitionAuthorizationReport`), dev-seedarna,
+  underhållsverktygen i `CompetitionAdminController` som går trädet.
+- Hälsokontrollen (`/health/competitions`) tar med Tävlingar och Serier.
+- **Seriens resultat i tabelläget räknar bara levande omgångar** — i nodläget räknade `ListAllInSeries` även
+  opublicerade barn (dev-seedarnas tio DEMO-tävlingar under Hallandsserien 2025 gav tomma kolumner 9–18). En
+  opublicerad nod är en raderad rad efter flytten, och då räknas den inte. Avsiktligt.
+- Sviter: `hpsk-verify/c3/c3-s5d-tablemode-verify.mjs` 20/20 (`$SP/s5d-run.sh`: tabellfödd tävling och serie,
+  navet, `/competitions/{id}/`, adminlistan, hanteringen, avpublicering, gamla trädadressen 301, redigering och
+  resultatsida utan nod); med navets `Parent()` kvar → 3 röda. Sidjämförelsen nodläge mot tabelläge
+  (`$SP/s5c.sh`, `c3/s6-page-compare.mjs`): 0 statusskillnader; textskillnaderna = brödsmulan "Tävlingar" (+10
+  tecken, föräldern är navet) och serien ovan. Skärmbilder: `c3/c3-s5d-shots.mjs`.
 
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 

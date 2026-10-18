@@ -6,6 +6,7 @@
 @using System;
 @inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.VirtualCompetitionNodes PageNodes
 @{
     // Get competition ID from query string
     var competitionIdStr = Context.Request.Query["competitionId"].FirstOrDefault();
@@ -17,8 +18,8 @@
     if (competitionId > 0)
     {
         // Direct cache lookup (O(1) instead of full tree scan)
-        var node = Umbraco.Content(competitionId);
-        if (node != null && node.ContentType.Alias == "competition") // competitionstore-ok: noden behövs för adressen (S6), fälten läses ur posten
+        var node = PageNodes.PageNode(competitionId); // C3-planen §5d: virtuell i tabelläget
+        if (node != null)
         {
             competition = node;
         }

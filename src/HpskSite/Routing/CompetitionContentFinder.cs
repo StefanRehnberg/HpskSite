@@ -12,10 +12,15 @@ namespace HpskSite.Routing
     public class CompetitionContentFinder : IContentFinder
     {
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
+        private readonly HpskSite.Services.SiteSettings.SiteSettingService _settings;
+        private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
 
-        public CompetitionContentFinder(IUmbracoContextAccessor umbracoContextAccessor)
+        public CompetitionContentFinder(IUmbracoContextAccessor umbracoContextAccessor,
+            HpskSite.Services.SiteSettings.SiteSettingService settings, HpskSite.Services.Competitions.CompetitionLinks links)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
+            _settings = settings;
+            _links = links;
         }
 
         public Task<bool> TryFindContent(IPublishedRequestBuilder request)
@@ -33,6 +38,16 @@ namespace HpskSite.Routing
                     // Try to parse the ID
                     if (int.TryParse(segments[1], out int competitionId))
                     {
+                        // Tabelläget (C3-planen §5d): ingen nod att visa — adressen ur PageAddress, annars ingen sida.
+                        if (HpskSite.Services.Competitions.CompetitionStoreSettings.UsesTable(_settings))
+                        {
+                            var url = _links.Url(competitionId);
+                            if (string.IsNullOrEmpty(url) || url.TrimEnd('/').Equals(path.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+                                return Task.FromResult(false);
+                            request.SetRedirectPermanent(url + request.Uri.Query);
+                            return Task.FromResult(true);
+                        }
+
                         // Get Umbraco context
                         if (!_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext))
                         {

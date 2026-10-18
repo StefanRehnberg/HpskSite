@@ -224,8 +224,15 @@ namespace HpskSite.Controllers
                 }
 
                 // Trädet (även opublicerade) avgör urvalet; fälten ur tävlingslagringen (C3-planen S3).
-                var competitionIds = allContent.Where(c => c.ContentType.Alias == "competition").Select(c => c.Id).ToList(); // competitionstore-ok: listan tar även opublicerade tävlingar ur trädet (S6)
-                var competitionsQuery = HpskSite.Services.Competitions.CompetitionStoreExtensions.GetManyIncludingUnpublished(_competitions, competitionIds).Values.AsEnumerable();
+                // Tabelläget (C3-planen §5d): tabellen har inget publiceringsläge — List() är alla tävlingar.
+                IEnumerable<HpskSite.Models.Competitions.CompetitionInfo> competitionsQuery;
+                if (_competitions is HpskSite.Services.Competitions.SwitchingCompetitionStore { UsesTable: true })
+                    competitionsQuery = _competitions.List();
+                else
+                {
+                    var competitionIds = allContent.Where(c => c.ContentType.Alias == "competition").Select(c => c.Id).ToList(); // competitionstore-ok: nodläget tar även opublicerade tävlingar ur trädet (S6)
+                    competitionsQuery = HpskSite.Services.Competitions.CompetitionStoreExtensions.GetManyIncludingUnpublished(_competitions, competitionIds).Values.AsEnumerable();
+                }
 
                 if (isRegionalAdmin && clubRegions != null)
                 {

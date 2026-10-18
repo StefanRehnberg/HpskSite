@@ -53,12 +53,61 @@ namespace HpskSite.Routing
                     if (parent?.ContentType.Alias == "competition" && IsServedChild(parent.Id, seg[^1])) // competitionstore-ok: adresserna (C3 S6) routar till noden tills sidorna blir controllers (S7)
                         return Task.FromResult(RedirectIfMoved(request, parent.Url(), seg[^1] + "/", path));
                 }
+
+                // Tabelläget (C3-planen §5e): noden kan vara avpublicerad — sök adressdelen i lagringen.
+                if (seg.Length >= 2 && FromStore(seg) is { } moved)
+                    return Task.FromResult(RedirectIfMoved(request, moved.Url, moved.Suffix, path));
             }
             catch
             {
                 // En adress vi inte kan avgöra är inte vår.
             }
             return Task.FromResult(false);
+        }
+
+        /// <summary>
+        /// Trädadressen när noden inte finns i den publicerade cachen (tabelläget efter avpubliceringen): sista
+        /// segmentet (eller näst sista + ett barn) är tävlingens eller seriens adressdel. Flera träffar avgörs av
+        /// ett årtal i adressen; går det inte att avgöra, ingen omdirigering.
+        /// </summary>
+        private (string Url, string Suffix)? FromStore(string[] seg)
+        {
+            var services = _http.HttpContext?.RequestServices;
+            var settings = services?.GetService(typeof(HpskSite.Services.SiteSettings.SiteSettingService)) as HpskSite.Services.SiteSettings.SiteSettingService;
+            if (settings == null || !HpskSite.Services.Competitions.CompetitionStoreSettings.UsesTable(settings)) return null;
+            var competitions = services!.GetService(typeof(HpskSite.Services.Competitions.ICompetitionStore)) as HpskSite.Services.Competitions.ICompetitionStore;
+            var seriesStore = services.GetService(typeof(HpskSite.Services.Competitions.ICompetitionSeriesStore)) as HpskSite.Services.Competitions.ICompetitionSeriesStore;
+            var links = services.GetService(typeof(HpskSite.Services.Competitions.CompetitionLinks)) as HpskSite.Services.Competitions.CompetitionLinks;
+            if (competitions == null || seriesStore == null || links == null) return null;
+            var years = seg.Select(s => int.TryParse(s, out var y) && y > 1900 && y < 2200 ? y : 0).Where(y => y > 0).ToHashSet();
+
+            int? Pick(IEnumerable<(int Id, int? Year)> found)
+            {
+                var list = found.ToList();
+                if (list.Count == 1) return list[0].Id;
+                var byYear = list.Where(x => x.Year.HasValue && years.Contains(x.Year.Value)).ToList();
+                return byYear.Count == 1 ? byYear[0].Id : null;
+            }
+
+            foreach (var (slug, suffix) in new[] { (seg[^1], ""), (seg.Length >= 3 ? seg[^2] : "", seg[^1] + "/") })
+            {
+                if (string.IsNullOrEmpty(slug)) continue;
+                var compId = Pick(competitions.List()
+                    .Where(c => string.Equals(c.UrlSegment, slug, StringComparison.OrdinalIgnoreCase))
+                    .Select(c => (c.Id, c.CompetitionDate?.Year)));
+                if (compId != null && (suffix == "" || IsServedChild(compId.Value, seg[^1])))
+                    return (links.Url(compId.Value), suffix);
+                if (suffix != "") continue;
+                var seriesId = Pick(seriesStore.List()
+                    .Where(s => string.Equals(s.UrlSegment, slug, StringComparison.OrdinalIgnoreCase))
+                    .Select(s => (s.Id, s.SeriesStartDate?.Year)));
+                if (seriesId != null)
+                {
+                    var url = links.SeriesUrl(seriesId.Value);
+                    if (!string.IsNullOrEmpty(url)) return (url, "");
+                }
+            }
+            return null;
         }
 
         private bool IsServedChild(int competitionId, string segment)

@@ -174,8 +174,7 @@ namespace HpskSite.Services.Staffing
         {
             try
             {
-                var comp = _contentService.GetById(competitionId);
-                var clubId = comp?.GetValue<int>("clubId") ?? 0;
+                var clubId = _competitions.GetSaved(competitionId)?.ClubId ?? 0; // C3-planen §5d
                 if (clubId <= 0) return null;
                 return _contentService.GetById(clubId)?.GetValue<string>("brevoApiKey");
             }

@@ -13,7 +13,7 @@
     var loginModel = new LoginModel();
 
     // "Min sida" (the member dashboard) is the default landing page after login.
-    var minSidaUrl = Model.Root()?.Children?.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url()
+    var minSidaUrl = Model.SiteRoot()?.Children?.FirstOrDefault(x => x.ContentType.Alias == "userProfile")?.Url()
                      ?? "/user-profile-page/";
 
     // Where to send the member after a successful login:

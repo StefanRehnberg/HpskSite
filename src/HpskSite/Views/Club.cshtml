@@ -56,8 +56,8 @@
     }
 
     // Find login page dynamically (same approach as Master.cshtml)
-    var loginPage = Model.Root().Children.FirstOrDefault(x => x.Name == "Login & Register")
-                    ?? Model.Root().Children.FirstOrDefault(x => x.Name.ToLower().Contains("login"));
+    var loginPage = Model.SiteRoot().Children.FirstOrDefault(x => x.Name == "Login & Register")
+                    ?? Model.SiteRoot().Children.FirstOrDefault(x => x.Name.ToLower().Contains("login"));
     var loginUrl = loginPage != null ? loginPage.Url() : "/login-register";
 }
 

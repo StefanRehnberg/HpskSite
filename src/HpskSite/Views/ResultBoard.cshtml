@@ -1,6 +1,7 @@
 ﻿@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.VirtualCompetitionNodes PageNodes
 @{
     // Standalone live results board at /live?c=<competitionId>. Chromeless (no Master)
     // so it fills a wall-TV/kiosk screen. Public, but only renders when the competition
@@ -14,7 +15,7 @@
 
     // Tävlingen genom ICompetitionStore (C3-planen S3); noden bara för adressen nedan.
     var info = competitionId > 0 ? Competitions.Get(competitionId) : null;
-    IPublishedContent? competition = info != null ? Umbraco.Content(competitionId) : null;
+    IPublishedContent? competition = info != null ? PageNodes.PageNode(info) : null; // C3-planen §5d
     if (competition == null) info = null;
 
     var competitionName = info?.CompetitionName ?? info?.Name ?? "";

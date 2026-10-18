@@ -26,8 +26,12 @@ namespace HpskSite.Services.Staffing
 
         private static readonly CultureInfo Sv = CultureInfo.GetCultureInfo("sv-SE");
 
-        public StaffDayService(IScopeProvider scopeProvider, IContentService contentService, ILogger<StaffDayService> logger)
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
+        public StaffDayService(IScopeProvider scopeProvider, IContentService contentService, ILogger<StaffDayService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _scopeProvider = scopeProvider;
             _contentService = contentService;
             _logger = logger;
@@ -238,15 +242,10 @@ namespace HpskSite.Services.Staffing
         {
             try
             {
-                var c = _contentService.GetById(competitionId);
+                // C3-planen §5d: ur lagringen (det sparade läget, som content service gav).
+                var c = _competitions.GetSaved(competitionId);
                 if (c == null) return (null, null);
-                DateTime? Real(string alias)
-                {
-                    if (!c.HasProperty(alias)) return null;
-                    var v = c.GetValue<DateTime?>(alias);
-                    return v is { } d && d != default && d.Year > 1900 ? d : null;
-                }
-                return (Real("competitionDate"), Real("competitionEndDate"));
+                return (c.CompetitionDate, c.CompetitionEndDate);
             }
             catch { return (null, null); }
         }

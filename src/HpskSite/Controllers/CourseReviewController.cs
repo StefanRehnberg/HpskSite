@@ -437,8 +437,9 @@ namespace HpskSite.Controllers
             string? scope = null;
             try
             {
-                var published = UmbracoContext.Content?.GetById(competitionId);
-                if (published != null) scope = CompetitionScopeHelper.ReadScope(published);
+                // C3-planen §5d: ur lagringen (det publicerade läget), inte noden.
+                var published = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.ICompetitionStore>().Get(competitionId);
+                if (published != null) scope = CompetitionScopeHelper.NormalizeScopeValue(published.CompetitionScope);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Bangranskning: omfattningen kunde inte läsas för {Id}.", competitionId); }
             return _access.Resolve(competitionId, scope);

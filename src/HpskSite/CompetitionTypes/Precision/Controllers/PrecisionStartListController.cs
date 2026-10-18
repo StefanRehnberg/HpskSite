@@ -144,10 +144,10 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
                         if (UmbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext))
                         {
                             // Adressen = den publicerade tävlingens + listans segment (aldrig en nods Url()).
-                            var publishedCompetition = umbracoContext.Content?.GetById(competition.Id);
-                            if (savedStartList.IsPublished && publishedCompetition != null)
+                            var competitionUrl = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.CompetitionLinks>().Url(competition.Id);
+                            if (savedStartList.IsPublished && !string.IsNullOrEmpty(competitionUrl))
                             {
-                                var startListUrl = savedStartList.PublicUrl(publishedCompetition.Url());
+                                var startListUrl = savedStartList.PublicUrl(competitionUrl);
                                 return Redirect(startListUrl);
                             }
                         }
@@ -458,12 +458,9 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             // This provides the canonical URL regardless of where the start list content is actually stored
             if (UmbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext))
             {
-                var publishedCompetition = umbracoContext.Content?.GetById(competitionId);
-                if (publishedCompetition != null)
-                {
-                    var competitionUrl = publishedCompetition.Url();
-                    return startList.PublicUrl(competitionUrl);
-                }
+                var competitionUrl = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.CompetitionLinks>().Url(competitionId);
+                if (!string.IsNullOrEmpty(competitionUrl))
+                    return startList.PublicUrl(competitionUrl); // C3-planen §5d
             }
 
             // Fallback to PreviewStartList action if we can't get the competition URL

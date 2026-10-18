@@ -1089,11 +1089,7 @@ namespace HpskSite.Controllers
 
         private string? CompetitionUrl(int id)
         {
-            try
-            {
-                var c = UmbracoContext.Content?.GetById(id);
-                return c == null ? null : HpskSite.Extensions.CompetitionUrlExtensions.CompetitionUrl(c);
-            }
+            try { return HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.CompetitionLinks>().Url(id); } // C3-planen §5d
             catch { return null; }
         }
 

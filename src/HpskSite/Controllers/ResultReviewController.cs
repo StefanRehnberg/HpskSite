@@ -624,7 +624,7 @@ namespace HpskSite.Controllers
                 Level = comp.CompetitionLevel ?? "",
                 Scope = ChampionshipCategory.NormalizeScope(CompetitionScopeHelper.NormalizeScopeValue(comp.CompetitionScope)),
                 IsClubOnly = comp.IsClubOnly,
-                Url = UmbracoContext.Content?.GetById(competitionId)?.Url() ?? ""
+                Url = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.CompetitionLinks>().Url(competitionId)
             };
             var type = comp.CompetitionType ?? "";
             c.TypeLabel = HpskSite.Models.CompetitionTypes.GetFuzzy(type)?.Name ?? type;

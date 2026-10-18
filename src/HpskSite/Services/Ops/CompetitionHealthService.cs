@@ -34,10 +34,16 @@ namespace HpskSite.Services.Ops
         private readonly AppCaches _caches;
         private readonly ILogger<CompetitionHealthService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
+
         public CompetitionHealthService(IUmbracoDatabaseFactory databaseFactory, SiteSettingService settings,
             IUmbracoContextFactory contextFactory, IPublishedUrlProvider urlProvider, AppCaches caches,
-            ILogger<CompetitionHealthService> logger)
+            ILogger<CompetitionHealthService> logger, HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Competitions.CompetitionLinks links)
         {
+            _competitions = competitions;
+            _links = links;
             _databaseFactory = databaseFactory;
             _settings = settings;
             _contextFactory = contextFactory;
@@ -104,6 +110,17 @@ namespace HpskSite.Services.Ops
                     new[] { "competitionResult" }, // resultstore-ok: bara ett antal noder i hälsokontrollen
 
                     HpskSite.Services.Results.CompetitionResultMigrationService.IdSources),
+                // C3-planen §5: tävlingarna och serierna.
+                ReadStore("Tävlingar", HpskSite.Services.Competitions.SqlCompetitionStore.Table,
+                    HpskSite.Services.Competitions.CompetitionStoreSettings.StoreKey,
+                    HpskSite.Services.Competitions.CompetitionStoreSettings.WriteFreezeKey,
+                    new[] { HpskSite.Models.Competitions.CompetitionFieldTable.NodeAlias },
+                    HpskSite.Services.Competitions.CompetitionMigrationService.CompetitionIdSources),
+                ReadStore("Serier", HpskSite.Services.Competitions.SqlCompetitionSeriesStore.Table,
+                    HpskSite.Services.Competitions.CompetitionStoreSettings.StoreKey,
+                    HpskSite.Services.Competitions.CompetitionStoreSettings.WriteFreezeKey,
+                    new[] { HpskSite.Models.Competitions.CompetitionSeriesFieldTable.NodeAlias },
+                    HpskSite.Services.Competitions.CompetitionMigrationService.SeriesIdSources),
             };
 
             var (count, noUrl, compError) = ReadCompetitions();
@@ -214,6 +231,15 @@ WHERE n.id = r.Id AND ct.alias IN ({aliasList}))");
         {
             try
             {
+                // Tabelläget (C3-planen §5d): tävlingarna ur lagringen; utan adress = bara id-formen finns.
+                if (HpskSite.Services.Competitions.CompetitionStoreSettings.UsesTable(_settings))
+                {
+                    var rows = _competitions.List();
+                    var missing = rows.Where(c => _links.Url(c.Id).StartsWith("/competitions/", StringComparison.OrdinalIgnoreCase))
+                        .Select(c => $"{c.Id} {c.Name}").ToList();
+                    return (rows.Count, missing, null);
+                }
+
                 List<int> ids;
                 using (var db = _databaseFactory.CreateDatabase())
                 {

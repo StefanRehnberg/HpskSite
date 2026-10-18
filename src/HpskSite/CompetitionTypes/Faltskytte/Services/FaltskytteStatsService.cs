@@ -33,15 +33,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
         // klienten länkar då inte.
         private string PrettyUrl(int competitionId)
         {
-            try
-            {
-                if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return "";
-                var c = ctx.Content.GetById(competitionId);
-                return c == null ? "" : HpskSite.Extensions.CompetitionUrlExtensions.CompetitionUrl(c);
-            }
+            try { return _links.Url(competitionId); } // C3-planen §5d: utan nod
             catch { return ""; }
         }
         private readonly ILogger<FaltskytteStatsService> _logger;
+        private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
 
@@ -50,9 +46,11 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Services
             IContentService contentService,
             ILogger<FaltskytteStatsService> logger,
             Umbraco.Cms.Core.Web.IUmbracoContextAccessor umbracoContextAccessor,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Competitions.CompetitionLinks links)
         {
             _competitions = competitions;
+            _links = links;
             _umbracoContextAccessor = umbracoContextAccessor;
             _databaseFactory = databaseFactory;
             _contentService = contentService;

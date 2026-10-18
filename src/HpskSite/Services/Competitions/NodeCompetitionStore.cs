@@ -28,13 +28,15 @@ namespace HpskSite.Services.Competitions
         private readonly NodeStoreCore<CompetitionInfo> _core;
         private readonly IContentService _contentService;
         private readonly CompetitionTreePlacement _placement;
+        private readonly IContentTypeService _contentTypes;
 
         public NodeCompetitionStore(IContentService contentService, IUmbracoContextAccessor umbracoContextAccessor,
             IScopeProvider scopeProvider, ILogger<NodeCompetitionStore> logger, CompetitionTreePlacement placement,
-            CompetitionChangeRecorder recorder)
+            CompetitionChangeRecorder recorder, IContentTypeService contentTypes)
         {
             _contentService = contentService;
             _placement = placement;
+            _contentTypes = contentTypes;
             _core = new NodeStoreCore<CompetitionInfo>(CompetitionFieldTable.NodeAlias, CompetitionFieldTable.Fields,
                 contentService, umbracoContextAccessor, scopeProvider, logger, Fill, c => c.Name, recorder);
         }
@@ -47,6 +49,11 @@ namespace HpskSite.Services.Competitions
 
         /// <summary>Det sparade läget även i papperskorgen, och noden. Bara för flytten (§5b).</summary>
         public (CompetitionInfo Record, IContent Node)? ReadForMigration(int id) => _core.ReadForMigration(id);
+
+        /// <summary>Doktypen har egenskapen (även genom en komposition).</summary>
+        public bool CanStore(string alias) =>
+            _contentTypes.Get(CompetitionFieldTable.NodeAlias)?.CompositionPropertyTypes
+                .Any(p => string.Equals(p.Alias, alias, StringComparison.OrdinalIgnoreCase)) ?? false;
 
         /// <summary>Seriens barn i trädet, även opublicerade, i det sparade läget.</summary>
         public IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId) =>
@@ -199,14 +206,18 @@ namespace HpskSite.Services.Competitions
         }
 
         /// <summary>
-        /// Det sparade läget även för en nod i papperskorgen, och noden själv (för arkivet). BARA för flytten
-        /// till tabellen (C3-planen §5b).
+        /// Läget som flyttas, och noden själv (för arkivet). BARA för flytten till tabellen (C3-planen §5b).
+        /// <b>En publicerad nod flyttas i sitt PUBLICERADE läge</b> — det är det sajten visat och sajtens redigering
+        /// skrivit (den publicerar alltid). Ett utkast före det publicerade kommer bara ur backoffice och har aldrig
+        /// synts (KM C 5361: utkastet tappade klubben och blev öppen för alla). Utkastet finns kvar i arkivet.
+        /// Opublicerade och papperskorgens noder flyttas i det sparade läget.
         /// </summary>
         public (T Record, IContent Node)? ReadForMigration(int id)
         {
             if (id <= 0) return null;
             var node = _contentService.GetById(id);
-            return node is not null && node.ContentType.Alias == _alias ? (FromContent(node), node) : null;
+            if (node is null || node.ContentType.Alias != _alias) return null;
+            return (node.Published && !node.Trashed ? FromContent(node, published: true) : FromContent(node), node);
         }
 
         public IReadOnlyDictionary<int, T> GetMany(IReadOnlyCollection<int> ids)
@@ -418,13 +429,14 @@ namespace HpskSite.Services.Competitions
             return r;
         }
 
-        private T FromContent(IContent node)
+        private T FromContent(IContent node, bool published = false)
         {
             var r = new T();
             foreach (var f in _fields)
-                f.Set(r, CompetitionFieldValues.Read(f.Shape, node.HasProperty(f.Alias) ? node.GetValue(f.Alias) : null));
+                f.Set(r, CompetitionFieldValues.Read(f.Shape, node.HasProperty(f.Alias) ? node.GetValue(f.Alias, published: published) : null));
             var segment = Cache()?.GetById(node.Id)?.UrlSegment ?? "";
-            _fill(r, new NodeMeta(node.Id, node.Key, node.Name ?? "", VersionOf(node), UmbracoTime.Local(node.CreateDate), UmbracoTime.Local(node.UpdateDate),
+            var name = published && !string.IsNullOrEmpty(node.PublishName) ? node.PublishName : node.Name;
+            _fill(r, new NodeMeta(node.Id, node.Key, name ?? "", VersionOf(node), UmbracoTime.Local(node.CreateDate), UmbracoTime.Local(node.UpdateDate),
                 node.SortOrder, node.Published, node.ParentId, ParentAlias(node.ParentId), segment));
             return r;
         }

@@ -53,18 +53,18 @@ namespace HpskSite.Services.Staffing
             // "self"/blank = the hosting club or region, resolved from the competition.
             if (string.IsNullOrWhiteSpace(scopeKey) || string.Equals(scopeKey, "self", StringComparison.OrdinalIgnoreCase))
             {
-                var comp = _contentService.GetById(competitionId);
+                var comp = _competitions.GetSaved(competitionId); // C3-planen §5d
                 if (type == SourceScopeType.Club)
                 {
-                    var clubId = comp?.GetValue<int>("clubId") ?? 0;
+                    var clubId = comp?.ClubId ?? 0;
                     if (clubId <= 0) return (false, "Tävlingen saknar arrangörsklubb.", 0);
                     scopeKey = clubId.ToString();
                 }
                 else
                 {
-                    var region = comp?.GetValue<string>("regionalFederation");
-                    if (string.IsNullOrWhiteSpace(region) && (comp?.GetValue<int>("clubId") ?? 0) > 0)
-                        try { region = _contentService.GetById(comp!.GetValue<int>("clubId"))?.GetValue<string>("regionalFederation"); } catch { }
+                    var region = comp?.RegionalFederation;
+                    if (string.IsNullOrWhiteSpace(region) && (comp?.ClubId ?? 0) > 0)
+                        try { region = _contentService.GetById(comp!.ClubId)?.GetValue<string>("regionalFederation"); } catch { }
                     if (string.IsNullOrWhiteSpace(region)) return (false, "Kunde inte hitta tävlingens krets.", 0);
                     scopeKey = region;
                 }

@@ -2462,7 +2462,7 @@ namespace HpskSite.Controllers
                 {
                     perWeaponGroup,
                     canChoose = MedalGrouping.CanChoose(scopeForMedals),
-                    propertyExists = _contentService.GetById(competitionId)?.HasProperty(MedalGrouping.PropertyAlias) ?? false,
+                    propertyExists = _competitions.CanStore(MedalGrouping.PropertyAlias),
                     description = MedalGrouping.Describe(perWeaponGroup)
                 };
 
@@ -2899,12 +2899,10 @@ namespace HpskSite.Controllers
             {
                 if (_umbracoContextAccessor.TryGetUmbracoContext(out var umbracoContext))
                 {
-                    var publishedCompetition = umbracoContext.Content?.GetById(competitionId);
-                    if (publishedCompetition != null)
-                    {
-                        var competitionUrl = publishedCompetition.Url();
+                    // Tävlingens adress ur id:t (C3-planen §5d) — ingen nod behövs.
+                    var competitionUrl = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.CompetitionLinks>().Url(competitionId);
+                    if (!string.IsNullOrEmpty(competitionUrl))
                         resultPageUrl = competitionUrl.TrimEnd('/') + "/resultat";
-                    }
                 }
             }
             catch (Exception ex)
@@ -3513,14 +3511,13 @@ namespace HpskSite.Controllers
                 if (!await CanManageCompetitionResults(request.CompetitionId))
                     return Json(new { success = false, message = "Du har inte behörighet att hantera resultat för denna tävling." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
-                if (competition == null)
+                if (_competitions.GetSaved(request.CompetitionId) == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
                 // ⚠️ SetValue på en saknad egenskap är en TYST no-op. Vägra och namnge den —
                 // en kryssruta som rapporterar lyckat och är borta vid nästa laddning är
                 // värre än en som säger vad som fattas.
-                if (!competition.HasProperty(MedalGrouping.PropertyAlias))
+                if (!_competitions.CanStore(MedalGrouping.PropertyAlias))
                 {
                     return Json(new
                     {

@@ -5,13 +5,14 @@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject HpskSite.Services.Competitions.CompetitionPostCache Posts
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.VirtualCompetitionNodes PageNodes
 @{
     var regionCode = ViewBag.regionCode as string ?? "";
     var today = DateTime.Today;
 
     // Single tree traversal — same pattern as CompetitionsHub.cshtml
     var allContent = !string.IsNullOrEmpty(regionCode)
-        ? Model.Root().DescendantsOrSelf().ToList()
+        ? Model.SiteRoot().DescendantsOrSelf().ToList()
         : new List<IPublishedContent>();
 
     var allClubs = allContent.Where(x => x.ContentType.Alias == "club").ToList();
@@ -26,10 +27,15 @@
     // Tävlingarna ur tävlingslagringen (C3-planen S4), i trädets ordning; noden för adressen.
     var treeIndex = new Dictionary<int, int>();
     for (var i = 0; i < allContent.Count; i++) treeIndex[allContent[i].Id] = i;
-    var allCompetitions = Competitions.List()
-        .Where(p => treeIndex.ContainsKey(p.Id))
-        .OrderBy(p => treeIndex[p.Id])
-        .Select(p => allContent[treeIndex[p.Id]])
+    // Tabelläget (C3-planen §5d): virtuella noder ur lagringen, ordnade på datum — trädet har inte de som
+    // skapats i tabellen.
+    var allCompetitions = (PageNodes.TableMode
+            ? Competitions.List().OrderBy(p => p.CompetitionDate ?? DateTime.MaxValue).ThenBy(p => p.SortOrder)
+                .Select(p => PageNodes.PageNode(p)).Where(n => n != null).Cast<IPublishedContent>()
+            : Competitions.List()
+                .Where(p => treeIndex.ContainsKey(p.Id))
+                .OrderBy(p => treeIndex[p.Id])
+                .Select(p => allContent[treeIndex[p.Id]]))
         .Where(x =>
         {
             var compClubId = Posts.Of(x).ClubId;

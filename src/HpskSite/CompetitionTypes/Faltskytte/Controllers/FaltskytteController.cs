@@ -968,7 +968,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
-            var competition = _contentService.GetById(request.CompetitionId);
+            var competition = _competitions.GetSaved(request.CompetitionId); // C3-planen §5d: lagringen, inte noden
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
@@ -989,7 +989,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             }
             else
             {
-                if (!competition.HasProperty("mergeConfig"))
+                if (!_competitions.CanStore("mergeConfig"))
                 {
                     _logger.LogWarning("Competition {CompId} missing 'mergeConfig' property — merge config not saved.", request.CompetitionId);
                     return Json(new { success = false, message = "Egenskapen 'mergeConfig' saknas på dokumenttypen competition — sammanslagningen kan inte sparas förrän den läggs till." });
@@ -1185,13 +1185,13 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             if (!await IsAuthorizedForCompetition(request.CompetitionId))
                 return Json(new { success = false, message = "Du har inte behörighet." });
 
-            var competition = _contentService.GetById(request.CompetitionId);
+            var competition = _competitions.GetSaved(request.CompetitionId); // C3-planen §5d: lagringen, inte noden
             if (competition == null)
                 return Json(new { success = false, message = "Tävlingen hittades inte." });
 
             // Main publish requires the legacy flag on the competition; sub-comp publish
             // only writes to the competitionResult node so we don't require that flag.
-            if (!request.IsSubCompetition && !competition.HasProperty("faltskytteResultsOfficial"))
+            if (!request.IsSubCompetition && !_competitions.CanStore("faltskytteResultsOfficial"))
                 return Json(new { success = false, message = "Egenskapen 'faltskytteResultsOfficial' saknas på tävlingens dokumenttyp. Lägg till den i Umbraco backoffice (True/False)." });
 
             if (!request.IsSubCompetition)
@@ -1227,7 +1227,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
 
             // Phase 2 auto-trigger: notify registered shooters that results are published. Opt-in per
             // competition (autoNotifyParticipants, default off), main publish only, fire-and-forget.
-            if (!request.IsSubCompetition && request.IsOfficial && competition.GetValue<bool>("autoNotifyParticipants"))
+            if (!request.IsSubCompetition && request.IsOfficial && (_contentService.GetById(competition.Id)?.GetValue<bool>("autoNotifyParticipants") ?? false))
             {
                 try
                 {

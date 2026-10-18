@@ -838,13 +838,13 @@ namespace HpskSite.CompetitionTypes.Springskytte.Controllers
                 if (!await HasCompetitionAccess(request.CompetitionId))
                     return Json(new { success = false, message = "Åtkomst nekad." });
 
-                var competition = _contentService.GetById(request.CompetitionId);
+                var competition = _competitions.GetSaved(request.CompetitionId); // C3-planen §5d: lagringen, inte noden
                 if (competition == null)
                     return Json(new { success = false, message = "Tävlingen hittades inte." });
 
                 // ⚠️ VÄGRA när egenskapen saknas. SetValue på en saknad egenskap är en TYST
                 // no-op, så ett "sparat" som inte sparades är oskiljbart från en trasig funktion.
-                if (!competition.HasProperty("mergeConfig"))
+                if (!_competitions.CanStore("mergeConfig"))
                     return Json(new { success = false, message = "Egenskapen 'mergeConfig' saknas på dokumenttypen competition — sammanslagningen kan inte sparas förrän den läggs till." });
 
                 // Genom tävlingslagringen (C3-planen S5): publicerar bara en tävling som redan var publicerad.

@@ -363,7 +363,7 @@ namespace HpskSite.Services
         /// inte bär — därför noden. Försvinner när tävlingarna flyttar till tabellen (där finns fältet alltid).
         /// </summary>
         private bool HonoraryPropertyMissing(int competitionId) =>
-            _contentService.GetById(competitionId)?.HasProperty(HonoraryEnabledProperty) != true;
+            !_competitions.CanStore(HonoraryEnabledProperty); // C3-planen §5d
 
         private PrizeHonorarySection BuildHonorary(
             HpskSite.Models.Competitions.CompetitionInfo competition,
