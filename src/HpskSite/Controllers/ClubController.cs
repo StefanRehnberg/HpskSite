@@ -1898,68 +1898,12 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Club not found" });
                 }
 
-                // Validate file
-                if (imageFile == null || imageFile.Length == 0)
+                // En regel för bilduppladdningar (C3-planen S7): klubbens logga och banner, seriens logga.
+                var images = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Media.ImageMediaService>();
+                var (udi, relativePath, uploadError) = await images.SaveAsync(imageFile, "Club Images", "club-images");
+                if (uploadError != null)
                 {
-                    return Ok(new { success = false, message = "No file uploaded" });
-                }
-
-                if (imageFile.Length > 5 * 1024 * 1024)
-                {
-                    return Ok(new { success = false, message = "File too large. Maximum 5 MB allowed." });
-                }
-
-                var extension = Path.GetExtension(imageFile.FileName).ToLowerInvariant();
-                var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
-                if (!allowedExtensions.Contains(extension))
-                {
-                    return Ok(new { success = false, message = "Invalid file type. Only JPG, PNG, GIF and WebP allowed." });
-                }
-
-                // Find or create "Club Images" folder in Media Library
-                var clubImagesFolder = _mediaService.GetRootMedia()
-                    .FirstOrDefault(m => m.Name == "Club Images");
-
-                if (clubImagesFolder == null)
-                {
-                    clubImagesFolder = _mediaService.CreateMedia("Club Images", -1, "Folder");
-                    _mediaService.Save(clubImagesFolder);
-                }
-
-                // Create media item
-                string fileName = Path.GetFileName(imageFile.FileName);
-                string fileExtension = Path.GetExtension(fileName);
-                string uniqueFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{Guid.NewGuid()}{fileExtension}";
-
-                var mediaItem = _mediaService.CreateMedia(fileName, clubImagesFolder.Id, "Image");
-
-                // Save file to physical location
-                var mediaFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "media", "club-images");
-                if (!Directory.Exists(mediaFolderPath))
-                {
-                    Directory.CreateDirectory(mediaFolderPath);
-                }
-
-                var physicalFilePath = Path.Combine(mediaFolderPath, uniqueFileName);
-                using (var fileStream = new FileStream(physicalFilePath, FileMode.Create))
-                {
-                    await imageFile.CopyToAsync(fileStream);
-                }
-
-                // Set media properties
-                var relativePath = $"/media/club-images/{uniqueFileName}";
-                mediaItem.SetValue("umbracoFile", relativePath);
-                mediaItem.SetValue("umbracoExtension", fileExtension.TrimStart('.'));
-                mediaItem.SetValue("umbracoBytes", imageFile.Length.ToString());
-
-                var mediaSaveResult = _mediaService.Save(mediaItem);
-                if (!mediaSaveResult.Success)
-                {
-                    if (System.IO.File.Exists(physicalFilePath))
-                    {
-                        System.IO.File.Delete(physicalFilePath);
-                    }
-                    return Ok(new { success = false, message = "Failed to save image to media library" });
+                    return Ok(new { success = false, message = uploadError });
                 }
 
                 // Link media to club content property
@@ -1969,7 +1913,7 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Club content not found" });
                 }
 
-                clubContent.SetValue(imageType, mediaItem.GetUdi().ToString());
+                clubContent.SetValue(imageType, udi);
                 _contentService.Save(clubContent);
                 _contentService.Publish(clubContent, new[] { "*" }, -1);
 

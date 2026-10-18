@@ -20,6 +20,7 @@ namespace HpskSite.Composers
 
             // Register UnifiedResultsService as scoped for aggregating results from multiple sources
             builder.Services.AddScoped<UnifiedResultsService>();
+            builder.Services.AddScoped<HpskSite.Services.Media.ImageMediaService>(); // C3-planen S7: klubbens och seriens bilder
 
             // Register MemberActivityService as scoped (static cache still shared, but avoids DI lifetime issues)
             builder.Services.AddScoped<MemberActivityService>();

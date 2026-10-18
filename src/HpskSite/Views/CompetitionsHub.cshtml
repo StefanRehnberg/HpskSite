@@ -163,7 +163,10 @@
     var competitionTypes = allContent.Where(x => x.ContentType.Alias == "competitionType").ToList();
     // Use centralized shooting classes model (includes R, L, M classes)
     var shootingClasses = HpskSite.Models.ShootingClasses.All;
-    var competitionSeasons = allContent.Where(x => x.ContentType.Alias == "competitionSeason").ToList();
+    // Säsongsfiltret går på tävlingens ÅR (C3-planen S7) — förut på föräldernoden, så en omgång i en serie (vars
+    // förälder är serien) föll ur filtret så fort en säsong valdes.
+    var seasonYears = allCompetitions.Select(c => Posts.Of(c).CompetitionDate?.Year).Where(y => y.HasValue)
+        .Select(y => y!.Value).Distinct().OrderByDescending(y => y).ToList();
 
     // Batch registration check — load all user registrations into a HashSet for O(1) lookups.
     // currentMember is resolved further up, because the competition list itself depends on it.
@@ -386,9 +389,9 @@
                                 </label>
                                 <select class="form-select" id="filterSeason">
                                     <option value="">Alla säsonger</option>
-                                    @foreach (var season in competitionSeasons.OrderByDescending(s => s.Name))
+                                    @foreach (var seasonYear in seasonYears)
                                     {
-                                        <option value="@season.Id">@season.Name</option>
+                                        <option value="@seasonYear">@seasonYear</option>
                                     }
                                 </select>
                             </div>
@@ -570,13 +573,9 @@
                 var externalUrl = Posts.Of(competition).ExternalUrl;
                 var externalRegistrationEmail = Posts.Of(competition).ExternalRegistrationEmail;
 
-                // Get season information - check if competition's parent is a season
-                var seasonId = "";
+                // Säsongen = tävlingens år (se seasonYears)
+                var seasonId = Posts.Of(competition).CompetitionDate?.Year.ToString() ?? "";
                 var parent = competition.Parent();
-                if (parent != null && parent.ContentType.Alias == "competitionSeason")
-                {
-                    seasonId = parent.Id.ToString();
-                }
 
                 // Get series information - check if competition's parent is a series
                 var seriesId = "";
@@ -914,13 +913,9 @@
                             competitionRegion = Posts.Of(competition).RegionalFederation ?? "";
                         }
 
-                        // Get season information - check if competition's parent is a season
-                        var seasonId = "";
+                        // Säsongen = tävlingens år (se seasonYears)
+                        var seasonId = Posts.Of(competition).CompetitionDate?.Year.ToString() ?? "";
                         var parent = competition.Parent();
-                        if (parent != null && parent.ContentType.Alias == "competitionSeason")
-                        {
-                            seasonId = parent.Id.ToString();
-                        }
 
                         // Get series information - check if competition's parent is a series
                         var seriesId = "";
