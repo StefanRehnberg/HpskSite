@@ -313,22 +313,15 @@ namespace HpskSite.Routing
             return string.Equals(actual, urlSeriesSlug, StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>Defensive read of competitionScope — see CompetitionUrlProvider.ReadScopeValue
-        /// for the rationale (FlexibleDropdown converter chokes on raw-string values).</summary>
+        /// <summary>
+        /// Omfattningen genom den gemensamma läsningen (råvärdet, JSON avkodat). Den egna typade läsningen som
+        /// låg här kände inte igen <c>["Svenskt Mästerskap"]</c> (prod, 3514), så den gamla adressen
+        /// <c>/competitions/2026/sm/sm-milsnabb-2026/</c> gav 404 när tävlingen fått sin nya adress.
+        /// </summary>
         private static string? ReadScopeValue(IPublishedContent competition)
         {
-            try
-            {
-                var raw = competition.Value("competitionScope");
-                return raw switch
-                {
-                    string s => string.IsNullOrWhiteSpace(s) ? null : s,
-                    string[] arr => arr.FirstOrDefault(),
-                    IEnumerable<string> e => e.FirstOrDefault(),
-                    _ => null
-                };
-            }
-            catch { return null; }
+            var scope = CompetitionScopeHelper.ReadScope(competition);
+            return string.IsNullOrEmpty(scope) ? null : scope;
         }
 
         private IPublishedContent? FindByRegionClubShape(int year, string regionSlug, string clubSlug,
