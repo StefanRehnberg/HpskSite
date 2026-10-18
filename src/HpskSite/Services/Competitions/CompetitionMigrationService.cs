@@ -137,6 +137,7 @@ ORDER BY n.id", CompetitionFieldTable.NodeAlias, CompetitionSeriesFieldTable.Nod
             public List<string> WithoutAddress { get; init; } = new();
             public int RowsAlreadyInTable { get; init; }
             public List<string> Notes { get; init; } = new();
+            public List<string> UnpublishBlockers { get; init; } = new();
             public List<string> MissingSchema => TableExists ? new List<string>() : new List<string> { "Competition (med §5-kolumnerna)", "CompetitionNodeArchive" };
         }
 
@@ -207,6 +208,7 @@ ORDER BY n.id", CompetitionFieldTable.NodeAlias, CompetitionSeriesFieldTable.Nod
                 Unreadable = unreadable,
                 WithoutAddress = withoutAddress,
                 RowsAlreadyInTable = inTable,
+                UnpublishBlockers = exists ? UnpublishBlockers() : new List<string>(),
                 Notes = notes,
             };
         }
@@ -524,10 +526,50 @@ VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, @10, @11, @12, @13)",
         /// Avpublicerar högst <paramref name="batch"/> tävlings- och serienoder (§5e). Bara när tabellen gäller.
         /// Raderar ingenting — noderna och deras barn (gamla fakturor) ligger kvar i trädet.
         /// </summary>
-        public (int Unpublished, int Remaining, string Message) UnpublishNodes(int batch, IContentService contentService)
+        /// <summary>
+        /// Det som måste vara klart innan tävlingsnoderna får avpubliceras (C3-planen §5 punkt 5.5). Tom = fritt.
+        /// <para><b>⚠️⚠️ De gamla fakturamapparna ligger under tävlingsnoderna.</b> Umbraco 17:s publicerade cache
+        /// döljer allt under en avpublicerad förälder (<c>HasPublishedAncestorPath</c>): mappen finns kvar i
+        /// databasen men <c>LegacyInvoiceHubs.PublishedHub</c> svarar null — Swish-betalningen av en gammal faktura
+        /// och kvittona slutar fungera (provat på kopian 2026-10-18, <c>c3/c3-s5e-invoice-hazard.mjs</c>). Mapparna
+        /// flyttas till arkivet först (F1, efter bokslutet 2026).</para>
+        /// <para>Barnen som bor kvar i trädet — anmälningar, startlistor och resultatlistor — och händelserna ska
+        /// stå på sina tabeller.</para>
+        /// </summary>
+        public List<string> UnpublishBlockers()
         {
-            if (NodesCurrent)
-                return (0, 0, "Avpubliceringen körs först när tabellerna gäller.");
+            var blockers = new List<string>();
+            if (NodesCurrent) blockers.Add("Tävlingarna står på noderna — byt till tabellerna först.");
+            if (!string.Equals(_settings.Get(HpskSite.Services.Registrations.RegistrationStoreSettings.StoreKey, "node"), "table", StringComparison.OrdinalIgnoreCase))
+                blockers.Add("Anmälningarna står inte på tabellen.");
+            if (!HpskSite.Services.StartLists.StartListStoreSettings.UsesTable(_settings))
+                blockers.Add("Startlistorna står inte på tabellen.");
+            if (!HpskSite.Services.Results.CompetitionResultStoreSettings.UsesTable(_settings))
+                blockers.Add("Resultatlistorna står inte på tabellen.");
+            if (!HpskSite.Services.Events.ClubEventStoreSettings.UsesTable(_settings))
+                blockers.Add("Händelserna står inte på tabellen.");
+
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var hubs = scope.Database.Fetch<int>(@"
+SELECT h.id FROM umbracoNode h
+JOIN umbracoContent c ON c.nodeId = h.id
+JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
+JOIN umbracoContent pc ON pc.nodeId = h.parentId
+JOIN cmsContentType pct ON pct.nodeId = pc.contentTypeId
+WHERE ct.alias = @0 AND pct.alias = @1 AND h.trashed = 0
+ORDER BY h.id", LegacyInvoiceHubs.HubAlias, CompetitionFieldTable.NodeAlias);
+            if (hubs.Count > 0)
+                blockers.Add($"{hubs.Count} gamla fakturamappar ligger under tävlingsnoder — flytta dem till arkivet först (F1). " +
+                    $"Avpublicerade tävlingar döljer dem i den publicerade cachen. Mappar: {string.Join(", ", hubs.Take(10))}{(hubs.Count > 10 ? " …" : "")}.");
+            return blockers;
+        }
+
+        public (int Unpublished, int Remaining, string Message) UnpublishNodes(int batch, IContentService contentService, bool copyOnlyIgnoreBlockers = false)
+        {
+            var blockers = UnpublishBlockers();
+            if (copyOnlyIgnoreBlockers) blockers.RemoveAll(b => !b.StartsWith("Tävlingarna står på noderna"));
+            if (blockers.Count > 0)
+                return (0, 0, "Avpubliceringen vägras: " + string.Join(" ", blockers));
             batch = Math.Clamp(batch, 1, 200);
             List<int> published;
             using (var scope = _scopeProvider.CreateScope(autoComplete: true))
