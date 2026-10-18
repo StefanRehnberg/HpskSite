@@ -77,6 +77,20 @@ namespace HpskSite.Controllers
             return JsonText(new { cached, rows = svc.AllFor(kind, id), url = urls.UrlFor(kind, id) });
         }
 
+        /// <summary>C3-planen §5e: tävlingens gamla fakturamapp — i databasen och i den publicerade cachen.</summary>
+        [HttpGet]
+        public async Task<IActionResult> LegacyInvoiceHubProbe(int competitionId)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
+            var hubs = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.LegacyInvoiceHubs>();
+            return JsonText(new
+            {
+                hubIds = hubs.HubIds(competitionId),
+                publishedHub = hubs.PublishedHub(competitionId)?.Id,
+                hasInvoices = hubs.HasInvoices(competitionId),
+            });
+        }
+
         [HttpGet]
         public async Task<IActionResult> CompetitionCacheProbe(bool check = false)
         {
@@ -194,6 +208,27 @@ namespace HpskSite.Controllers
                 _storeComparison.EnsureCopyDatabase();
                 settings.Set(HpskSite.Services.Competitions.CompetitionStoreSettings.StoreKey, mode, null);
                 return JsonText(new { success = true, mode });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return JsonText(new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// C3-planen §5e: avpublicerar tävlingsnoderna FÖRBI spärren (fakturamapparna, de andra lagringarna) — för att
+        /// pröva sidorna utan noder. BARA på databaskopian; i dev och prod gäller spärren.
+        /// </summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> UnpublishCompetitionNodesOnCopy(int batch,
+            [FromServices] HpskSite.Services.Competitions.CompetitionMigrationService migration)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
+            try
+            {
+                _storeComparison.EnsureCopyDatabase();
+                var (done, remaining, message) = migration.UnpublishNodes(batch, Services.ContentService, copyOnlyIgnoreBlockers: true);
+                return JsonText(new { success = true, unpublished = done, remaining, message });
             }
             catch (InvalidOperationException ex)
             {

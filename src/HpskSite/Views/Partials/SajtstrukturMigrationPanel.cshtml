@@ -134,8 +134,8 @@
             rows.push('Tävlingar: <strong>' + g('competitions') + '</strong> · serier: <strong>' + g('series') + '</strong>'
                 + ' · publicerade: ' + g('published') + ' · i papperskorgen: ' + g('trashed')
                 + ' (flyttas som raderade, syns inte)');
-            [['unpublished', 'Opublicerade — flyttas som raderade'], ['draftAhead', 'Sparade ändringar som inte publicerats — efter flytten gäller det sparade'],
-             ['withoutAddress', 'Publicerade utan adress — ingen sida i tabelläget förrän en värd sätts'], ['unreadable', 'Värden som inte går att läsa — blir standardvärdet']]
+            [['unpublished', 'Opublicerade — flyttas som raderade'], ['draftAhead', 'Sparade ändringar som inte publicerats — det publicerade flyttas, utkastet bara till arkivet'],
+             ['withoutAddress', 'Publicerade utan adress — ingen sida i tabelläget förrän en värd sätts'], ['unreadable', 'Värden som inte går att läsa — blir standardvärdet'], ['unpublishBlockers', 'Avpubliceringen av noderna väntar på']]
                 .forEach(function (k) {
                     var list = g(k[0]) || [];
                     if (list.length) rows.push('<details><summary>' + esc(k[1]) + ' (' + list.length + ')</summary><ul class="mb-0">'
@@ -213,6 +213,7 @@
             var total = 0;
             for (var i = 0; i < 200; i++) {
                 var d = await post(card.dataset.base, 'Unpublish', { batch: '50' });
+                if (d.success === false) { lines(card, esc(d.message || 'Avpubliceringen vägrades.'), 'text-danger'); break; }
                 total += d.unpublished || 0;
                 card.querySelector('.ssm-out').innerHTML = '<div>Avpublicerade: ' + total + ' · kvar: ' + d.remaining + '</div>';
                 if (!d.remaining || !d.unpublished) { lines(card, esc(d.message || '')); break; }

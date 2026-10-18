@@ -11762,7 +11762,13 @@ Underhåll på `/admin-page`. Samma steg som startlistorna: Torrkör → (frys, 
   adressen avgör flera träffar); `CompetitionContentFinder` skickar `/competitions/{id}/` vidare via `CompetitionLinks`.
 - **Nodvakten** vägrar i tabelläget nya tävlings-/serienoder OCH publicering av befintliga.
   **Avpubliceringen** (`CompetitionMigrationService.UnpublishNodes`, Underhåll → Avpublicera) bara i tabelläget;
-  raderar ingenting. ⚠️ Gamla fakturor (`registrationInvoicesHub` under tävlingsnoden, `PaymentService`) bor kvar
+  raderar ingenting. **⚠️⚠️ Den vägras (`UnpublishBlockers`, planens §5.5) tills anmälningarna, startlistorna,
+  resultatlistorna och händelserna står på tabellerna OCH inga gamla fakturamappar ligger under tävlingsnoderna.**
+  Umbraco 17:s publicerade cache döljer allt under en avpublicerad förälder (`HasPublishedAncestorPath`):
+  mappen finns kvar i databasen men `LegacyInvoiceHubs.PublishedHub` svarar null, så Swish-betalningen av en gammal
+  faktura och kvittona slutar fungera (provat på kopian, `hpsk-verify/c3/c3-s5e-invoice-hazard.mjs`). Mapparna
+  flyttas till arkivet först (F1, enligt planen efter bokslutet 2026). Torrkörningen visar vad avpubliceringen
+  väntar på. Kopian går förbi spärren med `C3Baseline/UnpublishCompetitionNodesOnCopy` (bara `Umbraco_C3`). ⚠️ Gamla fakturor (`registrationInvoicesHub` under tävlingsnoden, `PaymentService`) bor kvar
   under noderna — **ta aldrig bort tävlingsnoder** som bär fakturor (borttagningen av noder är inte byggd, med flit).
 - **Kvar på noder, medvetet:** `autoNotifyParticipants` (finns inte på doktypen; svarar falskt även utan nod),
   `PaymentService` (gamla fakturor), skyddsnätets verktyg (`C3Baseline`, `CompetitionAuthorizationReport`), dev-seedarna,
@@ -11771,7 +11777,7 @@ Underhåll på `/admin-page`. Samma steg som startlistorna: Torrkör → (frys, 
 - **Seriens resultat i tabelläget räknar bara levande omgångar** — i nodläget räknade `ListAllInSeries` även
   opublicerade barn (dev-seedarnas tio DEMO-tävlingar under Hallandsserien 2025 gav tomma kolumner 9–18). En
   opublicerad nod är en raderad rad efter flytten, och då räknas den inte. Avsiktligt.
-- Sviter: `hpsk-verify/c3/c3-s5d-tablemode-verify.mjs` 20/20 (`$SP/s5d-run.sh`: tabellfödd tävling och serie,
+- Sviter: `hpsk-verify/c3/c3-s5d-tablemode-verify.mjs` 23/23 (med spärren) (`$SP/s5d-run.sh`: tabellfödd tävling och serie,
   navet, `/competitions/{id}/`, adminlistan, hanteringen, avpublicering, gamla trädadressen 301, redigering och
   resultatsida utan nod); med navets `Parent()` kvar → 3 röda. Sidjämförelsen nodläge mot tabelläge
   (`$SP/s5c.sh`, `c3/s6-page-compare.mjs`): 0 statusskillnader; textskillnaderna = brödsmulan "Tävlingar" (+10

@@ -105,6 +105,9 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> Unpublish(int batch = 50)
         {
             if (await DenyAsync() is { } deny) return deny;
+            var blockers = _migration.UnpublishBlockers();
+            if (blockers.Count > 0)
+                return Json(new { success = false, unpublished = 0, remaining = 0, blockers, message = "Avpubliceringen vägras: " + string.Join(" ", blockers) });
             var (done, remaining, message) = _migration.UnpublishNodes(batch, Services.ContentService);
             return Json(new { success = true, unpublished = done, remaining, message });
         }
