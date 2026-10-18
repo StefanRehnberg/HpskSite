@@ -36,13 +36,13 @@ namespace HpskSite.Services.Addresses
         public string? UrlOf(PageAddressRow row)
         {
             var prefix = OwnerPrefix(row.Owner);
-            return prefix == null ? null : PageAddressRules.Compose(prefix, row.Owner.IsNational, row.TargetKind, row.UrlYear, row.Slug);
+            return prefix == null ? null : PageAddressRules.Compose(prefix, row.Owner.OmitsKindSegment, row.TargetKind, row.UrlYear, row.Slug);
         }
 
-        /// <summary>"/halland/haaplinge-goass/", "/halland/", "/sm/" — med snedstreck sist. Null = går inte att läsa.</summary>
+        /// <summary>"/halland/haaplinge-goass/", "/halland/", "/sm/", "/tavlingar/" — med snedstreck sist. Null = går inte att läsa.</summary>
         public string? OwnerPrefix(PageAddressOwner owner)
         {
-            if (owner.IsNational) return "/" + owner.Type.ToLowerInvariant() + "/";
+            if (owner.OmitsKindSegment) return "/" + owner.Type.ToLowerInvariant() + "/";
             if (!_ctx.TryGetUmbracoContext(out var uc) || uc.Content == null) return null;
             var node = uc.Content.GetById(owner.Id);
             var expected = owner.Type == PageAddressOwner.Region ? "regionalPage" : "club";

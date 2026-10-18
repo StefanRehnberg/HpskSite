@@ -82,6 +82,8 @@
                         </div>
                     </div>
 
+                    @await Html.PartialAsync("_AdvertScopeField", "advert_")
+
                     <div class="mb-3">
                         <label for="advert_competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="advert_competitionName" name="competitionName" required>

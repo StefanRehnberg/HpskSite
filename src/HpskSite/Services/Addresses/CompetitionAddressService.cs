@@ -49,10 +49,16 @@ namespace HpskSite.Services.Addresses
             var slug = c.UrlSegment;
             if (string.IsNullOrWhiteSpace(slug)) return (null, 0, "", "saknar adressdel");
             var year = c.CompetitionDate?.Year ?? SeriesYear(c.SeriesId) ?? YearOfNode(c.ParentId) ?? c.CreateDate.Year;
+            if (!_ctx.TryGetUmbracoContext(out var uc) || uc.Content == null) return (null, year, slug, "ingen publicerad cache");
             var owner = OwnerFor(c.CompetitionScope, c.ClubId, c.RegionalFederation, allowNational: true);
-            return owner == null
-                ? (null, year, slug, "ingen värd (varken klubb, krets eller mästerskap)")
-                : (owner, year, slug, null);
+            if (owner != null) return (owner, year, slug, null);
+            // Ingen värd alls → reservadressen /tavlingar/{år}/{slug}/ (2026-10-18): i tabelläget har en tävling bara
+            // en sida om den har en adress, och en extern annons har ofta varken klubb, krets eller mästerskap.
+            // ⚠️ Bara när ingenting är satt. En satt klubb eller krets som inte går att läsa just nu (avpublicerad,
+            // flyttad) ger ingen ny adress — tävlingen behåller sin, i stället för att flytta fram och tillbaka.
+            return HasNoHost(c)
+                ? (PageAddressOwner.SiteWide, year, slug, null)
+                : (null, year, slug, "värden går inte att läsa (klubb eller krets saknas i den publicerade cachen)");
         }
 
         public (PageAddressOwner? Owner, int Year, string Slug, string? Problem) Plan(CompetitionSeriesInfo s)
@@ -109,6 +115,13 @@ namespace HpskSite.Services.Addresses
         }
 
         // ── Ägaren ───────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Varken klubb eller krets satt. (Ett SM har fått sin adress före den här frågan; ett landsdelsmästerskap
+        /// utan värd har ingen landsdel att räkna fram och får reservadressen.)
+        /// </summary>
+        public static bool HasNoHost(CompetitionInfo c)
+            => c.ClubId <= 0 && string.IsNullOrWhiteSpace(c.RegionalFederation);
 
         private PageAddressOwner? OwnerFor(string? rawScope, int clubId, string? regionalFederation, bool allowNational)
         {

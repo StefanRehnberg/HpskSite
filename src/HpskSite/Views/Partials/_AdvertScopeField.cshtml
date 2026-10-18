@@ -1,0 +1,28 @@
+@model string
+@*
+    Fältet Mästerskap i annonsdialogerna (skapa och redigera annons), 2026-10-18.
+    Modellen är id-prefixet ("advert_" / "advertEdit_"); fältet heter competitionScope som i Redigera tävling
+    och sparas av samma fältregel (CompetitionFieldBag).
+
+    Varför annonsen behöver det: en nationell tävling har varken klubb eller krets, och utan omfattning har
+    adressräkningen ingenting att gå på. Med Svenskt Mästerskap blir adressen /sm/{år}/{namn}/. Ett
+    landsdelsmästerskap räknas fram ur kretsens landsdel och behöver därför en klubb eller krets som värd;
+    utan värd (och för övriga annonser) gäller reservadressen /tavlingar/{år}/{namn}/.
+*@
+@{
+    var prefix = Model ?? "";
+}
+<div class="mb-3">
+    <label for="@(prefix)competitionScope" class="form-label">Mästerskap</label>
+    <select class="form-select" id="@(prefix)competitionScope" name="competitionScope">
+        <option value="">Inget mästerskap</option>
+        @foreach (var scopeOption in HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.All)
+        {
+            <option value="@scopeOption">@scopeOption</option>
+        }
+    </select>
+    <small class="form-text text-muted">
+        Avgör tävlingens adress. Ett SM får <code>/sm/{år}/…</code>. Ett landsdelsmästerskap behöver en klubb eller krets som
+        arrangör för att få landsdelens adress. Annars hamnar annonsen under <code>/tavlingar/{år}/…</code>.
+    </small>
+</div>
