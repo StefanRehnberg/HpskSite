@@ -10,11 +10,11 @@ namespace HpskSite.Routing
     /// C3-planen S6: tävlingarnas, seriernas och listans adresser (Stefans beslut 2026-10-14, §9a), ur
     /// <c>PageAddress</c> via <see cref="PageAddressUrls"/>:
     /// <list type="bullet">
-    /// <item>tävling: <c>/{krets}/klubbar/{klubb}/{år}/{tävling}/</c>, <c>/{krets}/{år}/{tävling}/</c>,
+    /// <item>tävling: <c>/{krets}/{klubb}/tavlingar/{år}/{tävling}/</c>, <c>/{krets}/tavlingar/{år}/{tävling}/</c>,
     /// <c>/sm/{år}/{tävling}/</c>, <c>/ssm|vsm|osm|nsm/{år}/{tävling}/</c></item>
     /// <item>tävlingens barn (resultat, startlista, finalstartlista): tävlingens adress + eget segment</item>
-    /// <item>serie: <c>/{värd}/{år}/{serie}/</c></item>
-    /// <item>navet: <c>/tavlingar/</c>, säsongen: <c>/tavlingar/{år}/</c></item>
+    /// <item>serie: <c>/{värd}/serier/{år}/{serie}/</c></item>
+    /// <item>navet: <c>/tavlingar/</c>. Säsongen har ingen egen sida längre och pekar på navet.</item>
     /// </list>
     /// Saknar en tävling eller serie adress (ingen värd) returneras null, och Umbracos trädadress gäller —
     /// den visas då som förut (<see cref="CompetitionTreeRedirectFinder"/> 301:ar bara när adressen flyttat).
@@ -66,9 +66,8 @@ namespace HpskSite.Routing
                 case "competitionSeries": // competitionstore-ok: adresserna (C3 S6) routar till noden tills sidorna blir controllers (S7)
                     return _urls.UrlFor(PageAddressKinds.Series, content.Id);
                 case "competitionsHub":
+                case "competitionSeason": // säsongssidan finns inte längre (2026-10-18) — listan har årsväljaren
                     return PageAddressUrls.CompetitionsListPath;
-                case "competitionSeason":
-                    return string.IsNullOrWhiteSpace(content.UrlSegment) ? null : $"{PageAddressUrls.CompetitionsListPath}{content.UrlSegment}/";
             }
             if (ChildAliases.Contains(content.ContentType.Alias) && content.Parent?.ContentType.Alias == "competition") // competitionstore-ok: adresserna (C3 S6) routar till noden tills sidorna blir controllers (S7)
             {

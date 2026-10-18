@@ -15,13 +15,15 @@ namespace HpskSite.Controllers
 {
     /// <summary>
     /// C3-planen S7: sidorna på de nya adresserna (S6) som ASP.NET Core-routes, i stället för att Umbracos
-    /// innehållsupplösare letar fram dem.
+    /// innehållsupplösare letar fram dem. Adressformerna (Stefans beslut 2026-10-18, sorten i adressen):
     /// <list type="bullet">
-    /// <item><c>/tavlingar/</c> och <c>/tavlingar/{år}/</c> — listan och säsongen</item>
-    /// <item><c>/{krets}/klubbar/{klubb}/{år}/{slug}/[barn/]</c>, <c>/{krets}/{år}/{slug}/[barn/]</c>,
-    /// <c>/sm|ssm|vsm|osm|nsm/{år}/{slug}/[barn/]</c> — tävling (med resultat, startlistor, finaler), serie,
-    /// händelse, ur <c>PageAddress</c></item>
-    /// <item>årssidan (<c>/halland/2026/</c>) och <c>/sm/</c> → 301 till <c>/tavlingar/</c></item>
+    /// <item><c>/tavlingar/</c> — listan. <c>/tavlingar/{år}/</c> → 301 till listan.</item>
+    /// <item>klubbens: <c>/{krets}/{klubb}/tavlingar/{år}/{slug}/[barn/]</c>, <c>…/handelser/{år}/{slug}/</c>,
+    /// <c>…/serier/{år}/{slug}/</c> (klubbens adress är den korta, se <c>ClubShortUrls</c>)</item>
+    /// <item>kretsens: <c>/{krets}/tavlingar|handelser|serier/{år}/{slug}/[barn/]</c></item>
+    /// <item>förbundets mästerskap: <c>/sm|ssm|vsm|osm|nsm/{år}/{slug}/[barn/]</c>, utan sortsegment</item>
+    /// <item>de gamla formerna <c>/{krets}/{år}/{slug}/</c> och <c>/{krets}/klubbar/{klubb}/{år}/{slug}/</c>
+    /// → 301 till den nya. Sortsegmentet utan år (<c>/halland/tavlingar/</c>) och <c>/sm/</c> → 301.</item>
     /// </list>
     ///
     /// <para><b>Noderna är fortfarande modellen</b> så länge tävlingarna är noder — vyerna renderas som förut,
@@ -29,8 +31,10 @@ namespace HpskSite.Controllers
     /// <see cref="CompetitionPageContext"/>.</para>
     ///
     /// <para><b>⚠️ En matchad route är vår:</b> Umbracos egen upplösning körs inte. Finns adressen inte svarar
-    /// vi med 404-sidan. Därför är krets-segmentet spärrat mot navets eget segment (<c>competitions</c>) — de
-    /// gamla adresserna går fortfarande genom Umbracos kedja (<c>CompetitionTreeRedirectFinder</c> m.fl.).</para>
+    /// vi med 404-sidan. Därför är krets-segmentet spärrat mot navets eget segment (<c>competitions</c>) och
+    /// mot <c>tavlingar</c> — de gamla adresserna går fortfarande genom Umbracos kedja
+    /// (<c>CompetitionTreeRedirectFinder</c> m.fl.) — och klubbsegmentet mot katalogen, sortsegmenten och årtal,
+    /// så att ingen adress kan matcha två routes.</para>
     /// </summary>
     public class CompetitionPagesController : Controller
     {
@@ -38,7 +42,9 @@ namespace HpskSite.Controllers
         private const string National = "{owner:regex(^(sm|ssm|vsm|osm|nsm)$)}";
         // ⚠️ Inga hakparenteser: rutmallen läser [..] som en ersättningstoken. Mästerskapens namn är uteslutna,
         // annars matchar /sm/2026/… både den här och National — ASP.NET svarar då 500 (AmbiguousMatchException).
-        private const string Krets = "{krets:regex(^(?!(competitions|sm|ssm|vsm|osm|nsm)$).+$)}";
+        private const string Krets = "{krets:regex(^(?!(competitions|tavlingar|sm|ssm|vsm|osm|nsm)$).+$)}";
+        private const string Klubb = "{klubb:regex(^(?!(klubbar|tavlingar|handelser|serier|\\d{{4}})$).+$)}";
+        private const string Kind = "{kind:regex(^(tavlingar|handelser|serier)$)}";
 
         private readonly IUmbracoContextAccessor _ctx;
         private readonly PageAddressService _addresses;
@@ -47,9 +53,11 @@ namespace HpskSite.Controllers
         private readonly SiteSettingService _settings;
         private readonly CompetitionPageContext _page;
         private readonly ITemplateService _templates;
+        private readonly HpskSite.Routing.SiteRouteLookup _routes;
 
         public CompetitionPagesController(IUmbracoContextAccessor ctx, PageAddressService addresses, PageAddressUrls urls,
-            IRedirectUrlService redirects, SiteSettingService settings, CompetitionPageContext page, ITemplateService templates)
+            IRedirectUrlService redirects, SiteSettingService settings, CompetitionPageContext page, ITemplateService templates,
+            HpskSite.Routing.SiteRouteLookup routes)
         {
             _ctx = ctx;
             _addresses = addresses;
@@ -58,6 +66,7 @@ namespace HpskSite.Controllers
             _settings = settings;
             _page = page;
             _templates = templates;
+            _routes = routes;
         }
 
         // ── Listan ────────────────────────────────────────────────────────────────────────
@@ -69,13 +78,9 @@ namespace HpskSite.Controllers
             return hub == null ? NotFoundPage() : View("CompetitionsHub", hub);
         }
 
+        /// <summary>Säsongssidan finns inte längre (Stefans beslut 2026-10-18) — listan har årsväljaren.</summary>
         [HttpGet("tavlingar/" + Year)]
-        public IActionResult Season(string year)
-        {
-            var season = HubNode()?.Children.FirstOrDefault(c => c.ContentType.Alias == "competitionSeason"
-                && string.Equals(c.UrlSegment, year, StringComparison.OrdinalIgnoreCase));
-            return season == null ? NotFoundPage() : View("CompetitionSeason", season);
-        }
+        public IActionResult Season(string year) => ToList();
 
         // ── Förbundets mästerskap ─────────────────────────────────────────────────────────
 
@@ -84,41 +89,75 @@ namespace HpskSite.Controllers
 
         [HttpGet(National + "/" + Year + "/{slug?}/{child?}")]
         public IActionResult NationalPage(string owner, string year, string? slug, string? child)
-            => Serve(PageAddressOwner.ForNational(owner), int.Parse(year), slug, child);
+            => Serve(PageAddressOwner.ForNational(owner), null, int.Parse(year), slug, child);
 
         // ── Kretsens och klubbens ─────────────────────────────────────────────────────────
 
+        [HttpGet(Krets + "/" + Kind)]
+        public IActionResult RegionKindRoot(string krets, string kind) => KindRoot(new[] { krets }, kind);
+
+        [HttpGet(Krets + "/" + Kind + "/" + Year + "/{slug?}/{child?}")]
+        public IActionResult RegionPage(string krets, string kind, string year, string? slug, string? child)
+            => OwnerPage(new[] { krets }, PageAddressRules.KindOfSegment(kind), year, slug, child);
+
+        [HttpGet(Krets + "/" + Klubb + "/" + Kind)]
+        public IActionResult ClubKindRoot(string krets, string klubb, string kind) => KindRoot(new[] { krets, klubb }, kind);
+
+        [HttpGet(Krets + "/" + Klubb + "/" + Kind + "/" + Year + "/{slug?}/{child?}")]
+        public IActionResult ClubPage(string krets, string klubb, string kind, string year, string? slug, string? child)
+            => OwnerPage(new[] { krets, klubb }, PageAddressRules.KindOfSegment(kind), year, slug, child);
+
+        // ── De gamla formerna, utan sort (före 2026-10-18) → 301 ─────────────────────────
+
         [HttpGet(Krets + "/" + Year + "/{slug?}/{child?}")]
-        public IActionResult RegionPage(string krets, string year, string? slug, string? child)
-            => OwnerPage(new[] { krets }, year, slug, child);
+        public IActionResult LegacyRegionPage(string krets, string year, string? slug, string? child)
+            => OwnerPage(new[] { krets }, null, year, slug, child);
 
         [HttpGet(Krets + "/klubbar/{klubb}/" + Year + "/{slug?}/{child?}")]
-        public IActionResult ClubPage(string krets, string klubb, string year, string? slug, string? child)
-            => OwnerPage(new[] { krets, "klubbar", klubb }, year, slug, child);
+        public IActionResult LegacyClubPage(string krets, string klubb, string year, string? slug, string? child)
+            => OwnerPage(new[] { krets, "klubbar", klubb }, null, year, slug, child);
 
-        private IActionResult OwnerPage(string[] ownerSegments, string year, string? slug, string? child)
+        /// <summary>Sortsegmentet utan år: tävlingarna → listan, händelserna och serierna → ägarens sida.</summary>
+        private IActionResult KindRoot(string[] ownerSegments, string kindSegment)
+        {
+            if (PageAddressRules.KindOfSegment(kindSegment) == PageAddressKinds.Competition) return ToList();
+            var uc = Umbraco();
+            var owner = uc == null ? null : _routes.Owner(uc.Content!, ownerSegments);
+            if (owner == null) return NotFoundPage();
+            var url = owner.Url();
+            return string.IsNullOrEmpty(url) || url == "#" ? NotFoundPage() : Permanent(url);
+        }
+
+        /// <param name="kind">Sorten ur adressen, eller null för en adress utan sortsegment (de gamla formerna).</param>
+        private IActionResult OwnerPage(string[] ownerSegments, string? kind, string year, string? slug, string? child)
         {
             var uc = Umbraco();
             if (uc == null) return NotFoundPage();
-            var owner = PageAddressUrls.OwnerOf(Route(uc, ownerSegments));
-            if (owner != null) return Serve(owner.Value, int.Parse(year), slug, child);
+            var owner = PageAddressUrls.OwnerOf(_routes.Owner(uc.Content!, ownerSegments));
+            if (owner != null) return Serve(owner.Value, kind, int.Parse(year), slug, child);
 
             // Klubben eller kretsen har bytt adress: följ Umbracos omdirigering av ägarsidan.
             var moved = MovedOwnerPrefix(uc, ownerSegments);
             if (moved == null) return NotFoundPage();
+            var kindPart = kind == null ? "" : PageAddressRules.KindSegment(kind) + "/";
             var rest = string.Join('/', new[] { year, slug, child }.Where(s => !string.IsNullOrEmpty(s)));
-            return Permanent(moved + rest + "/");
+            return Permanent(moved + kindPart + rest + "/");
         }
 
-        private IActionResult Serve(PageAddressOwner owner, int year, string? slug, string? child)
+        /// <param name="kind">
+        /// Sorten ur adressen. Null = adressen saknar sortsegment: förbundets mästerskap (sorterna delar namnrymd
+        /// där) och de gamla formerna, som alltid ger 301 till den aktuella adressen.
+        /// </param>
+        private IActionResult Serve(PageAddressOwner owner, string? kind, int year, string? slug, string? child)
         {
             if (string.IsNullOrEmpty(slug)) return ToList(); // årssidan
             var uc = Umbraco();
             if (uc == null) return NotFoundPage();
 
-            var row = _addresses.Find(owner, year, slug);
+            var row = kind != null ? _addresses.Find(owner, kind, year, slug) : _addresses.FindAnyKind(owner, year, slug);
             if (row == null) return NotFoundPage();
-            if (!row.IsCurrent)
+            // En gammal adress — eller den gamla formen utan sort — ger 301 till sidans aktuella adress.
+            if (!row.IsCurrent || (kind == null && !owner.IsNational))
             {
                 var current = CurrentUrl(row);
                 return current == null ? NotFoundPage() : Permanent(current + (child == null ? "" : child + "/"));
@@ -215,8 +254,11 @@ namespace HpskSite.Controllers
 
         private string? MovedOwnerPrefix(IUmbracoContext uc, string[] ownerSegs)
         {
-            var old = "/" + string.Join('/', ownerSegs);
-            var redirect = _redirects.GetMostRecentRedirectUrl(old) ?? _redirects.GetMostRecentRedirectUrl(old + "/");
+            // Umbraco lagrar omdirigeringen på trädets adress, alltså klubbens långa form.
+            var forms = new List<string> { "/" + string.Join('/', ownerSegs) };
+            if (ownerSegs.Length == 2) forms.Add($"/{ownerSegs[0]}/klubbar/{ownerSegs[1]}");
+            var redirect = forms.Select(f => _redirects.GetMostRecentRedirectUrl(f) ?? _redirects.GetMostRecentRedirectUrl(f + "/"))
+                .FirstOrDefault(r => r != null);
             if (redirect == null) return null;
             var owner = PageAddressUrls.OwnerOf(uc.Content!.GetById(redirect.ContentKey));
             return owner == null ? null : _urls.OwnerPrefix(owner.Value);
@@ -226,13 +268,6 @@ namespace HpskSite.Controllers
 
         private IPublishedContent? HubNode()
             => Umbraco()?.Content!.GetAtRoot().FirstOrDefault()?.Children.FirstOrDefault(c => c.ContentType.Alias == "competitionsHub");
-
-        private static IPublishedContent? Route(IUmbracoContext uc, string[] segments)
-        {
-#pragma warning disable CS0618 // GetByRoute är den publicerade cachens uppslag på adress.
-            return uc.Content!.GetByRoute("/" + string.Join('/', segments) + "/");
-#pragma warning restore CS0618
-        }
 
         private IActionResult ToList() => Permanent(PageAddressUrls.CompetitionsListPath);
 

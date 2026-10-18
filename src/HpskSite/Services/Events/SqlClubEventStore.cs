@@ -247,7 +247,7 @@ WHERE Id = @0",
             string ownerType, int ownerId, int year, string baseSlug, int exceptId)
         {
             var taken = db.Fetch<string>(@"
-SELECT Slug FROM dbo.PageAddress WITH (UPDLOCK, HOLDLOCK) WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2 AND NOT (TargetKind = 'event' AND TargetId = @3)
+SELECT Slug FROM dbo.PageAddress WITH (UPDLOCK, HOLDLOCK) WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2 AND TargetKind = 'event' AND TargetId <> @3
 UNION SELECT Slug FROM dbo.ClubEvent WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2 AND Id <> @3",
                 ownerType, ownerId, year, exceptId).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (!taken.Contains(baseSlug)) return baseSlug;
@@ -328,7 +328,7 @@ UNION SELECT Slug FROM dbo.ClubEvent WHERE OwnerType = @0 AND OwnerId = @1 AND U
                     SwishNumber = x.SwishNumber ?? "",
                     ContentBlocksJson = x.ContentBlocksJson ?? "",
                     QuickLinksJson = x.QuickLinksJson ?? "",
-                    Url = string.IsNullOrEmpty(ownerUrl) ? "" : $"{ownerUrl.TrimEnd('/')}/{x.UrlYear}/{x.Slug}/",
+                    Url = string.IsNullOrEmpty(ownerUrl) ? "" : HpskSite.Services.Addresses.PageAddressRules.Compose(ownerUrl, false, HpskSite.Services.Addresses.PageAddressKinds.Event, x.UrlYear, x.Slug),
                     CreatedDate = x.CreatedDate,
                     UpdatedDate = x.UpdatedDate
                 };

@@ -49,15 +49,18 @@ namespace HpskSite.Services.Addresses
 
     /// <summary>
     /// C3-planen S6: EN adresstabell för sidorna utanför trädet — händelser, tävlingar och serier,
-    /// <c>/{ägarens adress}/{år}/{slug}/</c>.
+    /// <c>/{ägarens adress}/{sort}/{år}/{slug}/</c> (sorten: <c>tavlingar</c>, <c>handelser</c>, <c>serier</c>).
     ///
-    /// <para><b>Adressen lagras relativt ägaren</b> (ägare, år, slug), aldrig som en hel sökväg. Byter en
+    /// <para><b>Adressen lagras relativt ägaren</b> (ägare, år, slug, sort), aldrig som en hel sökväg. Byter en
     /// klubb adress följer alla dess sidor med av sig själva, och den gamla klubbadressen tas av Umbracos
-    /// egen omdirigering (se <see cref="HpskSite.Routing.PageAddressContentFinder"/>).</para>
+    /// egen omdirigering.</para>
     ///
     /// <para><b>Ny aktuell adress bara när ägare, år eller slug ändras;</b> den gamla står kvar och 301:as.
-    /// En krock inom samma ägare och år ger <c>-2</c>, <c>-3</c> … — tävlingar och händelser delar
-    /// namnrymd, och det unika indexet <c>UX_PageAddress_Address</c> gör en dubblett omöjlig.</para>
+    /// <b>Varje sort har sin egen namnrymd</b> (2026-10-18): en tävling och en händelse med samma namn samma år
+    /// krockar inte, eftersom sorten står i adressen. En krock inom samma sort ger <c>-2</c>, <c>-3</c> ….
+    /// Undantaget är förbundets mästerskap (<c>/sm/2026/x/</c>), som saknar sortsegment — där delar sorterna
+    /// namnrymd (<see cref="PageAddressRules.SharesNamespace"/>). Det unika indexet
+    /// <c>UX_PageAddress_Address</c> (ägare, år, slug, sort) gör en dubblett inom sorten omöjlig.</para>
     /// </summary>
     public class PageAddressService
     {
@@ -75,15 +78,31 @@ namespace HpskSite.Services.Addresses
 
         private const string Columns = "Id, OwnerType, OwnerId, UrlYear, Slug, TargetKind, TargetId, IsCurrent";
 
-        /// <summary>Adressen (ägare, år, slug), eller null. År null = händelsernas gamla trädadress.</summary>
-        public PageAddressRow? Find(PageAddressOwner owner, int? urlYear, string slug)
+        /// <summary>Adressen (ägare, sort, år, slug), eller null. År null = händelsernas gamla trädadress.</summary>
+        public PageAddressRow? Find(PageAddressOwner owner, string kind, int? urlYear, string slug)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             // Två frågor i stället för "(@2 IS NULL AND …) OR …", så att indexet kan sökas.
             return urlYear == null
-                ? scope.Database.FirstOrDefault<PageAddressRow>($"SELECT TOP 1 {Columns} FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear IS NULL AND Slug = @2",
+                ? scope.Database.FirstOrDefault<PageAddressRow>($"SELECT TOP 1 {Columns} FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear IS NULL AND Slug = @2 AND TargetKind = @3",
+                    owner.Type, owner.Id, slug, kind)
+                : scope.Database.FirstOrDefault<PageAddressRow>($"SELECT TOP 1 {Columns} FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2 AND Slug = @3 AND TargetKind = @4",
+                    owner.Type, owner.Id, urlYear.Value, slug, kind);
+        }
+
+        /// <summary>
+        /// Adressen (ägare, år, slug) av vilken sort som helst — för adresser UTAN sortsegment: förbundets
+        /// mästerskap och de gamla formerna från före 2026-10-18 (<c>/halland/2026/x/</c>). Finns flera sorter
+        /// tas den äldsta raden: den gamla adressen kan bara ha pekat på den som fanns först, eftersom sorterna
+        /// delade namnrymd då.
+        /// </summary>
+        public PageAddressRow? FindAnyKind(PageAddressOwner owner, int? urlYear, string slug)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return urlYear == null
+                ? scope.Database.FirstOrDefault<PageAddressRow>($"SELECT TOP 1 {Columns} FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear IS NULL AND Slug = @2 ORDER BY Id",
                     owner.Type, owner.Id, slug)
-                : scope.Database.FirstOrDefault<PageAddressRow>($"SELECT TOP 1 {Columns} FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2 AND Slug = @3",
+                : scope.Database.FirstOrDefault<PageAddressRow>($"SELECT TOP 1 {Columns} FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2 AND Slug = @3 ORDER BY Id",
                     owner.Type, owner.Id, urlYear.Value, slug);
         }
 
@@ -159,7 +178,10 @@ namespace HpskSite.Services.Addresses
             var rows = db.Fetch<PageAddressRow>(
                 $"SELECT {Columns} FROM dbo.PageAddress WITH (UPDLOCK, HOLDLOCK) WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2",
                 owner.Type, owner.Id, year);
-            var slug = PageAddressRules.UniqueSlug(baseSlug, rows.Select(r => (r.Slug, Mine: r.TargetKind == kind && r.TargetId == id)));
+            // Bara sortens egen namnrymd räknas (utom hos förbundets mästerskap, där adressen saknar sortsegment).
+            var slug = PageAddressRules.UniqueSlug(baseSlug, rows
+                .Where(r => PageAddressRules.SharesNamespace(owner, r.TargetKind, kind))
+                .Select(r => (r.Slug, Mine: r.TargetKind == kind && r.TargetId == id)));
 
             db.Execute("UPDATE dbo.PageAddress SET IsCurrent = 0 WHERE TargetKind = @0 AND TargetId = @1 AND IsCurrent = 1", kind, id);
             var reused = db.Execute(
@@ -190,8 +212,8 @@ namespace HpskSite.Services.Addresses
         public static void AddHistory(IUmbracoDatabase db, string kind, int id, PageAddressOwner owner, int? year, string slug)
         {
             var exists = year == null
-                ? db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear IS NULL AND Slug = @2", owner.Type, owner.Id, slug)
-                : db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2 AND Slug = @3", owner.Type, owner.Id, year.Value, slug);
+                ? db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear IS NULL AND Slug = @2 AND TargetKind = @3", owner.Type, owner.Id, slug, kind)
+                : db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.PageAddress WHERE OwnerType = @0 AND OwnerId = @1 AND UrlYear = @2 AND Slug = @3 AND TargetKind = @4", owner.Type, owner.Id, year.Value, slug, kind);
             if (exists == 0)
                 db.Execute("INSERT INTO dbo.PageAddress (OwnerType, OwnerId, UrlYear, Slug, TargetKind, TargetId, IsCurrent) VALUES (@0, @1, @2, @3, @4, @5, 0)",
                     owner.Type, owner.Id, year, slug, kind, id);
@@ -238,6 +260,55 @@ namespace HpskSite.Services.Addresses
 
         /// <summary>Toppnivåsegment som adresserna äger — ingen nod får heta så (spärren i PageAddressReservedNames).</summary>
         public static readonly string[] ReservedTopSegments = { "sm", "ssm", "vsm", "osm", "nsm", "tavlingar" };
+
+        /// <summary>Sortens segment i adressen: <c>tavlingar</c>, <c>handelser</c>, <c>serier</c>.</summary>
+        public const string CompetitionsSegment = "tavlingar";
+        public const string EventsSegment = "handelser";
+        public const string SeriesSegment = "serier";
+
+        public static string KindSegment(string kind) => kind switch
+        {
+            PageAddressKinds.Competition => CompetitionsSegment,
+            PageAddressKinds.Event => EventsSegment,
+            PageAddressKinds.Series => SeriesSegment,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Okänd sort."),
+        };
+
+        /// <summary>Sorten bakom ett segment, eller null.</summary>
+        public static string? KindOfSegment(string? segment) => segment?.ToLowerInvariant() switch
+        {
+            CompetitionsSegment => PageAddressKinds.Competition,
+            EventsSegment => PageAddressKinds.Event,
+            SeriesSegment => PageAddressKinds.Series,
+            _ => null,
+        };
+
+        /// <summary>
+        /// Segment som en klubb och en nod direkt under en krets inte får heta: sortsegmenten och klubbkatalogen.
+        /// En klubbs adress är <c>/{krets}/{klubb}/</c>, så klubben delar namnrymd med kretsens egna sidor.
+        /// </summary>
+        public static readonly string[] ReservedOwnerChildSegments = { "klubbar", CompetitionsSegment, EventsSegment, SeriesSegment };
+
+        /// <summary>Får <paramref name="segment"/> användas för en klubb eller en sida direkt under en krets?</summary>
+        public static bool IsReservedOwnerChildSegment(string segment)
+            => ReservedOwnerChildSegments.Contains(segment, StringComparer.OrdinalIgnoreCase) || IsYearSegment(segment, out _);
+
+        /// <summary>
+        /// Delar två sorter namnrymd hos ägaren? Bara hos förbundets mästerskap, vars adress saknar sortsegment.
+        /// </summary>
+        public static bool SharesNamespace(PageAddressOwner owner, string kindA, string kindB)
+            => owner.IsNational || string.Equals(kindA, kindB, StringComparison.Ordinal);
+
+        /// <summary>
+        /// Adressen ur ägarens adress (med snedstreck sist), sort, år och slug. År null = händelsens gamla
+        /// trädadress <c>{ägare}{slug}/</c>. Förbundets mästerskap: <c>/sm/{år}/{slug}/</c>, utan sortsegment.
+        /// </summary>
+        public static string Compose(string ownerPrefix, bool national, string kind, int? year, string slug)
+        {
+            var prefix = ownerPrefix.EndsWith('/') ? ownerPrefix : ownerPrefix + "/";
+            if (year == null) return $"{prefix}{slug}/";
+            return national ? $"{prefix}{year}/{slug}/" : $"{prefix}{KindSegment(kind)}/{year}/{slug}/";
+        }
 
         /// <summary>
         /// Delar en sökväg i ägarens segment, år, slug och resten (barnsegmentet, t.ex. <c>resultat</c>).

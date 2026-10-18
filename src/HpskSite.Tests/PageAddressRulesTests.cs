@@ -78,5 +78,55 @@ namespace HpskSite.Tests
             PageAddressOwner.IsNationalType("halland").Should().BeFalse();
             PageAddressOwner.ForNational("SM").Should().Be(new PageAddressOwner("sm", 0));
         }
+
+        // ── Sorten i adressen (2026-10-18) ─────────────────────────────────────────────────
+
+        [Theory]
+        [InlineData(PageAddressKinds.Competition, "/halland/haaplinge-goass/tavlingar/2026/morkerfalt/")]
+        [InlineData(PageAddressKinds.Event, "/halland/haaplinge-goass/handelser/2026/morkerfalt/")]
+        [InlineData(PageAddressKinds.Series, "/halland/haaplinge-goass/serier/2026/morkerfalt/")]
+        public void Sorten_star_i_klubbens_adress(string kind, string expected)
+            => PageAddressRules.Compose("/halland/haaplinge-goass/", false, kind, 2026, "morkerfalt").Should().Be(expected);
+
+        [Fact]
+        public void Forbundets_masterskap_saknar_sortsegment()
+            => PageAddressRules.Compose("/sm/", true, PageAddressKinds.Competition, 2026, "precision").Should().Be("/sm/2026/precision/");
+
+        [Fact]
+        public void Handelsens_gamla_tradadress_saknar_ar_och_sort()
+            => PageAddressRules.Compose("/halland/haaplinge-goass", false, PageAddressKinds.Event, null, "gasaskjutning")
+                .Should().Be("/halland/haaplinge-goass/gasaskjutning/");
+
+        [Theory]
+        [InlineData("tavlingar", PageAddressKinds.Competition)]
+        [InlineData("HANDELSER", PageAddressKinds.Event)]
+        [InlineData("serier", PageAddressKinds.Series)]
+        [InlineData("klubbar", null)]
+        [InlineData(null, null)]
+        public void Segmentet_ger_sorten(string? segment, string? expected) => PageAddressRules.KindOfSegment(segment).Should().Be(expected);
+
+        [Fact]
+        public void Varje_sort_har_sin_namnrymd_hos_en_klubb()
+        {
+            var club = new PageAddressOwner(PageAddressOwner.Club, 2604);
+            PageAddressRules.SharesNamespace(club, PageAddressKinds.Competition, PageAddressKinds.Event).Should().BeFalse();
+            PageAddressRules.SharesNamespace(club, PageAddressKinds.Event, PageAddressKinds.Event).Should().BeTrue();
+        }
+
+        [Fact]
+        public void Forbundets_sorter_delar_namnrymd()
+            => PageAddressRules.SharesNamespace(PageAddressOwner.ForNational("sm"), PageAddressKinds.Competition, PageAddressKinds.Series)
+                .Should().BeTrue();
+
+        [Theory]
+        [InlineData("klubbar", true)]
+        [InlineData("tavlingar", true)]
+        [InlineData("Handelser", true)]
+        [InlineData("serier", true)]
+        [InlineData("2026", true)]
+        [InlineData("haaplinge-goass", false)]
+        [InlineData("varbergs-pk", false)]
+        public void Reserverade_namn_under_kretsen(string segment, bool expected)
+            => PageAddressRules.IsReservedOwnerChildSegment(segment).Should().Be(expected);
     }
 }
