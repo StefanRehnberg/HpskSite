@@ -92,6 +92,37 @@ namespace HpskSite.Controllers
             return Json(new { success = ok, message, problems });
         }
 
+        /// <summary>C3-planen F1: fakturamapparna som ligger under tävlingsnoder och skulle flyttas till arkivet. Läser bara.</summary>
+        [HttpGet]
+        public async Task<IActionResult> InvoiceArchivePreview(
+            [FromServices] HpskSite.Services.LegacyInvoiceHubArchiveService archive)
+        {
+            if (await DenyAsync() is { } deny) return deny;
+            var p = archive.Preview();
+            return Json(new
+            {
+                success = true,
+                tableExists = p.TableExists,
+                archiveFolderId = p.ArchiveFolderId,
+                alreadyArchived = p.AlreadyArchived,
+                toMove = p.ToMove.Count,
+                invoices = p.ToMove.Sum(h => h.Invoices),
+                emptyHubs = p.ToMove.Count(h => h.Invoices == 0),
+                withoutCompetitionId = p.ToMove.Sum(h => h.InvoicesWithoutCompetitionId),
+                hubs = p.ToMove.Take(200),
+            });
+        }
+
+        /// <summary>Flyttar fakturamapparna till arkivet i portioner. Oberoende av vilken lagring tävlingarna står på.</summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> InvoiceArchiveRun(int batch,
+            [FromServices] HpskSite.Services.LegacyInvoiceHubArchiveService archive)
+        {
+            if (await DenyAsync() is { } deny) return deny;
+            var r = archive.Run(batch <= 0 ? 50 : batch, await ActorAsync());
+            return Json(new { success = r.Ok, moved = r.Moved, remaining = r.Remaining, message = r.Message, errors = r.Errors.Take(50) });
+        }
+
         [HttpPost, ValidateAntiForgeryToken]
         public async Task<IActionResult> Clear()
         {
