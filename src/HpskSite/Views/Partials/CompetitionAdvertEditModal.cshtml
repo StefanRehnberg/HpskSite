@@ -79,6 +79,8 @@
                         </div>
                     </div>
 
+                    @await Html.PartialAsync("_AdvertScopeField", "advertEdit_")
+
                     <div class="mb-3">
                         <label for="advertEdit_competitionName" class="form-label">Tävlingsnamn <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="advertEdit_competitionName" name="competitionName" required>
@@ -536,6 +538,16 @@ window.populateAdvertEditModal = function(competition) {
     document.getElementById('advertEdit_competitionType').value = competition.competitionType || 'Precision';
     document.getElementById('advertEdit_description').value = competition.description || '';
     document.getElementById('advertEdit_venue').value = competition.venue || '';
+
+    // Mästerskap: kan vara lagrat som JSON-array (["Svenskt Mästerskap"]) — läs ut värdet.
+    (function () {
+        var raw = (competition.competitionScope || '').trim();
+        if (raw.charAt(0) === '[' || raw.charAt(0) === '"') {
+            try { var p = JSON.parse(raw); raw = Array.isArray(p) ? (p[0] || '') : (p || ''); } catch (e) { raw = raw.replace(/^\[|\]$/g, '').replace(/"/g, ''); }
+        }
+        var sel = document.getElementById('advertEdit_competitionScope');
+        if (sel) sel.value = Array.prototype.some.call(sel.options, function (o) { return o.value === raw; }) ? raw : '';
+    })();
 
     // Dates - use formatDateForInput to strip timezone info, set value + sync Flatpickr
     function setAdvertDate(id, dateStr, withTime) {

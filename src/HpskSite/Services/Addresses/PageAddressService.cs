@@ -31,6 +31,19 @@ namespace HpskSite.Services.Addresses
         public bool IsNational => IsNationalType(Type);
 
         public static PageAddressOwner ForNational(string segment) => new(segment.ToLowerInvariant(), 0);
+
+        /// <summary>
+        /// Reservägaren för en tävling utan värd (2026-10-18): <c>/tavlingar/{år}/{slug}/</c>. Utan den hade en
+        /// tävling utan klubb, krets och mästerskap — en extern annons, t.ex. — ingen sida alls i tabelläget.
+        /// </summary>
+        public const string Site = "tavlingar";
+
+        public static readonly PageAddressOwner SiteWide = new(Site, 0);
+
+        public bool IsSite => string.Equals(Type, Site, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Saknar adressen sortsegment? Förbundets mästerskap och reservägaren gör det.</summary>
+        public bool OmitsKindSegment => IsNational || IsSite;
     }
 
     public sealed class PageAddressRow
@@ -297,17 +310,18 @@ namespace HpskSite.Services.Addresses
         /// Delar två sorter namnrymd hos ägaren? Bara hos förbundets mästerskap, vars adress saknar sortsegment.
         /// </summary>
         public static bool SharesNamespace(PageAddressOwner owner, string kindA, string kindB)
-            => owner.IsNational || string.Equals(kindA, kindB, StringComparison.Ordinal);
+            => owner.OmitsKindSegment || string.Equals(kindA, kindB, StringComparison.Ordinal);
 
         /// <summary>
         /// Adressen ur ägarens adress (med snedstreck sist), sort, år och slug. År null = händelsens gamla
-        /// trädadress <c>{ägare}{slug}/</c>. Förbundets mästerskap: <c>/sm/{år}/{slug}/</c>, utan sortsegment.
+        /// trädadress <c>{ägare}{slug}/</c>. Förbundets mästerskap (<c>/sm/{år}/{slug}/</c>) och reservägaren
+        /// (<c>/tavlingar/{år}/{slug}/</c>) saknar sortsegment (<see cref="PageAddressOwner.OmitsKindSegment"/>).
         /// </summary>
-        public static string Compose(string ownerPrefix, bool national, string kind, int? year, string slug)
+        public static string Compose(string ownerPrefix, bool omitKindSegment, string kind, int? year, string slug)
         {
             var prefix = ownerPrefix.EndsWith('/') ? ownerPrefix : ownerPrefix + "/";
             if (year == null) return $"{prefix}{slug}/";
-            return national ? $"{prefix}{year}/{slug}/" : $"{prefix}{KindSegment(kind)}/{year}/{slug}/";
+            return omitKindSegment ? $"{prefix}{year}/{slug}/" : $"{prefix}{KindSegment(kind)}/{year}/{slug}/";
         }
 
         /// <summary>

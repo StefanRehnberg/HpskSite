@@ -11639,6 +11639,11 @@ Taken 21 → 19, 23 → 16, 117 → 116, 61 → 34. Seedarna (bara dev) skriver 
 | Kretsens | `/{krets}/tavlingar\|handelser\|serier/{år}/{slug}/` |
 | SM, landsdel | `/sm\|ssm\|vsm\|osm\|nsm/{år}/{slug}/` — **utan** sortsegment, oförändrat |
 | Listan | `/tavlingar/`. `/tavlingar/{år}/` → 301 dit (säsongssidan finns inte längre) |
+| Tävling utan värd (reservadressen) | `/tavlingar/{år}/{slug}/` — bara när varken klubb eller krets är satt (`CompetitionAddressService.HasNoHost`, ägaren `PageAddressOwner.SiteWide`). En satt men oläsbar värd ger INGEN ny adress. Utan reservadressen hade en sådan tävling ingen sida i tabelläget. |
+
+**Annonser** har fältet Mästerskap (`_AdvertScopeField`, avsnittet Arrangör i båda annonsdialogerna), så en
+SM-annons utan värd får `/sm/{år}/…`. Omfattningen läses med `CompetitionScopeHelper.NormalizeScopeValue`, som
+avkodar JSON (`["Svenskt Mästerskap"]` i prod, 3514).
 
 - **Sorten läggs till när adressen skrivs ut** — `PageAddressRules.Compose` är ENDA formeln (adressbyggaren
   och händelselagringen). Tabellen lagrar ägare, år, slug och sort som förut; inga rader skrevs om.

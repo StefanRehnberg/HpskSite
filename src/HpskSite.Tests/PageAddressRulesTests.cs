@@ -114,6 +114,28 @@ namespace HpskSite.Tests
         }
 
         [Fact]
+        public void Reservagaren_saknar_sortsegment()
+        {
+            PageAddressOwner.SiteWide.OmitsKindSegment.Should().BeTrue();
+            PageAddressOwner.SiteWide.IsNational.Should().BeFalse();
+            PageAddressRules.Compose("/tavlingar/", PageAddressOwner.SiteWide.OmitsKindSegment, PageAddressKinds.Competition, 2026, "sm-precision-2026")
+                .Should().Be("/tavlingar/2026/sm-precision-2026/");
+        }
+
+        [Theory]
+        [InlineData(0, null, true)]
+        [InlineData(0, "  ", true)]
+        [InlineData(2604, null, false)]   // en satt klubb som inte går att läsa just nu ger ingen reservadress
+        [InlineData(0, "Halland", false)]
+        public void Reservadressen_bara_utan_vard(int clubId, string? region, bool expected)
+            => CompetitionAddressService.HasNoHost(new HpskSite.Models.Competitions.CompetitionInfo { ClubId = clubId, RegionalFederation = region })
+                .Should().Be(expected);
+
+        [Fact]
+        public void En_klubb_har_sortsegment()
+            => new PageAddressOwner(PageAddressOwner.Club, 2604).OmitsKindSegment.Should().BeFalse();
+
+        [Fact]
         public void Forbundets_sorter_delar_namnrymd()
             => PageAddressRules.SharesNamespace(PageAddressOwner.ForNational("sm"), PageAddressKinds.Competition, PageAddressKinds.Series)
                 .Should().BeTrue();

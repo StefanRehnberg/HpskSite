@@ -82,6 +82,11 @@ namespace HpskSite.Controllers
         [HttpGet("tavlingar/" + Year)]
         public IActionResult Season(string year) => ToList();
 
+        /// <summary>Reservadressen för en tävling utan värd (<see cref="PageAddressOwner.SiteWide"/>).</summary>
+        [HttpGet("tavlingar/" + Year + "/{slug}/{child?}")]
+        public IActionResult SitePage(string year, string slug, string? child)
+            => Serve(PageAddressOwner.SiteWide, null, int.Parse(year), slug, child);
+
         // ── Förbundets mästerskap ─────────────────────────────────────────────────────────
 
         [HttpGet(National)]
@@ -157,7 +162,7 @@ namespace HpskSite.Controllers
             var row = kind != null ? _addresses.Find(owner, kind, year, slug) : _addresses.FindAnyKind(owner, year, slug);
             if (row == null) return NotFoundPage();
             // En gammal adress — eller den gamla formen utan sort — ger 301 till sidans aktuella adress.
-            if (!row.IsCurrent || (kind == null && !owner.IsNational))
+            if (!row.IsCurrent || (kind == null && !owner.OmitsKindSegment))
             {
                 var current = CurrentUrl(row);
                 return current == null ? NotFoundPage() : Permanent(current + (child == null ? "" : child + "/"));
