@@ -237,6 +237,9 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Competitions.CompetitionPostCache>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.NodeCompetitionSeriesStore>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.SqlCompetitionSeriesStore>();
+            builder.Services.AddScoped<HpskSite.Services.Competitions.CompetitionMigrationService>();
+            builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
+                HpskSite.Services.Competitions.CompetitionNodeGuard>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.SwitchingCompetitionSeriesStore>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.ICompetitionSeriesStore>(
                 sp => sp.GetRequiredService<HpskSite.Services.Competitions.SwitchingCompetitionSeriesStore>());

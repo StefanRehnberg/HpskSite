@@ -233,6 +233,34 @@ namespace HpskSite.Models.Competitions
             _ => throw new ArgumentOutOfRangeException(nameof(shape)),
         };
 
+        /// <summary>
+        /// Varför ett lagrat värde inte överlever läsregeln, eller null när det gör det (C3-planen §5b:
+        /// torrkörningen namnger dem före flytten). Ett tomt värde är aldrig en förlust — det ÄR standardvärdet.
+        /// </summary>
+        public static string? LossReason(CompetitionFieldShape shape, object? raw)
+        {
+            if (raw is null || raw is string { Length: 0 } || raw is string s0 && string.IsNullOrWhiteSpace(s0)) return null;
+            switch (shape)
+            {
+                case CompetitionFieldShape.Bool or CompetitionFieldShape.BoolDefaultTrue:
+                    if (raw is string sb && !new[] { "0", "1", "true", "false" }.Contains(sb.Trim(), StringComparer.OrdinalIgnoreCase))
+                        return $"\"{sb.Trim()}\" är inte ett ja/nej-värde";
+                    return ReadBool(raw) is null ? $"{raw.GetType().Name} är inte ett ja/nej-värde" : null;
+                case CompetitionFieldShape.Int:
+                    return ReadInt(raw) is null ? $"\"{raw}\" är inte ett heltal" : null;
+                case CompetitionFieldShape.Date:
+                    if (ReadDate(raw) is not null) return null;
+                    return raw is DateTime d && (d == DateTime.MinValue || d.Year < 1900) ? null : $"\"{raw}\" är inte ett datum";
+                case CompetitionFieldShape.Choice:
+                    var t = raw is string sc ? sc.Trim() : null;
+                    if (t != null && t.StartsWith("[") && t.Contains(','))
+                        return $"flera val ({t}) — bara det första läses";
+                    return null;
+                default:
+                    return null;
+            }
+        }
+
         /// <summary>Värdet som nodlagringen skriver (det de befintliga skrivarna skriver).</summary>
         public static object? ToNode(CompetitionFieldShape shape, object? value) => shape switch
         {

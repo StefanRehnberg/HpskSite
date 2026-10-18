@@ -11703,6 +11703,30 @@ Arbetsplan för hela §5: `notes/c3-s5-tabeller-2026-10-18.md` (5a lagringen, 5b
   adressynk) → 4 röda. Nodläget oförändrat: `c3-s5c-verify` 22/22, `c3-series-verify` 39/39,
   `c3-copy-competition-verify` 33/33 (påståendet om föräldern bytt till årsmappsregeln).
 
+### Flytten av tävlingarna och serierna (C3-planen §5b, 2026-10-18)
+
+`CompetitionMigrationService` / `CompetitionMigrationController` (sajtadmin) och kortet **Tävlingar och serier** i
+Underhåll på `/admin-page`. Samma steg som startlistorna: Torrkör → (frys, flytta, jämför, byt, släpp frysningen).
+- **Torrkörningen namnger** opublicerade, utkast som skiljer sig från det publicerade (med fälten), publicerade
+  utan adress (ingen sida i tabelläget) och värden som inte överlever läsregeln
+  (`CompetitionFieldValues.LossReason`, `CompetitionFieldValuesLossTests`).
+- **Flytten:** en rad per nod med nodens id (`IDENTITY_INSERT`), serierna först, en nod per transaktion,
+  idempotent. **Utkastet flyttas** (det senast sparade). **Opublicerade och papperskorgens noder blir RADERADE
+  rader** (`DeletedUtc`) — tabellen har inget publiceringsläge. Varje nod arkiveras i **`CompetitionNodeArchive`**
+  (alla egenskaper, utkast och publicerat, som JSON) — det som finns kvar när noderna tas bort (§5e).
+- **⚠️ Id-golvet:** `CompetitionIdSources` / `SeriesIdSources`. **`IdentityFloor.ColumnsLike`** läser schemat vid
+  varje körning: varje heltalskolumn `*CompetitionId` i dbo/sbx kommer med av sig själv (en ny tabell också); plus
+  `TargetId` där `TargetKind` = competition (adresser, ändringslogg), liggarens `SourceId` för anmälnings-, lag-,
+  klubbfaktura- och projektkällan, vapnets användning (`comp`) och `competitionId` i `umbracoPropertyData`
+  (gamla fakturor). ⚠️ `legacy-invoice` bär FAKTURANS id och hör inte dit. Startkontrollen
+  (`IdentityFloorHostedService`) sätter golvet för båda tabellerna vid varje start.
+- **Bytet till tabellen vägras** så länge `CompetitionMigrationService.PagesReadyForTable` är falsk — sidorna
+  renderas ur noderna tills §5c–5d. Tillbaka till noderna och tömningen vägras när en rad bara finns i tabellen
+  (`force=1` går tillbaka ändå). Avpubliceringen hör till rensningen (§5e).
+- **`CompetitionNodeGuard`** vägrar nya `competition`/`competitionSeries`-noder när tabellen gäller (dev-seedarna).
+- Svit: `hpsk-verify/c3/c3-s5b-migration-verify.mjs` 32/32 mot nyåterställd kopia (`$SP/s5b-migration.sh`); A/B
+  (utan schemakällan i golvet + opublicerade som synliga) → 2 röda. Kortet i Underhåll prövas i samma svit.
+
 ### Sidmetadata = `PageMeta` (C3-planen F4, 2026-10-13)
 
 `Master.cshtml` läser titel, beskrivning, bild, typ och kanonisk adress ur `HpskSite.Models.PageMeta.For(Context)`,
