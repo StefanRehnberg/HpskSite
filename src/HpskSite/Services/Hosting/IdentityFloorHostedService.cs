@@ -37,6 +37,8 @@ namespace HpskSite.Services.Hosting
             ("dbo.ClubEvent", ClubEventMigrationService.IdSources),
             ("dbo.CompetitionStartList", HpskSite.Services.StartLists.StartListMigrationService.IdSources),
             ("dbo.CompetitionResultList", HpskSite.Services.Results.CompetitionResultMigrationService.IdSources),
+            ("dbo.Competition", HpskSite.Services.Competitions.CompetitionMigrationService.CompetitionIdSources),
+            ("dbo.CompetitionSeries", HpskSite.Services.Competitions.CompetitionMigrationService.SeriesIdSources),
         };
 
         /// <summary>Kör omsättningen för alla tabeller. Returnerar (tabell, före, efter) för loggen och testerna.</summary>

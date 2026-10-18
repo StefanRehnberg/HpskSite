@@ -45,6 +45,9 @@ namespace HpskSite.Services.Competitions
         public IReadOnlyList<CompetitionInfo> List() => _core.List(null);
         public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId) => seriesId <= 0 ? Array.Empty<CompetitionInfo>() : _core.List(seriesId);
 
+        /// <summary>Det sparade läget även i papperskorgen, och noden. Bara för flytten (§5b).</summary>
+        public (CompetitionInfo Record, IContent Node)? ReadForMigration(int id) => _core.ReadForMigration(id);
+
         /// <summary>Seriens barn i trädet, även opublicerade, i det sparade läget.</summary>
         public IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId) =>
             seriesId <= 0
@@ -135,6 +138,9 @@ namespace HpskSite.Services.Competitions
 
         public CompetitionUpdateResult<CompetitionSeriesInfo> Trash(int id) => _core.Trash(id);
 
+        /// <summary>Det sparade läget även i papperskorgen, och noden. Bara för flytten (§5b).</summary>
+        public (CompetitionSeriesInfo Record, IContent Node)? ReadForMigration(int id) => _core.ReadForMigration(id);
+
         private static void Fill(CompetitionSeriesInfo s, NodeMeta m)
         {
             s.Id = m.Id; s.Key = m.Key; s.Name = m.Name; s.Version = m.Version;
@@ -190,6 +196,17 @@ namespace HpskSite.Services.Competitions
             if (id <= 0) return null;
             var node = _contentService.GetById(id);
             return node is not null && !node.Trashed && node.ContentType.Alias == _alias ? FromContent(node) : null;
+        }
+
+        /// <summary>
+        /// Det sparade läget även för en nod i papperskorgen, och noden själv (för arkivet). BARA för flytten
+        /// till tabellen (C3-planen §5b).
+        /// </summary>
+        public (T Record, IContent Node)? ReadForMigration(int id)
+        {
+            if (id <= 0) return null;
+            var node = _contentService.GetById(id);
+            return node is not null && node.ContentType.Alias == _alias ? (FromContent(node), node) : null;
         }
 
         public IReadOnlyDictionary<int, T> GetMany(IReadOnlyCollection<int> ids)

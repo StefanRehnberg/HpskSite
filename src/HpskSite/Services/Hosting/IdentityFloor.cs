@@ -21,8 +21,52 @@ namespace HpskSite.Services.Hosting
     /// </summary>
     public static class IdentityFloor
     {
-        /// <summary>En källa till id:n: tabellen som måste finnas och frågan som ger dess högsta id.</summary>
-        public sealed record Source(string RequiredTable, string MaxSql);
+        /// <summary>
+        /// En källa till id:n: tabellen som måste finnas och frågan som ger dess högsta id. <see cref="Compute"/>
+        /// (när satt) ersätter frågan — för källor som räknas fram ur schemat vid körningen.
+        /// </summary>
+        public sealed record Source(string RequiredTable, string MaxSql)
+        {
+            public Func<IUmbracoDatabase, int?>? Compute { get; init; }
+        }
+
+        private static int MaxOf(IUmbracoDatabase db, Source s) =>
+            s.Compute != null ? s.Compute(db) ?? 0 : db.ExecuteScalar<int?>(s.MaxSql) ?? 0;
+
+        /// <summary>
+        /// Högsta värdet i VARJE heltalskolumn vars namn matchar <paramref name="columnLike"/> (SQL LIKE), i alla
+        /// tabeller i dbo och sbx — även tabeller som läggs till senare. <paramref name="filterColumn"/> +
+        /// <paramref name="filterValues"/> begränsar till tabeller med den kolumnen och rader med de värdena (t.ex.
+        /// <c>SourceType</c>). Värdena kommer ur koden, aldrig ur en begäran.
+        /// </summary>
+        public static Source ColumnsLike(string columnLike, string? filterColumn = null, params string[] filterValues) =>
+            new("sys.columns", "")
+            {
+                Compute = db =>
+                {
+                    var cols = db.Fetch<SchemaColumn>(@"
+SELECT s.name AS SchemaName, t.name AS TableName, c.name AS ColumnName
+FROM sys.columns c
+JOIN sys.tables t ON t.object_id = c.object_id
+JOIN sys.schemas s ON s.schema_id = t.schema_id
+WHERE s.name IN ('dbo', 'sbx') AND c.name LIKE @0 AND TYPE_NAME(c.system_type_id) = 'int'
+  AND (@1 = '' OR EXISTS (SELECT 1 FROM sys.columns f WHERE f.object_id = t.object_id AND f.name = @1))",
+                        columnLike, filterColumn ?? "");
+                    if (cols.Count == 0) return null;
+                    var where = filterColumn == null || filterValues.Length == 0
+                        ? ""
+                        : $" WHERE [{filterColumn}] IN ({string.Join(", ", filterValues.Select(v => "'" + v.Replace("'", "''") + "'"))})";
+                    var union = string.Join(" UNION ALL ", cols.Select(c => $"SELECT MAX([{c.ColumnName}]) AS m FROM [{c.SchemaName}].[{c.TableName}]{where}"));
+                    return db.ExecuteScalar<int?>($"SELECT MAX(m) FROM ({union}) x");
+                },
+            };
+
+        private sealed class SchemaColumn
+        {
+            public string SchemaName { get; set; } = "";
+            public string TableName { get; set; } = "";
+            public string ColumnName { get; set; } = "";
+        }
 
         /// <summary>Högsta id:t i en Umbraco-doctype, papperskorgen inräknad.</summary>
         public static Source NodesOfType(string alias) => new("dbo.umbracoNode",
@@ -39,7 +83,7 @@ namespace HpskSite.Services.Hosting
             foreach (var s in sources)
             {
                 if (db.ExecuteScalar<int?>("SELECT OBJECT_ID(@0)", s.RequiredTable) == null) continue;
-                highest = Math.Max(highest, db.ExecuteScalar<int?>(s.MaxSql) ?? 0);
+                highest = Math.Max(highest, MaxOf(db, s));
             }
             highest = Math.Max(highest, db.ExecuteScalar<int?>($"SELECT MAX(Id) FROM {table}") ?? 0);
             var current = db.ExecuteScalar<int?>($"SELECT CAST(IDENT_CURRENT('{table}') AS INT)") ?? 0;
@@ -65,7 +109,7 @@ namespace HpskSite.Services.Hosting
             foreach (var s in sources)
             {
                 if (db.ExecuteScalar<int?>("SELECT OBJECT_ID(@0)", s.RequiredTable) == null) continue;
-                floor = Math.Max(floor, db.ExecuteScalar<int?>(s.MaxSql) ?? 0);
+                floor = Math.Max(floor, MaxOf(db, s));
             }
             db.ExecuteScalar<int>($"SELECT COUNT(*) FROM {table} WITH (TABLOCKX, HOLDLOCK)");
             floor = Math.Max(floor, db.ExecuteScalar<int?>($"SELECT CAST(IDENT_CURRENT('{table}') AS INT)") ?? 0);
