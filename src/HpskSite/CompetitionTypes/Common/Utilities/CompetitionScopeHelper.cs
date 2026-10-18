@@ -95,13 +95,29 @@ namespace HpskSite.CompetitionTypes.Common.Utilities
         /// Samma avskalning som <c>ChampionshipCategory.NormalizeScope</c> gör, upprepad här
         /// för att <see cref="ReadScope"/> ska kunna svara färdignormaliserat utan att dra in
         /// ett beroende åt fel håll.
+        /// <para>⚠️ Värdet AVKODAS som JSON: en omfattning som skrivits av System.Text.Json bär
+        /// <c>["Svenskt Mästerskap"]</c> (prod, tävling 3514). Utan avkodningen kändes den inte igen
+        /// som SM — varken av adressen eller av mästerskapsreglerna.</para>
         /// </summary>
         public static string NormalizeScopeValue(string? scope)
         {
             if (string.IsNullOrWhiteSpace(scope)) return "";
             var s = scope.Trim();
-            if (s.StartsWith("[") && s.EndsWith("]"))
+            if ((s.StartsWith("[") && s.EndsWith("]")) || (s.StartsWith("\"") && s.EndsWith("\"") && s.Length > 1))
+            {
+                try
+                {
+                    var decoded = s.StartsWith("[")
+                        ? System.Text.Json.JsonSerializer.Deserialize<string[]>(s)?.FirstOrDefault()
+                        : System.Text.Json.JsonSerializer.Deserialize<string>(s);
+                    return (decoded ?? "").Trim();
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    // Inte giltig JSON: skala av som förut.
+                }
                 s = s.Trim('[', ']').Trim().Trim('"');
+            }
             return s.Trim();
         }
     }
