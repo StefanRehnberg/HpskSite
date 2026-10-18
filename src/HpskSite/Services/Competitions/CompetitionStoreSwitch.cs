@@ -53,6 +53,7 @@ namespace HpskSite.Services.Competitions
         public IReadOnlyDictionary<int, CompetitionInfo> GetMany(IReadOnlyCollection<int> ids) => Current.GetMany(ids);
         public IReadOnlyList<CompetitionInfo> List() => Current.List();
         public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId) => Current.ListBySeries(seriesId);
+        public IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId) => Current.ListAllInSeries(seriesId);
 
         public CompetitionUpdateResult<CompetitionInfo> Update(int id, long? expectedVersion, Action<CompetitionInfo> change)
         {
@@ -60,10 +61,10 @@ namespace HpskSite.Services.Competitions
             return Current.Update(id, expectedVersion, change);
         }
 
-        public CompetitionUpdateResult<CompetitionInfo> Create(int parentId, string name, Action<CompetitionInfo> init)
+        public CompetitionUpdateResult<CompetitionInfo> Create(int? seriesId, string name, Action<CompetitionInfo> init)
         {
             if (CompetitionStoreSettings.IsWriteFrozen(_settings)) throw new CompetitionWriteFrozenException();
-            return Current.Create(parentId, name, init);
+            return Current.Create(seriesId, name, init);
         }
 
         public CompetitionUpdateResult<CompetitionInfo> MoveToSeries(int id, int? seriesId)
@@ -106,10 +107,10 @@ namespace HpskSite.Services.Competitions
             return Current.Update(id, expectedVersion, change);
         }
 
-        public CompetitionUpdateResult<CompetitionSeriesInfo> Create(int parentId, string name, Action<CompetitionSeriesInfo> init)
+        public CompetitionUpdateResult<CompetitionSeriesInfo> Create(string name, Action<CompetitionSeriesInfo> init)
         {
             if (CompetitionStoreSettings.IsWriteFrozen(_settings)) throw new CompetitionWriteFrozenException();
-            return Current.Create(parentId, name, init);
+            return Current.Create(name, init);
         }
 
         public CompetitionUpdateResult<CompetitionSeriesInfo> Trash(int id)

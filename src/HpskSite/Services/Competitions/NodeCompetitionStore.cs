@@ -45,11 +45,27 @@ namespace HpskSite.Services.Competitions
         public IReadOnlyList<CompetitionInfo> List() => _core.List(null);
         public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId) => seriesId <= 0 ? Array.Empty<CompetitionInfo>() : _core.List(seriesId);
 
+        /// <summary>Seriens barn i trädet, även opublicerade, i det sparade läget.</summary>
+        public IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId) =>
+            seriesId <= 0
+                ? Array.Empty<CompetitionInfo>()
+                : _contentService.GetPagedChildren(seriesId, 0, int.MaxValue, out _)
+                    .Where(c => c.ContentType.Alias == CompetitionFieldTable.NodeAlias)
+                    .Select(c => _core.GetSaved(c.Id))
+                    .Where(c => c != null)
+                    .Cast<CompetitionInfo>()
+                    .ToList();
+
         public CompetitionUpdateResult<CompetitionInfo> Update(int id, long? expectedVersion, Action<CompetitionInfo> change) =>
             _core.Update(id, expectedVersion, change);
 
-        public CompetitionUpdateResult<CompetitionInfo> Create(int parentId, string name, Action<CompetitionInfo> init) =>
-            _core.Create(parentId, name, init);
+        /// <summary>Under serien, eller i årsmappen för tävlingens datum (dagens år när datumet saknas).</summary>
+        public CompetitionUpdateResult<CompetitionInfo> Create(int? seriesId, string name, Action<CompetitionInfo> init)
+        {
+            var probe = new CompetitionInfo();
+            init(probe);
+            return _core.Create(ParentFor(seriesId, probe.CompetitionDate), name, init);
+        }
 
         /// <summary>
         /// Serien, eller årsmappen för tävlingens datum (dagens år när datumet saknas) — samma placering
@@ -59,19 +75,19 @@ namespace HpskSite.Services.Competitions
         {
             var current = _core.GetSaved(id);
             if (current is null) return new CompetitionUpdateResult<CompetitionInfo> { Outcome = CompetitionUpdateOutcome.NotFound };
-            int parentId;
+            return _core.Move(id, ParentFor(seriesId, current.CompetitionDate));
+        }
+
+        private int ParentFor(int? seriesId, DateTime? competitionDate)
+        {
             if (seriesId is > 0)
             {
                 var series = _contentService.GetById(seriesId.Value);
                 if (series is null || series.Trashed || series.ContentType.Alias != CompetitionSeriesFieldTable.NodeAlias)
                     throw new InvalidOperationException("Serien finns inte.");
-                parentId = series.Id;
+                return series.Id;
             }
-            else
-            {
-                parentId = _placement.YearFolderId((current.CompetitionDate ?? DateTime.Now).Year);
-            }
-            return _core.Move(id, parentId);
+            return _placement.YearFolderId((competitionDate ?? DateTime.Now).Year);
         }
 
         public CompetitionUpdateResult<CompetitionInfo> Trash(int id) => _core.Trash(id);
@@ -90,11 +106,13 @@ namespace HpskSite.Services.Competitions
     public class NodeCompetitionSeriesStore : ICompetitionSeriesStore
     {
         private readonly NodeStoreCore<CompetitionSeriesInfo> _core;
+        private readonly CompetitionTreePlacement _placement;
 
         public NodeCompetitionSeriesStore(IContentService contentService, IUmbracoContextAccessor umbracoContextAccessor,
             IScopeProvider scopeProvider, ILogger<NodeCompetitionSeriesStore> logger,
-            CompetitionChangeRecorder recorder)
+            CompetitionChangeRecorder recorder, CompetitionTreePlacement placement)
         {
+            _placement = placement;
             _core = new NodeStoreCore<CompetitionSeriesInfo>(CompetitionSeriesFieldTable.NodeAlias, CompetitionSeriesFieldTable.Fields,
                 contentService, umbracoContextAccessor, scopeProvider, logger, Fill, s => s.Name, recorder);
         }
@@ -107,8 +125,13 @@ namespace HpskSite.Services.Competitions
         public CompetitionUpdateResult<CompetitionSeriesInfo> Update(int id, long? expectedVersion, Action<CompetitionSeriesInfo> change) =>
             _core.Update(id, expectedVersion, change);
 
-        public CompetitionUpdateResult<CompetitionSeriesInfo> Create(int parentId, string name, Action<CompetitionSeriesInfo> init) =>
-            _core.Create(parentId, name, init);
+        /// <summary>I årsmappen för seriens startdatum (dagens år när det saknas).</summary>
+        public CompetitionUpdateResult<CompetitionSeriesInfo> Create(string name, Action<CompetitionSeriesInfo> init)
+        {
+            var probe = new CompetitionSeriesInfo();
+            init(probe);
+            return _core.Create(_placement.YearFolderId((probe.SeriesStartDate ?? DateTime.Now).Year), name, init);
+        }
 
         public CompetitionUpdateResult<CompetitionSeriesInfo> Trash(int id) => _core.Trash(id);
 

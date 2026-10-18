@@ -67,7 +67,8 @@ namespace HpskSite.Services.Competitions
             CompetitionCacheVersion.InvalidateLocal(_caches);
         }
 
-        private int? CurrentMemberId()
+        /// <summary>Den inloggade medlemmens id, null för system och bakgrundssvep. Tabellens <c>CreatedBy</c>/<c>UpdatedBy</c>/<c>DeletedBy</c>.</summary>
+        public int? CurrentMemberId()
         {
             if (_http.HttpContext == null) return null;
             try
