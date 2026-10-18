@@ -3,6 +3,7 @@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject HpskSite.Services.Competitions.CompetitionPostCache Posts
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.VirtualCompetitionNodes PageNodes
 @{
     Layout = "Master.cshtml";
     ViewBag.Title = Model.Value<string>("pageTitle") ?? Model.Name;
@@ -12,7 +13,7 @@
     var allCompetitions = Competitions.List()
         .Where(p => p.ParentId == Model.Id)
         .OrderBy(p => p.SortOrder)
-        .Select(p => Umbraco.Content(p.Id))
+        .Select(p => PageNodes.PageNode(p)) // C3-planen §5d: virtuell i tabelläget
         .Where(n => n != null)
         .Cast<IPublishedContent>()
         .ToList();
@@ -55,7 +56,7 @@
     }).ToList();
 
     // Get unique competition types from competitions in this season
-    var competitionTypes = Model.Root().DescendantsOrSelf().Where(x => x.ContentType.Alias == "competitionType").ToList();
+    var competitionTypes = Model.SiteRoot().DescendantsOrSelf().Where(x => x.ContentType.Alias == "competitionType").ToList();
 }
 
 <div class="container-fluid mt-4">
@@ -64,7 +65,7 @@
             <!-- Breadcrumb -->
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="@Model.Root().Url()">Hem</a></li>
+                    <li class="breadcrumb-item"><a href="@Model.SiteRoot().Url()">Hem</a></li>
                     @if (Model.Parent.ContentType.Alias == "competitionsHub")
                     {
                         <li class="breadcrumb-item"><a href="@Model.Parent.Url()">Tävlingar</a></li>

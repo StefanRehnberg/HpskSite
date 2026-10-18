@@ -8,6 +8,8 @@
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @inject HpskSite.Services.Competitions.CompetitionPostCache Posts
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.VirtualCompetitionNodes PageNodes
+@inject HpskSite.Services.Competitions.ICompetitionSeriesStore SeriesStore
 @inject IMemberManager _memberManager
 @inject IMemberService _memberService
 @inject HpskSite.Services.MemberClubService _memberClubService
@@ -21,14 +23,21 @@
     ViewBag.Title = pageTitle;
 
     // Single content tree traversal for all lookups (avoids ~107 separate tree scans)
-    var allContent = Model.Root().DescendantsOrSelf().ToList();
+    var allContent = Model.SiteRoot().DescendantsOrSelf().ToList();
 
-    var allCompetitionSeries = allContent.Where(x => x.ContentType.Alias == "competitionSeries").ToList();
+    // Tabelläget (C3-planen §5d): serierna och tävlingarna som virtuella noder ur lagringarna — trädet har inte
+    // de som skapats i tabellen.
+    var allCompetitionSeries = PageNodes.TableMode
+        ? SeriesStore.List().Select(s => PageNodes.SeriesPageNode(s)).Where(n => n != null).Cast<IPublishedContent>().ToList()
+        : allContent.Where(x => x.ContentType.Alias == "competitionSeries").ToList();
     // Tävlingarna ur tävlingslagringen (C3-planen S4); noden bara för adressen och kortets RTE/media (S6).
     // Trädets ordning behålls, så sidan ritar korten i samma ordning som förut.
     var treeIndex = new Dictionary<int, int>();
     for (var i = 0; i < allContent.Count; i++) treeIndex[allContent[i].Id] = i;
-    Func<IEnumerable<HpskSite.Models.Competitions.CompetitionInfo>, List<IPublishedContent>> nodesOf = posts => posts
+    Func<IEnumerable<HpskSite.Models.Competitions.CompetitionInfo>, List<IPublishedContent>> nodesOf = posts => PageNodes.TableMode
+        ? posts.OrderBy(p => p.CompetitionDate ?? DateTime.MaxValue).ThenBy(p => p.SortOrder)
+            .Select(p => PageNodes.PageNode(p)).Where(n => n != null).Cast<IPublishedContent>().ToList()
+        : posts
         .Where(p => treeIndex.ContainsKey(p.Id))
         .OrderBy(p => treeIndex[p.Id])
         .Select(p => allContent[treeIndex[p.Id]])
@@ -241,7 +250,7 @@
             <!-- Breadcrumb -->
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="@Model.Root().Url()">Hem</a></li>
+                    <li class="breadcrumb-item"><a href="@Model.SiteRoot().Url()">Hem</a></li>
                     <li class="breadcrumb-item active">Tävlingar</li>
                 </ol>
             </nav>
@@ -575,14 +584,9 @@
 
                 // Säsongen = tävlingens år (se seasonYears)
                 var seasonId = Posts.Of(competition).CompetitionDate?.Year.ToString() ?? "";
-                var parent = competition.Parent();
-
-                // Get series information - check if competition's parent is a series
-                var seriesId = "";
-                if (parent != null && parent.ContentType.Alias == "competitionSeries")
-                {
-                    seriesId = parent.Id.ToString();
-                }
+                // Serien ur posten (C3-planen §5d) — en tävling som bara finns i tabellen har ingen plats i
+                // Umbracos navigering, och Parent() kastar för den.
+                var seriesId = Posts.Of(competition).SeriesId is int sid && sid > 0 ? sid.ToString() : "";
                 seriesInfoByCompetitionId.TryGetValue(competition.Id, out var partOfSeries);
                 var isClubOnlyComp = Posts.Of(competition).IsClubOnly;
                 var compTier = localityTierByCompetitionId.TryGetValue(competition.Id, out var ct) ? ct : 2;
@@ -915,14 +919,9 @@
 
                         // Säsongen = tävlingens år (se seasonYears)
                         var seasonId = Posts.Of(competition).CompetitionDate?.Year.ToString() ?? "";
-                        var parent = competition.Parent();
-
-                        // Get series information - check if competition's parent is a series
-                        var seriesId = "";
-                        if (parent != null && parent.ContentType.Alias == "competitionSeries")
-                        {
-                            seriesId = parent.Id.ToString();
-                        }
+                        // Serien ur posten (C3-planen §5d) — en tävling som bara finns i tabellen har ingen plats i
+                        // Umbracos navigering, och Parent() kastar för den.
+                        var seriesId = Posts.Of(competition).SeriesId is int sid && sid > 0 ? sid.ToString() : "";
                         seriesInfoByCompetitionId.TryGetValue(competition.Id, out var partOfSeries);
                         var isClubOnlyComp = Posts.Of(competition).IsClubOnly;
                         var compTier = localityTierByCompetitionId.TryGetValue(competition.Id, out var ct2) ? ct2 : 2;

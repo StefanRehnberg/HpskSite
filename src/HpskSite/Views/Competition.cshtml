@@ -17,6 +17,7 @@
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inject HpskSite.Services.StartLists.IStartListStore StartLists
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.CompetitionLinks CompLinks
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
 	Layout = "Master.cshtml";
@@ -491,7 +492,6 @@
     }
 
     // Server-side sidebar data (replaces 3 slow AJAX calls with in-memory published content cache lookups)
-    var competitionChildren = Model.Children()?.ToList() ?? new List<IPublishedContent>();
 
     // 1. Registration counts — via anmälningslagringen (sajtstrukturen fas 1a), som läser alla
     //    anmälningar, publicerade eller inte.
@@ -632,7 +632,7 @@
             }
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="@Model.Root().Url()">Hem</a></li>
+                    <li class="breadcrumb-item"><a href="@Model.SiteRoot().Url()">Hem</a></li>
                     @if (showClubCrumb)
                     {
                         <li class="breadcrumb-item"><a href="@hostClubCompUrl">@hostClubNode.Name</a></li>
@@ -718,7 +718,7 @@
                                 <div class="col-6 col-md-4">
                                     @if (previousCompetition != null)
                                     {
-                                        <a href="@(Umbraco.Content(previousCompetition.Id)?.CompetitionUrl())" class="btn btn-outline-secondary btn-sm">
+                                        <a href="@CompLinks.Url(previousCompetition.Id)" class="btn btn-outline-secondary btn-sm">
                                             <i class="bi bi-chevron-left"></i> Föregående
                                         </a>
                                     }
@@ -733,7 +733,7 @@
                                 <div class="col-6 col-md-4 text-end">
                                     @if (nextCompetition != null)
                                     {
-                                        <a href="@(Umbraco.Content(nextCompetition.Id)?.CompetitionUrl())" class="btn btn-outline-secondary btn-sm">
+                                        <a href="@CompLinks.Url(nextCompetition.Id)" class="btn btn-outline-secondary btn-sm">
                                             Nästa <i class="bi bi-chevron-right"></i>
                                         </a>
                                     }

@@ -47,6 +47,7 @@ namespace HpskSite.Services.Competitions
         public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId) =>
             seriesId <= 0 ? Array.Empty<CompetitionInfo>() : _core.List(("SeriesId", seriesId));
         public IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId) => ListBySeries(seriesId);
+        public bool CanStore(string alias) => CompetitionFieldTable.Fields.Any(f => string.Equals(f.Alias, alias, StringComparison.OrdinalIgnoreCase));
 
         public CompetitionUpdateResult<CompetitionInfo> Update(int id, long? expectedVersion, Action<CompetitionInfo> change) =>
             _core.Update(id, expectedVersion, change, (before, after) => before.SeriesId != after.SeriesId

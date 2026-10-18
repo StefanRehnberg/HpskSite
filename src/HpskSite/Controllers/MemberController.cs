@@ -1915,8 +1915,7 @@ namespace HpskSite.Controllers
                         {
                             RegistrationId = reg.Id,
                             CompetitionId = competitionId,
-                            CompetitionUrl = UmbracoContext?.Content?.GetById(competitionId) is { } pub
-                                ? HpskSite.Extensions.CompetitionUrlExtensions.CompetitionUrl(pub) : $"/competitions/{competitionId}/",
+                            CompetitionUrl = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.CompetitionLinks>().Url(competitionId),
                             CompetitionName = competition.Name ?? "Unknown",
                             CompetitionDate = competitionDate,
                             CompetitionType = competition.CompetitionType ?? "Precision",

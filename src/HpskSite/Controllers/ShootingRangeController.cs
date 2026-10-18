@@ -768,10 +768,10 @@ namespace HpskSite.Controllers
                 var memberId = await _rangeService.GetCurrentMemberIdAsync();
                 if (memberId == null) return Json(new { success = false, message = "Inloggning krävs." });
 
-                var comp = _contentService.GetById(competitionId);
+                var comp = _competitions.GetSaved(competitionId); // C3-planen §5d: lagringen, inte noden
                 if (comp == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
 
-                int rangeId = comp.HasProperty("rangeId") ? comp.GetValue<int>("rangeId") : 0;
+                int rangeId = comp.RangeId;
                 if (rangeId <= 0) return Json(new { success = true, hasRange = false });
 
                 var range = await _rangeService.GetByIdAsync(rangeId);

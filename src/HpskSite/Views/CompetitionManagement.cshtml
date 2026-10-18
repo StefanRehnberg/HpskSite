@@ -11,6 +11,7 @@
 @inject HpskSite.Services.ClubService ClubService
 @inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
 @inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.VirtualCompetitionNodes PageNodes
 @inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
 @{
     Layout = "Master.cshtml";
@@ -24,8 +25,8 @@
     IPublishedContent? competition = null;
     if (competitionId > 0)
     {
-        var node = Umbraco.Content(competitionId);
-        if (node != null && node.ContentType.Alias == "competition") // competitionstore-ok: noden behövs för adressen och barnen (S6), fälten läses ur posten
+        var node = PageNodes.PageNode(competitionId); // C3-planen §5d: virtuell i tabelläget
+        if (node != null)
         {
             competition = node;
         }

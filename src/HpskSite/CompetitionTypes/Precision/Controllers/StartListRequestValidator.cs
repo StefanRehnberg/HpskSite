@@ -12,8 +12,12 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
         private readonly ILogger<StartListRequestValidator> _logger;
         private readonly AdminAuthorizationService _authorizationService;
 
-        public StartListRequestValidator(IMemberService memberService, IContentService contentService, ILogger<StartListRequestValidator> logger, AdminAuthorizationService authorizationService)
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+
+        public StartListRequestValidator(IMemberService memberService, IContentService contentService, ILogger<StartListRequestValidator> logger, AdminAuthorizationService authorizationService,
+            HpskSite.Services.Competitions.ICompetitionStore competitions)
         {
+            _competitions = competitions;
             _memberService = memberService;
             _contentService = contentService;
             _logger = logger;
@@ -25,8 +29,7 @@ namespace HpskSite.CompetitionTypes.Precision.Controllers
             if (competitionId <= 0)
                 return (false, "Ogiltigt tävlings-ID.");
             
-            var competition = _contentService.GetById(competitionId);
-            if (competition == null)
+            if (_competitions.GetSaved(competitionId) == null) // C3-planen §5d: lagringen, inte noden
                 return (false, "Tävlingen hittades inte.");
             
             return (true, null);

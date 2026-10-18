@@ -406,7 +406,7 @@ namespace HpskSite.Controllers
                                     // Klubbens egna tävlingar är "Tävlingar"; kretsens och andra
                                     // klubbars öppna tävlingar ligger "utanför klubben".
                                     scope = compClubId == clubId ? CalendarScopeCompetition : CalendarScopeOutside,
-                                    url = UmbracoContext.Content?.GetById(publishedComp.Id)?.CompetitionUrl() ?? "",
+                                    url = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.CompetitionLinks>().Url(publishedComp.Id),
                                     description = publishedComp.Description ?? "",
                                     venue = publishedComp.Venue ?? ""
                                 });
@@ -509,8 +509,7 @@ namespace HpskSite.Controllers
                                 clubMembers.Any(m => m.Id == memberId.Value))
                             {
                                 var memberName = clubMembers.FirstOrDefault(m => m.Id == memberId.Value)?.Name ?? "Unknown";
-                                var competition = _contentService.GetById(competitionId.Value);
-                                var competitionName = competition?.Name ?? "Unknown Competition";
+                                var competitionName = _competitions.GetSaved(competitionId.Value)?.Name ?? "Unknown Competition"; // C3-planen §5d
 
                                 var score = total.GetValue<string>("totalScore");
                                 var placement = total.GetValue<int?>("placement");

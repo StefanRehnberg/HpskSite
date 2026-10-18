@@ -1,5 +1,6 @@
 using HpskSite.Models;
 using HpskSite.Services.Addresses;
+using HpskSite.Services.Competitions;
 using HpskSite.Services.Events;
 using HpskSite.Services.Results;
 using HpskSite.Services.SiteSettings;
@@ -129,6 +130,14 @@ namespace HpskSite.Controllers
                     return child == null ? ServeEvent(uc, row.TargetId) : NotFoundPage();
                 case PageAddressKinds.Series:
                 {
+                    if (CompetitionStoreSettings.UsesTable(_settings))
+                    {
+                        // Tabelläget (C3-planen §5c): seriens sida med den virtuella noden, ur lagringen.
+                        var s = HttpContext.RequestServices.GetRequiredService<ICompetitionSeriesStore>().Get(row.TargetId);
+                        return child == null && s != null
+                            ? View("CompetitionSeries", HttpContext.RequestServices.GetRequiredService<VirtualCompetitionNodes>().Series(s, HubNode()))
+                            : NotFoundPage();
+                    }
                     var node = uc.Content!.GetById(row.TargetId);
                     return child == null && node?.ContentType.Alias == "competitionSeries" // competitionstore-ok: sidan renderas med noden tills tävlingarna är rader
                         ? View("CompetitionSeries", node) : NotFoundPage();
@@ -141,12 +150,25 @@ namespace HpskSite.Controllers
 
         private IActionResult ServeCompetition(IUmbracoContext uc, int id, string? child)
         {
-            var competition = uc.Content!.GetById(id);
-            if (competition?.ContentType.Alias != "competition") return NotFoundPage(); // competitionstore-ok: sidan renderas med noden tills tävlingarna är rader
-            if (child == null) return View("Competition", competition);
+            IPublishedContent? competition;
+            if (CompetitionStoreSettings.UsesTable(_settings))
+            {
+                // Tabelläget (C3-planen §5c): sidan har en virtuell nod byggd ur raden — ingen nod behövs, och en
+                // gammal nod som ligger kvar till rensningen visar aldrig ett inaktuellt läge.
+                var info = HttpContext.RequestServices.GetRequiredService<ICompetitionStore>().Get(id);
+                competition = info == null ? null : HttpContext.RequestServices.GetRequiredService<VirtualCompetitionNodes>().Competition(info, HubNode());
+                if (competition == null) return NotFoundPage();
+                if (child == null) return View("Competition", competition);
+            }
+            else
+            {
+                competition = uc.Content!.GetById(id);
+                if (competition?.ContentType.Alias != "competition") return NotFoundPage(); // competitionstore-ok: nodläget renderar med noden
+                if (child == null) return View("Competition", competition);
 
-            var node = competition.Children.FirstOrDefault(c => string.Equals(c.UrlSegment, child, StringComparison.OrdinalIgnoreCase));
-            if (node != null) return ViewForNode(node);
+                var node = competition.Children.FirstOrDefault(c => string.Equals(c.UrlSegment, child, StringComparison.OrdinalIgnoreCase));
+                if (node != null) return ViewForNode(node);
+            }
 
             // Resultatlistan och startlistorna ur lagringen, utan egen nod (skalplanen C1/C2).
             if (string.Equals(child, "resultat", StringComparison.OrdinalIgnoreCase))

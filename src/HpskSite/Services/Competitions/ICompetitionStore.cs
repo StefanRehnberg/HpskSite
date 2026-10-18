@@ -39,6 +39,13 @@ namespace HpskSite.Services.Competitions
         IReadOnlyList<CompetitionInfo> ListAllInSeries(int seriesId);
 
         /// <summary>
+        /// Går fältet (nodens alias) att spara? Nodlagringen: doktypen har egenskapen — <c>SetValue</c> på en saknad
+        /// egenskap är en TYST no-op, så skrivvägar vägrar och namnger den. Tabellen: varje fält är en kolumn.
+        /// Ersätter <c>GetById(id).HasProperty(alias)</c> (C3-planen §5d).
+        /// </summary>
+        bool CanStore(string alias);
+
+        /// <summary>
         /// Läser tävlingen färskt, kör <paramref name="change"/> och sparar de fält som ändrades.
         /// <paramref name="expectedVersion"/> = den version användaren såg (<see cref="CompetitionInfo.Version"/>);
         /// skiljer den sig svarar lagringen <see cref="CompetitionUpdateOutcome.Conflict"/> och skriver ingenting.

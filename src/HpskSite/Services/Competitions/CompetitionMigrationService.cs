@@ -4,6 +4,7 @@ using HpskSite.Services.Addresses;
 using HpskSite.Services.Hosting;
 using HpskSite.Services.SiteSettings;
 using Umbraco.Cms.Core.Models;
+using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Strings;
 using Umbraco.Cms.Infrastructure.Persistence;
 using Umbraco.Cms.Infrastructure.Scoping;
@@ -28,8 +29,10 @@ namespace HpskSite.Services.Competitions
     /// Identiteten sätts sedan över VARJE id som någon pekar på (<see cref="CompetitionIdSources"/>,
     /// <see cref="SeriesIdSources"/>; LAG: id-reglerna, regel 3).</para>
     ///
-    /// <para><b>⚠️ Utkastet flyttas</b> (det senast sparade), som för startlistorna. En tävling vars utkast skiljer
-    /// sig från det publicerade namnges i torrkörningen med fälten som skiljer.</para>
+    /// <para><b>⚠️ En publicerad nod flyttas i sitt PUBLICERADE läge</b> — det sajten visat och sajtens redigering
+    /// skrivit. Ett utkast före det kommer bara ur backoffice och har aldrig synts (KM C 5361: utkastet saknade
+    /// klubben och hade blivit öppet för alla). Torrkörningen namnger dem med fälten som skiljer; utkastet finns kvar
+    /// i arkivet. Opublicerade noder flyttas i sitt sparade läge.</para>
     ///
     /// <para><b>Opublicerade och papperskorgens noder flyttas som RADERADE rader</b> (<c>DeletedUtc</c> satt):
     /// tabellen har inget publiceringsläge, och en opublicerad tävling hade annars blivit synlig. De syns inte,
@@ -186,7 +189,7 @@ ORDER BY n.id", CompetitionFieldTable.NodeAlias, CompetitionSeriesFieldTable.Nod
 
             var notes = new List<string>();
             if (unpublished.Count > 0) notes.Add($"{unpublished.Count} opublicerade flyttas som raderade (syns inte, finns kvar).");
-            if (draftAhead.Count > 0) notes.Add($"{draftAhead.Count} har sparade ändringar som inte publicerats — efter flytten gäller det sparade.");
+            if (draftAhead.Count > 0) notes.Add($"{draftAhead.Count} har sparade ändringar som inte publicerats — det publicerade flyttas, utkastet sparas bara i arkivet.");
             if (withoutAddress.Count > 0) notes.Add($"{withoutAddress.Count} publicerade saknar adress — de har ingen sida i tabelläget förrän en värd sätts.");
             if (unreadable.Count > 0) notes.Add($"{unreadable.Count} värden går inte att läsa och blir standardvärdet.");
 
@@ -515,6 +518,43 @@ VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, @10, @11, @12, @13)",
                 return (false, $"{verify.Mismatches} avvikelser mellan noderna och tabellerna — växeln slås inte om.", verify.Problems.Take(50).ToList());
             _settings.Set(CompetitionStoreSettings.StoreKey, CompetitionStoreSettings.StoreTable, byMemberId);
             return (true, $"Tabellerna gäller nu ({verify.Compared} tävlingar och serier jämförda).", new List<string>());
+        }
+
+        /// <summary>
+        /// Avpublicerar högst <paramref name="batch"/> tävlings- och serienoder (§5e). Bara när tabellen gäller.
+        /// Raderar ingenting — noderna och deras barn (gamla fakturor) ligger kvar i trädet.
+        /// </summary>
+        public (int Unpublished, int Remaining, string Message) UnpublishNodes(int batch, IContentService contentService)
+        {
+            if (NodesCurrent)
+                return (0, 0, "Avpubliceringen körs först när tabellerna gäller.");
+            batch = Math.Clamp(batch, 1, 200);
+            List<int> published;
+            using (var scope = _scopeProvider.CreateScope(autoComplete: true))
+            {
+                published = scope.Database.Fetch<int>(@"
+SELECT n.id FROM umbracoNode n
+JOIN umbracoContent c ON c.nodeId = n.id
+JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
+JOIN umbracoDocument d ON d.nodeId = n.id
+WHERE ct.alias IN (@0, @1) AND d.published = 1 AND n.trashed = 0
+ORDER BY n.id", CompetitionFieldTable.NodeAlias, CompetitionSeriesFieldTable.NodeAlias);
+            }
+            int done = 0;
+            foreach (var id in published.Take(batch))
+            {
+                try
+                {
+                    var node = contentService.GetById(id);
+                    if (node != null && node.Published) { contentService.Unpublish(node); done++; }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Tävlingsnod {Id} kunde inte avpubliceras", id);
+                }
+            }
+            var remaining = Math.Max(0, published.Count - done);
+            return (done, remaining, remaining == 0 ? "Alla tävlings- och serienoder är avpublicerade." : $"{remaining} kvar — kör igen.");
         }
 
         /// <summary>Tömmer tabellerna och arkivet inför ett nytt försök. Bara när noderna gäller. Identiteten går aldrig bakåt.</summary>

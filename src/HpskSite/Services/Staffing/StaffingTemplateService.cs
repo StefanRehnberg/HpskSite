@@ -31,15 +31,15 @@ namespace HpskSite.Services.Staffing
 
         private (string OwnerType, string OwnerKey, string? RegionCode) ResolveHost(int competitionId)
         {
-            var comp = _contentService.GetById(competitionId);
-            var clubId = comp?.GetValue<int>("clubId") ?? 0;
+            var comp = _competitions.GetSaved(competitionId); // C3-planen §5d
+            var clubId = comp?.ClubId ?? 0;
             if (clubId > 0)
             {
                 string? region = null;
                 try { region = _contentService.GetById(clubId)?.GetValue<string>("regionalFederation"); } catch { }
                 return (StaffingTemplateOwner.Club, clubId.ToString(), string.IsNullOrWhiteSpace(region) ? null : region);
             }
-            var regionCode = comp?.GetValue<string>("regionalFederation");
+            var regionCode = comp?.RegionalFederation;
             return (StaffingTemplateOwner.Region, regionCode ?? "", string.IsNullOrWhiteSpace(regionCode) ? null : regionCode);
         }
 

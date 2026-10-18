@@ -247,8 +247,7 @@ namespace HpskSite.Controllers
                 // If competitionId is provided and > 0, validate it exists
                 if (competitionId.HasValue && competitionId.Value > 0)
                 {
-                    var content = _contentService.GetById(competitionId.Value);
-                    if (content == null)
+                    if (_competitions.GetSaved(competitionId.Value) == null) // C3-planen §5d
                     {
                         return NotFound(new { success = false, message = "Competition not found" });
                     }
@@ -301,8 +300,8 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                // Validate competition exists
-                var content = _contentService.GetById(request.CompetitionId);
+                // Validate competition exists — det sparade läget ur lagringen (C3-planen §5d), inte noden.
+                var content = _competitions.GetSaved(request.CompetitionId);
                 if (content == null)
                 {
                     return NotFound(new
@@ -342,8 +341,8 @@ namespace HpskSite.Controllers
                 // and that non-empty value is honoured.
                 bool clubIncomingEmpty = FieldPresentButEmpty(request.Fields, "clubId");
                 bool regionIncomingEmpty = FieldPresentButEmpty(request.Fields, "regionalFederation");
-                int existingClubId = content.GetValue<int?>("clubId") ?? 0;
-                string existingRegion = (content.GetValue<string>("regionalFederation") ?? "").Trim();
+                int existingClubId = content.ClubId;
+                string existingRegion = (content.RegionalFederation ?? "").Trim();
                 bool wouldClearBothHosts =
                     (clubIncomingEmpty || existingClubId <= 0) && (regionIncomingEmpty || string.IsNullOrWhiteSpace(existingRegion));
                 if (wouldClearBothHosts && (existingClubId > 0 || !string.IsNullOrWhiteSpace(existingRegion)))
@@ -390,7 +389,7 @@ namespace HpskSite.Controllers
                 // SPARADE värdet när fältet inte skickas, så en tävling som redan bär felaktiga
                 // finalserier inte kan sparas vidare utan att rättas.
                 var finalsRefusal = HpskSite.CompetitionTypes.Common.CompetitionFinals.Refusal(
-                    content.GetValue<string>("competitionType"),
+                    content.CompetitionType,
                     ReadFieldOrContentAsInt(request.Fields, "numberOfFinalSeries", content));
                 if (finalsRefusal != null)
                     return Ok(new { success = false, message = finalsRefusal });
@@ -490,7 +489,12 @@ namespace HpskSite.Controllers
             return string.IsNullOrWhiteSpace(raw) || raw == "0";
         }
 
-        private static int ReadFieldOrContentAsInt(Dictionary<string, object>? fields, string key, Umbraco.Cms.Core.Models.IContent content)
+        /// <summary>Det sparade värdet för ett fält (nodens alias) ur posten.</summary>
+        private static object? ExistingValue(HpskSite.Models.Competitions.CompetitionInfo c, string alias) =>
+            HpskSite.Models.Competitions.CompetitionFieldTable.Fields
+                .FirstOrDefault(f => string.Equals(f.Alias, alias, StringComparison.OrdinalIgnoreCase))?.Get(c);
+
+        private static int ReadFieldOrContentAsInt(Dictionary<string, object>? fields, string key, HpskSite.Models.Competitions.CompetitionInfo content)
         {
             if (fields != null && fields.TryGetValue(key, out var obj) && obj != null)
             {
@@ -505,7 +509,7 @@ namespace HpskSite.Controllers
                 return int.TryParse(obj.ToString(), out var parsed) ? parsed : 0;
             }
             // Field absent from request → keep existing content value.
-            return content.GetValue<int?>(key) ?? 0;
+            return HpskSite.Models.Competitions.CompetitionFieldValues.ReadInt(ExistingValue(content, key)) ?? 0;
         }
 
         /// <summary>
@@ -516,7 +520,7 @@ namespace HpskSite.Controllers
         /// Read a field from the request Fields dict as a bool; falls back to the content node's
         /// stored value when the key isn't in the request. Accepts true/false and "true"/"false".
         /// </summary>
-        private static bool ReadFieldOrContentAsBool(Dictionary<string, object>? fields, string key, Umbraco.Cms.Core.Models.IContent content)
+        private static bool ReadFieldOrContentAsBool(Dictionary<string, object>? fields, string key, HpskSite.Models.Competitions.CompetitionInfo content)
         {
             if (fields != null && fields.TryGetValue(key, out var obj) && obj != null)
             {
@@ -530,10 +534,10 @@ namespace HpskSite.Controllers
                 if (obj is bool b) return b;
                 return bool.TryParse(obj.ToString(), out var pb) && pb;
             }
-            return content.GetValue<bool>(key);
+            return HpskSite.Models.Competitions.CompetitionFieldValues.ReadBool(ExistingValue(content, key)) ?? false;
         }
 
-        private static string ReadFieldOrContentAsString(Dictionary<string, object>? fields, string key, Umbraco.Cms.Core.Models.IContent content)
+        private static string ReadFieldOrContentAsString(Dictionary<string, object>? fields, string key, HpskSite.Models.Competitions.CompetitionInfo content)
         {
             if (fields != null && fields.TryGetValue(key, out var obj) && obj != null)
             {
@@ -545,7 +549,7 @@ namespace HpskSite.Controllers
                 }
                 return (obj.ToString() ?? string.Empty).Trim();
             }
-            return (content.GetValue<string>(key) ?? string.Empty).Trim();
+            return (ExistingValue(content, key)?.ToString() ?? string.Empty).Trim();
         }
 
         /// <summary>
@@ -601,7 +605,7 @@ namespace HpskSite.Controllers
         /// </summary>
         private async Task<object> RouteToTypeSpecificSave(
             CompetitionEditRequest request,
-            Umbraco.Cms.Core.Models.IContent content)
+            HpskSite.Models.Competitions.CompetitionInfo content)
         {
             return request.CompetitionType.ToLower() switch
             {
@@ -620,7 +624,7 @@ namespace HpskSite.Controllers
         /// </summary>
         private async Task<object> SavePrecisionCompetition(
             CompetitionEditRequest request,
-            Umbraco.Cms.Core.Models.IContent content)
+            HpskSite.Models.Competitions.CompetitionInfo content)
         {
             try
             {

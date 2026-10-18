@@ -21,13 +21,20 @@ namespace HpskSite.Services.Messaging
         private readonly IUmbracoContextFactory _ctxFactory;
         private readonly ILogger<ParticipantNotificationService> _logger;
 
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.CompetitionLinks _links;
+
         public ParticipantNotificationService(
             EventMessageService messages,
             ParticipantAudienceResolver audience,
             WebPushService webPush,
             IUmbracoContextFactory ctxFactory,
-            ILogger<ParticipantNotificationService> logger)
+            ILogger<ParticipantNotificationService> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Competitions.CompetitionLinks links)
         {
+            _competitions = competitions;
+            _links = links;
             _messages = messages;
             _audience = audience;
             _webPush = webPush;
@@ -122,11 +129,12 @@ namespace HpskSite.Services.Messaging
         {
             try
             {
+                // C3-planen §5d: namnet ur lagringen, adressen ur id:t — ingen nod.
                 using var cref = _ctxFactory.EnsureUmbracoContext();
-                var content = cref.UmbracoContext.Content?.GetById(competitionId);
-                if (content == null) return ("pistol.nu", "/");
-                var url = content.Url();
-                return (content.Name ?? "Tävling", string.IsNullOrWhiteSpace(url) ? "/" : url);
+                var c = _competitions.Get(competitionId);
+                if (c == null) return ("pistol.nu", "/");
+                var url = _links.Url(competitionId);
+                return (c.Name ?? "Tävling", string.IsNullOrWhiteSpace(url) ? "/" : url);
             }
             catch
             {

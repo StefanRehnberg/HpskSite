@@ -100,13 +100,13 @@ namespace HpskSite.Controllers
             return Json(new { success = ok, message });
         }
 
-        /// <summary>Avpubliceringen av tävlingsnoderna hör till rensningen (§5e) — vägras tills den finns.</summary>
+        /// <summary>Avpublicerar tävlings- och serienoderna i portioner (§5e). Bara när tabellerna gäller.</summary>
         [HttpPost, ValidateAntiForgeryToken]
         public async Task<IActionResult> Unpublish(int batch = 50)
         {
             if (await DenyAsync() is { } deny) return deny;
-            return Json(new { success = true, unpublished = 0, remaining = 0,
-                message = "Tävlingsnoderna avpubliceras med rensningen (C3-planen §5e), inte här." });
+            var (done, remaining, message) = _migration.UnpublishNodes(batch, Services.ContentService);
+            return Json(new { success = true, unpublished = done, remaining, message });
         }
     }
 }

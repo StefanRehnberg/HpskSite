@@ -18,15 +18,18 @@ namespace HpskSite.Services
         private const string CacheKeyPrefix = "SeriesResults_";
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _seriesStore;
 
         public SeriesCalculationService(
             IContentService contentService,
             IEnumerable<ISeriesScoreSource> scoreSources,
             IMemoryCache cache,
             ILogger<SeriesCalculationService> logger,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Competitions.ICompetitionSeriesStore seriesStore)
         {
             _competitions = competitions;
+            _seriesStore = seriesStore;
             _contentService = contentService;
             _scoreSources = scoreSources;
             _cache = cache;
@@ -42,14 +45,15 @@ namespace HpskSite.Services
                 return cached;
             }
 
-            var series = _contentService.GetById(seriesContentId);
-            if (series == null || series.ContentType.Alias != "competitionSeries")
+            // C3-planen §5d: serien och omgångarna ur lagringarna (det sparade läget, som content service gav).
+            var series = _seriesStore.GetSaved(seriesContentId);
+            if (series == null)
             {
                 _logger.LogWarning("Series not found or wrong type: {SeriesId}", seriesContentId);
                 return null;
             }
 
-            var strategyId = series.GetValue<string>("seriesCalculationStrategy") ?? "";
+            var strategyId = series.SeriesCalculationStrategy ?? "";
             if (string.IsNullOrEmpty(strategyId))
             {
                 _logger.LogDebug("No calculation strategy configured for series {SeriesId}", seriesContentId);
@@ -64,7 +68,7 @@ namespace HpskSite.Services
             }
 
             // Parse strategy config
-            var configJson = series.GetValue<string>("seriesCalculationConfig") ?? "{}";
+            var configJson = series.SeriesCalculationConfig ?? "{}";
             var parameters = new Dictionary<string, object>();
             try
             {
@@ -86,10 +90,7 @@ namespace HpskSite.Services
             // Barnen ur trädet (seriens struktur), varje omgång ur tävlingslagringen i SPARAT läge, som
             // content service gav. seriesSortOrder har aldrig funnits på doktypen (CompetitionFieldTable),
             // så ordningen är datumet.
-            var childCompetitions = _contentService.GetPagedChildren(seriesContentId, 0, int.MaxValue, out _)
-                .Select(c => _competitions.GetSaved(c.Id))
-                .Where(c => c != null)
-                .Select(c => c!)
+            var childCompetitions = _competitions.ListAllInSeries(seriesContentId)
                 .OrderBy(c => c.CompetitionDate ?? DateTime.MinValue)
                 .ToList();
 
@@ -141,7 +142,7 @@ namespace HpskSite.Services
             var context = new SeriesCalculationContext
             {
                 SeriesId = seriesContentId,
-                SeriesName = series.GetValue<string>("seriesName") ?? series.Name,
+                SeriesName = series.DisplayName,
                 Competitions = competitions,
                 Parameters = parameters,
                 CompetitionResults = scores.ByCompetition
@@ -167,16 +168,14 @@ namespace HpskSite.Services
         {
             try
             {
-                var competition = _contentService.GetById(competitionId);
-                if (competition == null) return;
-
-                var parent = _contentService.GetById(competition.ParentId);
-                if (parent != null && parent.ContentType.Alias == "competitionSeries")
+                // C3-planen §5d: serien ur lagringen, inte nodens förälder.
+                var seriesId = _competitions.GetSaved(competitionId)?.SeriesId;
+                if (seriesId is > 0)
                 {
-                    var cacheKey = CacheKeyPrefix + parent.Id;
+                    var cacheKey = CacheKeyPrefix + seriesId.Value;
                     _cache.Remove(cacheKey);
                     _logger.LogDebug("Invalidated series results cache for series {SeriesId} (competition {CompId} changed)",
-                        parent.Id, competitionId);
+                        seriesId.Value, competitionId);
                 }
             }
             catch (Exception ex)

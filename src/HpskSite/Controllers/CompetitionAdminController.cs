@@ -670,11 +670,13 @@ namespace HpskSite.Controllers
                 }
 
                 // Build competition list — parent lookup via .Parent (no DB calls needed)
+                // Sidans nod: den publicerade i nodläget, den virtuella i tabelläget (C3-planen §5d).
+                var pageNodes = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Competitions.VirtualCompetitionNodes>();
                 var competitions = filteredCompetitions
                     .Select(comp =>
                     {
                         // Noden bara för adressen och beskrivningen (RTE); serien ur serielagringen.
-                        var node = umbracoContext.Content.GetById(comp.Id);
+                        var node = pageNodes.PageNode(comp);
                         var series = comp.SeriesId is int sid ? _seriesStore.Get(sid) : null;
                         var isInSeries = series != null;
 
