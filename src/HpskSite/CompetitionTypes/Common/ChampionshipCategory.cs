@@ -178,13 +178,8 @@ namespace HpskSite.CompetitionTypes.Common
         /// </summary>
         public static string NormalizeScope(string? scope) => Normalize(scope);
 
+        // Samma regel som omfattningens övriga läsningar — inklusive JSON-avkodningen av ä.
         private static string Normalize(string? scope)
-        {
-            if (string.IsNullOrWhiteSpace(scope)) return "";
-            var s = scope.Trim();
-            if (s.StartsWith("[") && s.EndsWith("]"))
-                s = s.Trim('[', ']').Trim().Trim('"');
-            return s;
-        }
+            => HpskSite.CompetitionTypes.Common.Utilities.CompetitionScopeHelper.NormalizeScopeValue(scope);
     }
 }
