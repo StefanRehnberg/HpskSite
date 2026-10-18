@@ -47,7 +47,7 @@
             <!-- Modal Header -->
             <div class="modal-header">
                 <h5 class="modal-title" id="seriesEditModalLabel">
-                    <i class="bi bi-plus-circle me-2"></i>New Series
+                    <i class="bi bi-plus-circle me-2"></i>Ny serie
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
@@ -61,7 +61,7 @@
 
                     <!-- Series Name -->
                     <div class="mb-3">
-                        <label for="seriesName" class="form-label">Series Name <span class="text-danger">*</span></label>
+                        <label for="seriesName" class="form-label">Seriens namn <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="seriesName" name="seriesName" required>
                     </div>
 
@@ -115,23 +115,41 @@
 
                     <!-- Short Description -->
                     <div class="mb-3">
-                        <label for="seriesShortDescription" class="form-label">Short Description</label>
+                        <label for="seriesShortDescription" class="form-label">Kort beskrivning</label>
                         <input type="text" class="form-control" id="seriesShortDescription" name="seriesShortDescription" maxlength="200">
-                        <small class="form-text text-muted">Brief one-line description (max 200 characters)</small>
+                        <small class="form-text text-muted">En rad om serien (högst 200 tecken)</small>
                     </div>
 
                     <!-- Full Description with TinyMCE Editor -->
                     <div class="mb-3">
-                        <label for="seriesDescription" class="form-label">Description</label>
+                        <label for="seriesDescription" class="form-label">Beskrivning</label>
                         <textarea id="seriesDescription" name="seriesDescription" style="width: 100%; min-height: 300px;"></textarea>
+                    </div>
+
+                    <!-- Seriens logga (C3-planen S7) — visas på seriebannern på varje omgångs tävlingssida -->
+                    <div class="mb-3" id="seriesLogoSection">
+                        <label class="form-label">Logga</label>
+                        <div id="seriesLogoNew" class="form-text">Spara serien först — sedan kan du ladda upp en logga.</div>
+                        <div id="seriesLogoEdit" class="d-none">
+                            <div class="d-flex align-items-center gap-3 flex-wrap">
+                                <img id="seriesLogoPreview" alt="Seriens logga" class="d-none border rounded" style="max-height: 60px; max-width: 120px;">
+                                <span id="seriesLogoNone" class="text-muted small">Ingen logga.</span>
+                                <input type="file" class="form-control w-auto" id="seriesLogoFile" accept="image/jpeg,image/png,image/gif,image/webp" onchange="uploadSeriesLogo(this)">
+                                <button type="button" class="btn btn-outline-danger btn-sm d-none" id="seriesLogoRemove" onclick="removeSeriesLogo()">
+                                    <i class="bi bi-trash me-1"></i>Ta bort loggan
+                                </button>
+                            </div>
+                            <div class="form-text">JPG, PNG, GIF eller WebP, högst 5 MB. Visas på seriebannern på varje omgångs tävlingssida.</div>
+                            <div class="small mt-1" id="seriesLogoMsg"></div>
+                        </div>
                     </div>
 
                     <!-- Date Fields with Flatpickr -->
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="seriesStartDate" class="form-label">Start Date <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="seriesStartDate" name="seriesStartDate" placeholder="Select start date" required>
+                                <label for="seriesStartDate" class="form-label">Startdatum <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="seriesStartDate" name="seriesStartDate" placeholder="Välj startdatum" required>
                                 @* Mandatory on the doctype, so a series without it SAVES but never PUBLISHES — and the publish
                                    failure comes back with an empty message, leaving an unpublished ghost series behind. Requiring
                                    it here stops that before it happens. *@
@@ -140,8 +158,8 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="seriesEndDate" class="form-label">End Date</label>
-                                <input type="text" class="form-control" id="seriesEndDate" name="seriesEndDate" placeholder="Select end date">
+                                <label for="seriesEndDate" class="form-label">Slutdatum</label>
+                                <input type="text" class="form-control" id="seriesEndDate" name="seriesEndDate" placeholder="Välj slutdatum">
                             </div>
                         </div>
                     </div>
@@ -158,10 +176,10 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="isActive" class="form-label">Status</label>
+                                <label for="isActive" class="form-label">Synlighet</label>
                                 <select class="form-select" id="isActive" name="isActive">
-                                    <option value="true" selected>Active</option>
-                                    <option value="false">Inactive</option>
+                                    <option value="true" selected>Synlig</option>
+                                    <option value="false">Dold</option>
                                 </select>
                             </div>
                         </div>
@@ -187,6 +205,70 @@
 </div>
 
 <script>
+// ── Seriens logga (C3-planen S7) ─────────────────────────────────────────────────────────
+// Läses när dialogen öppnas (alla tre panelerna öppnar samma dialog), laddas upp direkt — inte med Spara.
+(function () {
+    const modalEl = document.getElementById('seriesEditModal');
+    if (!modalEl || modalEl.dataset.logoBound) return;
+    modalEl.dataset.logoBound = '1';
+    const $ = id => document.getElementById(id);
+    function show(url) {
+        const img = $('seriesLogoPreview');
+        img.classList.toggle('d-none', !url);
+        if (url) img.src = url;
+        $('seriesLogoNone').classList.toggle('d-none', !!url);
+        $('seriesLogoRemove').classList.toggle('d-none', !url);
+    }
+    function msg(text, ok) {
+        const el = $('seriesLogoMsg');
+        el.textContent = text || '';
+        el.className = 'small mt-1 ' + (ok ? 'text-success' : 'text-danger');
+    }
+    const seriesId = () => parseInt($('seriesId').value || '0', 10);
+    const token = () => document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+    modalEl.addEventListener('shown.bs.modal', async () => {
+        const id = seriesId();
+        $('seriesLogoNew').classList.toggle('d-none', id > 0);
+        $('seriesLogoEdit').classList.toggle('d-none', !(id > 0));
+        msg('');
+        $('seriesLogoFile').value = '';
+        show(null);
+        if (!(id > 0)) return;
+        try {
+            const r = await fetch('/umbraco/surface/CompetitionAdmin/GetSeriesLogo?seriesId=' + id);
+            const j = await r.json();
+            if (j.success) show(j.logoUrl);
+        } catch (e) { msg('Loggan kunde inte läsas.', false); }
+    });
+    window.uploadSeriesLogo = async function (input) {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const fd = new FormData();
+        fd.append('seriesId', String(seriesId()));
+        fd.append('imageFile', file);
+        msg('Laddar upp…', true);
+        try {
+            const r = await fetch('/umbraco/surface/CompetitionAdmin/UploadSeriesLogo', { method: 'POST', headers: { 'RequestVerificationToken': token() }, body: fd });
+            const j = await r.json();
+            if (!j.success) { msg(j.message || 'Loggan kunde inte sparas.', false); return; }
+            show(j.logoUrl);
+            msg(j.message || 'Loggan är sparad.', !j.message);
+        } catch (e) { msg('Loggan kunde inte sparas.', false); }
+        input.value = '';
+    };
+    window.removeSeriesLogo = async function () {
+        const fd = new FormData();
+        fd.append('seriesId', String(seriesId()));
+        try {
+            const r = await fetch('/umbraco/surface/CompetitionAdmin/RemoveSeriesLogo', { method: 'POST', headers: { 'RequestVerificationToken': token() }, body: fd });
+            const j = await r.json();
+            if (!j.success) { msg(j.message || 'Loggan kunde inte tas bort.', false); return; }
+            show(null);
+            msg('Loggan är borttagen.', true);
+        } catch (e) { msg('Loggan kunde inte tas bort.', false); }
+    };
+})();
+
 let editorInstance = null;  // Global reference to CKEditor instance
 let seriesStrategies = [];  // Loaded from API
 

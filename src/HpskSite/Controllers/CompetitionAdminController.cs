@@ -2259,6 +2259,73 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// C3-planen S7: seriens logga — läses av seriedialogen, laddas upp genom samma regel som klubbens logga
+        /// (<see cref="HpskSite.Services.Media.ImageMediaService"/>). Visas på tävlingssidans seriebanner.
+        /// </summary>
+        [HttpGet]
+        public IActionResult GetSeriesLogo(int seriesId)
+        {
+            var series = _seriesStore.GetSaved(seriesId);
+            if (series == null) return Ok(new { success = false, message = "Serien hittades inte." });
+            return Ok(new { success = true, logoUrl = SeriesLogoUrl(series.SeriesLogo) });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UploadSeriesLogo(int seriesId, Microsoft.AspNetCore.Http.IFormFile imageFile)
+        {
+            var refusal = await SeriesWriteRefusal(seriesId);
+            if (refusal != null) return Ok(new { success = false, message = refusal });
+            var images = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Media.ImageMediaService>();
+            var (udi, url, error) = await images.SaveAsync(imageFile, "Series Images", "series-images");
+            if (error != null) return Ok(new { success = false, message = error });
+            var updated = _seriesStore.Update(seriesId, null, s => s.SeriesLogo = udi);
+            if (!updated.Ok) return Ok(new { success = false, message = "Serien hittades inte." });
+            InvalidateCompetitionCaches();
+            return Ok(new { success = true, logoUrl = url, message = updated.PublishProblem == null ? null : "Loggan sparades men serien kunde inte publiceras om: " + updated.PublishProblem });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveSeriesLogo(int seriesId)
+        {
+            var refusal = await SeriesWriteRefusal(seriesId);
+            if (refusal != null) return Ok(new { success = false, message = refusal });
+            var updated = _seriesStore.Update(seriesId, null, s => s.SeriesLogo = null);
+            if (!updated.Ok) return Ok(new { success = false, message = "Serien hittades inte." });
+            InvalidateCompetitionCaches();
+            return Ok(new { success = true });
+        }
+
+        /// <summary>Samma regel som att redigera serien: sajtadmin, klubbens admin för klubbens serie, kretsens för kretsens.</summary>
+        private async Task<string?> SeriesWriteRefusal(int seriesId)
+        {
+            var (isSiteAdmin, isRegionalAdmin, isClubAdmin, managedClubIds) = await GetSeriesAuthContext();
+            if (!isSiteAdmin && !isRegionalAdmin && !isClubAdmin) return "Du har inte behörighet att ändra serien.";
+            var series = _seriesStore.GetSaved(seriesId);
+            if (series == null) return "Serien hittades inte.";
+            if (isSiteAdmin) return null;
+            if (isClubAdmin && IsSeriesOwnedByClubs(series, managedClubIds)) return null;
+            if (isRegionalAdmin && await RegionalAdminOwnsSeries(series)) return null;
+            return "Du har inte behörighet att ändra serien.";
+        }
+
+        /// <summary>Mediaväljarens värde (UDI eller JSON med mediaKey) → bildens adress, eller null.</summary>
+        private string? SeriesLogoUrl(string? stored)
+        {
+            if (string.IsNullOrWhiteSpace(stored) || UmbracoContext.Media == null) return null;
+            Guid key;
+            if (Umbraco.Cms.Core.UdiParser.TryParse(stored.Trim(), out Umbraco.Cms.Core.GuidUdi? udi) && udi != null) key = udi.Guid;
+            else
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(stored, "\"mediaKey\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
+                if (!m.Success || !Guid.TryParse(m.Groups[1].Value, out key)) return null;
+            }
+            var media = UmbracoContext.Media.GetById(key);
+            return media?.Url();
+        }
+
+        /// <summary>
         /// Update an existing competition series
         /// </summary>
         [HttpPost]
