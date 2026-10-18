@@ -51,18 +51,18 @@ namespace HpskSite.Controllers
 
         private readonly IScopeProvider _scopeProvider;
         private readonly AdminAuthorizationService _auth;
-        private readonly IMemoryCache _cache;
+        private readonly HpskSite.Services.Hosting.RateCounterService _rateCounters;
         private readonly ILogger<EkonomiEnkatController> _logger;
 
         public EkonomiEnkatController(
             IScopeProvider scopeProvider,
             AdminAuthorizationService auth,
-            IMemoryCache cache,
+            HpskSite.Services.Hosting.RateCounterService rateCounters,
             ILogger<EkonomiEnkatController> logger)
         {
             _scopeProvider = scopeProvider;
             _auth = auth;
-            _cache = cache;
+            _rateCounters = rateCounters;
             _logger = logger;
         }
 
@@ -119,20 +119,20 @@ namespace HpskSite.Controllers
             var ip = ClientIp();
             if (!string.IsNullOrWhiteSpace(ip))
             {
-                var nyckel = "ekonomienkat_ip_" + ip;
-                var antal = _cache.TryGetValue<int>(nyckel, out var n) ? n : 0;
+                // Räknas vid FÖRSÖKET, inte vid en lyckad sparning — annars är ett skript som
+                // skickar ogiltiga poster obegränsat. I databasen (skalplanen D1), så gränsen gäller
+                // alla instanser och överlever en omstart. `antal` = försöken INKLUSIVE det här.
+                var antal = _rateCounters.Increment("ekonomienkat:ip:" + ip, Fonster);
 
-                if (antal >= MaxPerTimme)
+                if (antal > MaxPerTimme)
                 {
                     // ⚠️ INGEN loggrad per avvisat försök. En robot som mal skulle annars fylla
                     // loggen med brus och göra den oläsbar — vilket är ett eget slags angrepp.
                     // Den FÖRSTA avvisningen räcker för att en människa ska kunna se att det händer.
-                    if (antal == MaxPerTimme)
+                    if (antal == MaxPerTimme + 1)
                         _logger.LogWarning(
                             "Ekonomienkät: gränsen {Max} svar/timme nådd för en avsändare. "
                             + "Fler svar därifrån avvisas den närmaste timmen.", MaxPerTimme);
-
-                    _cache.Set(nyckel, antal + 1, Fonster);
 
                     ViewData["Fel"] =
                         "Vi tar emot högst " + MaxPerTimme + " svar i timmen från samma uppkoppling, "
@@ -141,10 +141,6 @@ namespace HpskSite.Controllers
                         + "samma ställe, mejla gärna admin@pistol.nu så löser vi det.";
                     return View("~/Views/EkonomiEnkat.cshtml");
                 }
-
-                // Räknas vid FÖRSÖKET, inte vid en lyckad sparning — annars är ett skript som
-                // skickar ogiltiga poster obegränsat.
-                _cache.Set(nyckel, antal + 1, Fonster);
             }
             // ⚠️ Går IP:t inte att läsa släpps svaret igenom. En spärr som blockerar riktiga svar
             // för att den inte kunde läsa en adress är värre än skräpet den skyddar mot — hela

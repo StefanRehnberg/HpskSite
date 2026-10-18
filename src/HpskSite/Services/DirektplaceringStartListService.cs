@@ -22,6 +22,7 @@ namespace HpskSite.Services
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Hosting.DatabaseLock _dbLock;
 
         public DirektplaceringStartListService(
             IContentService contentService,
@@ -29,8 +30,10 @@ namespace HpskSite.Services
             ILogger<DirektplaceringStartListService> logger,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.StartLists.IStartListStore startLists,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Hosting.DatabaseLock dbLock)
         {
+            _dbLock = dbLock;
             _competitions = competitions;
             _registrations = registrations;
             _startLists = startLists;
@@ -38,6 +41,23 @@ namespace HpskSite.Services
             _clubService = clubService;
             _logger = logger;
         }
+
+        /// <summary>
+        /// <b>Egenbokningens platser — ett lås för alla vägar och alla instanser</b> (skalplanen D1).
+        /// Kontrollen "finns det plats?" och sparningen måste ske under SAMMA lås, annars säljs samma
+        /// plats två gånger. Tävlingssidans anmälan, efteranmälan vid disken och Redigera anmälan tar det.
+        /// Null = någon annan bokar just nu; svara <see cref="CapacityBusyMessage"/>.
+        /// </summary>
+        public HpskSite.Services.Hosting.DatabaseLock.Lease? TryLockCapacity(int competitionId) =>
+            _dbLock.TryAcquire(CapacityLockName(competitionId), TimeSpan.FromSeconds(10));
+
+        /// <inheritdoc cref="TryLockCapacity"/>
+        public Task<HpskSite.Services.Hosting.DatabaseLock.Lease?> TryLockCapacityAsync(int competitionId) =>
+            _dbLock.TryAcquireAsync(CapacityLockName(competitionId), TimeSpan.FromSeconds(10));
+
+        public static string CapacityLockName(int competitionId) => $"dp-capacity:{competitionId}";
+
+        public const string CapacityBusyMessage = "Anmälan kunde inte genomföras just nu, försök igen.";
 
         /// <summary>
         /// Recomputes the precisionStartList document under the competition based on the

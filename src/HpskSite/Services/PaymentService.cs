@@ -53,8 +53,10 @@ namespace HpskSite.Services
             HpskSite.Services.CompetitionFees.CompetitionFeeService competitionFees,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.LegacyInvoiceHubs invoiceHubs,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Hosting.DatabaseLock dbLock)
         {
+            _dbLock = dbLock;
             _competitions = competitions;
             _invoiceHubs = invoiceHubs;
             _registrations = registrations;
@@ -354,7 +356,11 @@ namespace HpskSite.Services
         // check-then-create concurrently with nothing in between. A registration burst - exactly what
         // a competition opening is - could therefore mint a duplicate. Serialize per competition and
         // re-check against the DB, which is authoritative and has no cache lag.
-        private static readonly ConcurrentDictionary<int, object> _invoiceHubGates = new();
+        //
+        // Skalplanen D1 (2026-10-18): låset ligger i databasen (DatabaseLock), så det gäller också mellan
+        // instanser och över en omstart med överlapp. Ett lås i processen skyddade bara samma process.
+        private readonly HpskSite.Services.Hosting.DatabaseLock _dbLock;
+        private static readonly TimeSpan InvoiceLockWait = TimeSpan.FromSeconds(30);
 
         /// <summary>
         /// The id of this competition's invoice hub, creating it once if it is genuinely missing.
@@ -362,8 +368,12 @@ namespace HpskSite.Services
         /// </summary>
         private int? EnsureInvoicesHubId(int competitionId)
         {
-            var gate = _invoiceHubGates.GetOrAdd(competitionId, _ => new object());
-            lock (gate)
+            using var lease = _dbLock.TryAcquire($"invoice-hub:{competitionId}", InvoiceLockWait);
+            if (lease == null)
+            {
+                _logger.LogError("Fakturamappen för tävling {CompetitionId} skapades inte: låset var upptaget i {Seconds} s", competitionId, InvoiceLockWait.TotalSeconds);
+                return null;
+            }
             {
                 var existing = FindInvoicesHubIdFromDb(competitionId);
                 if (existing.HasValue) return existing;
@@ -416,10 +426,10 @@ namespace HpskSite.Services
         // (CompetitionController), which parks it right where a human clicks "Betala med Swish" on the
         // page they just landed on. The delay does not cause the race, but it aims it.
         //
-        // Serialize per registration and re-check against the DB, exactly as _invoiceHubGates does.
+        // Serialize per registration and re-check against the DB, exactly as the invoice-hub lock does.
         // This is a DEDUPLICATOR, not a gate: it never suppresses an invoice that does not exist yet,
-        // so the "Skapa saknade fakturor" repair keeps having nothing to repair.
-        private static readonly ConcurrentDictionary<string, object> _registrationInvoiceGates = new();
+        // so the "Skapa saknade fakturor" repair keeps having nothing to repair. (Skalplanen D1: the
+        // lock lives in the database now, so it holds across instances.)
 
         /// <summary>
         /// Create the registration's invoice — or hand back the one that already exists.
@@ -452,8 +462,14 @@ namespace HpskSite.Services
                 return Task.FromResult<IContent?>(null);
             }
 
-            var gate = _registrationInvoiceGates.GetOrAdd($"{competitionId}:{registrationId}", _ => new object());
-            lock (gate)
+            using var lease = _dbLock.TryAcquire($"registration-invoice:{competitionId}:{registrationId}", InvoiceLockWait);
+            if (lease == null)
+            {
+                // Ingen faktura hellre än en dubblett: reparationen "Skapa saknade fakturor" tar den saknade.
+                _logger.LogError("Fakturan för anmälan {RegistrationId} (tävling {CompetitionId}) skapades inte: låset var upptaget i {Seconds} s",
+                    registrationId, competitionId, InvoiceLockWait.TotalSeconds);
+                return Task.FromResult<IContent?>(null);
+            }
             {
                 var existing = FindPendingInvoiceForRegistrationFromDb(competitionId, registrationId);
                 if (existing != null)

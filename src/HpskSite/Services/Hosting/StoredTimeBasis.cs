@@ -32,6 +32,7 @@ namespace HpskSite.Services.Hosting
             "CompetitionRecords.EnteredAt",
             "CompetitionStoreVersion.UpdatedUtc",
             "CompetitionTeam.CreatedAt",
+            "RateCounter.WindowEndsUtc",
             "CompetitionTeamMember.JoinedAt",
             "CourseReviewers.GrantedAt",
             "DataProtectionKey.CreatedUtc",

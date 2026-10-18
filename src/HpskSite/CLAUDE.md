@@ -11915,6 +11915,34 @@ Läs det här innan du rör datum, NPoco eller adresser.
 - Verifiering: kopian `Umbraco_U17` (dev-databasen uppgraderad), `$SP/u17run.sh`, och skyddsnätet 16 mot 17 på
   den frysta kopian (`$SP/s0capture-u17.sh`, `$SP/e-all.sh`). Sviter som läser databasen följer `HPSK_DB`.
 
+## ⚠️⚠️ Lås och räknare ligger i databasen — `DatabaseLock`, `RateCounterService` (skalplanen D1, 2026-10-18)
+
+**Skriv aldrig `lock`/`SemaphoreSlim`/`IMemoryCache` där korrektheten hänger på att bara en åt gången gör
+kontroll-och-skrivning, eller på att en räknare är densamma överallt.** Ett lås i processen skyddar bara
+samma process — med två instanser, eller en omstart med överlapp, säljs samma plats två gånger.
+- **`DatabaseLock`** (singleton, `Services/Hosting/`): `sp_getapplock` på en EGEN anslutning, ägd av
+  sessionen. `TryAcquire(name, timeout)` / `TryAcquireAsync` → `Lease` (Dispose släpper) eller null =
+  upptaget. Utan SQL Server, eller vid databasfel, faller den tillbaka på ett lås i processen (samma skydd
+  som förut, loggat). Namnen är ett kontrakt mellan instanserna: `dp-capacity:{tävling}`,
+  `invoice-hub:{tävling}`, `registration-invoice:{tävling}:{anmälan}`, `ranking-snapshot`.
+- **Egenbokningens platser:** `DirektplaceringStartListService.TryLockCapacity(Async)` — tävlingssidans
+  anmälan, efteranmälan och Redigera anmälan tar SAMMA lås runt kontroll + sparning. ⚠️ Diskens två vägar
+  hade inget lås alls före D1; A/B mot det gamla bygget: **5 anmälningar i ett skjutlag med 3 platser**,
+  tre omgångar av tre (`hpsk-verify/d1-capacity-race-verify.mjs`, 19/19 efter).
+- **Rankningen:** de publika ingångarna i `RankingSnapshotService` tar `ranking-snapshot` (väntar högst 5
+  min, annars `BusyMessage`); de inre `…CoreAsync` anropas när låset redan är taget.
+- **`RateCounterService`** (`dbo.RateCounter`, egen anslutning): `Increment(key, window)` ger räknaren efter
+  anropet, atomärt; `TryClaimOnce` = en gång per fönster (claim före utskick). Ekonomienkätens spärr per IP
+  och låsningsmejlet. Saknas tabellen räknas i minnet och det loggas en gång.
+- Kvar i processen MED FLIT (bara prestanda eller loggstrypning): besöks- och aktivitetsstämplarnas
+  strypning, `OpsSignals`, `CompetitionChangeRecorder`s varningsstrypning, `CompetitionPaymentModelService`s
+  cache (beslutet är oföränderligt), `NodeCompetitionResultStore` (bara nodläget),
+  `TrainingMigrationService.Gate` (UPDLOCK i transaktionen är spärren), AI-indexets byggare.
+- Test: `DatabaseLockTests` — körs mot SQL Server när `HPSK_TEST_SQL` är satt (annars hoppas de över med
+  namn). A/B: med båda tjänsterna tvingade till minnet faller 4. ⚠️ "Två instanser får inte samma lås"
+  kan inte skilja lägena åt — det är `APPLOCK_TEST` från en annan anslutning som bevisar databasen.
+- Migrering: `create-rate-counter-table.sql` (D4 i körordningen), FÖRE deploy.
+
 ## ⚠️⚠️ Bakgrundstjänster ärver `IsolatedBackgroundService` — ALDRIG `BackgroundService` (2026-09-24)
 
 **Ska du bygga en ny bakgrundstjänst?** Ärv `HpskSite.Services.Hosting.IsolatedBackgroundService`
