@@ -5,8 +5,13 @@ using Umbraco.Extensions;
 namespace HpskSite.Services.Addresses
 {
     /// <summary>
-    /// Bygger en sidas publika adress ur adresstabellen: ägarens adress + år + slug. Ägarens adress läses
-    /// varje gång ur den publicerade cachen, så att en klubb som byter adress tar alla sina sidor med sig.
+    /// Bygger en sidas publika adress ur adresstabellen: ägarens adress + sortens segment + år + slug.
+    /// Ägarens adress läses varje gång ur den publicerade cachen, så att en klubb som byter adress tar alla
+    /// sina sidor med sig.
+    ///
+    /// <para><b>Sorten står i adressen</b> (Stefans beslut 2026-10-18): <c>/halland/haaplinge-goass/tavlingar/2026/x/</c>,
+    /// <c>…/handelser/2026/x/</c>, <c>…/serier/2026/x/</c>. Förbundets mästerskap (<c>/sm/2026/x/</c>) har inget
+    /// sortsegment — där finns bara tävlingar och serier, och de delar namnrymd.</para>
     /// </summary>
     public class PageAddressUrls
     {
@@ -31,11 +36,10 @@ namespace HpskSite.Services.Addresses
         public string? UrlOf(PageAddressRow row)
         {
             var prefix = OwnerPrefix(row.Owner);
-            if (prefix == null) return null;
-            return row.UrlYear == null ? $"{prefix}{row.Slug}/" : $"{prefix}{row.UrlYear}/{row.Slug}/";
+            return prefix == null ? null : PageAddressRules.Compose(prefix, row.Owner.IsNational, row.TargetKind, row.UrlYear, row.Slug);
         }
 
-        /// <summary>"/halland/klubbar/haaplinge-goass/", "/halland/", "/sm/" — med snedstreck sist. Null = går inte att läsa.</summary>
+        /// <summary>"/halland/haaplinge-goass/", "/halland/", "/sm/" — med snedstreck sist. Null = går inte att läsa.</summary>
         public string? OwnerPrefix(PageAddressOwner owner)
         {
             if (owner.IsNational) return "/" + owner.Type.ToLowerInvariant() + "/";

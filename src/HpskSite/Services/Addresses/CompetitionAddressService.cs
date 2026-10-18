@@ -10,11 +10,13 @@ namespace HpskSite.Services.Addresses
     /// <summary>
     /// C3-planen S6: tävlingarnas och seriernas adresser (Stefans beslut 2026-10-14, §9a).
     /// <list type="bullet">
-    /// <item>Klubbens: <c>/{krets}/klubbar/{klubb}/{år}/{tävling}/</c></item>
-    /// <item>Kretsens: <c>/{krets}/{år}/{tävling}/</c></item>
+    /// <item>Klubbens: <c>/{krets}/{klubb}/tavlingar/{år}/{tävling}/</c></item>
+    /// <item>Kretsens: <c>/{krets}/tavlingar/{år}/{tävling}/</c></item>
     /// <item>SM: <c>/sm/{år}/{tävling}/</c>, landsdel: <c>/ssm|vsm|osm|nsm/{år}/{tävling}/</c></item>
-    /// <item>Serien: <c>/{värd}/{år}/{serie}/</c> — serien lämnar tävlingens adress.</item>
+    /// <item>Serien: <c>/{värd}/serier/{år}/{serie}/</c> — serien lämnar tävlingens adress.</item>
     /// </list>
+    /// Sortsegmentet läggs till när adressen skrivs ut (<see cref="PageAddressRules.Compose"/>); tabellen lagrar
+    /// ägare, år, slug och sort.
     /// Barnen som förut: <c>…/resultat/</c>, <c>…/startlista/</c>, <c>…/finalstartlista-x/</c>.
     ///
     /// <para>Ägaren räknas ur tävlingens egna värden i samma ordning som den gamla adressgivaren: SM →

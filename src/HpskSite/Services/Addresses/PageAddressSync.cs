@@ -50,8 +50,14 @@ namespace HpskSite.Services.Addresses
     }
 
     /// <summary>
-    /// Ingen nod direkt under startsidan får heta som ett av adressernas egna toppsegment (<c>sm</c>,
-    /// <c>ssm</c> … <c>tavlingar</c>) — den hade tagit över deras adresser.
+    /// Namn som skulle ta över en adress vägras när noden sparas:
+    /// <list type="bullet">
+    /// <item>direkt under startsidan: adressernas toppsegment (<c>sm</c>, <c>ssm</c> … <c>tavlingar</c>)</item>
+    /// <item>en klubb: <c>klubbar</c>, sortsegmenten (<c>tavlingar</c>, <c>handelser</c>, <c>serier</c>), ett årtal,
+    /// och namnet på en sida som redan ligger direkt under kretsen — klubbens adress är <c>/{krets}/{klubb}/</c>
+    /// (<see cref="HpskSite.Routing.ClubShortUrls"/>)</item>
+    /// <item>en sida direkt under en krets: sortsegmenten, ett årtal, och namnet på en av kretsens klubbar</item>
+    /// </list>
     /// </summary>
     public class PageAddressReservedNames : INotificationHandler<ContentSavingNotification>
     {
@@ -70,14 +76,50 @@ namespace HpskSite.Services.Addresses
             {
                 if (e.ParentId <= 0) continue;
                 var segment = _shortStrings.CleanStringForUrlSegment(e.Name ?? "");
-                if (!PageAddressRules.ReservedTopSegments.Contains(segment, StringComparer.OrdinalIgnoreCase)) continue;
-                if (_content.GetById(e.ParentId)?.ParentId != Umbraco.Cms.Core.Constants.System.Root) continue;
-                notification.CancelOperation(new EventMessage("Adress",
-                    $"Namnet \"{e.Name}\" är reserverat för tävlingarnas adresser och kan inte användas direkt under startsidan.",
-                    EventMessageType.Error));
+                if (string.IsNullOrEmpty(segment)) continue;
+                var problem = Problem(e, segment);
+                if (problem == null) continue;
+                notification.CancelOperation(new EventMessage("Adress", problem, EventMessageType.Error));
                 return;
             }
         }
+
+        private string? Problem(Umbraco.Cms.Core.Models.IContent e, string segment)
+        {
+            var parent = _content.GetById(e.ParentId);
+            if (parent == null) return null;
+
+            if (parent.ParentId == Umbraco.Cms.Core.Constants.System.Root
+                && PageAddressRules.ReservedTopSegments.Contains(segment, StringComparer.OrdinalIgnoreCase))
+                return $"Namnet \"{e.Name}\" är reserverat för tävlingarnas adresser och kan inte användas direkt under startsidan.";
+
+            if (e.ContentType.Alias == "club" && parent.ContentType.Alias == "clubsPage")
+            {
+                if (PageAddressRules.IsReservedOwnerChildSegment(segment))
+                    return $"Klubben kan inte heta \"{e.Name}\": ordet används i klubbens och kretsens adresser.";
+                var region = _content.GetById(parent.ParentId);
+                if (region?.ContentType.Alias == "regionalPage"
+                    && ChildSegments(region.Id).Any(c => c.Id != parent.Id && c.Id != e.Id && SameSegment(c, segment)))
+                    return $"Klubben kan inte heta \"{e.Name}\": kretsen har redan en sida med den adressen.";
+                return null;
+            }
+
+            if (parent.ContentType.Alias == "regionalPage" && e.ContentType.Alias != "clubsPage")
+            {
+                if (PageAddressRules.IsReservedOwnerChildSegment(segment))
+                    return $"Sidan kan inte heta \"{e.Name}\" direkt under kretsen: ordet används i kretsens adresser.";
+                var directory = ChildSegments(parent.Id).FirstOrDefault(c => c.ContentType.Alias == "clubsPage");
+                if (directory != null && ChildSegments(directory.Id).Any(c => c.Id != e.Id && SameSegment(c, segment)))
+                    return $"Sidan kan inte heta \"{e.Name}\" direkt under kretsen: en av kretsens klubbar har den adressen.";
+            }
+            return null;
+        }
+
+        private IEnumerable<Umbraco.Cms.Core.Models.IContent> ChildSegments(int parentId)
+            => _content.GetPagedChildren(parentId, 0, 2000, out _);
+
+        private bool SameSegment(Umbraco.Cms.Core.Models.IContent c, string segment)
+            => string.Equals(_shortStrings.CleanStringForUrlSegment(c.Name ?? ""), segment, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

@@ -11630,7 +11630,38 @@ Taken 21 → 19, 23 → 16, 117 → 116, 61 → 34. Seedarna (bara dev) skriver 
 
 ### ⚠️⚠️ Adresserna — `PageAddress` (C3-planen S6, branch `umbraco-17`, 2026-10-17)
 
-Stefans beslut (§9a): ingen `/competitions/` längre. Klubbens tävling `/{krets}/klubbar/{klubb}/{år}/{tävling}/`,
+**⚠️⚠️ OMTAGET 2026-10-18 (Stefans beslut) — sorten i adressen och klubbens korta adress:**
+
+| Sida | Adress |
+|---|---|
+| Klubbsidan | `/{krets}/{klubb}/` (förut `/{krets}/klubbar/{klubb}/`; katalogen `/{krets}/klubbar/` står kvar) |
+| Klubbens tävling / händelse / serie | `/{krets}/{klubb}/tavlingar\|handelser\|serier/{år}/{slug}/` |
+| Kretsens | `/{krets}/tavlingar\|handelser\|serier/{år}/{slug}/` |
+| SM, landsdel | `/sm\|ssm\|vsm\|osm\|nsm/{år}/{slug}/` — **utan** sortsegment, oförändrat |
+| Listan | `/tavlingar/`. `/tavlingar/{år}/` → 301 dit (säsongssidan finns inte längre) |
+
+- **Sorten läggs till när adressen skrivs ut** — `PageAddressRules.Compose` är ENDA formeln (adressbyggaren
+  och händelselagringen). Tabellen lagrar ägare, år, slug och sort som förut; inga rader skrevs om.
+- **Varje sort har sin egen namnrymd** (`PageAddressRules.SharesNamespace`): en tävling och en händelse med
+  samma namn samma år krockar inte. Förbundets mästerskap saknar sortsegment och delar därför namnrymd.
+  Indexet `UX_PageAddress_Address` = (ägare, år, slug, **sort**). Uppslaget med sort: `PageAddressService.Find`;
+  utan (de gamla formerna, mästerskapen): `FindAnyKind` (äldsta raden).
+- **De gamla formerna ger 301:** `/{krets}/{år}/{slug}/`, `/{krets}/klubbar/{klubb}/{år}/{slug}/` (routes i
+  `CompetitionPagesController`), klubbens långa form och allt under den (`ClubShortUrlContentFinder`),
+  händelsernas `/{ägare}/{slug}/` (båda klubbformerna). `/{krets}/tavlingar/` → listan, `…/handelser/` och
+  `…/serier/` → ägarens sida.
+- **Klubbens korta adress** (`Routing/ClubShortUrls.cs`): trädet ändras inte — `ClubShortUrlProvider` bygger
+  adressen utåt (klubben och dess gamla händelsenoder), `ClubShortUrlContentFinder` (först i kedjan) översätter
+  inåt. En sida direkt under kretsen har företräde. **`SiteRouteLookup`** är ENDA uppslaget av en ägare ur
+  adressens segment (kretsen, klubben kort eller långt) — använd den, aldrig `GetByRoute` + `"klubbar"`.
+- **Namnspärren** (`PageAddressReservedNames`): en klubb kan inte heta `klubbar`, `tavlingar`, `handelser`,
+  `serier`, ett årtal eller som en sida direkt under kretsen; en sida direkt under kretsen inte som sortsegmenten,
+  ett årtal eller en av kretsens klubbar.
+- **Operatörssteg:** `Migrations/split-page-address-namespace-by-kind.sql` **FÖRE deployen** (A1).
+- Svit: `hpsk-verify/c3/addr-*` (gamla bygget fångar dagens adresser på kopian, nya bygget följer dem:
+  `addr-compare.mjs`).
+
+Tidigare form (S6, 2026-10-14): ingen `/competitions/` längre. Klubbens tävling `/{krets}/klubbar/{klubb}/{år}/{tävling}/`,
 kretsens `/{krets}/{år}/{tävling}/`, SM `/sm/{år}/{tävling}/`, landsdel `/ssm|vsm|osm|nsm/{år}/{tävling}/`, serien
 `/{värd}/{år}/{serie}/`, listan `/tavlingar/`, säsongen `/tavlingar/{år}/`. Barnen som förut (`…/resultat/` …).
 Varje gammal adress ger 301.
