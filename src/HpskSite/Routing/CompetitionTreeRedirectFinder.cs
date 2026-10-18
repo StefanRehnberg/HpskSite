@@ -44,6 +44,26 @@ namespace HpskSite.Routing
                 if (node != null)
                     return Task.FromResult(Redirected.Contains(node.ContentType.Alias) && RedirectIfMoved(request, node.Url(), "", path));
 
+                // ⚠️ Umbracos GAMLA stavning (Fas E, 2026-10-18): segment som byggdes innan vår teckentabell fanns bar
+                // å/ä/ö som aa/ae/oe ("omgaang", "vaexjoetraeffen"). Ombyggnaden av adresstabellen vid 17-deployen
+                // skrev om dem till a/a/o, så besökarnas gamla adresser hittade ingen nod. Pröva den översatta
+                // formen — bara som reservväg, och bara när den leder till en nod vi omdirigerar.
+                var folded = seg.Select(LegacyAsciiFold).ToArray();
+                if (!folded.SequenceEqual(seg, StringComparer.OrdinalIgnoreCase))
+                {
+                    var legacy = Route(uc, folded);
+                    if (legacy != null && Redirected.Contains(legacy.ContentType.Alias))
+                        return Task.FromResult(RedirectIfMoved(request, legacy.Url(), "", path));
+                    if (folded.Length >= 2)
+                    {
+                        var legacyParent = Route(uc, folded[..^1]);
+                        if (legacyParent?.ContentType.Alias == "competition" && IsServedChild(legacyParent.Id, folded[^1])) // competitionstore-ok: samma som ovan, för den gamla stavningen
+                            return Task.FromResult(RedirectIfMoved(request, legacyParent.Url(), folded[^1] + "/", path));
+                    }
+                    if (folded.Length >= 2 && FromStore(folded) is { } movedLegacy)
+                        return Task.FromResult(RedirectIfMoved(request, movedLegacy.Url, movedLegacy.Suffix, path));
+                }
+
                 // Ett barnsegment utan egen nod (listor och resultat i lagringen): tävlingens nya adress + segmentet.
                 if (seg.Length >= 2)
                 {
@@ -109,6 +129,12 @@ namespace HpskSite.Routing
             }
             return null;
         }
+
+        /// <summary>Umbracos standardstavning av å/ä/ö (aa/ae/oe) översatt till vår teckentabells (a/a/o).</summary>
+        public static string LegacyAsciiFold(string segment) =>
+            segment.Replace("aa", "a", StringComparison.OrdinalIgnoreCase)
+                   .Replace("ae", "a", StringComparison.OrdinalIgnoreCase)
+                   .Replace("oe", "o", StringComparison.OrdinalIgnoreCase);
 
         private bool IsServedChild(int competitionId, string segment)
         {
