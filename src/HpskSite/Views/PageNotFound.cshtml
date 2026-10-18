@@ -1,0 +1,14 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    // C3-planen S7: en adress på tävlingarnas eller händelsernas form som inte finns. Statuskoden är 404.
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Sidan finns inte";
+}
+
+<div class="container mt-5 mb-5" style="max-width: 640px;">
+    <h1 class="h3 mb-3"><i class="bi bi-signpost-split me-2"></i>Sidan finns inte</h1>
+    <p>Adressen leder inte till någon tävling, serie eller händelse. Den kan ha bytt namn, eller så har den tagits bort.</p>
+    <p class="mb-4">Alla tävlingar finns i listan, och du kan söka på namnet där.</p>
+    <a href="/tavlingar/" class="btn btn-primary"><i class="bi bi-trophy me-2"></i>Till tävlingarna</a>
+    <a href="/" class="btn btn-outline-secondary ms-2">Startsidan</a>
+</div>

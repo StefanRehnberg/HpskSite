@@ -15,8 +15,8 @@
     Layout = "Master.cshtml";
 
     // Händelsen via händelselagringen (sajtstrukturen fas 2a). På årsadressen är modellen ÄGARNODEN
-    // och händelsen ligger i HttpContext.Items; på den gamla trädadressen är modellen händelsenoden.
-    var routed = Context.Items[HpskSite.Routing.ClubEventRoute.ItemKey] as HpskSite.Models.Events.ClubEventRecord;
+    // och händelsen ligger i CompetitionPageContext (C3 S7); på den gamla trädadressen är modellen händelsenoden.
+    var routed = (Context.RequestServices.GetService(typeof(HpskSite.Services.Addresses.CompetitionPageContext)) as HpskSite.Services.Addresses.CompetitionPageContext)?.Event;
     // ⚠️ Utan årsadressen är modellen en NOD. Bara en händelsenod får slås upp som händelse: mallen går att
     // välja för vilken sida som helst (?altTemplate=ClubSimpleEvent), och då hade händelsen med samma TAL
     // som sidans nod-id visats — en annan sorts id, alltså en annan händelse.

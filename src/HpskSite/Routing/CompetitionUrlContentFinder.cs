@@ -101,14 +101,11 @@ namespace HpskSite.Routing
             return true;
         }
 
-        /// <summary>Listan som startlistevyn visar när sidan serveras utan nod (Model är då tävlingen).</summary>
-        public const string StartListItemKey = "hpsk:startlist";
-
         /// <summary>
         /// <c>/startlista/</c> och <c>/finalstartlista-x/</c> utan egen nod under tävlingen (skalplanen C2): listorna
         /// i tabellen, och i nodlagringen de äldre listorna under <c>competitionStartListsHub</c>. TÄVLINGEN visas
         /// med vyn <c>PrecisionStartList</c> resp. <c>PrecisionFinalsStartList</c>, som läser listan ur
-        /// <see cref="StartListItemKey"/>. Bara publika listor; ingen = inte vår adress.
+        /// <c>CompetitionPageContext.StartList</c>. Bara publika listor; ingen = inte vår adress.
         /// </summary>
         public static bool TryServeStartListPage(IPublishedRequestBuilder request, IPublishedContent competition,
             string segment, IHttpContextAccessor http, IShortStringHelper shortStrings)
@@ -119,7 +116,7 @@ namespace HpskSite.Routing
             var list = store.ListPublished(competition.Id)
                 .FirstOrDefault(r => string.Equals(r.UrlSegment, segment, StringComparison.OrdinalIgnoreCase));
             if (list == null) return false;
-            ctx.Items[StartListItemKey] = list;
+            ctx.RequestServices.GetRequiredService<HpskSite.Services.Addresses.CompetitionPageContext>().StartList = list;
             request.SetPublishedContent(competition);
             var view = list.Kind == StartListKind.Finals ? "PrecisionFinalsStartList" : "PrecisionStartList"; // startliststore-ok: mallnamn, inte doctyp
             request.SetTemplate(new Template(shortStrings, view, view));
