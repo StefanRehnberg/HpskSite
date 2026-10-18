@@ -532,7 +532,8 @@ VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, @10, @11, @12, @13)",
         /// döljer allt under en avpublicerad förälder (<c>HasPublishedAncestorPath</c>): mappen finns kvar i
         /// databasen men <c>LegacyInvoiceHubs.PublishedHub</c> svarar null — Swish-betalningen av en gammal faktura
         /// och kvittona slutar fungera (provat på kopian 2026-10-18, <c>c3/c3-s5e-invoice-hazard.mjs</c>). Mapparna
-        /// flyttas till arkivet först (F1, efter bokslutet 2026).</para>
+        /// flyttas till arkivet först (F1, <see cref="HpskSite.Services.LegacyInvoiceHubArchiveService"/> — Underhåll →
+        /// Tävlingar och serier → Fakturamapparna till arkivet).</para>
         /// <para>Barnen som bor kvar i trädet — anmälningar, startlistor och resultatlistor — och händelserna ska
         /// stå på sina tabeller.</para>
         /// </summary>
@@ -559,7 +560,7 @@ JOIN cmsContentType pct ON pct.nodeId = pc.contentTypeId
 WHERE ct.alias = @0 AND pct.alias = @1 AND h.trashed = 0
 ORDER BY h.id", LegacyInvoiceHubs.HubAlias, CompetitionFieldTable.NodeAlias);
             if (hubs.Count > 0)
-                blockers.Add($"{hubs.Count} gamla fakturamappar ligger under tävlingsnoder — flytta dem till arkivet först (F1). " +
+                blockers.Add($"{hubs.Count} gamla fakturamappar ligger under tävlingsnoder — flytta dem till arkivet först (knappen Fakturamapparna till arkivet). " +
                     $"Avpublicerade tävlingar döljer dem i den publicerade cachen. Mappar: {string.Join(", ", hubs.Take(10))}{(hubs.Count > 10 ? " …" : "")}.");
             return blockers;
         }

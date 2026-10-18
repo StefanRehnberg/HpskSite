@@ -142,7 +142,9 @@ namespace HpskSite.Services.CompetitionFees
                     JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
                     JOIN umbracoNode hub ON hub.id = i.parentId
                    WHERE ct.alias = 'registrationInvoice' AND i.trashed = 0
-                     AND (hub.parentId = @0 OR EXISTS (
+                     AND ((hub.parentId = @0 AND EXISTS (
+                          SELECT 1 FROM umbracoContent pc JOIN cmsContentType pct ON pct.nodeId = pc.contentTypeId
+                          WHERE pc.nodeId = hub.parentId AND pct.alias = 'competition')) OR EXISTS (
                           SELECT 1 FROM umbracoContentVersion cv
                           JOIN umbracoPropertyData pd ON pd.versionId = cv.id
                           JOIN cmsPropertyType pt ON pt.id = pd.propertyTypeId

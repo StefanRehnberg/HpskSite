@@ -11767,9 +11767,23 @@ Underhåll på `/admin-page`. Samma steg som startlistorna: Torrkör → (frys, 
   Umbraco 17:s publicerade cache döljer allt under en avpublicerad förälder (`HasPublishedAncestorPath`):
   mappen finns kvar i databasen men `LegacyInvoiceHubs.PublishedHub` svarar null, så Swish-betalningen av en gammal
   faktura och kvittona slutar fungera (provat på kopian, `hpsk-verify/c3/c3-s5e-invoice-hazard.mjs`). Mapparna
-  flyttas till arkivet först (F1, enligt planen efter bokslutet 2026). Torrkörningen visar vad avpubliceringen
+  flyttas till arkivet först (F1, se nästa punkt). Torrkörningen visar vad avpubliceringen
   väntar på. Kopian går förbi spärren med `C3Baseline/UnpublishCompetitionNodesOnCopy` (bara `Umbraco_C3`). ⚠️ Gamla fakturor (`registrationInvoicesHub` under tävlingsnoden, `PaymentService`) bor kvar
   under noderna — **ta aldrig bort tävlingsnoder** som bär fakturor (borttagningen av noder är inte byggd, med flit).
+- **⚠️⚠️ Fakturaarkivet (F1, byggt 2026-10-18 — Stefan: behöver inte vänta på bokslutet, ekonomin är i beta).**
+  `LegacyInvoiceHubArchiveService` + Underhåll → Tävlingar och serier → *Fakturamapparna till arkivet*
+  (`CompetitionMigration/InvoiceArchivePreview` läser, `InvoiceArchiveRun` i portioner; oberoende av lagringsläget).
+  Varje `registrationInvoicesHub` under en tävlingsnod flyttas OFÖRÄNDRAD och publicerad till en publicerad
+  `contentPage` "Fakturaarkiv" under tävlingsnavet (id i `SiteSetting` `LegacyInvoices:ArchiveFolderId`, aldrig
+  namnet). FÖRE flytten: betalningsmodellens rad säkras (`CompetitionPaymentModelService.Get`) och mappen skrivs in
+  i **`dbo.LegacyInvoiceHubArchive`** (HubId → CompetitionId) — fakturornas `competitionId` räcker inte för en tom
+  mapp. `LegacyInvoiceHubs` (HubIds, CompetitionByHub) läser tabellen; en NY mapp skapas i arkivet när det finns
+  (`LegacyInvoiceHubs.CreateHub`, PaymentService anropar den). Fakturornas mallar är tomma sidor och ingen länkar
+  till dem, så adressbytet märks inte.
+- **⚠️⚠️ LAG regel 1 i fakturauppslaget:** `HubIds` och `HasLegacyInvoices` godtog `h.parentId = tävlings-id` utan
+  att pröva att föräldern ÄR en tävling. Får fakturaarkivet (eller någon annan nod) samma nummer som en tävling i
+  tabellen hade ALLA arkivets mappar räknats som den tävlingens — mätt med mutation: arkivnodens nummer gav 28 mappar.
+  Föräldern prövas nu med alias. `GetExistingInvoiceForMember` läser tävlingen ur lagringen, inte cachens barn.
 - **Kvar på noder, medvetet:** `autoNotifyParticipants` (finns inte på doktypen; svarar falskt även utan nod),
   `PaymentService` (gamla fakturor), skyddsnätets verktyg (`C3Baseline`, `CompetitionAuthorizationReport`), dev-seedarna,
   underhållsverktygen i `CompetitionAdminController` som går trädet.

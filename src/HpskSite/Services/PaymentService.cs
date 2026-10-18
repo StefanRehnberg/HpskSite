@@ -224,27 +224,20 @@ namespace HpskSite.Services
         {
             try
             {
-                var umbracoContext = _umbracoContextAccessor.GetRequiredUmbracoContext();
-                var competition = umbracoContext.Content.GetById(competitionId);
+                // Tävlingen ur lagringen och mappen genom LegacyInvoiceHubs (C3-planen F1; LAG: id-reglerna, regel 2) —
+                // inte tävlingens barn i den publicerade cachen: i tabelläget finns ingen nod, och mappen kan ligga i
+                // fakturaarkivet.
+                var competition = _competitions.Get(competitionId);
                 if (competition == null)
                 {
                     _logger.LogWarning("Competition {CompetitionId} not found", competitionId);
                     return Task.FromResult<IPublishedContent?>(null);
                 }
 
-                var allChildren = competition.Children().ToList();
-                _logger.LogInformation("Competition {CompetitionId} children: {Children}", 
-                    competitionId, string.Join(", ", allChildren.Select(c => $"{c.Name} ({c.ContentType?.Alias})")));
-
-                var invoicesHub = _invoiceHubs.PublishedHub(competition.Id) ?? allChildren
-                    .FirstOrDefault(x => x.ContentType?.Alias == "registrationInvoicesHub" || 
-                                        x.Name?.Contains("Fakturor") == true || 
-                                        x.Name?.Contains("Betalningar") == true);
-
+                var invoicesHub = _invoiceHubs.PublishedHub(competition.Id);
                 if (invoicesHub == null)
                 {
-                    _logger.LogInformation("No invoices hub found for competition {CompetitionId}. Available children: {Children}", 
-                        competitionId, string.Join(", ", allChildren.Select(c => $"{c.Name} ({c.ContentType?.Alias})")));
+                    _logger.LogInformation("No invoices hub found for competition {CompetitionId}", competitionId);
                     return Task.FromResult<IPublishedContent?>(null);
                 }
 
@@ -378,30 +371,11 @@ namespace HpskSite.Services
                 _logger.LogInformation("No invoices hub found for competition {CompetitionId}. Creating it automatically.", competitionId);
                 try
                 {
-                    var competitionContent = _contentService.GetById(competitionId);
-                    if (competitionContent == null)
-                    {
-                        _logger.LogError("Could not get writable competition content node {CompetitionId}", competitionId);
-                        return null;
-                    }
-
-                    var hub = _contentService.Create("Fakturor", competitionContent.Id, "registrationInvoicesHub");
+                    // EN väg (C3-planen F1): i fakturaarkivet när det finns, annars under tävlingsnoden (med aliaskontroll).
+                    var hub = _invoiceHubs.CreateHub(competitionId, out var problem);
                     if (hub == null)
                     {
-                        _logger.LogError("Failed to create registrationInvoicesHub for competition {CompetitionId}", competitionId);
-                        return null;
-                    }
-
-                    if (!_contentService.Save(hub).Success)
-                    {
-                        _logger.LogError("Failed to save registrationInvoicesHub for competition {CompetitionId}", competitionId);
-                        return null;
-                    }
-
-                    if (!_contentService.Publish(hub, new[] { "*" }, -1).Success)
-                    {
-                        _logger.LogError("Failed to publish registrationInvoicesHub for competition {CompetitionId}", competitionId);
-                        _contentService.Delete(hub);
+                        _logger.LogError("Could not create registrationInvoicesHub for competition {CompetitionId}: {Problem}", competitionId, problem);
                         return null;
                     }
 

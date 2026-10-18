@@ -31,6 +31,11 @@
                         <div class="d-flex gap-2 flex-wrap">
                             <button type="button" class="btn btn-outline-primary btn-sm" data-ssm="preview">1. Torrkör</button>
                             <button type="button" class="btn btn-primary btn-sm" data-ssm="migrate">2. Flytta till tabellen</button>
+                            @if (part.Item1 == "comp")
+                            {
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-ssm="invoiceArchive"
+                                        title="Flyttar de gamla fakturamapparna från tävlingsnoderna till fakturaarkivet. Krävs före avpubliceringen.">Fakturamapparna till arkivet</button>
+                            }
                             <button type="button" class="btn btn-outline-secondary btn-sm" data-ssm="unpublish">3. Avpublicera de gamla noderna</button>
                             @if (part.Item1 == "reg")
                             {
@@ -206,6 +211,24 @@
         }
     }
 
+    async function doInvoiceArchive(card) {
+        clear(card); busy(card, true);
+        try {
+            var total = 0;
+            for (var i = 0; i < 100; i++) {
+                var d = await post(card.dataset.base, 'InvoiceArchiveRun', { batch: '50' });
+                total += d.moved || 0;
+                card.querySelector('.ssm-out').innerHTML = '<div>Flyttade: ' + total + ' · kvar: ' + (d.remaining || 0) + '</div>';
+                if (!d.success || !d.remaining || !d.moved) {
+                    lines(card, esc(d.message || ''), d.success ? '' : 'text-danger');
+                    (d.errors || []).slice(0, 10).forEach(function (x) { lines(card, esc(x), 'text-danger'); });
+                    break;
+                }
+            }
+        } catch (e) { lines(card, 'Avbrutet: ' + esc(e.message), 'text-danger'); }
+        finally { busy(card, false); }
+    }
+
     async function doUnpublish(card) {
         clear(card); busy(card, true);
         try {
@@ -292,6 +315,20 @@
             clear(card);
             get(card.dataset.base, 'CleanupPreview').then(function (d) { lines(card, cleanupHtml(d.state)); })
                 .catch(function (err) { lines(card, 'Läget gick inte att läsa: ' + esc(err.message), 'text-danger'); });
+        }
+        else if (a === 'invoiceArchive') {
+            if (btn.dataset.armed === '1') { armed(btn); doInvoiceArchive(card); return; }
+            // Första trycket: visa vad som skulle flyttas, beväpna knappen.
+            clear(card);
+            get(card.dataset.base, 'InvoiceArchivePreview').then(function (d) {
+                if (!d.tableExists) { lines(card, 'Arkivtabellen saknas — kör Migrations/create-competition-tables.sql först.', 'text-danger'); return; }
+                if (!d.toMove) { lines(card, 'Inga fakturamappar ligger under tävlingsnoderna' + (d.alreadyArchived ? ' — ' + d.alreadyArchived + ' ligger i arkivet.' : '.')); return; }
+                lines(card, '<strong>' + d.toMove + '</strong> fakturamappar med <strong>' + d.invoices + '</strong> fakturor flyttas oförändrade till arkivet'
+                    + (d.archiveFolderId ? '' : ' (arkivet skapas under tävlingsnavet)') + '.'
+                    + (d.emptyHubs ? ' ' + d.emptyHubs + ' av dem är tomma.' : '')
+                    + (d.withoutCompetitionId ? ' ' + d.withoutCompetitionId + ' fakturor saknar tävlingens id — arkivet bär det åt dem.' : ''));
+                armed(btn, 'Tryck igen för att flytta mapparna');
+            }).catch(function (err) { lines(card, 'Läget gick inte att läsa: ' + esc(err.message), 'text-danger'); });
         }
         else if (a === 'rollback') { if (armed(btn, 'Tryck igen — tillbaka till noderna')) doRollback(card); }
         else if (a === 'clear') { if (armed(btn, 'Tryck igen — det som skapats efter flytten försvinner')) doClear(card); }
