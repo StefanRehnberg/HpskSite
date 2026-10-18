@@ -198,6 +198,9 @@ namespace HpskSite.Composers
                 sp => sp.GetRequiredService<HpskSite.Services.Registrations.SwitchingRegistrationStore>());
             builder.Services.AddHostedService<HpskSite.Services.Registrations.CompetitionRegistrationSchemaGuardHostedService>();
             builder.Services.AddHostedService<HpskSite.Services.Hosting.IdentityFloorHostedService>();
+            // Skalplanen D1: lås och räknare i databasen, så att de gäller alla instanser.
+            builder.Services.AddSingleton<HpskSite.Services.Hosting.DatabaseLock>();
+            builder.Services.AddSingleton<HpskSite.Services.Hosting.RateCounterService>();
             builder.Services.AddScoped<HpskSite.Services.CompetitionMenuService>();
             builder.Services.AddSingleton<HpskSite.Services.LegacyInvoiceHubs>();
             builder.Services.AddScoped<HpskSite.Services.CompetitionHostBackfillService>();

@@ -25,7 +25,6 @@ namespace HpskSite.Controllers
         private HpskSite.Services.LegacyInvoiceHubs InvoiceHubs =>
             HttpContext.RequestServices.GetRequiredService<HpskSite.Services.LegacyInvoiceHubs>();
 
-        private static readonly ConcurrentDictionary<int, SemaphoreSlim> _registrationLocks = new();
 
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
@@ -537,10 +536,11 @@ namespace HpskSite.Controllers
                 // Direktplacering: validate team availability under lock before saving
                 if (dpConfig != null)
                 {
-                    var semaphore = _registrationLocks.GetOrAdd(competitionId, _ => new SemaphoreSlim(1, 1));
-                    if (!await semaphore.WaitAsync(TimeSpan.FromSeconds(10)))
+                    // Samma lås som diskens vägar, i databasen så att det gäller alla instanser (skalplanen D1).
+                    var capacityLease = await _dpStartListService.TryLockCapacityAsync(competitionId);
+                    if (capacityLease == null)
                     {
-                        var errorMsg = "Anmälningen kunde inte genomföras just nu, försök igen.";
+                        var errorMsg = DirektplaceringStartListService.CapacityBusyMessage;
                         if (IsAjaxRequest())
                             return Json(new { success = false, message = errorMsg });
                         TempData["Error"] = errorMsg;
@@ -602,7 +602,7 @@ namespace HpskSite.Controllers
                     }
                     finally
                     {
-                        semaphore.Release();
+                        capacityLease.Dispose();
                     }
                 }
                 else

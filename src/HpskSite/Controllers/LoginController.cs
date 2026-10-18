@@ -37,6 +37,7 @@ namespace HpskSite.Controllers
         private readonly ITwoFactorLoginService _twoFactorLoginService;
         private readonly EmailService _emailService;
         private readonly AppCaches _appCaches;
+        private readonly HpskSite.Services.Hosting.RateCounterService _rateCounters;
 
         public LoginController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -48,9 +49,11 @@ namespace HpskSite.Controllers
             SignInManager<MemberIdentityUser> signInManager,
             IMemberManager memberManager,
             ITwoFactorLoginService twoFactorLoginService,
-            EmailService emailService)
+            EmailService emailService,
+            HpskSite.Services.Hosting.RateCounterService rateCounters)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _rateCounters = rateCounters;
             _signInManager = signInManager;
             _memberManager = memberManager;
             _twoFactorLoginService = twoFactorLoginService;
@@ -145,9 +148,13 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Send the "account locked" email at most once per lockout window. PasswordSignInAsync
-        /// reports IsLockedOut on every attempt while locked, so we dedupe on a runtime-cache key
-        /// whose lifetime exceeds the lockout span — otherwise the member would be emailed on every
-        /// retry.
+        /// reports IsLockedOut on every attempt while locked, so we dedupe on a claim whose window
+        /// is an hour — otherwise the member would be emailed on every retry.
+        ///
+        /// <para>Skalplanen D1 (2026-10-18): claimet ligger i databasen (<c>RateCounterService</c>), så det
+        /// gäller alla instanser och överlever en omstart. Det tas FÖRE utskicket (claim-then-send, som
+        /// påminnelseloggarna): två samtidiga försök kan då inte båda skicka. En krasch mellan claim och
+        /// utskick kostar ett uteblivet mejl, aldrig ett dubbelt.</para>
         /// </summary>
         private async Task TrySendLockoutEmailOnceAsync(MemberIdentityUser user)
         {
@@ -157,8 +164,10 @@ namespace HpskSite.Controllers
                 return;
             }
 
-            var cacheKey = $"lockout-email-sent:{user.Key}";
-            if (_appCaches.RuntimeCache.Get(cacheKey) is not null)
+            // Dedupe window: don't email again for an hour of retries. (Umbraco member lockout
+            // itself lasts far longer — Security:MemberDefaultLockoutTimeInMinutes, 30 days by
+            // default — so a re-notification after an hour is acceptable, not spammy.)
+            if (!_rateCounters.TryClaimOnce($"lockout-email:{user.Key}", TimeSpan.FromHours(1)))
             {
                 return;
             }
@@ -166,11 +175,6 @@ namespace HpskSite.Controllers
             var displayName = string.IsNullOrWhiteSpace(user.Name) ? email : user.Name;
 
             await _emailService.SendAccountLockedEmailAsync(email, displayName);
-
-            // Dedupe window: don't email again for an hour of retries. (Umbraco member lockout
-            // itself lasts far longer — Security:MemberDefaultLockoutTimeInMinutes, 30 days by
-            // default — so a re-notification after an hour is acceptable, not spammy.)
-            _appCaches.RuntimeCache.Insert(cacheKey, () => (object)true, TimeSpan.FromHours(1));
         }
     }
 }

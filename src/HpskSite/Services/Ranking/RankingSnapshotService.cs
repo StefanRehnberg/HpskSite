@@ -29,6 +29,19 @@ namespace HpskSite.Services.Ranking
         private readonly IConfiguration _config;
         private readonly WebPushService _webPush;
         private readonly ILogger<RankingSnapshotService> _logger;
+        private readonly HpskSite.Services.Hosting.DatabaseLock _dbLock;
+
+        /// <summary>
+        /// <b>En rankningskörning åt gången, för alla instanser</b> (skalplanen D1). Dagens ögonblicksbild
+        /// skrivs som DELETE + INSERT för dagen; två samtidiga körningar (nattjobbet och "Bygg om", eller två
+        /// instanser) kunde lämna dubbla rader och skicka dubbla förbättringspushar.
+        /// </summary>
+        public const string LockName = "ranking-snapshot";
+        private static readonly TimeSpan LockWait = TimeSpan.FromMinutes(5);
+        public const string BusyMessage = "En annan rankningskörning pågår — försök igen om en stund.";
+
+        private async Task<HpskSite.Services.Hosting.DatabaseLock.Lease> LockAsync(CancellationToken ct) =>
+            await _dbLock.TryAcquireAsync(LockName, LockWait, ct) ?? throw new InvalidOperationException(BusyMessage);
 
         // Tunables (see Documentation/TRANINGSMATCH_RANKING_SYSTEM.md §13).
         // Overridable via the "RankingSettings" config section (handy to lower in dev).
@@ -51,8 +64,10 @@ namespace HpskSite.Services.Ranking
             IShooterStatisticsService statsService,
             IConfiguration config,
             WebPushService webPush,
-            ILogger<RankingSnapshotService> logger)
+            ILogger<RankingSnapshotService> logger,
+            HpskSite.Services.Hosting.DatabaseLock dbLock)
         {
+            _dbLock = dbLock;
             _scopeProvider = scopeProvider;
             _memberService = memberService;
             _contentService = contentService;
@@ -90,6 +105,12 @@ namespace HpskSite.Services.Ranking
         }
 
         public async Task<int> BuildSnapshotAsync(CancellationToken ct = default, bool sendNotifications = false)
+        {
+            using var lease = await LockAsync(ct);
+            return await BuildSnapshotCoreAsync(ct, sendNotifications);
+        }
+
+        private async Task<int> BuildSnapshotCoreAsync(CancellationToken ct, bool sendNotifications)
         {
             var today = DateTime.Today;
             var minSessions = _config.GetValue("RankingSettings:MinRecentSessions", MinRecentSessions);
@@ -360,6 +381,12 @@ namespace HpskSite.Services.Ranking
         /// </summary>
         public async Task<int> BuildHistoricalSnapshotAsync(DateTime asOf, CancellationToken ct = default)
         {
+            using var lease = await LockAsync(ct);
+            return await BuildHistoricalSnapshotCoreAsync(asOf, ct);
+        }
+
+        private async Task<int> BuildHistoricalSnapshotCoreAsync(DateTime asOf, CancellationToken ct)
+        {
             asOf = asOf.Date;
             var recencyDays = _config.GetValue("RankingSettings:RecencyDays", RecencyDays);
             var minSessions = _config.GetValue("RankingSettings:MinRecentSessions", MinRecentSessions);
@@ -480,6 +507,12 @@ namespace HpskSite.Services.Ranking
         /// </summary>
         public async Task<object> BackfillAsync(CancellationToken ct = default)
         {
+            using var lease = await LockAsync(ct);
+            return await BackfillCoreAsync(ct);
+        }
+
+        private async Task<object> BackfillCoreAsync(CancellationToken ct)
+        {
             var today = DateTime.Today;
             var seasonStart = new DateTime(today.Year, 1, 1);
 
@@ -504,11 +537,11 @@ namespace HpskSite.Services.Ranking
             foreach (var d in dates)
             {
                 if (ct.IsCancellationRequested) break;
-                var n = await BuildHistoricalSnapshotAsync(d, ct);
+                var n = await BuildHistoricalSnapshotCoreAsync(d, ct);
                 report.Add(new { date = d.ToString("yyyy-MM-dd"), rows = n < 0 ? 0 : n, skipped = n < 0 });
             }
 
-            var todayRows = await BuildSnapshotAsync(ct, sendNotifications: false);
+            var todayRows = await BuildSnapshotCoreAsync(ct, sendNotifications: false);
             return new { seasonBaseline = seasonBaseline.ToString("yyyy-MM-dd"), backfilled = report, todayRows };
         }
 

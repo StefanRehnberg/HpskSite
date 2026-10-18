@@ -348,8 +348,15 @@ namespace HpskSite.Controllers
                 var dpConfigEdit = competition != null
                     ? HpskSite.Models.DirektplaceringConfig.Parse(competition.DirektplaceringConfig)
                     : null;
+                // ⚠️ Kontrollen och sparningen under samma lås som tävlingssidans anmälan (skalplanen D1) —
+                // utan det kunde disken och en skytt boka samma sista plats samtidigt. Släpps efter sparningen;
+                // `using` släpper det också vid en tidig retur.
+                using var capacityLease = dpConfigEdit != null && newClasses.Any(c => c.TeamNumber.HasValue)
+                    ? await _dpStartListService.TryLockCapacityAsync(competitionId) : null;
                 if (dpConfigEdit != null && newClasses.Any(c => c.TeamNumber.HasValue))
                 {
+                    if (capacityLease == null)
+                        return Json(new { success = false, message = DirektplaceringStartListService.CapacityBusyMessage });
                     var capacityError = ValidateCapacity(competitionId, dpConfigEdit, newClasses, request.RegistrationId);
                     if (capacityError != null)
                         return Json(new { success = false, message = capacityError });
@@ -395,6 +402,7 @@ namespace HpskSite.Controllers
 
                 // Sparas av lagringen — publiceras aldrig (sajtstrukturen fas 1a).
                 _registrations.Save(registration);
+                capacityLease?.Dispose();
 
                 // Push the corrected club into every start list / patrol row that already
                 // snapshotted the old one. Without this the Anmälningar table would show the new
@@ -840,8 +848,13 @@ namespace HpskSite.Controllers
                 // existing usage across all *other* registrations, then verify each picked
                 // teamNumber still has remaining positions after this walk-in lands.
                 var dpConfig = HpskSite.Models.DirektplaceringConfig.Parse(competition.DirektplaceringConfig);
+                // ⚠️ Samma lås som tävlingssidans anmälan (skalplanen D1); släpps efter sparningen.
+                using var capacityLease = dpConfig != null && classEntries.Any(e => e.TeamNumber.HasValue)
+                    ? await _dpStartListService.TryLockCapacityAsync(competition.Id) : null;
                 if (dpConfig != null && classEntries.Any(e => e.TeamNumber.HasValue))
                 {
+                    if (capacityLease == null)
+                        return Json(new { success = false, message = DirektplaceringStartListService.CapacityBusyMessage });
                     var capacityError = ValidateCapacity(competition.Id, dpConfig, classEntries, excludeRegistrationId: null);
                     if (capacityError != null)
                         return Json(new { success = false, message = capacityError });
@@ -861,6 +874,7 @@ namespace HpskSite.Controllers
                     IsSubCompetition = request.IsSubCompetition
                 };
                 _registrations.Save(registration);
+                capacityLease?.Dispose();
 
                 // Eager invoice: create the Pending invoice now so the registration carries it
                 // from the start (best-effort; a free registration just returns null).
