@@ -11656,6 +11656,18 @@ Varje gammal adress ger 301.
 - **Årssidan** `/halland/2026/`, `/sm/2026/` och `/sm/` → 301 till `/tavlingar/`.
 - **`PageAddressReservedNames`** vägrar en nod direkt under startsidan som heter `sm`, `ssm` … `tavlingar`.
 - **Operatörssteg:** `Migrations/create-page-address-table.sql` **FÖRE deployen** (kopierar händelsernas adresser).
+- **S7 (2026-10-18): sidorna på de nya adresserna är routes** — `Controllers/CompetitionPagesController.cs`
+  (`/tavlingar/`, `/tavlingar/{år}/`, `/{krets}/[klubbar/{klubb}/]{år}/{slug}/[barn/]`, `/sm…/{år}/…`). Noden är
+  fortfarande modellen; det som inte är noden (startlista ur lagringen, händelse ur tabellen) ligger i
+  **`CompetitionPageContext`** (scoped), som ersätter de råa nycklarna i `HttpContext.Items`. Okänd adress =
+  `Views/PageNotFound.cshtml` med 404. En barnnod renderas med sin egen mall (`ITemplateService`).
+  ⚠️ **En matchad route är vår — Umbraco körs inte.** Kretsens segment är därför spärrat mot `competitions`
+  (de gamla adresserna går genom Umbracos kedja) OCH mot `sm|ssm|vsm|osm|nsm` (annars matchar två routes och
+  ASP.NET svarar 500). Inga `[ ]` i rututtrycken — mallen läser dem som en token.
+  **Kvar i Umbracos kedja tills noderna är borta (§5):** `CompetitionTreeRedirectFinder`,
+  `CompetitionUrlContentFinder` och `CompetitionContentFinder` (gamla adresser → 301),
+  `CompetitionResultTreeUrlFinder` och trädadressen för tävlingar utan värd, `ClubEventLegacyUrlFinder`
+  (händelsernas `/{ägare}/{slug}/`), och `CompetitionUrlProvider` (nodernas `Url()`).
 - Svit: `hpsk-verify/c3/s6-corpus-check.mjs <korpus>` — varje adress i korpusen 200 eller 301→200; jämförs mot
   samma körning på bygget före S6.
 

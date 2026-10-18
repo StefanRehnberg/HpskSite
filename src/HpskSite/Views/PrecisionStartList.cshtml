@@ -27,7 +27,7 @@
 
 	// Listan genom IStartListStore (skalplanen C2). Utan egen nod är Model TÄVLINGEN och listan
 	// kommer från finnaren; annars är Model listans nod (under tävlingen eller den äldre hubben).
-	var routedList = Context.Items[HpskSite.Routing.CompetitionUrlContentFinder.StartListItemKey] as HpskSite.Models.StartLists.StartListRecord;
+	var routedList = (Context.RequestServices.GetService(typeof(HpskSite.Services.Addresses.CompetitionPageContext)) as HpskSite.Services.Addresses.CompetitionPageContext)?.StartList;
 	IPublishedContent? competition;
 	if (routedList != null) competition = Model;
 	else
