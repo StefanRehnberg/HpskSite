@@ -23,6 +23,19 @@ namespace HpskSite.Tests
         public void Omfattningen_lases(string? stored, string expected)
             => CompetitionScopeHelper.NormalizeScopeValue(stored).Should().Be(expected);
 
+        /// <summary>
+        /// Den publicerade nodens RÅVÄRDE (det som de gamla adressernas upplösning läser) — tävling 3514 i prod.
+        /// </summary>
+        [Fact]
+        public void Publicerad_nods_ravarde_med_escape_kanns_igen()
+        {
+            var prop = new Moq.Mock<Umbraco.Cms.Core.Models.PublishedContent.IPublishedProperty>();
+            prop.Setup(x => x.GetSourceValue(Moq.It.IsAny<string?>(), Moq.It.IsAny<string?>())).Returns("[\"Svenskt M\\u00E4sterskap\"]");
+            var node = new Moq.Mock<Umbraco.Cms.Core.Models.PublishedContent.IPublishedContent>();
+            node.Setup(x => x.GetProperty("competitionScope")).Returns(prop.Object);
+            CompetitionScopeHelper.ReadScope(node.Object).Should().Be(CompetitionScopeHelper.SvensktMasterskap);
+        }
+
         [Fact]
         public void Mastarskapsreglerna_laser_samma_varde()
             => ChampionshipCategory.NormalizeScope("[\"Svenskt M\\u00E4sterskap\"]").Should().Be(CompetitionScopeHelper.SvensktMasterskap);
