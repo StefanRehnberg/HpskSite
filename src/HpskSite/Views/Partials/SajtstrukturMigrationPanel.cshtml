@@ -333,10 +333,12 @@
     }
 
     // Bekräftelse i sidan, aldrig confirm(): ett andra klick inom några sekunder krävs.
-    function armed(btn, text) {
+    // ms: hur länge knappen står beväpnad. Knappar som först visar en förhandsgranskning får en minut — sex sekunder
+    // räckte inte för att läsa den, och nästa tryck visade då bara läget igen (prod 2026-10-19).
+    function armed(btn, text, ms) {
         if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; return true; }
         btn.dataset.label = btn.textContent; btn.dataset.armed = '1'; btn.textContent = text;
-        setTimeout(function () { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; } }, 6000);
+        setTimeout(function () { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; } }, ms || 6000);
         return false;
     }
 
@@ -351,7 +353,7 @@
         else if (a === 'cleanup') {
             if (btn.dataset.armed === '1') { armed(btn); doCleanup(card); return; }
             // Första trycket: visa vad som skulle tas bort, beväpna knappen.
-            armed(btn, 'Tryck igen — noderna tas bort för gott');
+            armed(btn, 'Tryck igen — noderna tas bort för gott', 60000);
             clear(card);
             get(card.dataset.base, 'CleanupPreview').then(function (d) { lines(card, cleanupHtml(d.state)); })
                 .catch(function (err) { lines(card, 'Läget gick inte att läsa: ' + esc(err.message), 'text-danger'); });
@@ -365,7 +367,8 @@
                 var s = d.state || {};
                 if ((s.blockers || []).length) return;
                 if (!s.competitions && !s.series && !s.emptySeasons && !s.events) { lines(card, 'Det finns inga noder kvar att radera.'); return; }
-                armed(btn, 'Tryck igen — noderna raderas för gott');
+                armed(btn, 'Tryck igen — noderna raderas för gott', 60000);
+                lines(card, '<strong>Tryck på knappen en gång till (inom en minut) för att radera.</strong>');
             }).catch(function (err) { lines(card, 'Läget gick inte att läsa: ' + esc(err.message), 'text-danger'); });
         }
         else if (a === 'invoiceArchive') {
@@ -379,7 +382,7 @@
                     + (d.archiveFolderId ? '' : ' (arkivet skapas under tävlingsnavet)') + '.'
                     + (d.emptyHubs ? ' ' + d.emptyHubs + ' av dem är tomma.' : '')
                     + (d.withoutCompetitionId ? ' ' + d.withoutCompetitionId + ' fakturor saknar tävlingens id — arkivet bär det åt dem.' : ''));
-                armed(btn, 'Tryck igen för att flytta mapparna');
+                armed(btn, 'Tryck igen för att flytta mapparna', 60000);
             }).catch(function (err) { lines(card, 'Läget gick inte att läsa: ' + esc(err.message), 'text-danger'); });
         }
         else if (a === 'rollback') { if (armed(btn, 'Tryck igen — tillbaka till noderna')) doRollback(card); }
