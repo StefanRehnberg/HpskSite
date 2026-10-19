@@ -11833,6 +11833,17 @@ Underhåll på `/admin-page`. Samma steg som startlistorna: Torrkör → (frys, 
   Development, bara kopiorna) och `hpsk-verify/c3/c3-s5e-rehearsal.mjs` (arkiv/avpublicering/papperskorg genom de riktiga
   endpointsen), `c3-url-corpus.mjs` före/efter och `c3-s5e-poison-probe.mjs` (inloggade ytor). Efter rättelserna: 7 396
   adresser oförändrade, 261 sidor och 184 anrop utan fel. Kör den igen före raderingen av noderna.
+- **⚠️⚠️ Raderingen av noderna (§5.5 punkt 7, 2026-10-19): `CompetitionNodeDeletionService`**, Underhåll → Tävlingar
+  och serier → *4. Radera de gamla noderna* (`CompetitionMigration/DeleteNodesPreview` läser, `DeleteNodes` i omgångar om
+  högst 20 s). Tävlingarna först (med allt under dem), sedan serierna, sist tomma årsmappar; en nod per `Delete`, aldrig
+  `EmptyRecycleBin`. **Spärrarna (`Blockers`) prövas före varje omgång:** avpubliceringens, ingen frysning,
+  `LegacyRedirect` finns (raderna kopieras före varje omgång), inga publicerade noder, varje tävling/serie i sin tabell
+  OCH i arkivet, varje resultat-/startliste-/finallistenod UNDER en tävling i sin tabell, inga anmälnings- eller lagnoder
+  kvar (Anmälningar → 4 först), och inga andra sorters noder under tävlingarna. ⚠️⚠️ **`CompetitionTableRowsCleanupHandler`
+  gör ingenting i tabelläget** — utan den spärren hade raderingen (eller en tömd papperskorg) tömt varje tävlings start-
+  och resultatlistor, eftersom tabellraderna har nodens id. Årsadresserna `/competitions/{år}/` ger 301 till `/tavlingar/`
+  även utan årsmappens nod (`CompetitionTreeRedirectFinder`). Repetitionen på `Umbraco_Scale`: 790 noder + 1 444 under
+  dem på 5,5 minuter, tabellernas antal oförändrade, 0 skillnader på 7 396 adresser mot läget efter avpubliceringen.
 - **⚠️⚠️ Sidornas vyer heter `…Page` (§5.5 punkt 6, 2026-10-19)** — `CompetitionPage`, `CompetitionSeriesPage`,
   `CompetitionResultPage`, `PrecisionStartListPage`, `PrecisionFinalsStartListPage`, `ClubSimpleEventPage`, namnen i
   `Routing/PageViews`. Att ta bort en mall i Umbraco raderar vyfilen med mallens namn, så ingen sida får bo i en fil som

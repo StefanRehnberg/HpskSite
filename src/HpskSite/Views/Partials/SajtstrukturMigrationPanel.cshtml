@@ -37,6 +37,11 @@
                                         title="Flyttar de gamla fakturamapparna från tävlingsnoderna till fakturaarkivet. Krävs före avpubliceringen.">Fakturamapparna till arkivet</button>
                             }
                             <button type="button" class="btn btn-outline-secondary btn-sm" data-ssm="unpublish">3. Avpublicera de gamla noderna</button>
+                            @if (part.Item1 == "comp")
+                            {
+                                <button type="button" class="btn btn-outline-danger btn-sm" data-ssm="deleteNodes"
+                                        title="Raderar tävlings- och serienoderna för gott, med allt under dem. Bara när allt finns i tabellerna och arkivet. Kör utanför trafiktid.">4. Radera de gamla noderna</button>
+                            }
                             @if (part.Item1 == "reg")
                             {
                                 <button type="button" class="btn btn-outline-secondary btn-sm" data-ssm="cleanup"
@@ -273,6 +278,32 @@
         finally { busy(card, false); }
     }
 
+    function deleteStateHtml(s) {
+        s = s || {};
+        var html = 'Att radera: <strong>' + (s.competitions || 0) + '</strong> tävlingsnoder · ' + (s.series || 0) + ' serienoder · '
+            + (s.emptySeasons || 0) + ' tomma årsmappar, med ' + (s.descendants || 0) + ' noder under dem.';
+        if (s.redirectsToCopy) html += '<br>' + s.redirectsToCopy + ' gamla omdirigeringar kopieras först.';
+        if ((s.blockers || []).length)
+            html += '<div class="text-danger mt-1"><strong>Spärrat:</strong><ul class="mb-0">' + s.blockers.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul></div>';
+        return '<div>' + html + '</div>';
+    }
+
+    // Raderingen i omgångar (högst 20 sekunder per anrop) tills inget återstår eller något går fel.
+    async function doDeleteNodes(card) {
+        clear(card); busy(card, true);
+        try {
+            var total = 0;
+            for (var i = 0; i < 400; i++) {
+                var d = await post(card.dataset.base, 'DeleteNodes', { batch: '25' });
+                total += d.deleted || 0;
+                card.querySelector('.ssm-out').innerHTML = '<div>Raderade: ' + total + ' · kvar: ' + (d.remaining || 0) + '</div>';
+                (d.errors || []).slice(0, 10).forEach(function (x) { lines(card, esc(x), 'text-danger'); });
+                if (!d.success || !d.remaining || !d.deleted) { lines(card, esc(d.message || ''), d.success ? '' : 'text-danger'); break; }
+            }
+        } catch (e) { lines(card, 'Avbrutet: ' + esc(e.message), 'text-danger'); }
+        finally { busy(card, false); }
+    }
+
     async function doRollback(card) {
         clear(card); busy(card, true);
         try {
@@ -315,6 +346,18 @@
             clear(card);
             get(card.dataset.base, 'CleanupPreview').then(function (d) { lines(card, cleanupHtml(d.state)); })
                 .catch(function (err) { lines(card, 'Läget gick inte att läsa: ' + esc(err.message), 'text-danger'); });
+        }
+        else if (a === 'deleteNodes') {
+            if (btn.dataset.armed === '1') { armed(btn); doDeleteNodes(card); return; }
+            // Första trycket: visa vad som raderas och vad som spärrar; beväpna bara när inget spärrar.
+            clear(card);
+            get(card.dataset.base, 'DeleteNodesPreview').then(function (d) {
+                lines(card, deleteStateHtml(d.state));
+                var s = d.state || {};
+                if ((s.blockers || []).length) return;
+                if (!s.competitions && !s.series && !s.emptySeasons) { lines(card, 'Det finns inga noder kvar att radera.'); return; }
+                armed(btn, 'Tryck igen — noderna raderas för gott');
+            }).catch(function (err) { lines(card, 'Läget gick inte att läsa: ' + esc(err.message), 'text-danger'); });
         }
         else if (a === 'invoiceArchive') {
             if (btn.dataset.armed === '1') { armed(btn); doInvoiceArchive(card); return; }

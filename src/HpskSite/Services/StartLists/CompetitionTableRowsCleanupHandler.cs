@@ -11,20 +11,29 @@ namespace HpskSite.Services.StartLists
     /// <para>Som noder försvann listorna med tävlingen. I tabellerna finns ingen sådan koppling, och utan
     /// städningen låg raderna kvar för alltid — startlistorna bär skyttarnas namn och klubbar. En tävling i
     /// papperskorgen rörs inte: den kan återställas, och då ska listorna finnas kvar.</para>
+    ///
+    /// <para>⚠️⚠️ <b>Bara när tävlingarna står på noderna</b> (C3 §5.5, 2026-10-19). I tabelläget är noden en
+    /// kvarleva med SAMMA id som tävlingens rad — tävlingen tas bort mjukt i tabellen, aldrig genom att noden raderas.
+    /// Utan spärren hade raderingen av de gamla noderna (eller en tömd papperskorg) tömt varje tävlings start- och
+    /// resultatlistor.</para>
     /// </summary>
     public class CompetitionTableRowsCleanupHandler : INotificationHandler<ContentDeletedNotification>
     {
         private readonly IScopeProvider _scopeProvider;
+        private readonly HpskSite.Services.SiteSettings.SiteSettingService _settings;
         private readonly ILogger<CompetitionTableRowsCleanupHandler> _logger;
 
-        public CompetitionTableRowsCleanupHandler(IScopeProvider scopeProvider, ILogger<CompetitionTableRowsCleanupHandler> logger)
+        public CompetitionTableRowsCleanupHandler(IScopeProvider scopeProvider, HpskSite.Services.SiteSettings.SiteSettingService settings,
+            ILogger<CompetitionTableRowsCleanupHandler> logger)
         {
             _scopeProvider = scopeProvider;
+            _settings = settings;
             _logger = logger;
         }
 
         public void Handle(ContentDeletedNotification notification)
         {
+            if (HpskSite.Services.Competitions.CompetitionStoreSettings.UsesTable(_settings)) return;
             var ids = notification.DeletedEntities
                 .Where(e => e.ContentType.Alias == "competition") // competitionstore-ok: reagerar på att tävlingsNODEN raderas; byts när tävlingarna flyttar till tabellen
                 .Select(e => e.Id)
