@@ -1735,7 +1735,7 @@ namespace HpskSite.Controllers
                 ? MailReplyTo.SiteAdmin
                 : MailReplyTo.To(actorEmail, actorName ?? access.OwnerName);
 
-            var url = $"{Request.Scheme}://{Request.Host}/ekonomi?type={request.OwnerType}&id={request.OwnerId}";
+            var url = $"{Request.PublicBase()}/ekonomi?type={request.OwnerType}&id={request.OwnerId}";
             var notified = new List<string>();
 
             try
@@ -1820,7 +1820,7 @@ namespace HpskSite.Controllers
 
             if (!made) return Json(new { success = false, message = error! });
 
-            var url = $"{Request.Scheme}://{Request.Host}/revision/inbjudan?t={token}";
+            var url = $"{Request.PublicBase()}/revision/inbjudan?t={token}";
             var expires = DateTime.UtcNow.AddMonths(LedgerAuditorService.GrantMonths).ToLocalTime();
 
             // ⚠️⚠️ SVARSADRESSEN ÄR FÖRENINGEN, inte sajten. En revisor som svarar på inbjudan

@@ -41,7 +41,7 @@ namespace HpskSite.Controllers
             var compType = competition.CompetitionType ?? "";
             if (compType is not ("Faltskytte" or "MagnumFalt")) return NotFound();
 
-            var model = BuildModel(competition, competitionId, station, $"{Request.Scheme}://{Request.Host}", withQr: true);
+            var model = BuildModel(competition, competitionId, station, $"{Request.PublicBase()}", withQr: true);
 
             return View("~/Views/FaltskyttePrintStationCards.cshtml", model);
         }

@@ -1015,7 +1015,7 @@ namespace HpskSite.Controllers
         {
             var payload = ctx.IsTraining ? $"training:{ctx.EventId}" : eventId.ToString();
             var token = _attendanceProtector.Protect(payload, AttendanceTokenLifetime(ctx));
-            return $"{Request.Scheme}://{Request.Host}/evenemang/narvaro?t={Uri.EscapeDataString(token)}";
+            return $"{Request.PublicBase()}/evenemang/narvaro?t={Uri.EscapeDataString(token)}";
         }
 
         /// <summary>

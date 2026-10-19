@@ -262,7 +262,7 @@ namespace HpskSite.Controllers
                 return StatusCode(403, "Stationsbeskrivningarna är hemliga för skyttarna och visas bara för tävlingens funktionärer och kretsens granskare.");
             }
 
-            var model = FaltskyttePrintController.BuildModel(comp, c.Value, null, $"{Request.Scheme}://{Request.Host}", withQr: false);
+            var model = FaltskyttePrintController.BuildModel(comp, c.Value, null, $"{Request.PublicBase()}", withQr: false);
             model.AutoPrint = print == 1;
             model.Notice = "Granskningsunderlag — hemligt för skyttarna. Dela inte stationsbeskrivningarna med någon som tävlar."
                 + (competitor ? " Du är själv anmäld i tävlingen." : "");

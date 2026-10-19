@@ -251,7 +251,7 @@ namespace HpskSite.Controllers
             if (_calendar.GetRangeWithSections(rangeId).Range == null)
                 return Json(new { success = false, message = "Skjutbanan finns inte." });
             var token = _protection.CreateProtector(IcsPurpose).Protect("range:" + rangeId);
-            var url = $"{Request.Scheme}://{Request.Host}/skjutbana/kalender.ics?t={Uri.EscapeDataString(token)}";
+            var url = $"{Request.PublicBase()}/skjutbana/kalender.ics?t={Uri.EscapeDataString(token)}";
             return Json(new { success = true, url, webcal = "webcal://" + url[(url.IndexOf("://", StringComparison.Ordinal) + 3)..] });
         }
 

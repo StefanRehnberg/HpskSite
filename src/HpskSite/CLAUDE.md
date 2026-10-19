@@ -12104,8 +12104,41 @@ instans. `FileStorageGuardTests` fäller bygget (undantag: `filestore-ok: <skäl
   och Azurite — mot blobb), `FileStorageGuardTests`. Sviter: `hpsk-verify/d3-filestore-verify.mjs`
   (`HPSK_MODE=disk|blob`, kontrollerar var filen hamnade) och `d3-filestore-migrate-verify.mjs`.
   Azurite lokalt: `npx -p azurite azurite-blob --location <dir> --blobPort 10000 --loose`.
-- **D4 (flera servrar) är INTE byggd** — se skalplanen. Den behövs den dag sajten ska köra på mer än en
-  instans; D3 räcker för en server och för en serverflytt.
+- **D4 (flera servrar)** — se nästa avsnitt.
+
+## ⚠️⚠️ Flera instanser — `ScaleOut` (skalplanen D4, 2026-10-19)
+
+**Utan sektionen `ScaleOut` och utan `ConnectionStrings:redis` beter sig sajten exakt som förut.** Allt nedan
+slås på med inställningar den dag sajten ska köra på mer än en server (kräver flytt från Simply).
+- **Schemalagt arbete bara på publiceraren.** `ScaleOut:ServerRole` = `SchedulingPublisher` | `Subscriber`
+  sätter Umbracos serverroll uttryckligen (`ConfiguredServerRoleAccessor`). Varje bakgrundstjänst som
+  SKICKAR eller SKRIVER på ett schema frågar `_scopeFactory.MayRunScheduled(...)` (`ScheduledWorkGate`) i
+  början av varje varv: påminnelserna (schema, vapenlicens, kretsgranskning), rankningen, målbildsstädningen,
+  adressernas startsvep. **Ny sådan tjänst: lägg in frågan.** Schemavakter, uppvärmning och tömning av
+  minnesköer frågar inte — de gäller den egna instansen.
+- **Länkar utåt = `Request.PublicBase()`** (`PublicUrls`), aldrig `$"{Request.Scheme}://{Request.Host}"` —
+  bakom en lastbalanserare är det den interna adressen. `ScaleOut:PublicBaseUrl` ger den riktiga; tomt =
+  ur förfrågan som förut. `ScaleOutGuardTests` fäller bygget (undantag `scaleout-ok:`).
+- **Cacher som töms lokalt meddelar de andra instanserna** genom `CacheSignals.Notify(namn)` → raden i
+  `dbo.CacheSignal`; `CacheSignalPollingService` läser var tredje sekund och kör tömningen i
+  `CacheSignals.Invalidators`. Gäller fakturalistan, "Det här händer", sajtinställningarna (frysningarna!),
+  kretskalendern, händelseadresserna och seriernas resultat. Tävlingarna har sin egen versionsrad
+  (`CompetitionCacheVersion`). **Ny cache med lokal tömning: namn + tömning i registret + Notify.**
+  Tömningen i registret får aldrig själv anropa Notify (slinga). Bara aktiv med `ScaleOut:ServerRole`.
+  Cacher utan tömning (korta TTL på 30 s–5 min) är medvetet kvar — de blir inte fel, bara lite sena.
+- **Redis** (`ConnectionStrings:redis`): andra nivån i cachen (`IDistributedCache`, som Umbracos
+  `HybridCache` använder — cacherna överlever en omstart) och SignalR:s koppling mellan instanserna.
+  `abortConnect=false`: sajten svarar när Redis är nere (prövat).
+- **Vidarebefordrade huvuden** (`ScaleOut:ForwardedHeaders`, med betrodda proxyer/nät) — av som standard.
+- **Umbracos egna inställningar per instans** (bara konfiguration, se körordningen D7):
+  `Umbraco:CMS:Global:MainDomLock = SqlMainDomLock` + unik `MainDomKeyDiscriminator`,
+  `Hosting:LocalTempStorageLocation = EnvironmentTemp`, `Examine:LuceneDirectoryFactory =
+  SyncedTempFileSystemDirectoryFactory`, och `Unattended:UpgradeUnattended = false` på prenumeranterna.
+- **Kända begränsningar:** träningsmatchens åskådarlista (statiska listor i `TrainingMatchHub`) visar bara
+  den egna instansens åskådare; larmmejlen (`CriticalAlertService`) skickas per instans.
+- Verifierat: två instanser mot `Umbraco_Scale` + Garnet (Redis-kompatibel, `dotnet tool install
+  garnet-server`) — `hpsk-verify/d4-scaleout-verify.mjs` 14/14 (startas med två lokala instanser, se
+  svitens huvud); A/B utan signaltabellen → B ser inte frysningen. Test: `ScaleOutGuardTests`.
 
 ## ⚠️⚠️ Skalreglerna — medlemmar (skalplanen B1–B4, 2026-10-12)
 

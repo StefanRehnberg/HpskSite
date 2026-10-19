@@ -1372,7 +1372,7 @@ namespace HpskSite.Controllers
                 return Content("Åtkomst nekad");
 
             var req = HttpContext.Request;
-            var url = $"{req.Scheme}://{req.Host}/valvet?club={clubId}";
+            var url = $"{req.PublicBase()}/valvet?club={clubId}";
             var svg = QrSvg(url, Math.Clamp(size, 4, 24));
             return svg is null
                 ? Content("Kunde inte skapa QR-kod")
@@ -1393,7 +1393,7 @@ namespace HpskSite.Controllers
             if (string.IsNullOrWhiteSpace(code)) return null;
 
             var req = HttpContext.Request;
-            return FirearmLabelCode.Url(req.Scheme, req.Host.Value ?? "", code);
+            return FirearmLabelCode.Url(req.PublicBase(), code);
         }
 
         /// <summary>

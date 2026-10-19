@@ -1022,7 +1022,7 @@ namespace HpskSite.Controllers
         private string BuildPayUrl(int chargeId)
         {
             var token = _protector.Protect(chargeId.ToString());
-            return $"{Request.Scheme}://{Request.Host}/medlemsavgift/{Uri.EscapeDataString(token)}";
+            return $"{Request.PublicBase()}/medlemsavgift/{Uri.EscapeDataString(token)}";
         }
 
         private async Task<int> GetCurrentMemberIdAsync()

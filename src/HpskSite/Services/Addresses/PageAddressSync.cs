@@ -148,6 +148,8 @@ namespace HpskSite.Services.Addresses
         {
             try { await Task.Delay(StartupDelay, stoppingToken); }
             catch (OperationCanceledException) { return; }
+            // Skalplanen D4: skrivningen görs av publiceraren; en andra instans hade gjort samma arbete igen.
+            if (!_scopeFactory.MayRunScheduled(nameof(PageAddressSeedHostedService))) return;
             try
             {
                 using var scope = _scopeFactory.CreateScope();

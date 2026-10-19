@@ -91,11 +91,42 @@ builder.Services.ConfigureOptions<MemberCookieConfigureOptions>();
 builder.Services.ConfigureOptions<MemberSecurityStampValidatorOptions>();
 
 // Register SignalR for real-time training match communication
-builder.Services.AddSignalR(options =>
+var signalR = builder.Services.AddSignalR(options =>
 {
     options.EnableDetailedErrors = builder.Environment.IsDevelopment();
     options.KeepAliveInterval = TimeSpan.FromSeconds(15);
 });
+// Skalplanen D4: med flera instanser når ett meddelande annars bara de anslutna på den egna servern.
+// Bara när ConnectionStrings:redis är satt — utan den som förut.
+var redisConnection = builder.Configuration.GetConnectionString(HpskSite.Services.Hosting.ScaleOutComposer.RedisConnectionName);
+if (!string.IsNullOrWhiteSpace(redisConnection))
+{
+    signalR.AddStackExchangeRedis(redisConnection, o =>
+    {
+        o.Configuration.ChannelPrefix = StackExchange.Redis.RedisChannel.Literal("hpsk-signalr");
+        o.Configuration.AbortOnConnectFail = false;
+    });
+}
+
+// Skalplanen D4: bakom en lastbalanserare läses klientens adress och protokoll ur X-Forwarded-*,
+// men bara från uttryckligt betrodda proxyer. Av som standard.
+var scaleOut = builder.Configuration.GetSection(HpskSite.Services.Hosting.ScaleOutOptions.SectionName)
+    .Get<HpskSite.Services.Hosting.ScaleOutOptions>() ?? new HpskSite.Services.Hosting.ScaleOutOptions();
+if (scaleOut.ForwardedHeaders.Enabled)
+{
+    builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(o =>
+    {
+        o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+            | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+            | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost;
+        o.KnownProxies.Clear();
+        o.KnownIPNetworks.Clear();
+        foreach (var p in scaleOut.ForwardedHeaders.KnownProxies)
+            if (System.Net.IPAddress.TryParse(p, out var ip)) o.KnownProxies.Add(ip);
+        foreach (var n in scaleOut.ForwardedHeaders.KnownNetworks)
+            if (System.Net.IPNetwork.TryParse(n, out var net)) o.KnownIPNetworks.Add(net);
+    });
+}
 
 // Add CORS for mobile app SignalR connections
 builder.Services.AddCors(options =>
@@ -159,6 +190,12 @@ if (jwtSettings != null && jwtSettings.IsValid())
 WebApplication app = builder.Build();
 
 await app.BootUmbracoAsync();
+
+// Först i kedjan, så att HTTPS-omdirigeringen och allt annat ser klientens riktiga protokoll.
+if (scaleOut.ForwardedHeaders.Enabled)
+{
+    app.UseForwardedHeaders();
+}
 
 // Redirect HTTP to HTTPS in production
 if (!app.Environment.IsDevelopment())

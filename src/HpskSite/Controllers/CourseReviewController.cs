@@ -482,7 +482,7 @@ namespace HpskSite.Controllers
         // ════════════════════════════════════════════════════════════════════════════════
 
         private static readonly CultureInfo Sv = CultureInfo.GetCultureInfo("sv-SE");
-        private string BaseUrl => $"{Request.Scheme}://{Request.Host}";
+        private string BaseUrl => $"{Request.PublicBase()}";
 
         private string? MemberName(int id)
         {

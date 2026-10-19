@@ -836,6 +836,7 @@ namespace HpskSite.Services
         /// </summary>
         private void InvalidateInvoiceListCaches()
         {
+            HpskSite.Services.Hosting.CacheSignals.Notify(HpskSite.Services.Hosting.CacheSignals.Invoices);
             try { _appCaches.RuntimeCache.ClearByRegex("^admin_invoices_"); }
             catch (Exception ex) { _logger.LogWarning(ex, "Could not clear the admin invoice cache"); }
         }

@@ -316,7 +316,7 @@ namespace HpskSite.Controllers
                     total = twin.Total,
                     threshold = twin.Threshold,
                     verifyToken = twinToken,
-                    verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(twinToken)}",
+                    verifyUrl = $"{Request.PublicBase()}/marken/verifiera?t={Uri.EscapeDataString(twinToken)}",
                     requiresOnSiteWitness = RequireOnSiteWitness(twin.ClubId),
                     seriesDate = twin.SeriesDate,
                     duplicateWarning = (string?)null,
@@ -381,7 +381,7 @@ namespace HpskSite.Controllers
                 total = series.Total,
                 threshold = series.Threshold,
                 verifyToken = token,
-                verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(token)}",
+                verifyUrl = $"{Request.PublicBase()}/marken/verifiera?t={Uri.EscapeDataString(token)}",
                 // The shooter must know BEFORE they walk away from the range whether the queue is a
                 // fallback or whether the QR code is the only way this series can ever be approved.
                 requiresOnSiteWitness = RequireOnSiteWitness(series.ClubId),
@@ -633,7 +633,7 @@ namespace HpskSite.Controllers
                 success = true,
                 id = s.Id,
                 verifyToken = token,
-                verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(token)}",
+                verifyUrl = $"{Request.PublicBase()}/marken/verifiera?t={Uri.EscapeDataString(token)}",
                 requiresOnSiteWitness = RequireOnSiteWitness(s.ClubId),
                 qualifies = s.Qualifies,
                 total = s.Total,
@@ -727,7 +727,7 @@ namespace HpskSite.Controllers
                 reachedLevel = reached,
                 qualifies = reached != null,
                 verifyToken = token,
-                verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(token)}",
+                verifyUrl = $"{Request.PublicBase()}/marken/verifiera?t={Uri.EscapeDataString(token)}",
                 message = reached == null
                     ? "Sparat. Resultatet når inte märkeskravet men kan ändå valideras."
                     : "Sparat och skickat för validering."
@@ -857,7 +857,7 @@ namespace HpskSite.Controllers
                 id,
                 qualifies = series.Qualifies,
                 verifyToken = token,
-                verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(token)}",
+                verifyUrl = $"{Request.PublicBase()}/marken/verifiera?t={Uri.EscapeDataString(token)}",
                 message = level == null
                     ? "Sparat. Serien når inte bronsnivån men kan ändå valideras."
                     : "Sparat och skickat för validering."
@@ -2675,7 +2675,7 @@ namespace HpskSite.Controllers
                 id,
                 points,
                 verifyToken = token,
-                verifyUrl = $"{Request.Scheme}://{Request.Host}/marken/verifiera?t={Uri.EscapeDataString(token)}",
+                verifyUrl = $"{Request.PublicBase()}/marken/verifiera?t={Uri.EscapeDataString(token)}",
                 message = points > 0
                     ? $"Sparat ({points} inteckningspoäng) och skickat för validering."
                     : "Sparat. Resultatet ger 0 inteckningspoäng men kan ändå valideras."

@@ -42,7 +42,7 @@ public class TargetPhotoCleanupService : IsolatedBackgroundService
         {
             try
             {
-                await CleanupOldPhotosAsync(stoppingToken);
+                if (_scopeFactory.MayRunScheduled(nameof(TargetPhotoCleanupService))) await CleanupOldPhotosAsync(stoppingToken);
             }
             catch (OperationCanceledException)
             {

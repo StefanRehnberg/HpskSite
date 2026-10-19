@@ -189,7 +189,7 @@ namespace HpskSite.Controllers
 
         private string BuildHtml(BoardMeeting m, string orgName, string? message)
         {
-            var baseUrl = $"{Request.Scheme}://{Request.Host}";
+            var baseUrl = $"{Request.PublicBase()}";
             var agenda = _meetingService.GetAgenda(m.Id);
             var links = _meetingService.GetLinksForMeeting(m.Id);
             var sb = new StringBuilder();
