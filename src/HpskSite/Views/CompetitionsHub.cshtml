@@ -92,8 +92,26 @@
     //  • isClubOnly competitions were excluded for everyone, including the club's own members, so
     //    your own club's internal competition was invisible on the page that lists competitions.
     //    They are now shown to members of that club only, badged "Endast klubb".
-    var allCompetitions = nodesOf(Competitions.List()
-        .Where(p => !p.IsClubOnly || myClubIds.Contains(p.ClubId)));
+    //
+    // ⚠️ Och sedan FÖNSTRET (skalplanen 2026-10-19, CompetitionHubWindow): kommande + de senaste 15 månaderna, eller
+    // ett valt år (?ar=). Sidan renderade annars varje tävling som någonsin hållits (4,2 MB med 783 tävlingar).
+    // Det som inte visas SÄGS i raden ovanför listan, med väg till äldre år och sökningen i alla år — en tävling
+    // som inte syns får aldrig se ut att inte finnas.
+    var visiblePosts = Competitions.List()
+        .Where(p => !p.IsClubOnly || myClubIds.Contains(p.ClubId))
+        .ToList();
+    var selectedYear = HpskSite.Models.Competitions.CompetitionHubWindow.ParseYear(Context.Request.Query["ar"].ToString());
+    var windowFrom = HpskSite.Models.Competitions.CompetitionHubWindow.From(DateTime.Today);
+    var shownPosts = selectedYear is int sy
+        ? visiblePosts.Where(p => HpskSite.Models.Competitions.CompetitionHubWindow.InYear(p, sy)).ToList()
+        : visiblePosts.Where(p => HpskSite.Models.Competitions.CompetitionHubWindow.InWindow(p, DateTime.Today)).ToList();
+    var olderNotShown = selectedYear.HasValue ? 0 : visiblePosts.Count - shownPosts.Count;
+    // Åren som har tävlingar UTANFÖR det som visas — det är dem raden ovanför listan erbjuder.
+    var shownIds = shownPosts.Select(p => p.Id).ToHashSet();
+    var olderYears = visiblePosts.Where(p => !shownIds.Contains(p.Id))
+        .Select(p => p.CompetitionDate?.Year).Where(y => y.HasValue).Select(y => y!.Value)
+        .Distinct().OrderByDescending(y => y).ToList();
+    var allCompetitions = nodesOf(shownPosts);
 
     // Grannkretsarna, ur det handskrivna gränsschemat i Models/RegionAdjacency.cs. Egna kretsar
     // filtreras bort där, så en granne som samtidigt är min egen krets aldrig kan hamna i två
@@ -174,7 +192,8 @@
     var shootingClasses = HpskSite.Models.ShootingClasses.All;
     // Säsongsfiltret går på tävlingens ÅR (C3-planen S7) — förut på föräldernoden, så en omgång i en serie (vars
     // förälder är serien) föll ur filtret så fort en säsong valdes.
-    var seasonYears = allCompetitions.Select(c => Posts.Of(c).CompetitionDate?.Year).Where(y => y.HasValue)
+    // ⚠️ Åren ur ALLA tävlingar, inte bara de som visas — väljaren är vägen till de äldre (?ar=).
+    var seasonYears = visiblePosts.Select(p => p.CompetitionDate?.Year).Where(y => y.HasValue)
         .Select(y => y!.Value).Distinct().OrderByDescending(y => y).ToList();
 
     // Batch registration check — load all user registrations into a HashSet for O(1) lookups.
@@ -317,7 +336,8 @@
                     <i class="bi bi-play-circle me-2"></i>
                     Pågående (<span id="active-count">@activeCompetitions.Count</span>)
                 </button>
-                <button class="btn btn-outline-secondary filter-pill" data-status="completed" title="Klicka för att visa/dölja avslutade tävlingar">
+                @* Ett valt år (?ar=) är nästan alltid avslutat — då är avslutade PÅ, annars vore sidan tom. *@
+                <button class="btn btn-outline-secondary filter-pill@(selectedYear.HasValue ? " active" : "")" data-status="completed" title="Klicka för att visa/dölja avslutade tävlingar">
                     <i class="bi bi-check-circle me-2"></i>
                     Avslutade (<span id="completed-count">@completedCompetitions.Count</span>)
                 </button>
@@ -396,11 +416,13 @@
                                 <label for="filterSeason" class="form-label">
                                     <i class="bi bi-calendar"></i> Säsong
                                 </label>
+                                @* Väljaren LADDAR ett år (?ar=) i stället för att filtrera — sidan har bara
+                                   kommande och de senaste 15 månaderna (CompetitionHubWindow). *@
                                 <select class="form-select" id="filterSeason">
-                                    <option value="">Alla säsonger</option>
+                                    <option value="" selected="@(!selectedYear.HasValue)">Kommande + senaste 15 mån</option>
                                     @foreach (var seasonYear in seasonYears)
                                     {
-                                        <option value="@seasonYear">@seasonYear</option>
+                                        <option value="@seasonYear" selected="@(selectedYear == seasonYear)">@seasonYear</option>
                                     }
                                 </select>
                             </div>
@@ -441,6 +463,63 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    @* ⚠️ Vad sidan visar SÄGS här, alltid synligt — inte bara i den hopfällda "Mer filter". Sidan har kommande
+       tävlingar och de senaste 15 månaderna (CompetitionHubWindow); den som letar en äldre tävling ska se det
+       innan hen drar slutsatsen att tävlingen inte finns. *@
+    <div class="alert alert-light border d-flex flex-wrap align-items-center gap-2 mb-0" id="hubWindowNote">
+        <i class="bi bi-calendar-range"></i>
+        @if (selectedYear.HasValue)
+        {
+            <span>Visar tävlingar <strong>@selectedYear.Value</strong> (@shownPosts.Count st).</span>
+            <a class="btn btn-sm btn-outline-primary" href="?" id="hubWindowBack">
+                <i class="bi bi-arrow-left me-1"></i>Kommande och senaste 15 månaderna
+            </a>
+        }
+        else
+        {
+            @* Inget antal här: avslutade är dolda tills "Avslutade" slås på, och ett antal som inte stämmer med
+               korten på skärmen läses som att tävlingar saknas. Statusknapparna bär antalen. *@
+            <span>
+                Visar kommande tävlingar och tävlingar från de senaste 15 månaderna
+                (sedan @windowFrom.ToString("d MMMM yyyy", new System.Globalization.CultureInfo("sv-SE"))).
+                @if (olderNotShown > 0)
+                {
+                    <text>@olderNotShown äldre visas inte här.</text>
+                }
+            </span>
+        }
+        @if (olderYears.Count > 0)
+        {
+            <span class="ms-1">@(selectedYear.HasValue ? "Andra år:" : "Äldre år:")</span>
+            @foreach (var y in olderYears)
+            {
+                <a class="btn btn-sm btn-outline-secondary hub-year-link" href="?ar=@y">@y</a>
+            }
+        }
+        <button type="button" class="btn btn-sm btn-outline-primary ms-lg-auto" id="hubSearchAllYearsBtn">
+            <i class="bi bi-search me-1"></i>Sök i alla år
+        </button>
+    </div>
+
+    @* Sökningen i alla år (CompetitionSearch/Search) — fylls av skriptet. *@
+    <div class="card mt-3 d-none" id="hubAllYearsResults">
+        <div class="card-header d-flex align-items-center gap-2">
+            <i class="bi bi-search"></i>
+            <strong id="hubAllYearsTitle">Sökning i alla år</strong>
+            <button type="button" class="btn-close ms-auto" id="hubAllYearsClose" aria-label="Stäng"></button>
+        </div>
+        <div class="list-group list-group-flush" id="hubAllYearsList"></div>
+    </div>
+
+    @* Visas när sökningen inte hittar något bland de VISADE tävlingarna. *@
+    <div class="alert alert-warning mt-3 d-none" id="hubNoLocalHits">
+        <i class="bi bi-info-circle me-1"></i>
+        Ingen träff bland de tävlingar som visas här@(selectedYear.HasValue ? $" ({selectedYear})" : " (kommande och senaste 15 månaderna)").
+        <button type="button" class="btn btn-sm btn-primary ms-2" id="hubNoLocalHitsSearch">
+            <i class="bi bi-search me-1"></i>Sök i alla år
+        </button>
     </div>
 
     <!-- All Competitions Grid -->
@@ -1273,7 +1352,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const competitionsList = document.getElementById('competitionsList');
     const competitionsMap = document.getElementById('competitionsMap');
 
-    let activeStatuses = new Set(['open', 'upcoming', 'active']); // Default: show open, upcoming, active - hide completed
+    // Standard: öppna, kommande och pågående — avslutade dolda. Ett valt år (?ar=) visar även avslutade,
+    // annars vore sidan tom (nästan allt i ett äldre år är avslutat).
+    const selectedYear = @(selectedYear.HasValue ? selectedYear.Value.ToString() : "null");
+    const defaultStatuses = () => new Set(selectedYear ? ['open', 'upcoming', 'active', 'completed'] : ['open', 'upcoming', 'active']);
+    let activeStatuses = defaultStatuses();
     let currentView = 'card'; // Default view
     let selectedRegions = new Set(); // Empty = all regions
     let allRegions = []; // Will be populated from API
@@ -1448,6 +1531,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (visibleCards.length > 0) {
             sortCards(visibleCards, sortBy);
         }
+
+        // Ingen träff bland de VISADE tävlingarna → säg det och erbjud sökningen i alla år. Räknas i kortvyn
+        // (listvyns rader är samma tävlingar en gång till).
+        const shownHere = visibleCards.filter(c => c.closest('#competitionsGrid')).length;
+        document.getElementById('hubNoLocalHits').classList.toggle('d-none', !(searchTerm.trim().length >= 2 && shownHere === 0));
 
         // Update counts
         updateStatusCounts();
@@ -1759,7 +1847,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Filter change handlers
     typeFilter.addEventListener('change', filterCompetitions);
     weaponClassFilter.addEventListener('change', filterCompetitions);
-    seasonFilter.addEventListener('change', filterCompetitions);
+    // Säsongen LADDAR ett år från servern — sidan har bara kommande och de senaste 15 månaderna.
+    seasonFilter.addEventListener('change', function () {
+        const y = seasonFilter.value;
+        window.location.href = y ? ('?ar=' + encodeURIComponent(y)) : '?';
+    });
     venueFilter.addEventListener('change', filterCompetitions);
     sortSelect.addEventListener('change', filterCompetitions);
 
@@ -1772,16 +1864,10 @@ document.addEventListener('DOMContentLoaded', function() {
         venueFilter.value = '';
         sortSelect.value = 'date-asc';
 
-        // Reset to default statuses (excluding completed)
-        activeStatuses = new Set(['open', 'upcoming', 'active']);
-        filterPills.forEach(p => {
-            const status = p.dataset.status;
-            if (status === 'completed') {
-                p.classList.remove('active');
-            } else {
-                p.classList.add('active');
-            }
-        });
+        // Standardlägena igen — med avslutade när ett år är valt (det valda året ligger kvar: det är vad sidan HAR).
+        activeStatuses = defaultStatuses();
+        seasonFilter.value = selectedYear ? String(selectedYear) : '';
+        filterPills.forEach(p => p.classList.toggle('active', activeStatuses.has(p.dataset.status)));
 
         // Reset region filter to all
         selectedRegions.clear();
@@ -1800,6 +1886,50 @@ document.addEventListener('DOMContentLoaded', function() {
 
         filterCompetitions();
     });
+
+    // ── Sök i alla år (CompetitionSearch/Search) ───────────────────────────────────────────
+    // Sidan visar kommande och de senaste 15 månaderna; sökningen går igenom ALLA tävlingar, så att en äldre
+    // tävling aldrig ser ut att inte finnas. Resultaten är länkar — de blandas inte in bland korten.
+    const allYearsBox = document.getElementById('hubAllYearsResults');
+    const allYearsList = document.getElementById('hubAllYearsList');
+    const allYearsTitle = document.getElementById('hubAllYearsTitle');
+    function fmtDate(d) {
+        if (!d) return 'utan datum';
+        return new Date(d + 'T12:00:00').toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    async function searchAllYears() {
+        const q = searchInput.value.trim();
+        allYearsBox.classList.remove('d-none');
+        if (q.length < 2) {
+            allYearsTitle.textContent = 'Sökning i alla år';
+            allYearsList.innerHTML = '<div class="list-group-item text-body-secondary">Skriv minst två tecken i sökrutan ovanför.</div>';
+            searchInput.focus();
+            return;
+        }
+        allYearsTitle.textContent = 'Söker i alla år …';
+        allYearsList.innerHTML = '';
+        try {
+            const r = await fetch('/umbraco/surface/CompetitionSearch/Search?q=' + encodeURIComponent(q), { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            const d = await r.json();
+            if (!d.success) { allYearsTitle.textContent = d.message || 'Sökningen gick inte att göra.'; return; }
+            allYearsTitle.textContent = d.total === 0
+                ? `Ingen tävling i något år matchar ”${q}”`
+                : `${d.total} ${d.total === 1 ? 'tävling' : 'tävlingar'} i alla år matchar ”${q}”` + (d.truncated ? ` — visar de ${d.results.length} senaste` : '');
+            allYearsList.innerHTML = d.results.map(x => {
+                const meta = [fmtDate(x.date) + (x.endDate ? ' – ' + fmtDate(x.endDate) : ''), x.host, x.venue, x.type, x.series ? 'Del av ' + x.series : '']
+                    .filter(Boolean).map(compEsc).join(' · ');
+                const badge = x.inWindow ? '' : '<span class="badge text-bg-secondary ms-2">äldre</span>';
+                return `<a class="list-group-item list-group-item-action" href="${compEsc(x.url)}">`
+                     + `<div class="fw-semibold">${compEsc(x.name)}${badge}</div>`
+                     + `<div class="small text-body-secondary">${meta}</div></a>`;
+            }).join('');
+        } catch (e) {
+            allYearsTitle.textContent = 'Sökningen gick inte att göra just nu. Försök igen.';
+        }
+    }
+    document.getElementById('hubSearchAllYearsBtn').addEventListener('click', searchAllYears);
+    document.getElementById('hubNoLocalHitsSearch').addEventListener('click', searchAllYears);
+    document.getElementById('hubAllYearsClose').addEventListener('click', () => allYearsBox.classList.add('d-none'));
 
     // Load regions for filter dropdown
     loadRegions();
