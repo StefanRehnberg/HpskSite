@@ -22,6 +22,7 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly IContentService _contentService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
+        private readonly HpskSite.Services.TutorialWatchService _tutorialWatches;
 
         public TutorialController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -32,9 +33,11 @@ namespace HpskSite.Controllers
             IPublishedUrlProvider publishedUrlProvider,
             IMemberManager memberManager,
             IMemberService memberService,
-            IContentService contentService)
+            IContentService contentService,
+            HpskSite.Services.TutorialWatchService tutorialWatches)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _tutorialWatches = tutorialWatches;
             _memberManager = memberManager;
             _memberService = memberService;
             _contentService = contentService;
@@ -119,32 +122,13 @@ namespace HpskSite.Controllers
                 {
                     return Json(new { success = false, message = "Member not found" });
                 }
-
-                // Get current watched list
-                var watchedJson = umbracoMember.GetValue<string>("watchedTutorials") ?? "[]";
-                var watched = JsonSerializer.Deserialize<List<TutorialWatch>>(watchedJson) ?? new List<TutorialWatch>();
-
-                // Add or update
-                var existing = watched.FirstOrDefault(w => w.Id == request.TutorialId);
-                if (existing != null)
+                if (string.IsNullOrWhiteSpace(request?.TutorialId) || request.TutorialId.Length > 100)
                 {
-                    existing.ViewCount++;
-                    existing.Timestamp = DateTime.UtcNow;
-                }
-                else
-                {
-                    watched.Add(new TutorialWatch
-                    {
-                        Id = request.TutorialId,
-                        Watched = true,
-                        Timestamp = DateTime.UtcNow,
-                        ViewCount = 1
-                    });
+                    return Json(new { success = false, message = "Ogiltig film." });
                 }
 
-                // Save back to member
-                umbracoMember.SetValue("watchedTutorials", JsonSerializer.Serialize(watched));
-                _memberService.Save(umbracoMember);
+                // En rad i MemberTutorialWatch (skalplanen B5) — ingen medlemssparning.
+                _tutorialWatches.MarkWatched(umbracoMember.Id, request.TutorialId);
 
                 return Json(new { success = true });
             }
@@ -174,8 +158,15 @@ namespace HpskSite.Controllers
                 }
 
                 var umbracoMember = _memberService.GetById(member.Key);
-                var watchedJson = umbracoMember?.GetValue<string>("watchedTutorials") ?? "[]";
-                var watched = JsonSerializer.Deserialize<List<TutorialWatch>>(watchedJson) ?? new List<TutorialWatch>();
+                var watched = umbracoMember == null
+                    ? new List<TutorialWatch>()
+                    : _tutorialWatches.GetForMember(umbracoMember.Id).Select(w => new TutorialWatch
+                    {
+                        Id = w.TutorialId,
+                        Watched = true,
+                        Timestamp = w.LastWatchedUtc,
+                        ViewCount = w.ViewCount
+                    }).ToList();
 
                 return Json(new { success = true, watched });
             }
@@ -193,85 +184,30 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Mark welcome tutorial as seen
         /// POST /umbraco/surface/Tutorial/MarkWelcomeSeen
+        ///
+        /// ⚠️ Sparar ingenting (skalplanen B5, 2026-10-19): välkomstrutan styrs av webbläsarens
+        /// localStorage, och ingenting på servern läste egenskapen. Att spara den var en medlemssparning
+        /// utan läsare. Ändpunkten finns kvar så att äldre sidor inte får ett fel.
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> MarkWelcomeSeen()
         {
-            try
-            {
-                var member = await _memberManager.GetCurrentMemberAsync();
-                if (member == null)
-                {
-                    return Json(new { success = false });
-                }
-
-                var umbracoMember = _memberService.GetById(member.Key);
-                if (umbracoMember == null)
-                {
-                    return Json(new { success = false });
-                }
-
-                umbracoMember.SetValue("firstLoginWelcomeShown", true);
-                _memberService.Save(umbracoMember);
-
-                return Json(new { success = true });
-            }
-            catch (Exception ex)
-            {
-                return Json(new
-                {
-                    success = false,
-                    message = "Error marking welcome as seen: " + ex.Message
-                });
-            }
+            var member = await _memberManager.GetCurrentMemberAsync();
+            return Json(new { success = member != null });
         }
 
         /// <summary>
         /// Dismiss a tutorial banner
         /// POST /umbraco/surface/Tutorial/DismissBanner
+        ///
+        /// ⚠️ Sparar ingenting (skalplanen B5, 2026-10-19): stängda banderoller hålls i webbläsarens
+        /// localStorage (tutorialHelper.js), och ingenting på servern läste egenskapen. Varje stängd
+        /// banderoll var en medlemssparning utan läsare.
         /// </summary>
         [HttpPost]
-        public async Task<IActionResult> DismissBanner([FromBody] DismissBannerRequest request)
+        public IActionResult DismissBanner([FromBody] DismissBannerRequest request)
         {
-            try
-            {
-                var member = await _memberManager.GetCurrentMemberAsync();
-                if (member == null)
-                {
-                    // Not logged in - client will handle with localStorage
-                    return Json(new { success = true });
-                }
-
-                var umbracoMember = _memberService.GetById(member.Key);
-                if (umbracoMember == null)
-                {
-                    return Json(new { success = false });
-                }
-
-                // Get current dismissed banners list
-                var dismissedJson = umbracoMember.GetValue<string>("dismissedTutorialBanners") ?? "[]";
-                var dismissed = JsonSerializer.Deserialize<List<string>>(dismissedJson) ?? new List<string>();
-
-                // Add banner ID if not already dismissed
-                if (!dismissed.Contains(request.BannerId))
-                {
-                    dismissed.Add(request.BannerId);
-                }
-
-                // Save back to member
-                umbracoMember.SetValue("dismissedTutorialBanners", JsonSerializer.Serialize(dismissed));
-                _memberService.Save(umbracoMember);
-
-                return Json(new { success = true });
-            }
-            catch (Exception ex)
-            {
-                return Json(new
-                {
-                    success = false,
-                    message = "Error dismissing banner: " + ex.Message
-                });
-            }
+            return Json(new { success = true });
         }
 
         #endregion

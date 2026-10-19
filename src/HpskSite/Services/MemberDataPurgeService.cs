@@ -59,6 +59,8 @@ namespace HpskSite.Services
             // ── Membership / keys / föreningsintyg / fees ──
             ("ClubMembership",               "MemberId"),
             ("MemberAccessKey",              "MemberId"),
+            ("MemberToken",                  "MemberId"),
+            ("MemberTutorialWatch",          "MemberId"),
             ("MemberCertificateIssue",       "MemberId"),
             ("MembershipFeeCharge",          "MemberId"),
 
@@ -79,6 +81,7 @@ namespace HpskSite.Services
 
             // ── Training (log, groups, matches, handicap stats) ──
             ("TrainingScores",              "MemberId"),
+            ("MemberTrainingProgress",      "MemberId"),   // Skyttetrappans framsteg (skalplanen B5)
             ("TrainingGroupMembers",        "MemberId"),
             ("TrainingMatchParticipants",   "MemberId"),
             ("TrainingMatchJoinRequests",   "MemberId"),

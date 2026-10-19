@@ -52,6 +52,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.MemberTokenService _tokens;
         public MemberController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -76,9 +77,11 @@ namespace HpskSite.Controllers
             MemberDataPresenceService presenceService,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Results.ICompetitionResultStore results,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.MemberTokenService tokens)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _tokens = tokens;
             _competitions = competitions;
             _registrations = registrations;
             _results = results;
@@ -1216,19 +1219,14 @@ namespace HpskSite.Controllers
                 }
 
                 // Rate limiting - check if there's an active, non-expired token
-                var existingTokenExpiryStr = member.GetValue<string>("passwordResetTokenExpiry");
-                var existingToken = member.GetValue<string>("passwordResetToken");
-
-                if (!string.IsNullOrEmpty(existingToken) &&
-                    !string.IsNullOrEmpty(existingTokenExpiryStr) &&
-                    DateTime.TryParse(existingTokenExpiryStr, out DateTime existingExpiry))
+                // Koden ligger i MemberToken (skalplanen B5), inte på medlemmen.
+                var existing = _tokens.Get(member.Id, MemberTokenPurpose.PasswordReset);
+                if (existing != null)
                 {
                     // If there's a valid, non-expired token, check if it was created within last 5 minutes (use UTC)
-                    if (existingExpiry > DateTime.UtcNow)
+                    if (existing.ExpiresUtc > DateTime.UtcNow)
                     {
-                        // Token hasn't expired yet - calculate when it was created (1 hour before expiry)
-                        var tokenCreatedAt = existingExpiry.AddHours(-1);
-                        if (tokenCreatedAt > DateTime.UtcNow.AddMinutes(-5))
+                        if (existing.CreatedUtc > DateTime.UtcNow.AddMinutes(-5))
                         {
                             return Json(new {
                                 success = false,
@@ -1251,11 +1249,9 @@ namespace HpskSite.Controllers
                 // Generate password reset token using Umbraco's built-in method
                 var resetToken = await _memberManager.GeneratePasswordResetTokenAsync(identityUser);
 
-                // Store token and expiry in member properties (use UTC for consistency)
+                // Bara hashen lagras, i MemberToken — ingen medlemssparning (skalplanen B5).
                 var tokenExpiry = DateTime.UtcNow.AddHours(1); // Token valid for 1 hour
-                member.SetValue("passwordResetToken", resetToken);
-                member.SetValue("passwordResetTokenExpiry", tokenExpiry.ToString("o")); // ISO 8601 format with UTC
-                _memberService.Save(member);
+                _tokens.Issue(member.Id, MemberTokenPurpose.PasswordReset, resetToken, tokenExpiry);
 
                 // Get member name
                 var firstName = member.GetValue<string>("firstName") ?? "";
@@ -1315,31 +1311,15 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Ogiltig återställningslänk." });
                 }
 
-                // Get stored token and expiry
-                var storedToken = member.GetValue<string>("passwordResetToken");
-                var tokenExpiryStr = member.GetValue<string>("passwordResetTokenExpiry");
-
-                // Validate token exists
-                if (string.IsNullOrEmpty(storedToken) || string.IsNullOrEmpty(tokenExpiryStr))
+                // Koden prövas mot MemberToken (skalplanen B5). En utgången kod tas bort där.
+                switch (_tokens.Check(member.Id, MemberTokenPurpose.PasswordReset, request.Token))
                 {
-                    return Json(new { success = false, message = "Ingen giltig återställningslänk hittades." });
-                }
-
-                // Validate token hasn't expired (compare with UTC)
-                if (!DateTime.TryParse(tokenExpiryStr, out DateTime tokenExpiry) || tokenExpiry < DateTime.UtcNow)
-                {
-                    // Clear expired token
-                    member.SetValue("passwordResetToken", string.Empty);
-                    member.SetValue("passwordResetTokenExpiry", string.Empty);
-                    _memberService.Save(member);
-
-                    return Json(new { success = false, message = "Återställningslänken har gått ut. Begär en ny länk." });
-                }
-
-                // Validate token matches (tokens should match exactly)
-                if (storedToken != request.Token)
-                {
-                    return Json(new { success = false, message = "Ogiltig återställningslänk." });
+                    case MemberTokenCheck.Missing:
+                        return Json(new { success = false, message = "Ingen giltig återställningslänk hittades." });
+                    case MemberTokenCheck.Expired:
+                        return Json(new { success = false, message = "Återställningslänken har gått ut. Begär en ny länk." });
+                    case MemberTokenCheck.Mismatch:
+                        return Json(new { success = false, message = "Ogiltig återställningslänk." });
                 }
 
                 // Get MemberIdentityUser
@@ -1366,10 +1346,9 @@ namespace HpskSite.Controllers
                 }
                 await _memberManager.ResetAccessFailedCountAsync(identityUser);
 
-                // Clear token after successful reset (single-use token)
-                member.SetValue("passwordResetToken", string.Empty);
-                member.SetValue("passwordResetTokenExpiry", string.Empty);
-                _memberService.Save(member);
+                // Clear token after successful reset (single-use token). ⚠️ Ingen medlemssparning här
+                // längre: objektet lästes FÖRE lösenordsbytet, och att spara det efteråt var onödigt.
+                _tokens.Clear(member.Id, MemberTokenPurpose.PasswordReset);
 
                 // Note: In Umbraco v16, we use the built-in login form for authentication
                 // User will need to log in with their new password
@@ -1426,44 +1405,26 @@ namespace HpskSite.Controllers
                     return Redirect("/login-register?tab=login");
                 }
 
-                // Get stored token and expiry
-                var storedToken = member.GetValue<string>("autoLoginToken");
-                var tokenExpiryStr = member.GetValue<string>("autoLoginTokenExpiry");
-
-                // Check if token exists
-                if (string.IsNullOrEmpty(storedToken))
+                // Koden prövas mot MemberToken (skalplanen B5). En utgången kod tas bort där.
+                switch (_tokens.Check(member.Id, MemberTokenPurpose.AutoLogin, token))
                 {
-                    Console.WriteLine($"[AutoLogin] No token found for member: {email}");
-                    TempData["ErrorMessage"] = "Inloggningslänken har redan använts eller är ogiltig. Använd vanlig inloggning istället.";
-                    return Redirect("/login-register?tab=login");
-                }
-
-                // Validate token hasn't expired
-                if (!DateTime.TryParse(tokenExpiryStr, out DateTime tokenExpiry) || tokenExpiry < DateTime.UtcNow)
-                {
-                    Console.WriteLine($"[AutoLogin] Token expired for member: {email}");
-                    // Clear expired token
-                    member.SetValue("autoLoginToken", string.Empty);
-                    member.SetValue("autoLoginTokenExpiry", string.Empty);
-                    _memberService.Save(member);
-
-                    TempData["ErrorMessage"] = "Inloggningslänken har gått ut (giltig i 7 dagar). Använd vanlig inloggning istället.";
-                    return Redirect("/login-register?tab=login");
-                }
-
-                // Validate token matches
-                if (storedToken != token)
-                {
-                    Console.WriteLine($"[AutoLogin] Token mismatch for member: {email}");
-                    TempData["ErrorMessage"] = "Ogiltig inloggningslänk. Använd vanlig inloggning istället.";
-                    return Redirect("/login-register?tab=login");
+                    case MemberTokenCheck.Missing:
+                        Console.WriteLine($"[AutoLogin] No token found for member: {email}");
+                        TempData["ErrorMessage"] = "Inloggningslänken har redan använts eller är ogiltig. Använd vanlig inloggning istället.";
+                        return Redirect("/login-register?tab=login");
+                    case MemberTokenCheck.Expired:
+                        Console.WriteLine($"[AutoLogin] Token expired for member: {email}");
+                        TempData["ErrorMessage"] = "Inloggningslänken har gått ut (giltig i 7 dagar). Använd vanlig inloggning istället.";
+                        return Redirect("/login-register?tab=login");
+                    case MemberTokenCheck.Mismatch:
+                        Console.WriteLine($"[AutoLogin] Token mismatch for member: {email}");
+                        TempData["ErrorMessage"] = "Ogiltig inloggningslänk. Använd vanlig inloggning istället.";
+                        return Redirect("/login-register?tab=login");
                 }
 
                 // Token is valid - clear it (single-use)
                 Console.WriteLine($"[AutoLogin] Token validated successfully for: {email}. Clearing token.");
-                member.SetValue("autoLoginToken", string.Empty);
-                member.SetValue("autoLoginTokenExpiry", string.Empty);
-                _memberService.Save(member);
+                _tokens.Clear(member.Id, MemberTokenPurpose.AutoLogin);
 
                 // Sign in the member with persistent cookie (remember me for 90 days)
                 var identityUser = await _memberManager.FindByEmailAsync(email);
@@ -1552,10 +1513,7 @@ namespace HpskSite.Controllers
 
                 // Generate auto-login token for approval email
                 var autoLoginToken = Guid.NewGuid().ToString("N");
-                var tokenExpiry = DateTime.UtcNow.AddDays(7);
-                member.SetValue("autoLoginToken", autoLoginToken);
-                member.SetValue("autoLoginTokenExpiry", tokenExpiry.ToString("o"));
-                _memberService.Save(member);
+                _tokens.Issue(member.Id, MemberTokenPurpose.AutoLogin, autoLoginToken, DateTime.UtcNow.AddDays(7));
 
                 // Send approval notification email to the member
                 var memberName = member.Name;
@@ -1681,32 +1639,18 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Kontot kunde inte hittas" });
                 }
 
-                // Get stored token and expiry
-                var storedToken = member.GetValue<string>("invitationToken");
-                var tokenExpiryStr = member.GetValue<string>("invitationTokenExpiry");
-
-                // Check if token exists
-                if (string.IsNullOrEmpty(storedToken))
+                // Koden prövas mot MemberToken (skalplanen B5). En utgången kod tas bort där.
+                switch (_tokens.Check(member.Id, MemberTokenPurpose.Invitation, token))
                 {
-                    Console.WriteLine($"[CompleteInvitation] No invitation token found for: {email}");
-                    return Json(new { success = false, message = "Inbjudningslänken har redan använts eller är ogiltig" });
-                }
-
-                // Validate token hasn't expired
-                if (!DateTime.TryParse(tokenExpiryStr, out DateTime tokenExpiry) || tokenExpiry < DateTime.UtcNow)
-                {
-                    Console.WriteLine($"[CompleteInvitation] Token expired for: {email}");
-                    member.SetValue("invitationToken", string.Empty);
-                    member.SetValue("invitationTokenExpiry", string.Empty);
-                    _memberService.Save(member);
-                    return Json(new { success = false, message = "Inbjudningslänken har gått ut (giltig i 7 dagar)" });
-                }
-
-                // Validate token matches
-                if (storedToken != token)
-                {
-                    Console.WriteLine($"[CompleteInvitation] Token mismatch for: {email}");
-                    return Json(new { success = false, message = "Ogiltig inbjudningslänk" });
+                    case MemberTokenCheck.Missing:
+                        Console.WriteLine($"[CompleteInvitation] No invitation token found for: {email}");
+                        return Json(new { success = false, message = "Inbjudningslänken har redan använts eller är ogiltig" });
+                    case MemberTokenCheck.Expired:
+                        Console.WriteLine($"[CompleteInvitation] Token expired for: {email}");
+                        return Json(new { success = false, message = "Inbjudningslänken har gått ut (giltig i 7 dagar)" });
+                    case MemberTokenCheck.Mismatch:
+                        Console.WriteLine($"[CompleteInvitation] Token mismatch for: {email}");
+                        return Json(new { success = false, message = "Ogiltig inbjudningslänk" });
                 }
 
                 // Get identity user and change password
@@ -1731,8 +1675,7 @@ namespace HpskSite.Controllers
                 Console.WriteLine($"[CompleteInvitation] Password set successfully for: {email}");
 
                 // Clear invitation token (single-use)
-                member.SetValue("invitationToken", string.Empty);
-                member.SetValue("invitationTokenExpiry", string.Empty);
+                _tokens.Clear(member.Id, MemberTokenPurpose.Invitation);
 
                 // Auto-approve member
                 member.IsApproved = true;

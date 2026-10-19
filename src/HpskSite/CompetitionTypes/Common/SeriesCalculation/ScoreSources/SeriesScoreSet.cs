@@ -4,7 +4,7 @@ namespace HpskSite.CompetitionTypes.Common.SeriesCalculation.ScoreSources
 {
     /// <summary>
     /// Per-competition shooter totals plus the column headings that fit the discipline.
-    /// Precision counts "Totalt / X"; normalf‰lt counts "Tr‰ff / Fig."; po‰ngf‰lt "Po‰ng / Po‰ngmÂl".
+    /// Precision counts "Totalt / X"; normalf√§lt counts "Tr√§ff / Fig."; po√§ngf√§lt "Po√§ng / Po√§ngm√•l".
     /// </summary>
     public class SeriesScoreSet
     {

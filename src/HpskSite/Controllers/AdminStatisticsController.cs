@@ -53,6 +53,7 @@ namespace HpskSite.Controllers
         private readonly MemberActivityService _activity;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
+        private readonly HpskSite.Services.Training.TrainingProgressStore _progressStore;
 
         public AdminStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -73,9 +74,11 @@ namespace HpskSite.Controllers
             HpskSite.Services.Events.IClubEventStore events,
             MemberActivityService activity,
             HpskSite.Services.Competitions.ICompetitionStore competitions,
-            HpskSite.Services.MemberPropertyReader memberProperties)
+            HpskSite.Services.MemberPropertyReader memberProperties,
+            HpskSite.Services.Training.TrainingProgressStore progressStore)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _progressStore = progressStore;
             _memberProperties = memberProperties;
             _competitions = competitions;
             _activity = activity;
@@ -479,9 +482,9 @@ namespace HpskSite.Controllers
             var currentYearStart = new DateTime(now.Year, 1, 1);
 
             // ── 1. Members ──────────────────────────────────────────
-            // Bara de fyra egenskaper statistiken räknar på (skalplanen B), i stället för hela
-            // registret som IMember.
-            var allMembers = _memberProperties.Read(new[] { "primaryClubId", "trainingStartDate", "currentTrainingLevel", "completedTrainingSteps" });
+            // Bara huvudklubben behövs ur medlemmarna (skalplanen B); trappans framsteg ligger i
+            // MemberTrainingProgress (B5) och läses nedan.
+            var allMembers = _memberProperties.Read(new[] { "primaryClubId" });
             var approvedMembers = allMembers.Where(m => m.IsApproved).ToList();
 
             // Resolve the demo/test club + region node IDs up front so every member,
@@ -1308,32 +1311,26 @@ namespace HpskSite.Controllers
                     int trainingStairsStepsCompleted30d = 0;
                     var trainingStairsMembersPerLevel = new List<object>();
 
-                    trainingStairsActiveTrainees = approvedMembers.Count(m =>
-                    {
-                        // (egenskapen saknas = tomt värde)
-                        var val = m.Get("trainingStartDate");
-                        return !string.IsNullOrEmpty(val);
-                    });
+                    // Framstegen ur MemberTrainingProgress (skalplanen B5), bara för de godkända medlemmarna.
+                    var progressRows = _progressStore.All().ToDictionary(r => r.MemberId);
+                    var approvedProgress = approvedMembers
+                        .Where(m => progressRows.ContainsKey(m.Id))
+                        .Select(m => progressRows[m.Id])
+                        .ToList();
 
-                    trainingStairsMembersPerLevel = approvedMembers
-                        .Where(m => m.Get("currentTrainingLevel").Length > 0)
-                        .Select(m =>
-                        {
-                            var levelStr = m.Get("currentTrainingLevel");
-                            if (!string.IsNullOrEmpty(levelStr) && int.TryParse(levelStr, out var level) && level > 0)
-                                return level;
-                            return 0;
-                        })
+                    trainingStairsActiveTrainees = approvedProgress.Count(r => r.TrainingStartDate.HasValue);
+
+                    trainingStairsMembersPerLevel = approvedProgress
+                        .Select(r => r.CurrentLevel)
                         .Where(level => level > 0)
                         .GroupBy(level => level)
                         .Select(g => (object)new { level = g.Key, count = g.Count() })
                         .OrderBy(x => ((dynamic)x).level)
                         .ToList();
 
-                    foreach (var m in approvedMembers)
+                    foreach (var r in approvedProgress)
                     {
-                        // (egenskapen saknas = tomt värde)
-                        var json = m.Get("completedTrainingSteps");
+                        var json = r.CompletedSteps;
                         if (string.IsNullOrEmpty(json)) continue;
                         try
                         {

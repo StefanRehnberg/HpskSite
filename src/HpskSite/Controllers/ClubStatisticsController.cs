@@ -35,6 +35,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Events.IClubEventStore _events;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Training.TrainingProgressStore _progressStore;
 
         public ClubStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -52,9 +53,11 @@ namespace HpskSite.Controllers
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Events.IClubEventStore events,
             MemberActivityService activity,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Training.TrainingProgressStore progressStore)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _progressStore = progressStore;
             _competitions = competitions;
             _activity = activity;
             _registrations = registrations;
@@ -159,11 +162,12 @@ namespace HpskSite.Controllers
                 .ToList();
 
             // Members per Skyttetrappan level (0-9)
+            // Framstegen ur MemberTrainingProgress (skalplanen B5), en fråga för klubbens medlemmar.
+            var progressRows = _progressStore.LoadRows(clubMembers.Select(m => m.Id));
             var levelCounts = new int[10];
-            foreach (var m in clubMembers)
+            foreach (var r in progressRows.Values)
             {
-                var lv = m.GetValue<int?>("currentTrainingLevel");
-                if (lv.HasValue && lv.Value >= 0 && lv.Value < 10) levelCounts[lv.Value]++;
+                if (r.CurrentLevel >= 0 && r.CurrentLevel < 10) levelCounts[r.CurrentLevel]++;
             }
             var membersByLevel = Enumerable.Range(0, 10)
                 .Select(i => new { level = i, count = levelCounts[i] })
@@ -171,11 +175,10 @@ namespace HpskSite.Controllers
 
             // Step completions in last 30d (parsed from JSON on each member)
             int stepCompletions30d = 0;
-            foreach (var m in clubMembers)
+            foreach (var r in progressRows.Values)
             {
-                var json = m.GetValue<string>("completedTrainingSteps");
-                if (!string.IsNullOrWhiteSpace(json))
-                    stepCompletions30d += CountRecentStepCompletions(json, thirtyDaysAgo);
+                if (!string.IsNullOrWhiteSpace(r.CompletedSteps))
+                    stepCompletions30d += CountRecentStepCompletions(r.CompletedSteps, thirtyDaysAgo);
             }
 
             // ── Skjutledare + Föreningsinstruktör + Vapenkontrollant + Banläggare presence ──

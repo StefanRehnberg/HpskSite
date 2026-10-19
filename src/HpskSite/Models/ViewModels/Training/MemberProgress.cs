@@ -27,58 +27,8 @@ namespace HpskSite.Models.ViewModels.Training
         public string CurrentLevelName => TrainingDefinitions.GetLevel(CurrentLevel)?.Name ?? "Unknown";
         public string CurrentStepDescription => TrainingDefinitions.GetStep(CurrentLevel, CurrentStep)?.Description ?? "";
 
-        /// <summary>
-        /// Create MemberProgress from Umbraco member data
-        /// </summary>
-        public static MemberProgress FromMember(IMember member, string? clubName = null)
-        {
-            var progress = new MemberProgress
-            {
-                MemberId = member.Id,
-                MemberName = member.Name,
-                MemberEmail = member.Email,
-                PrimaryClubName = clubName
-            };
-
-            // Load training data from member properties
-            progress.CurrentLevel = GetIntProperty(member, "currentTrainingLevel", 1);
-            progress.CurrentStep = GetIntProperty(member, "currentTrainingStep", 1);
-
-            if (DateTime.TryParse(member.GetValue("trainingStartDate")?.ToString(), out var startDate))
-            {
-                progress.TrainingStartDate = startDate;
-            }
-
-            if (DateTime.TryParse(member.GetValue("lastTrainingActivity")?.ToString(), out var lastActivity))
-            {
-                progress.LastActivityDate = lastActivity;
-            }
-
-            progress.Notes = member.GetValue("trainingNotes")?.ToString();
-
-            // Parse completed steps from JSON
-            var completedStepsJson = member.GetValue("completedTrainingSteps")?.ToString();
-            if (!string.IsNullOrEmpty(completedStepsJson))
-            {
-                try
-                {
-                    var options = new System.Text.Json.JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    };
-                    progress.CompletedSteps = System.Text.Json.JsonSerializer.Deserialize<List<StepCompletion>>(completedStepsJson, options) ?? new List<StepCompletion>();
-                }
-                catch
-                {
-                    progress.CompletedSteps = new List<StepCompletion>();
-                }
-            }
-
-            // Calculate current position from completed steps to ensure accuracy
-            progress.CalculateCurrentPosition();
-
-            return progress;
-        }
+        // Laddas och sparas av TrainingProgressStore (skalplanen B5, 2026-10-19) - aldrig ur/till
+        // medlemsegenskaper. FromMember/SaveToMember ar borttagna med flit.
 
         /// <summary>
         /// Calculate current level and step from completed steps
@@ -127,35 +77,6 @@ namespace HpskSite.Models.ViewModels.Training
                 CurrentLevel = highestCompleted.LevelId;
                 CurrentStep = highestCompleted.StepNumber + 1;
             }
-        }
-
-        /// <summary>
-        /// Save progress back to Umbraco member
-        /// </summary>
-        public void SaveToMember(IMember member)
-        {
-            member.SetValue("currentTrainingLevel", CurrentLevel);
-            member.SetValue("currentTrainingStep", CurrentStep);
-            member.SetValue("lastTrainingActivity", DateTime.Now);
-
-            if (TrainingStartDate.HasValue)
-            {
-                member.SetValue("trainingStartDate", TrainingStartDate.Value);
-            }
-
-            if (!string.IsNullOrEmpty(Notes))
-            {
-                member.SetValue("trainingNotes", Notes);
-            }
-
-            // Serialize completed steps to JSON.
-            // ⚠️ Badge-credited steps are DERIVED (TrainingBadgeCreditService re-applies them on every
-            // read) and are deliberately NOT stored. Storing them would make the credit permanent, so
-            // a märke that is later makulerad or rejected would leave the beginner ladder standing
-            // with nothing behind it. Storage holds only what was actually done on this site.
-            var stepsToStore = CompletedSteps.Where(c => !c.FromBadge).ToList();
-            var completedStepsJson = System.Text.Json.JsonSerializer.Serialize(stepsToStore);
-            member.SetValue("completedTrainingSteps", completedStepsJson);
         }
 
         /// <summary>
@@ -280,10 +201,5 @@ namespace HpskSite.Models.ViewModels.Training
             return (double)CompletedSteps.Count / totalSteps * 100;
         }
 
-        private static int GetIntProperty(IMember member, string propertyName, int defaultValue)
-        {
-            var value = member.GetValue(propertyName)?.ToString();
-            return int.TryParse(value, out var result) ? result : defaultValue;
-        }
     }
 }

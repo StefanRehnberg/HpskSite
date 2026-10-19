@@ -104,7 +104,7 @@ namespace HpskSite.Services
                     {
                         // Trädet gås fortfarande för fakturaarkivets mappar; tävlingen själv läses genom lagringen
                         // (det sparade läget, som skanningen alltid läst). C3-planen S3 område 2.
-                        case "competition": competitionIds.Add(node.Id); break; // competitionstore-ok: skanningen g�r tr�det f�r fakturaarkivets mappar (opublicerade inr�knade); f�lten ur lagringen
+                        case "competition": competitionIds.Add(node.Id); break; // competitionstore-ok: skanningen går trädet för fakturaarkivets mappar (opublicerade inräknade); fälten ur lagringen
                         case "registrationInvoicesHub": scan.InvoiceHubs.Add(node); break;
                         case "club": scan.Clubs.Add(node); break;
                     }
