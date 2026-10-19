@@ -11833,6 +11833,12 @@ Underhåll på `/admin-page`. Samma steg som startlistorna: Torrkör → (frys, 
   Development, bara kopiorna) och `hpsk-verify/c3/c3-s5e-rehearsal.mjs` (arkiv/avpublicering/papperskorg genom de riktiga
   endpointsen), `c3-url-corpus.mjs` före/efter och `c3-s5e-poison-probe.mjs` (inloggade ytor). Efter rättelserna: 7 396
   adresser oförändrade, 261 sidor och 184 anrop utan fel. Kör den igen före raderingen av noderna.
+- **⚠️⚠️ Sidornas vyer heter `…Page` (§5.5 punkt 6, 2026-10-19)** — `CompetitionPage`, `CompetitionSeriesPage`,
+  `CompetitionResultPage`, `PrecisionStartListPage`, `PrecisionFinalsStartListPage`, `ClubSimpleEventPage`, namnen i
+  `Routing/PageViews`. Att ta bort en mall i Umbraco raderar vyfilen med mallens namn, så ingen sida får bo i en fil som
+  heter som en mall. Filerna med de gamla namnen (`Competition.cshtml` …) är MELLANLED (`PartialAsync` till sidan) för
+  Umbracos mallar i nodläget — **skriv aldrig sidans innehåll i dem**. `PageViewsTests` fäller bygget. Kommentarer i
+  koden som nämner `CompetitionResult.cshtml` m.fl. menar numera `…Page.cshtml`.
 - **Kvar på noder, medvetet:** `autoNotifyParticipants` (finns inte på doktypen; svarar falskt även utan nod),
   `PaymentService` (gamla fakturor), skyddsnätets verktyg (`C3Baseline`, `CompetitionAuthorizationReport`), dev-seedarna,
   underhållsverktygen i `CompetitionAdminController` som går trädet.

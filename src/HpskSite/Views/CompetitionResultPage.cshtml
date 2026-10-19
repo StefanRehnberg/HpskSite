@@ -1,0 +1,1562 @@
+﻿@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@using Newtonsoft.Json
+@using Umbraco.Cms.Core.Models.PublishedContent
+@using Umbraco.Extensions
+@using Umbraco.Cms.Core.Security
+@using Umbraco.Cms.Core.Services
+@inject IMemberManager MemberManager
+@inject IMemberService MemberService
+@inject HpskSite.Services.ClubService ClubService
+@inject HpskSite.Services.AdminAuthorizationService AuthService
+@inject HpskSite.Services.Kretsgranskning.ResultReviewService ResultReviews
+@inject HpskSite.Services.Kretsgranskning.KretsCalendarService KretsCalendar
+@inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@{
+    Layout = null;
+    // Sidan visas antingen för resultatnoden (barn till tävlingen) eller, när listorna ligger i
+    // tabellen, direkt för tävlingen. Listan läses alltid ur ICompetitionResultStore.
+    var competitionInfo = Competitions.Get(Model.Id) ?? (Model.Parent != null ? Competitions.Get(Model.Parent.Id) : null);
+    var competition = competitionInfo != null && competitionInfo.Id == Model.Id ? Model : Model.Parent;
+    var resultList = competition == null ? null : ResultLists.GetMany(new[] { competition.Id }).Values.FirstOrDefault();
+    
+    // Get properties using Value<T>
+    var resultData = resultList?.ResultData ?? "";
+    var lastUpdated = resultList?.LastUpdated ?? DateTime.Now;
+    var isOfficial = resultList?.IsOfficial ?? false;
+    
+    // Get competition type
+    var competitionTypeId = "";
+    competitionTypeId = competitionInfo?.CompetitionType ?? "Precision";
+    var isSpringskytte = competitionTypeId == "Springskytte";
+    var isFaltskytte = competitionTypeId == "Faltskytte" || competitionTypeId == "MagnumFalt";
+
+    // Hur grenens 12 serier delas i avsnitt. Låg tidigare handskriven som en kedja av
+    // ternärer här nere i JavaScript; nu ur SeriesSegments, samma källa som
+    // inmatningsskärmens serieremsa och Nationell Helmatchs särskiljning läser.
+    var seriesSegmentsJson = HpskSite.CompetitionTypes.Common.SeriesSegments.ToJson(competitionTypeId, 12);
+
+    // Deltävling toggle: when /resultat/?sub=true is requested, the page renders the
+    // sub-competition subset (filtered to registrations with isSubCompetition=true).
+    // Used to label the heading, swap the public title, and route the result-loading
+    // endpoint to subCompetitionOnly=true. Falls back to the main list when missing.
+    var isSubCompetitionView = false;
+    var subCompetitionName = "";
+    try
+    {
+        var subParam = Context.Request.Query["sub"].ToString();
+        isSubCompetitionView = string.Equals(subParam, "true", StringComparison.OrdinalIgnoreCase);
+        subCompetitionName = competitionInfo?.SubCompetitionName ?? "";
+        // Defensive: ignore ?sub=true when the competition has no deltävling configured.
+        if (string.IsNullOrWhiteSpace(subCompetitionName)) isSubCompetitionView = false;
+    }
+    catch { /* keep defaults */ }
+
+    // Team results support
+    var allowTeams = false;
+    allowTeams = competitionInfo?.AllowTeams ?? false;
+
+    // Get competition configuration for finals
+    var numberOfSeriesOrStations = 0;
+    var numberOfFinalSeries = 0;
+    numberOfSeriesOrStations = competitionInfo?.NumberOfSeriesOrStations ?? 0;
+    numberOfFinalSeries = competitionInfo?.NumberOfFinalSeries ?? 0;
+    
+    var hasFinalsRound = numberOfFinalSeries > 0;
+    var qualificationSeriesCount = hasFinalsRound ? (numberOfSeriesOrStations - numberOfFinalSeries) : numberOfSeriesOrStations;
+    
+    // Get current member info for highlighting
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    var currentMemberName = currentMember?.Name ?? "";
+    var currentMemberClub = "";
+
+    // ?embed=1: listan är inbäddad på tävlingshanteringens Resultat-flik (2026-10-04). Sidans egen
+    // rubrik och Skriv ut-knapp döljs där — fliken har sin egen rubrikrad — och sidan rapporterar
+    // sin höjd till förälderfönstret, så ramen växer med listan i stället för en fast 800 px-ruta.
+    var isEmbed = Context.Request.Query["embed"] == "1";
+
+    // Authorization: who may delete a shooter's results from this competition?
+    var canDeleteResults = false;
+
+    if (currentMember != null)
+    {
+        var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
+        if (memberData != null)
+        {
+            var primaryClubIdStr = memberData.GetValue<string>("primaryClubId");
+            if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int primaryClubId))
+            {
+                currentMemberClub = ClubService.GetClubNameById(primaryClubId) ?? "";
+            }
+
+            var isSiteAdmin = await AuthService.IsCurrentUserAdminAsync();
+            var isCompetitionManager = await AuthService.IsCompetitionManager(competition.Id);
+
+            var isClubAdmin = false;
+            var isSkjutledare = false;
+            var competitionClubId = competitionInfo?.ClubId ?? 0;
+            if (competitionClubId > 0)
+            {
+                isClubAdmin = await AuthService.IsClubAdminForClub(competitionClubId);
+                isSkjutledare = await AuthService.IsSkjutledareForClub(competitionClubId);
+            }
+            // Region-hosted (clubId unset — the SM shape): the krets is the organiser.
+            var isRegionHost = await AuthService.IsRegionHostAdminAsync(
+                competitionClubId, competitionInfo?.RegionalFederation);
+
+            // ⚠️ Bara i hanteringsvyns inbäddning (?edit=1). På den PUBLIKA sidan såg en inloggad
+            // admin 16 röda papperskorgar, och ett feltryck raderade en skytts resultat
+            // (Sune-genomgång 2, 2026-10-03; Stefans beslut). Servern kräver fortfarande behörighet.
+            canDeleteResults = (isSiteAdmin || isCompetitionManager || isClubAdmin || isSkjutledare || isRegionHost)
+                && Context.Request.Query["edit"] == "1";
+        }
+    }
+
+    // Kretsgranskning fas 2: "Granskad av …krets" — bara när kretsen godkänt EXAKT den lista som
+    // visas (kontrollsumman). Ändras listan efter godkännandet försvinner markeringen av sig själv.
+    var reviewedByRegion = "";
+    var reviewedAt = "";
+    if (!isSubCompetitionView && competition != null)
+    {
+        try
+        {
+            var rv = ResultReviews.TablesExist() ? ResultReviews.For(competition.Id, false) : null;
+            if (rv != null && rv.IsApproved
+                && !HpskSite.Models.Kretsgranskning.ResultReviewRules.Changed(rv, HpskSite.Models.Kretsgranskning.ResultReviewRules.Checksum(resultData)))
+            {
+                reviewedByRegion = KretsCalendar.Region(rv.RegionId)?.Name ?? "kretsen";
+                reviewedAt = rv.DecidedAt?.ToString("d MMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("sv-SE")) ?? "";
+            }
+        }
+        catch { /* markeringen är inte kritisk — resultatlistan visas ändå */ }
+    }
+}
+
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@(isSubCompetitionView ? subCompetitionName : "Resultat") - @competition.Name</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body { padding: 20px; background-color: #f8f9fa; font-family: Arial, sans-serif; }
+        .print-only { display: none; }
+        
+        /* Plain table styling like start lists */
+        .results-table {
+            font-size: 11px;
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+            background: white;
+        }
+        
+        .results-table th,
+        .results-table td {
+            padding: 3px 6px;
+            border: 1px solid #ddd;
+            text-align: left;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+
+        /* Fixed layout so score columns align across class tables and the table fits the viewport */
+        .results-table-fixed {
+            table-layout: fixed;
+        }
+
+        .results-cell-truncate {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .results-table th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+            font-size: 10px;
+            text-align: center;
+        }
+        
+        .results-table td {
+            font-size: 11px;
+        }
+        
+        .results-table .text-center {
+            text-align: center;
+        }
+        
+        .results-table .text-right {
+            text-align: right;
+        }
+        
+        /* Class header styling */
+        .class-header {
+            background-color: #e9ecef;
+            padding: 8px 12px;
+            margin: 20px 0 5px 0;
+            border-left: 4px solid #007bff;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        /* Compact spacing */
+        .class-results-section {
+            margin-bottom: 25px;
+        }
+        
+        /* User highlighting */
+        .current-user { background-color: #cce5ff !important; } /* Light blue for current user */
+        .same-club { background-color: #f0f8ff !important; } /* Very light blue for same club */
+        
+        .x-count { color: #dc3545; font-size: 9px; }
+
+        /* Grouped sub-total columns (Milsnabb, Nationell Helmatch) */
+        .results-table .subtotal-col {
+            border-left: 2px solid #999;
+            font-weight: bold;
+        }
+        .results-table th.subtotal-col {
+            background-color: #e8e8e8;
+        }
+
+        /* Individual series columns (Milsnabb, Nationell Helmatch) - hide on mobile */
+        .results-table .milsnabb-series {
+            /* visible by default on desktop */
+        }
+        @@media (max-width: 767.98px) {
+            .results-table .milsnabb-series { display: none; }
+        }
+
+        /* Telefon i STÅENDE läge: listan byggs inte om för det (Stefans beslut 2026-10-03) — i
+           liggande läge går den att läsa, mätt utan klippta celler ner till 667 px. Den som
+           håller telefonen stående får veta att den ska vridas, i stället för en ihopklämd
+           tabell utan förklaring. */
+        .cr-rotate-hint { display: none; }
+        @@media screen and (orientation: portrait) and (max-width: 767.98px) {
+            .cr-rotate-hint { display: block; }
+        }
+
+        @@media print {
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            body { background-color: white; padding: 0; font-size: 10px; }
+            .results-table { font-size: 9px; }
+            .results-table th, .results-table td { padding: 2px 4px; }
+            .class-header { font-size: 12px; }
+            /* Markeringen av den inloggade och hens klubb är en skärmhjälp. En utskrift
+               eller PDF publiceras för andra (kretsens hemsida), så den ska vara neutral. */
+            .current-user, .same-club { background-color: transparent !important; }
+            /* Individuellt och Lagresultat är flikar på skärmen, men en utskrift ska bära
+               BÅDA — annars blev PDF:en bara den flik som råkade vara öppen. */
+            .tab-content > .tab-pane { display: block !important; opacity: 1 !important; }
+            #teamResults { break-before: page; }
+            .print-section-heading { font-size: 14px; font-weight: bold; margin: 0 0 8px; }
+            .print-footer {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                text-align: right;
+                font-size: 9px;
+                color: #555;
+                padding: 4px 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    @Html.AntiForgeryToken()
+    @* window.getWeaponClassCode — needed by the "alla klasser i vapengruppen"-view below. Use it
+       rather than charAt(0): A_opt_1 would otherwise be folded into plain A, and optical sights are
+       not the same competition as open sights. It also resolves both the class ID and the display
+       NAME, which matters here because result rows carry the Name. *@
+    @await Html.PartialAsync("~/Views/Partials/_ShootingClassesBootstrap.cshtml")
+    @* ⚠️ Lagtabellen nedan skrev lagnamn, klubbnamn och MEDLEMSNAMN rakt in i innerHTML.
+       Medlemmen sätter sitt eget namn, så det är samma lucka som redan rättats fyra gånger
+       i den här kodbasen. hpskEsc bor i EN partial; inkludera den, skriv ingen egen. *@
+    @await Html.PartialAsync("_HtmlEscape")
+    <div class="container-fluid">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4 no-print@(isEmbed ? " d-none" : "")">
+            <div>
+                <h1>
+                        <i class="bi bi-trophy text-warning me-2"></i>
+                                @(isSubCompetitionView ? subCompetitionName : "Resultat")
+                </h1>
+                <p class="text-muted mb-0">@competition.Name</p>
+                @if (!string.IsNullOrEmpty(reviewedByRegion))
+                {
+                    <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle mt-2" id="reviewedByRegionBadge"
+                          title="Kretsen har granskat och godkänt resultatlistan@(string.IsNullOrEmpty(reviewedAt) ? "" : " " + reviewedAt)">
+                        <i class="bi bi-patch-check me-1"></i>Granskad av @reviewedByRegion
+                    </span>
+                }
+                            </div>
+                        <div>
+                <button class="btn btn-outline-secondary" onclick="window.print()">
+                                <i class="bi bi-printer me-1"></i>Skriv ut
+                            </button>
+                            </div>
+                        </div>
+
+        <!-- Print Header -->
+        <div class="print-only mb-4">
+            <h1>@(isSubCompetitionView ? subCompetitionName : "Resultat") @competition.Name</h1>
+            @if (!string.IsNullOrEmpty(reviewedByRegion))
+            {
+                <p class="mb-0">Granskad av @reviewedByRegion@(string.IsNullOrEmpty(reviewedAt) ? "" : " " + reviewedAt)</p>
+            }
+            <hr>
+        </div>
+
+        <!-- Print Footer -->
+        <div class="print-footer print-only">
+            Utskriven: <span id="printTimestamp"></span>
+        </div>
+
+        <script>
+            (function () {
+                function setPrintTimestamp() {
+                    var now = new Date();
+                    var pad = function (n) { return n < 10 ? '0' + n : n; };
+                    var stamp = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate())
+                        + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+                    var el = document.getElementById('printTimestamp');
+                    if (el) el.textContent = stamp;
+                }
+                setPrintTimestamp();
+                window.addEventListener('beforeprint', setPrintTimestamp);
+            })();
+        </script>
+
+        @if (allowTeams)
+        {
+            <!-- Tab navigation for Individual/Team results -->
+            <ul class="nav nav-tabs mb-3 no-print" id="resultsTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="individualTab" data-bs-toggle="tab" data-bs-target="#individualResults" type="button" role="tab">
+                        <i class="bi bi-person me-1"></i>Individuellt
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="teamTab" data-bs-toggle="tab" data-bs-target="#teamResults" type="button" role="tab">
+                        <i class="bi bi-people-fill me-1"></i>Lagresultat
+                    </button>
+                </li>
+            </ul>
+            <div class="tab-content">
+                <div class="tab-pane fade show active" id="individualResults" role="tabpanel">
+                    <div class="print-only print-section-heading" style="display:none">Individuella resultat</div>
+                    <div class="cr-rotate-hint alert alert-info py-2 small no-print">
+                        <i class="bi bi-phone-landscape me-1"></i>Vrid telefonen för att se hela resultatlistan.
+                    </div>
+                    <div id="resultsContent">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Laddar resultat...</span>
+                            </div>
+                            <p class="mt-2">Laddar resultat...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="tab-pane fade" id="teamResults" role="tabpanel">
+                    <div class="print-only print-section-heading" style="display:none">Lagresultat</div>
+                    <div id="teamResultsContent">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Laddar lagresultat...</span>
+                            </div>
+                            <p class="mt-2">Laddar lagresultat...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <!-- Results Content (no teams) -->
+            <div id="resultsContent">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Laddar resultat...</span>
+                    </div>
+                    <p class="mt-2">Laddar resultat...</p>
+                </div>
+            </div>
+        }
+        </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+<script>
+    // Get competition ID from the URL or parent
+    const competitionId = @(competition?.Id ?? 0);
+    const refreshInterval = 15000; // 15 seconds
+    let autoRefreshTimer = null;
+
+    // ⚠️ ?noRefresh=1 stänger av den här sidans egen 15-sekunderspoll. Sätts av
+    // administrationens inbäddning: pollen finns för publiken (och för storbildsskärmen),
+    // men i arrangörens inbäddade vy laddade den om listan under händerna på den som
+    // tittade på den, och arrangören har en Uppdatera-knapp i stället.
+    const suppressAutoRefresh = new URLSearchParams(window.location.search).get('noRefresh') === '1';
+    function startAutoRefresh() {
+        if (suppressAutoRefresh || autoRefreshTimer) return;
+        autoRefreshTimer = setInterval(loadResults, refreshInterval);
+    }
+    let isOfficialResults = false;
+    
+    // Finals configuration
+    const hasFinalsRound = @(hasFinalsRound.ToString().ToLower());
+    const qualificationSeriesCount = @qualificationSeriesCount;
+    const numberOfFinalSeries = @numberOfFinalSeries;
+    const totalSeriesCount = @numberOfSeriesOrStations;
+    
+    // Competition type
+    const isSpringskytte = @(isSpringskytte.ToString().ToLower());
+    const isFaltskytte = @(isFaltskytte.ToString().ToLower());
+
+    // Deltävling view: when set, every result-loading endpoint gets &subCompetitionOnly=true
+    // and the resulting rows are the IsSubCompetition-only subset with their own merges + medals.
+    const isSubCompetitionView = @(isSubCompetitionView.ToString().ToLower());
+    const subQs = isSubCompetitionView ? '&subCompetitionOnly=true' : '';
+
+    // Team results
+    const allowTeams = @(allowTeams.ToString().ToLower());
+
+    // Current user info for highlighting
+    const currentUserName = '@Html.Raw(currentMemberName.Replace("'", "\\'"))';
+    const currentUserClub = '@Html.Raw(currentMemberClub.Replace("'", "\\'"))';
+
+    // Admin-only delete capability for individual shooter results
+    const canDeleteResults = @(canDeleteResults.ToString().ToLower());
+
+    // Avsnitten i grenens serieordning: [{first, last, label, delmoment}], 1-baserade och
+    // inklusive i båda ändar. Tom lista = ingen indelning. ENDA källan på den här sidan —
+    // både delsummekolumnerna och särskiljningen i vapengruppsvyn läser den.
+    const CR_SERIES_SEGMENTS = @Html.Raw(seriesSegmentsJson);
+
+        // Fetch and display results
+        // ── "Alla klasser i vapengruppen" ────────────────────────────────────────────────────────
+        // A shooter wants to see where they landed among everyone who shot the same course with the
+        // same weapon group — klass 1/2/3 (plus Dam/Vet/Jun) all shoot the same programme, so a
+        // combined reading is fair. This is a VIEW, not a merge: placements and medals stay per
+        // class, and the official per-class placement is printed on every row so the flat list can
+        // never be mistaken for a result.
+        //
+        // Implemented as a regrouping of `classGroups` BEFORE the renderer, so the whole table
+        // builder below is untouched and cannot drift from the per-class view.
+        const CR_FLAT_KEY = `hpsk_cr_flat_${competitionId}${subQs ? '_sub' : ''}`;
+        let crFlatMode = (() => { try { return localStorage.getItem(CR_FLAT_KEY) === '1'; } catch { return false; } })();
+
+        function crSetFlatMode(on) {
+            crFlatMode = !!on;
+            try { localStorage.setItem(CR_FLAT_KEY, crFlatMode ? '1' : '0'); } catch { }
+            loadResults();
+        }
+
+        // Series scores + totals for one shooter. ONE implementation: the flat view needs the total
+        // to sort on before rendering, and the row below needs the per-series cells — two parses of
+        // the same shots JSON would be free to disagree.
+        //
+        // ⚠️⚠️ `seriesScores` är indexerad på SERIENUMMER (index i = serie i+1), inte på radernas
+        // ordning. En skytt som saknar en serie i mitten hade annars fått varje efterföljande serie
+        // i FEL KOLUMN — och därmed fel delsummor. Mätt i dev på Helamatchen: en skytt utan serie 4
+        // visades som Prec 197 / Duell 183 / Fält 133 där sanningen är 148 / 192 / 173. Totalen var
+        // rätt hela tiden, vilket är varför det kunde ligga oupptäckt.
+        //
+        // Det är inte kosmetiskt: för Nationell Helmatch AVGÖR delmoment C och B placeringen
+        // (SHB:s särskiljning), och servern räknar dem på serienumret. Läste tabellen dem på
+        // radordningen skulle sidan visa andra tal än de som avgjorde ordningen den visar.
+        //
+        // En lucka är `null`, aldrig 0 — "sköt inte" och "sköt noll" är olika saker.
+        function crShooterTotals(shooter) {
+            const rows = shooter.results || [];
+            const byNumber = [];
+            let total = 0, xCount = 0, seq = 0;
+            rows.forEach(result => {
+                let score = 0, x = 0;
+                JSON.parse(result.shots).forEach(shot => {
+                    score += (shot === 'X' ? 10 : parseInt(shot));
+                    if (shot === 'X') x++;
+                });
+                // Saknas serienumret (äldre eller grenfrämmande rader) faller vi tillbaka på
+                // radordningen, vilket är exakt det gamla beteendet.
+                seq++;
+                const n = (result.seriesNumber > 0) ? result.seriesNumber : seq;
+                byNumber[n - 1] = { score, xCount: x };
+                total += score;
+                xCount += x;
+            });
+            // Gör hålen explicita i stället för glesa (en gles array hoppar över forEach/reduce).
+            const seriesScores = Array.from(byNumber, v => v || null);
+            return { seriesScores, total, xCount };
+        }
+
+        /// Poängen för serie i+1, eller null när skytten saknar den.
+        function crSeriesAt(seriesScores, i) {
+            return (i >= 0 && i < seriesScores.length) ? seriesScores[i] : null;
+        }
+
+        // "A_Opt" -> "A Opt", "A_M" -> "AM" … from the class registry (ShootingClasses.WeaponGroupLabel).
+        function crWeaponGroupLabel(code) {
+            return window.getWeaponGroupLabel(code);
+        }
+
+        // How many weapon groups actually hold more than one class group. 0 = flattening would change
+        // nothing, so the toggle is not offered — a control that does nothing is worse than no control.
+        function crFlattenableGroups(classGroups) {
+            const counts = {};
+            (classGroups || []).forEach(g => {
+                const code = crGroupWeaponCode(g);
+                counts[code] = (counts[code] || 0) + 1;
+            });
+            return Object.values(counts).filter(n => n > 1).length;
+        }
+
+        // The weapon group of a class group, taken from its SHOOTERS rather than the group's own
+        // (possibly merged, possibly admin-renamed) name — "C2 Allmänt" resolves to nothing.
+        function crGroupWeaponCode(group) {
+            const first = (group.shooters || [])[0];
+            const src = (first && first.shootingClass) || group.className || '';
+            return (window.getWeaponClassCode ? window.getWeaponClassCode(src) : '') || String(src).charAt(0).toUpperCase() || '?';
+        }
+
+        // ── Särskiljning i vapengruppsvyn ───────────────────────────────────────────────────────
+        // Poängsumman för ett DELMOMENT. Bara de grenar vars avsnitt SHB namnger som delmoment
+        // (A/B/C) har en särskiljningsregel att läsa ur dem — Milsnabbs tider och Sportpistols
+        // halvor är avsnitt utan bokstav och ger ingen ordning.
+        function crDelmomentScore(shooter, seg) {
+            let sum = 0;
+            (shooter.results || []).forEach((result, i) => {
+                const n = (result.seriesNumber != null) ? result.seriesNumber : (i + 1);
+                if (n < seg.first || n > seg.last) return;
+                JSON.parse(result.shots).forEach(shot => { sum += (shot === 'X' ? 10 : parseInt(shot)); });
+            });
+            return sum;
+        }
+
+        // Nationell Helmatch: "Vid särskiljning går den som har högst poäng i delmoment C före,
+        // därefter i delmoment B" (SHB). Delmomenten avgör alltså platsen redan innan innertior,
+        // och de gör det över klassgränserna precis som inom en klass — det är samma regel, inte
+        // en påhittad återräkning, så vapengruppsvyn får och ska använda den.
+        const CR_DELMOMENT_ORDER = ['C', 'B']
+            .map(letter => CR_SERIES_SEGMENTS.find(s => s.delmoment === letter))
+            .filter(Boolean);
+
+        function crFlattenByWeaponGroup(classGroups) {
+            const byCode = new Map();
+            (classGroups || []).forEach(group => {
+                const code = crGroupWeaponCode(group);
+                if (!byCode.has(code)) byCode.set(code, []);
+                // Capture the OFFICIAL per-class placement (the server's order within this group)
+                // before anything is re-sorted — it is the only placement that means anything.
+                (group.shooters || []).forEach((shooter, idx) => {
+                    const t = crShooterTotals(shooter);
+                    byCode.get(code).push(Object.assign({}, shooter, {
+                        __officialClassName: shooter.shootingClass || group.className || '',
+                        __officialPlace: idx + 1,
+                        __sortTotal: t.total,
+                        __sortX: t.xCount,
+                        // Delmomentspoängen i regelns ordning (C, sedan B). Tom lista för grenar
+                        // utan delmoment, och då gäller samma försiktighet som förut.
+                        __sortDelmoment: CR_DELMOMENT_ORDER.map(seg => crDelmomentScore(shooter, seg))
+                    }));
+                });
+            });
+
+            // Särskjutning footnotes explain how a MEDAL was decided, and stay true regardless of how
+            // the table is grouped — carry them over rather than silently dropping them here.
+            const notesByCode = new Map();
+            (classGroups || []).forEach(group => {
+                if (!Array.isArray(group.shootOffNotes) || !group.shootOffNotes.length) return;
+                const code = crGroupWeaponCode(group);
+                if (!notesByCode.has(code)) notesByCode.set(code, []);
+                notesByCode.get(code).push(...group.shootOffNotes);
+            });
+
+            const out = [];
+            for (const [code, shooters] of byCode) {
+                // Jämförelsenycklarna, i den ordning regeln läser dem: poäng, sedan grenens
+                // delmoment (C före B), sedan innertior. Har grenen inga delmoment är listan i
+                // mitten tom och nycklarna är exakt de två som gällde förut.
+                //
+                // ⚠️ DELMOMENTEN LIGGER FÖRE INNERTIORNA. SHB:s särskiljning för Nationell
+                // Helmatch nämner inte innertior alls, och att läsa dem först gav fel ordning:
+                // rapporterat efter klubbmästerskapet 2026-09-19 stod skytten med högst
+                // fältresultat på plats 6 i stället för 5.
+                const crKeys = s => [s.__sortTotal, ...(s.__sortDelmoment || []), s.__sortX];
+                const crCmpKeys = (a, b) => {
+                    const ka = crKeys(a), kb = crKeys(b);
+                    for (let i = 0; i < ka.length; i++) { if (ka[i] !== kb[i]) return kb[i] - ka[i]; }
+                    return 0;
+                };
+                shooters.sort(crCmpKeys);
+                // Lika på ALLA nycklar delar plats. Den sista officiella särskiljningen är
+                // särskjutning eller lottning — en människas beslut, inte sorteringens — så den
+                // platta listan skiljer inte skyttar den inte ärligt kan skilja åt.
+                let pos = 0;
+                shooters.forEach((s, i) => {
+                    if (i === 0 || crCmpKeys(shooters[i - 1], s) !== 0) pos = i + 1;
+                    s.__flatPos = pos;
+                    s.__flatClassLabel = `${s.__officialClassName} · ${s.__officialPlace}`;
+                });
+                out.push({
+                    className: `Vapengrupp ${crWeaponGroupLabel(code)}`,
+                    shooters,
+                    shootOffNotes: notesByCode.get(code) || [],
+                    __isFlat: true
+                });
+            }
+            out.sort((a, b) => a.className.localeCompare(b.className, 'sv'));
+            return out;
+        }
+
+        function crViewToggleHtml(flattenable) {
+            if (!flattenable) return '';
+            return `
+                <div class="d-flex align-items-center gap-2 flex-wrap mb-3 no-print">
+                    <span class="small text-muted">Visa:</span>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Visningsläge">
+                        <button type="button" class="btn ${crFlatMode ? 'btn-outline-primary' : 'btn-primary'}"
+                                onclick="crSetFlatMode(false)">Per klass</button>
+                        <button type="button" class="btn ${crFlatMode ? 'btn-primary' : 'btn-outline-primary'}"
+                                onclick="crSetFlatMode(true)">Alla klasser i vapengruppen</button>
+                    </div>
+                    ${crFlatMode
+                        ? `<span class="small text-muted"><i class="bi bi-info-circle me-1"></i>Sammanslagen läsning.
+                             Placeringar och medaljer räknas fortfarande per klass — varje rad visar sin klass och sin placering i den.</span>`
+                        : ''}
+                </div>`;
+        }
+
+        async function loadResults() {
+            const container = document.getElementById('resultsContent');
+
+            // Springskytte uses its own endpoint and rendering
+            if (isSpringskytte) {
+                await loadSpringskytteResults(container);
+                return;
+            }
+
+            // Fältskytte uses its own endpoint and rendering
+            if (isFaltskytte) {
+                await loadFaltskytteResults(container);
+                return;
+            }
+
+            try {
+                const response = await fetch(`/umbraco/surface/CompetitionResults/GetResultsList?competitionId=${competitionId}${subQs}`);
+                const data = await response.json();
+                
+                if (!data.success || !data.exists) {
+                    container.innerHTML = `
+                            <div class="alert alert-info">
+                                <h4 class="alert-heading">Inga resultat ännu</h4>
+                            <p class="mb-0">Det finns inga registrerade resultat för denna tävling ännu. Resultat visas automatiskt här när domare börjar registrera skjutresultat.</p>
+                            </div>
+                    `;
+                    return;
+                }
+                
+                isOfficialResults = data.isOfficial;
+                const results = data.results;
+                const isAwardingStandardMedals = data.isAwardingStandardMedals || false;
+
+                // Hur grenens 12 serier delas i delsummor: [förstaSerieIndex, sistaExklusive, rubrik].
+                // Var hårdkodat till 3 grupper om 4 på TRE ställen (kolumnräkningen, rubrikerna och
+                // cellerna), vilket gjorde Sportpistols 2 grupper om 6 omöjlig att uttrycka.
+                // Kommer nu ur SeriesSegments i C# (CR_SERIES_SEGMENTS) — samma karta som
+                // inmatningsskärmens serieremsa ritar och som särskiljningen läser delmoment ur.
+                // null = ingen gruppering, alltså vanlig serie-per-kolumn-tabell.
+                const seriesGroups = CR_SERIES_SEGMENTS.length
+                    ? CR_SERIES_SEGMENTS.map(s => [s.first - 1, s.last, s.label])
+                    : null;
+                const isGrouped12 = seriesGroups !== null;
+
+                // Build HTML for results
+                let html = '';
+
+                // The view toggle is offered only when at least one weapon group holds more than one
+                // class — otherwise the two views are identical.
+                const crFlattenable = crFlattenableGroups(results.classGroups);
+                html += crViewToggleHtml(crFlattenable);
+                const crGroupsToRender = (crFlatMode && crFlattenable)
+                    ? crFlattenByWeaponGroup(results.classGroups)
+                    : results.classGroups;
+
+                if (crGroupsToRender && crGroupsToRender.length > 0) {
+                    crGroupsToRender.forEach(classGroup => {
+                        // Allocate column widths so the table fits the viewport while leaving as
+                        // much room as possible for Namn and Förening. Single-series columns
+                        // (1..N, F1..FN, milsnabb 1..12) hold at most 2 chars ("50"), so they
+                        // get a narrow width. Tot/X/S/subtotal columns hold up to 3 chars ("500")
+                        // and need slightly more room.
+                        let seriesColCount = 0;
+                        let totalColCount = 0;
+                        let seriesCountForRow = 0;
+                        let showFinals = false;
+
+                        // Use the MAX series count across all shooters in this class so that
+                        // shooters with missing series rows still align with the header
+                        // (missing cells render empty in the body below).
+                        // ⚠️ Högsta SERIENUMRET, inte antalet rader: en skytt som saknar serie 4 men
+                        // sköt serie 10 behöver tio kolumner, och radantalet säger nio.
+                        const crHighestSeries = s => (s.results || [])
+                            .reduce((m, r, i) => Math.max(m, r.seriesNumber > 0 ? r.seriesNumber : i + 1), 0);
+                        const maxSeriesCount = classGroup.shooters.length > 0
+                            ? Math.max(0, ...classGroup.shooters.map(crHighestSeries))
+                            : 0;
+
+                        if (isGrouped12) {
+                            seriesColCount = 12;
+                            totalColCount = seriesGroups.length; // en delsumma per grupp
+                        } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
+                            seriesCountForRow = maxSeriesCount;
+                            if (hasFinalsRound && seriesCountForRow >= totalSeriesCount) {
+                                seriesColCount = qualificationSeriesCount + numberOfFinalSeries;
+                                totalColCount = 1; // mid Tot between qualification and finals
+                                showFinals = true;
+                            } else {
+                                seriesColCount = seriesCountForRow;
+                            }
+                        }
+                        totalColCount += 2; // final Tot + X
+                        if (isAwardingStandardMedals) totalColCount += 1; // S
+                        // Add a "Sj" (Särskjutning) column only when at least one shooter in this
+                        // class has shoot-off rounds entered. The shoot-off scores are shown
+                        // separately from the qualification Tot — they only decide medal order.
+                        const classHasShootOff = classGroup.shooters.some(s =>
+                            Array.isArray(s.shootOffRoundTotals) && s.shootOffRoundTotals.length > 0);
+                        if (classHasShootOff) totalColCount += 2; // Sj column gets double width to fit "49 / 47"
+                        const deleteColCount = canDeleteResults ? 1 : 0;
+
+                        const platsPct = 4;
+                        const klassPct = 5;
+                        const fixedTextPct = platsPct + klassPct;
+                        const targetSeriesPct = 3;  // 2-char single-series cells
+                        const targetTotalPct  = 4;  // 3-char total/subtotal cells
+                        const targetDeletePct = 3;  // tiny trash-icon col
+                        const minTextSharePct = 20; // floor for Namn + Förening combined
+
+                        const targetNumericPct =
+                            seriesColCount * targetSeriesPct +
+                            totalColCount  * targetTotalPct  +
+                            deleteColCount * targetDeletePct;
+                        const availableNumericPct = 100 - fixedTextPct - minTextSharePct;
+                        const scale = targetNumericPct > availableNumericPct
+                            ? availableNumericPct / targetNumericPct
+                            : 1;
+
+                        const seriesPct = targetSeriesPct * scale;
+                        const totalPct  = targetTotalPct  * scale;
+                        const deletePct = targetDeletePct * scale;
+
+                        const usedNumericPct =
+                            seriesColCount * seriesPct +
+                            totalColCount  * totalPct  +
+                            deleteColCount * deletePct;
+                        const textSharePct = 100 - fixedTextPct - usedNumericPct;
+                        const namnPct = textSharePct / 2;
+                        const foreningPct = textSharePct / 2;
+
+                        // Class header — admin sees a pen icon for inline-editing the class name.
+                        // The auto-generated combined name (classGroup.className) is preserved
+                        // as the override key so renaming + reverting are roundtrip-safe.
+                        const autoName = classGroup.className || '';
+                        const displayName = classGroup.displayClassName || autoName;
+                        // ⚠️ No renaming in the flattened view: "Vapengrupp C" is a label this page
+                        // invented, and saving an override keyed on it would write a row into
+                        // classNameOverrides that matches no real class group ever again.
+                        const canRename = canDeleteResults && !classGroup.__isFlat;
+                        const renameAttr = canRename
+                            ? ` data-rename="1" data-original="${autoName.replace(/"/g, '&quot;')}" data-current="${displayName.replace(/"/g, '&quot;')}"`
+                            : '';
+                        const renameBtn = canRename
+                            ? ` <button type="button" class="btn btn-link btn-sm p-0 ms-2 rename-class-btn no-print" title="Byt namn på klassgruppen" aria-label="Byt namn">
+                                  <i class="bi bi-pencil-square"></i>
+                               </button>`
+                            : '';
+                        html += `
+                            <div class="class-results-section">
+                                <div class="class-header"${renameAttr}>
+                                    <span class="class-header-name">${displayName}</span> (${classGroup.shooters.length} deltagare)${renameBtn}
+                                </div>
+                                <table class="results-table results-table-fixed">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:${platsPct}%">Plats</th>
+                                            <th style="width:${namnPct}%">Namn</th>
+                                            <th style="width:${foreningPct}%">Förening</th>
+                                            <th style="width:${klassPct}%">Klass</th>
+                        `;
+
+                        // Add series columns based on competition type
+                        if (isGrouped12) {
+                            // 12 serier i grupper med delsumma efter varje grupp.
+                            seriesGroups.forEach(([start, end, label]) => {
+                                for (let i = start + 1; i <= end; i++) html += `<th class="milsnabb-series" style="width:${seriesPct}%">${i}</th>`;
+                                html += `<th class="subtotal-col" style="width:${totalPct}%">${label}</th>`;
+                            });
+                        } else if (classGroup.shooters.length > 0 && classGroup.shooters[0].results) {
+                            // showFinals is decided once per class above — the body below reads the
+                            // same flag, so a shooter who never reached the final can never shift
+                            // the header's Tot/F-columns out from under their own cells.
+                            if (showFinals) {
+                                for (let i = 1; i <= qualificationSeriesCount; i++) {
+                                    html += `<th style="width:${seriesPct}%">${i}</th>`;
+                                }
+                                html += `<th style="width:${totalPct}%">Tot</th>`;
+                                for (let i = 1; i <= numberOfFinalSeries; i++) {
+                                    html += `<th style="width:${seriesPct}%">F${i}</th>`;
+                                }
+                            } else {
+                                for (let i = 1; i <= seriesColCount; i++) {
+                                    html += `<th style="width:${seriesPct}%">${i}</th>`;
+                                }
+                            }
+                        }
+
+                        html += `
+                                            <th style="width:${totalPct}%">Tot</th>
+                                            <th style="width:${totalPct}%">X</th>
+                        `;
+
+                        if (classHasShootOff) {
+                            html += `<th style="width:${totalPct * 2}%" title="Särskjutning">Sär</th>`;
+                        }
+
+                        if (isAwardingStandardMedals) {
+                            html += `<th style="width:${totalPct}%">S</th>`;
+                        }
+
+                        if (canDeleteResults) {
+                            html += `<th class="no-print" style="width:${deletePct}%"></th>`;
+                        }
+
+                        html += `
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                        `;
+
+                        // Add shooters
+                        classGroup.shooters.forEach((shooter, index) => {
+                            // In the flattened view the position is a shared reading rank (see
+                            // crFlattenByWeaponGroup); per class it is the server's official order.
+                            const position = shooter.__flatPos || (index + 1);
+                            let qualificationScore = 0;
+
+                            const { seriesScores, total: totalScore, xCount: totalXCount } = crShooterTotals(shooter);
+
+                            // Row styling
+                            let rowClass = '';
+                            if (currentUserName && shooter.name === currentUserName) {
+                                rowClass = 'current-user';
+                            } else if (currentUserClub && shooter.club === currentUserClub) {
+                                rowClass = 'same-club';
+                            }
+
+                            html += `
+                                <tr class="${rowClass}">
+                                    <td class="text-center">${position}</td>
+                                    <td class="results-cell-truncate" title="${shooter.name}">${shooter.name}</td>
+                                    <td class="results-cell-truncate" title="${shooter.club}">${shooter.club}</td>
+                                    <td class="text-center">${shooter.__flatClassLabel || shooter.shootingClass || classGroup.className}</td>
+                            `;
+
+                            // Add series scores based on competition type
+                            if (isGrouped12) {
+                                // Samma grupper som rubrikerna — en källa, så de inte kan glida isär.
+                                seriesGroups.forEach(([start, end]) => {
+                                    let groupTotal = 0;
+                                    for (let i = start; i < end; i++) {
+                                        const s = crSeriesAt(seriesScores, i);
+                                        groupTotal += s ? s.score : 0;
+                                        html += `<td class="text-center milsnabb-series">${s ? s.score : '-'}</td>`;
+                                    }
+                                    html += `<td class="text-center subtotal-col">${groupTotal}</td>`;
+                                });
+                            } else if (showFinals) {
+                                // The class shows a final, so EVERY row must emit the same cells:
+                                // qualification series, the mid Tot, then one cell per final series.
+                                // A shooter who did not reach the final gets empty final cells —
+                                // never 0, which reads as "sköt och fick noll".
+                                for (let i = 0; i < qualificationSeriesCount; i++) {
+                                    const s = crSeriesAt(seriesScores, i);
+                                    html += `<td class="text-center">${s ? s.score : ''}</td>`;
+                                }
+                                qualificationScore = seriesScores
+                                    .slice(0, qualificationSeriesCount)
+                                    .reduce((sum, s) => sum + (s ? s.score : 0), 0);
+                                html += `<td class="text-center"><strong>${qualificationScore}</strong></td>`;
+                                for (let i = qualificationSeriesCount; i < totalSeriesCount; i++) {
+                                    const s = crSeriesAt(seriesScores, i);
+                                    html += `<td class="text-center">${s ? s.score : ''}</td>`;
+                                }
+                            } else {
+                                // Iterate up to seriesColCount (max across shooters) so cells line up
+                                // with the header. Shooters missing a series get an empty slot.
+                                for (let i = 0; i < seriesColCount; i++) {
+                                    const s = crSeriesAt(seriesScores, i);
+                                    html += `<td class="text-center">${s ? s.score : ''}</td>`;
+                                }
+                            }
+
+                            html += `
+                                    <td class="text-center"><strong>${totalScore}</strong></td>
+                                    <td class="text-center">${totalXCount}</td>
+                            `;
+
+                            if (classHasShootOff) {
+                                // Show each round's total separated by " / ". Truly empty cell for
+                                // shooters who weren't part of a shoot-off in this class — a dash
+                                // reads as a recorded result.
+                                const rounds = Array.isArray(shooter.shootOffRoundTotals) ? shooter.shootOffRoundTotals : [];
+                                if (rounds.length > 0) {
+                                    const tip = rounds.map((t, i) => `Runda ${i + 1}: ${t}`).join(', ');
+                                    const display = rounds.join(' / ');
+                                    html += `<td class="text-center" title="${tip}"><strong>${display}</strong></td>`;
+                                } else {
+                                    html += `<td class="text-center"></td>`;
+                                }
+                            }
+
+                            if (isAwardingStandardMedals) {
+                                const medal = shooter.standardMedal || '';
+                                html += `<td class="text-center"><strong>${medal}</strong></td>`;
+                            }
+
+                            if (canDeleteResults) {
+                                const rowClass = shooter.shootingClass || classGroup.className || '';
+                                const safeClassAttr = rowClass.replace(/"/g, '&quot;');
+                                const safeNameAttr = (shooter.name || '').replace(/"/g, '&quot;');
+                                html += `<td class="no-print text-center">`
+                                     + `<button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 delete-shooter-btn" `
+                                     + `data-member-id="${shooter.memberId}" `
+                                     + `data-shooting-class="${safeClassAttr}" `
+                                     + `data-shooter-name="${safeNameAttr}" `
+                                     + `title="Ta bort alla resultat för denna skytt i klassen">`
+                                     + `<i class="bi bi-trash"></i>`
+                                     + `</button></td>`;
+                            }
+
+                            html += `
+                                </tr>
+                            `;
+                        });
+
+                        html += `
+                                    </tbody>
+                                </table>
+                            </div>
+                        `;
+
+                        // Särskjutning footnotes — surfaced from CalculateFinalResults when a shoot-off
+                        // resolved a medal-tier tie ("Särskjutning avgjorde guldet: Anna 50 vs Berit 47").
+                        if (Array.isArray(classGroup.shootOffNotes) && classGroup.shootOffNotes.length > 0) {
+                            html += '<div class="text-muted small mt-1 mb-3">';
+                            classGroup.shootOffNotes.forEach(note => {
+                                const safe = String(note).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+                                html += `<div><i class="bi bi-info-circle me-1"></i>${safe}</div>`;
+                            });
+                            html += '</div>';
+                        }
+                    });
+
+                    container.innerHTML = html;
+                    
+                    // Setup auto-refresh for preliminary results
+                    if (!isOfficialResults) startAutoRefresh();
+                } else {
+                    container.innerHTML = `
+                        <div class="alert alert-warning">
+                            <h4 class="alert-heading">Ingen resultatdata tillgänglig</h4>
+                            <p class="mb-0">Resultatdata finns men kunde inte formateras korrekt.</p>
+                    </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading results:', error);
+                container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h4 class="alert-heading">Fel vid laddning av resultat</h4>
+                        <p class="mb-0">${error.message}</p>
+                </div>
+                `;
+            }
+        }
+        
+        // Load results when page loads
+        document.addEventListener('DOMContentLoaded', loadResults);
+
+        // Admin: delete all results for one shooter in one shooting class.
+        // Uses event delegation so re-rendered tables stay wired up.
+        async function deleteShooterFromClass(memberId, shootingClass, shooterName) {
+            if (!memberId || !shootingClass) {
+                alert('Saknar nödvändig data för att ta bort resultat.');
+                return;
+            }
+
+            const confirmed = confirm(`Ta bort alla resultat för ${shooterName || 'denna skytt'} i klass ${shootingClass}?\n\nDetta kan inte ångras.`);
+            if (!confirmed) return;
+
+            const tokenInput = document.querySelector('input[name="__RequestVerificationToken"]');
+            const token = tokenInput ? tokenInput.value : '';
+            if (!token) {
+                alert('Säkerhetstoken saknas. Ladda om sidan och försök igen.');
+                return;
+            }
+
+            try {
+                const response = await fetch('/umbraco/surface/CompetitionResults/DeleteShooterFromClass', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': token
+                    },
+                    body: JSON.stringify({
+                        competitionId: competitionId,
+                        memberId: memberId,
+                        shootingClass: shootingClass
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    await loadResults();
+                } else {
+                    alert('Kunde inte ta bort resultat: ' + (data.message || 'Okänt fel'));
+                }
+            } catch (err) {
+                console.error('Delete error', err);
+                alert('Ett fel uppstod vid borttagning.');
+            }
+        }
+
+        document.addEventListener('click', function (ev) {
+            const btn = ev.target.closest('.delete-shooter-btn');
+            if (!btn) return;
+            ev.preventDefault();
+            const memberId = parseInt(btn.getAttribute('data-member-id'), 10);
+            const shootingClass = btn.getAttribute('data-shooting-class') || '';
+            const shooterName = btn.getAttribute('data-shooter-name') || '';
+            deleteShooterFromClass(memberId, shootingClass, shooterName);
+        });
+
+        // Inline rename of a class group — admin only. Pen icon next to class title swaps
+        // the name span for an input + Spara / Avbryt / Återställ buttons.
+        async function saveClassNameOverride(originalName, customName) {
+            try {
+                const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+                const response = await fetch('/umbraco/surface/CompetitionResults/SaveClassNameOverride', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                    body: JSON.stringify({
+                        competitionId: parseInt(competitionId, 10),
+                        originalName: originalName,
+                        customName: customName,
+                        isSubCompetition: isSubCompetitionView
+                    })
+                });
+                const data = await response.json();
+                if (!data.Success && !data.success) {
+                    alert('Kunde inte spara: ' + (data.Message || data.message || 'okänt fel'));
+                    return false;
+                }
+                return true;
+            } catch (err) {
+                console.error('Rename error', err);
+                alert('Ett fel uppstod vid namnändring.');
+                return false;
+            }
+        }
+
+        document.addEventListener('click', function (ev) {
+            const btn = ev.target.closest('.rename-class-btn');
+            if (!btn) return;
+            ev.preventDefault();
+            const header = btn.closest('.class-header');
+            if (!header || header.dataset.renaming === '1') return;
+            header.dataset.renaming = '1';
+
+            const original = header.getAttribute('data-original') || '';
+            const current = header.getAttribute('data-current') || original;
+            const nameSpan = header.querySelector('.class-header-name');
+            if (!nameSpan) return;
+
+            // Build inline editor preserving the surrounding markup so layout doesn't jump.
+            const editor = document.createElement('span');
+            editor.className = 'class-header-editor d-inline-flex align-items-center gap-2';
+            editor.innerHTML = `
+                <input type="text" class="form-control form-control-sm class-header-input" style="max-width: 24rem;" />
+                <button type="button" class="btn btn-success btn-sm class-header-save"><i class="bi bi-check-lg"></i> Spara</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm class-header-cancel">Avbryt</button>
+                <button type="button" class="btn btn-outline-warning btn-sm class-header-reset" title="Återställ till automatiskt namn (${original.replace(/"/g, '&quot;')})">Återställ</button>
+            `;
+            const input = editor.querySelector('.class-header-input');
+            input.value = current;
+
+            // Hide the title span and the pen button while editing.
+            nameSpan.style.display = 'none';
+            btn.style.display = 'none';
+            header.insertBefore(editor, nameSpan.nextSibling);
+            input.focus();
+            input.select();
+
+            const finish = () => {
+                header.dataset.renaming = '';
+                editor.remove();
+                nameSpan.style.display = '';
+                btn.style.display = '';
+            };
+
+            editor.querySelector('.class-header-cancel').addEventListener('click', () => finish());
+
+            editor.querySelector('.class-header-save').addEventListener('click', async () => {
+                const newName = input.value.trim();
+                if (newName === current) { finish(); return; }
+                const ok = await saveClassNameOverride(original, newName);
+                if (ok) { finish(); location.reload(); }
+            });
+
+            editor.querySelector('.class-header-reset').addEventListener('click', async () => {
+                if (!confirm('Återställ till det automatiskt genererade namnet "' + original + '"?')) return;
+                const ok = await saveClassNameOverride(original, '');
+                if (ok) { finish(); location.reload(); }
+            });
+
+            input.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Enter') { ev.preventDefault(); editor.querySelector('.class-header-save').click(); }
+                else if (ev.key === 'Escape') { ev.preventDefault(); finish(); }
+            });
+        });
+        
+        // Springskytte results rendering
+        async function loadSpringskytteResults(container) {
+            try {
+                // publicOnly: each weapon group is published on its own, so this page shows only the
+                // groups the organiser has made official — A can be up while C is still being scored.
+                const response = await fetch(`/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=${competitionId}${subQs}&publicOnly=true`);
+                const data = await response.json();
+
+                if (!data.success || !data.classGroups?.length) {
+                    container.innerHTML = `
+                        <div class="alert alert-info">
+                            <h4 class="alert-heading">Inga resultat ännu</h4>
+                            <p class="mb-0">Det finns inga publicerade resultat för denna tävling ännu.</p>
+                        </div>`;
+                    return;
+                }
+
+                // Say which groups are still missing, so a shooter doesn't read a partial list as final.
+                const springPending = (data.weaponClassesWithResults || [])
+                    .filter(wc => !(data.officialWeaponClasses || []).includes(wc));
+
+                const springAwardingMedals = data.isAwardingStandardMedals === true;
+                // Only show the manual Straff/Avdrag columns when the competition actually has any.
+                const springAnyAdjust = data.classGroups.some(g => g.shooters.some(s => (s.penaltyPoints || 0) > 0 || (s.reductionSeconds || 0) > 0));
+                let html = '';
+                if (springPending.length) {
+                    html += `<div class="alert alert-info">
+                        <i class="bi bi-hourglass-split me-1"></i>
+                        Resultaten för vapengrupp ${springPending.join(', ')} är inte publicerade ännu.
+                    </div>`;
+                }
+                data.classGroups.forEach(group => {
+                    html += `
+                        <div class="class-results-section">
+                            <div class="class-header">
+                                ${group.className} (${group.shooters.length} deltagare)
+                            </div>
+                            <table class="results-table">
+                                <thead>
+                                    <tr>
+                                        <th>Plats</th>
+                                        <th>Namn</th>
+                                        <th>Förening</th>
+                                        <th>Löptid</th>
+                                        <th>Skjutp.</th>
+                                        <th>Tillägg</th>
+                                        ${springAnyAdjust ? '<th>Straff</th><th>Avdrag</th>' : ''}
+                                        <th>Sluttid</th>
+                                        ${springAwardingMedals ? '<th>Medalj</th>' : ''}
+                                    </tr>
+                                </thead>
+                                <tbody>`;
+
+                    group.shooters.forEach(s => {
+                        let rowClass = '';
+                        if (currentUserName && s.name === currentUserName) rowClass = 'current-user';
+                        else if (currentUserClub && s.club === currentUserClub) rowClass = 'same-club';
+
+                        const medal = s.standardMedal === 'S' ? '<strong>S</strong>'
+                            : s.standardMedal === 'B' ? '<strong>B</strong>' : '';
+
+                        html += `
+                                    <tr class="${rowClass}">
+                                        <td class="text-center">${s.status || s.rank || '-'}</td>
+                                        <td>${s.name}</td>
+                                        <td title="${s.club}">${s.clubShort || s.club}</td>
+                                        <td class="text-center">${s.sprintTimeDisplay || '-'}</td>
+                                        <td class="text-center">${s.shootingScore ?? '-'}</td>
+                                        <td class="text-center">${s.penaltyTimeDisplay || '-'}</td>
+                                        ${springAnyAdjust ? `<td class="text-center">${s.penaltyPoints ? s.penaltyMinutesDisplay : '-'}</td><td class="text-center">${s.reductionSeconds ? s.reductionDisplay : '-'}</td>` : ''}
+                                        <td class="text-center"><strong>${s.totalTimeDisplay || '-'}</strong></td>
+                                        ${springAwardingMedals ? `<td class="text-center">${medal}</td>` : ''}
+                                    </tr>`;
+                    });
+
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>`;
+                });
+
+                container.innerHTML = html;
+
+                // Auto-refresh for live results
+                startAutoRefresh();
+            } catch (error) {
+                console.error('Error loading Springskytte results:', error);
+                container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h4>Fel vid laddning av resultat</h4>
+                        <p>${error.message}</p>
+                    </div>`;
+            }
+        }
+
+        // Fältskytte results rendering
+        function faltExtractStationConfigs(results) {
+            var configs = [];
+            var wc = results.config?.weaponConfigs || results.config?.WeaponConfigs || {};
+            var firstWc = Object.values(wc)[0];
+            if (firstWc) {
+                (firstWc.stations || firstWc.Stations || []).forEach(function(st) {
+                    var stNum = st.station || st.Station;
+                    var hasPm = false;
+                    (st.targetGroups || st.TargetGroups || []).forEach(function(tg) {
+                        (tg.figures || tg.Figures || []).forEach(function(fig) {
+                            if (fig.isPoangmal || fig.IsPoangmal) hasPm = true;
+                        });
+                    });
+                    configs.push({ station: stNum, hasPoangmal: hasPm });
+                });
+            }
+            return configs;
+        }
+
+        // Fältskyttets motsvarighet till crFlattenByWeaponGroup. Egen funktion, inte en gren i
+        // den precisionens: raderna har en annan form (stationer, inga serier) och en ANNAN
+        // rangordning — normalfält träff → figurer → poängmål, poängfält poäng → poängmål. Att
+        // sortera fältskytte på precisionens nycklar hade gett en trovärdig men felaktig ordning.
+        //
+        // Samma löfte som där: det är en VY. Varje rad skriver ut sin klass OCH sin officiella
+        // placering i klassen, så listan aldrig kan läsas som ett resultat.
+        function faltFlattenByWeaponGroup(classGroups, isPoang) {
+            const keys = s => isPoang
+                ? [s.totalPoints || 0, s.totalTiebreakerScore || 0, 0]
+                : [s.totalHits || 0, s.totalFigures || 0, s.totalTiebreakerScore || 0];
+
+            const byCode = new Map();
+            const notesByCode = new Map();
+            (classGroups || []).forEach(group => {
+                const code = crGroupWeaponCode(group);
+                if (!byCode.has(code)) byCode.set(code, []);
+                // Serverns ordning INOM gruppen är den officiella placeringen — läs av den innan
+                // något sorteras om.
+                (group.shooters || []).forEach((shooter, idx) => {
+                    byCode.get(code).push(Object.assign({}, shooter, {
+                        __officialClassName: shooter.shootingClass || group.className || '',
+                        __officialPlace: idx + 1,
+                        __sortKeys: keys(shooter)
+                    }));
+                });
+                if (Array.isArray(group.shootOffNotes) && group.shootOffNotes.length) {
+                    if (!notesByCode.has(code)) notesByCode.set(code, []);
+                    notesByCode.get(code).push(...group.shootOffNotes);
+                }
+            });
+
+            const out = [];
+            for (const [code, shooters] of byCode) {
+                shooters.sort((a, b) => {
+                    for (let i = 0; i < a.__sortKeys.length; i++) {
+                        if (b.__sortKeys[i] !== a.__sortKeys[i]) return b.__sortKeys[i] - a.__sortKeys[i];
+                    }
+                    return 0;
+                });
+                // Lika på ALLA nycklar delar placering. Den officiella särskiljningen bortom dem
+                // är särskjutning, alltså ett beslut servern äger — den här listan hittar inte på
+                // en egen ordning för skyttar den inte kan skilja ärligt.
+                let pos = 0, prev = null;
+                shooters.forEach((s, i) => {
+                    const same = prev && prev.every((v, k) => v === s.__sortKeys[k]);
+                    if (!same) { pos = i + 1; prev = s.__sortKeys; }
+                    s.__flatPos = pos;
+                    s.__flatClassLabel = `${s.__officialClassName} · ${s.__officialPlace}`;
+                });
+                out.push({
+                    className: `Vapengrupp ${crWeaponGroupLabel(code)}`,
+                    shooters,
+                    shootOffNotes: notesByCode.get(code) || [],
+                    __isFlat: true
+                });
+            }
+            out.sort((a, b) => a.className.localeCompare(b.className, 'sv'));
+            return out;
+        }
+
+        async function loadFaltskytteResults(container) {
+            try {
+                const response = await fetch(`/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=${competitionId}${subQs}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    container.innerHTML = `<div class="alert alert-info">${data.message || 'Inga resultat.'}</div>`;
+                    return;
+                }
+
+                const results = data.results;
+                const isPoang = results.scoringMode === 'Poang';
+                const stationConfigs = faltExtractStationConfigs(results);
+                const faltAwardingMedals = results.isAwardingStandardMedals === true;
+                let html = '';
+
+                // Växeln erbjuds bara när minst en vapengrupp bär mer än en klassgrupp — annars är
+                // de två vyerna identiska och kontrollen gör ingenting.
+                const faltFlattenable = crFlattenableGroups(results.classGroups);
+                html += crViewToggleHtml(faltFlattenable);
+                const faltGroups = (crFlatMode && faltFlattenable)
+                    ? faltFlattenByWeaponGroup(results.classGroups, isPoang)
+                    : results.classGroups;
+
+                faltGroups.forEach(group => {
+                    // Show admin-overridden display name when present, fall back to auto.
+                    const displayName = group.displayClassName || group.className || '';
+                    // Per-class "Sär" column only when at least one shooter has shoot-off rounds.
+                    const classHasShootOff = (group.shooters || []).some(s => Array.isArray(s.shootOffRounds) && s.shootOffRounds.length > 0);
+
+                    html += `<div class="mb-4">`;
+                    html += `<h4 class="border-bottom pb-2">${displayName} <small class="text-muted">(${group.shooters.length} deltagare)</small></h4>`;
+                    html += `<div class="table-responsive"><table class="table table-sm table-hover">`;
+                    html += `<thead class="table-light"><tr>
+                        <th style="width:50px" class="text-center">Plats</th>
+                        <th>Namn</th><th>Förening</th><th>Klass</th>`;
+
+                    for (let i = 1; i <= results.stationCount; i++) {
+                        const cfg = stationConfigs.find(s => s.station === i);
+                        html += `<th class="text-center">${i}${cfg?.hasPoangmal ? '*' : ''}</th>`;
+                    }
+
+                    html += isPoang
+                        ? `<th class="text-center fw-bold">Poäng</th>`
+                        : `<th class="text-center fw-bold">Tot</th>`;
+                    html += `<th class="text-center">Pm</th>`;
+                    if (classHasShootOff) html += `<th class="text-center" title="Särskjutning">Sär</th>`;
+                    if (faltAwardingMedals) html += `<th class="text-center">Std</th>`;
+                    html += `</tr></thead><tbody>`;
+
+                    group.shooters.forEach((shooter, idx) => {
+                        const isCurrentUser = shooter.name === currentUserName;
+                        // Samma klass som de andra renderarna, så att utskriftens neutralisering
+                        // (@@media print) gäller även här. 'table-info fw-bold' följde med i PDF:en.
+                        const rowClass = isCurrentUser ? 'current-user' : '';
+                        html += `<tr class="${rowClass}">
+                            <td class="text-center">${group.__isFlat ? shooter.__flatPos : idx + 1}</td>
+                            <td>${shooter.name}</td>
+                            <td>${shooter.club}</td>
+                            <td class="text-center">${group.__isFlat ? shooter.__flatClassLabel : shooter.shootingClass}</td>`;
+
+                        for (let i = 1; i <= results.stationCount; i++) {
+                            const st = shooter.stations.find(s => s.stationNumber === i);
+                            if (st) {
+                                let cell = `${st.hits}/${st.figures}`;
+                                if (st.tiebreakerScore != null) cell += ` <small>${st.tiebreakerScore}p</small>`;
+                                html += `<td class="text-center">${cell}</td>`;
+                            } else {
+                                html += `<td class="text-center text-muted">-</td>`;
+                            }
+                        }
+
+                        html += isPoang
+                            ? `<td class="text-center fw-bold">${shooter.totalPoints}</td>`
+                            : `<td class="text-center fw-bold">${shooter.totalHits}/${shooter.totalFigures}</td>`;
+                        html += `<td class="text-center">${shooter.totalTiebreakerScore || ''}</td>`;
+                        if (classHasShootOff) {
+                            const rounds = Array.isArray(shooter.shootOffRounds) ? shooter.shootOffRounds : [];
+                            if (rounds.length > 0) {
+                                const tip = rounds.map((t, i) => 'Runda ' + (i + 1) + ': ' + t).join(', ');
+                                html += `<td class="text-center" title="${tip}"><strong>${rounds.join(' / ')}</strong></td>`;
+                            } else {
+                                html += `<td class="text-center"></td>`;
+                            }
+                        }
+                        if (faltAwardingMedals) {
+                            var stdM = shooter.standardMedal || '';
+                            html += `<td class="text-center fw-bold${stdM === 'S' ? ' text-primary' : stdM === 'B' ? ' text-warning' : ''}">${stdM}</td>`;
+                        }
+                        html += `</tr>`;
+                    });
+
+                    html += `</tbody></table>`;
+
+                    // Per-class footnotes from server (e.g. "Särskjutning avgjorde guldet: Anna 5/4 vs Berit 4/3")
+                    if (Array.isArray(group.shootOffNotes) && group.shootOffNotes.length > 0) {
+                        html += '<div class="text-muted small mt-1 mb-2">';
+                        group.shootOffNotes.forEach(note => {
+                            const safe = String(note).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+                            html += `<div><i class="bi bi-info-circle me-1"></i>${safe}</div>`;
+                        });
+                        html += '</div>';
+                    }
+
+                    html += `</div></div>`;
+                });
+
+                if (!html) html = '<div class="alert alert-info">Inga resultat att visa.</div>';
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Error loading Fältskytte results:', error);
+                container.innerHTML = `<div class="alert alert-danger"><p>${error.message}</p></div>`;
+            }
+        }
+
+        // Team results loading
+        async function loadTeamResults() {
+            const container = document.getElementById('teamResultsContent');
+            if (!container) return;
+
+            try {
+                const response = await fetch(`/umbraco/surface/CompetitionTeam/GetTeamResults?competitionId=${competitionId}`);
+                const data = await response.json();
+
+                if (!data.success || !data.classGroups?.length) {
+                    container.innerHTML = `
+                        <div class="alert alert-info">
+                            <h4 class="alert-heading">Inga lagresultat</h4>
+                            <p class="mb-0">Det finns inga lag registrerade för denna tävling ännu.</p>
+                        </div>`;
+                    return;
+                }
+
+                let html = '';
+                data.classGroups.forEach(group => {
+                    html += `
+                        <div class="class-results-section">
+                            <div class="class-header">
+                                ${hpskEsc(group.teamClass)} (${group.teams.length} lag)
+                            </div>
+                            <table class="results-table">
+                                <thead>
+                                    <tr>
+                                        <th>Plats</th>
+                                        <th>Lag</th>
+                                        <th>Förening</th>
+                                        <th>Medlemmar</th>
+                                        ${data.isSpringskytte ? '<th>Total tid</th>' : `<th>${hpskEsc(data.scoreLabel || 'Poäng')}</th><th>${hpskEsc(data.secondaryLabel || 'X')}</th>`}
+                                    </tr>
+                                </thead>
+                                <tbody>`;
+
+                    // ⚠️ Enheterna kommer från SERVERN. En hårdkodad "p"/"X" över en
+                    // fältskyttesiffra läses som ett felaktigt resultat, inte som en
+                    // felaktig etikett — samma skäl som kolumnrubrikerna ovan.
+                    const scoreLabel = data.scoreLabel || 'Poäng';
+                    const unitShort = scoreLabel === 'Träff' ? 'träff' : 'p';
+                    // Kolumnrubriken är versal och punkterad ("Fig."); inne i en parentes efter
+                    // ett namn är den en enhet och skrivs som en. "X" är en förkortning och
+                    // behåller sin versal.
+                    const secLabel = data.secondaryLabel || 'X';
+                    const secShort = secLabel === 'X' ? 'X' : secLabel.toLowerCase().replace(/\.$/, '');
+                    group.teams.forEach(team => {
+                        const membersHtml = team.members.map(m => {
+                            if (!m.hasResult) return `${hpskEsc(m.name)} (${hpskEsc(m.status || 'Inget resultat')})`;
+                            if (data.isSpringskytte) return `${hpskEsc(m.name)} (${hpskEsc(m.timeDisplay)})`;
+                            return `${hpskEsc(m.name)} (${m.score} ${hpskEsc(unitShort)}${m.xCount > 0 ? ', ' + m.xCount + ' ' + hpskEsc(secShort) : ''})`;
+                        }).join('<br>');
+
+                        const rankDisplay = team.rank > 0 ? team.rank : '-';
+
+                        html += `
+                                    <tr${!team.isComplete ? ' class="text-muted"' : ''}>
+                                        <td class="text-center">${rankDisplay}</td>
+                                        <td><strong>${hpskEsc(team.teamName)}</strong></td>
+                                        <td>${hpskEsc(team.clubName)}</td>
+                                        <td class="small">${membersHtml}</td>
+                                        ${data.isSpringskytte
+                                            ? `<td class="text-center"><strong>${team.totalTimeDisplay}</strong></td>`
+                                            : `<td class="text-center"><strong>${team.totalScore}</strong></td><td class="text-center">${team.totalXCount}</td>`
+                                        }
+                                    </tr>`;
+                    });
+
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>`;
+                });
+
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Error loading team results:', error);
+                container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h4>Fel vid laddning av lagresultat</h4>
+                        <p>${error.message}</p>
+                    </div>`;
+            }
+        }
+
+        // Lagresultaten laddas direkt vid sidladdning, inte först när fliken öppnas: en
+        // utskrift/PDF bär båda flikarna, och laddades lagen lat stod det "Laddar
+        // lagresultat..." i PDF:en för den som aldrig klickat på fliken.
+        if (allowTeams) {
+            loadTeamResults();
+        }
+
+        // Stop auto-refresh when page is hidden
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            } else if (!document.hidden && !isOfficialResults) {
+                startAutoRefresh();
+            }
+        });
+</script>
+@if (isEmbed)
+{
+    @* Inbäddad på Resultat-fliken: ingen egen marginal, och höjden rapporteras till fliken så att
+       ramen växer med listan (ResizeObserver fångar både första ritningen och omritningar). *@
+    @* overflow:hidden — ramen får exakt innehållets höjd; den sista sektionens nedre marginal gav
+       annars en egen rullning på ett par tiotal pixlar inne i ramen. *@
+    <style>html { overflow: hidden; } body { padding: 0 !important; background: transparent !important; }</style>
+    <script>
+    (function () {
+        if (window.parent === window) return;
+        let last = 0;
+        // ⚠️ body, inte documentElement: dokumentets höjd blir aldrig lägre än ramen själv, så
+        // ramen kunde bara växa och aldrig krympa till listan.
+        // Nedersta elementets nederkant plus dess marginal (en marginal räknas inte in i kroppens höjd).
+        const send = () => {
+            let h = 0;
+            for (const el of document.body.children) {
+                if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+                const r = el.getBoundingClientRect();
+                if (!r.height) continue;
+                h = Math.max(h, r.bottom + window.scrollY + parseFloat(getComputedStyle(el).marginBottom || 0));
+            }
+            h = Math.ceil(h);
+            if (h !== last) { last = h; window.parent.postMessage({ hpskResultsHeight: h }, window.location.origin); }
+        };
+        new ResizeObserver(send).observe(document.body);
+        window.addEventListener('load', send);
+        send();
+    })();
+    </script>
+}
+            </body>
+            </html>

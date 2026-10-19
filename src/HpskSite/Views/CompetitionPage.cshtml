@@ -1,0 +1,2366 @@
+﻿@using HpskSite.Models
+@using HpskSite.Extensions
+@using HpskSite.CompetitionTypes.Springskytte.Models
+@using Umbraco.Cms.Web.Common.PublishedModels;
+@using System.Linq;
+@using System;
+@using System.Globalization;
+@inject Umbraco.Cms.Core.Services.IMemberService MemberService
+@inject Umbraco.Cms.Core.Security.IMemberManager MemberManager
+@inject HpskSite.Services.AdminAuthorizationService AuthService
+@inject HpskSite.Services.ClubService ClubService
+@inject Umbraco.Cms.Core.Services.IContentService ContentService
+@inject HpskSite.Services.CompetitionFees.CompetitionPaymentModelService PaymentModels
+@inject Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory DbFactory
+@inject HpskSite.Services.Registrations.ICompetitionRegistrationStore Registrations
+@inject HpskSite.Services.Events.CompetitionEventLinkService CompetitionLinks
+@inject HpskSite.Services.Results.ICompetitionResultStore ResultLists
+@inject HpskSite.Services.StartLists.IStartListStore StartLists
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.CompetitionLinks CompLinks
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+	Layout = "Master.cshtml";
+	// Tävlingens fält ur tävlingslagringen (C3-planen S3). Noden (Model) bär fortfarande adressen,
+	// trädet (serien, klubben) och mediavalen.
+	var compPost = Competitions.Get(Model.Id) ?? new HpskSite.Models.Competitions.CompetitionInfo { Id = Model.Id, Name = Model.Name ?? "" };
+	ViewBag.Title = compPost.CompetitionName ?? "Competition";
+
+	// Get competition manager IDs from JSON array
+	var competitionManagersJson = compPost.CompetitionManagers ?? "[]";
+	int[] managerIds;
+	try
+	{
+		managerIds = Newtonsoft.Json.JsonConvert.DeserializeObject<int[]>(competitionManagersJson) ?? Array.Empty<int>();
+	}
+	catch
+	{
+		managerIds = Array.Empty<int>();
+	}
+
+    var competitionName = compPost.CompetitionName ?? "";
+    // Arrangörens händelsesida för tävlingen (sajtstrukturen fas 2) — en enda länkrad under rubriken.
+    var linkedEvent = CompetitionLinks.EventForCompetition(Model.Id);
+    var description = HpskSite.Extensions.RteHelper.ExtractMarkup(Model.Value<string>("description"));
+    var competitionDate = (compPost.CompetitionDate ?? DateTime.MinValue);
+    var competitionEndDate = compPost.CompetitionEndDate;
+    var venue = compPost.Venue ?? "";
+    // Delningsbeskrivning (C3-planen F4): datum och plats, sedan början av beskrivningen.
+    {
+        var compMeta = HpskSite.Models.PageMeta.For(Context);
+        // Tävlingen nås också på sin gamla trädadress (Umbraco svarar 200 där); canonical är alltid den
+        // aktuella adressen, så en äldre länk pekar sökmotorer och delningar rätt (C3 F4/F5).
+        compMeta.Canonical = Model.Url();
+        var metaParts = new[]
+        {
+            competitionDate.Year > 1900 ? competitionDate.ToString("d MMMM yyyy", new System.Globalization.CultureInfo("sv-SE")) : "",
+            venue.Trim()
+        }.Where(s => s.Length > 0);
+        var metaText = System.Net.WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(description ?? "", "<[^>]*>", " "));
+        metaText = System.Text.RegularExpressions.Regex.Replace(metaText, @"\s+", " ").Trim();
+        var metaLead = string.Join(" · ", metaParts);
+        var metaFull = string.IsNullOrEmpty(metaText) ? metaLead : (metaLead.Length > 0 ? metaLead + ". " + metaText : metaText);
+        if (metaFull.Length > 160) metaFull = metaFull.Substring(0, 157).TrimEnd() + "…";
+        if (metaFull.Length > 0) compMeta.Description = metaFull;
+    }
+
+    // Multi-day competition logic
+    var hasValidEndDate = competitionEndDate.HasValue &&
+                          competitionEndDate.Value > DateTime.MinValue &&
+                          competitionEndDate.Value.Year > 1900 &&
+                          competitionEndDate.Value.Date >= competitionDate.Date;
+    var isMultiDay = hasValidEndDate && competitionEndDate!.Value.Date != competitionDate.Date;
+    var dateIcon = isMultiDay ? "📅" : "🕐";
+    var durationInfo = isMultiDay ?
+        $"({(competitionEndDate.Value.Date - competitionDate.Date).Days + 1} dagar)" :
+        "(1 dag)";
+    var maxParticipants = compPost.MaxParticipants;
+    var registrationFee = compPost.RegistrationFee ?? "";
+    var juniorRegistrationFeeStr = compPost.JuniorRegistrationFee ?? "";
+    var subCompetitionFeeStr = compPost.SubCompetitionFee ?? "";
+    var subCompetitionFeeModeRaw = compPost.SubCompetitionFeeMode ?? "";
+    var subCompetitionNameRaw = compPost.SubCompetitionName ?? "";
+    var teamRegistrationFeeStr = compPost.TeamRegistrationFee ?? "";
+    var stafettRegistrationFeeStr = compPost.StafettRegistrationFee ?? "";
+    decimal.TryParse(registrationFee, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var registrationFeeVal);
+    // ⚠️ Ifylld-till-0 är INTE samma sak som tom. Se RegistrationFeeCalculator.CalculateTotal.
+    var juniorRegistrationFeeHasValue = decimal.TryParse(juniorRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var juniorRegistrationFeeVal);
+    decimal.TryParse(subCompetitionFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var subCompetitionFeeVal);
+    decimal.TryParse(teamRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var teamRegistrationFeeVal);
+    decimal.TryParse(stafettRegistrationFeeStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var stafettRegistrationFeeVal);
+    var subCompetitionFeeIsPerRegistration = string.Equals(subCompetitionFeeModeRaw, "perRegistration", StringComparison.OrdinalIgnoreCase);
+    var registrationOpenDate = (compPost.RegistrationOpenDate ?? DateTime.MinValue);
+    var registrationCloseDate = (compPost.RegistrationCloseDate ?? DateTime.MinValue);
+    var competitionDirector = compPost.CompetitionDirector ?? "";
+    var contactEmail = compPost.ContactEmail ?? "";
+    var contactPhone = compPost.ContactPhone ?? "";
+    var isActive = compPost.IsVisible;
+    var showLiveResults = compPost.ShowLiveResults;
+    var competitionTypeStr = compPost.CompetitionType ?? "Precision";
+    // competitionType lagras som STRÄNG — oftast id:t ("Milsnabb"), på äldre tävlingar ibland
+    // visningsnamnet ("Magnum Fält"). Den lästes tidigare som en innehållsnod, alltså alltid null,
+    // och typen syntes aldrig på sidan. Exakt matchning, inte GetFuzzy (prefixmatchning).
+    var competitionTypeName = (HpskSite.Models.CompetitionTypes.GetById(competitionTypeStr)
+                               ?? HpskSite.Models.CompetitionTypes.GetByName(competitionTypeStr))?.Name
+                              ?? competitionTypeStr;
+    var isSpringskytte = competitionTypeStr == "Springskytte";
+    var isFaltskytte = competitionTypeStr == "Faltskytte" || competitionTypeStr == "MagnumFalt";
+    var dpConfigJson = "";
+    var isDirektplacering = false;
+    try
+    {
+        if (Model.HasProperty("direktplaceringConfig"))
+        {
+            dpConfigJson = compPost.DirektplaceringConfig ?? "";
+            if (!string.IsNullOrEmpty(dpConfigJson))
+            {
+                isDirektplacering = dpConfigJson.Contains("\"enabled\":true") || dpConfigJson.Contains("\"Enabled\":true");
+            }
+        }
+    }
+    catch { }
+    var rsJson = compPost.RollingStart ?? "";
+    object rsConfig = null;
+    if (!string.IsNullOrEmpty(rsJson)) { try { rsConfig = Newtonsoft.Json.JsonConvert.DeserializeObject(rsJson); } catch {} }
+    var numberOfSeriesOrStations = compPost.NumberOfSeriesOrStations;
+    var numberOfFinalSeries = compPost.NumberOfFinalSeries;
+
+    // External competition properties
+    var isExternal = compPost.IsExternal;
+    var externalUrl = compPost.ExternalUrl;
+    var externalRegistrationEmail = compPost.ExternalRegistrationEmail;
+    IPublishedContent? invitationFile = null;
+    try
+    {
+        invitationFile = Model.Value<IPublishedContent>("invitationFile");
+    }
+    catch (ArgumentException)
+    {
+        // Invalid invitation file path - ignore and continue
+    }
+    var hasInvitation = invitationFile != null;
+
+    IPublishedContent? resultListFile = null;
+    try
+    {
+        resultListFile = Model.Value<IPublishedContent>("resultListFile");
+    }
+    catch (ArgumentException)
+    {
+        // Invalid result list file path - ignore and continue
+    }
+    var hasResultList = resultListFile != null;
+
+    // Smart defaults for the collapsible Inbjudan / Resultatlista cards:
+    // past comp → Resultatlista open, Inbjudan closed; otherwise → Inbjudan open, Resultatlista closed.
+    var compEffectiveEnd = (competitionEndDate.HasValue && competitionEndDate.Value.Year > 1900 && competitionEndDate.Value.Date >= competitionDate.Date)
+        ? competitionEndDate.Value.Date
+        : competitionDate.Date;
+    var competitionIsPast = compEffectiveEnd < DateTime.Today;
+    // Get multiple shooting classes support - handle both string array and comma-separated string
+    object? shootingClassIdsRaw = compPost.ShootingClassIds;
+    var shootingClassIds = "";
+
+    // Handle different data types from Umbraco multiselect
+    if (shootingClassIdsRaw is string[] stringArray)
+    {
+        shootingClassIds = string.Join(",", stringArray);
+    }
+    else if (shootingClassIdsRaw is IEnumerable<string> enumerable)
+    {
+        shootingClassIds = string.Join(",", enumerable);
+    }
+    else if (shootingClassIdsRaw is string stringValue)
+    {
+        shootingClassIds = stringValue ?? "";
+    }
+    else if (shootingClassIdsRaw != null)
+    {
+        // Try generic Value<T> approach for Flexible Dropdown
+        try
+        {
+            var typed = Model.Value<IEnumerable<string>>("shootingClassIds");
+            if (typed != null)
+            {
+                shootingClassIds = string.Join(",", typed);
+            }
+        }
+        catch
+        {
+            // Fallback to empty if all parsing fails
+            shootingClassIds = "";
+        }
+    }
+
+    var allowDualCClassRegistration = compPost.AllowDualCClassRegistration;
+    var allowSelfReporting = compPost.AllowSelfReporting;
+    var allowTeams = compPost.AllowTeams;
+    var allowStafett = compPost.AllowStafett;
+
+    // Get competition shooting classes using Models.ShootingClasses
+    var competitionShootingClasses = new List<ShootingClass>();
+
+    // Try to parse shooting class IDs - handle JSON array format
+    if (!string.IsNullOrEmpty(shootingClassIds))
+    {
+        var ids = new List<string>();
+
+        // Check if it's a JSON array format: ["A1","B2"]
+        if (shootingClassIds.StartsWith("[") && shootingClassIds.EndsWith("]"))
+        {
+            try
+            {
+                // Parse JSON array manually (simple approach)
+                var jsonContent = shootingClassIds.Substring(1, shootingClassIds.Length - 2); // Remove [ and ]
+                ids.AddRange(jsonContent.Split(',')
+                    .Select(s => s.Trim().Trim('"'))
+                    .Where(s => !string.IsNullOrEmpty(s)));
+            }
+            catch
+            {
+                // If JSON parsing fails, try as comma-separated
+                ids.AddRange(shootingClassIds.Split(',')
+                    .Select(id => id.Trim())
+                    .Where(id => !string.IsNullOrEmpty(id)));
+            }
+        }
+        else
+        {
+            // Already comma-separated or single value
+            ids.AddRange(shootingClassIds.Split(',')
+                .Select(id => id.Trim())
+                .Where(id => !string.IsNullOrEmpty(id)));
+        }
+
+        foreach (var id in ids)
+        {
+            var shootingClass = HpskSite.Models.ShootingClasses.GetById(id);
+            if (shootingClass != null)
+            {
+                competitionShootingClasses.Add(shootingClass);
+            }
+        }
+    }
+
+
+    var hasShootingClasses = competitionShootingClasses.Any();
+    var shootingClassNames = hasShootingClasses
+        ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
+        : "Inga klasser angivna";
+
+    // Parse Springskytte class IDs directly (they don't map to standard ShootingClasses)
+    var springClassIds = new List<string>();
+    if (isSpringskytte && !string.IsNullOrEmpty(shootingClassIds))
+    {
+        if (shootingClassIds.StartsWith("[") && shootingClassIds.EndsWith("]"))
+        {
+            try { springClassIds.AddRange(System.Text.Json.JsonSerializer.Deserialize<string[]>(shootingClassIds) ?? Array.Empty<string>()); }
+            catch { springClassIds.AddRange(shootingClassIds.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s))); }
+        }
+        else
+        {
+            springClassIds.AddRange(shootingClassIds.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)));
+        }
+    }
+
+    // Group available shooting classes by weapon (so A_opt_X is its own group, not lumped into A).
+    var aClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A).ToList();
+    var aOptClasses = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_Opt).ToList();
+    var aMClasses   = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_M).ToList();
+    var aPClasses   = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_P).ToList();
+    var aGClasses   = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.A_G).ToList();
+    var bClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.B).ToList();
+    var cClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.C).ToList();
+    var rClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.R).ToList();
+    var lClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.L).ToList();
+    var mClasses    = competitionShootingClasses.Where(sc => sc.Weapon == HpskSite.Models.WeaponClass.M).ToList();
+
+    // Subdivide C and L classes by the registry's category (never by parsing the id)
+    var cRegularClasses = cClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Open).ToList();
+    var cVetClasses = cClasses.Where(sc => sc.IsVeteran).ToList();
+    var cJuniorClasses = cClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Junior).ToList();
+    var cDamClasses = cClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Dam).ToList();
+
+    var lRegularClasses = lClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Open).ToList();
+    var lVetClasses = lClasses.Where(sc => sc.IsVeteran).ToList();
+    var lJuniorClasses = lClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Junior).ToList();
+    var lDamClasses = lClasses.Where(sc => sc.Category == HpskSite.Models.ClassCategory.Dam).ToList();
+
+    var now = DateTime.Now;
+    string status = "Okänd";
+    string badgeClass = "secondary";
+
+    if (!isActive)
+    {
+        status = "Inaktiv";
+        badgeClass = "danger";
+    }
+    else if (now < registrationOpenDate)
+    {
+        status = "Anmälan öppnar snart";
+        badgeClass = "info";
+    }
+    else if (now >= registrationOpenDate && now <= registrationCloseDate)
+    {
+        status = "Anmälan öppen";
+        badgeClass = "success";
+    }
+    else if (now > registrationCloseDate && now < competitionDate)
+    {
+        status = "Anmälan stängd";
+        badgeClass = "warning";
+    }
+    else if (now.Date == competitionDate.Date)
+    {
+        status = "Tävling idag";
+        badgeClass = "primary";
+    }
+    else if (now > competitionDate)
+    {
+        status = "Tävlingen avslutad";
+        badgeClass = "secondary";
+    }
+
+    // Check if current user can manage this competition
+    var currentMember = await MemberManager.GetCurrentMemberAsync();
+    bool canManageCompetition = false;
+
+    // Get current user info for highlighting in registered shooters modal
+    var currentMemberName = currentMember?.Name ?? "";
+    var currentMemberClub = "";
+    // Registration info computed server-side for performance
+    var regRole = "member";
+    var regMemberId = 0;
+    var regMemberEmail = "";
+    int? regClubId = null;
+    var regClubName = "";
+    var svComparer = StringComparer.Create(new CultureInfo("sv-SE"), ignoreCase: true);
+    var allClubsJson = "[]";
+    var regRegionCode = "";
+    var isRegionalAdmin = false;
+    var clubsWithRegionsJson = "[]";
+
+    // Distributed result reporting authorization (computed below alongside other auth)
+    bool canReportDistributedResults = false;
+
+    if (currentMember != null)
+    {
+        var memberData = MemberService.GetByEmail(currentMember.Email ?? "");
+        if (memberData != null)
+        {
+            regMemberId = memberData.Id;
+            regMemberEmail = memberData.Email ?? "";
+            var primaryClubIdStr = memberData.GetValue<string>("primaryClubId");
+            if (!string.IsNullOrEmpty(primaryClubIdStr) && int.TryParse(primaryClubIdStr, out int primaryClubId))
+            {
+                regClubId = primaryClubId;
+                regClubName = ClubService.GetClubNameById(primaryClubId) ?? "";
+                currentMemberClub = regClubName;
+                // Look up region for member's club (O(1) cache lookup)
+                if (string.IsNullOrEmpty(regRegionCode))
+                {
+                    var memberClubNode = Umbraco.Content(primaryClubId);
+                    if (memberClubNode != null)
+                        regRegionCode = memberClubNode.Value<string>("regionalFederation") ?? "";
+                }
+            }
+
+            // Load roles once — derive all authorization from this (avoids ~24 redundant service calls)
+            var roles = MemberService.GetAllRoles(memberData.Id)?.ToList() ?? new List<string>();
+            bool isSiteAdmin = roles.Contains("Administrators");
+            bool isClubAdmin = roles.Any(r => r.StartsWith("ClubAdmin_"));
+            bool isSkjutledare = roles.Any(r => r.StartsWith("Skjutledare_"));
+
+            // Competition management access (managerIds from line 23, memberData.Id available here):
+            // the tävlingsansvariga list OR any Bemanning roster row — any role — granted app access.
+            bool isCompetitionManager = managerIds.Contains(memberData.Id)
+                || AuthService.HasRosterAppAccess(Model.Id, memberData.Id);
+
+            if (isSiteAdmin) regRole = "admin";
+            else if (isClubAdmin) regRole = "clubAdmin";
+            else if (isSkjutledare) regRole = "skjutledare";
+
+            // Detect regional admin
+            var regionalAdminRole = roles.FirstOrDefault(r => r.StartsWith("RegionalAdmin_"));
+            if (regionalAdminRole != null)
+            {
+                regRegionCode = regionalAdminRole.Replace("RegionalAdmin_", "");
+                isRegionalAdmin = true;
+                if (regRole == "member") regRole = "regionalAdmin";
+            }
+
+            // Competition manager can register others for their managed competition
+            if (isCompetitionManager && regRole == "member") regRole = "competitionManager";
+
+            // For club admin / skjutledare without primaryClubId, use role-derived club
+            if (!regClubId.HasValue && isClubAdmin)
+            {
+                var clubAdminRole = roles.First(r => r.StartsWith("ClubAdmin_"));
+                if (int.TryParse(clubAdminRole.Replace("ClubAdmin_", ""), out int cid))
+                {
+                    regClubId = cid;
+                    regClubName = ClubService.GetClubNameById(cid) ?? "";
+                }
+            }
+            if (!regClubId.HasValue && isSkjutledare)
+            {
+                var skjRole = roles.First(r => r.StartsWith("Skjutledare_"));
+                if (int.TryParse(skjRole.Replace("Skjutledare_", ""), out int cid))
+                {
+                    regClubId = cid;
+                    regClubName = ClubService.GetClubNameById(cid) ?? "";
+                }
+            }
+
+            // Build club list for non-member roles (sorted Swedish)
+            if (regRole != "member")
+            {
+                var clubs = ClubService.GetAllClubs()
+                    .Where(c => c.IsActive)
+                    .OrderBy(c => c.Name, svComparer)
+                    .Select(c => new { id = c.Id, name = c.Name })
+                    .ToList();
+                allClubsJson = System.Text.Json.JsonSerializer.Serialize(clubs);
+            }
+            else if (regClubId.HasValue)
+            {
+                // Member only sees own club
+                var ownClub = new[] { new { id = regClubId.Value, name = regClubName } };
+                allClubsJson = System.Text.Json.JsonSerializer.Serialize(ownClub);
+            }
+
+            // Build clubs-with-regions for team registration (only for admin/regional admin who need club picker)
+            // Uses Umbraco.Content() O(1) lookups — no DescendantsOrSelf
+            if (allowTeams && (isSiteAdmin || isRegionalAdmin))
+            {
+                var allActiveClubs = ClubService.GetAllClubs().Where(c => c.IsActive).ToList();
+                var clubsWithRegionsList = new List<Dictionary<string, object>>();
+                foreach (var c in allActiveClubs)
+                {
+                    var cNode = Umbraco.Content(c.Id);
+                    var region = cNode?.Value<string>("regionalFederation") ?? "";
+                    clubsWithRegionsList.Add(new Dictionary<string, object>
+                    {
+                        ["id"] = c.Id,
+                        ["name"] = c.Name,
+                        ["region"] = region
+                    });
+                }
+                var jsonOpts = new System.Text.Json.JsonSerializerOptions
+                {
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                };
+                clubsWithRegionsJson = System.Text.Json.JsonSerializer.Serialize(
+                    clubsWithRegionsList.OrderBy(x => (string)x["name"], svComparer), jsonOpts);
+            }
+
+            // Competition management — compute from already-loaded roles and managerIds
+            // isCompetitionManager already computed above (line ~288)
+            bool isClubAdminForCompetition = false;
+            var competitionClubId = compPost.ClubId;
+            if (competitionClubId > 0)
+            {
+                // Check direct club admin, site admin, or regional admin for the club's region
+                isClubAdminForCompetition = isSiteAdmin
+                    || roles.Contains($"ClubAdmin_{competitionClubId}")
+                    || roles.Any(r =>
+                    {
+                        if (!r.StartsWith("RegionalAdmin_")) return false;
+                        var clubNode = Umbraco.Content(competitionClubId);
+                        if (clubNode == null || clubNode.ContentType.Alias != "club") return false;
+                        var clubRegion = clubNode.Value<string>("regionalFederation") ?? "";
+                        return r == $"RegionalAdmin_{clubRegion}";
+                    });
+            }
+            else
+            {
+                // Region-hosted (clubId unset — the SM shape): the krets is the organiser, so its
+                // regional admin manages it. Without this the management affordances on the public
+                // competition page were hidden from a region-hosted competition's own organisers.
+                var compRegion = (compPost.RegionalFederation ?? "").Trim();
+                if (!string.IsNullOrWhiteSpace(compRegion))
+                    isClubAdminForCompetition = roles.Contains($"RegionalAdmin_{compRegion}");
+            }
+            canManageCompetition = isSiteAdmin || isCompetitionManager || isClubAdminForCompetition;
+
+            // Distributed result reporting — uses same auth values (no duplicate service calls)
+            if (allowSelfReporting && !isExternal)
+            {
+                canReportDistributedResults = isSiteAdmin || isCompetitionManager || isClubAdmin || isSkjutledare || isRegionalAdmin;
+            }
+        }
+    }
+
+    // Server-side sidebar data (replaces 3 slow AJAX calls with in-memory published content cache lookups)
+
+    // 1. Registration counts — via anmälningslagringen (sajtstrukturen fas 1a), som läser alla
+    //    anmälningar, publicerade eller inte.
+    var registrationContents = Registrations.List(Model.Id);
+    var uniqueShooterCount = registrationContents
+        .Where(r => r.MemberId > 0)
+        .Select(r => r.MemberId)
+        .Distinct()
+        .Count();
+    // En anmälan utan läsbar klasslista räknas som en start, som förut.
+    var totalStartsCount = registrationContents.Sum(r => r.Classes.Count > 0 ? r.Classes.Count : 1);
+
+    // 2. Start list availability from published content.
+    //    New architecture: precisionStartList is a DIRECT child of the competition
+    //    (mirrors the finals + Springskytte direct-child reads below, and the
+    //    generator/publish endpoints which were migrated to this layout).
+    //    Legacy: nested under a competitionStartListsHub — kept as a fallback.
+    //    Listorna läses ur IStartListStore (skalplanen C2), aldrig noderna direkt; adressen byggs
+    //    ur tävlingens + listans segment.
+    var publishedStartLists = StartLists.ListPublished(Model.Id);
+    var officialStartList = publishedStartLists
+        .FirstOrDefault(r => r.Kind == HpskSite.Models.StartLists.StartListKind.Qualifying && r.IsOfficial);
+    var hasOfficialStartList = officialStartList != null;
+    var startListPageUrl = hasOfficialStartList ? officialStartList!.PublicUrl(Model.Url()) : "";
+
+    // Är självanmälan stängd för att startlistan är publicerad? Frågan besvaras av
+    // StartListRegistrationGate och INTE härifrån, eftersom RegisterForCompetition måste ge samma
+    // svar — en knapp som är släckt medan endpointen tar emot anmälan är värre än ingen spärr alls.
+    // Grinden är härledd (arrangörens val OCH en publicerad lista), så en avpublicering öppnar
+    // anmälan igen utan att något behöver skrivas.
+    var startListGateActive = HpskSite.Services.RegistrationGate.StartListRegistrationGate.IsClosed(compPost, StartLists);
+
+    // ⚠️ Funktionärer undantas ÄVEN HÄR, inte bara i endpointen. Arrangören anmäler rutinmässigt
+    // någon annan via den här modalen (targetMemberId), så en släckt knapp för dem hade gjort
+    // serverns undantag onåbart från gränssnittet — det hade bara skyddat en gammal flik.
+    //
+    // ⚠️ canManageCompetition måste vara en DELMÄNGD av serverns HasCompetitionStaffAccessAsync,
+    // annars visas en knapp vars anrop nekas. Den är det: samma sajtadmin / tävlingsansvarig /
+    // klubbadmin-för-tävlingen (inkl. regionadmin och kretsvärdad tävling), bara utan Skjutledare —
+    // som servern släpper in men som här får gå via registreringsbordet. Widening this without
+    // widening the server would ship a dead button.
+    var startListClosesRegistration = startListGateActive && !canManageCompetition;
+
+    // 2b. Finals start lists (championship competitions). Direct children of the
+    //     competition, gated on isOfficialFinalsStartList.
+    //     ⚠️ EN LISTA PER VAPENGRUPP sedan 2026-09-08, var och en publicerad för sig —
+    //     på ett flerdagarsmästerskap är C:s final publicerad på lördagen medan A:s ännu
+    //     är ett utkast. Alla publicerade visas, en knapp per lista, märkt med gruppen.
+    //     Gruppen läses via FinalsWeaponGroup — samma regel som administrationsytan.
+    var officialFinalsStartLists = publishedStartLists
+        .Where(r => r.Kind == HpskSite.Models.StartLists.StartListKind.Finals && r.IsOfficial)
+        .Select(r => new
+        {
+            Url = r.PublicUrl(Model.Url()),
+            Group = HpskSite.CompetitionTypes.Precision.Models.FinalsWeaponGroup
+                .FromConfigurationData(r.ConfigurationData)
+        })
+        .OrderBy(x => x.Group.Length == 0 ? 1 : 0)
+        .ThenBy(x => x.Group, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+    var hasOfficialFinalsStartList = officialFinalsStartLists.Count > 0;
+    var finalsStartListPageUrl = hasOfficialFinalsStartList ? officialFinalsStartLists[0].Url : "";
+
+    // 3. Result page availability from published content
+    // Resultatlistan ur ICompetitionResultStore (det publicerade läget), aldrig noden direkt.
+    var resultList = ResultLists.GetMany(new[] { Model.Id }).Values.FirstOrDefault();
+    var hasResultPage = resultList != null;
+    var isResultsOfficial = resultList?.IsOfficial ?? false;
+    // Deltävling result list — published independently of the main result list. When
+    // subCompetitionIsOfficial is true on the same competitionResult node, a second
+    // public button is rendered pointing at /resultat/?sub=true (handled by the
+    // /resultat/ page). Value<bool> returns false when the property is missing, so
+    // we don't need a separate HasProperty guard — a clean falsy value is the
+    // correct "no sub-comp published yet" answer.
+    var isSubResultsOfficial = resultList?.SubIsOfficial ?? false;
+    var hasSubCompetition = !string.IsNullOrWhiteSpace(subCompetitionNameRaw);
+
+    // Springskytte stafett (relay) results — published independently via the
+    // SpringskytteStafettResultPublish flag table (gates the public /stafettresultat/ page + button).
+    var isStafettResultsOfficial = false;
+    if (isSpringskytte)
+    {
+        try
+        {
+            using var _stfDb = DbFactory.CreateDatabase();
+            var _stfVal = _stfDb.ExecuteScalar<int?>(
+                "SELECT CAST(IsOfficial AS INT) FROM SpringskytteStafettResultPublish WHERE CompetitionId = @0", Model.Id);
+            isStafettResultsOfficial = _stfVal == 1;
+        }
+        catch { /* table missing → not published */ }
+    }
+    var stafettResultsUrl = "/stafettresultat/" + Model.Id;
+
+    // Results URL (used in sidebar and JavaScript)
+    var resultsUrl = Model.Url().TrimEnd('/') + "/resultat/";
+    var subResultsUrl = resultsUrl + "?sub=true";
+
+    // "Ditt schema" — resolved here, in the top code block, and surfaced further down as a LINK in the
+    // start-list block rather than as a card. It used to render a full card directly under the breadcrumb,
+    // which put a personal block above the competition's own identity for exactly the people who least
+    // need the intro, and made this file a THIRD renderer of the same itinerary (HomePage.cshtml has its
+    // own, /mitt-schema uses _MittSchema) — which duly drifted: different row selection, different cap, and
+    // the "Nästa" hero shown on the home page but suppressed here. The link keeps a competition beyond the
+    // home card's window from being a dead end without spending the page's best real estate.
+    HpskSite.Models.Schedule.MySchedule? mySchedule = null;
+    if (regMemberId > 0)
+    {
+        var myScheduleSvc = Context.RequestServices.GetService(typeof(HpskSite.Services.Schedule.MyScheduleService))
+            as HpskSite.Services.Schedule.MyScheduleService;
+        mySchedule = myScheduleSvc?.GetSchedule(regMemberId, Model.Id);
+    }
+    var showMyScheduleLink = mySchedule != null && (mySchedule.HasAny || mySchedule.StartListPending);
+}
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <!-- Breadcrumb with Series Context -->
+            @{
+                // Club-hosted competitions get a club-scoped canonical URL (/competitions/{year}/{region}/{club}/…)
+                // from CompetitionUrlProvider, but the content tree parent is still the general competitions hub —
+                // so the default breadcrumb always pointed "back" to the general list. When appropriate, mirror the
+                // URL: link back to the club's Tävlingar tab (#clubCompetitions deep-link, handled in Club.cshtml)
+                // instead of the general hub.
+                //
+                // The club's Tävlingar tab lists ALL of the club's competitions (club-only AND open invitationals).
+                // We show the club crumb when:
+                //   • the comp is club-only (it belongs solely to that club), OR
+                //   • the visitor arrived from the club's Tävlingar tab (?fromClub=<clubId> marker on those links).
+                // An open comp reached from the general list keeps the normal "Tävlingar" crumb.
+                var hostClubId = compPost.ClubId;
+                var hostClubNode = hostClubId > 0 ? Umbraco.Content(hostClubId) : null;
+                if (hostClubNode != null && hostClubNode.ContentType.Alias != "club") hostClubNode = null;
+                var cameFromClubTab = hostClubId > 0
+                    && string.Equals(Context.Request.Query["fromClub"].ToString(), hostClubId.ToString(), StringComparison.Ordinal);
+                var showClubCrumb = hostClubNode != null && (compPost.IsClubOnly || cameFromClubTab);
+                var hostClubCompUrl = hostClubNode != null ? hostClubNode.Url().TrimEnd('/') + "/#clubCompetitions" : "";
+            }
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="@Model.SiteRoot().Url()">Hem</a></li>
+                    @if (showClubCrumb)
+                    {
+                        <li class="breadcrumb-item"><a href="@hostClubCompUrl">@hostClubNode.Name</a></li>
+                        @if (Model.Parent?.ContentType.Alias == "competitionSeries")
+                        {
+                            <li class="breadcrumb-item"><a href="@Model.Parent.Url()">@Model.Parent.Name</a></li>
+                        }
+                    }
+                    else if (Model.Parent?.ContentType.Alias == "competitionsHub")
+                    {
+                        <li class="breadcrumb-item"><a href="@Model.Parent.Url()">Tävlingar</a></li>
+                    }
+                    else if (Model.Parent?.ContentType.Alias == "competitionSeries")
+                    {
+                        @if (Model.Parent.Parent?.ContentType.Alias == "competitionsHub")
+                        {
+                            <li class="breadcrumb-item"><a href="@Model.Parent.Parent.Url()">Tävlingar</a></li>
+                        }
+                        else if (Model.Parent.Parent?.ContentType.Alias == "competitionSeason")
+                        {
+                            <li class="breadcrumb-item"><a href="@Model.Parent.Parent.Parent.Url()">Tävlingar</a></li>
+                        }
+                        <li class="breadcrumb-item"><a href="@Model.Parent.Url()">@Model.Parent.Name</a></li>
+                    }
+                    else if (Model.Parent?.ContentType.Alias == "competitionSeason")
+                    {
+                        <li class="breadcrumb-item"><a href="@Model.Parent.Parent.Url()">Tävlingar</a></li>
+                    }
+                    <li class="breadcrumb-item active">@competitionName</li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+
+    @* "Ditt schema" is a link in the start-list block further down, not a card here — see the top code block. *@
+
+    @* Series Information Banner (when competition is part of a series) *@
+    @if (Model.Parent?.ContentType.Alias == "competitionSeries")
+    {
+        var seriesContent = Model.Parent;
+        var seriesName = seriesContent.Value<string>("seriesName") ?? seriesContent.Name;
+        var seriesLogo = seriesContent.Value<IPublishedContent>("seriesLogo");
+        // Seriens publicerade omgångar ur tävlingslagringen (C3-planen S4), ordnade på datum
+        // (seriesSortOrder har aldrig funnits på dokumenttypen). Noden bara för adressen.
+        var allSeriesCompetitions = Competitions.ListBySeries(seriesContent.Id)
+                                                .OrderBy(x => x.CompetitionDate ?? DateTime.MinValue)
+                                                .ThenBy(x => x.SortOrder)
+                                                .ToList();
+        var currentIndex = allSeriesCompetitions.FindIndex(x => x.Id == Model.Id);
+        var roundNumber = currentIndex + 1;
+        var totalRounds = allSeriesCompetitions.Count();
+        var previousCompetition = currentIndex > 0 ? allSeriesCompetitions[currentIndex - 1] : null;
+        var nextCompetition = currentIndex < allSeriesCompetitions.Count - 1 ? allSeriesCompetitions[currentIndex + 1] : null;
+
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card border-primary">
+                    <div class="card-header bg-primary text-white">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <div class="d-flex align-items-center">
+                                    @if (seriesLogo != null)
+                                    {
+                                        <img src="@seriesLogo.Url()" alt="@seriesName Logo" class="me-3" style="max-height: 40px; max-width: 60px;">
+                                    }
+                                    <div>
+                                        <h5 class="mb-1">🏆 @seriesName</h5>
+                                        <small class="opacity-75">Omgång @roundNumber av @totalRounds</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <a href="@seriesContent.Url()" class="btn btn-light btn-sm">
+                                    <i class="bi bi-list"></i> Visa serie
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    @if (previousCompetition != null || nextCompetition != null)
+                    {
+                        <div class="card-footer bg-light">
+                            <div class="row align-items-center">
+                                <div class="col-6 col-md-4">
+                                    @if (previousCompetition != null)
+                                    {
+                                        <a href="@CompLinks.Url(previousCompetition.Id)" class="btn btn-outline-secondary btn-sm">
+                                            <i class="bi bi-chevron-left"></i> Föregående
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small">Visar första tävlingen i serien</span>
+                                    }
+                                </div>
+                                <div class="d-none d-md-block col-md-4 text-center">
+                                    <small class="text-muted">@seriesName navigering</small>
+                                </div>
+                                <div class="col-6 col-md-4 text-end">
+                                    @if (nextCompetition != null)
+                                    {
+                                        <a href="@CompLinks.Url(nextCompetition.Id)" class="btn btn-outline-secondary btn-sm">
+                                            Nästa <i class="bi bi-chevron-right"></i>
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small">Visar sista tävlingen i serien</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="row">
+        <div class="col-lg-8">
+			<div class="card mb-4">
+			<div class="card-header">
+			<div class="d-flex justify-content-between align-items-center">
+			<h2 class="card-title h4 mb-0">@competitionName</h2>
+			<div class="d-flex gap-2 align-items-center">
+			@* ======================================== EXTERNAL COMPETITION BUTTONS ======================================== *@
+			@if (isExternal)
+			{
+				@* External competition - show external link and email button *@
+				@if (!string.IsNullOrEmpty(externalUrl))
+				{
+					<a href="@externalUrl" target="_blank" class="btn btn-info">
+						<i class="bi bi-box-arrow-up-right"></i> Gå till tävlingssida
+					</a>
+				}
+
+				@if (!string.IsNullOrEmpty(externalRegistrationEmail) && isActive && now >= registrationOpenDate && now <= registrationCloseDate)
+				{
+					<a href="mailto:@externalRegistrationEmail?subject=Anmälan till @Uri.EscapeDataString(competitionName)"
+					   class="btn btn-outline-info">
+						<i class="bi bi-envelope"></i> Anmäl via e-post
+					</a>
+				}
+			}
+			@* ======================================== INTERNAL COMPETITION BUTTONS ======================================== *@
+			else
+			{
+				@* Registration and Rapportera resultat buttons live in the "Anmälan" card in the right column *@
+
+				@* Management button (admin/competition manager only) - Bulls eye icon only *@
+				@if (canManageCompetition)
+				{
+				<a href="/competitionmanagement?competitionId=@Model.Id" class="btn btn-outline-secondary" title="Administrera tävling">
+				<i class="bi bi-bullseye me-1"></i>Administrera tävling
+				</a>
+				}
+			}
+			</div>
+			</div>
+			@if (linkedEvent != null && !string.IsNullOrEmpty(linkedEvent.Url))
+			{
+				<a href="@linkedEvent.Url" id="competitionEventLink" class="d-inline-flex align-items-center gap-1 small mt-2">
+					<i class="bi bi-info-circle"></i> Mer om @linkedEvent.DisplayName <i class="bi bi-arrow-right"></i>
+				</a>
+			}
+			</div>
+				<div class="card-body">
+					<div class="row">
+						<div class="col-md-6">
+							<p><strong>Datum & Plats:</strong></p>
+							<ul class="list-unstyled">
+								<li>
+									@dateIcon
+									@if (isMultiDay)
+									{
+										<strong>@competitionDate.ToString("dddd, d MMMM", CultureInfo.GetCultureInfo("sv-SE"))@(competitionDate.TimeOfDay != TimeSpan.Zero ? ", kl " + competitionDate.ToString("HH:mm") : "") - @competitionEndDate!.Value.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>
+										<small class="text-muted">@durationInfo</small>
+									}
+									else
+									{
+										<strong>@competitionDate.ToString("dddd, d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))@(competitionDate.TimeOfDay != TimeSpan.Zero ? ", kl " + competitionDate.ToString("HH:mm") : "")</strong>
+										<small class="text-muted">@durationInfo</small>
+									}
+								</li>
+								<li><i class="bi bi-geo-alt"></i> @venue</li>
+							</ul>
+
+							@if (currentMember != null)
+							{
+								<link rel="stylesheet" href="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.css" />
+								<script src="https://unpkg.com/leaflet@@1.9.4/dist/leaflet.js"></script>
+								<div id="compRangeBlock" class="mb-3" style="display:none">
+									<p class="mb-1"><strong>Skjutbana:</strong></p>
+									<div id="compRangeName" class="mb-1"></div>
+									<div id="compRangeMap" style="height:220px;border-radius:.5rem;border:1px solid var(--bs-border-color);display:none"></div>
+									<a id="compRangeDir" href="#" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-2" style="display:none"><i class="bi bi-signpost-2 me-1"></i>Vägbeskrivning</a>
+									<a id="compRangePage" href="#" class="btn btn-sm btn-outline-secondary mt-2" style="display:none"><i class="bi bi-bullseye me-1"></i>Om banan</a>
+								</div>
+								<script src="~/js/range-map.js" asp-append-version="true"></script>
+								<script>
+								(function () {
+									const compId = @Model.Id;
+									const esc = s => (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+									(async function () {
+										try {
+											const d = await (await fetch('/umbraco/surface/ShootingRange/GetRangeForCompetition?competitionId=' + compId)).json();
+											if (!d.success || !d.hasRange) return;
+											const r = d.range;
+											document.getElementById('compRangeBlock').style.display = '';
+											// Samma karta som banans egen sida och klubbens flik Banor (range-map.js) — ingen egen kopia.
+											const addr = hpskRangeMap.addressText(r);
+											document.getElementById('compRangeName').innerHTML =
+												`<i class="bi bi-geo-alt-fill"></i> <strong>${esc(r.name)}</strong>` + (addr ? `<br><span class="text-muted small ms-3">${esc(addr)}</span>` : '');
+											if (r.id) {
+												const page = document.getElementById('compRangePage');
+												page.href = '/skjutbana/' + encodeURIComponent(r.id);
+												page.style.display = '';
+											}
+											if (hpskRangeMap.hasPos(r)) {
+												const el = document.getElementById('compRangeMap');
+												el.style.display = '';
+												hpskRangeMap.render(el, r);
+												const dir = document.getElementById('compRangeDir');
+												dir.href = hpskRangeMap.directionsUrl(r);
+												dir.style.display = '';
+											}
+										} catch (e) { }
+									})();
+								})();
+								</script>
+							}
+
+							@if (isSpringskytte)
+							{
+								<p><strong>Klasser:</strong></p>
+								if (springClassIds.Any())
+								{
+									<div class="mb-2 d-flex flex-wrap gap-1">
+										@foreach (var cls in springClassIds)
+										{
+											<span class="badge bg-primary">@SpringskytteClasses.FormatWithAgeSpan(cls)</span>
+										}
+									</div>
+								}
+								else
+								{
+									<div class="alert alert-warning mb-2">
+										<i class="bi bi-exclamation-triangle"></i> Inga klasser har angivits för denna tävling.
+									</div>
+								}
+							}
+							else
+							{
+								<p><strong>Skjutklasser:</strong></p>
+								@if (hasShootingClasses)
+								{
+									<div class="mb-2">
+										@foreach (var shootingClass in competitionShootingClasses)
+										{
+											<span class="badge bg-primary me-2"
+												  data-bs-toggle="tooltip"
+												  data-bs-placement="top"
+												  title="@shootingClass.Description">@shootingClass.Name</span>
+										}
+									</div>
+								}
+								else
+								{
+									<div class="alert alert-warning mb-2">
+										<i class="bi bi-exclamation-triangle"></i> Inga skytteklasser har angivits för denna tävling.
+									</div>
+								}
+							}
+						</div>
+						<div class="col-md-6">
+							<p><strong>Anmälningsdetaljer:</strong></p>
+							<ul class="list-unstyled">
+								@if (!isExternal)
+								{
+									@if (isFaltskytte)
+									{
+										@if (rsConfig != null)
+										{
+											<li><i class="bi bi-arrow-repeat"></i> <strong>Rullande start</strong> — anmälan på plats</li>
+										}
+										else
+										{
+											<li><i class="bi bi-pencil-square"></i> Föranmälan krävs</li>
+										}
+									}
+									<li><i class="bi bi-currency-dollar"></i> Avgift: <strong>@registrationFee kr</strong> <small class="text-muted">per anmäld klass</small></li>
+										@* En junioravgift satt till 0 betyder gratis, inte "ej ifylld" — samma
+										   skillnad RegistrationFeeCalculator gör. Visas den bara när den är
+										   > 0 syns aldrig det billigaste beskedet sidan har att ge. *@
+										@if (juniorRegistrationFeeHasValue && juniorRegistrationFeeVal > 0)
+										{
+											<li class="ms-4"><i class="bi bi-person-arms-up"></i> Junioravgift: <strong>@juniorRegistrationFeeStr kr</strong> <small class="text-muted">per anmäld juniorklass</small></li>
+										}
+										else if (juniorRegistrationFeeHasValue && registrationFeeVal > 0)
+										{
+											<li class="ms-4"><i class="bi bi-person-arms-up"></i> Junioravgift: <strong>gratis</strong> <small class="text-muted">juniorklasser är avgiftsfria</small></li>
+										}
+										@if (subCompetitionFeeVal > 0)
+										{
+											var subCompModeLabel = subCompetitionFeeIsPerRegistration ? "en gång per anmälan" : "per anmäld klass";
+											var subCompLabelSuffix = string.IsNullOrEmpty(subCompetitionNameRaw) ? "Deltävling" : subCompetitionNameRaw;
+											<li class="ms-4"><i class="bi bi-plus-circle"></i> Deltävlingsavgift (@subCompLabelSuffix): <strong>@subCompetitionFeeStr kr</strong> <small class="text-muted">@subCompModeLabel</small></li>
+										}
+										@if (allowTeams && teamRegistrationFeeVal > 0)
+										{
+											<li class="ms-4"><i class="bi bi-people"></i> Lagavgift: <strong>@teamRegistrationFeeStr kr</strong> <small class="text-muted">per lag</small></li>
+										}
+										@if (allowStafett && stafettRegistrationFeeVal > 0)
+										{
+											<li class="ms-4"><i class="bi bi-flag"></i> Stafettavgift: <strong>@stafettRegistrationFeeStr kr</strong> <small class="text-muted">per lag</small></li>
+										}
+								}
+								<li><i class="bi bi-calendar-check"></i> Öppnar: @registrationOpenDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</li>
+								<li><i class="bi bi-calendar-x"></i> Stänger: @registrationCloseDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</li>
+							</ul>
+
+							<p><strong>Tävlingsinformation:</strong></p>
+							<ul class="list-unstyled">
+								<li><i class="bi bi-trophy"></i> Tävlingstyp: <strong>@competitionTypeName</strong></li>
+								@if (!isSpringskytte)
+								{
+									@* Fältskytte/MagnumFält räknar STATIONER, inte serier — samma property
+									   (numberOfSeriesOrStations) bär båda, så bara ordet skiljer. Fältskytte har
+									   heller ingen final, så grundomgång + final-uppdelningen gäller bara serier. *@
+									<li><i class="bi bi-list-ol"></i> @(isFaltskytte ? "Antal stationer" : "Antal serier"): <strong>@(!isFaltskytte && numberOfFinalSeries > 0 ? $"{numberOfSeriesOrStations - numberOfFinalSeries} + {numberOfFinalSeries}" : $"{numberOfSeriesOrStations}")</strong></li>
+								}
+								@if (!isExternal)
+								{
+									<li><i class="bi bi-broadcast@(showLiveResults ? "" : "-off")"></i> Live-resultat: <strong>@(showLiveResults ? "Ja" : "Nej")</strong></li>
+								}
+							</ul>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			@* Beskrivning Card *@
+			@if (!string.IsNullOrWhiteSpace(description))
+			{
+				<div class="card mb-4">
+					<div class="card-header">
+						<h3 class="card-title h5 mb-0"><i class="bi bi-text-paragraph me-2"></i>Beskrivning</h3>
+					</div>
+					<div class="card-body">
+						@* Collapsed preview (first sentence) + full description, toggled by JS.
+						   Full HTML is injected via innerHTML so any unclosed RTE tags auto-close
+						   within the target element instead of breaking the surrounding DOM. *@
+						<div id="competitionDescriptionPreview" class="prose mb-0"></div>
+						<div id="competitionDescriptionFull" class="prose mb-0" style="display:none;"></div>
+						<a href="#" id="competitionDescriptionToggle" class="d-inline-block mt-2" style="display:none;">Visa mer</a>
+					</div>
+				</div>
+				<script>
+					(function () {
+						var fullHtml = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(System.Net.WebUtility.HtmlDecode(description)));
+						var previewEl = document.getElementById('competitionDescriptionPreview');
+						var fullEl = document.getElementById('competitionDescriptionFull');
+						var toggleEl = document.getElementById('competitionDescriptionToggle');
+
+						// Render full HTML into its container (isolates any unclosed tags).
+						fullEl.innerHTML = fullHtml;
+
+						// Find the first sentence from the plain text.
+						var text = (fullEl.textContent || '').replace(/\s+/g, ' ').trim();
+						var match = text.match(/^.*?[.!?](?=\s|$)/);
+						var firstSentence = match ? match[0].trim() : text;
+
+						// Only collapse when there is meaningfully more than the first sentence.
+						if (firstSentence && firstSentence.length < text.length - 1) {
+							previewEl.textContent = firstSentence;
+							previewEl.style.display = '';
+							toggleEl.style.display = '';
+
+							toggleEl.addEventListener('click', function (e) {
+								e.preventDefault();
+								var expanded = fullEl.style.display !== 'none';
+								if (expanded) {
+									fullEl.style.display = 'none';
+									previewEl.style.display = '';
+									toggleEl.textContent = 'Visa mer';
+								} else {
+									fullEl.style.display = '';
+									previewEl.style.display = 'none';
+									toggleEl.textContent = 'Visa mindre';
+								}
+							});
+						} else {
+							// Short description - just show it in full.
+							fullEl.style.display = '';
+						}
+					})();
+				</script>
+			}
+
+			@if (hasInvitation || hasResultList)
+			{
+				<style>
+					.collapse-chevron { transition: transform .2s ease; }
+					.btn-link.collapsed .collapse-chevron { transform: rotate(-90deg); }
+				</style>
+			}
+
+			@* ======================================== Invitation File Display (Both Internal & External) ======================================== *@
+			@if (hasInvitation && invitationFile != null)
+			{
+				var invitationOpen = !competitionIsPast;
+				<div class="card mb-4">
+					<div class="card-header p-0" style="background-color: var(--bs-tertiary-bg);">
+						<button class="btn btn-link w-100 text-start d-flex align-items-center justify-content-between text-decoration-none p-3 @(invitationOpen ? "" : "collapsed")"
+								type="button"
+								data-bs-toggle="collapse"
+								data-bs-target="#invitationCollapse"
+								aria-expanded="@(invitationOpen ? "true" : "false")"
+								aria-controls="invitationCollapse"
+								style="color: inherit;">
+							<span class="h5 mb-0">
+								<i class="bi bi-file-earmark-pdf me-2"></i>Inbjudan
+								@if (isExternal)
+								{
+									<span class="badge bg-info ms-2">Extern tävling</span>
+								}
+							</span>
+							<i class="bi bi-chevron-down collapse-chevron"></i>
+						</button>
+					</div>
+					<div id="invitationCollapse" class="collapse @(invitationOpen ? "show" : "")">
+						<div class="card-body">
+							<div class="mb-3">
+								<a href="@invitationFile.Url()" class="btn btn-primary" target="_blank" download>
+									<i class="bi bi-download me-1"></i>Ladda ner inbjudan
+								</a>
+								<small class="text-muted ms-2">@invitationFile.Name</small>
+							</div>
+							@if (invitationFile.Url().EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+							{
+								<div class="ratio ratio-4x3" style="min-height: 600px;">
+									<iframe src="@invitationFile.Url()"
+											frameborder="0"
+											style="border: 1px solid #ddd; border-radius: 4px;"
+											title="Tävlingsinbjudan">
+									</iframe>
+								</div>
+								<p class="text-muted small mt-2">
+									<i class="bi bi-info-circle"></i> PDF-förhandsgranskning. Om den inte visas korrekt, ladda ner filen ovan.
+								</p>
+							}
+							else
+							{
+								<div class="alert alert-info">
+									<i class="bi bi-file-earmark-word me-1"></i>
+									Dokumentet är inte en PDF-fil och kan inte förhandsgranskas. Klicka på "Ladda ner inbjudan" ovan.
+								</div>
+							}
+						</div>
+					</div>
+				</div>
+			}
+
+			@* ======================================== Result List File Display (External only) ======================================== *@
+			@if (hasResultList && resultListFile != null)
+			{
+				var resultListOpen = competitionIsPast;
+				<div class="card mb-4" id="resultatCard">
+					<div class="card-header p-0" style="background-color: var(--bs-tertiary-bg);">
+						<button class="btn btn-link w-100 text-start d-flex align-items-center justify-content-between text-decoration-none p-3 @(resultListOpen ? "" : "collapsed")"
+								type="button"
+								data-bs-toggle="collapse"
+								data-bs-target="#resultListCollapse"
+								aria-expanded="@(resultListOpen ? "true" : "false")"
+								aria-controls="resultListCollapse"
+								style="color: inherit;">
+							<span class="h5 mb-0">
+								<i class="bi bi-file-earmark-bar-graph me-2"></i>Resultatlista
+								@if (isExternal)
+								{
+									<span class="badge bg-info ms-2">Extern tävling</span>
+								}
+							</span>
+							<i class="bi bi-chevron-down collapse-chevron"></i>
+						</button>
+					</div>
+					<div id="resultListCollapse" class="collapse @(resultListOpen ? "show" : "")">
+						<div class="card-body">
+							<div class="mb-3">
+								<a href="@resultListFile.Url()" class="btn btn-primary" target="_blank" download>
+									<i class="bi bi-download me-1"></i>Ladda ner resultatlista
+								</a>
+								<small class="text-muted ms-2">@resultListFile.Name</small>
+							</div>
+							@if (resultListFile.Url().EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+							{
+								<div class="ratio ratio-4x3" style="min-height: 600px;">
+									<iframe src="@resultListFile.Url()"
+											frameborder="0"
+											style="border: 1px solid #ddd; border-radius: 4px;"
+											title="Resultatlista">
+									</iframe>
+								</div>
+								<p class="text-muted small mt-2">
+									<i class="bi bi-info-circle"></i> PDF-förhandsgranskning. Om den inte visas korrekt, ladda ner filen ovan.
+								</p>
+							}
+							else
+							{
+								<div class="alert alert-info">
+									<i class="bi bi-file-earmark-word me-1"></i>
+									Dokumentet är inte en PDF-fil och kan inte förhandsgranskas. Klicka på "Ladda ner resultatlista" ovan.
+								</div>
+							}
+						</div>
+					</div>
+				</div>
+				<script>
+					(function () {
+						function openResultList() {
+							var el = document.getElementById('resultListCollapse');
+							if (!el) return;
+							var inst = bootstrap.Collapse.getOrCreateInstance(el, { toggle: false });
+							inst.show();
+							var card = document.getElementById('resultatCard');
+							if (card && card.scrollIntoView) {
+								card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+							}
+						}
+						if (window.location.hash === '#resultat') {
+							document.addEventListener('DOMContentLoaded', openResultList);
+							if (document.readyState !== 'loading') openResultList();
+						}
+						window.addEventListener('hashchange', function () {
+							if (window.location.hash === '#resultat') openResultList();
+						});
+					})();
+				</script>
+			}
+
+		</div>
+
+		@* ======================================== INTERNAL COMPETITION ONLY: Information Sidebar ======================================== *@
+		@if (!isExternal)
+		{
+			<div class="col-lg-4">
+				@* ======================================== Anmälan Card ======================================== *@
+				<div class="card mb-4">
+					<div class="card-header">
+						<h5 class="mb-0"><i class="bi bi-person-plus me-2"></i>Anmälan</h5>
+					</div>
+					<div class="card-body">
+						@{
+							var regClosed = now > registrationCloseDate;
+							var regNotYetOpen = now < registrationOpenDate;
+							var regOpen = !regClosed && !regNotYetOpen;
+							var canRegister = isActive && regOpen && (hasShootingClasses || isSpringskytte) && !startListClosesRegistration;
+						}
+
+						@*
+							Förklaringen ligger FÖRE if/else-kedjan, inte inuti en gren, så den syns
+							både när startlistan stängde anmälan och när sista anmälningsdag redan
+							hade passerat — annars hade texten behövt dupliceras i två grenar och den
+							ena hunnit glida.
+
+							⚠️ Den säger vad skytten KAN göra, inte bara att något är stängt. En
+							släckt knapp utan skäl får folk att antingen mejla och undra eller låta
+							bli att komma; det enda de behöver lära sig är att det går att dyka upp.
+						*@
+						@if (startListGateActive && canManageCompetition)
+						{
+							@* Funktionären ser knappen kvar — men måste få veta att skyttarna inte gör
+							   det, annars läser hen sidan som att grinden inte slog till. *@
+							<div class="alert alert-warning small py-2 mb-3">
+								<i class="bi bi-shield-lock me-1"></i>
+								Självanmälan är stängd för skyttarna eftersom startlistan är publicerad.
+								Du ser knappen som funktionär. För en efteranmäld: använd
+								<strong>Anmälningar → Åtgärder → Anmäl och betala</strong>, som också skapar faktura
+								och placerar skytten i ett skjutlag.
+							</div>
+						}
+						@if (startListClosesRegistration)
+						{
+							<div class="alert alert-info small py-2 mb-3">
+								<i class="bi bi-list-ol me-1"></i>
+								<strong>Startlistan är publicerad</strong> — därför är självanmälan stängd.
+								<br>
+								Du kan fortfarande komma med: kontakta arrangören, eller anmäl dig på plats före start.
+								Du placeras då sist i ett skjutlag utan att någon annans startnummer ändras.
+								@if (!string.IsNullOrEmpty(contactEmail) || !string.IsNullOrEmpty(contactPhone))
+								{
+									<div class="mt-1">
+										@if (!string.IsNullOrEmpty(contactEmail))
+										{
+											<span class="d-block"><i class="bi bi-envelope me-1"></i><a href="mailto:@contactEmail">@contactEmail</a></span>
+										}
+										@if (!string.IsNullOrEmpty(contactPhone))
+										{
+											<span class="d-block"><i class="bi bi-telephone me-1"></i><a href="tel:@contactPhone">@contactPhone</a></span>
+										}
+									</div>
+								}
+							</div>
+						}
+
+						@if (regClosed)
+						{
+							<p class="text-muted small mb-2">
+								<i class="bi bi-calendar-x me-1"></i>Anmälan stängde @registrationCloseDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+							</p>
+							<button class="btn btn-success w-100" disabled>
+								<i class="bi bi-person-plus me-1"></i>Anmäl
+							</button>
+							@if (allowTeams)
+							{
+								<button class="btn btn-success w-100 mt-2" disabled>
+									<i class="bi bi-people-fill me-1"></i>Anmäl lag
+								</button>
+							}
+							@if (allowStafett)
+							{
+								<button class="btn btn-success w-100 mt-2" disabled>
+									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
+								</button>
+							}
+						}
+						else if (regNotYetOpen)
+						{
+							<p class="text-muted small mb-2">
+								<i class="bi bi-clock me-1"></i>Anmälan öppnar @registrationOpenDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+							</p>
+							<button class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#registrationNotOpenModal">
+								<i class="bi bi-person-plus me-1"></i>Anmäl
+							</button>
+							@if (allowTeams)
+							{
+								<button class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#registrationNotOpenModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl lag
+								</button>
+							}
+							@if (allowStafett)
+							{
+								<button class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#registrationNotOpenModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
+								</button>
+							}
+						}
+						else if (startListClosesRegistration && regOpen && isActive)
+						{
+							@*
+								Anmälningsfönstret är öppet — det är startlistan som stänger. Bara
+								den individuella anmälan spärras: ett lag ligger inte i den
+								individuella startlistan och har sin egen frist, så att stänga det
+								här vore att lösa ett problem laget inte har.
+							*@
+							<button class="btn btn-success w-100" disabled>
+								<i class="bi bi-person-plus me-1"></i>Anmäl
+							</button>
+							@if (allowTeams)
+							{
+								<button type="button" class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#teamRegistrationModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl lag
+								</button>
+							}
+							@if (allowStafett)
+							{
+								<button type="button" class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#stafettRegistrationModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
+								</button>
+							}
+						}
+						else if (canRegister)
+						{
+							<p class="text-muted small mb-2">
+								<i class="bi bi-calendar-check me-1"></i>Sista anmälningsdag: @registrationCloseDate.ToString("d MMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))
+							</p>
+							<button type="button" class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#registrationModal">
+								<i class="bi bi-person-plus me-1"></i>Anmäl
+							</button>
+							@if (allowTeams)
+							{
+								<button type="button" class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#teamRegistrationModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl lag
+								</button>
+							}
+							@if (allowStafett)
+							{
+								<button type="button" class="btn btn-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#stafettRegistrationModal">
+									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
+								</button>
+							}
+						}
+						else
+						{
+							@* Not active or no shooting classes configured *@
+							<p class="text-muted small mb-2">
+								<i class="bi bi-info-circle me-1"></i>Anmälan är inte tillgänglig just nu.
+							</p>
+							<button class="btn btn-success w-100" disabled>
+								<i class="bi bi-person-plus me-1"></i>Anmäl
+							</button>
+							@if (allowTeams)
+							{
+								<button class="btn btn-success w-100 mt-2" disabled>
+									<i class="bi bi-people-fill me-1"></i>Anmäl lag
+								</button>
+							}
+							@if (allowStafett)
+							{
+								<button class="btn btn-success w-100 mt-2" disabled>
+									<i class="bi bi-people-fill me-1"></i>Anmäl stafettlag
+								</button>
+							}
+						}
+						@* Distributed result reporting button (always full-width so it stays readable on mobile) *@
+						@if (canReportDistributedResults)
+						{
+							<button type="button" class="btn btn-outline-success w-100 mt-2" data-bs-toggle="modal" data-bs-target="#distributedResultModal">
+								<i class="bi bi-pencil-square me-1"></i>Rapportera resultat
+							</button>
+						}
+
+						@* Unpaid invoices button — shown/hidden by JS *@
+						<div id="unpaidInvoicesButtonContainer" style="display:none;" class="mt-2">
+							<button type="button" class="btn btn-warning w-100" data-bs-toggle="modal" data-bs-target="#unpaidInvoicesModal">
+								<i class="bi bi-wallet2 me-1"></i>Betala anmälningsavgift
+							</button>
+						</div>
+					</div>
+				</div>
+
+
+
+				@* ======================================== Registration Not Open Modal ======================================== *@
+				<div class="modal fade" id="registrationNotOpenModal" tabindex="-1" aria-labelledby="registrationNotOpenModalLabel" aria-hidden="true">
+					<div class="modal-dialog modal-dialog-centered">
+						<div class="modal-content">
+							<div class="modal-header">
+								<h5 class="modal-title" id="registrationNotOpenModalLabel">
+									<i class="bi bi-clock me-2"></i>Anmälan har inte öppnat
+								</h5>
+								<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+							</div>
+							<div class="modal-body">
+								<p>Anmälan till <strong>@competitionName</strong> har inte öppnat ännu.</p>
+								<p>Anmälan öppnar <strong>@registrationOpenDate.ToString("dddd d MMMM yyyy", CultureInfo.GetCultureInfo("sv-SE"))</strong>.</p>
+								<p class="text-muted small mb-0">Kom tillbaka efter detta datum för att anmäla dig.</p>
+							</div>
+							<div class="modal-footer">
+								<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				@* Notiser card — between Anmälan and Information. The card itself (opt-in prompt,
+				   message feed, unread handling) lives in _ParticipantNotices so the competition page and
+				   /mitt-schema?c= cannot drift apart. *@
+				@if (currentMember != null)
+				{
+					@* mb-4 matches every other card in this column; the Information card below it sets no
+					   top margin of its own, so without this the two cards sit flush against each other. *@
+					@await Html.PartialAsync("_ParticipantNotices", Model, new ViewDataDictionary(ViewData) { { "CompetitionId", Model.Id }, { "NoticesCardClass", "information-sidebar mb-4" } })
+				}
+
+				<div class="card information-sidebar">
+					<div class="card-header">
+						<h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Information</h5>
+					</div>
+					<div class="card-body">
+					@{
+						// Calculate days remaining
+						var daysRemaining = (competitionDate.Date - now.Date).Days;
+						string daysText;
+						string daysBadgeClass;
+
+						if (daysRemaining < 0)
+						{
+							daysText = $"{Math.Abs(daysRemaining)} dagar sedan";
+							daysBadgeClass = "bg-secondary";
+						}
+						else if (daysRemaining == 0)
+						{
+							daysText = "Idag!";
+							daysBadgeClass = "bg-success";
+						}
+						else if (daysRemaining == 1)
+						{
+							daysText = "Imorgon";
+							daysBadgeClass = "bg-warning";
+						}
+						else if (daysRemaining <= 7)
+						{
+							daysText = $"{daysRemaining} dagar";
+							daysBadgeClass = "bg-warning";
+						}
+						else
+						{
+							daysText = $"{daysRemaining} dagar";
+							daysBadgeClass = "bg-danger";
+						}
+
+						// Calculate "Senast uppdaterad" from Model.UpdateDate
+						var updateDate = HpskSite.Services.Hosting.UmbracoTime.Local(Model.UpdateDate);
+						var timeSinceUpdate = DateTime.Now - updateDate;
+						string updateText;
+						if (timeSinceUpdate.TotalMinutes < 1)
+						{
+							updateText = "Just nu";
+						}
+						else if (timeSinceUpdate.TotalHours < 1)
+						{
+							updateText = $"{(int)timeSinceUpdate.TotalMinutes} minuter sedan";
+						}
+						else if (timeSinceUpdate.TotalHours < 24)
+						{
+							updateText = $"{(int)timeSinceUpdate.TotalHours} timmar sedan";
+						}
+						else
+						{
+							updateText = updateDate.ToString("yyyy-MM-dd HH:mm");
+						}
+
+						// Button visibility logic
+						var showStartListPending = now <= registrationCloseDate;
+						var competitionCompleted = now.Date > competitionDate.Date;
+						var competitionOngoing = now.Date == competitionDate.Date || (now > registrationCloseDate && now.Date <= competitionDate.Date);
+						var showResultsPending = now.Date < competitionDate.Date;
+					}
+
+					<!-- Antal skyttar -->
+					<div class="mb-3">
+						<div class="d-flex justify-content-between align-items-center">
+							<span><i class="bi bi-people me-1 text-primary"></i> Antal skyttar:</span>
+							<span class="badge bg-primary">@uniqueShooterCount</span>
+						</div>
+					</div>
+
+					<!-- Antal starter -->
+					<div class="mb-3">
+						<div class="d-flex justify-content-between align-items-center">
+							<span><i class="bi bi-flag me-1 text-info"></i> Antal starter:</span>
+							<span class="badge bg-info">@totalStartsCount</span>
+						</div>
+					</div>
+
+					<!-- Dagar till tävling -->
+					<div class="mb-3">
+						<div class="d-flex justify-content-between align-items-center">
+							<span><i class="bi bi-calendar-event me-1 text-danger"></i> Dagar till tävling:</span>
+							<span class="badge @daysBadgeClass">@daysText</span>
+						</div>
+					</div>
+
+					<!-- Senast uppdaterad -->
+					<div class="mb-3">
+						<div class="d-flex justify-content-between align-items-center">
+							<span><i class="bi bi-clock-history me-1 text-secondary"></i> Senast uppdaterad:</span>
+							<span class="badge bg-secondary">@updateText</span>
+						</div>
+					</div>
+
+					<hr>
+
+					@if (!isExternal)
+					{
+						<!-- Registered Shooters Button -->
+						<div class="mb-2">
+							<button type="button" class="btn btn-outline-primary w-100" onclick="openRegisteredShootersModal()">
+								<i class="bi bi-people-fill me-1"></i> Visa anmälda skyttar
+							</button>
+						</div>
+
+						<!-- Start List Section -->
+						<div class="mb-2">
+							@if (isFaltskytte)
+							{
+								@* Patrullista opens its own public page (clubhouse screen) — mirrors "Visa resultat".
+								   Shown once the organiser publishes the patrols; no login (a clubhouse screen isn't logged in). *@
+								@if (compPost.FaltskyttePatrolsPublished)
+								{
+									<a href="/patrullista/@Model.Id" class="btn btn-info w-100" target="_blank" rel="noopener">
+										<i class="bi bi-people me-1"></i> Visa patrullista
+									</a>
+								}
+								else
+								{
+									<p class="text-muted small mb-0">
+										<i class="bi bi-hourglass-split me-1"></i> Patrullista har inte publicerats än.
+									</p>
+								}
+							}
+							else if (isSpringskytte)
+							{
+								@* Springskytte can have several start lists (per weapon group / day). One button
+								   opens the /startlista/{id} hub that lists them all, instead of one button each. *@
+								var springStartLists = publishedStartLists
+									.Where(r => r.Kind == HpskSite.Models.StartLists.StartListKind.Qualifying)
+									.ToList();
+								if (springStartLists.Any())
+								{
+									<a href="/startlista/@Model.Id" class="btn btn-info w-100" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('startlistan'); }">
+										<i class="bi bi-list-ol me-1"></i> @(springStartLists.Count > 1 ? "Visa startlistor" : "Visa startlista")
+									</a>
+								}
+								else
+								{
+									<p class="text-muted small mb-0">
+										<i class="bi bi-hourglass-split me-1"></i> Startlista har inte publicerats än.
+									</p>
+								}
+							}
+							else if (hasOfficialStartList)
+							{
+								<a href="@startListPageUrl" class="btn btn-info w-100" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('startlistan'); }">
+									<i class="bi bi-list-ol me-1"></i> Visa startlista
+								</a>
+							}
+							else
+							{
+								<p class="text-muted small mb-0">
+									<i class="bi bi-hourglass-split me-1"></i> Startlista har inte publicerats än.
+								</p>
+							}
+
+							@*
+								En knapp per publicerad finalstartlista — en per vapengrupp. Gruppen står i
+								etiketten när det finns fler än en; med bara en lista skär vi bort gruppnamnet,
+								eftersom "Visa finalsstartlista C" på en tävling med bara C-final är brus.
+							*@
+							@foreach (var fsl in officialFinalsStartLists)
+							{
+								var fslLabel = officialFinalsStartLists.Count > 1 && fsl.Group.Length > 0
+									? $"Visa finalsstartlista – {fsl.Group}"
+									: "Visa finalsstartlista";
+								<a href="@fsl.Url" class="btn btn-warning w-100 mt-2" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('finalsstartlistan'); }">
+									<i class="bi bi-trophy me-1"></i> @fslLabel
+								</a>
+							}
+
+							@*
+								The member's own times, in context — a link, not a card. This is what keeps a
+								competition further out than the home card's window from being a dead end: the
+								full itinerary (shooting + funktionärsuppdrag + dagsprogram, with print and
+								.ics) lives on /mitt-schema. Only rendered when they actually have something
+								here, so it never shows an empty promise.
+							*@
+							@if (showMyScheduleLink)
+							{
+								<a href="/mitt-schema?c=@Model.Id" class="btn btn-outline-primary w-100 mt-2">
+									<i class="bi bi-calendar2-week me-1"></i> Ditt schema
+									@if (mySchedule!.IsToday)
+									{
+										<span class="badge bg-primary ms-1">Idag</span>
+									}
+									@if (mySchedule.ConflictCount > 0)
+									{
+										@* Spelled out: a bare "⚠ 2" on a button next to neutral "Visa …" buttons reads as
+										   a count of nothing in particular. The word is what makes it actionable. *@
+										<span class="badge bg-warning text-dark ms-1" title="Två saker ligger på samma tid — hör av dig till tävlingsledningen">
+											<i class="bi bi-exclamation-triangle"></i>
+											@mySchedule.ConflictCount krock@(mySchedule.ConflictCount == 1 ? "" : "ar")
+										</span>
+									}
+								</a>
+							}
+						</div>
+
+						<!-- Results Section -->
+						<div class="mt-2">
+							@if (hasResultPage && isResultsOfficial)
+							{
+								<a href="@resultsUrl" class="btn btn-warning w-100" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('resultatlistan'); }">
+									<i class="bi bi-trophy me-1"></i> Visa resultat
+								</a>
+
+								@if (showLiveResults)
+								{
+									<a class="btn btn-outline-secondary w-100 mt-2" href="/live?c=@Model.Id" target="_blank" rel="noopener"><i class="bi bi-tv me-1"></i> Visa Live resultat</a>
+								}
+							}
+							else if (showLiveResults)
+							{
+								@* Live-resultat kräver INGEN competitionResult-nod — tavlan räknar rakt ur
+								   resultattabellen (GetResultsList's node-free branch, grindad på
+								   showLiveResults). Enda frågan är om något resultat är inmatat, och det
+								   frågar JS:en nedan databasen om var 30:e sekund. Länken dyker upp så snart
+								   första serien finns, utan omladdning.
+
+								   ⚠️ Grinden var tidigare `hasResultPage` — att NODEN finns. Det var samma
+								   fel som 404:an i admins Resultat-flik, fast åt andra hållet: en nod är
+								   inget bevis på att det finns resultat. Sedan noden skapas ivrigt för alla
+								   grenar (2026-09-07) hade den grinden lovat en tom live-tavla på varje ny
+								   tävling med live-resultat påslaget. Frågan databasen, inte innehållsträdet. *@
+								<div id="liveResultsCheck">
+									<p class="text-muted small mb-0" id="noResultsText">
+										<i class="bi bi-hourglass-split me-1"></i> Live-resultat visas så snart det första resultatet är inmatat.
+									</p>
+								</div>
+							}
+							else
+							{
+								<p class="text-muted small mb-0">
+									<i class="bi bi-hourglass-split me-1"></i> Resultat har inte publicerats än.
+								</p>
+							}
+							@if (hasResultPage && hasSubCompetition && isSubResultsOfficial)
+							{
+								<a href="@subResultsUrl" class="btn btn-warning w-100 mt-2" target="_blank" onclick="if (!currentUserIsLoggedIn) { event.preventDefault(); showLoginRequiredModal('resultatlistan'); }">
+									<i class="bi bi-trophy me-1"></i> Visa @subCompetitionNameRaw resultat
+								</a>
+							}
+							@if (isSpringskytte && isStafettResultsOfficial)
+							{
+								<a href="@stafettResultsUrl" class="btn btn-warning w-100 mt-2" target="_blank" rel="noopener">
+									<i class="bi bi-people-fill me-1"></i> Visa stafettresultat
+								</a>
+							}
+						</div>
+					}
+					else
+					{
+						<!-- External Competition - Show external registration options -->
+						@if (!string.IsNullOrEmpty(externalUrl))
+						{
+							<div class="mb-2">
+								<a href="@externalUrl" target="_blank" class="btn btn-info w-100">
+									<i class="bi bi-box-arrow-up-right me-1"></i>Extern länk
+								</a>
+							</div>
+						}
+						@if (!string.IsNullOrEmpty(externalRegistrationEmail))
+						{
+							<div class="mb-2">
+								<a href="mailto:@externalRegistrationEmail?subject=Anmälan till @competitionName" class="btn btn-success w-100">
+									<i class="bi bi-envelope me-1"></i>Anmäl via mejl
+								</a>
+							</div>
+						}
+					}
+				</div>
+			</div>
+
+
+			@* Contact Information Card *@
+			<div class="card mt-4">
+				<div class="card-header">
+					<h5 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Kontaktinformation</h5>
+				</div>
+				<div class="card-body">
+					@if (!string.IsNullOrEmpty(competitionDirector))
+					{
+						<div class="mb-2">
+							<i class="bi bi-person me-1 text-primary"></i>
+							<strong>Tävlingsledare:</strong><br/>
+							<span class="ms-3">@competitionDirector</span>
+						</div>
+					}
+					@if (!string.IsNullOrEmpty(contactEmail))
+					{
+						<div class="mb-2">
+							<i class="bi bi-envelope me-1 text-primary"></i>
+							<strong>E-post:</strong><br/>
+							<span class="ms-3"><a href="mailto:@contactEmail">@contactEmail</a></span>
+						</div>
+					}
+					@if (!string.IsNullOrEmpty(contactPhone))
+					{
+						<div class="mb-2">
+							<i class="bi bi-telephone me-1 text-primary"></i>
+							<strong>Telefon:</strong><br/>
+							<span class="ms-3"><a href="tel:@contactPhone">@contactPhone</a></span>
+						</div>
+					}
+					@if (managerIds.Any())
+					{
+						<div class="mt-2">
+							<strong>Tävlingsansvariga:</strong>
+							<div class="d-flex flex-wrap gap-2 mt-1">
+								@{
+								var managerLookup = managerIds
+									.Select(id => MemberService.GetById(id))
+									.Where(m => m != null)
+									.ToList();
+							}
+							@foreach (var manager in managerLookup)
+								{
+									var managerEmail = manager.GetValue<string>("email") ?? manager.Email;
+										<div class="badge bg-primary d-flex align-items-center">
+											<i class="bi bi-person-gear me-1"></i>
+											@if (!string.IsNullOrEmpty(managerEmail))
+											{
+												<a href="mailto:@managerEmail" class="text-white text-decoration-none">@manager.Name</a>
+											}
+											else
+											{
+												<span>@manager.Name</span>
+											}
+										</div>
+								}
+							</div>
+						</div>
+					}
+				</div>
+			</div>
+			</div>
+		}
+
+	</div>
+</div>
+
+
+@* Registration Modal (hidden for external competitions) *@
+@if (!isExternal)
+{
+	@if (isSpringskytte)
+	{
+		@await Html.PartialAsync("SpringskytteRegistrationModal", new ViewDataDictionary(ViewData)
+		{
+			{ "CompetitionId", Model.Id },
+			{ "CompetitionName", competitionName },
+			{ "ShootingClassIds", shootingClassIds },
+			{ "RegRole", regRole },
+			{ "RegMemberId", regMemberId },
+			{ "RegMemberName", currentMemberName },
+			{ "RegClubId", regClubId },
+			{ "RegClubName", regClubName },
+			{ "AllClubsJson", allClubsJson },
+			{ "HasSwish", !string.IsNullOrWhiteSpace(compPost.SwishNumber) && decimal.TryParse(registrationFee, out var _springFee) && _springFee > 0 },
+			{ "RegistrationFee", decimal.TryParse(registrationFee, out var _springFeeVal) ? _springFeeVal : 0m },
+			{ "SubCompetitionName", compPost.SubCompetitionName ?? "" }
+		})
+	}
+	else
+	{
+		@await Html.PartialAsync("CompetitionRegistrationModal", new ViewDataDictionary(ViewData)
+		{
+			{ "CompetitionId", Model.Id },
+			{ "CompetitionName", competitionName },
+			{ "AClasses", aClasses },
+			{ "AOptClasses", aOptClasses },
+			{ "AMClasses", aMClasses },
+			{ "APClasses", aPClasses },
+			{ "AGClasses", aGClasses },
+			{ "BClasses", bClasses },
+			{ "CClasses", cClasses },
+			{ "CRegularClasses", cRegularClasses },
+			{ "CVetClasses", cVetClasses },
+			{ "CJuniorClasses", cJuniorClasses },
+			{ "CDamClasses", cDamClasses },
+			{ "RClasses", rClasses },
+			{ "LClasses", lClasses },
+			{ "LRegularClasses", lRegularClasses },
+			{ "LVetClasses", lVetClasses },
+			{ "LJuniorClasses", lJuniorClasses },
+			{ "LDamClasses", lDamClasses },
+			{ "MClasses", mClasses },
+			{ "AllowDualCClassRegistration", allowDualCClassRegistration }
+		})
+	}
+
+
+	@* Team Registration Modal *@
+	var teamRegFeeStr = compPost.TeamRegistrationFee ?? "0";
+	decimal.TryParse(teamRegFeeStr, out var teamRegFee);
+	var teamHasSwish = allowTeams && !string.IsNullOrWhiteSpace(compPost.SwishNumber) && teamRegFee > 0;
+	if (allowTeams)
+	{
+		@await Html.PartialAsync("CompetitionTeamRegistrationModal", new ViewDataDictionary(ViewData)
+		{
+			{ "CompetitionId", Model.Id },
+			{ "CurrentMemberClubId", regClubId ?? 0 },
+			{ "CurrentMemberClubName", regClubName },
+			{ "CurrentMemberId", regMemberId },
+			{ "RegRole", regRole },
+			{ "RegRegionCode", regRegionCode },
+			{ "ClubsWithRegionsJson", clubsWithRegionsJson },
+			{ "IsRegionalAdmin", isRegionalAdmin },
+			{ "TeamRegistrationFee", teamRegFee },
+			{ "TeamHasSwish", teamHasSwish },
+				{ "IsSpringskytte", isSpringskytte }
+		})
+	}
+
+	@* Stafett Registration Modal *@
+	var stafettRegFeeStr = compPost.StafettRegistrationFee ?? "0";
+	decimal.TryParse(stafettRegFeeStr, out var stafettRegFee);
+	var stafettHasSwish = allowStafett && !string.IsNullOrWhiteSpace(compPost.SwishNumber) && stafettRegFee > 0;
+	if (allowStafett)
+	{
+		@await Html.PartialAsync("StafettRegistrationModal", new ViewDataDictionary(ViewData)
+		{
+			{ "CompetitionId", Model.Id },
+			{ "CurrentMemberClubId", regClubId ?? 0 },
+			{ "CurrentMemberClubName", regClubName },
+			{ "CurrentMemberId", regMemberId },
+			{ "RegRole", regRole },
+			{ "RegRegionCode", regRegionCode },
+			{ "ClubsWithRegionsJson", clubsWithRegionsJson },
+			{ "IsRegionalAdmin", isRegionalAdmin },
+			{ "StafettRegistrationFee", stafettRegFee },
+			{ "StafettHasSwish", stafettHasSwish },
+				{ "IsSpringskytte", isSpringskytte }
+		})
+	}
+
+	@* Preference Modal *@
+	@await Html.PartialAsync("CompetitionPreferenceModal")
+
+	@* Update Confirmation Modal *@
+	@await Html.PartialAsync("CompetitionUpdateConfirmModal")
+
+	@* Replace Confirmation Modal *@
+	@await Html.PartialAsync("CompetitionReplaceConfirmModal")
+
+	@* Distributed Result Entry Modal *@
+	@if (canReportDistributedResults)
+	{
+		@await Html.PartialAsync("DistributedResultEntry", new ViewDataDictionary(ViewData)
+		{
+			{ "CompetitionId", Model.Id },
+			{ "CompetitionName", competitionName },
+			{ "NumberOfSeries", numberOfSeriesOrStations }
+		})
+	}
+}
+
+@* JavaScript Configuration and Script Reference *@
+@{
+    var swishNumber = compPost.SwishNumber;
+    var hasSwishNumberValue = !string.IsNullOrWhiteSpace(swishNumber);
+}
+@* DEBUG: swishNumber = "@swishNumber", hasSwishNumber = @hasSwishNumberValue *@
+@if (!isSpringskytte)
+{
+<script>
+// Configuration object for competition-registration.js
+window.CompetitionConfig = {
+    competitionId: @Model.Id,
+    allowDualCClassRegistration: @(allowDualCClassRegistration.ToString().ToLower()),
+    registrationFee: @(decimal.TryParse(registrationFee, out var _configFee) ? _configFee : 0m),
+    juniorRegistrationFee: @(decimal.TryParse(juniorRegistrationFeeStr, out var _configJuniorFee) ? _configJuniorFee : 0m),
+    subCompetitionFee: @(decimal.TryParse(subCompetitionFeeStr, out var _configSubCompFee) ? _configSubCompFee : 0m),
+    hasSwishNumber: @(hasSwishNumberValue.ToString().ToLower()),
+    registrationInfo: {
+        role: '@regRole',
+        memberId: @regMemberId,
+        memberName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(currentMemberName))',
+        email: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(regMemberEmail))',
+        clubId: @(regClubId.HasValue ? regClubId.Value.ToString() : "null"),
+        clubName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(regClubName))'
+    },
+    clubs: @Html.Raw(allClubsJson),
+    competitionType: '@competitionTypeStr',
+    rollingStart: @(rsConfig != null ? Html.Raw(rsJson) : Html.Raw("null")),
+    subCompetitionName: '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(compPost.SubCompetitionName ?? ""))',
+    isDirektplacering: @(isDirektplacering.ToString().ToLower()),
+    direktplaceringConfig: @(isDirektplacering ? Html.Raw(dpConfigJson) : Html.Raw("null"))
+};
+
+// Show success/error messages from server
+@if (TempData["Success"] != null)
+{
+    var successMsg = TempData["Success"].ToString();
+    var jsEncodedMsg = System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(successMsg);
+    <text>
+    showNotification('@Html.Raw(jsEncodedMsg)', 'success');
+
+    // Show payment prompt for self-registrations only (not admin registering someone else)
+    var msg = '@Html.Raw(jsEncodedMsg)';
+    if (msg.indexOf('anmält dig') !== -1) {
+        setTimeout(function() {
+            showPaymentPrompt(@Model.Id);
+        }, 1000);
+    }
+    </text>
+}
+
+@if (TempData["Error"] != null)
+{
+    <text>
+    showNotification('@TempData["Error"]', 'error');
+    </text>
+}
+
+@if (TempData["DebugInfo"] != null)
+{
+    <text>
+    console.log('Registration Debug Info: @TempData["DebugInfo"]');
+    showNotification('DEBUG: @TempData["DebugInfo"]', 'info');
+    </text>
+}
+</script>
+} @* end !isSpringskytte config block *@
+
+@* Registered Shooters Modal *@
+<div class="modal fade" id="registeredShootersModal" tabindex="-1" aria-labelledby="registeredShootersModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="registeredShootersModalLabel">
+                    <i class="bi bi-people-fill me-2"></i>Anmälda skyttar
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="registeredShootersModalBody">
+                <div class="text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Laddar...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle"></i> Stäng
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Login Required Modal (shared) *@
+<div class="modal fade" id="loginRequiredModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-lock me-2"></i>Inloggning krävs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="loginRequiredModalBody">
+                Du behöver vara inloggad för att se denna information.
+            </div>
+            <div class="modal-footer">
+                <a href="/login-register" class="btn btn-primary"><i class="bi bi-box-arrow-in-right me-1"></i> Logga in</a>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* Swish Payment Modal *@
+@* Shared Swish QR modal — used by the regular registration flow (competition-registration.js)
+   and the Springskytte flow (springRegShowSwish). Using the partial (instead of an inline copy)
+   gives it the payer-side "Jag har betalat" button + window.swishModalSetPaymentSent. *@
+@await Html.PartialAsync("SwishPaymentModal")
+
+@* ======================================== Unpaid Invoices Modal ======================================== *@
+<div class="modal fade" id="unpaidInvoicesModal" tabindex="-1" aria-labelledby="unpaidInvoicesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title" id="unpaidInvoicesModalLabel">
+                    <i class="bi bi-wallet2 me-2"></i>Obetalda avgifter
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button>
+            </div>
+            <div class="modal-body" id="unpaidInvoicesModalBody">
+                <div class="text-center py-3">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2 text-muted">Laddar fakturor...</p>
+                </div>
+            </div>
+            <div class="modal-footer d-block">
+                <div class="alert alert-info small mb-2 py-2">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Om du redan har betalat via Swish kan det ta tid innan betalningen har kontrollerats och registrerats. Betalningar visas som obetalda tills de har bekräftats av arrangören.
+                </div>
+                <button type="button" class="btn btn-secondary w-100" data-bs-dismiss="modal">Stäng</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@{
+    // ⚠️ Den nya modellen (P3/P4): avgiften bor i liggaren. Samma knapp, men betalsteget kommer ur
+    // competition-fees.js — gamla GetUnpaidInvoices ser inga fakturor för en sådan tävling.
+    var ledgerFees = PaymentModels.IsLedger(Model.Id);
+}
+<script src="/js/competition-fees.js?v=@DateTime.Now.Ticks"></script>
+@if (regMemberId > 0 && ledgerFees)
+{
+    <script>
+    (async function () {
+        const cid = @Model.Id;
+        const d = await HpskFees.get('GetMyFees', { competitionId: cid });
+        if (!d.success || d.model !== 'ledger') return;
+        const owes = (d.registrations || []).some(r => (r.toPay || []).length > 0);
+        if (!owes) return;
+        const btn = document.getElementById('unpaidInvoicesButtonContainer');
+        if (btn) btn.style.display = 'block';
+        document.getElementById('unpaidInvoicesModal')?.addEventListener('show.bs.modal', function () {
+            HpskFees.renderPayStep(document.getElementById('unpaidInvoicesModalBody'), { competitionId: cid });
+        });
+    })();
+    </script>
+}
+@if (regMemberId > 0 && !ledgerFees)
+{
+    <script>
+    (function() {
+        const unpaidCompetitionId = @Model.Id;
+        const unpaidHasSwish = @(hasSwishNumberValue.ToString().ToLower());
+        const unpaidFee = @(decimal.TryParse(registrationFee, out var _unpaidFee) ? _unpaidFee : 0m);
+
+        if (!unpaidHasSwish || unpaidFee <= 0) return;
+
+        fetch(`/umbraco/surface/Swish/GetUnpaidInvoices?competitionId=${unpaidCompetitionId}`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success || !data.invoices || data.invoices.length === 0) return;
+                // Show the button in the Anmälan card
+                const btnContainer = document.getElementById('unpaidInvoicesButtonContainer');
+                if (btnContainer) btnContainer.style.display = 'block';
+
+                // Populate modal on open
+                document.getElementById('unpaidInvoicesModal')?.addEventListener('show.bs.modal', function() {
+                    renderUnpaidInvoices(data.invoices);
+                });
+            })
+            .catch(() => {});
+
+        function renderUnpaidInvoices(invoices) {
+            const body = document.getElementById('unpaidInvoicesModalBody');
+            if (!body) return;
+
+            let html = '<div class="list-group">';
+            invoices.forEach(inv => {
+                const typeLabel = inv.isTeam ? '<span class="badge bg-info me-1">Lag</span>' : '';
+                html += `
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                ${typeLabel}<strong>${escapeHtmlUnpaid(inv.memberName)}</strong>
+                                <div class="text-muted small">${escapeHtmlUnpaid(inv.invoiceNumber)} &middot; ${inv.createdDate}</div>
+                            </div>
+                            <span class="badge bg-warning text-dark fs-6">${inv.amount.toFixed(0)} kr</span>
+                        </div>
+                        <button type="button" class="btn btn-primary btn-sm w-100" onclick="payUnpaidInvoice(${inv.id}, ${inv.isTeam}, ${inv.noInvoice || false})">
+                            <i class="bi bi-qr-code me-1"></i>Betala med Swish
+                        </button>
+                    </div>`;
+            });
+            html += '</div>';
+            body.innerHTML = html;
+        }
+
+        window.payUnpaidInvoice = function(invoiceId, isTeam, noInvoice) {
+            // Hide unpaid invoices modal
+            const unpaidModal = bootstrap.Modal.getInstance(document.getElementById('unpaidInvoicesModal'));
+            if (unpaidModal) unpaidModal.hide();
+
+            // Open Swish QR modal
+            const swishModalEl = document.getElementById('swishPaymentModal');
+            if (!swishModalEl) return;
+
+            const modalBody = document.getElementById('swishPaymentModalBody');
+            modalBody.innerHTML = `
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Laddar QR-kod...</span>
+                </div>
+                <p class="mt-2">Laddar betalningsinformation...</p>
+            `;
+
+            setTimeout(() => {
+                bootstrap.Modal.getOrCreateInstance(swishModalEl).show();
+            }, 200);
+
+            // For no-invoice or individual: use GeneratePaymentQR (creates invoice on-the-fly)
+            // For team invoices with existing invoice: use GenerateInvoiceQRCode
+            let url;
+            if (noInvoice || !isTeam) {
+                url = `/umbraco/surface/Swish/GeneratePaymentQR?competitionId=${unpaidCompetitionId}`;
+            } else {
+                url = `/umbraco/surface/InvoiceAdmin/GenerateInvoiceQRCode?invoiceId=${invoiceId}`;
+            }
+
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        const qrSrc = data.qrCode || (data.qrCodeBase64 ? `data:image/png;base64,${data.qrCodeBase64}` : '');
+                        const invNum = data.invoiceNumber || '';
+                        const amount = data.amount || '';
+                        const swishAppButton = data.swishAppUrl ? `
+                            <a href="${data.swishAppUrl}" class="btn btn-success btn-lg w-100 mb-2">
+                                <i class="bi bi-phone me-1"></i> Öppna Swish och betala
+                            </a>
+                            <div class="text-muted small mb-3">— eller scanna QR-koden med Swish-appen på en annan telefon —</div>
+                        ` : '';
+                        modalBody.innerHTML = `
+                            ${swishAppButton}
+                            ${qrSrc ? `<div class="mb-3">
+                                <img src="${qrSrc}" alt="Swish QR Code" style="max-width: 300px; width: 100%;" class="img-fluid">
+                            </div>` : ''}
+                            <div class="alert alert-info text-start mb-0">
+                                <p class="mb-1"><strong>Belopp:</strong> ${amount} kr</p>
+                                ${data.includesSubCompetition ? `<p class="mb-1 small text-muted">Inkluderar ${data.subCompetitionFeeTotal} kr i deltävlingsavgift${data.subCompetitionName ? ` (${data.subCompetitionName})` : ''}.</p>` : ''}
+                                ${data.shootingClasses ? `<p class="mb-1"><strong>Klasser:</strong> ${data.shootingClasses}</p>` : ''}
+                                ${data.teamName ? `<p class="mb-1"><strong>Lag:</strong> ${data.teamName}</p>` : ''}
+                                <p class="mb-0"><strong>Fakturanummer:</strong> ${invNum}</p>
+                            </div>
+                            ${window.renderBankgiroBlock ? window.renderBankgiroBlock(data) : ''}
+                        `;
+                        // Payer-side "Jag har betalat" claim for a shooter paying their own unpaid
+                        // invoice. Auth (CanClaimPaymentForInvoice) gates it server-side; for a team
+                        // invoice the shooter must be the team's club admin or the click is refused.
+                        if (window.swishModalSetPaymentSent && (data.invoiceId || invoiceId)) {
+                            window.swishModalSetPaymentSent({
+                                invoiceId: data.invoiceId || invoiceId,
+                                label: 'Jag har betalat',
+                                alreadySent: !!data.paymentAlreadySent
+                            });
+                        }
+                    } else {
+                        modalBody.innerHTML = `
+                            <div class="alert alert-danger mb-0">
+                                <i class="bi bi-exclamation-triangle me-1"></i>${data.message || 'Kunde inte skapa betalning.'}
+                            </div>
+                        `;
+                    }
+                })
+                .catch(() => {
+                    modalBody.innerHTML = `
+                        <div class="alert alert-danger mb-0">
+                            <i class="bi bi-exclamation-triangle me-1"></i>Ett nätverksfel uppstod.
+                        </div>
+                    `;
+                });
+        };
+
+        function escapeHtmlUnpaid(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    })();
+    </script>
+}
+
+@* Load external JavaScript file (not for Springskytte - it has its own registration modal) *@
+@if (!isSpringskytte)
+{
+    <script src="/js/competition-registration.js?v=@DateTime.Now.Ticks"></script>
+}
+
+@* Styles for Information Sidebar *@
+<style>
+/* Card styling */
+.information-sidebar .card-header {
+    background-color: var(--bs-secondary-bg);
+}
+
+.information-sidebar hr {
+    margin: 1rem 0;
+    opacity: 0.1;
+}
+
+/* User highlighting in registered shooters modal */
+#registeredShootersModal .table tr.current-user,
+#registeredShootersModal .table tr.current-user td {
+    background-color: var(--bs-primary-bg-subtle) !important; /* Primary highlight for current user */
+}
+#registeredShootersModal .table tr.same-club,
+#registeredShootersModal .table tr.same-club td {
+    background-color: var(--bs-info-bg-subtle) !important; /* Secondary highlight for same club */
+}
+</style>
+
+@* JavaScript for Information Sidebar *@
+<script>
+// Shared helper: format Springskytte age class with age span (e.g. "H 50" → "H 50-59")
+window.formatAgeSpan = function(cls) {
+    if (!cls) return cls;
+    var inline = {'21':'21-34','35':'35-49','50':'50-59','60':'60-64','65':'65-69','70':'70+'};
+    var parens = {'15':'-15 år','18':'16-18 år','jun':'15-20 år'};
+    for (var code in inline) {
+        if (cls.endsWith(' ' + code) || cls.endsWith('-' + code))
+            return cls.substring(0, cls.length - code.length) + inline[code];
+    }
+    for (var code in parens) {
+        if (cls.endsWith(' ' + code) || cls.endsWith('-' + code))
+            return cls + ' (' + parens[code] + ')';
+    }
+    return cls;
+};
+
+// Current user information for highlighting
+const currentUserName = '@Html.Raw(currentMemberName.Replace("'", "\\'"))';
+const currentUserClub = '@Html.Raw(currentMemberClub.Replace("'", "\\'"))';
+const currentUserIsLoggedIn = @(currentMember != null ? "true" : "false");
+
+window.showLoginRequiredModal = function(whatLabel) {
+    var body = document.getElementById('loginRequiredModalBody');
+    if (body) body.textContent = 'Du behöver vara inloggad för att se ' + whatLabel + '.';
+    var el = document.getElementById('loginRequiredModal');
+    if (el) bootstrap.Modal.getOrCreateInstance(el).show();
+};
+
+window.openRegisteredShootersModal = function() {
+    if (!currentUserIsLoggedIn) { showLoginRequiredModal('anmälda skyttar'); return; }
+    var el = document.getElementById('registeredShootersModal');
+    if (el) bootstrap.Modal.getOrCreateInstance(el).show();
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+    const competitionId = @Model.Id;
+
+    @if (showLiveResults && !(hasResultPage && isResultsOfficial))
+    {
+        @* showLiveResults är på men resultatlistan är inte officiell än, så live-länken ritas av
+           platshållaren ovan i stället för av den officiella grenen. A result list is NOT a
+           prerequisite for the live board — the only question is whether any result has been entered
+           yet, which this asks the database directly. It re-asks every 30 s so the link appears
+           during the competition without a reload, and stops as soon as it has appeared.
+
+           ⚠️ Villkoret var `!hasResultPage`. Nu när noden alltid finns hade sonderingen aldrig
+           körts, och live-länken hade suttit fast i sitt "väntar"-läge. Grinden är
+           publiceringsstatusen, inte nodens existens. *@
+        <text>
+    var liveProbeUrl = @Html.Raw(
+        isSpringskytte ? "'/umbraco/surface/Springskytte/GetSpringskytteResults?competitionId=' + competitionId"
+        : isFaltskytte ? "'/umbraco/surface/Faltskytte/GetFaltskytteResults?competitionId=' + competitionId"
+        : "'/umbraco/surface/CompetitionResults/GetResultsStats?competitionId=' + competitionId");
+
+    @* ⚠️ Read BOTH casings. These endpoints build anonymous objects with PascalCase members but MVC
+       serialises them camelCase, and the old check read `data.Success && data.Count` — permanently
+       false, which is why the live link only ever appeared once a result list had been created.
+       Springskytte/Fältskytte also differ on whether classGroups sits at the root or under results. *@
+    function liveProbeHasResults(d) {
+        if (!d) return false;
+        if (!(d.success || d.Success)) return false;
+        var n = (d.count !== undefined) ? d.count : d.Count;
+        if (typeof n === 'number') return n > 0;
+        var r = d.results || d.Results || d;
+        var g = r.classGroups || r.ClassGroups;
+        return !!(g && g.length);
+    }
+
+    var liveProbeTimer = null;
+    function liveProbe() {
+        var container = document.getElementById('liveResultsCheck');
+        if (!container) { if (liveProbeTimer) { clearInterval(liveProbeTimer); liveProbeTimer = null; } return; }
+        fetch(liveProbeUrl)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!liveProbeHasResults(d)) return;
+                if (liveProbeTimer) { clearInterval(liveProbeTimer); liveProbeTimer = null; }
+                container.innerHTML = '<a class="btn btn-outline-secondary w-100 mt-2" href="/live?c=@Model.Id" target="_blank" rel="noopener"><i class="bi bi-tv me-1"></i> Visa Live resultat</a>';
+            })
+            .catch(function (e) { console.error('Error checking results:', e); });
+    }
+    liveProbe();
+    liveProbeTimer = setInterval(liveProbe, 30000);
+        </text>
+    }
+
+    // Handle registered shooters modal
+    const registeredShootersModal = document.getElementById('registeredShootersModal');
+    if (registeredShootersModal) {
+        registeredShootersModal.addEventListener('show.bs.modal', function () {
+            const modalBody = document.getElementById('registeredShootersModalBody');
+            modalBody.innerHTML = '<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Laddar...</span></div></div>';
+
+            fetch(`/umbraco/surface/Competition/GetRegisteredShooters?competitionId=${competitionId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.registrations && data.registrations.length > 0) {
+                        // Group by shooter (memberId and memberName)
+                        const shooterMap = new Map();
+                        data.registrations.forEach(reg => {
+                            const key = reg.memberId;
+                            if (!shooterMap.has(key)) {
+                                shooterMap.set(key, {
+                                    name: reg.memberName,
+                                    club: reg.memberClub || 'Okänd klubb',
+                                    classes: []
+                                });
+                            }
+
+                            // Add all shooting classes from this registration's shootingClasses array
+                            if (reg.shootingClasses && Array.isArray(reg.shootingClasses)) {
+                                reg.shootingClasses.forEach(sc => {
+                                    // Use className for display, with age span for Springskytte
+                                    var cls = sc.className || sc.class;
+                                    shooterMap.get(key).classes.push(window.formatAgeSpan ? window.formatAgeSpan(cls) : cls);
+                                });
+                            }
+                        });
+
+                        // Build HTML
+                        let html = '<div class="table-responsive"><table class="table table-hover"><thead><tr><th>Namn</th><th>Förening</th><th>Klasser</th></tr></thead><tbody>';
+
+                        // Sort by name
+                        const shooters = Array.from(shooterMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+
+                        shooters.forEach(shooter => {
+                            // Determine row class for highlighting
+                            let rowClass = '';
+                            if (currentUserName && shooter.name === currentUserName) {
+                                rowClass = 'current-user';
+                            } else if (currentUserClub && shooter.club === currentUserClub) {
+                                rowClass = 'same-club';
+                            }
+
+                            html += `<tr class="${rowClass}">
+                                <td>${shooter.name}</td>
+                                <td>${shooter.club}</td>
+                                <td>${shooter.classes.join(', ')}</td>
+                            </tr>`;
+                        });
+
+                        html += '</tbody></table></div>';
+
+                        // Calculate total starts (sum of all class entries)
+                        const totalStarts = Array.from(shooterMap.values()).reduce((sum, shooter) => sum + shooter.classes.length, 0);
+                        html += `<p class="text-muted small mt-2 mb-0"><i class="bi bi-info-circle me-1"></i>${shooters.length} skyttar, ${totalStarts} starter totalt</p>`;
+
+                        modalBody.innerHTML = html;
+                    } else {
+                        modalBody.innerHTML = '<p class="text-center text-muted">Inga anmälda skyttar än.</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching registered shooters:', error);
+                    modalBody.innerHTML = '<p class="text-center text-danger">Kunde inte ladda anmälda skyttar.</p>';
+                });
+        });
+    }
+});
+</script>
+
