@@ -14,10 +14,13 @@ namespace HpskSite.Services
         private readonly IMemberService _memberService;
         private readonly BoardRoleService _boardRoleService;
         private readonly BoardMeetingTemplateService _templateService;
+        private readonly HpskSite.Services.MemberDirectoryService _directory;
 
         public BoardMeetingService(IScopeProvider scopeProvider, IMemberService memberService,
-            BoardRoleService boardRoleService, BoardMeetingTemplateService templateService)
+            BoardRoleService boardRoleService, BoardMeetingTemplateService templateService,
+            HpskSite.Services.MemberDirectoryService directory)
         {
+            _directory = directory;
             _scopeProvider = scopeProvider;
             _memberService = memberService;
             _boardRoleService = boardRoleService;
@@ -394,28 +397,9 @@ namespace HpskSite.Services
         /// <summary>Owner (club/region) members for a "members"-source election picker, optionally filtered by query.</summary>
         public List<(int Id, string Name)> SearchOwnerMembers(int ownerType, int ownerId, string? query)
         {
-            var all = _memberService.GetAll(0, int.MaxValue, out _)
-                .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved);
-
-            if (ownerType == DocumentOwnerType.Club)
-            {
-                var clubIdStr = ownerId.ToString();
-                all = all.Where(m =>
-                    m.GetValue("primaryClubId")?.ToString() == clubIdStr ||
-                    (m.GetValue("memberClubIds")?.ToString()?.Split(',').Select(s => s.Trim()).Contains(clubIdStr) ?? false));
-            }
-
-            if (!string.IsNullOrWhiteSpace(query))
-                all = all.Where(m => m.Name.Contains(query, StringComparison.OrdinalIgnoreCase));
-
-            return all.OrderBy(m => m.Name).Take(30)
-                .Select(m =>
-                {
-                    var first = m.GetValue<string>("firstName") ?? "";
-                    var last = m.GetValue<string>("lastName") ?? "";
-                    var name = $"{first} {last}".Trim();
-                    return (m.Id, string.IsNullOrEmpty(name) ? m.Name : name);
-                })
+            // Sökningen i SQL (skalplanen B). En klubb: bara klubbens medlemmar. Tom fråga = de första 30.
+            return _directory.Search(query, 30, ownerType == DocumentOwnerType.Club ? ownerId : null)
+                .Select(m => (m.MemberId, m.DisplayName))
                 .ToList();
         }
 

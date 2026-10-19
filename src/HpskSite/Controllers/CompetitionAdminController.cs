@@ -200,17 +200,17 @@ namespace HpskSite.Controllers
                     }
                 }
 
-                var members = _memberService.GetAll(0, int.MaxValue, out _)
-                    .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved)
+                // Tre egenskaper per godkänd medlem (skalplanen B), inte hela registret som IMember.
+                var members = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.MemberPropertyReader>()
+                    .Read(new[] { "firstName", "lastName", "primaryClubId" }, approvedOnly: true)
                     .Select(m =>
                     {
-                        int primary = 0;
-                        int.TryParse(m.GetValue<string>("primaryClubId") ?? "", out primary);
+                        int primary = m.PrimaryClubId;
                         return new
                         {
                             id = m.Id,
-                            firstName = m.GetValue<string>("firstName") ?? "",
-                            lastName = m.GetValue<string>("lastName") ?? "",
+                            firstName = m.Get("firstName"),
+                            lastName = m.Get("lastName"),
                             email = m.Email,
                             primaryClubId = primary,
                             primaryClubName = primary > 0 && clubNames.TryGetValue(primary, out var cn) ? cn : "No Club"

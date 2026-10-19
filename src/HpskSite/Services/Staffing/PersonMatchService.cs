@@ -24,10 +24,13 @@ namespace HpskSite.Services.Staffing
         private readonly ClubService _clubService;
         private readonly IScopeProvider _scopeProvider;
         private readonly ILogger<PersonMatchService> _logger;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
 
         public PersonMatchService(IMemberService memberService, ClubService clubService,
-            IScopeProvider scopeProvider, ILogger<PersonMatchService> logger)
+            IScopeProvider scopeProvider, ILogger<PersonMatchService> logger,
+            HpskSite.Services.MemberPropertyReader memberProperties)
         {
+            _memberProperties = memberProperties;
             _memberService = memberService;
             _clubService = clubService;
             _scopeProvider = scopeProvider;
@@ -161,19 +164,15 @@ namespace HpskSite.Services.Staffing
             try
             {
                 var clubNames = new Dictionary<int, string?>();
-                foreach (var m in _memberService.GetAll(0, int.MaxValue, out _))
+                // Tre egenskaper per godkänd medlem (skalplanen B), inte hela registret som IMember.
+                foreach (var m in _memberProperties.Read(new[] { "firstName", "lastName", "primaryClubId" }, approvedOnly: true))
                 {
-                    if (!m.IsApproved) continue;
-                    var first = m.GetValue<string>("firstName");
-                    var last = m.GetValue<string>("lastName");
-                    var name = $"{first} {last}".Trim();
-                    if (string.IsNullOrWhiteSpace(name)) name = m.Name ?? "";
+                    var name = m.DisplayName;
                     if (string.IsNullOrWhiteSpace(name)) continue;
 
                     string? club = null;
-                    // primaryClubId is stored as a STRING on the member type.
-                    var raw = m.GetValue<string>("primaryClubId");
-                    if (!string.IsNullOrEmpty(raw) && int.TryParse(raw, out var cid) && cid > 0)
+                    var cid = m.PrimaryClubId;
+                    if (cid > 0)
                     {
                         if (!clubNames.TryGetValue(cid, out club))
                         {

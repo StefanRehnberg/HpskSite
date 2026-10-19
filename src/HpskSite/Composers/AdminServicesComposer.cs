@@ -288,6 +288,7 @@ namespace HpskSite.Composers
                 HpskSite.Services.Results.CompetitionResultNodeGuard>();
             builder.Services.AddScoped<HpskSite.Services.ClubRosterService>();
             builder.Services.AddScoped<HpskSite.Services.MemberDirectoryService>();
+            builder.Services.AddScoped<HpskSite.Services.MemberPropertyReader>();
             // Skalplanen B3: varje sparad medlem får en ClubMembership-rad per klubb i egenskaperna, och
             // en klubb som tas bort ur egenskaperna ger Utträdd. Saving läser klubbarna FÖRE sparningen.
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.MemberSavingNotification,

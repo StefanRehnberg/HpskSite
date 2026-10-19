@@ -2335,8 +2335,9 @@ namespace HpskSite.Controllers
                     var memberCache = new Dictionary<int, (string FirstName, string LastName, string ProfilePictureUrl)>();
                     if (memberIds.Any())
                     {
-                        var members = _memberService.GetAllMembers()
-                            .Where(m => memberIds.Contains(m.Id))
+                        // Bara deltagarna, i bitar (skalplanen B) — förut lästes hela registret och filtrerades.
+                        var members = memberIds.Chunk(1000)
+                            .SelectMany(chunk => _memberService.GetAllMembers(chunk))
                             .ToList();
                         foreach (var m in members)
                         {

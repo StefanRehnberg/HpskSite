@@ -32,6 +32,7 @@ namespace HpskSite.Controllers
         private readonly MemberActivityService _activity;
         private readonly ClubRosterService _roster;
         private readonly MemberDirectoryService _directory;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -51,9 +52,11 @@ namespace HpskSite.Controllers
             ClubMembershipService clubMembershipService,
             MemberActivityService activity,
             ClubRosterService roster,
-            MemberDirectoryService directory)
+            MemberDirectoryService directory,
+            HpskSite.Services.MemberPropertyReader memberProperties)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _memberProperties = memberProperties;
             _activity = activity;
             _roster = roster;
             _directory = directory;
@@ -165,15 +168,11 @@ namespace HpskSite.Controllers
                         return Json(new { success = false, message = "Club not found" });
                     }
 
-                    // Get club members for contact person dropdown (exclude club member types)
-                    var allMembersForClub = _memberService.GetAll(0, int.MaxValue, out _);
-                    var clubMembers = allMembersForClub.Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                        .Where(m => m.GetValue("primaryClubId")?.ToString() == club.Id.ToString() ||
-                                    (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                    .Contains(club.Id.ToString()))
+                    // Klubbens medlemmar ur klubbregistret (skalplanen B), inte hela medlemsregistret.
+                    var clubMembers = _roster.Active(club.Id ?? 0)
                         .Select(m => new {
-                            id = m.Id,
-                            name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
+                            id = m.MemberId,
+                            name = $"{m.FirstName} {m.LastName}".Trim(),
                             email = m.Email
                         }).ToArray();
 
@@ -199,16 +198,11 @@ namespace HpskSite.Controllers
                 // Get club data from content node
                 var clubName = clubNode.Value<string>("clubName") ?? clubNode.Name ?? "";
 
-                // Get club members for contact person dropdown
-                var contentClubMembers = _memberService.GetAll(0, int.MaxValue, out _);
-                var clubMembersFromContent = contentClubMembers
-                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                    .Where(m => m.GetValue("primaryClubId")?.ToString() == id.ToString() ||
-                                (m.GetValue("memberClubIds")?.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                .Contains(id.ToString()))
+                // Klubbens medlemmar ur klubbregistret (skalplanen B), inte hela medlemsregistret.
+                var clubMembersFromContent = _roster.Active(id)
                     .Select(m => new {
-                        id = m.Id,
-                        name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
+                        id = m.MemberId,
+                        name = $"{m.FirstName} {m.LastName}".Trim(),
                         email = m.Email
                     }).ToArray();
 
@@ -537,20 +531,10 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Club not found" });
                 }
 
-                // Check if any members are assigned to this club (primary or additional)
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var regularMembers = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias);
-                var membersWithThisClubAsPrimary = regularMembers
-                    .Where(m => m.GetValue("primaryClubId")?.ToString() == clubId.ToString())
-                    .ToList();
-
-                var membersWithThisClubAsAdditional = regularMembers
-                    .Where(m => !string.IsNullOrEmpty(m.GetValue("memberClubIds")?.ToString()) &&
-                               m.GetValue("memberClubIds")?.ToString()
-                                ?.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                ?.Select(id => id.Trim())
-                                ?.Contains(clubId.ToString()) == true)
-                    .ToList();
+                // Klubbens medlemmar ur klubbregistret (skalplanen B), inte hela medlemsregistret.
+                var linkedMembers = _roster.Active(clubId);
+                var membersWithThisClubAsPrimary = linkedMembers.Where(m => m.IsPrimary).ToList();
+                var membersWithThisClubAsAdditional = linkedMembers.Where(m => !m.IsPrimary).ToList();
 
                 var totalMembersWithThisClub = membersWithThisClubAsPrimary.Count + membersWithThisClubAsAdditional.Count;
 
@@ -582,8 +566,8 @@ namespace HpskSite.Controllers
                     {
                         memberDetails.Add(new
                         {
-                            Id = member.Id,
-                            Name = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim(),
+                            Id = member.MemberId,
+                            Name = $"{member.FirstName} {member.LastName}".Trim(),
                             Email = member.Email,
                             LinkType = "Primary Club"
                         });
@@ -593,8 +577,8 @@ namespace HpskSite.Controllers
                     {
                         memberDetails.Add(new
                         {
-                            Id = member.Id,
-                            Name = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim(),
+                            Id = member.MemberId,
+                            Name = $"{member.FirstName} {member.LastName}".Trim(),
                             Email = member.Email,
                             LinkType = "Additional Club"
                         });
@@ -667,8 +651,18 @@ namespace HpskSite.Controllers
                 var validClubs = GetClubsFromStorage().Where(c => c.IsActive).ToList();
                 var validClubIds = validClubs.Select(c => c.Id).ToHashSet();
 
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var regularMembers = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias);
+                // Kandidaterna ur en lätt läsning (skalplanen B); bara de som behöver rättas laddas som IMember.
+                var candidateIds = _memberProperties.Read(new[] { "primaryClubName", "primaryClubId", "memberClubIds" })
+                    .Where(m => m.Get("primaryClubName").Length > 0
+                        || (int.TryParse(m.Get("primaryClubId"), out var pc) && !validClubIds.Contains(pc))
+                        || m.Get("memberClubIds").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                              .Any(s => int.TryParse(s.Trim(), out var c) && !validClubIds.Contains(c)))
+                    .Select(m => m.Id)
+                    .ToList();
+                var regularMembers = candidateIds.Chunk(1000)
+                    .SelectMany(chunk => _memberService.GetAllMembers(chunk))
+                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
+                    .ToList();
                 var membersUpdated = 0;
                 var membersWithInvalidRefs = new List<string>();
 
@@ -757,20 +751,10 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Club not found" });
                 }
 
-                // Check if any members are assigned to this club (primary or additional)
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var regularMembers = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias);
-                var membersWithThisClubAsPrimary = regularMembers
-                    .Where(m => m.GetValue("primaryClubId")?.ToString() == clubId.ToString())
-                    .ToList();
-
-                var membersWithThisClubAsAdditional = regularMembers
-                    .Where(m => !string.IsNullOrEmpty(m.GetValue("memberClubIds")?.ToString()) &&
-                               m.GetValue("memberClubIds")?.ToString()
-                                ?.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                ?.Select(id => id.Trim())
-                                ?.Contains(clubId.ToString()) == true)
-                    .ToList();
+                // Klubbens medlemmar ur klubbregistret (skalplanen B), inte hela medlemsregistret.
+                var linkedMembers = _roster.Active(clubId);
+                var membersWithThisClubAsPrimary = linkedMembers.Where(m => m.IsPrimary).ToList();
+                var membersWithThisClubAsAdditional = linkedMembers.Where(m => !m.IsPrimary).ToList();
 
                 var totalMembersWithThisClub = membersWithThisClubAsPrimary.Count + membersWithThisClubAsAdditional.Count;
 
@@ -802,8 +786,8 @@ namespace HpskSite.Controllers
                     {
                         memberDetails.Add(new
                         {
-                            Id = member.Id,
-                            Name = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim(),
+                            Id = member.MemberId,
+                            Name = $"{member.FirstName} {member.LastName}".Trim(),
                             Email = member.Email,
                             LinkType = "Primary Club"
                         });
@@ -813,8 +797,8 @@ namespace HpskSite.Controllers
                     {
                         memberDetails.Add(new
                         {
-                            Id = member.Id,
-                            Name = $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim(),
+                            Id = member.MemberId,
+                            Name = $"{member.FirstName} {member.LastName}".Trim(),
                             Email = member.Email,
                             LinkType = "Additional Club"
                         });

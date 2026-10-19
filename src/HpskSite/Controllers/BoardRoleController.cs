@@ -19,6 +19,7 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
         private readonly ILogger<BoardRoleController> _logger;
+        private readonly HpskSite.Services.MemberDirectoryService _directory;
 
         public BoardRoleController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -31,9 +32,11 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             IMemberService memberService,
             IMemberManager memberManager,
-            ILogger<BoardRoleController> logger)
+            ILogger<BoardRoleController> logger,
+            HpskSite.Services.MemberDirectoryService directory)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _directory = directory;
             _boardRoleService = boardRoleService;
             _authorizationService = authorizationService;
             _memberService = memberService;
@@ -161,30 +164,11 @@ namespace HpskSite.Controllers
             if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
                 return Json(new { success = true, data = Array.Empty<object>() });
 
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _)
-                .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved)
-                .ToList();
-
-            // For clubs, filter to club members only
-            if (ownerType == DocumentOwnerType.Club)
-            {
-                var clubIdStr = ownerId.ToString();
-                allMembers = allMembers.Where(m =>
-                    m.GetValue("primaryClubId")?.ToString() == clubIdStr ||
-                    (m.GetValue("memberClubIds")?.ToString()?.Split(',')
-                        .Select(s => s.Trim())
-                        .Contains(clubIdStr) ?? false))
-                    .ToList();
-            }
-
-            var results = allMembers
-                .Where(m => m.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                            (m.Email?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
-                .OrderBy(m => m.Name)
-                .Take(20)
+            // Sökningen i SQL (skalplanen B). En klubb: bara klubbens medlemmar; en krets: hela registret.
+            var results = _directory.Search(query, 20, ownerType == DocumentOwnerType.Club ? ownerId : null)
                 .Select(m => new
                 {
-                    id = m.Id,
+                    id = m.MemberId,
                     name = m.Name,
                     email = m.Email
                 });

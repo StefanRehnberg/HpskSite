@@ -24,6 +24,7 @@ namespace HpskSite.Controllers
         private readonly IContentService _contentService;
         private readonly ClubService _clubService;
         private readonly ILogger<ClubEmailController> _logger;
+        private readonly HpskSite.Services.ClubRosterService _roster;
 
         // Simply.com's websmtp is fine for club-sized sends but discourages high volume. Cap the
         // per-send recipient count and steer larger campaigns to Brevo / a dedicated ESP.
@@ -44,9 +45,11 @@ namespace HpskSite.Controllers
             IMemberManager memberManager,
             IContentService contentService,
             ClubService clubService,
-            ILogger<ClubEmailController> logger)
+            ILogger<ClubEmailController> logger,
+            HpskSite.Services.ClubRosterService roster)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _roster = roster;
             _authService = authService;
             _boardRoleService = boardRoleService;
             _brevoService = brevoService;
@@ -67,23 +70,19 @@ namespace HpskSite.Controllers
             if (!await _authService.IsClubAdminForClub(clubId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
 
-            var clubIdStr = clubId.ToString();
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _)
-                .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved)
-                .Where(m => m.GetValue("primaryClubId")?.ToString() == clubIdStr ||
-                    (m.GetValue("memberClubIds")?.ToString()?.Split(',')
-                        .Select(s => s.Trim())
-                        .Contains(clubIdStr) ?? false))
+            // Klubbens godkända medlemmar ur klubbregistret (skalplanen B), inte hela medlemsregistret.
+            var allMembers = _roster.Active(clubId)
+                .Where(m => m.IsApproved)
                 .OrderBy(m => m.Name)
                 .ToList();
 
             var boardRoles = _boardRoleService.GetBoardRolesForClubMembers(clubId);
 
             var recipients = allMembers.Select(m => {
-                var roles = boardRoles.ContainsKey(m.Id) ? boardRoles[m.Id] : null;
+                var roles = boardRoles.ContainsKey(m.MemberId) ? boardRoles[m.MemberId] : null;
                 return new
                 {
-                    id = m.Id,
+                    id = m.MemberId,
                     name = m.Name,
                     email = m.Email ?? "",
                     boardRoles = roles?.Select(r => new { r.Title, r.IsBoardMember }) ?? Enumerable.Empty<object>()

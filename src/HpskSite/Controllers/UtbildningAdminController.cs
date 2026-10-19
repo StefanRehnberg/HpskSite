@@ -25,6 +25,7 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly IMemberManager _memberManager;
         private readonly EmailService _emailService;
+        private readonly HpskSite.Services.MemberDirectoryService _directory;
         private readonly ILogger<UtbildningAdminController> _logger;
 
         public UtbildningAdminController(
@@ -40,7 +41,8 @@ namespace HpskSite.Controllers
             IMemberService memberService,
             IMemberManager memberManager,
             EmailService emailService,
-            ILogger<UtbildningAdminController> logger)
+            ILogger<UtbildningAdminController> logger,
+            HpskSite.Services.MemberDirectoryService directory)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _courseService = courseService;
@@ -50,6 +52,7 @@ namespace HpskSite.Controllers
             _memberManager = memberManager;
             _emailService = emailService;
             _logger = logger;
+            _directory = directory;
         }
 
         // ── Courses ──────────────────────────────────────────────────────────
@@ -330,11 +333,8 @@ namespace HpskSite.Controllers
                 return Json(new { success = true, members = new List<object>() });
 
             var q = query.Trim();
-            var matches = _memberService.GetAll(0, int.MaxValue, out _)
-                .Where(m => (m.Name ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
-                         || (m.Email ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))
-                .Take(20)
-                .Select(m => new { memberId = m.Id, name = MemberDisplayName(m), email = m.Email })
+            var matches = _directory.Search(q, 20, approvedOnly: false)
+                .Select(m => new { memberId = m.MemberId, name = m.DisplayName, email = m.Email })
                 .ToList();
             return Json(new { success = true, members = matches });
         }

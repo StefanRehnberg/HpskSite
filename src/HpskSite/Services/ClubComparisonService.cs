@@ -28,6 +28,7 @@ namespace HpskSite.Services
         private readonly IMemoryCache _memoryCache;
         private readonly ILogger<ClubComparisonService> _logger;
         private readonly MemberActivityService _activity;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
 
         public ClubComparisonService(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -35,8 +36,10 @@ namespace HpskSite.Services
             IMemberService memberService,
             IMemoryCache memoryCache,
             ILogger<ClubComparisonService> logger,
-            MemberActivityService activity)
+            MemberActivityService activity,
+            HpskSite.Services.MemberPropertyReader memberProperties)
         {
+            _memberProperties = memberProperties;
             _activity = activity;
             _umbracoContextAccessor = umbracoContextAccessor;
             _databaseFactory = databaseFactory;
@@ -99,13 +102,14 @@ namespace HpskSite.Services
 
             try
             {
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out _).Where(m => m.IsApproved).ToList();
+                // Bara huvudklubben och stegen behövs (skalplanen B), inte hela registret som IMember.
+                var allMembers = _memberProperties.Read(new[] { "primaryClubId", "completedTrainingSteps" }, approvedOnly: true);
                 var memberToClub = new Dictionary<int, int>(allMembers.Count);
                 var lastSeenAll = _activity.GetAll();
 
                 foreach (var m in allMembers)
                 {
-                    var clubIdStr = m.GetValue<string>("primaryClubId");
+                    var clubIdStr = m.Get("primaryClubId");
                     if (string.IsNullOrEmpty(clubIdStr) || !int.TryParse(clubIdStr, out int cid) || cid <= 0) continue;
 
                     memberToClub[m.Id] = cid;
@@ -120,7 +124,7 @@ namespace HpskSite.Services
 
                     // Step completions in last 30d (parsed from completedTrainingSteps JSON,
                     // each entry has a CompletedDate string)
-                    var stepsJson = m.GetValue<string>("completedTrainingSteps");
+                    var stepsJson = m.Get("completedTrainingSteps");
                     if (!string.IsNullOrWhiteSpace(stepsJson))
                     {
                         var stepCount = CountRecentStepCompletions(stepsJson, thirtyDaysAgo);

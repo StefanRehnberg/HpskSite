@@ -23,13 +23,13 @@ namespace HpskSite.Tests
     public class ScaleGuardTests
     {
         /// <summary>Antal levande anrop till <c>MemberService.GetAll(</c> 2026-10-12. Sänk när ett tas bort — höj aldrig.</summary>
-        private const int GetAllBaseline = 39; // 2026-10-13: registreringens adminkontakter och godkännandet flyttade
+        private const int GetAllBaseline = 0; // 2026-10-19: skalplanen B klar — hela registret läses aldrig som IMember
 
         /// <summary>
         /// Antal levande <c>GetAllMembers()</c> UTAN argument (hela registret) 2026-10-13 — sökfälten i
         /// genomgångens punkt B. Spärren missade dem förut. Sänk när ett tas bort — höj aldrig.
         /// </summary>
-        private const int GetAllMembersBaseline = 3;
+        private const int GetAllMembersBaseline = 0;
 
         private static readonly string[] SkipDirectories =
             { "bin", "obj", "node_modules", "lib", "Migrations", "Documentation", "KnowledgeBase", "App_Data", "umbraco", "media", "App_Plugins", "wwwroot" };

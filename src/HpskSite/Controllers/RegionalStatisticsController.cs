@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly MemberActivityService _activity;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
 
         public RegionalStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -49,9 +50,11 @@ namespace HpskSite.Controllers
             HpskSite.Services.Training.ClubTrainingService trainings,
             HpskSite.Services.Events.IClubEventStore events,
             MemberActivityService activity,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.MemberPropertyReader memberProperties)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _memberProperties = memberProperties;
             _competitions = competitions;
             _activity = activity;
             _trainings = trainings;
@@ -135,14 +138,11 @@ namespace HpskSite.Controllers
             }
 
             // ── Members in region ──────────────────────────────────────
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _).ToList();
-            var regionMembers = allMembers
-                .Where(m => m.IsApproved)
-                .Where(m =>
-                {
-                    var s = m.GetValue<string>("primaryClubId");
-                    return !string.IsNullOrEmpty(s) && int.TryParse(s, out int cid) && clubIdSet.Contains(cid);
-                })
+            // Bara huvudklubben och skapandedagen behövs (skalplanen B): de godkända medlemmarna med
+            // EN egenskap, i stället för hela registret som IMember.
+            var approvedMembers = _memberProperties.Read(new[] { "primaryClubId" }, approvedOnly: true);
+            var regionMembers = approvedMembers
+                .Where(m => m.PrimaryClubId > 0 && clubIdSet.Contains(m.PrimaryClubId))
                 .ToList();
 
             int totalMembers = regionMembers.Count;
@@ -159,7 +159,7 @@ namespace HpskSite.Controllers
             var membersPerClub = regionMembers
                 .Select(m =>
                 {
-                    int.TryParse(m.GetValue<string>("primaryClubId") ?? "", out int cid);
+                    int.TryParse(m.Get("primaryClubId"), out int cid);
                     return cid;
                 })
                 .Where(cid => clubIdSet.Contains(cid))
@@ -208,14 +208,14 @@ namespace HpskSite.Controllers
             int regionVapenkontrollantCount = 0;
             int regionBanlaggareCount = 0;
             var roleIndex = MemberRoleIndex.Load(_databaseFactory);
-            foreach (var m in allMembers.Where(m => m.IsApproved))
+            foreach (var m in approvedMembers)
             {
                 var roles = roleIndex.Of(m.Id);
                 if (roles.Length == 0) continue;
 
                 // Is this member primarily in this region? (For Vapen/Ban totals)
                 int primaryClubId = 0;
-                int.TryParse(m.GetValue<string>("primaryClubId") ?? "", out primaryClubId);
+                int.TryParse(m.Get("primaryClubId"), out primaryClubId);
                 bool inRegion = primaryClubId > 0 && clubIdSet.Contains(primaryClubId);
 
                 foreach (var role in roles)
@@ -281,7 +281,7 @@ namespace HpskSite.Controllers
             var memberClubMap = regionMembers
                 .Select(m =>
                 {
-                    int.TryParse(m.GetValue<string>("primaryClubId") ?? "", out int cid);
+                    int.TryParse(m.Get("primaryClubId"), out int cid);
                     return new { m.Id, ClubId = cid };
                 })
                 .Where(x => clubIdSet.Contains(x.ClubId))
@@ -291,16 +291,15 @@ namespace HpskSite.Controllers
             if (memberClubMap.Any())
             {
                 using var db = _databaseFactory.CreateDatabase();
-                var paramNames = string.Join(",", memberClubMap.Keys.Select((_, i) => "@" + i));
-                var paramVals = memberClubMap.Keys.Cast<object>().ToArray();
-
+                // Alla deltagare de senaste 30 dagarna; kretsens filtreras nedan. ⚠️ Förut ett IN med en
+                // parameter per kretsmedlem — över 2 100 medlemmar föll hela kretsstatistiken.
                 var rows = await db.FetchAsync<MatchPerMemberRow>(
-                    $@"SELECT p.MemberId AS MemberId, COUNT(DISTINCT m.Id) AS C
+                    @"SELECT p.MemberId AS MemberId, COUNT(DISTINCT m.Id) AS C
                        FROM TrainingMatchParticipants p
                        INNER JOIN TrainingMatches m ON m.Id = p.TrainingMatchId
-                       WHERE m.CreatedDate >= @{memberClubMap.Count} AND p.MemberId IN ({paramNames})
+                       WHERE m.CreatedDate >= @0 AND p.MemberId IS NOT NULL
                        GROUP BY p.MemberId",
-                    paramVals.Concat(new object[] { thirtyDaysAgo }).ToArray());
+                    thirtyDaysAgo);
 
                 foreach (var r in rows)
                 {

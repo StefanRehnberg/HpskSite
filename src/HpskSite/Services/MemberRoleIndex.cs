@@ -37,6 +37,10 @@ namespace HpskSite.Services
         public bool Has(int memberId, string group)
             => Of(memberId).Contains(group, StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>Medlemmar som har minst en grupp som uppfyller <paramref name="match"/>.</summary>
+        public IEnumerable<int> MembersWithAny(Func<string, bool> match)
+            => _roles.Where(kv => kv.Value.Any(match)).Select(kv => kv.Key);
+
         private sealed class Row
         {
             public int MemberId { get; set; }

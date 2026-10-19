@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+﻿﻿﻿using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
@@ -52,6 +52,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Events.IClubEventStore _events;
         private readonly MemberActivityService _activity;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
 
         public AdminStatisticsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -71,9 +72,11 @@ namespace HpskSite.Controllers
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Events.IClubEventStore events,
             MemberActivityService activity,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.MemberPropertyReader memberProperties)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _memberProperties = memberProperties;
             _competitions = competitions;
             _activity = activity;
             _registrations = registrations;
@@ -476,7 +479,9 @@ namespace HpskSite.Controllers
             var currentYearStart = new DateTime(now.Year, 1, 1);
 
             // ── 1. Members ──────────────────────────────────────────
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _).ToList();
+            // Bara de fyra egenskaper statistiken r�knar p� (skalplanen B), i st�llet f�r hela
+            // registret som IMember.
+            var allMembers = _memberProperties.Read(new[] { "primaryClubId", "trainingStartDate", "currentTrainingLevel", "completedTrainingSteps" });
             var approvedMembers = allMembers.Where(m => m.IsApproved).ToList();
 
             // Resolve the demo/test club + region node IDs up front so every member,
@@ -496,7 +501,7 @@ namespace HpskSite.Controllers
             var excludedMemberIds = excludedClubIds.Count == 0
                 ? new HashSet<int>()
                 : allMembers
-                    .Where(m => int.TryParse(m.GetValue<string>("primaryClubId"), out var cid)
+                    .Where(m => int.TryParse(m.Get("primaryClubId"), out var cid)
                                 && excludedClubIds.Contains(cid))
                     .Select(m => m.Id)
                     .ToHashSet();
@@ -505,7 +510,7 @@ namespace HpskSite.Controllers
             approvedMembers = approvedMembers
                 .Where(m =>
                 {
-                    var clubIdStr = m.GetValue<string>("primaryClubId");
+                    var clubIdStr = m.Get("primaryClubId");
                     return !(int.TryParse(clubIdStr, out var cid) && excludedClubIds.Contains(cid));
                 })
                 .ToList();
@@ -596,7 +601,7 @@ namespace HpskSite.Controllers
                     var regionGroups = approvedMembers
                         .Select(m =>
                         {
-                            var clubIdStr = m.GetValue<string>("primaryClubId");
+                            var clubIdStr = m.Get("primaryClubId");
                             if (!string.IsNullOrEmpty(clubIdStr) && int.TryParse(clubIdStr, out var cid) && clubRegionCache.TryGetValue(cid, out var region))
                                 return region;
                             return "Okänd";
@@ -626,7 +631,7 @@ namespace HpskSite.Controllers
                     var membersByClub = approvedMembers
                         .Select(m =>
                         {
-                            var clubIdStr = m.GetValue<string>("primaryClubId");
+                            var clubIdStr = m.Get("primaryClubId");
                             if (!string.IsNullOrEmpty(clubIdStr) && int.TryParse(clubIdStr, out var cid))
                                 return cid;
                             return 0;
@@ -672,7 +677,7 @@ namespace HpskSite.Controllers
                     var earliestMemberByClub = approvedMembers
                         .Select(m =>
                         {
-                            var clubIdStr = m.GetValue<string>("primaryClubId");
+                            var clubIdStr = m.Get("primaryClubId");
                             if (!string.IsNullOrEmpty(clubIdStr) && int.TryParse(clubIdStr, out var cid))
                                 return new { ClubId = cid, CreateDate = UmbracoTime.Local(m.CreateDate) };
                             return null;
@@ -871,7 +876,7 @@ namespace HpskSite.Controllers
                         var memberClubLookup = approvedMembers
                             .Select(m =>
                             {
-                                var clubIdStr = m.GetValue<string>("primaryClubId");
+                                var clubIdStr = m.Get("primaryClubId");
                                 if (!string.IsNullOrEmpty(clubIdStr) && int.TryParse(clubIdStr, out var cid))
                                     return new { MemberId = m.Id, ClubId = cid };
                                 return null;
@@ -1305,16 +1310,16 @@ namespace HpskSite.Controllers
 
                     trainingStairsActiveTrainees = approvedMembers.Count(m =>
                     {
-                        if (!m.HasProperty("trainingStartDate")) return false;
-                        var val = m.GetValue<string>("trainingStartDate");
+                        // (egenskapen saknas = tomt v�rde)
+                        var val = m.Get("trainingStartDate");
                         return !string.IsNullOrEmpty(val);
                     });
 
                     trainingStairsMembersPerLevel = approvedMembers
-                        .Where(m => m.HasProperty("currentTrainingLevel"))
+                        .Where(m => m.Get("currentTrainingLevel").Length > 0)
                         .Select(m =>
                         {
-                            var levelStr = m.GetValue<string>("currentTrainingLevel");
+                            var levelStr = m.Get("currentTrainingLevel");
                             if (!string.IsNullOrEmpty(levelStr) && int.TryParse(levelStr, out var level) && level > 0)
                                 return level;
                             return 0;
@@ -1327,8 +1332,8 @@ namespace HpskSite.Controllers
 
                     foreach (var m in approvedMembers)
                     {
-                        if (!m.HasProperty("completedTrainingSteps")) continue;
-                        var json = m.GetValue<string>("completedTrainingSteps");
+                        // (egenskapen saknas = tomt v�rde)
+                        var json = m.Get("completedTrainingSteps");
                         if (string.IsNullOrEmpty(json)) continue;
                         try
                         {
@@ -1405,7 +1410,7 @@ namespace HpskSite.Controllers
                         // Track active members per club (active = any activity within 30d)
                         if (lastAny.HasValue && lastAny.Value >= thirtyDaysAgo)
                         {
-                            var clubIdStr = m.GetValue<string>("primaryClubId");
+                            var clubIdStr = m.Get("primaryClubId");
                             if (!string.IsNullOrEmpty(clubIdStr) && int.TryParse(clubIdStr, out var cid) && cid > 0)
                             {
                                 activeCountByClub[cid] = activeCountByClub.GetValueOrDefault(cid, 0) + 1;

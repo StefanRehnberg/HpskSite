@@ -31,6 +31,7 @@ namespace HpskSite.Controllers
         private readonly RangeCalendarService _calendar;
         private readonly ClubEventParticipationService _participation;
         private readonly ILogger<ShootingRangeController> _logger;
+        private readonly HpskSite.Services.MemberDirectoryService _directory;
 
         public ShootingRangeController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -49,9 +50,11 @@ namespace HpskSite.Controllers
             RangeCalendarService calendar,
             ClubEventParticipationService participation,
             ILogger<ShootingRangeController> logger,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.MemberDirectoryService directory)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _directory = directory;
             _calendar = calendar;
             _competitions = competitions;
             _participation = participation;
@@ -313,13 +316,9 @@ namespace HpskSite.Controllers
                 if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
                     return Json(new { success = true, members = new List<object>() });
 
-                var all = _memberService.GetAll(0, int.MaxValue, out _);
-                var members = all
-                    .Where(m => m.IsApproved
-                        && ((m.Name ?? "").Contains(query, StringComparison.OrdinalIgnoreCase)
-                            || (m.Email ?? "").Contains(query, StringComparison.OrdinalIgnoreCase)))
-                    .Take(20)
-                    .Select(m => new { memberId = m.Id, memberName = ResolveMemberName(m.Id) })
+                // Sökningen i SQL (skalplanen B) — förut byggdes hela registret för att svara med 20 rader.
+                var members = _directory.Search(query, 20)
+                    .Select(m => new { memberId = m.MemberId, memberName = ResolveMemberName(m.MemberId) })
                     .ToList();
                 return Json(new { success = true, members });
             }

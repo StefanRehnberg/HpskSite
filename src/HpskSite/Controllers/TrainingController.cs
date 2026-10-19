@@ -26,6 +26,7 @@ namespace HpskSite.Controllers
         private readonly ReplyContactResolver _replyContacts;
         private readonly TrainingBadgeCreditService _badgeCredit;
         private readonly ILogger<TrainingController> _logger;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
         private const string ClubMemberTypeAlias = "hpskClub";
 
         public TrainingController(
@@ -43,9 +44,11 @@ namespace HpskSite.Controllers
             EmailService emailService,
             ReplyContactResolver replyContacts,
             TrainingBadgeCreditService badgeCredit,
-            ILogger<TrainingController> logger)
+            ILogger<TrainingController> logger,
+            HpskSite.Services.MemberPropertyReader memberProperties)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _memberProperties = memberProperties;
             _memberService = memberService;
             _memberManager = memberManager;
             _clubService = clubService;
@@ -71,9 +74,7 @@ namespace HpskSite.Controllers
                 };
 
                 // Get all active members (excluding clubs)
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords)
-                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias && m.IsApproved)
-                    .ToList();
+                var allMembers = LoadApprovedTrainees();
 
                 // Load progress for each member
                 foreach (var member in allMembers)
@@ -553,9 +554,7 @@ namespace HpskSite.Controllers
                 var isLoggedIn = currentMember != null;
 
                 // Get all members with training progress
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords)
-                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias && m.IsApproved)
-                    .ToList();
+                var allMembers = LoadApprovedTrainees();
 
                 // Scope: participants/trainers see only their own training-group peers;
                 // club/regional admins + skjutledare see their clubs; site admins see everyone.
@@ -666,6 +665,19 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// Godkända medlemmar som börjat Skyttetrappan (<c>trainingStartDate</c> satt) som IMember —
+        /// bara de (skalplanen B). <see cref="MemberProgress.IsActive"/> är just det villkoret, så de
+        /// andra hade ändå sorterats bort efter att hela registret byggts.
+        /// </summary>
+        private List<IMember> LoadApprovedTrainees()
+        {
+            var ids = _memberProperties.IdsWithValue("trainingStartDate", approvedOnly: true);
+            var result = new List<IMember>(ids.Count);
+            foreach (var chunk in ids.Chunk(1000))
+                result.AddRange(_memberService.GetAllMembers(chunk).Where(m => m.ContentType.Alias != ClubMemberTypeAlias && m.IsApproved));
+            return result;
+        }
         /// <summary>
         /// The set of member ids the current viewer may see on Skyttetrappan.
         /// Returns null when unrestricted (site admin). Participants/trainers are scoped to their

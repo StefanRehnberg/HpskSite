@@ -2449,42 +2449,18 @@ namespace HpskSite.Controllers.Api
 
             try
             {
-                var searchTerm = q.Trim().ToLower();
-                var results = new List<Shared.DTOs.MemberSearchResult>();
-
-                // Search members by name using IMemberService
-                var allMembers = _memberService.GetAllMembers();
-
-                foreach (var member in allMembers)
-                {
-                    var firstName = member.GetValue<string>("firstName") ?? "";
-                    var lastName = member.GetValue<string>("lastName") ?? "";
-                    var fullName = $"{firstName} {lastName}".ToLower();
-
-                    if (fullName.Contains(searchTerm) || firstName.ToLower().Contains(searchTerm) || lastName.ToLower().Contains(searchTerm))
+                // Sökningen i SQL (skalplanen B): namn, förnamn, efternamn och e-post, högst 20.
+                // Förut byggdes hela registret som IMember för varje sökning från appen.
+                var results = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.MemberDirectoryService>()
+                    .Search(q.Trim(), 20, approvedOnly: false, searchNames: true)
+                    .Select(m => new Shared.DTOs.MemberSearchResult
                     {
-                        // Get club name
-                        string? clubName = null;
-                        var clubId = member.GetValue<int>("primaryClubId");
-                        if (clubId > 0)
-                        {
-                            // Use ClubService if available, otherwise just set clubName from lookup
-                            clubName = GetClubNameById(clubId);
-                        }
-
-                        results.Add(new Shared.DTOs.MemberSearchResult
-                        {
-                            Id = member.Id,
-                            FirstName = firstName,
-                            LastName = lastName,
-                            ClubName = clubName
-                        });
-                    }
-
-                    // Limit to 20 results
-                    if (results.Count >= 20)
-                        break;
-                }
+                        Id = m.MemberId,
+                        FirstName = m.FirstName,
+                        LastName = m.LastName,
+                        ClubName = m.PrimaryClubId is int clubId ? GetClubNameById(clubId) : null
+                    })
+                    .ToList();
 
                 return Ok(ApiResponse<List<Shared.DTOs.MemberSearchResult>>.Ok(results));
             }

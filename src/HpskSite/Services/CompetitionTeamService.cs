@@ -29,6 +29,8 @@ namespace HpskSite.Services
         private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.ClubRosterService _roster;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
         public CompetitionTeamService(
             IUmbracoDatabaseFactory databaseFactory,
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -41,8 +43,12 @@ namespace HpskSite.Services
             ILogger<CompetitionTeamService> logger,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.LegacyInvoiceHubs invoiceHubs,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.ClubRosterService roster,
+            HpskSite.Services.MemberPropertyReader memberProperties)
         {
+            _memberProperties = memberProperties;
+            _roster = roster;
             _competitions = competitions;
             _invoiceHubs = invoiceHubs;
             _registrations = registrations;
@@ -1058,34 +1064,25 @@ namespace HpskSite.Services
             var result = new List<ClubMemberInfo>();
             try
             {
-                // Get all members and filter by club
-                // ⚠️ Förut GetAll(0, 5000): ett TYST tak — över 5 000 medlemmar föll klubbens
-                // skyttar ur stafettväljaren. Och rollen lästes per medlem; nu i en fråga (skalplanen B2).
-                long totalRecords;
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out totalRecords);
+                // Klubbens medlemmar ur klubbregistret (skalplanen B) — primär klubb ELLER övrig klubb.
+                // En stafett väljs bland klubbens medlemmar, och en skytt vars huvudklubb är en annan är
+                // ändå medlem här. Bara de fyra egenskaper väljaren behöver läses, aldrig hela IMember.
+                // ⚠️ Förut GetAll(0, 5000): ett TYST tak — över 5 000 medlemmar föll klubbens skyttar ur
+                // stafettväljaren. Och rollen lästes per medlem; nu i en fråga (skalplanen B2).
+                var memberIds = _roster.ActiveMemberIds(clubId);
                 var roleIndex = HpskSite.Services.MemberRoleIndex.Load(_databaseFactory);
-                foreach (var member in allMembers)
+                foreach (var member in _memberProperties.Read(new[] { "firstName", "lastName", "gender", "personNumber" }, memberIds))
                 {
-                    // Everyone who belongs to the club, primary OR additional. A stafettlag is
-                    // picked from the club's members, and a shooter whose primary club is another
-                    // one is still a member here and eligible for this club's team — the old
-                    // primary-only test made them unpickable with no way to say why.
-                    if (!_memberClubService.IsMemberOfClub(member, clubId)) continue;
-
                     // Check member is approved (has "Users" role, not just "PendingApproval")
                     if (!roleIndex.Has(member.Id, "Users")) continue;
 
-                    var firstName = member.GetValue<string>("firstName") ?? "";
-                    var lastName = member.GetValue<string>("lastName") ?? "";
                     result.Add(new ClubMemberInfo
                     {
                         MemberId = member.Id,
-                        Name = $"{firstName} {lastName}".Trim(),
+                        Name = $"{member.Get("firstName")} {member.Get("lastName")}".Trim(),
                         // Lets the stafett picker grey out members the class can't take. Empty =
                         // unknown, which the server treats as allowed (see ValidateStafettGender).
-                        Gender = GenderFromValues(
-                            member.GetValue<string>("gender"),
-                            member.GetValue<string>("personNumber")) ?? ""
+                        Gender = GenderFromValues(member.Get("gender"), member.Get("personNumber")) ?? ""
                     });
                 }
             }

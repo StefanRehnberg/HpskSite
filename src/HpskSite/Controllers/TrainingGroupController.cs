@@ -24,6 +24,7 @@ namespace HpskSite.Controllers
         private readonly EmailService _emailService;
         private readonly ReplyContactResolver _replyContacts;
         private readonly ILogger<TrainingGroupController> _logger;
+        private readonly HpskSite.Services.MemberDirectoryService _directory;
 
         public TrainingGroupController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -39,9 +40,11 @@ namespace HpskSite.Controllers
             ClubService clubService,
             EmailService emailService,
             ReplyContactResolver replyContacts,
-            ILogger<TrainingGroupController> logger)
+            ILogger<TrainingGroupController> logger,
+            HpskSite.Services.MemberDirectoryService directory)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _directory = directory;
             _trainingGroupService = trainingGroupService;
             _authorizationService = authorizationService;
             _memberService = memberService;
@@ -540,48 +543,16 @@ namespace HpskSite.Controllers
                 if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
                     return Json(new { success = true, data = new List<object>() });
 
-                var matches = _memberService.GetAll(0, int.MaxValue, out var totalRecords)
-                    .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved)
-                    .Where(m => (m.Name ?? "").Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                                (m.Email ?? "").Contains(query, StringComparison.OrdinalIgnoreCase));
-
-                if (clubId.HasValue)
-                {
-                    var clubIdStr = clubId.Value.ToString();
-                    // Match members affiliated with the club — primary club OR additional clubs.
-                    // Applied before Take(20) so club members aren't dropped when a common query
-                    // returns 20+ name matches from other clubs first.
-                    matches = matches.Where(m =>
+                // Sökningen i SQL (skalplanen B). Klubbfiltret gäller före Take(20), som förut, så
+                // klubbens medlemmar inte trängs undan av namnträffar i andra klubbar.
+                var results = _directory.Search(query, 20, clubId)
+                    .Select(m => new
                     {
-                        var pcid = m.GetValue("primaryClubId")?.ToString();
-                        if (pcid == clubIdStr)
-                            return true;
-
-                        return (m.GetValue("memberClubIds")?.ToString()?.Split(',')
-                            .Select(s => s.Trim())
-                            .Contains(clubIdStr) ?? false);
-                    });
-                }
-
-                var allMembers = matches.Take(20).ToList();
-
-                var results = allMembers.Select(m =>
-                {
-                    var pcidStr = m.GetValue("primaryClubId")?.ToString();
-                    string? memberClubName = null;
-                    if (!string.IsNullOrEmpty(pcidStr) && int.TryParse(pcidStr, out int pcid))
-                    {
-                        memberClubName = _clubService.GetClubNameById(pcid);
-                    }
-
-                    return new
-                    {
-                        memberId = m.Id,
+                        memberId = m.MemberId,
                         memberName = m.Name,
                         email = m.Email,
-                        clubName = memberClubName
-                    };
-                });
+                        clubName = m.PrimaryClubId is int pcid ? _clubService.GetClubNameById(pcid) : null
+                    });
 
                 return Json(new { success = true, data = results });
             }
