@@ -64,7 +64,7 @@ namespace HpskSite.Controllers.Api
             if (string.IsNullOrEmpty(siteUrl))
             {
                 // Fallback to request-based URL
-                siteUrl = $"{Request.Scheme}://{Request.Host}";
+                siteUrl = $"{Request.PublicBase()}";
             }
 
             return relativeUrl.StartsWith("/")

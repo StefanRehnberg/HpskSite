@@ -532,7 +532,7 @@ namespace HpskSite.Controllers
 
         /// <summary>Länken till fakturadokumentet — med en token, så den fungerar utan inloggning.</summary>
         private string DocumentUrl(int chargeId)
-            => $"{Request.Scheme}://{Request.Host}/klubbfaktura/{chargeId}?t={Uri.EscapeDataString(_documentProtector.Protect(chargeId.ToString()))}";
+            => $"{Request.PublicBase()}/klubbfaktura/{chargeId}?t={Uri.EscapeDataString(_documentProtector.Protect(chargeId.ToString()))}";
 
         /// <summary>
         /// GET GetSettings — tävlingsdialogernas ruta "Får klubben betala i stället för skytten?".

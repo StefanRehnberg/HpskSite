@@ -104,7 +104,7 @@ namespace HpskSite.Controllers
             var sched = _schedule.GetSchedule(memberId.Value, c);
             if (!sched.HasAny) return NotFound();
 
-            var baseUrl = $"{Request.Scheme}://{Request.Host}";
+            var baseUrl = $"{Request.PublicBase()}";
             var (ics, exported, skipped) = _ics.Build(sched, baseUrl);
             if (exported == 0) return NotFound();
 

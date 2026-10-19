@@ -40,7 +40,7 @@ namespace HpskSite.Models
             if (Uri.TryCreate(url, UriKind.Absolute, out var abs) && (abs.Scheme == "http" || abs.Scheme == "https"))
                 return url;
             var path = url.StartsWith('/') ? url : "/" + url;
-            return $"{request.Scheme}://{request.Host}{path}";
+            return $"{request.PublicBase()}{path}";
         }
 
         /// <summary>
@@ -68,6 +68,6 @@ namespace HpskSite.Models
         public static string DefaultCanonical(HttpRequest request, string? nodeUrl) =>
             IsNodesOwnPage(request.Path.Value ?? "/", nodeUrl)
                 ? Absolute(request, nodeUrl!)!
-                : $"{request.Scheme}://{request.Host}{request.Path}{request.QueryString}";
+                : $"{request.PublicBase()}{request.Path}{request.QueryString}";
     }
 }

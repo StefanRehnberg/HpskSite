@@ -305,7 +305,7 @@ namespace HpskSite.Controllers
                 return Json(new { success = false, message = "Åtkomst nekad" });
             var meId = await GetCurrentMemberId();
             var r = _meetingService.ApproveByMember(meetingId, meId, "web");
-            int notified = r.Ok && r.Locked ? await _notify.DecisionsAsync(meetingId, $"{Request.Scheme}://{Request.Host}") : 0;
+            int notified = r.Ok && r.Locked ? await _notify.DecisionsAsync(meetingId, $"{Request.PublicBase()}") : 0;
             return Json(new { success = r.Ok, locked = r.Locked, approved = r.Approved, total = r.Total, notified, message = r.Ok ? "" : r.Message });
         }
 
@@ -321,7 +321,7 @@ namespace HpskSite.Controllers
             var r = _meetingService.ApproveByMember(meetingId.Value, meId, "qr");
             // Sista underskriften låser protokollet — då får den som anmälde ett ärende och
             // motionären beslutet. Spärren mot dubbla besked ligger i ClaimDecisionNotices.
-            if (r.Ok && r.Locked) await _notify.DecisionsAsync(meetingId.Value, $"{Request.Scheme}://{Request.Host}");
+            if (r.Ok && r.Locked) await _notify.DecisionsAsync(meetingId.Value, $"{Request.PublicBase()}");
             return Json(new { success = r.Ok, locked = r.Locked, approved = r.Approved, total = r.Total, message = r.Ok ? "" : r.Message });
         }
 
@@ -379,7 +379,7 @@ namespace HpskSite.Controllers
         {
             if (!await CanAccessMeeting(meetingId))
                 return Content("Åtkomst nekad");
-            var url = $"{Request.Scheme}://{Request.Host}/styrelse/justera?t={Uri.EscapeDataString(ProtectMeetingToken(meetingId))}";
+            var url = $"{Request.PublicBase()}/styrelse/justera?t={Uri.EscapeDataString(ProtectMeetingToken(meetingId))}";
             var png = QrPng(url);
             return png == null ? Content("QR-fel") : File(png, "image/png");
         }
@@ -395,7 +395,7 @@ namespace HpskSite.Controllers
             if (meeting.Status != "VantarJustering")
                 return Json(new { success = false, message = "Protokollet är inte skickat för justering" });
 
-            var link = $"{Request.Scheme}://{Request.Host}/styrelse/justera?t={Uri.EscapeDataString(ProtectMeetingToken(meetingId))}";
+            var link = $"{Request.PublicBase()}/styrelse/justera?t={Uri.EscapeDataString(ProtectMeetingToken(meetingId))}";
             var orgName = ResolveOrgName(meeting.OwnerType, meeting.OwnerId);
             int sent = 0;
             foreach (var s in _meetingService.GetSigners(meetingId).Where(s => s.ApprovedDate == null))

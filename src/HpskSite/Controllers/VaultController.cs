@@ -164,7 +164,7 @@ namespace HpskSite.Controllers
             if (string.IsNullOrWhiteSpace(code)) return "";
 
             var req = HttpContext.Request;
-            return FirearmLabelCode.Url(req.Scheme, req.Host.Value ?? "", code);
+            return FirearmLabelCode.Url(req.PublicBase(), code);
         }
 
         [HttpGet("etiketter")]
@@ -275,7 +275,7 @@ namespace HpskSite.Controllers
             {
                 ClubId = target,
                 ClubName = posterClubName,
-                VaultUrl = $"{req.Scheme}://{req.Host}/valvet?club={target}",
+                VaultUrl = $"{req.PublicBase()}/valvet?club={target}",
             });
         }
     }

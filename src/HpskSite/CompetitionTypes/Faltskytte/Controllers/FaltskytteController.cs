@@ -1909,7 +1909,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 return Forbid();
             var protector = _dataProtectionProvider.CreateProtector("Faltskytte.StationInfoQr.v1");
             var token = protector.Protect($"{competitionId}:{stationNumber}");
-            var url = $"{Request.Scheme}://{Request.Host}/station?t={Uri.EscapeDataString(token)}";
+            var url = $"{Request.PublicBase()}/station?t={Uri.EscapeDataString(token)}";
             var png = QrPng(url);
             return png == null ? StatusCode(500) : File(png, "image/png");
         }

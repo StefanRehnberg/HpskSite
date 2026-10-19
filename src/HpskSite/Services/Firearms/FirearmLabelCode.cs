@@ -108,5 +108,9 @@ namespace HpskSite.Services.Firearms
         /// </summary>
         public static string Url(string scheme, string host, string code) =>
             $"{scheme}://{host}/v/{code}".ToUpperInvariant();
+
+        /// <summary>Samma adress ur sajtens bas ("https://pistol.nu", <c>Request.PublicBase()</c>).</summary>
+        public static string Url(string baseUrl, string code) =>
+            $"{baseUrl.TrimEnd('/')}/v/{code}".ToUpperInvariant();
     }
 }

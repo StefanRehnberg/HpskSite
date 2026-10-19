@@ -50,8 +50,8 @@ namespace HpskSite.Controllers
         public async Task<IActionResult> Index()
         {
             // Adressen byggs ur förfrågan, så att koden pekar rätt i dev och i prod.
-            var host = Request.Host.Value;
-            var pageUrl = $"{Request.Scheme}://{host}/allt";
+            var pageUrl = $"{Request.PublicBase()}/allt";
+            var host = new Uri(pageUrl).Authority;
 
             // Samma uppslag av inloggningssidan som Master.cshtml och Om-sidan gör.
             var loginUrl = "/login-register";

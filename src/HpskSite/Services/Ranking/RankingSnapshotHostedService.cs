@@ -28,7 +28,7 @@ namespace HpskSite.Services.Ranking
             catch (OperationCanceledException) { return; }
 
             // Build once on startup so a fresh deploy populates immediately.
-            await RunSafelyAsync(stoppingToken);
+            if (_scopeFactory.MayRunScheduled(nameof(RankingSnapshotHostedService))) await RunSafelyAsync(stoppingToken);
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -36,7 +36,7 @@ namespace HpskSite.Services.Ranking
                 try { await Task.Delay(delay, stoppingToken); }
                 catch (OperationCanceledException) { break; }
 
-                await RunSafelyAsync(stoppingToken);
+                if (_scopeFactory.MayRunScheduled(nameof(RankingSnapshotHostedService))) await RunSafelyAsync(stoppingToken);
             }
 
             _logger.LogInformation("RankingSnapshotHostedService stopped.");

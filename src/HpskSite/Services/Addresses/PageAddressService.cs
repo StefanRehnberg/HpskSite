@@ -133,7 +133,11 @@ namespace HpskSite.Services.Addresses
         public IReadOnlyList<PageAddressRow> ListCurrent(string kind)
             => CurrentIndex().Values.Where(r => r.TargetKind == kind).ToList();
 
-        public void Invalidate() => InvalidateLocal(_caches);
+        public void Invalidate()
+        {
+            InvalidateLocal(_caches);
+            HpskSite.Services.Hosting.CacheSignals.Notify(HpskSite.Services.Hosting.CacheSignals.PageAddresses);
+        }
 
         /// <summary>
         /// Töm cachen och räkna upp generationen. ⚠️ Generationen är det som gör tömningen säker: en läsning som

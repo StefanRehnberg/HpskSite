@@ -63,7 +63,7 @@ namespace HpskSite.Controllers
             var course = _courses.Get(g, DateTime.Today);
             if (course == null) return NotFound();
 
-            var (ics, exported) = CourseIcsBuilder.Build(course.Name, g, course.Occasions, $"{Request.Scheme}://{Request.Host}");
+            var (ics, exported) = CourseIcsBuilder.Build(course.Name, g, course.Occasions, $"{Request.PublicBase()}");
             if (exported == 0) return NotFound();
             var safe = new string(course.Name.Select(ch => char.IsLetterOrDigit(ch) ? char.ToLowerInvariant(ch) : '-').ToArray()).Trim('-');
             while (safe.Contains("--")) safe = safe.Replace("--", "-");

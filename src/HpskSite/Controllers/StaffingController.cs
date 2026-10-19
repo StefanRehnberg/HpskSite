@@ -1136,7 +1136,7 @@ namespace HpskSite.Controllers
             if (!await HasCompetitionAccessAsync(a.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
             var token = StaffingInviteToken.Protect(_dataProtection, a.Id);
-            var url = $"{Request.Scheme}://{Request.Host}/mina-uppdrag/svar?t={Uri.EscapeDataString(token)}";
+            var url = $"{Request.PublicBase()}/mina-uppdrag/svar?t={Uri.EscapeDataString(token)}";
             return Json(new { success = true, url, token });
         }
 

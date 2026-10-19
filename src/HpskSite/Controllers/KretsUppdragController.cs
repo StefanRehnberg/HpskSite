@@ -103,7 +103,7 @@ namespace HpskSite.Controllers
             var regionName = region.Value<string>("regionName") ?? region.Name ?? "";
             var label = BoardRoleDefinitions.GetLabel(roleKey);
             var token = _tokens.CreateUppdragRequest(regionId, me.Id, roleKey);
-            var confirmUrl = $"{Request.Scheme}://{Request.Host}/kretsen/uppdrag?t={Uri.EscapeDataString(token)}";
+            var confirmUrl = $"{Request.PublicBase()}/kretsen/uppdrag?t={Uri.EscapeDataString(token)}";
             var requesterName = DisplayName(me);
             message = (message ?? "").Trim();
             if (message.Length > 1000) message = message[..1000];

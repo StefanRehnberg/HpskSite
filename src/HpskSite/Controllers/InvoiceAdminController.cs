@@ -2203,6 +2203,7 @@ namespace HpskSite.Controllers
         private void InvalidateInvoiceCaches()
         {
             _appCaches.RuntimeCache.ClearByRegex("^admin_invoices_");
+            HpskSite.Services.Hosting.CacheSignals.Notify(HpskSite.Services.Hosting.CacheSignals.Invoices);
         }
     }
 

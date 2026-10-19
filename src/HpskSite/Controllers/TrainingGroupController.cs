@@ -609,7 +609,7 @@ namespace HpskSite.Controllers
                 // En länk till kursen i stället för ett avskrivet schema (Stefan 2026-10-06): där står
                 // alltid de aktuella tillfällena och vilka som är obligatoriska.
                 var courseUrl = includeCourseLink is "1" or "true" or "on"
-                    ? $"{Request.Scheme}://{Request.Host}/min-kurs?g={trainingGroupId}" : null;
+                    ? $"{Request.PublicBase()}/min-kurs?g={trainingGroupId}" : null;
 
                 int sentCount = 0;
                 var noEmail = new List<string>();

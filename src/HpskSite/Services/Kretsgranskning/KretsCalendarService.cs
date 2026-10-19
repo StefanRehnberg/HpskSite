@@ -29,7 +29,8 @@ namespace HpskSite.Services.Kretsgranskning
     /// </summary>
     public class KretsCalendarService
     {
-        private const string CacheKey = "kretskalender_index_v1";
+        public const string IndexCacheKey = "kretskalender_index_v1";
+        private const string CacheKey = IndexCacheKey;
         private readonly IUmbracoContextFactory _contextFactory;
         private readonly AppCaches _caches;
         private readonly CompetitionApplicationService _applications;
@@ -290,7 +291,11 @@ namespace HpskSite.Services.Kretsgranskning
         }
 
         /// <summary>Töm indexet — efter att en tävling skapats ur en ansökan ska kalendern visa den genast.</summary>
-        public void Invalidate() => _caches.RuntimeCache.Clear(CacheKey);
+        public void Invalidate()
+        {
+            _caches.RuntimeCache.Clear(CacheKey);
+            HpskSite.Services.Hosting.CacheSignals.Notify(HpskSite.Services.Hosting.CacheSignals.KretsCalendar);
+        }
 
         // ── Indexet ─────────────────────────────────────────────────────────────────────────
 

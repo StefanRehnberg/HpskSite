@@ -3783,7 +3783,7 @@ namespace HpskSite.Controllers
             {
                 // Build join URL
                 var request = HttpContext.Request;
-                var baseUrl = $"{request.Scheme}://{request.Host}";
+                var baseUrl = $"{request.PublicBase()}";
                 var joinUrl = $"{baseUrl}/traningsmatch/?join={matchCode}";
 
                 // Generate QR code
@@ -3825,7 +3825,7 @@ namespace HpskSite.Controllers
                 }
 
                 // Construct the guest claim URL server-side
-                var baseUrl = $"{Request.Scheme}://{Request.Host}";
+                var baseUrl = $"{Request.PublicBase()}";
                 var guestClaimUrl = $"{baseUrl}/match/{code.ToUpper()}/guest/{token}";
 
                 // Generate QR code

@@ -54,7 +54,7 @@ namespace HpskSite.Services.Schedule
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                await RunSafelyAsync(stoppingToken);
+                if (_scopeFactory.MayRunScheduled(nameof(ScheduleReminderHostedService))) await RunSafelyAsync(stoppingToken);
                 try { await Task.Delay(Interval, stoppingToken); }
                 catch (OperationCanceledException) { break; }
             }

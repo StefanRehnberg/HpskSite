@@ -45,7 +45,14 @@ namespace HpskSite.Services
             => _appCaches.RuntimeCache.GetCacheItem(CacheKey, Build, CacheTtl) ?? new WhatsHappeningData();
 
         /// <summary>Drop the cached aggregate so the next request rebuilds it (used after seeding/edits).</summary>
-        public void ClearCache() => _appCaches.RuntimeCache.ClearByKey(CacheKey);
+        public void ClearCache()
+        {
+            ClearLocal();
+            HpskSite.Services.Hosting.CacheSignals.Notify(HpskSite.Services.Hosting.CacheSignals.WhatsHappening);
+        }
+
+        /// <summary>Tömmer bara den här instansens cache (anropas av cachesignalen — skalplanen D4).</summary>
+        public void ClearLocal() => _appCaches.RuntimeCache.ClearByKey(CacheKey);
 
         private WhatsHappeningData Build()
         {

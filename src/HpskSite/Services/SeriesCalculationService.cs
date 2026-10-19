@@ -17,6 +17,15 @@ namespace HpskSite.Services
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
         private const string CacheKeyPrefix = "SeriesResults_";
 
+        /// <summary>Nycklarna den här instansen cachat — så att cachesignalen kan tömma alla (skalplanen D4).</summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> CachedKeys = new();
+
+        /// <summary>Tömmer den här instansens serieresultat (anropas av cachesignalen).</summary>
+        public static void ClearLocal(Microsoft.Extensions.Caching.Memory.IMemoryCache cache)
+        {
+            foreach (var key in CachedKeys.Keys) { cache.Remove(key); CachedKeys.TryRemove(key, out _); }
+        }
+
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
         private readonly HpskSite.Services.Competitions.ICompetitionSeriesStore _seriesStore;
 
@@ -154,6 +163,7 @@ namespace HpskSite.Services
 
             // Cache the result
             _cache.Set(cacheKey, result, CacheDuration);
+            CachedKeys[cacheKey] = 0;
             _logger.LogDebug("Cached series results for {SeriesId}", seriesContentId);
 
             return result;
@@ -174,6 +184,7 @@ namespace HpskSite.Services
                 {
                     var cacheKey = CacheKeyPrefix + seriesId.Value;
                     _cache.Remove(cacheKey);
+                    HpskSite.Services.Hosting.CacheSignals.Notify(HpskSite.Services.Hosting.CacheSignals.SeriesResults);
                     _logger.LogDebug("Invalidated series results cache for series {SeriesId} (competition {CompId} changed)",
                         seriesId.Value, competitionId);
                 }
@@ -190,6 +201,7 @@ namespace HpskSite.Services
         public void InvalidateCacheForSeries(int seriesId)
         {
             _cache.Remove(CacheKeyPrefix + seriesId);
+            HpskSite.Services.Hosting.CacheSignals.Notify(HpskSite.Services.Hosting.CacheSignals.SeriesResults);
             _logger.LogDebug("Invalidated series results cache for series {SeriesId}", seriesId);
         }
     }

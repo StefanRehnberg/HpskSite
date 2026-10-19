@@ -2322,6 +2322,7 @@ namespace HpskSite.Controllers
         private void InvalidateInvoiceCachesForCompetition()
         {
             try { AppCaches.RuntimeCache.ClearByRegex("^admin_invoices_"); } catch { }
+            HpskSite.Services.Hosting.CacheSignals.Notify(HpskSite.Services.Hosting.CacheSignals.Invoices);
         }
 
         [HttpPost]

@@ -43,7 +43,7 @@ namespace HpskSite.Services.Kretsgranskning
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                try { await RunOnceAsync(DateTime.Today); }
+                try { if (_scopeFactory.MayRunScheduled(nameof(CompetitionApplicationReminderHostedService))) await RunOnceAsync(DateTime.Today); }
                 catch (Exception ex) { _logger.LogError(ex, "Tävlingsansökans påminnelser kunde inte köras."); }
 
                 try { await Task.Delay(Interval, stoppingToken); }

@@ -113,7 +113,16 @@ WHEN NOT MATCHED THEN INSERT (SettingKey, SettingValue, UpdatedUtc, UpdatedByMem
             }
             _cache.Remove(CachePrefix + key);
             _lastGood[key] = value.Trim();
+            // Skalplanen D4: de andra instanserna läser om direkt i stället för efter en minut — en frysning
+            // av lagringen ska gälla överallt med en gång.
+            HpskSite.Services.Hosting.CacheSignals.Notify(HpskSite.Services.Hosting.CacheSignals.SiteSettings);
             _logger.LogWarning("Inställningen {Key} satt till {Value} av medlem {MemberId}", key, value, byMemberId);
+        }
+
+        /// <summary>Tömmer den här instansens cache för alla kända inställningar (cachesignalen — skalplanen D4).</summary>
+        public void ClearLocal()
+        {
+            foreach (var key in _lastGood.Keys) _cache.Remove(CachePrefix + key);
         }
 
         /// <summary>Själva läsningen. Virtuell för testerna.</summary>

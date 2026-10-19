@@ -59,7 +59,7 @@ namespace HpskSite.Services.Firearms
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                await RunSafelyAsync(stoppingToken);
+                if (_scopeFactory.MayRunScheduled(nameof(FirearmReminderHostedService))) await RunSafelyAsync(stoppingToken);
                 try { await Task.Delay(Interval, stoppingToken); }
                 catch (OperationCanceledException) { break; }
             }

@@ -576,7 +576,7 @@ namespace HpskSite.Controllers
             if (recipients.Count == 0)
                 return Json(new { success = false, message = $"{region.Name} har varken ordförande eller kontaktadress på pistol.nu. Kontakta kretsen på annat sätt." });
 
-            var url = $"{Request.Scheme}://{Request.Host}/kretsen/kom-igang?krets={region.Id}";
+            var url = $"{Request.PublicBase()}/kretsen/kom-igang?krets={region.Id}";
             var clubName = _clubs.GetClubNameById(clubId) ?? "";
             int sent = 0;
             foreach (var (email, name) in recipients)
@@ -1116,7 +1116,7 @@ namespace HpskSite.Controllers
             try
             {
                 var rec = _uppdrag.Recipients(a.RegionId, BoardRoleDefinitions.RoleTavlingsansvarig);
-                var base_ = $"{Request.Scheme}://{Request.Host}";
+                var base_ = $"{Request.PublicBase()}";
                 var inbox = $"{base_}/kretsen/ansokningar?krets={a.RegionId}";
                 var club = a.ClubId > 0 ? (_clubs.GetClubNameById(a.ClubId) ?? "") : RegionName(a.RegionId);
                 var level = CompetitionLevel.Find(a.Level)?.Label?.ToLowerInvariant() ?? a.Level;

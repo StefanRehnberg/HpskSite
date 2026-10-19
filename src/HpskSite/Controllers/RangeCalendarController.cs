@@ -56,7 +56,7 @@ namespace HpskSite.Controllers
             try
             {
                 var items = _calendar.Build(rangeId, DateTime.Today.AddMonths(-6), DateTime.Today.AddYears(1));
-                var ics = _calendar.BuildIcs(rangeId, range.Name, items, $"{Request.Scheme}://{Request.Host}");
+                var ics = _calendar.BuildIcs(rangeId, range.Name, items, $"{Request.PublicBase()}");
                 return File(Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8");
             }
             catch (Exception ex)

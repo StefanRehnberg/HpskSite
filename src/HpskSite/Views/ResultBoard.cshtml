@@ -59,7 +59,7 @@
         var hasResultList = ResultLists.GetMany(new[] { competition.Id }).Count > 0;
         var compRel = competition.Url();
         if (hasResultList && !string.IsNullOrEmpty(compRel))
-            resultPageUrl = $"{Context.Request.Scheme}://{Context.Request.Host}{compRel.TrimEnd('/')}/resultat/";
+            resultPageUrl = $"{Context.Request.PublicBase()}{compRel.TrimEnd('/')}/resultat/";
     }
 }<!DOCTYPE html>
 <html lang="sv">

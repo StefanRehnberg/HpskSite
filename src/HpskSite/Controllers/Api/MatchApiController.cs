@@ -142,7 +142,7 @@ namespace HpskSite.Controllers.Api
             if (string.IsNullOrEmpty(siteUrl))
             {
                 // Fallback to request-based URL
-                siteUrl = $"{Request.Scheme}://{Request.Host}";
+                siteUrl = $"{Request.PublicBase()}";
             }
 
             return relativeUrl.StartsWith("/")
@@ -2245,7 +2245,7 @@ namespace HpskSite.Controllers.Api
             scope.Complete();
 
             // Build claim URL
-            var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.Scheme}://{Request.Host}";
+            var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.PublicBase()}";
             var claimUrl = $"{siteUrl}/match/{code.ToUpper()}/guest/{claimToken}";
 
             _logger.LogInformation("AddGuest: Generated claimUrl={ClaimUrl} for guest {GuestId}", claimUrl, guest.Id);
@@ -2402,7 +2402,7 @@ namespace HpskSite.Controllers.Api
             scope.Complete();
 
             // Build claim URL
-            var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.Scheme}://{Request.Host}";
+            var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.PublicBase()}";
             var claimUrl = $"{siteUrl}/match/{code.ToUpper()}/guest/{newClaimToken}";
 
             _logger.LogInformation("RegenerateGuestQr: Generated claimUrl={ClaimUrl} for guest {GuestId}", claimUrl, guest.Id);
@@ -2568,7 +2568,7 @@ namespace HpskSite.Controllers.Api
                 scope.Complete();
 
                 // Build claim URL
-                var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.Scheme}://{Request.Host}";
+                var siteUrl = _configuration["EmailSettings:SiteUrl"]?.TrimEnd('/') ?? $"{Request.PublicBase()}";
                 var claimUrl = $"{siteUrl}/match/{code.ToUpper()}/member/{claimToken}";
 
                 _logger.LogInformation("CreateMemberClaim: Generated claimUrl={ClaimUrl} for member {MemberId}", claimUrl, request.MemberId);

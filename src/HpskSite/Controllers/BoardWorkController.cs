@@ -51,7 +51,7 @@ namespace HpskSite.Controllers
             _logger = logger;
         }
 
-        private string BaseUrl => $"{Request.Scheme}://{Request.Host}";
+        private string BaseUrl => $"{Request.PublicBase()}";
         private static string D(DateTime d) => d.ToString("yyyy-MM-dd");
         private static string DT(DateTime d) => d.ToString("yyyy-MM-dd HH:mm");
         private IActionResult Denied() => Json(new { success = false, message = "Åtkomst nekad" });
