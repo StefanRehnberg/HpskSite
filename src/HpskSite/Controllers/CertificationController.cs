@@ -29,6 +29,9 @@ namespace HpskSite.Controllers
         private readonly EmailService _emailService;
         private readonly ReplyContactResolver _replyContacts;
         private readonly ILogger<CertificationController> _logger;
+        private readonly HpskSite.Services.ClubRosterService _roster;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
+        private static readonly string[] NameAliases = { "firstName", "lastName" };
 
         public CertificationController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -44,9 +47,13 @@ namespace HpskSite.Controllers
             CertificationAuthorizationService certAuth,
             EmailService emailService,
             ReplyContactResolver replyContacts,
-            ILogger<CertificationController> logger)
+            ILogger<CertificationController> logger,
+            HpskSite.Services.ClubRosterService roster,
+            HpskSite.Services.MemberPropertyReader memberProperties)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _memberProperties = memberProperties;
+            _roster = roster;
             _databaseFactory = databaseFactory;
             _memberService = memberService;
             _memberManager = memberManager;
@@ -94,17 +101,17 @@ namespace HpskSite.Controllers
             // Find members where primary club = this club AND they have at least one
             // active cert of any of the three club-relevant types, plus the appointed
             // Föreningsinstruktörer for this club regardless of primary club.
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _).Where(m => m.IsApproved).ToList();
-            var clubMembers = allMembers.Where(m =>
-            {
-                var s = m.GetValue<string>("primaryClubId");
-                return !string.IsNullOrEmpty(s) && int.TryParse(s, out int cid) && cid == clubId;
-            }).ToList();
+            // Klubbens medlemmar ur klubbregistret och namnen ur en lätt läsning (skalplanen B) —
+            // aldrig hela medlemsregistret som IMember.
+            var clubMemberIds = _roster.Active(clubId)
+                .Where(r => r.IsPrimary && r.IsApproved).Select(r => r.MemberId).ToList();
 
             // Members appointed as Föreningsinstruktör for this club (might be from any club)
             var appointedIds = await GetMemberIdsInGroupAsync($"Foreningsinstruktor_{clubId}");
 
-            var memberLookup = allMembers.ToDictionary(m => m.Id, m => m);
+            var memberLookup = _memberProperties.Read(NameAliases, clubMemberIds.Union(appointedIds), approvedOnly: true)
+                .ToDictionary(m => m.Id);
+            var clubMembers = clubMemberIds.Where(memberLookup.ContainsKey).Select(id => memberLookup[id]).ToList();
             var unionIds = clubMembers.Select(m => m.Id).Union(appointedIds).ToList();
 
             var certs = await _certService.GetActiveForMembersAsync(unionIds);
@@ -115,7 +122,7 @@ namespace HpskSite.Controllers
             object BuildRow(int mId, string certType)
             {
                 var m = memberLookup.GetValueOrDefault(mId);
-                var name = $"{m?.GetValue<string>("firstName") ?? ""} {m?.GetValue<string>("lastName") ?? ""}".Trim();
+                var name = $"{m?.Get("firstName") ?? ""} {m?.Get("lastName") ?? ""}".Trim();
                 if (string.IsNullOrEmpty(name)) name = m?.Name ?? "Okänd";
                 var memberCerts = byMember.GetValueOrDefault(mId);
                 var cert = memberCerts?.FirstOrDefault(c => c.CertificationType == certType);
@@ -164,19 +171,18 @@ namespace HpskSite.Controllers
             if (!await _authService.IsRegionalAdminForRegion(regionCode))
                 return Json(new { success = false, message = "Access denied" });
 
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _).Where(m => m.IsApproved).ToList();
-            var memberLookup = allMembers.ToDictionary(m => m.Id, m => m);
-
             // Appointed Kretsinstruktörer for this region
             var appointedIds = await GetMemberIdsInGroupAsync($"Kretsinstruktor_{regionCode}");
 
+            // Kretsklubbarnas medlemmar ur klubbregistret och namnen ur en lätt läsning (skalplanen B) —
+            // aldrig hela medlemsregistret som IMember.
             var clubsInRegion = _authService.GetClubsInRegions(new List<string> { regionCode });
             var clubIdSet = new HashSet<int>(clubsInRegion);
-            var regionMembers = allMembers.Where(m =>
-            {
-                var s = m.GetValue<string>("primaryClubId");
-                return !string.IsNullOrEmpty(s) && int.TryParse(s, out int cid) && clubIdSet.Contains(cid);
-            }).ToList();
+            var regionMemberIds = _roster.ActiveInClubs(clubIdSet)
+                .Where(r => r.IsPrimary && r.IsApproved).Select(r => r.MemberId).Distinct().ToList();
+            var memberLookup = _memberProperties.Read(NameAliases, regionMemberIds.Union(appointedIds), approvedOnly: true)
+                .ToDictionary(m => m.Id);
+            var regionMembers = regionMemberIds.Where(memberLookup.ContainsKey).Select(id => memberLookup[id]).ToList();
 
             var allMemberIdsToConsider = regionMembers.Select(m => m.Id).Union(appointedIds).ToList();
             var certs = await _certService.GetActiveForMembersAsync(allMemberIdsToConsider);
@@ -199,16 +205,22 @@ namespace HpskSite.Controllers
                 foreningsMemberships.Select(x => x.MemberId), CertificationTypes.Foreningsinstruktor);
             var foreningsCertByMember = foreningsCerts.GroupBy(c => c.MemberId).ToDictionary(g => g.Key, g => g.First());
 
+            // Föreningsinstruktörer som inte redan är inlästa (de kan ha en annan huvudklubb).
+            foreach (var extra in _memberProperties.Read(NameAliases,
+                         foreningsMemberships.Select(x => x.MemberId).Where(id => !memberLookup.ContainsKey(id)),
+                         approvedOnly: true))
+                memberLookup[extra.Id] = extra;
+
             foreach (var entry in foreningsMemberships)
             {
-                var m = memberLookup.GetValueOrDefault(entry.MemberId) ?? _memberService.GetById(entry.MemberId);
+                var m = memberLookup.GetValueOrDefault(entry.MemberId);
                 if (m == null || !m.IsApproved) continue;
                 var cert = foreningsCertByMember.GetValueOrDefault(entry.MemberId);
                 if (!foreningsByClub.ContainsKey(entry.ClubId)) foreningsByClub[entry.ClubId] = new List<object>();
                 foreningsByClub[entry.ClubId].Add(new
                 {
                     memberId = m.Id,
-                    name = MemberDisplayName(m),
+                    name = m.DisplayName,
                     cert = cert == null ? null : ProjectCert(cert)
                 });
             }
@@ -216,7 +228,7 @@ namespace HpskSite.Controllers
             object BuildPersonRow(int mId, string certType)
             {
                 var m = memberLookup.GetValueOrDefault(mId);
-                var name = $"{m?.GetValue<string>("firstName") ?? ""} {m?.GetValue<string>("lastName") ?? ""}".Trim();
+                var name = $"{m?.Get("firstName") ?? ""} {m?.Get("lastName") ?? ""}".Trim();
                 if (string.IsNullOrEmpty(name)) name = m?.Name ?? "Okänd";
                 var cert = byMember.GetValueOrDefault(mId)?.FirstOrDefault(c => c.CertificationType == certType);
                 return new

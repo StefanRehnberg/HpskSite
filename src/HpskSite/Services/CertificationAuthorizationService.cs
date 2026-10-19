@@ -24,12 +24,18 @@ namespace HpskSite.Services
         private readonly IMemberService _memberService;
         private readonly AdminAuthorizationService _adminAuth;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
+        private readonly Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory _databaseFactory;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
 
         public CertificationAuthorizationService(
             IMemberService memberService,
             AdminAuthorizationService adminAuth,
-            IUmbracoContextAccessor umbracoContextAccessor)
+            IUmbracoContextAccessor umbracoContextAccessor,
+            Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory databaseFactory,
+            HpskSite.Services.MemberPropertyReader memberProperties)
         {
+            _memberProperties = memberProperties;
+            _databaseFactory = databaseFactory;
             _memberService = memberService;
             _adminAuth = adminAuth;
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -94,16 +100,23 @@ namespace HpskSite.Services
         /// </summary>
         public async Task<List<int>> GetAuthorizedGrantorsAsync(string certType, int candidateMemberId)
         {
-            // Walk every approved member checking roles. Counts are in the low thousands
-            // even on large installations — fine for an interactive admin form.
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _);
+            // Bara medlemmar som har en grupp som kan ge rätten prövas (skalplanen B): sajtadmin,
+            // kretsadmin, krets- och riksinstruktör. Förut prövades hela registret, en rollfråga per medlem.
+            var roleIndex = MemberRoleIndex.Load(_databaseFactory);
+            var possible = roleIndex.MembersWithAny(r =>
+                r.Equals("Administrators", StringComparison.OrdinalIgnoreCase)
+                || r.StartsWith("RegionalAdmin_", StringComparison.OrdinalIgnoreCase)
+                || r.StartsWith("Kretsinstruktor_", StringComparison.OrdinalIgnoreCase)
+                || r.StartsWith("Riksinstruktor_", StringComparison.OrdinalIgnoreCase)).ToList();
+            var approved = _memberProperties.Read(Array.Empty<string>(), possible, approvedOnly: true)
+                .Select(m => m.Id).OrderBy(id => id);
+
             var result = new List<int>();
-            foreach (var m in allMembers)
+            foreach (var id in approved)
             {
-                if (!m.IsApproved) continue;
-                if (await CanGrantAsync(m.Id, certType, candidateMemberId))
+                if (await CanGrantAsync(id, certType, candidateMemberId))
                 {
-                    result.Add(m.Id);
+                    result.Add(id);
                 }
             }
             return result;

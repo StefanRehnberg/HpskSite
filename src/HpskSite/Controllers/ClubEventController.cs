@@ -44,6 +44,8 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Ledger.LedgerIssuerResolver _issuers;
         private readonly HpskSite.Services.Ledger.LedgerPostingService _posting;
         private readonly EmailService _emailService;
+        private readonly HpskSite.Services.ClubRosterService _roster;
+        private readonly HpskSite.Services.MemberDirectoryService _directory;
 
         public ClubEventController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -65,9 +67,13 @@ namespace HpskSite.Controllers
             HpskSite.Services.Ledger.LedgerPaymentService payments,
             HpskSite.Services.Ledger.LedgerIssuerResolver issuers,
             HpskSite.Services.Ledger.LedgerPostingService posting,
-            EmailService emailService)
+            EmailService emailService,
+            HpskSite.Services.ClubRosterService roster,
+            HpskSite.Services.MemberDirectoryService directory)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _directory = directory;
+            _roster = roster;
             _auth = auth;
             _memberManager = memberManager;
             _memberService = memberService;
@@ -928,15 +934,21 @@ namespace HpskSite.Controllers
             bool anyMemberQualifies = HpskSite.Models.EventAudience
                 .IsAtLeastAsWideAs(ctx.Audience, HpskSite.Models.EventAudience.AllMembers);
 
-            var results = new List<object>();
-            foreach (var member in _memberService.GetAll(0, int.MaxValue, out _))
-            {
-                if (already.Contains(member.Id)) continue;
-                if (!anyMemberQualifies && !_participation.IsEligible(eligibleClubs, member)) continue;
-                if (term.Length > 0 && (member.Name ?? "").IndexOf(term, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                results.Add(new { memberId = member.Id, name = member.Name ?? $"Medlem {member.Id}" });
-                if (results.Count >= 50) break;
-            }
+            // Kandidaterna i SQL (skalplanen B): klubbens eller kretsens register, eller — på de breda
+            // publiknivåerna — en sökning i hela registret. Aldrig hela registret som IMember.
+            var candidates = anyMemberQualifies
+                ? _directory.Search(term, 50 + already.Count, approvedOnly: false)
+                    .Select(m => (Id: m.MemberId, m.Name))
+                : _roster.ActiveInClubs(eligibleClubs)
+                    .GroupBy(m => m.MemberId).Select(g => g.First())
+                    .Where(m => term.Length == 0 || (m.Name ?? "").IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                    .Select(m => (Id: m.MemberId, m.Name));
+
+            var results = candidates
+                .Where(m => !already.Contains(m.Id))
+                .Take(50)
+                .Select(m => (object)new { memberId = m.Id, name = string.IsNullOrEmpty(m.Name) ? $"Medlem {m.Id}" : m.Name })
+                .ToList();
 
             return Json(new { success = true, members = results });
         }

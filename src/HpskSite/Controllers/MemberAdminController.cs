@@ -39,6 +39,7 @@ namespace HpskSite.Controllers
         private readonly string _adminEmail;
         private readonly MemberActivityService _activity;
         private readonly MemberDirectoryService _directory;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -61,9 +62,11 @@ namespace HpskSite.Controllers
             ClubMembershipService clubMemberships,
             IConfiguration configuration,
             MemberActivityService activity,
-            MemberDirectoryService directory)
+            MemberDirectoryService directory,
+            HpskSite.Services.MemberPropertyReader memberProperties)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _memberProperties = memberProperties;
             _activity = activity;
             _directory = directory;
             _memberService = memberService;
@@ -425,16 +428,17 @@ namespace HpskSite.Controllers
                         .ToHashSet();
                 }
 
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var regularMembers = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias);
+                // Fyra egenskaper per medlem (skalplanen B), inte hela registret som IMember.
+                IEnumerable<HpskSite.Services.MemberPropertyRow> regularMembers =
+                    _memberProperties.Read(new[] { "firstName", "lastName", "phoneNumber", "primaryClubId" });
 
                 // Apply search filter
                 if (!string.IsNullOrWhiteSpace(search))
                 {
                     var searchLower = search.ToLowerInvariant();
                     regularMembers = regularMembers.Where(m =>
-                        (m.GetValue("firstName")?.ToString()?.ToLowerInvariant().Contains(searchLower) ?? false) ||
-                        (m.GetValue("lastName")?.ToString()?.ToLowerInvariant().Contains(searchLower) ?? false) ||
+                        (m.Get("firstName").ToLowerInvariant().Contains(searchLower)) ||
+                        (m.Get("lastName").ToLowerInvariant().Contains(searchLower)) ||
                         (m.Email?.ToLowerInvariant().Contains(searchLower) ?? false)
                     );
                 }
@@ -444,7 +448,7 @@ namespace HpskSite.Controllers
                 {
                     regularMembers = regularMembers.Where(m =>
                     {
-                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                        var memberClubIdStr = m.Get("primaryClubId");
                         if (int.TryParse(memberClubIdStr, out var memberClubId))
                         {
                             return clubsInRegion.Contains(memberClubId);
@@ -458,7 +462,7 @@ namespace HpskSite.Controllers
                 {
                     regularMembers = regularMembers.Where(m =>
                     {
-                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                        var memberClubIdStr = m.Get("primaryClubId");
                         if (int.TryParse(memberClubIdStr, out var memberClubId))
                         {
                             return memberClubId == clubId.Value;
@@ -504,7 +508,7 @@ namespace HpskSite.Controllers
                 {
                     regularMembers = regularMembers.Where(m =>
                     {
-                        var memberClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                        var memberClubIdStr = m.Get("primaryClubId");
                         if (int.TryParse(memberClubIdStr, out var memberClubId))
                         {
                             return !ankeborgClubIds.Contains(memberClubId);
@@ -519,7 +523,7 @@ namespace HpskSite.Controllers
 
                 foreach (var m in regularMembers)
                 {
-                    var primaryClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                    var primaryClubIdStr = m.Get("primaryClubId");
                     var primaryClubName = "";
                     var memberRegion = "";
 
@@ -533,9 +537,9 @@ namespace HpskSite.Controllers
                         }
                     }
 
-                    var firstName = m.GetValue("firstName")?.ToString() ?? "";
-                    var lastName = m.GetValue("lastName")?.ToString() ?? "";
-                    var phoneNumber = m.GetValue("phoneNumber")?.ToString() ?? "";
+                    var firstName = m.Get("firstName") ?? "";
+                    var lastName = m.Get("lastName") ?? "";
+                    var phoneNumber = m.Get("phoneNumber") ?? "";
                     var memberRoles = exportRoles.Of(m.Id)
                         .Where(g => !g.StartsWith("ClubAdmin_", StringComparison.OrdinalIgnoreCase));
                     var seenCsv = _activity.Get(m.Id);
@@ -1888,7 +1892,7 @@ namespace HpskSite.Controllers
 
             try
             {
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
+                var allMembers = _memberProperties.Read(new[] { "firstName", "lastName", "primaryClubId" }, unapprovedOnly: true); // skalplanen B: bara de som inte godkants, tre egenskaper
 
                 // Get clubs for club name lookup and region filtering
                 var clubs = GetClubsFromStorage();
@@ -1968,10 +1972,10 @@ namespace HpskSite.Controllers
                     .ToDictionary(g => g.Key, g => g.First().RegionalFederation ?? "");
 
                 var pendingMembers = allMembers
-                    .Where(m => m.ContentType.Alias != ClubMemberTypeAlias) // Exclude clubs
+                    // (klubbar lagrade som medlemmar filtreras bort i lasningen)
                     .Where(m => !m.IsApproved) // Only non-approved members
                     .Select(m => {
-                        var primaryClubIdStr = m.GetValue("primaryClubId")?.ToString();
+                        var primaryClubIdStr = m.Get("primaryClubId");
                         var clubName = "No Club";
                         int? parsedClubId = null;
                         var region = "";
@@ -1993,7 +1997,7 @@ namespace HpskSite.Controllers
 
                         return new {
                             Id = m.Id,
-                            Name = $"{m.GetValue("firstName")} {m.GetValue("lastName")}".Trim(),
+                            Name = $"{m.Get("firstName")} {m.Get("lastName")}".Trim(),
                             Email = m.Email,
                             ClubName = clubName,
                             ClubId = parsedClubId,
@@ -2029,20 +2033,23 @@ namespace HpskSite.Controllers
 
             try
             {
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                var regularMembers = allMembers.Where(m => m.ContentType.Alias != ClubMemberTypeAlias);
+                // Medlemmar utan grupp i EN fråga (skalplanen B) — förut en rollfråga per medlem i hela registret.
+                List<int> withoutGroups;
+                using (var db = DatabaseFactory.CreateDatabase())
+                {
+                    withoutGroups = db.Fetch<int>(
+                        @"SELECT m.nodeId FROM cmsMember m
+                            JOIN umbracoNode n     ON n.id = m.nodeId AND n.trashed = 0
+                            JOIN umbracoContent c  ON c.nodeId = m.nodeId
+                            JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId AND ct.alias <> 'hpskClub'
+                           WHERE NOT EXISTS (SELECT 1 FROM cmsMember2MemberGroup g WHERE g.Member = m.nodeId)");
+                }
                 var membersFixed = 0;
 
-                foreach (var member in regularMembers)
+                foreach (var memberId in withoutGroups)
                 {
-                    var memberRoles = _memberService.GetAllRoles(member.Id); // scale-ok: sajtadmins engångsverktyg, körs för hand
-
-                    // If member has no groups, assign them to Users group
-                    if (!memberRoles.Any())
-                    {
-                        _memberService.AssignRole(member.Id, "Users");
-                        membersFixed++;
-                    }
+                    _memberService.AssignRole(memberId, "Users");
+                    membersFixed++;
                 }
 
                 return Json(new {

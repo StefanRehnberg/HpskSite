@@ -73,6 +73,8 @@ namespace HpskSite.Controllers
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly ILogger<EkonomiAdminController> _logger;
+        private readonly HpskSite.Services.MemberDirectoryService _directory;
+        private readonly HpskSite.Services.ClubRosterService _roster;
 
         public EkonomiAdminController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -112,9 +114,13 @@ namespace HpskSite.Controllers
             EmailService emailService,
             IMemberManager memberManager,
             IMemberService memberService,
-            ILogger<EkonomiAdminController> logger)
+            ILogger<EkonomiAdminController> logger,
+            HpskSite.Services.MemberDirectoryService directory,
+            HpskSite.Services.ClubRosterService roster)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _roster = roster;
+            _directory = directory;
             _authService = authService;
             _setupService = setupService;
             _postingService = postingService;
@@ -847,12 +853,9 @@ namespace HpskSite.Controllers
                     });
                 }
 
-                var members = _memberService.GetAll(0, int.MaxValue, out _)
-                    .Where(m => m.GetValue("primaryClubId")?.ToString() == ownerId.ToString()
-                                || (m.GetValue("memberClubIds")?.ToString() ?? "")
-                                    .Split(',')
-                                    .Any(id => id.Trim() == ownerId.ToString()))
-                    .Select(m => new { id = m.Id, name = m.Name ?? "" })
+                // Klubbens medlemmar ur klubbregistret (skalplanen B), inte hela medlemsregistret.
+                var members = _roster.Active(ownerId)
+                    .Select(m => new { id = m.MemberId, name = m.Name ?? "" })
                     .OrderBy(m => m.name)
                     .ToList();
 
@@ -1661,23 +1664,9 @@ namespace HpskSite.Controllers
                 return Json(new { success = true, members = Array.Empty<object>() });
 
             var query = q.Trim();
-            var members = _memberService.GetAll(0, int.MaxValue, out _)
-                .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved);
-
-            if (ownerType == DocumentOwnerType.Club)
-            {
-                var clubIdStr = ownerId.ToString();
-                members = members.Where(m =>
-                    m.GetValue("primaryClubId")?.ToString() == clubIdStr ||
-                    (m.GetValue("memberClubIds")?.ToString()?.Split(',').Select(s => s.Trim()).Contains(clubIdStr) ?? false));
-            }
-
-            var result = members
-                .Where(m => m.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
-                            || (m.Email?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
-                .OrderBy(m => m.Name)
-                .Take(15)
-                .Select(m => new { id = m.Id, name = m.Name, email = m.Email });
+            // Sökningen i SQL (skalplanen B). En klubb: bara klubbens medlemmar.
+            var result = _directory.Search(query, 15, ownerType == DocumentOwnerType.Club ? ownerId : null)
+                .Select(m => new { id = m.MemberId, name = m.Name, email = m.Email });
 
             return Json(new { success = true, members = result });
         }

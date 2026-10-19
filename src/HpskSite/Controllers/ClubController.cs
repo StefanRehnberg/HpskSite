@@ -477,17 +477,8 @@ namespace HpskSite.Controllers
 
                 var results = new List<dynamic>();
 
-                // Get club members
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out _)
-                    .Where(m => m.ContentType.Alias != "hpskClub")
-                    .ToList();
-
-                var clubMembers = allMembers.Where(m =>
-                    m.GetValue("primaryClubId")?.ToString() == clubId.ToString() ||
-                    (m.GetValue("memberClubIds")?.ToString()?.Split(',')
-                        .Select(s => s.Trim())
-                        .Contains(clubId.ToString()) ?? false))
-                    .ToList();
+                // Klubbens medlemmar ur klubbregistret (skalplanen B), inte hela medlemsregistret.
+                var clubMembers = HttpContext.RequestServices.GetRequiredService<ClubRosterService>().Active(clubId);
 
                 if (clubMembers.Any() && UmbracoContext.Content != null)
                 {
@@ -506,9 +497,9 @@ namespace HpskSite.Controllers
                             var competitionId = total.GetValue<int?>("competitionId");
 
                             if (memberId.HasValue && competitionId.HasValue &&
-                                clubMembers.Any(m => m.Id == memberId.Value))
+                                clubMembers.Any(m => m.MemberId == memberId.Value))
                             {
-                                var memberName = clubMembers.FirstOrDefault(m => m.Id == memberId.Value)?.Name ?? "Unknown";
+                                var memberName = clubMembers.FirstOrDefault(m => m.MemberId == memberId.Value)?.Name ?? "Unknown";
                                 var competitionName = _competitions.GetSaved(competitionId.Value)?.Name ?? "Unknown Competition"; // C3-planen §5d
 
                                 var score = total.GetValue<string>("totalScore");

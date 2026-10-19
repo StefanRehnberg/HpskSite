@@ -23,6 +23,7 @@ namespace HpskSite.Controllers
         private readonly IMemberService _memberService;
         private readonly ClubService _clubService;
         private readonly ILogger<FaltskytteConfigurationController> _logger;
+        private readonly HpskSite.Services.MemberDirectoryService _directory;
 
         public FaltskytteConfigurationController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -34,9 +35,11 @@ namespace HpskSite.Controllers
             FaltskytteConfigurationService configService,
             IMemberService memberService,
             ClubService clubService,
-            ILogger<FaltskytteConfigurationController> logger)
+            ILogger<FaltskytteConfigurationController> logger,
+            HpskSite.Services.MemberDirectoryService directory)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _directory = directory;
             _configService = configService;
             _memberService = memberService;
             _clubService = clubService;
@@ -406,31 +409,12 @@ namespace HpskSite.Controllers
                 if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
                     return Json(new { success = true, members = new List<object>() });
 
-                var all = _memberService.GetAll(0, int.MaxValue, out _);
-                var matches = all
-                    .Where(m => m.IsApproved
-                        && ((m.Name ?? "").Contains(query, StringComparison.OrdinalIgnoreCase)
-                            || (m.Email ?? "").Contains(query, StringComparison.OrdinalIgnoreCase)))
-                    .Take(20)
-                    .ToList();
-
-                var members = matches.Select(m =>
+                // Sökningen i SQL (skalplanen B) — förut byggdes hela registret för att svara med 20 rader.
+                var members = _directory.Search(query, 20).Select(m => new
                 {
-                    string? clubName = null;
-                    var pcid = m.GetValue<string>("primaryClubId");
-                    if (!string.IsNullOrEmpty(pcid) && int.TryParse(pcid, out int clubId))
-                        clubName = _clubService.GetClubNameById(clubId);
-
-                    var first = m.GetValue<string>("firstName");
-                    var last = m.GetValue<string>("lastName");
-                    var displayName = string.IsNullOrWhiteSpace($"{first} {last}".Trim()) ? m.Name : $"{first} {last}".Trim();
-
-                    return new
-                    {
-                        memberId = m.Id,
-                        memberName = displayName,
-                        clubName
-                    };
+                    memberId = m.MemberId,
+                    memberName = m.DisplayName,
+                    clubName = m.PrimaryClubId is int clubId ? _clubService.GetClubNameById(clubId) : null
                 }).ToList();
 
                 return Json(new { success = true, members });

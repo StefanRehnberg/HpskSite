@@ -26,11 +26,14 @@ namespace HpskSite.Services.Staffing
         private readonly ILogger<StaffRequestService> _logger;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.ClubRosterService _roster;
 
         public StaffRequestService(IScopeProvider scopeProvider, IMemberService memberService, IContentService contentService,
             StaffingSignupService signup, EmailService email, WebPushService webPush, BrevoEmailService brevo, ILogger<StaffRequestService> logger,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.ClubRosterService roster)
         {
+            _roster = roster;
             _competitions = competitions;
             _scopeProvider = scopeProvider;
             _memberService = memberService;
@@ -146,13 +149,12 @@ namespace HpskSite.Services.Staffing
             var ids = new List<int>();
             try
             {
-                var all = _memberService.GetAll(0, int.MaxValue, out _);
-                foreach (var m in all)
-                {
-                    if (!m.IsApproved) continue;
-                    var pc = m.GetValue<string>("primaryClubId");
-                    if (!string.IsNullOrWhiteSpace(pc) && clubKeys.Contains(pc)) ids.Add(m.Id);
-                }
+                // Godkända medlemmar med en av klubbarna som HUVUDklubb, ur klubbregistret (skalplanen B).
+                var clubIds = clubKeys.Select(k => int.TryParse(k, out var id) ? id : 0).Where(id => id > 0);
+                ids.AddRange(_roster.ActiveInClubs(clubIds)
+                    .Where(m => m.IsPrimary && m.IsApproved)
+                    .Select(m => m.MemberId)
+                    .Distinct());
             }
             catch (Exception ex) { _logger.LogWarning(ex, "StaffRequest: direct resolve failed"); }
             return ids;

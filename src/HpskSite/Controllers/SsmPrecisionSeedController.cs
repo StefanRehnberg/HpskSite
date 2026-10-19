@@ -1725,7 +1725,7 @@ namespace HpskSite.Controllers
         private Dictionary<string, int> BuildMemberNameIndex()
         {
             var index = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var m in _memberService.GetAll(0, int.MaxValue, out _))
+            foreach (var m in HttpContext.RequestServices.GetRequiredService<HpskSite.Services.MemberPropertyReader>().Read(Array.Empty<string>()))
             {
                 var key = (m.Name ?? "").Trim().ToLowerInvariant();
                 if (key.Length > 0) index.TryAdd(key, m.Id);

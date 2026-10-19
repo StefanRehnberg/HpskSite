@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly MarkenLedgerService _markenLedger;
         private readonly MemberMergeService _mergeService;
         private readonly ILogger<MemberImportController> _logger;
+        private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -73,9 +74,11 @@ namespace HpskSite.Controllers
             MemberAccessKeyService accessKeyService,
             MarkenLedgerService markenLedger,
             MemberMergeService mergeService,
-            ILogger<MemberImportController> logger)
+            ILogger<MemberImportController> logger,
+            HpskSite.Services.MemberPropertyReader memberProperties)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _memberProperties = memberProperties;
             _memberService = memberService;
             _authService = authService;
             _memberManager = memberManager;
@@ -363,11 +366,11 @@ namespace HpskSite.Controllers
                     IMember? existing = null;
                     if (!string.IsNullOrEmpty(pnrKey) && byPnr.TryGetValue(pnrKey, out var pm))
                     {
-                        existing = pm;
+                        existing = Resolve(pm);
                     }
                     else if (!string.IsNullOrEmpty(email) && byEmail.TryGetValue(email, out var em))
                     {
-                        existing = em;
+                        existing = Resolve(em);
                     }
 
                     bool pnrComplete = IsPnrComplete(personNumber);
@@ -432,8 +435,8 @@ namespace HpskSite.Controllers
                     // same login. Same-file repeats now update the row we just created.
                     if (isNew)
                     {
-                        if (!string.IsNullOrEmpty(pnrKey)) byPnr.TryAdd(pnrKey, member);
-                        if (!string.IsNullOrWhiteSpace(member.Email)) byEmail.TryAdd(member.Email, member);
+                        if (!string.IsNullOrEmpty(pnrKey)) byPnr.TryAdd(pnrKey, IndexedMember.From(member));
+                        if (!string.IsNullOrWhiteSpace(member.Email)) byEmail.TryAdd(member.Email, IndexedMember.From(member));
                     }
 
                     // ---- Club-specific action columns (map to other tables/systems) ----
@@ -527,11 +530,11 @@ namespace HpskSite.Controllers
                         // Keep in-memory lookups fresh so later rows dedup against this one.
                         if (!string.IsNullOrEmpty(pnrKey) && !byPnr.ContainsKey(pnrKey))
                         {
-                            byPnr[pnrKey] = member;
+                            byPnr[pnrKey] = IndexedMember.From(member);
                         }
                         if (!string.IsNullOrWhiteSpace(member.Email) && !byEmail.ContainsKey(member.Email))
                         {
-                            byEmail[member.Email] = member;
+                            byEmail[member.Email] = IndexedMember.From(member);
                         }
                     }
                     else
@@ -616,6 +619,42 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
+        /// En medlem i dubblettindexen — en lätt rad ur <see cref="HpskSite.Services.MemberPropertyReader"/>
+        /// (skalplanen B), eller en medlem som skapats tidigare i samma körning. Hela <c>IMember</c>
+        /// laddas först när en rad ska skrivas (<see cref="Resolve"/>), aldrig för hela registret.
+        /// </summary>
+        private sealed class IndexedMember
+        {
+            public int Id { get; init; }
+            public string Name { get; init; } = "";
+            public string Email { get; init; } = "";
+            public string PrimaryClubIdRaw { get; init; } = "";
+            public string MemberClubIdsRaw { get; init; } = "";
+            public IMember? Loaded { get; init; }
+
+            public static IndexedMember From(HpskSite.Services.MemberPropertyRow r) => new()
+            {
+                Id = r.Id,
+                Name = r.Name,
+                Email = r.Email,
+                PrimaryClubIdRaw = r.Get("primaryClubId"),
+                MemberClubIdsRaw = r.Get("memberClubIds")
+            };
+
+            public static IndexedMember From(IMember m) => new()
+            {
+                Id = m.Id,
+                Name = m.Name ?? "",
+                Email = m.Email ?? "",
+                PrimaryClubIdRaw = m.GetValue("primaryClubId")?.ToString() ?? "",
+                MemberClubIdsRaw = m.GetValue("memberClubIds")?.ToString() ?? "",
+                Loaded = m
+            };
+        }
+
+        private IMember? Resolve(IndexedMember? m) => m == null ? null : m.Loaded ?? _memberService.GetById(m.Id);
+
+        /// <summary>
         /// Loads every person-member once and builds the two dedup indexes. Shared by DryRun and
         /// Commit so the two can never resolve a row differently.
         ///
@@ -625,20 +664,23 @@ namespace HpskSite.Controllers
         /// trailing ';'. A clean file row then lands on the real member, not the broken twin, and a
         /// broken twin that has no clean counterpart is still reachable instead of being duplicated
         /// a third time.
+        ///
+        /// <para>Skalplanen B: fyra egenskaper per medlem ur en lätt läsning, inte hela registret som
+        /// IMember. Den som matchas laddas när raden skrivs.</para>
         /// </summary>
-        private (List<IMember> All, Dictionary<string, IMember> ByPnr, Dictionary<string, IMember> ByEmail)
+        private (List<IndexedMember> All, Dictionary<string, IndexedMember> ByPnr, Dictionary<string, IndexedMember> ByEmail)
             LoadMemberIndexes()
         {
-            var allMembers = _memberService.GetAll(0, int.MaxValue, out _)
-                .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
-                .ToList();
+            var rows = _memberProperties.Read(new[] { "personNumber", "primaryClubId", "memberClubIds" });
+            var allMembers = rows.Select(IndexedMember.From).ToList();
+            var pnrById = rows.ToDictionary(r => r.Id, r => r.Get("personNumber"));
 
-            var byPnr = new Dictionary<string, IMember>();
-            var byEmail = new Dictionary<string, IMember>(StringComparer.OrdinalIgnoreCase);
+            var byPnr = new Dictionary<string, IndexedMember>();
+            var byEmail = new Dictionary<string, IndexedMember>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var m in allMembers)
             {
-                var pnrKey = NormalizePnrKey(m.GetValue("personNumber")?.ToString());
+                var pnrKey = NormalizePnrKey(pnrById.GetValueOrDefault(m.Id));
                 if (!string.IsNullOrEmpty(pnrKey))
                 {
                     byPnr.TryAdd(pnrKey, m);
@@ -735,9 +777,9 @@ namespace HpskSite.Controllers
             List<Dictionary<string, string>> rows,
             Dictionary<string, string> mapping,
             int clubId,
-            Dictionary<string, IMember> byPnr,
-            Dictionary<string, IMember> byEmail,
-            Dictionary<string, IMember> byName)
+            Dictionary<string, IndexedMember> byPnr,
+            Dictionary<string, IndexedMember> byEmail,
+            Dictionary<string, IndexedMember> byName)
         {
             var plan = new ImportPlan { TotalRows = rows.Count };
 
@@ -847,9 +889,9 @@ namespace HpskSite.Controllers
         /// Display name → member, for the name-clash warning. First wins; members whose name is
         /// blank are skipped. Never used to match a row — only to flag one for human review.
         /// </summary>
-        private static Dictionary<string, IMember> BuildNameIndex(List<IMember> allMembers)
+        private static Dictionary<string, IndexedMember> BuildNameIndex(List<IndexedMember> allMembers)
         {
-            var byName = new Dictionary<string, IMember>(StringComparer.OrdinalIgnoreCase);
+            var byName = new Dictionary<string, IndexedMember>(StringComparer.OrdinalIgnoreCase);
             foreach (var m in allMembers)
             {
                 var name = (m.Name ?? "").Trim();
@@ -863,24 +905,24 @@ namespace HpskSite.Controllers
         /// Used only to tell a club's FIRST import (roster legitimately empty, everyone is new)
         /// apart from a re-import that matched nothing because the dedup key was broken.
         /// </summary>
-        private static int CountClubMembers(List<IMember> allMembers, int clubId)
+        private static int CountClubMembers(List<IndexedMember> allMembers, int clubId)
         {
             var id = clubId.ToString();
             return allMembers.Count(m =>
             {
-                if (m.GetValue("primaryClubId")?.ToString() == id) return true;
-                var csv = m.GetValue("memberClubIds")?.ToString() ?? "";
+                if (m.PrimaryClubIdRaw.Trim() == id) return true;
+                var csv = m.MemberClubIdsRaw;
                 return csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                           .Contains(id);
             });
         }
 
         /// <summary>True when the member is affiliated with the club — primary club or memberClubIds.</summary>
-        private static bool IsInClub(IMember member, int clubId)
+        private static bool IsInClub(IndexedMember member, int clubId)
         {
             var id = clubId.ToString();
-            if (member.GetValue("primaryClubId")?.ToString() == id) return true;
-            var csv = member.GetValue("memberClubIds")?.ToString() ?? "";
+            if (member.PrimaryClubIdRaw.Trim() == id) return true;
+            var csv = member.MemberClubIdsRaw;
             return csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                       .Contains(id);
         }
@@ -891,13 +933,13 @@ namespace HpskSite.Controllers
         /// but it also adds them to this club's roster — so it is counted and shown separately
         /// instead of disappearing into "uppdateras".
         /// </summary>
-        private static void NoteAffiliation(PlanRow entry, IMember matched, int clubId, ImportPlan plan)
+        private static void NoteAffiliation(PlanRow entry, IndexedMember matched, int clubId, ImportPlan plan)
         {
             entry.MatchedInClub = IsInClub(matched, clubId);
             if (entry.MatchedInClub) return;
 
             plan.MatchedOutsideClub++;
-            if (int.TryParse(matched.GetValue("primaryClubId")?.ToString(), out var primary) && primary > 0)
+            if (int.TryParse(matched.PrimaryClubIdRaw, out var primary) && primary > 0)
             {
                 entry.MatchedClubId = primary;
             }

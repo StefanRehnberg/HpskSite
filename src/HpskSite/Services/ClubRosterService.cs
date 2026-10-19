@@ -6,6 +6,8 @@ namespace HpskSite.Services
     public sealed class ClubRosterEntry
     {
         public int MemberId { get; set; }
+        /// <summary>Klubben raden avser (en medlem i flera av klubbarna har en rad per klubb).</summary>
+        public int ClubId { get; set; }
         public string Name { get; set; } = "";
         public string FirstName { get; set; } = "";
         public string LastName { get; set; } = "";
@@ -59,8 +61,22 @@ namespace HpskSite.Services
         public List<ClubRosterEntry> Active(int clubId)
         {
             if (clubId <= 0) return new List<ClubRosterEntry>();
+            return ActiveInClubs(new[] { clubId });
+        }
+
+        /// <summary>
+        /// Aktiva medlemmar i flera klubbar på en gång (t.ex. kretsens klubbar), en rad per (medlem, klubb).
+        /// Bara huvudklubben: filtrera på <see cref="ClubRosterEntry.IsPrimary"/>.
+        /// </summary>
+        public List<ClubRosterEntry> ActiveInClubs(IEnumerable<int> clubIds)
+        {
+            var ids = clubIds.Where(id => id > 0).Distinct().ToList();
+            var result = new List<ClubRosterEntry>();
+            if (ids.Count == 0) return result;
             using var db = _databaseFactory.CreateDatabase();
-            return db.Fetch<ClubRosterEntry>(Sql, clubId, "Utträdd", "Avliden", clubId.ToString());
+            foreach (var chunk in ids.Chunk(1000))
+                result.AddRange(db.Fetch<ClubRosterEntry>(Sql, chunk, "Utträdd", "Avliden"));
+            return result;
         }
 
         /// <summary>Bara medlems-id:na — för frågor som går vidare till andra tabeller.</summary>
@@ -71,6 +87,23 @@ namespace HpskSite.Services
             return db.Fetch<int>(
                 @"SELECT cm.MemberId FROM ClubMembership cm
                    WHERE cm.ClubId = @0 AND cm.MembershipStatus NOT IN (@1, @2)", clubId, "Utträdd", "Avliden");
+        }
+
+        /// <summary>
+        /// Medlemmar utan någon aktiv klubb — den självregistrerade som aldrig valde klubb, eller den som
+        /// gått ur alla sina. Klubbar lagrade som medlemmar (<c>hpskClub</c>) räknas inte.
+        /// </summary>
+        public List<int> ClublessMemberIds()
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return db.Fetch<int>(
+                @"SELECT m.nodeId FROM cmsMember m
+                    JOIN umbracoNode n     ON n.id = m.nodeId AND n.trashed = 0
+                    JOIN umbracoContent c  ON c.nodeId = m.nodeId
+                    JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId AND ct.alias <> 'hpskClub'
+                   WHERE NOT EXISTS (SELECT 1 FROM ClubMembership cm
+                                      WHERE cm.MemberId = m.nodeId AND cm.MembershipStatus NOT IN (@0, @1))",
+                "Utträdd", "Avliden");
         }
 
         /// <summary>
@@ -89,6 +122,7 @@ namespace HpskSite.Services
 
         private const string Sql = @"
 SELECT cm.MemberId,
+       cm.ClubId,
        n.text AS Name,
        n.createDate AS CreateDate,
        ISNULL(m.Email, '') AS Email,
@@ -102,7 +136,7 @@ SELECT cm.MemberId,
        ISNULL(MAX(CASE WHEN pt.alias = 'primaryClubId' THEN COALESCE(CAST(pd.intValue AS NVARCHAR(20)), pd.varcharValue, CAST(pd.textValue AS NVARCHAR(40))) END), '') AS PrimaryClubIdRaw,
        ISNULL(MAX(CASE WHEN pt.alias = 'memberClubIds' THEN COALESCE(pd.varcharValue, CAST(pd.textValue AS NVARCHAR(1000))) END), '') AS MemberClubIdsRaw,
        CAST(MAX(CASE WHEN pt.alias = 'primaryClubId'
-                      AND COALESCE(CAST(pd.intValue AS NVARCHAR(20)), pd.varcharValue, CAST(pd.textValue AS NVARCHAR(40))) = @3
+                      AND COALESCE(CAST(pd.intValue AS NVARCHAR(20)), pd.varcharValue, CAST(pd.textValue AS NVARCHAR(40))) = CAST(cm.ClubId AS NVARCHAR(20))
                      THEN 1 ELSE 0 END) AS BIT) AS IsPrimary
   FROM ClubMembership cm
   JOIN cmsMember m  ON m.nodeId = cm.MemberId
@@ -111,8 +145,8 @@ SELECT cm.MemberId,
   LEFT JOIN umbracoPropertyData pd ON pd.versionId = cv.id
   LEFT JOIN cmsPropertyType pt ON pt.id = pd.propertyTypeId
        AND pt.alias IN ('firstName', 'lastName', 'phoneNumber', 'shooterIdNumber', 'profilePictureUrl', 'primaryClubId', 'memberClubIds')
- WHERE cm.ClubId = @0 AND cm.MembershipStatus NOT IN (@1, @2)
- GROUP BY cm.MemberId, n.text, n.createDate, m.Email, m.isApproved, cm.MembershipStatus
+ WHERE cm.ClubId IN (@0) AND cm.MembershipStatus NOT IN (@1, @2)
+ GROUP BY cm.MemberId, cm.ClubId, n.text, n.createDate, m.Email, m.isApproved, cm.MembershipStatus
  ORDER BY n.text";
     }
 }

@@ -12096,8 +12096,22 @@ administratörer. Efter B1–B3: 0,05–0,4 s.
 - **Senast aktiv = `MemberActivityService`** (`GetAll`/`Get`, tabellen `MemberActivity`) — skrivs aldrig
   som medlemsegenskap. Middlewaren läser medlemskakan själv (`IdentityConstants.ApplicationScheme`; den
   ligger före autentiseringen i pipelinen, så `context.User` är tom där).
-- **`ScaleGuardTests`** fäller bygget på rollfråga per medlem i en lista, fast tak (`GetAll(0, 5000, …)`)
-  och fler `MemberService.GetAll(`-anrop än `GetAllBaseline` (41). Sänk taket när ett tas bort.
+- **En sökruta = `MemberDirectoryService.Search(fråga, antal, clubId?, approvedOnly, searchNames)`** —
+  LIKE i SQL, sorterat på namn, klubbfiltret via `ClubMembership`. Tom fråga = de första `antal`.
+- **Få egenskaper över många medlemmar = `MemberPropertyReader.Read(alias[], ids?, approvedOnly, unapprovedOnly)`**
+  (statistik, exporter, personmatchning). `IdsWithValue(alias)` ger dem som har ett värde (t.ex. de som
+  börjat trappan); behövs då hela `IMember`: `GetAllMembers(ids)` i bitar om 1 000.
+- **En krets medlemmar = `ClubRosterService.ActiveInClubs(klubbar)`** (en rad per medlem och klubb,
+  `IsPrimary` för huvudklubben). Klubblösa: `ClublessMemberIds()`.
+- **`ScaleGuardTests`** fäller bygget på rollfråga per medlem i en lista, fast tak (`GetAll(0, 5000, …)`),
+  och på VARJE `MemberService.GetAll(` och `GetAllMembers()` utan urval — taken är 0 sedan 2026-10-19
+  (skalplanen B: 39 + 3 ställen flyttade). Mätt på 20 000-kopian: 3–4 s → 0,02–0,3 s per yta;
+  certifieringens "certifierad av" 21 s → 0,04 s. Svaren jämförda mot det gamla bygget
+  (`hpsk-verify/scale-b-getall-capture.mjs`, `scale-b-import-dryrun.mjs`): identiska utom sökrutorna,
+  som nu visar de första träffarna i namnordning.
+- **⚠️ Ytorna litar nu på att `ClubMembership` stämmer med klubbegenskaperna.** Kontroll:
+  `Migrations/check-prod-clubmembership-drift-2026-10-19.sql` (båda talen 0). Kopian `Umbraco_Scale` var
+  inte i takt (111 rader saknades) — backfillen kördes där 2026-10-19.
 - Mätverktyg: `ScaleSeedController` (vägrar allt utom databasen `Umbraco_Scale`, startprofilen
   "Umbraco.Web.UI (Scale)"), `hpsk-verify/scale-measure.mjs`, `scale-verify-b.mjs`, `scale-verify-sync.mjs`.
 - Migreringar: `create-member-activity-table.sql` (K2, FÖRE deploy) och

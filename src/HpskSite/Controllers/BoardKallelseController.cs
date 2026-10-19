@@ -33,6 +33,7 @@ namespace HpskSite.Controllers
         private readonly BrevoEmailService _brevo;
         private readonly ClubService _clubService;
         private readonly ILogger<BoardKallelseController> _logger;
+        private readonly HpskSite.Services.ClubRosterService _roster;
 
         public BoardKallelseController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -50,9 +51,11 @@ namespace HpskSite.Controllers
             EmailService emailService,
             BrevoEmailService brevo,
             ClubService clubService,
-            ILogger<BoardKallelseController> logger)
+            ILogger<BoardKallelseController> logger,
+            HpskSite.Services.ClubRosterService roster)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _roster = roster;
             _meetingService = meetingService;
             _gov = gov;
             _boardRoleService = boardRoleService;
@@ -150,12 +153,12 @@ namespace HpskSite.Controllers
             if (m.OwnerType == DocumentOwnerType.Club && IsArsmote(m.MeetingType))
             {
                 audience = "alla medlemmar i klubben";
-                var clubIdStr = m.OwnerId.ToString();
-                var members = _memberService.GetAll(0, int.MaxValue, out _)
-                    .Where(x => x.ContentType.Alias != "hpskClub" && x.IsApproved && !string.IsNullOrEmpty(x.Email))
-                    .Where(x => (x.GetValue<string>("primaryClubId") ?? "") == clubIdStr ||
-                                (x.GetValue<string>("memberClubIds") ?? "").Split(',', StringSplitOptions.TrimEntries).Contains(clubIdStr));
-                foreach (var x in members) list.Add((x.Email!, DisplayName(x)));
+                // Klubbens godkända medlemmar ur klubbregistret (skalplanen B), inte hela medlemsregistret.
+                foreach (var x in _roster.Active(m.OwnerId).Where(x => x.IsApproved && !string.IsNullOrEmpty(x.Email)))
+                {
+                    var n = $"{x.FirstName} {x.LastName}".Trim();
+                    list.Add((x.Email, string.IsNullOrEmpty(n) ? x.Name : n));
+                }
             }
             else
             {

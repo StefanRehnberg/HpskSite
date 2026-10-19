@@ -612,13 +612,10 @@ namespace HpskSite.Controllers
                 if (!isSiteAdmin && !isClubAdmin)
                     return Json(new { success = false, message = "Åtkomst nekad" });
 
-                // ⚠️ MemberClubService är ENDA stället en medlems klubbar resolvas. Egen parsning av
-                // primaryClubId + memberClubIds är hur man tappar en medlem som gått med i en andra
-                // klubb — och aliaset stavas dessutom olika i doctypen än i de flesta anropen.
-                var memberIds = _memberService.GetAllMembers()
-                    .Where(m => _memberClubs.IsMemberOfClub(m, clubId))
-                    .Select(m => m.Id)
-                    .ToList();
+                // Klubbens medlemmar ur klubbregistret (skalplanen B) — primär klubb eller övrig klubb,
+                // samma regel som MemberClubService, utan att hela registret läses.
+                var memberIds = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.ClubRosterService>()
+                    .ActiveMemberIds(clubId);
 
                 int y = year ?? DateTime.Today.Year;
                 var days = await _activitySummary.GetActivityDaysForMembersAsync(memberIds, y, clubId);

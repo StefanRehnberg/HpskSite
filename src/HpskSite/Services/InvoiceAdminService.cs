@@ -43,6 +43,7 @@ namespace HpskSite.Services
         private readonly HpskSite.Services.LegacyInvoiceHubs _invoiceHubs; // C3-planen F1
         private readonly ICompetitionStore _competitions;
         private readonly ICompetitionSeriesStore _series;
+        private readonly HpskSite.Services.ClubRosterService _roster;
 
         public InvoiceAdminService(
             ILogger<InvoiceAdminService> logger,
@@ -53,8 +54,10 @@ namespace HpskSite.Services
             Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabaseFactory databaseFactory,
             HpskSite.Services.LegacyInvoiceHubs invoiceHubs,
             ICompetitionStore competitions,
-            ICompetitionSeriesStore series)
+            ICompetitionSeriesStore series,
+            HpskSite.Services.ClubRosterService roster)
         {
+            _roster = roster;
             _invoiceHubs = invoiceHubs;
             _competitions = competitions;
             _series = series;
@@ -550,25 +553,12 @@ namespace HpskSite.Services
             var cacheKey = string.Format(ClubMembersCacheKey, clubId);
             if (_appCaches.RuntimeCache.Get(cacheKey) is HashSet<string> cached) return cached;
 
-            var clubMemberIds = new HashSet<string>();
-            int pageIndex = 0;
-            const int pageSize = 500;
-            long totalRecords;
-            do
-            {
-                var members = _memberService.GetAll(pageIndex, pageSize, out totalRecords);
-                foreach (var member in members)
-                {
-                    var primaryClubIdRaw = member.GetValue("primaryClubId")?.ToString();
-                    if (!string.IsNullOrEmpty(primaryClubIdRaw)
-                        && int.TryParse(primaryClubIdRaw, out var memberClubId)
-                        && memberClubId == clubId)
-                    {
-                        clubMemberIds.Add(member.Id.ToString());
-                    }
-                }
-                pageIndex++;
-            } while (pageIndex * pageSize < totalRecords);
+            // Medlemmar med klubben som HUVUDklubb, ur klubbregistret (skalplanen B). Forut gick
+            // hela medlemsregistret igenom 500 i taget.
+            var clubMemberIds = _roster.Active(clubId)
+                .Where(m => m.IsPrimary)
+                .Select(m => m.MemberId.ToString())
+                .ToHashSet();
 
             _appCaches.RuntimeCache.Insert(cacheKey, () => clubMemberIds, ScanCacheDuration);
             return clubMemberIds;

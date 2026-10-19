@@ -47,6 +47,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.ClubRosterService _roster;
         public CompetitionController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory databaseFactory,
@@ -67,9 +68,11 @@ namespace HpskSite.Controllers
             RegistrationClubPropagationService clubPropagationService,
             IServiceScopeFactory scopeFactory,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.ClubRosterService roster)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _roster = roster;
             _competitions = competitions;
             _memberClubService = memberClubService;
             _clubPropagationService = clubPropagationService;
@@ -1371,33 +1374,12 @@ namespace HpskSite.Controllers
                 var cacheKey = $"club_members_{clubId}";
                 var clubMembers = AppCaches.RuntimeCache.GetCacheItem(cacheKey, () =>
                 {
-                    // Get all regular members (not clubs) that belong to this club
-                    var allMembers = _memberService.GetAll(0, int.MaxValue, out var totalRecords);
-                    return allMembers
-                        .Where(m => m.ContentType.Alias != "hpskClub" && m.IsApproved)
-                        .Where(m =>
-                        {
-                            var primaryClubId = m.GetValue<string>("primaryClubId");
-                            var memberClubIds = m.GetValue<string>("memberClubIds");
-
-                            // Check primary club
-                            if (!string.IsNullOrEmpty(primaryClubId) && int.TryParse(primaryClubId, out int primary))
-                            {
-                                if (primary == clubId) return true;
-                            }
-
-                            // Check additional clubs
-                            if (!string.IsNullOrEmpty(memberClubIds))
-                            {
-                                var additionalClubIds = memberClubIds.Split(',').Select(id => id.Trim());
-                                if (additionalClubIds.Contains(clubId.ToString())) return true;
-                            }
-
-                            return false;
-                        })
+                    // Klubbens godkända medlemmar ur klubbregistret (skalplanen B), inte hela medlemsregistret.
+                    return _roster.Active(clubId)
+                        .Where(m => m.IsApproved)
                         .Select(member => new
                         {
-                            id = member.Id,
+                            id = member.MemberId,
                             name = member.Name,
                             email = member.Email
                         })

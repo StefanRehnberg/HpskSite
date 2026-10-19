@@ -76,14 +76,17 @@ namespace HpskSite.Services
         private const string ClubMemberTypeAlias = "hpskClub";
 
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
+        private readonly HpskSite.Services.ClubRosterService _roster;
 
         public MemberMergeService(
             IMemberService memberService,
             IContentService contentService,
             IScopeProvider scopeProvider,
             ILogger<MemberMergeService> logger,
-            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations)
+            HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
+            HpskSite.Services.ClubRosterService roster)
         {
+            _roster = roster;
             _registrations = registrations;
             _memberService = memberService;
             _contentService = contentService;
@@ -104,17 +107,14 @@ namespace HpskSite.Services
         /// </summary>
         public List<DuplicateCandidate> FindCandidates(int clubId)
         {
-            var all = _memberService.GetAll(0, int.MaxValue, out _)
+            // Klubbens medlemmar och de klubblösa ur klubbregistret (skalplanen B) — bara de laddas som
+            // IMember, inte hela registret. Jämförelsen behöver många egenskaper, därför IMember här.
+            var roster = _roster.LoadActiveMembers(_memberService, clubId)
                 .Where(m => m.ContentType.Alias != ClubMemberTypeAlias)
                 .ToList();
-
-            var roster = new List<IMember>();
             var clubless = new List<IMember>();
-            foreach (var m in all)
-            {
-                if (IsInClub(m, clubId)) roster.Add(m);
-                else if (HasNoClub(m)) clubless.Add(m);
-            }
+            foreach (var chunk in _roster.ClublessMemberIds().Chunk(1000))
+                clubless.AddRange(_memberService.GetAllMembers(chunk).Where(m => m.ContentType.Alias != ClubMemberTypeAlias && HasNoClub(m)));
 
             // Only roster members seed a pair. Two club-less strangers who happen to share a name
             // are not this club's problem, and pairing them here would leak both to the admin.

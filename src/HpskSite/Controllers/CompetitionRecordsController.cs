@@ -26,6 +26,7 @@ namespace HpskSite.Controllers
         private readonly CompetitionChampionsService _championsService;
         private readonly ClubService _clubService;
         private readonly ILogger<CompetitionRecordsController> _logger;
+        private readonly HpskSite.Services.ClubRosterService _roster;
 
         public CompetitionRecordsController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -40,9 +41,11 @@ namespace HpskSite.Controllers
             CompetitionRecordsService recordsService,
             CompetitionChampionsService championsService,
             ClubService clubService,
-            ILogger<CompetitionRecordsController> logger)
+            ILogger<CompetitionRecordsController> logger,
+            HpskSite.Services.ClubRosterService roster)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _roster = roster;
             _memberService = memberService;
             _memberManager = memberManager;
             _authService = authService;
@@ -231,29 +234,22 @@ namespace HpskSite.Controllers
             {
                 var clubIds = _authService.GetClubsInRegions(new List<string> { regionCode });
                 var clubIdSet = new HashSet<int>(clubIds);
-                var allMembers = _memberService.GetAll(0, int.MaxValue, out _).Where(m => m.IsApproved).ToList();
-                var rows = allMembers
+                // Kretsklubbarnas medlemmar (huvudklubb) ur klubbregistret (skalplanen B), inte hela registret.
+                var rows = _roster.ActiveInClubs(clubIdSet)
+                    .Where(m => m.IsPrimary && m.IsApproved)
                     .Select(m =>
                     {
-                        var s = m.GetValue<string>("primaryClubId");
-                        if (string.IsNullOrEmpty(s) || !int.TryParse(s, out int cid) || !clubIdSet.Contains(cid))
-                            return null;
-                        var first = m.GetValue<string>("firstName") ?? "";
-                        var last = m.GetValue<string>("lastName") ?? "";
-                        var name = $"{first} {last}".Trim();
-                        if (string.IsNullOrEmpty(name)) name = m.Name ?? $"Medlem {m.Id}";
-                        var clubName = _clubService.GetClubNameById(cid) ?? "";
-                        var shooterIdNumber = m.GetValue<string>("shooterIdNumber") ?? "";
+                        var name = $"{m.FirstName} {m.LastName}".Trim();
+                        if (string.IsNullOrEmpty(name)) name = string.IsNullOrEmpty(m.Name) ? $"Medlem {m.MemberId}" : m.Name;
                         return new
                         {
-                            id = m.Id,
+                            id = m.MemberId,
                             name,
-                            clubName,
-                            shooterIdNumber
+                            clubName = _clubService.GetClubNameById(m.ClubId) ?? "",
+                            shooterIdNumber = m.ShooterIdNumber ?? ""
                         };
                     })
-                    .Where(r => r != null)
-                    .OrderBy(r => r!.name)
+                    .OrderBy(r => r.name)
                     .ToList();
                 return Json(new { success = true, data = rows });
             }
