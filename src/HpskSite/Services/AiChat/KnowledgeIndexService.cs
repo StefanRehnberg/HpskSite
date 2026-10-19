@@ -32,7 +32,9 @@ namespace HpskSite.Services.AiChat
         private readonly KnowledgeBaseService _knowledgeBase;
         private readonly ILogger<KnowledgeIndexService> _logger;
         private readonly string _apiKey;
-        private readonly string _cacheFile;
+        private readonly HpskSite.Services.Storage.IFileStore _files;
+        /// <summary>Cachen i fillagringen (område AiChatIndex) — på disk App_Data/AiChatIndex som förut.</summary>
+        private const string CacheName = "embeddings-v1.json";
 
         private readonly SemaphoreSlim _lock = new(1, 1);
         private Dictionary<string, float[]>? _vectors;            // hash → vektor (cachen)
@@ -48,7 +50,7 @@ namespace HpskSite.Services.AiChat
             IOptions<AiChatOptions> options,
             KnowledgeBaseService knowledgeBase,
             IConfiguration configuration,
-            IWebHostEnvironment env,
+            HpskSite.Services.Storage.IFileStore files,
             ILogger<KnowledgeIndexService> logger)
         {
             _httpClientFactory = httpClientFactory;
@@ -56,7 +58,7 @@ namespace HpskSite.Services.AiChat
             _knowledgeBase = knowledgeBase;
             _logger = logger;
             _apiKey = configuration["AiChat:ApiKey"] ?? "";
-            _cacheFile = Path.Combine(env.ContentRootPath, "App_Data", "AiChatIndex", "embeddings-v1.json");
+            _files = files;
         }
 
         public bool IsSupported => _options.Enabled && _apiKey.Length > 0 && _options.RetrievalSupported;
@@ -112,7 +114,7 @@ namespace HpskSite.Services.AiChat
                 if (ReferenceEquals(docs, _indexedDocs)) return _index;
 
                 var model = _options.ResolveEmbeddingModel();
-                _vectors ??= LoadCache(model);
+                _vectors ??= await LoadCacheAsync(model);
 
                 var chunks = docs.SelectMany(KnowledgeChunker.Split).ToList();
                 var hashed = chunks.Select(c => (Chunk: c, Hash: c.Hash(model))).ToList();
@@ -137,7 +139,7 @@ namespace HpskSite.Services.AiChat
                 var removed = _vectors.Keys.Count(k => !current.Contains(k));
                 if (removed > 0)
                     foreach (var k in _vectors.Keys.Where(k => !current.Contains(k)).ToList()) _vectors.Remove(k);
-                if (missing.Count > 0 || removed > 0) SaveCache(model);
+                if (missing.Count > 0 || removed > 0) await SaveCacheAsync(model);
 
                 _index = hashed.Select(h => (h.Chunk, _vectors[h.Hash])).ToList();
                 _indexedDocs = docs;
@@ -205,12 +207,13 @@ namespace HpskSite.Services.AiChat
             }
         }
 
-        private Dictionary<string, float[]> LoadCache(string model)
+        private async Task<Dictionary<string, float[]>> LoadCacheAsync(string model)
         {
             try
             {
-                if (!File.Exists(_cacheFile)) return new();
-                var file = JsonSerializer.Deserialize<CacheFile>(File.ReadAllText(_cacheFile));
+                await using var stream = await _files.OpenReadAsync(HpskSite.Services.Storage.FileStoreAreas.AiChatIndex, CacheName);
+                if (stream == null) return new();
+                var file = await JsonSerializer.DeserializeAsync<CacheFile>(stream);
                 // En cache från en annan modell är oanvändbar: vektorerna ligger i olika rum.
                 if (file == null || file.Model != model) return new();
                 return file.Vectors.ToDictionary(kv => kv.Key, kv => FromBase64(kv.Value));
@@ -222,21 +225,19 @@ namespace HpskSite.Services.AiChat
             }
         }
 
-        private void SaveCache(string model)
+        private async Task SaveCacheAsync(string model)
         {
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(_cacheFile)!);
                 var file = new CacheFile
                 {
                     Model = model,
                     Vectors = _vectors!.ToDictionary(kv => kv.Key, kv => ToBase64(kv.Value)),
                 };
-                // Skrivs till en temporär fil och flyttas på plats, så en avbruten skrivning aldrig
-                // lämnar en halv cache efter sig.
-                var tmp = _cacheFile + ".tmp";
-                File.WriteAllText(tmp, JsonSerializer.Serialize(file));
-                File.Move(tmp, _cacheFile, overwrite: true);
+                // Lagringen skriver till en temporär fil och flyttar (disk) respektive laddar upp hela
+                // blobben på en gång, så en avbruten skrivning aldrig lämnar en halv cache efter sig.
+                using var content = new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(file));
+                await _files.SaveAsync(HpskSite.Services.Storage.FileStoreAreas.AiChatIndex, CacheName, content);
             }
             catch (Exception ex)
             {

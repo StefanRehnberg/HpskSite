@@ -28,7 +28,7 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _authorizationService;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
-        private readonly IWebHostEnvironment _env;
+        private readonly HpskSite.Services.Storage.IFileStore _files;
         private readonly ILogger<UtbildningController> _logger;
 
         public UtbildningController(
@@ -39,7 +39,7 @@ namespace HpskSite.Controllers
             AdminAuthorizationService authorizationService,
             IMemberManager memberManager,
             IMemberService memberService,
-            IWebHostEnvironment env,
+            HpskSite.Services.Storage.IFileStore files,
             ILogger<UtbildningController> logger)
         {
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -49,7 +49,7 @@ namespace HpskSite.Controllers
             _authorizationService = authorizationService;
             _memberManager = memberManager;
             _memberService = memberService;
-            _env = env;
+            _files = files;
             _logger = logger;
         }
 
@@ -183,17 +183,23 @@ namespace HpskSite.Controllers
                 (!module.IsPublished && !isAdmin))
                 return Forbid();
 
-            // Lesson HTML lives OUTSIDE the web root, under App_Data, so it cannot be fetched as a
-            // static file (which would bypass this gate AND expose the proprietary content).
+            // Lesson HTML lives OUTSIDE the web root — in the file store's private "utbildning" area
+            // (App_Data/utbildning on disk) — so it cannot be fetched as a static file (which would
+            // bypass this gate AND expose the proprietary content).
             // LessonPath stays relative (e.g. "utbildning/foreningsinstruktor/.../lektion.html").
-            var appData = Path.GetFullPath(Path.Combine(_env.ContentRootPath, "App_Data"));
+            const string prefix = HpskSite.Services.Storage.FileStoreAreas.Utbildning + "/";
             var relative = module.LessonPath!.Replace('\\', '/').TrimStart('/');
-            var fullPath = Path.GetFullPath(Path.Combine(appData, relative));
-            var utbildningRoot = Path.GetFullPath(Path.Combine(appData, "utbildning"));
-            if (!fullPath.StartsWith(utbildningRoot, StringComparison.OrdinalIgnoreCase) || !System.IO.File.Exists(fullPath))
+            if (!relative.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return NotFound();
+            // The store rejects any name that could escape the area ('..', empty segments).
+            var stream = await _files.OpenReadAsync(HpskSite.Services.Storage.FileStoreAreas.Utbildning,
+                relative.Substring(prefix.Length));
+            if (stream == null)
                 return NotFound();
 
-            var html = await System.IO.File.ReadAllTextAsync(fullPath);
+            string html;
+            using (var reader = new StreamReader(stream))
+                html = await reader.ReadToEndAsync();
             return Content(html, "text/html");
         }
 

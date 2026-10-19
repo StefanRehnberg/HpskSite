@@ -632,8 +632,8 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Strömmar ett underlag.
         ///
-        /// <para>⚠️ LÄSRÄTT räcker — det är hela poängen för en revisor. Filerna ligger under
-        /// <c>App_Data</c> och nås bara härifrån; en direktlänk finns inte.</para>
+        /// <para>⚠️ LÄSRÄTT räcker — det är hela poängen för en revisor. Filerna ligger i fillagringen
+        /// och nås bara härifrån; en direktlänk finns inte.</para>
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetAttachment(int issuerType, int issuerId, int attachmentId)
@@ -641,17 +641,18 @@ namespace HpskSite.Controllers
             var (ok, _) = await AuthorizeIssuerAsync(issuerType, issuerId);
             if (!ok) return Content(DeniedMessage);
 
-            var (path, fileName, contentType) =
+            var (storedAs, fileName, contentType) =
                 _attachmentService.Resolve(issuerType, issuerId, attachmentId);
 
-            if (path is null) return Content("Underlaget hittades inte.");
+            var stream = storedAs is null ? null : await _attachmentStorage.OpenReadAsync(storedAs);
+            if (stream is null) return Content("Underlaget hittades inte.");
 
             // ⚠️ Inline, inte attachment: revisorn ska kunna bläddra genom kvitton utan att ladda
             //    ner tjugo filer. Filnamnet följer ändå med för den som sparar.
             Response.Headers.ContentDisposition =
                 $"inline; filename=\"{Uri.EscapeDataString(fileName)}\"";
 
-            return PhysicalFile(path, contentType);
+            return File(stream, contentType, enableRangeProcessing: true);
         }
 
         /// <summary>Kopplar bort ett underlag. Raderar aldrig — se <see cref="LedgerAttachmentService"/>.</summary>
@@ -972,15 +973,15 @@ namespace HpskSite.Controllers
             var expense = _expenseService.Get(issuerType, issuerId, expenseId);
             if (expense?.ReceiptStoredAs is null) return Content("Kvittot hittades inte.");
 
-            var path = _attachmentStorage.GetFilePath(expense.ReceiptStoredAs);
-            if (path is null) return Content("Kvittot hittades inte på disk.");
+            var receipt = await _attachmentStorage.OpenReadAsync(expense.ReceiptStoredAs);
+            if (receipt is null) return Content("Kvittot hittades inte i lagringen.");
 
             // ⚠️ Inline, inte attachment: attestanten ska kunna titta på kvittot utan att ladda ner
             //    det. Samma val som verifikationernas underlag.
             Response.Headers.ContentDisposition =
                 $"inline; filename=\"{Uri.EscapeDataString(expense.ReceiptFileName ?? "kvitto")}\"";
 
-            return PhysicalFile(path, LedgerAttachmentStorage.ContentTypeFor(expense.ReceiptStoredAs));
+            return File(receipt, LedgerAttachmentStorage.ContentTypeFor(expense.ReceiptStoredAs), enableRangeProcessing: true);
         }
 
         /// <summary>Attesterar en utgift.</summary>

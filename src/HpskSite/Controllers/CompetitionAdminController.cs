@@ -2837,72 +2837,12 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid file type. Only PDF and Word documents allowed." });
                 }
 
-                // Find or create "Competition Invitations" folder in Media Library
-                var invitationsFolder = _mediaService.GetRootMedia()
-                    .FirstOrDefault(m => m.Name == "Competition Invitations");
-
-                if (invitationsFolder == null)
+                // Genom mediafilsystemet (skalplanen D3) — blobblagringen när den är påslagen.
+                var mediaUploads = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Media.ImageMediaService>();
+                var (mediaItem, _, mediaError) = await mediaUploads.SaveMediaAsync(invitationFile, "Competition Invitations", "competition-invitations", "File");
+                if (mediaItem == null)
                 {
-                    invitationsFolder = _mediaService.CreateMedia("Competition Invitations", -1, "Folder");
-                    _mediaService.Save(invitationsFolder);
-                }
-
-                // Create media item with unique name to avoid conflicts
-                string fileName = Path.GetFileName(invitationFile.FileName);
-                string fileExtension = Path.GetExtension(fileName);
-                string uniqueFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{Guid.NewGuid()}{fileExtension}";
-
-                var mediaItem = _mediaService.CreateMedia(fileName, invitationsFolder.Id, "File");
-
-                // Save the file to a temporary location first
-                var tempFilePath = Path.Combine(Path.GetTempPath(), uniqueFileName);
-                using (var fileStream = new FileStream(tempFilePath, FileMode.Create))
-                {
-                    await invitationFile.CopyToAsync(fileStream);
-                }
-
-                try
-                {
-                    // Get the physical media folder path
-                    var mediaFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "media", "competition-invitations");
-
-                    // Create the directory if it doesn't exist
-                    if (!Directory.Exists(mediaFolderPath))
-                    {
-                        Directory.CreateDirectory(mediaFolderPath);
-                    }
-
-                    // Copy file to media folder
-                    var physicalFilePath = Path.Combine(mediaFolderPath, uniqueFileName);
-                    System.IO.File.Copy(tempFilePath, physicalFilePath, true);
-
-                    // Set the media file path (relative to wwwroot)
-                    var relativePath = $"/media/competition-invitations/{uniqueFileName}";
-                    mediaItem.SetValue("umbracoFile", relativePath);
-
-                    // Set additional properties
-                    mediaItem.SetValue("umbracoExtension", fileExtension.TrimStart('.'));
-                    mediaItem.SetValue("umbracoBytes", invitationFile.Length.ToString());
-
-                    // Save media item with file reference
-                    var mediaSaveResult = _mediaService.Save(mediaItem);
-                    if (!mediaSaveResult.Success)
-                    {
-                        // Clean up physical file if save failed
-                        if (System.IO.File.Exists(physicalFilePath))
-                        {
-                            System.IO.File.Delete(physicalFilePath);
-                        }
-                        return Ok(new { success = false, message = "Failed to save file to media library" });
-                    }
-                }
-                finally
-                {
-                    // Clean up temp file
-                    if (System.IO.File.Exists(tempFilePath))
-                    {
-                        System.IO.File.Delete(tempFilePath);
-                    }
+                    return Ok(new { success = false, message = mediaError ?? "Failed to save file to media library" });
                 }
 
                 // Link media item to competition
@@ -2922,7 +2862,7 @@ namespace HpskSite.Controllers
                 {
                     success = true,
                     message = "Invitation file uploaded successfully",
-                    fileName = fileName
+                    fileName = Path.GetFileName(mediaItem.Name ?? "")
                 });
             }
             catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
@@ -2990,61 +2930,12 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid file type. Only PDF and Word documents allowed." });
                 }
 
-                // Find or create "Competition Results" folder in Media Library
-                var resultsFolder = _mediaService.GetRootMedia()
-                    .FirstOrDefault(m => m.Name == "Competition Results");
-
-                if (resultsFolder == null)
+                // Genom mediafilsystemet (skalplanen D3) — blobblagringen när den är påslagen.
+                var mediaUploads = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Media.ImageMediaService>();
+                var (mediaItem, _, mediaError) = await mediaUploads.SaveMediaAsync(resultListFile, "Competition Results", "competition-results", "File");
+                if (mediaItem == null)
                 {
-                    resultsFolder = _mediaService.CreateMedia("Competition Results", -1, "Folder");
-                    _mediaService.Save(resultsFolder);
-                }
-
-                string fileName = Path.GetFileName(resultListFile.FileName);
-                string fileExtension = Path.GetExtension(fileName);
-                string uniqueFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{Guid.NewGuid()}{fileExtension}";
-
-                var mediaItem = _mediaService.CreateMedia(fileName, resultsFolder.Id, "File");
-
-                var tempFilePath = Path.Combine(Path.GetTempPath(), uniqueFileName);
-                using (var fileStream = new FileStream(tempFilePath, FileMode.Create))
-                {
-                    await resultListFile.CopyToAsync(fileStream);
-                }
-
-                try
-                {
-                    var mediaFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "media", "competition-results");
-
-                    if (!Directory.Exists(mediaFolderPath))
-                    {
-                        Directory.CreateDirectory(mediaFolderPath);
-                    }
-
-                    var physicalFilePath = Path.Combine(mediaFolderPath, uniqueFileName);
-                    System.IO.File.Copy(tempFilePath, physicalFilePath, true);
-
-                    var relativePath = $"/media/competition-results/{uniqueFileName}";
-                    mediaItem.SetValue("umbracoFile", relativePath);
-                    mediaItem.SetValue("umbracoExtension", fileExtension.TrimStart('.'));
-                    mediaItem.SetValue("umbracoBytes", resultListFile.Length.ToString());
-
-                    var mediaSaveResult = _mediaService.Save(mediaItem);
-                    if (!mediaSaveResult.Success)
-                    {
-                        if (System.IO.File.Exists(physicalFilePath))
-                        {
-                            System.IO.File.Delete(physicalFilePath);
-                        }
-                        return Ok(new { success = false, message = "Failed to save file to media library" });
-                    }
-                }
-                finally
-                {
-                    if (System.IO.File.Exists(tempFilePath))
-                    {
-                        System.IO.File.Delete(tempFilePath);
-                    }
+                    return Ok(new { success = false, message = mediaError ?? "Failed to save file to media library" });
                 }
 
                 // Genom tävlingslagringen (C3-planen S5): publicerar bara en tävling som redan var publicerad.
@@ -3063,7 +2954,7 @@ namespace HpskSite.Controllers
                 {
                     success = true,
                     message = "Result list file uploaded successfully",
-                    fileName = fileName
+                    fileName = Path.GetFileName(mediaItem.Name ?? "")
                 });
             }
             catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)

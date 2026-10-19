@@ -452,7 +452,7 @@ namespace HpskSite.Controllers
                 if (!await _configService.CanEditAsync(config, viewerId))
                     return Json(new { success = false, message = "Du har inte rättighet att ändra denna konfiguration." });
 
-                return SaveStationImage(file, Path.Combine("faltkonfig", configurationId.ToString()),
+                return await SaveStationImageAsync(file, configurationId.ToString(),
                     weaponClass, stationNumber, groupNumber);
             }
             catch (Exception ex)
@@ -477,7 +477,7 @@ namespace HpskSite.Controllers
                 var viewerId = await _configService.GetCurrentMemberIdAsync();
                 if (viewerId == null) return Json(new { success = false, message = "Inloggning krävs." });
 
-                return SaveStationImage(file, Path.Combine("faltkonfig", "utkast", viewerId.Value.ToString()),
+                return await SaveStationImageAsync(file, "utkast/" + viewerId.Value,
                     weaponClass, stationNumber, groupNumber);
             }
             catch (Exception ex)
@@ -489,10 +489,11 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Shared validation + write for the two upload endpoints above.
-        /// <paramref name="relativeDir"/> is the folder under wwwroot/images.
+        /// <paramref name="subDir"/> is the folder inside the file store's "faltkonfig" area
+        /// (wwwroot/images/faltkonfig on disk; served at /images/faltkonfig/… either way).
         /// Callers must have checked authorization first.
         /// </summary>
-        private IActionResult SaveStationImage(IFormFile file, string relativeDir, string weaponClass, int stationNumber, int groupNumber)
+        private async Task<IActionResult> SaveStationImageAsync(IFormFile file, string subDir, string weaponClass, int stationNumber, int groupNumber)
         {
             if (file == null || file.Length == 0)
                 return Json(new { success = false, message = "Ingen fil vald." });
@@ -507,15 +508,11 @@ namespace HpskSite.Controllers
             var wc = SanitizeForFileName(weaponClass);
             var fileName = $"st{stationNumber}_{wc}_tg{groupNumber}{ext}";
 
-            var fullDir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images", relativeDir);
-            Directory.CreateDirectory(fullDir);
+            var name = subDir + "/" + fileName;
+            await using (var stream = file.OpenReadStream())
+                await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Storage.IFileStore>().SaveAsync(HpskSite.Services.Storage.FileStoreAreas.Faltkonfig, name, stream);
 
-            using (var stream = new FileStream(Path.Combine(fullDir, fileName), FileMode.Create))
-            {
-                file.CopyTo(stream);
-            }
-
-            var imageUrl = "/images/" + relativeDir.Replace('\\', '/') + "/" + fileName;
+            var imageUrl = HpskSite.Services.Storage.FileStoreAreas.PublicUrl(HpskSite.Services.Storage.FileStoreAreas.Faltkonfig, name);
             _logger.LogInformation("Uploaded station image: {Url}", imageUrl);
             return Json(new { success = true, imageUrl });
         }

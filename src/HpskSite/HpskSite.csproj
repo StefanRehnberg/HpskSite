@@ -27,6 +27,7 @@
     <!-- Umbraco 17: körtidskompileringen av Razor-vyerna ligger i det här paketet. Vi behöver den —
          vyer deployas som filer utan ombyggnad, och dev kompilerar vyerna vid körning. -->
     <PackageReference Include="Umbraco.Cms.DevelopmentMode.Backoffice" Version="17.7.1" />
+    <PackageReference Include="Umbraco.StorageProviders.AzureBlob" Version="17.1.0" />
     <PackageReference Include="WebPush" Version="1.0.12" />
     <!-- Låsta högre än Umbraco 17.7.1 drar in, för kända säkerhetshål: Pkcs 10.0.0 (CVE-2026-84008, DoS)
          och MessagePack 3.1.8 (GHSA-qhrr-8q5h-9q3h). Kan tas bort när Umbraco själv kräver dessa. -->

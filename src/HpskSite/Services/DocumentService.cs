@@ -13,17 +13,20 @@ namespace HpskSite.Services
     {
         private readonly IScopeProvider _scopeProvider;
         private readonly DocumentArchiveOptions _options;
-        private readonly IWebHostEnvironment _environment;
+        private readonly HpskSite.Services.Storage.IFileStore _store;
 
         public DocumentService(
             IScopeProvider scopeProvider,
             IOptions<DocumentArchiveOptions> options,
-            IWebHostEnvironment environment)
+            HpskSite.Services.Storage.IFileStore store)
         {
             _scopeProvider = scopeProvider;
             _options = options.Value;
-            _environment = environment;
+            _store = store;
         }
+
+        /// <summary>Arkivets område i fillagringen (DocumentArchive:StoragePath, standard "documents").</summary>
+        private string Area => _options.StoragePath;
 
         // ===== CATEGORIES =====
 
@@ -123,13 +126,13 @@ namespace HpskSite.Services
             db.Update(document);
         }
 
-        public bool DeleteDocument(int id)
+        public async Task<bool> DeleteDocumentAsync(int id)
         {
             var document = GetDocument(id);
             if (document == null) return false;
 
-            // Delete the physical file
-            DeleteStoredFile(document.StoredFileName);
+            // Delete the stored file
+            await DeleteStoredFileAsync(document.StoredFileName);
 
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
@@ -144,16 +147,6 @@ namespace HpskSite.Services
         }
 
         // ===== FILE OPERATIONS =====
-
-        public string GetStoragePath()
-        {
-            var appDataPath = Path.Combine(_environment.ContentRootPath, "App_Data", _options.StoragePath);
-            if (!Directory.Exists(appDataPath))
-            {
-                Directory.CreateDirectory(appDataPath);
-            }
-            return appDataPath;
-        }
 
         public (bool isValid, string errorMessage) ValidateFile(string fileName, long fileSize)
         {
@@ -184,30 +177,24 @@ namespace HpskSite.Services
         {
             var extension = Path.GetExtension(originalFileName);
             var storedFileName = $"{Guid.NewGuid()}{extension}";
-            var storagePath = GetStoragePath();
-            var filePath = Path.Combine(storagePath, storedFileName);
-
-            using var outputStream = new FileStream(filePath, FileMode.Create);
-            await fileStream.CopyToAsync(outputStream);
-
+            await _store.SaveAsync(Area, storedFileName, fileStream);
             return storedFileName;
         }
 
-        public string? GetFilePath(string storedFileName)
+        /// <summary>The stored file's content, or null if it is missing (bare names only).</summary>
+        public Task<Stream?> OpenReadAsync(string? storedFileName)
         {
-            var storagePath = GetStoragePath();
-            var filePath = Path.Combine(storagePath, storedFileName);
-            return File.Exists(filePath) ? filePath : null;
+            if (string.IsNullOrWhiteSpace(storedFileName) || storedFileName.Contains('/') ||
+                storedFileName.Contains('\\') || storedFileName.Contains(".."))
+                return Task.FromResult<Stream?>(null);
+            return _store.OpenReadAsync(Area, storedFileName);
         }
 
-        private void DeleteStoredFile(string storedFileName)
+        private async Task DeleteStoredFileAsync(string storedFileName)
         {
-            var storagePath = GetStoragePath();
-            var filePath = Path.Combine(storagePath, storedFileName);
-            if (File.Exists(filePath))
-            {
-                File.Delete(filePath);
-            }
+            if (string.IsNullOrWhiteSpace(storedFileName) || storedFileName.Contains('/') ||
+                storedFileName.Contains('\\') || storedFileName.Contains("..")) return;
+            await _store.DeleteAsync(Area, storedFileName);
         }
 
         // ===== STORAGE QUOTA =====

@@ -247,7 +247,7 @@ namespace HpskSite.Controllers
             if (!await IsAdminForOwner(document.OwnerType, document.OwnerId))
                 return Json(new { success = false, message = "Åtkomst nekad." });
 
-            _documentService.DeleteDocument(id);
+            await _documentService.DeleteDocumentAsync(id);
             return Json(new { success = true });
         }
 
@@ -310,8 +310,8 @@ namespace HpskSite.Controllers
             if (!await CanAccessDocument(document))
                 return Unauthorized();
 
-            var filePath = _documentService.GetFilePath(document.StoredFileName);
-            if (filePath == null)
+            var stream = await _documentService.OpenReadAsync(document.StoredFileName);
+            if (stream == null)
                 return NotFound();
 
             _documentService.IncrementDownloadCount(id);
@@ -326,11 +326,16 @@ namespace HpskSite.Controllers
 
             if (inlineTypes.Contains(document.ContentType))
             {
-                Response.Headers["Content-Disposition"] = $"inline; filename=\"{document.FileName}\"";
-                return PhysicalFile(filePath, document.ContentType);
+                // ⚠️ Inte $"inline; filename=\"{namn}\"": ett filnamn med å/ä/ö är inte ASCII, och Kestrel
+                //    kastar då vid huvudet — varje sådant dokument gav 500. SetHttpFileName skriver både
+                //    filename (ASCII) och filename* (UTF-8).
+                var disposition = new Microsoft.Net.Http.Headers.ContentDispositionHeaderValue("inline");
+                disposition.SetHttpFileName(document.FileName);
+                Response.Headers.ContentDisposition = disposition.ToString();
+                return File(stream, document.ContentType, enableRangeProcessing: true);
             }
 
-            return PhysicalFile(filePath, document.ContentType, document.FileName);
+            return File(stream, document.ContentType, document.FileName, enableRangeProcessing: true);
         }
 
         // ===== STORAGE QUOTA =====

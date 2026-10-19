@@ -95,7 +95,7 @@ namespace HpskSite.Controllers
                     // Award is gone now; delete its file only if no other award still references it.
                     if (deleted && !string.IsNullOrEmpty(proofToDelete)
                         && await _medalLedger.CountAwardsUsingProofAsync(proofToDelete) == 0)
-                        _proofStorage.Delete(proofToDelete);
+                        await _proofStorage.DeleteAsync(proofToDelete);
                 }
                 return;
             }
@@ -158,7 +158,7 @@ namespace HpskSite.Controllers
                 existing.ProofType = StandardMedals.ProofFile;
                 if (!string.IsNullOrEmpty(oldRef)
                     && await _medalLedger.CountAwardsUsingProofAsync(oldRef, existing.Id) == 0)
-                    _proofStorage.Delete(oldRef);
+                    await _proofStorage.DeleteAsync(oldRef);
             }
 
             // A member edit re-opens verification: a rejected medal returns to reported, and a
@@ -1013,7 +1013,7 @@ namespace HpskSite.Controllers
                         // Delete the file only if no other award still references it.
                         if (deleted && !string.IsNullOrEmpty(proofToDelete)
                             && await _medalLedger.CountAwardsUsingProofAsync(proofToDelete) == 0)
-                            _proofStorage.Delete(proofToDelete);
+                            await _proofStorage.DeleteAsync(proofToDelete);
                     }
 
                     // Delete the record
@@ -1330,7 +1330,7 @@ namespace HpskSite.Controllers
                     // Delete the file only if no other award still references it.
                     if (deleted && !string.IsNullOrEmpty(proofToDelete)
                         && await _medalLedger.CountAwardsUsingProofAsync(proofToDelete) == 0)
-                        _proofStorage.Delete(proofToDelete);
+                        await _proofStorage.DeleteAsync(proofToDelete);
                 }
 
                 db.Execute("DELETE FROM TrainingScores WHERE Id = @0", id);

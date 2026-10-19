@@ -12072,6 +12072,41 @@ saknas tabellen används filerna och loggen larmar Critical. **Radera inte katal
 har nycklarna. Migrering: `Migrations/create-dataprotection-key-table.sql` (K1, FÖRE deploy).
 ⚠️ Nycklarna är okrypterade i tabellen, som de var på disken — databasåtkomst = nyckelåtkomst.
 
+## ⚠️⚠️ Filerna går genom lagringen — `IFileStore` och `MediaFiles` (skalplanen D3, 2026-10-19)
+
+**Skriv aldrig en fil med `File`/`FileStream`/`Directory`, och bygg aldrig en sökväg till `App_Data` eller
+`wwwroot`.** En sådan fil finns bara på en server, dör vid en serverflytt och syns inte för en andra
+instans. `FileStorageGuardTests` fäller bygget (undantag: `filestore-ok: <skäl>` på raden).
+- **Sajtens egna filer = `Services/Storage/IFileStore`**, ett namn per område i `FileStoreAreas`
+  (privata: medaljbevis, bandokument, förberedelsedokument, liggarens underlag, kursmaterialet,
+  AI-indexets cache, dokumentarkivet; publika: `field-targets`, `faltskytte`, `faltkonfig`, `uploads`).
+  Disk (standard): `App_Data/{område}` respektive `wwwroot/images/{område}` — exakt som förut.
+  Blobb (`FileStorage:Provider = AzureBlob`, `ConnectionString`, `ContainerName`): `app-data/{område}/…`
+  och `images/{område}/…` i en PRIVAT behållare; `PublicImageMiddleware` serverar `/images/{område}/…`,
+  så adresserna i databasen ändras aldrig. Namnregeln (`FileStoreNames`) prövas i lagringen.
+  Nytt område = en konstant (publikt: lägg den också i `PublicAreas`) + flyttens lista följer med.
+- **Filer under `/media/…` = `Services/Storage/MediaFiles`** (Umbracos mediafilsystem). Med
+  `Umbraco:Storage:AzureBlob:Media:ConnectionString` (paketet Umbraco.StorageProviders.AzureBlob 17.1)
+  ligger mediabiblioteket i blobblagringen och Umbraco serverar `/media/…` därifrån. Uppladdningar som
+  blir medier går genom `ImageMediaService.SaveAsync` / `SaveMediaAsync` (en regel för mapp, namn, skrivväg).
+  ⚠️ Paketet skapar inte behållaren — `FileStorageStartupService` gör det vid start och larmar Critical
+  när lagringen inte svarar.
+- **Läsning är en ström** (`OpenReadAsync`), aldrig en sökväg: `File(stream, typ, enableRangeProcessing: true)`.
+- **AI-chattens logg ligger i `dbo.AiChatLog`** (`AiChatLogService`); de gamla månadsfilerna förs in en
+  gång av `AiChatLogImportHostedService` och döps om till `imported-…`. Saknas tabellen skrivs filen som förut.
+- **Flytten** (efter att blobblagringen slagits på): `/admin-page` → Underhåll → **Fillagring**
+  (`FileStorageMigrationService`). Kopierar, raderar aldrig, hoppar över det som redan finns med samma
+  storlek, i omgångar om 45 s tills inget återstår. ⚠️ En privat fil som inte flyttats syns inte — kör
+  flytten direkt efter bytet.
+- Rättat på vägen: arkivdokument med å/ä/ö i filnamnet gav 500 (rått filnamn i Content-Disposition);
+  figurkatalogens bilduppladdning saknade behörighetskontroll.
+- Test: `FileStoreTests` (samma kontrakt mot disk och — med `HPSK_TEST_BLOB=UseDevelopmentStorage=true`
+  och Azurite — mot blobb), `FileStorageGuardTests`. Sviter: `hpsk-verify/d3-filestore-verify.mjs`
+  (`HPSK_MODE=disk|blob`, kontrollerar var filen hamnade) och `d3-filestore-migrate-verify.mjs`.
+  Azurite lokalt: `npx -p azurite azurite-blob --location <dir> --blobPort 10000 --loose`.
+- **D4 (flera servrar) är INTE byggd** — se skalplanen. Den behövs den dag sajten ska köra på mer än en
+  instans; D3 räcker för en server och för en serverflytt.
+
 ## ⚠️⚠️ Skalreglerna — medlemmar (skalplanen B1–B4, 2026-10-12)
 
 Plan och mätningar: `notes/skalplan-2026-10-12.md`. Mätt på en kopia med 20 000 medlemmar: ytor som

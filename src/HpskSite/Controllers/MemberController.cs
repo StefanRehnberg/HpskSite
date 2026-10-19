@@ -2161,43 +2161,22 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Medlem hittades inte" });
                 }
 
-                // Create profile pictures directory if it doesn't exist
-                var profilePicturesDir = Path.Combine(_webHostEnvironment.WebRootPath, "media", "profile-pictures");
-                if (!Directory.Exists(profilePicturesDir))
-                {
-                    Directory.CreateDirectory(profilePicturesDir);
-                }
-
                 // Delete old profile picture if exists
                 var oldPictureUrl = member.GetValue<string>("profilePictureUrl");
                 if (!string.IsNullOrEmpty(oldPictureUrl))
                 {
-                    try
-                    {
-                        var oldFilePath = Path.Combine(_webHostEnvironment.WebRootPath, oldPictureUrl.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
-                        if (System.IO.File.Exists(oldFilePath))
-                        {
-                            System.IO.File.Delete(oldFilePath);
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore errors deleting old file
-                    }
+                    // Bara inom mediamappen (skalplanen D3) — en adress utanför den rörs aldrig.
+                    HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Storage.MediaFiles>().DeleteByUrl(oldPictureUrl);
                 }
 
                 // Generate unique filename
                 var fileName = $"{member.Id}_{DateTime.UtcNow.Ticks}{extension}";
-                var filePath = Path.Combine(profilePicturesDir, fileName);
 
-                // Save file
-                using (var stream = new FileStream(filePath, FileMode.Create))
-                {
-                    await profilePicture.CopyToAsync(stream);
-                }
+                // Save file — through the media file system (skalplanen D3)
+                var imageUrl = await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Storage.MediaFiles>()
+                    .SaveAsync("profile-pictures", fileName, profilePicture);
 
                 // Update member with new profile picture URL
-                var imageUrl = $"/media/profile-pictures/{fileName}";
                 member.SetValue("profilePictureUrl", imageUrl);
                 _memberService.Save(member);
 
@@ -2244,11 +2223,7 @@ namespace HpskSite.Controllers
                 // Delete file from disk
                 try
                 {
-                    var filePath = Path.Combine(_webHostEnvironment.WebRootPath, pictureUrl.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
-                    if (System.IO.File.Exists(filePath))
-                    {
-                        System.IO.File.Delete(filePath);
-                    }
+                    HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Storage.MediaFiles>().DeleteByUrl(pictureUrl);
                 }
                 catch (Exception ex)
                 {
