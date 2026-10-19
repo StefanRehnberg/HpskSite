@@ -236,6 +236,42 @@ namespace HpskSite.Controllers
             }
         }
 
+        /// <summary>
+        /// C3-planen §5.6, repetitionen med "förgiftade" noder: lägger tävlings- och serienoderna i papperskorgen
+        /// (med allt under dem), så att varje läsning som fortfarande går till en nod syns när sajten gås igenom.
+        /// BARA i Development och bara mot kopiorna <c>Umbraco_C3</c> och <c>Umbraco_Scale</c>.
+        /// </summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> TrashCompetitionNodesOnCopy(int batch,
+            [FromServices] Umbraco.Cms.Infrastructure.Scoping.IScopeProvider scopes,
+            [FromServices] Microsoft.AspNetCore.Hosting.IWebHostEnvironment env)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
+            if (!Microsoft.Extensions.Hosting.HostEnvironmentEnvExtensions.IsDevelopment(env))
+                return JsonText(new { success = false, message = "Bara i Development." });
+            List<int> ids;
+            using (var s = scopes.CreateScope(autoComplete: true))
+            {
+                var db = s.Database.ExecuteScalar<string>("SELECT DB_NAME()");
+                if (!string.Equals(db, "Umbraco_C3", StringComparison.OrdinalIgnoreCase) && !string.Equals(db, "Umbraco_Scale", StringComparison.OrdinalIgnoreCase))
+                    return JsonText(new { success = false, message = $"Bara mot kopiorna (den här är {db})." });
+                ids = s.Database.Fetch<int>(@"SELECT n.id FROM umbracoNode n JOIN umbracoContent c ON c.nodeId = n.id
+                    JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
+                    WHERE n.trashed = 0 AND ct.alias IN (@0, @1) ORDER BY n.level DESC, n.id",
+                    HpskSite.Models.Competitions.CompetitionFieldTable.NodeAlias, HpskSite.Models.Competitions.CompetitionSeriesFieldTable.NodeAlias);
+            }
+            var done = 0;
+            var errors = new List<string>();
+            foreach (var id in ids.Take(batch <= 0 ? 50 : batch))
+            {
+                var node = Services.ContentService.GetById(id);
+                if (node == null || node.Trashed) continue;
+                var r = Services.ContentService.MoveToRecycleBin(node, -1);
+                if (r.Success) done++; else errors.Add($"{id}: {r.Result}");
+            }
+            return JsonText(new { success = errors.Count == 0, trashed = done, remaining = Math.Max(0, ids.Count - done), errors });
+        }
+
         /// <summary>Samma frågor mot nodlagringen och tabellagringen. BARA på databaskopian. Tom lista = lika.</summary>
         [HttpGet]
         public async Task<IActionResult> CompetitionStoreCompare()
