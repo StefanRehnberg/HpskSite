@@ -11844,6 +11844,13 @@ Underhåll på `/admin-page`. Samma steg som startlistorna: Torrkör → (frys, 
   och resultatlistor, eftersom tabellraderna har nodens id. Årsadresserna `/competitions/{år}/` ger 301 till `/tavlingar/`
   även utan årsmappens nod (`CompetitionTreeRedirectFinder`). Repetitionen på `Umbraco_Scale`: 790 noder + 1 444 under
   dem på 5,5 minuter, tabellernas antal oförändrade, 0 skillnader på 7 396 adresser mot läget efter avpubliceringen.
+- **Händelsernas noder raderas på samma sätt: `ClubEventNodeDeletionService`** (2026-10-19), Underhåll → Händelser →
+  *4. Radera de gamla noderna* (`ClubEventMigration/DeleteNodesPreview` / `DeleteNodes`). Spärrar: tabellen gäller, ingen
+  frysning, `LegacyRedirect` finns, inga publicerade noder, varje nod utanför papperskorgen i `dbo.ClubEvent` eller
+  flyttad till en träning (`ClubTraining.LegacyEventNodeId`), inga noder under händelserna. **Varje nod arkiveras först
+  i `CompetitionNodeArchive`** (`CompetitionMigrationService.ArchiveNode`, med sin sort). Papperskorgens noder spärrar
+  inte — de flyttades aldrig (en användare hade tagit bort händelsen). Repetitionen på Scale: 55 noder, tabellernas antal
+  och de 20 gamla händelseadresserna oförändrade, 0 skillnader på korpusen.
 - **⚠️⚠️ Sidornas vyer heter `…Page` (§5.5 punkt 6, 2026-10-19)** — `CompetitionPage`, `CompetitionSeriesPage`,
   `CompetitionResultPage`, `PrecisionStartListPage`, `PrecisionFinalsStartListPage`, `ClubSimpleEventPage`, namnen i
   `Routing/PageViews`. Att ta bort en mall i Umbraco raderar vyfilen med mallens namn, så ingen sida får bo i en fil som
