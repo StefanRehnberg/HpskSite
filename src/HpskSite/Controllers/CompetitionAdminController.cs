@@ -1972,43 +1972,22 @@ namespace HpskSite.Controllers
                     return Ok(cachedResult);
                 }
 
-                // Use GetPagedDescendants for a single efficient query (same approach as GetCompetitionsList)
-                var rootContent = _contentService.GetRootContent().FirstOrDefault();
-                if (rootContent == null)
-                {
-                    return Ok(new { success = true, data = new List<object>() });
-                }
-
-                var allSeries = new List<Umbraco.Cms.Core.Models.IContent>();
-                var allCompetitions = new List<Umbraco.Cms.Core.Models.IContent>();
-                var clubRegionLookup = new Dictionary<int, string>();
+                // C3-planen §5.6: serierna ur serielagringen, aldrig ur trädet. I tabelläget finns en serie som skapats
+                // efter flytten inte som nod, och när noderna tas bort hade listan blivit tom (mätt på kopian).
                 bool needsRegionFilter = !string.IsNullOrEmpty(effectiveRegion) || (effectiveRegions != null && effectiveRegions.Any());
+                var allSeries = _seriesStore.List();
 
-                var descendants = _contentService.GetPagedDescendants(rootContent.Id, 0, int.MaxValue, out _);
-                foreach (var item in descendants)
+                // Klubbens krets ur den publicerade cachen — bara för de klubbar serierna pekar på.
+                var clubRegionLookup = new Dictionary<int, string>();
+                if (needsRegionFilter && _umbracoContextAccessor.TryGetUmbracoContext(out var seriesCtx) && seriesCtx.Content != null)
                 {
-                    if (item.ContentType.Alias == "competitionSeries")
+                    foreach (var clubId in allSeries.Select(s => s.ClubId).Where(id => id > 0).Distinct())
                     {
-                        allSeries.Add(item);
-                    }
-                    else if (item.ContentType.Alias == "competition")
-                    {
-                        allCompetitions.Add(item);
-                    }
-                    else if (item.ContentType.Alias == "club" && needsRegionFilter)
-                    {
-                        // Collect club region info for series that have a clubId
-                        if (!clubRegionLookup.ContainsKey(item.Id))
-                        {
-                            clubRegionLookup[item.Id] = item.GetValue<string>("regionalFederation") ?? "";
-                        }
+                        var club = seriesCtx.Content.GetById(clubId);
+                        if (club?.ContentType.Alias == "club")
+                            clubRegionLookup[clubId] = club.Value<string>("regionalFederation") ?? "";
                     }
                 }
-
-                // Pre-calculate competition counts per series
-                var competitionCountsByParent = allCompetitions
-                    .GroupBy(x => x.ParentId)
-                    .ToDictionary(g => g.Key, g => g.Count());
 
                 // Filter series by their OWN organizer properties (clubId / regionalFederation)
                 // Club admins only see series belonging to their managed clubs
@@ -2019,15 +1998,15 @@ namespace HpskSite.Controllers
                         // Club admins: only show series belonging to their clubs
                         if (isClubAdmin && !isSiteAdmin && !isRegionalAdmin)
                         {
-                            var seriesClubId = series.GetValue<int>("clubId");
+                            var seriesClubId = series.ClubId;
                             return seriesClubId > 0 && managedClubIds.Contains(seriesClubId);
                         }
 
                         if (!needsRegionFilter)
                             return true; // No filter — show all
 
-                        var seriesClubIdForRegion = series.GetValue<int>("clubId");
-                        var seriesRegion = series.GetValue<string>("regionalFederation") ?? "";
+                        var seriesClubIdForRegion = series.ClubId;
+                        var seriesRegion = series.RegionalFederation ?? "";
 
                         // Series with a club — look up the club's region
                         if (seriesClubIdForRegion > 0)
@@ -2055,20 +2034,20 @@ namespace HpskSite.Controllers
                     .Select(series => new
                     {
                         id = series.Id,
-                        name = series.GetValue<string>("seriesName") ?? series.Name,
-                        shortDescription = series.GetValue<string>("seriesShortDescription") ?? "",
-                        description = series.GetValue<string>("seriesDescription") ?? "",
-                        startDate = series.GetValue<DateTime?>("seriesStartDate"),
-                        endDate = series.GetValue<DateTime?>("seriesEndDate"),
-                        showInMenu = series.GetValue<bool>("showInMenu"),
-                        isActive = series.GetValue<bool>("isActive"),
-                        clubId = series.GetValue<int>("clubId"),
-                        regionalFederation = series.GetValue<string>("regionalFederation") ?? "",
-                        seriesCalculationStrategy = series.GetValue<string>("seriesCalculationStrategy") ?? "",
-                        seriesCalculationConfig = series.GetValue<string>("seriesCalculationConfig") ?? "",
-                        // Use pre-calculated count instead of per-series query
-                        competitionCount = competitionCountsByParent.TryGetValue(series.Id, out var count) ? count : 0,
-                        status = GetSeriesStatus(series, now)
+                        name = series.DisplayName,
+                        shortDescription = series.SeriesShortDescription ?? "",
+                        description = series.SeriesDescription ?? "",
+                        startDate = series.SeriesStartDate,
+                        endDate = series.SeriesEndDate,
+                        showInMenu = series.ShowInMenu,
+                        isActive = series.IsVisible,
+                        clubId = series.ClubId,
+                        regionalFederation = series.RegionalFederation ?? "",
+                        seriesCalculationStrategy = series.SeriesCalculationStrategy ?? "",
+                        seriesCalculationConfig = series.SeriesCalculationConfig ?? "",
+                        // Omgångarna även opublicerade, som den gamla trädgenomgången räknade.
+                        competitionCount = _competitions.ListAllInSeries(series.Id).Count,
+                        status = SeriesStatus(series.SeriesStartDate, series.SeriesEndDate, now)
                     })
                     .OrderByDescending(s => s.startDate ?? DateTime.MinValue)
                     .ToList();
@@ -2716,11 +2695,8 @@ namespace HpskSite.Controllers
         /// <summary>
         /// Determine series status (Draft, Scheduled, Active, Completed)
         /// </summary>
-        private string GetSeriesStatus(Umbraco.Cms.Core.Models.IContent series, DateTime now)
+        private static string SeriesStatus(DateTime? startDate, DateTime? endDate, DateTime now)
         {
-            var startDate = series.GetValue<DateTime?>("seriesStartDate");
-            var endDate = series.GetValue<DateTime?>("seriesEndDate");
-
             if (!startDate.HasValue)
                 return "Draft";
 

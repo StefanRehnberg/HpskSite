@@ -11820,6 +11820,19 @@ Underhåll på `/admin-page`. Samma steg som startlistorna: Torrkör → (frys, 
   att pröva att föräldern ÄR en tävling. Får fakturaarkivet (eller någon annan nod) samma nummer som en tävling i
   tabellen hade ALLA arkivets mappar räknats som den tävlingens — mätt med mutation: arkivnodens nummer gav 28 mappar.
   Föräldern prövas nu med alias. `GetExistingInvoiceForMember` läser tävlingen ur lagringen, inte cachens barn.
+- **⚠️⚠️ Umbracos lagrade omdirigeringar (§5.5 punkt 2, 2026-10-19).** `umbracoRedirectUrl` omdirigerar bara till
+  PUBLICERAT innehåll, och raderna försvinner när noden raderas. Efter avpubliceringen gav därför en gammal adress till
+  en omdöpt tävling, serie, resultat- eller startlista 404 (mätt på kopian: 30 adresser). **`LegacyRedirectService`**
+  kopierar raderna för `competition`, `competitionSeries`, `competitionResult`, `precisionStartList`, `finalsStartList`
+  och `clubSimpleEvent` till **`dbo.LegacyRedirect`** (idempotent, en minut efter varje start — och ska köras före varje
+  radering av noder), och **`LegacyRedirectFinder`** (sist i kedjan) svarar 301 till sidans nya adress ur lagringarna.
+  Migrering `create-legacy-redirect-table.sql` FÖRE deployen.
+- **Seriernas adminlista (`GetSeriesList`) läser serielagringen** (2026-10-19). Den gick trädet, så en serie skapad i
+  tabelläget syntes inte där, och med noderna borta blev listan tom.
+- **Repetitionen med förgiftade noder (§5.6)** på `Umbraco_Scale`: `C3Baseline/TrashCompetitionNodesOnCopy` (bara
+  Development, bara kopiorna) och `hpsk-verify/c3/c3-s5e-rehearsal.mjs` (arkiv/avpublicering/papperskorg genom de riktiga
+  endpointsen), `c3-url-corpus.mjs` före/efter och `c3-s5e-poison-probe.mjs` (inloggade ytor). Efter rättelserna: 7 396
+  adresser oförändrade, 261 sidor och 184 anrop utan fel. Kör den igen före raderingen av noderna.
 - **Kvar på noder, medvetet:** `autoNotifyParticipants` (finns inte på doktypen; svarar falskt även utan nod),
   `PaymentService` (gamla fakturor), skyddsnätets verktyg (`C3Baseline`, `CompetitionAuthorizationReport`), dev-seedarna,
   underhållsverktygen i `CompetitionAdminController` som går trädet.
