@@ -11,12 +11,19 @@ namespace HpskSite.Services
     {
         public const string MenuKey = "competition_menu_v1";
         public const string UrlIndexKey = "competition_url_index_v1";
+
+        /// <summary>
+        /// Tabellägets adressdel → tävlingar/serier, för gamla trädadresser (<c>CompetitionTreeRedirectFinder</c>).
+        /// Förut lästes hela tävlings- och serietabellen vid varje sådan förfrågan (skalplanen, mätningen 2026-10-19).
+        /// </summary>
+        public const string SlugIndexKey = "competition_slug_index_v1";
         public static readonly TimeSpan CacheFor = TimeSpan.FromMinutes(5);
 
         public static void Invalidate(AppCaches caches)
         {
             caches.RuntimeCache.ClearByKey(MenuKey);
             caches.RuntimeCache.ClearByKey(UrlIndexKey);
+            caches.RuntimeCache.ClearByKey(SlugIndexKey);
         }
     }
 }
