@@ -131,6 +131,24 @@ namespace HpskSite.Controllers
             return Json(new { success = ok, message });
         }
 
+        /// <summary>Raderingens läge: vad som skulle raderas och vad som spärrar (§5.5 punkt 7). Läser bara.</summary>
+        [HttpGet]
+        public async Task<IActionResult> DeleteNodesPreview([FromServices] HpskSite.Services.Competitions.CompetitionNodeDeletionService deletion)
+        {
+            if (await DenyAsync() is { } deny) return deny;
+            return Json(new { success = true, state = deletion.Preview() });
+        }
+
+        /// <summary>Raderar tävlings-, serie- och tomma årsmappsnoder för gott, en omgång (högst 20 sekunder) per anrop.</summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteNodes(int batch,
+            [FromServices] HpskSite.Services.Competitions.CompetitionNodeDeletionService deletion)
+        {
+            if (await DenyAsync() is { } deny) return deny;
+            var r = deletion.Run(batch <= 0 ? 25 : batch, TimeSpan.FromSeconds(20));
+            return Json(new { success = r.Ok, deleted = r.Deleted, remaining = r.Remaining, message = r.Message, errors = r.Errors.Take(20) });
+        }
+
         /// <summary>Avpublicerar tävlings- och serienoderna i portioner (§5e). Bara när tabellerna gäller.</summary>
         [HttpPost, ValidateAntiForgeryToken]
         public async Task<IActionResult> Unpublish(int batch = 50)

@@ -44,6 +44,11 @@ namespace HpskSite.Routing
                 if (node != null)
                     return Task.FromResult(Redirected.Contains(node.ContentType.Alias) && RedirectIfMoved(request, node.Url(), "", path));
 
+                // Årsmappen (/competitions/2025/) utan nod — årsmapparna raderas med tävlingsnoderna (C3 §5.5 punkt 7).
+                // Samma mål som årsmappens adress hade: tävlingslistan.
+                if (seg.Length == 2 && seg[1].Length == 4 && int.TryParse(seg[1], out var year) && year is > 1990 and < 2100)
+                    return Task.FromResult(RedirectIfMoved(request, HpskSite.Services.Addresses.PageAddressUrls.CompetitionsListPath, "", path));
+
                 // ⚠️ Umbracos GAMLA stavning (Fas E, 2026-10-18): segment som byggdes innan vår teckentabell fanns bar
                 // å/ä/ö som aa/ae/oe ("omgaang", "vaexjoetraeffen"). Ombyggnaden av adresstabellen vid 17-deployen
                 // skrev om dem till a/a/o, så besökarnas gamla adresser hittade ingen nod. Pröva den översatta
