@@ -179,12 +179,12 @@ namespace HpskSite.Controllers
                         // Tabelläget (C3-planen §5c): seriens sida med den virtuella noden, ur lagringen.
                         var s = HttpContext.RequestServices.GetRequiredService<ICompetitionSeriesStore>().Get(row.TargetId);
                         return child == null && s != null
-                            ? View("CompetitionSeries", HttpContext.RequestServices.GetRequiredService<VirtualCompetitionNodes>().Series(s, HubNode()))
+                            ? View(HpskSite.Routing.PageViews.Series, HttpContext.RequestServices.GetRequiredService<VirtualCompetitionNodes>().Series(s, HubNode()))
                             : NotFoundPage();
                     }
                     var node = uc.Content!.GetById(row.TargetId);
                     return child == null && node?.ContentType.Alias == "competitionSeries" // competitionstore-ok: sidan renderas med noden tills tävlingarna är rader
-                        ? View("CompetitionSeries", node) : NotFoundPage();
+                        ? View(HpskSite.Routing.PageViews.Series, node) : NotFoundPage();
                 }
                 case PageAddressKinds.Competition:
                     return ServeCompetition(uc, row.TargetId, child);
@@ -202,13 +202,13 @@ namespace HpskSite.Controllers
                 var info = HttpContext.RequestServices.GetRequiredService<ICompetitionStore>().Get(id);
                 competition = info == null ? null : HttpContext.RequestServices.GetRequiredService<VirtualCompetitionNodes>().Competition(info, HubNode());
                 if (competition == null) return NotFoundPage();
-                if (child == null) return View("Competition", competition);
+                if (child == null) return View(HpskSite.Routing.PageViews.Competition, competition);
             }
             else
             {
                 competition = uc.Content!.GetById(id);
                 if (competition?.ContentType.Alias != "competition") return NotFoundPage(); // competitionstore-ok: nodläget renderar med noden
-                if (child == null) return View("Competition", competition);
+                if (child == null) return View(HpskSite.Routing.PageViews.Competition, competition);
 
                 var node = competition.Children.FirstOrDefault(c => string.Equals(c.UrlSegment, child, StringComparison.OrdinalIgnoreCase));
                 if (node != null) return ViewForNode(node);
@@ -218,13 +218,13 @@ namespace HpskSite.Controllers
             if (string.Equals(child, "resultat", StringComparison.OrdinalIgnoreCase))
             {
                 var results = HttpContext.RequestServices.GetRequiredService<ICompetitionResultStore>();
-                return results.GetMany(new[] { id }).Count == 0 ? NotFoundPage() : View("CompetitionResult", competition);
+                return results.GetMany(new[] { id }).Count == 0 ? NotFoundPage() : View(HpskSite.Routing.PageViews.Result, competition);
             }
             var list = HttpContext.RequestServices.GetRequiredService<IStartListStore>().ListPublished(id)
                 .FirstOrDefault(r => string.Equals(r.UrlSegment, child, StringComparison.OrdinalIgnoreCase));
             if (list == null) return NotFoundPage();
             _page.StartList = list;
-            return View(list.Kind == HpskSite.Models.StartLists.StartListKind.Finals ? "PrecisionFinalsStartList" : "PrecisionStartList", competition); // startliststore-ok: mallnamn, inte doctyp
+            return View(list.Kind == HpskSite.Models.StartLists.StartListKind.Finals ? HpskSite.Routing.PageViews.FinalsStartList : HpskSite.Routing.PageViews.StartList, competition); // startliststore-ok: mallnamn, inte doctyp
         }
 
         private IActionResult ServeEvent(IUmbracoContext uc, int eventId)
@@ -235,7 +235,7 @@ namespace HpskSite.Controllers
             var owner = uc.Content!.GetById(ev.OwnerId);
             if (owner == null) return NotFoundPage();
             _page.Event = ev;
-            return View("ClubSimpleEvent", owner);
+            return View(HpskSite.Routing.PageViews.Event, owner);
         }
 
         /// <summary>En barnnod (resultatnod, startlista, finalstartlista, anmälningsmappen …) med sin egen mall.</summary>
@@ -244,7 +244,7 @@ namespace HpskSite.Controllers
             var templateId = node.TemplateId ?? 0;
             if (templateId <= 0) return NotFoundPage();
             var template = _templates.GetAsync(templateId).GetAwaiter().GetResult();
-            return template == null ? NotFoundPage() : View(template.Alias, node);
+            return template == null ? NotFoundPage() : View(HpskSite.Routing.PageViews.ForTemplate(template.Alias), node);
         }
 
         // ── Hjälpare ──────────────────────────────────────────────────────────────────────

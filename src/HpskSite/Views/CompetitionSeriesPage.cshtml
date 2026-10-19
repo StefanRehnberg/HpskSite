@@ -1,0 +1,1371 @@
+﻿@using Umbraco.Cms.Web.Common.PublishedModels;
+@using Umbraco.Extensions;
+@using HpskSite.Extensions
+@inject HpskSite.Services.AdminAuthorizationService AuthService
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@inject HpskSite.Services.Competitions.CompetitionPostCache Posts
+@inject HpskSite.Services.Competitions.ICompetitionStore Competitions
+@inject HpskSite.Services.Competitions.VirtualCompetitionNodes PageNodes
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = Model.Value<string>("seriesName") ?? Model.Name;
+
+    // Get all competitions in this series - order by seriesSortOrder first, then by date
+    // Seriens publicerade omgångar ur tävlingslagringen (C3-planen S4), ordnade på datum (seriesSortOrder har
+    // aldrig funnits på dokumenttypen) och sedan trädets ordning; noden för adressen.
+    var seriesCompetitions = Competitions.ListBySeries(Model.Id)
+                                          .OrderBy(p => p.CompetitionDate ?? DateTime.MinValue)
+                                          .ThenBy(p => p.SortOrder)
+                                          .Select(p => PageNodes.PageNode(p)) // C3-planen §5d
+                                          .Where(n => n != null)
+                                          .Cast<IPublishedContent>()
+                                          .ToList();
+
+    var now = DateTime.Now;
+    var completedCompetitions = seriesCompetitions.Where(c => (Posts.Of(c).CompetitionDate ?? DateTime.MinValue).Date < now.Date).Count();
+    var totalCompetitions = seriesCompetitions.Count();
+    var progressPercentage = totalCompetitions > 0 ? (completedCompetitions * 100 / totalCompetitions) : 0;
+
+    // The carousel opens on the round that matters now — the first one that hasn't finished yet —
+    // the way a calendar opens on today rather than on January. If the whole series is over, the
+    // last round is the interesting one, so land there instead.
+    var currentRoundIndex = seriesCompetitions.FindIndex(c =>
+    {
+        var start = (Posts.Of(c).CompetitionDate ?? DateTime.MinValue).Date;
+        var end = Posts.Of(c).CompetitionEndDate;
+        var effectiveEndDate = (end.HasValue && end.Value.Date >= start) ? end.Value.Date : start;
+        return effectiveEndDate >= now.Date;
+    });
+    if (currentRoundIndex < 0)
+    {
+        currentRoundIndex = totalCompetitions - 1;
+    }
+
+    var seriesStartDate = Model.Value<DateTime>("seriesStartDate");
+    var seriesEndDate = Model.Value<DateTime>("seriesEndDate");
+    var seriesName = Model.Value<string>("seriesName") ?? Model.Name;
+    var seriesDescription = Model.Value<string>("seriesDescription");
+    var seriesLogo = Model.Value<IPublishedContent>("seriesLogo");
+    var isActive = Model.Value<bool>("isActive", fallback: Fallback.ToDefaultValue, defaultValue: true);
+    var seriesCalculationStrategy = Model.Value<string>("seriesCalculationStrategy") ?? "";
+    var seriesId = Model.Id;
+
+    bool hasAdminAccess = false;
+    if (User.Identity?.IsAuthenticated == true)
+    {
+        hasAdminAccess = await AuthService.IsCurrentUserAdminAsync();
+        if (!hasAdminAccess)
+        {
+            var managedRegions = await AuthService.GetManagedRegions();
+            hasAdminAccess = managedRegions.Any();
+        }
+    }
+}
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <!-- Breadcrumb -->
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="@Model.SiteRoot().Url()">Hem</a></li>
+                    @if (Model.Parent?.ContentType.Alias == "competitionsHub")
+                    {
+                        <li class="breadcrumb-item"><a href="@Model.Parent.Url()">Tävlingar</a></li>
+                    }
+                    else if (Model.Parent?.ContentType.Alias == "competitionSeason")
+                    {
+                        <li class="breadcrumb-item"><a href="@Model.Parent?.Parent.Url()">Tävlingar</a></li>
+                    }
+                    <li class="breadcrumb-item active">@seriesName</li>
+                </ol>
+            </nav>
+
+            <!-- Series Header -->
+            <div class="card border-primary mb-4">
+                <div class="card-header bg-primary text-white">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <div class="d-flex align-items-center">
+                                @if (seriesLogo != null)
+                                {
+                                    <img src="@seriesLogo.Url()" alt="@seriesName Logo" class="me-3" style="max-height: 60px; max-width: 80px;">
+                                }
+                                <div>
+                                    <h1 class="mb-1">🏆 @seriesName</h1>
+                                    <p class="mb-0 opacity-75">
+                                        @if (seriesStartDate != DateTime.MinValue && seriesEndDate != DateTime.MinValue)
+                                        {
+                                            @seriesStartDate.ToString("yyyy-MM-dd") <text> - </text> @seriesEndDate.ToString("yyyy-MM-dd")
+                                        }
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <div class="text-white">
+                                <div class="h4 mb-1">@completedCompetitions/@totalCompetitions</div>
+                                <small>Genomförda</small>
+                                @if (!isActive)
+                                {
+                                    <div class="badge bg-warning text-dark mt-2">Inaktiv</div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                @if (totalCompetitions > 0)
+                {
+                    <div class="card-body py-2">
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <span class="small text-muted text-nowrap">Serieframsteg</span>
+                            <div class="progress flex-grow-1" style="height: 8px; min-width: 8rem;"
+                                 role="progressbar" aria-label="Serieframsteg"
+                                 aria-valuenow="@progressPercentage" aria-valuemin="0" aria-valuemax="100">
+                                <div class="progress-bar bg-success" style="width: @progressPercentage%"></div>
+                            </div>
+                            <span class="small text-muted text-nowrap">@progressPercentage% genomfört</span>
+                        </div>
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(seriesDescription))
+                {
+                    <div class="card-body border-top">
+                        <!-- Expandable Description -->
+                        <div class="series-description-container prose">
+                            <div class="series-description-preview" id="seriesDescriptionPreview">
+                                @Html.Raw(System.Net.WebUtility.HtmlDecode(seriesDescription))
+                            </div>
+                            <div class="series-description-full" id="seriesDescriptionFull" style="display: none;">
+                                @Html.Raw(System.Net.WebUtility.HtmlDecode(seriesDescription))
+                            </div>
+                            <button type="button" class="btn btn-link btn-sm p-0 mt-2 text-decoration-none"
+                                    id="toggleDescription"
+                                    onclick="toggleSeriesDescription()"
+                                    style="display: none;">
+                                <i class="bi bi-chevron-down" id="toggleIcon"></i>
+                                <span id="toggleText">Visa mer</span>
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Competitions in Series -->
+            @if (seriesCompetitions.Any())
+            {
+                <div class="series-rounds mb-4">
+                    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                        <h2 class="h5 mb-0" id="seriesRoundsHeading">
+                            Tävlingar i serien
+                            <span class="text-muted fw-normal small">@totalCompetitions st</span>
+                        </h2>
+                        <div class="btn-group" id="seriesRailNav" role="group" aria-label="Bläddra bland tävlingarna" hidden>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-rail-prev aria-label="Visa tidigare omgångar">
+                                <i class="bi bi-chevron-left" aria-hidden="true"></i>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-rail-next aria-label="Visa fler omgångar">
+                                <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="series-rail" id="seriesRail" tabindex="0" role="region" aria-labelledby="seriesRoundsHeading">
+                            @{ int roundNumber = 1; }
+                            @foreach (var competition in seriesCompetitions)
+                            {
+                                // Get competition details (same as competitions hub)
+                                var compDate = (Posts.Of(competition).CompetitionDate ?? DateTime.MinValue);
+                                var compEndDate = Posts.Of(competition).CompetitionEndDate;
+                                var regCloseDate = (Posts.Of(competition).RegistrationCloseDate ?? DateTime.MinValue);
+                                var regOpenDate = (Posts.Of(competition).RegistrationOpenDate ?? DateTime.MinValue);
+                                var description = HpskSite.Extensions.RteHelper.ExtractMarkup(competition.Value<string>("description"));
+                                var venue = Posts.Of(competition).Venue;
+
+                                // Check if multi-day competition
+                                var hasValidEndDate = compEndDate.HasValue &&
+                                                      compEndDate.Value > DateTime.MinValue &&
+                                                      compEndDate.Value.Year > 1900 &&
+                                                      compEndDate.Value.Date >= compDate.Date;
+                                var isMultiDay = hasValidEndDate && compEndDate!.Value.Date != compDate.Date;
+                                var dateIcon = isMultiDay ? "📅" : "🕐";
+                                var dateDisplay = isMultiDay ?
+                                    $"{compDate:yyyy-MM-dd} - {compEndDate.Value:yyyy-MM-dd}" :
+                                    compDate.ToString("yyyy-MM-dd");
+                                var durationInfo = isMultiDay ?
+                                    $"({(compEndDate.Value.Date - compDate.Date).Days + 1} dagar)" :
+                                    "(1 dag)";
+
+                                var maxParticipants = Posts.Of(competition).MaxParticipants;
+                                var registrationFee = Posts.Of(competition).RegistrationFee;
+                                var competitionTypeId = Posts.Of(competition).CompetitionType ?? "";
+                                var competitionTypeObj = HpskSite.Models.CompetitionTypes.GetById(competitionTypeId);
+                                var competitionTypeName = competitionTypeObj?.Name ?? (!string.IsNullOrEmpty(competitionTypeId) ? competitionTypeId : "Okänd typ");
+                                var numberOfSeriesOrStations = Posts.Of(competition).NumberOfSeriesOrStations;
+                                var numberOfFinalSeries = Posts.Of(competition).NumberOfFinalSeries;
+
+                                // Build competition type display name with series info (skip for Springskytte)
+                                var competitionTypeDisplayName = competitionTypeName;
+                                if (competitionTypeId != "Springskytte" && numberOfSeriesOrStations > 0)
+                                {
+                                    if (numberOfFinalSeries > 0)
+                                    {
+                                        var qualSeries = numberOfSeriesOrStations - numberOfFinalSeries;
+                                        competitionTypeDisplayName += $" {qualSeries}+{numberOfFinalSeries} serier";
+                                    }
+                                    else
+                                    {
+                                        competitionTypeDisplayName += $" {numberOfSeriesOrStations} serier";
+                                    }
+                                }
+
+                                // Multiple shooting classes support - handle string array, JSON array, or CSV
+                                object? shootingClassIdsRaw = Posts.Of(competition).ShootingClassIds;
+                                string[] classIdArray = Array.Empty<string>();
+                                try
+                                {
+                                    if (shootingClassIdsRaw is string[] stringArray)
+                                    {
+                                        classIdArray = stringArray;
+                                    }
+                                    else if (shootingClassIdsRaw is string stringValue && !string.IsNullOrEmpty(stringValue))
+                                    {
+                                        // Check if JSON array format
+                                        if (stringValue.TrimStart().StartsWith("["))
+                                        {
+                                            classIdArray = System.Text.Json.JsonSerializer.Deserialize<string[]>(stringValue) ?? Array.Empty<string>();
+                                        }
+                                        else
+                                        {
+                                            // CSV format (legacy)
+                                            classIdArray = stringValue.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToArray();
+                                        }
+                                    }
+                                }
+                                catch (System.Text.Json.JsonException)
+                                {
+                                    // Handle corrupted shooting class data - fallback to empty
+                                    classIdArray = Array.Empty<string>();
+                                }
+
+                                // Use centralized shooting classes model (includes R, L, M classes)
+                                var shootingClasses = HpskSite.Models.ShootingClasses.All;
+
+                                var competitionShootingClasses = new List<dynamic>();
+                                if (classIdArray.Length > 0)
+                                {
+                                    competitionShootingClasses = shootingClasses.Where(sc => classIdArray.Contains((string)sc.Id)).ToList<dynamic>();
+                                }
+
+                                var isSpringskytteComp = competitionTypeId == "Springskytte";
+                                var shootingClassName = isSpringskytteComp && classIdArray.Length > 0
+                                    ? string.Join(", ", classIdArray)
+                                    : competitionShootingClasses.Any()
+                                        ? string.Join(", ", competitionShootingClasses.Select(sc => sc.Name))
+                                        : "Inga klasser";
+                                var isCompetitionActive = Posts.Of(competition).IsVisible;
+
+                                // Calculate status (same logic as competitions hub)
+                                var effectiveEnd = hasValidEndDate ? compEndDate!.Value.Date : compDate.Date;
+                                var status = "completed";
+                                var statusIcon = "bi-check-circle";
+                                var statusText = "Avslutad";
+                                var statusClass = "secondary";
+                                var buttonText = "Visa Tävling";
+                                var buttonClass = "btn-secondary";
+
+                                if (isCompetitionActive && effectiveEnd >= now.Date)
+                                {
+                                    if (regOpenDate <= now && regCloseDate >= now)
+                                    {
+                                        status = "open";
+                                        statusIcon = "bi-person-plus";
+                                        statusText = "Anmälan öppen";
+                                        statusClass = "success";
+                                        buttonClass = "btn-success";
+                                    }
+                                    else if (regOpenDate > now)
+                                    {
+                                        status = "upcoming";
+                                        statusIcon = "bi-calendar-plus";
+                                        statusText = "Kommande";
+                                        statusClass = "warning";
+                                        buttonClass = "btn-warning";
+                                    }
+                                    else if (compDate.Date == now.Date || (regCloseDate < now && compDate.Date >= now.Date))
+                                    {
+                                        status = "active";
+                                        statusIcon = "bi-play-circle";
+                                        statusText = "Pågående";
+                                        statusClass = "primary";
+                                        buttonClass = "btn-primary";
+                                    }
+                                }
+
+                                var isCurrentRound = (roundNumber - 1) == currentRoundIndex;
+
+                                <div class="series-rail-item @(isCurrentRound ? "is-current" : "")">
+                                    <div class="card h-100 border-@statusClass">
+                                        <div class="card-header bg-@statusClass text-white d-flex justify-content-between align-items-center">
+                                            <div class="flex-grow-1">
+                                                <h5 class="card-title h6 mb-0">@competition.Name</h5>
+                                                <small><i class="bi @statusIcon me-1"></i>@statusText</small>
+                                            </div>
+                                            <span class="badge bg-light text-dark ms-2">Omg. @roundNumber</span>
+                                        </div>
+                                        <div class="card-body pt-2 pb-2">
+                                            <ul class="list-unstyled small mb-0">
+                                                @if (!string.IsNullOrEmpty(description))
+                                                {
+                                                    <li class="mb-1 series-card-desc">@Html.Raw(System.Net.WebUtility.HtmlDecode(description))</li>
+                                                }
+                                                <li>
+                                                    @dateIcon @dateDisplay
+                                                    <small class="text-muted ms-1">@durationInfo</small>
+                                                </li>
+                                                <li class="series-card-line"><i class="bi bi-geo-alt" aria-hidden="true"></i> @venue</li>
+                                                @if (!string.IsNullOrEmpty(competitionTypeId))
+                                                {
+                                                    <li class="series-card-line"><i class="bi bi-trophy" aria-hidden="true"></i> @competitionTypeDisplayName</li>
+                                                }
+                                                <li class="series-card-line"><i class="bi bi-bullseye" aria-hidden="true"></i> @shootingClassName</li>
+                                            </ul>
+                                        </div>
+                                        <div class="card-footer d-flex align-items-center flex-wrap gap-1">
+                                            <a href="@competition.CompetitionUrl()" class="btn @buttonClass btn-sm">
+                                                @buttonText<span class="visually-hidden"> – @competition.Name</span>
+                                            </a>
+                                            @if (status == "open")
+                                            {
+                                                <small class="text-muted ms-1">Stänger: @regCloseDate.ToString("yyyy-MM-dd")</small>
+                                            }
+                                            else if (status == "upcoming")
+                                            {
+                                                <small class="text-muted ms-1">Öppnar: @regOpenDate.ToString("yyyy-MM-dd")</small>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                                roundNumber++;
+                            }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> Inga tävlingar har lagts till i denna serie ännu.
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(seriesCalculationStrategy))
+            {
+                <!-- Series Results -->
+                <div id="seriesResultsContainer" class="mt-4">
+                    <div class="text-center py-4" id="seriesResultsLoading">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Laddar...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Beräknar serieresultat...</p>
+                    </div>
+                    <div id="seriesResultsContent" style="display: none;"></div>
+                    <div id="seriesResultsError" class="alert alert-warning d-none">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        <span id="seriesResultsErrorMessage"></span>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<style>
+/* ---- Competition carousel (the "rail") --------------------------------
+   A horizontal scroll-snap rail instead of a growing card grid: the section
+   keeps ONE card's height no matter how many rounds the series has, so the
+   series standings stay above the fold. Native scrolling means touch swipe,
+   trackpad and the arrow keys all work without a carousel library, and there
+   is deliberately no autoplay. */
+.series-rail {
+    position: relative;
+    display: flex;
+    gap: 1rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    /* Padding leaves room for the focus ring and the scrollbar itself. */
+    padding: 0.25rem 0.25rem 0.75rem;
+    margin-bottom: -0.25rem;
+    scrollbar-width: thin;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+.series-rail:focus-visible {
+    outline: 2px solid var(--bs-primary);
+    outline-offset: 2px;
+    border-radius: 0.5rem;
+}
+
+.series-rail-item {
+    flex: 0 0 auto;
+    width: 20rem;
+    max-width: 85%;
+    display: flex;
+    scroll-snap-align: start;
+}
+
+.series-rail-item > .card {
+    width: 100%;
+}
+
+/* Without this the far end of the rail is unreachable: with mandatory
+   snapping every resting place must be a snap point, and the last card's
+   start position lies beyond max scroll, so the browser silently rolls any
+   scroll that lands there back to where it came from. Snapping the last card
+   to the END makes max scroll a legal resting place. */
+.series-rail-item:last-child {
+    scroll-snap-align: end;
+}
+
+/* The round in play gets a ring — it is also the card the rail opens on. */
+.series-rail-item.is-current > .card {
+    box-shadow: 0 0 0 0.2rem var(--bs-primary-bg-subtle);
+}
+
+/* Descriptions are free-text RTE and were the biggest height variance in the
+   old grid. Two lines, then cut — the card links to the full competition. */
+.series-card-desc {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.series-card-desc p:last-child {
+    margin-bottom: 0;
+}
+
+/* Venue/type/class values vary wildly in length; one line each keeps every
+   card the same height. */
+.series-card-line {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.series-rail .card-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+/* Phones: let the next card peek in, which is the affordance that says
+   "there is more sideways" better than any arrow. */
+@@media (max-width: 575.98px) {
+    .series-rail-item {
+        width: 85vw;
+        max-width: 20rem;
+    }
+}
+
+@@media (prefers-reduced-motion: reduce) {
+    .series-rail {
+        scroll-behavior: auto;
+    }
+}
+
+@@media print {
+    /* Paper has no sideways. Fall back to the grid. */
+    .series-rail {
+        display: flex;
+        flex-wrap: wrap;
+        overflow: visible;
+    }
+    #seriesRailNav {
+        display: none !important;
+    }
+}
+
+.series-description-container {
+    position: relative;
+}
+
+.series-description-preview {
+    max-height: 3.6em; /* Approximately 2-3 lines */
+    overflow: hidden;
+    position: relative;
+    line-height: 1.4em;
+}
+
+.series-description-preview::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 100%;
+    height: 1.4em;
+    background: linear-gradient(to bottom, transparent, var(--bs-body-bg));
+    pointer-events: none;
+}
+
+.series-description-preview.no-fade::after {
+    display: none;
+}
+
+.series-description-full {
+    line-height: 1.4em;
+}
+
+#toggleDescription {
+    color: var(--bs-link-color) !important;
+    font-size: 0.875rem;
+    transition: all 0.2s ease;
+}
+
+#toggleDescription:hover {
+    color: var(--bs-link-hover-color) !important;
+}
+
+#toggleIcon {
+    transition: transform 0.2s ease;
+    margin-right: 0.25rem;
+}
+
+#toggleIcon.rotated {
+    transform: rotate(180deg);
+}
+
+/* Mobile card layout for series standings (visible under md breakpoint) */
+.series-mobile-rounds-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.25rem 0.75rem;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--bs-border-color);
+    font-size: 0.875rem;
+}
+.series-mobile-rounds-grid .label {
+    color: var(--bs-secondary-color);
+    margin-right: 0.35rem;
+}
+.series-mobile-rounds-grid .non-counting {
+    opacity: 0.4;
+    text-decoration: line-through;
+}
+
+/* Klubb section: per-round breakdown with contributing shooters (mobile collapse + desktop expander) */
+.series-klubb-rounds {
+    /* container; rounds stacked vertically */
+}
+.series-klubb-round {
+    padding: 0.45rem 0;
+    border-top: 1px solid var(--bs-border-color);
+}
+.series-klubb-round:first-child {
+    border-top: 0;
+    padding-top: 0.1rem;
+}
+.series-klubb-round-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-weight: 600;
+    gap: 0.5rem;
+}
+.series-klubb-round-head .label {
+    color: var(--bs-secondary-color);
+    font-weight: 500;
+}
+.series-klubb-round-head .value {
+    text-align: right;
+}
+.series-klubb-contributors {
+    margin-top: 0.25rem;
+    margin-left: 0.6rem;
+    font-size: 0.875rem;
+}
+.series-klubb-contributor {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.05rem 0;
+}
+.series-klubb-contributor .name {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--bs-body-color);
+    word-break: break-word;
+}
+.series-klubb-contributor .score {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    color: var(--bs-secondary-color);
+}
+.series-klubb-contributor .cls-badge {
+    display: inline-block;
+    margin-right: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.2rem;
+    background-color: var(--bs-tertiary-bg);
+    color: var(--bs-secondary-color);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+.series-klubb-expand-btn {
+    border: 0;
+    background: transparent;
+    padding: 0 0.25rem;
+    color: var(--bs-secondary-color);
+    cursor: pointer;
+}
+.series-klubb-expand-btn[aria-expanded="true"] .bi-chevron-down {
+    transform: rotate(180deg);
+}
+.series-klubb-expand-btn .bi-chevron-down {
+    transition: transform 0.15s ease;
+}
+
+/* Truncate long name/club values in series standings tables so fixed-width columns stay aligned */
+.series-cell-truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    initializeSeriesDescription();
+    initializeSeriesRail();
+});
+
+// Horizontal competition rail. Scrolling itself is native (CSS scroll-snap);
+// this only adds the arrows, disables them at the ends, hides them entirely
+// when everything already fits, and opens the rail on the current round.
+function initializeSeriesRail() {
+    const rail = document.getElementById('seriesRail');
+    const nav = document.getElementById('seriesRailNav');
+    if (!rail) return;
+
+    const prevBtn = nav ? nav.querySelector('[data-rail-prev]') : null;
+    const nextBtn = nav ? nav.querySelector('[data-rail-next]') : null;
+
+    // Scroll a whole "page" of cards, never a fixed pixel amount — the card
+    // width differs between phone and desktop.
+    function pageWidth() {
+        const item = rail.querySelector('.series-rail-item');
+        if (!item) return rail.clientWidth;
+        const gap = parseFloat(getComputedStyle(rail).columnGap) || 16;
+        const itemWidth = item.getBoundingClientRect().width + gap;
+        const perPage = Math.max(1, Math.floor(rail.clientWidth / itemWidth));
+        return itemWidth * perPage;
+    }
+
+    function updateNav() {
+        // A 4px slack absorbs sub-pixel rounding at the ends.
+        const scrollable = rail.scrollWidth - rail.clientWidth > 4;
+        if (nav) nav.hidden = !scrollable;
+        if (!scrollable) return;
+        if (prevBtn) prevBtn.disabled = rail.scrollLeft <= 4;
+        if (nextBtn) nextBtn.disabled = rail.scrollLeft >= rail.scrollWidth - rail.clientWidth - 4;
+    }
+
+    // Always come to rest on a card edge (or on one of the two ends). A
+    // mandatory snap container rejects any other resting place and rolls the
+    // scroll back, which reads as "the arrow does nothing".
+    // No behavior:'smooth' here on purpose — the CSS says smooth, and the CSS
+    // is what prefers-reduced-motion turns off.
+    function cardEdges() {
+        // offsetLeft, not 0, is the rail's first legal resting place: the rail
+        // has a little padding so the focus ring is not clipped.
+        return Array.prototype.map.call(
+            rail.querySelectorAll('.series-rail-item'),
+            function(item) { return item.offsetLeft; });
+    }
+
+    function scrollPage(direction) {
+        const edges = cardEdges();
+        if (edges.length === 0) return;
+
+        const maxScroll = rail.scrollWidth - rail.clientWidth;
+        const target = rail.scrollLeft + direction * pageWidth();
+        if (target >= maxScroll - 4) { rail.scrollTo({ left: maxScroll }); return; }
+
+        let nearestEdge = edges[0];
+        edges.forEach(function(edge) {
+            if (Math.abs(edge - target) < Math.abs(nearestEdge - target)) {
+                nearestEdge = edge;
+            }
+        });
+        rail.scrollTo({ left: nearestEdge });
+    }
+
+    if (prevBtn) prevBtn.addEventListener('click', function() { scrollPage(-1); });
+    if (nextBtn) nextBtn.addEventListener('click', function() { scrollPage(1); });
+
+    // Left/Right arrows are handled by the browser for a focused scroll
+    // container; Home/End are not, and they are what you reach for in a
+    // ten-round series.
+    rail.addEventListener('keydown', function(e) {
+        if (e.key === 'Home') {
+            e.preventDefault();
+            const edges = cardEdges();
+            rail.scrollTo({ left: edges.length ? edges[0] : 0 });
+        } else if (e.key === 'End') {
+            e.preventDefault();
+            rail.scrollTo({ left: rail.scrollWidth - rail.clientWidth });
+        }
+    });
+
+    rail.addEventListener('scroll', updateNav, { passive: true });
+    if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(updateNav).observe(rail);
+    } else {
+        window.addEventListener('resize', updateNav);
+    }
+
+    // Land on the round in play rather than on round 1. Jump without the
+    // smooth animation so the page does not appear to slide on load.
+    const current = rail.querySelector('.series-rail-item.is-current');
+    if (current && current.offsetLeft > 0) {
+        const previousBehavior = rail.style.scrollBehavior;
+        rail.style.scrollBehavior = 'auto';
+        rail.scrollLeft = current.offsetLeft - rail.clientLeft;
+        rail.style.scrollBehavior = previousBehavior;
+    }
+
+    updateNav();
+}
+
+function initializeSeriesDescription() {
+    const preview = document.getElementById('seriesDescriptionPreview');
+    const toggle = document.getElementById('toggleDescription');
+
+    if (!preview || !toggle) return;
+
+    // Check if content actually overflows
+    const lineHeight = parseFloat(getComputedStyle(preview).lineHeight);
+    const maxHeight = 3.6 * (lineHeight || 16); // Fallback to 16px if lineHeight is NaN
+
+    if (preview.scrollHeight > maxHeight) {
+        // Content overflows, show the toggle button
+        toggle.style.display = 'inline-flex';
+    } else {
+        // Content fits, remove fade effect and hide toggle
+        preview.classList.add('no-fade');
+        toggle.style.display = 'none';
+    }
+}
+
+function toggleSeriesDescription() {
+    const preview = document.getElementById('seriesDescriptionPreview');
+    const full = document.getElementById('seriesDescriptionFull');
+    const toggleIcon = document.getElementById('toggleIcon');
+    const toggleText = document.getElementById('toggleText');
+
+    if (!preview || !full || !toggleIcon || !toggleText) return;
+
+    const isExpanded = full.style.display !== 'none';
+
+    if (isExpanded) {
+        // Collapse
+        preview.style.display = 'block';
+        full.style.display = 'none';
+        toggleIcon.classList.remove('rotated');
+        toggleText.textContent = 'Visa mer';
+
+        // Smooth scroll to series header
+        document.querySelector('.card.border-primary').scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+        });
+    } else {
+        // Expand
+        preview.style.display = 'none';
+        full.style.display = 'block';
+        toggleIcon.classList.add('rotated');
+        toggleText.textContent = 'Visa mindre';
+    }
+}
+
+@if (!string.IsNullOrEmpty(seriesCalculationStrategy))
+{
+    <text>
+    // Load series results
+    (function() {
+        const seriesId = @seriesId;
+        const container = document.getElementById('seriesResultsContent');
+        const loading = document.getElementById('seriesResultsLoading');
+        const errorDiv = document.getElementById('seriesResultsError');
+        const errorMsg = document.getElementById('seriesResultsErrorMessage');
+        const isAdmin = @(hasAdminAccess ? "true" : "false");
+
+        // Column headings follow the discipline: Totalt/X for precision, Träff/Fig. or Poäng/Poängmål
+        // for fältskytte. Set from the payload on every load, defaulted for older cached responses.
+        let scoreLabel = 'Totalt';
+        let secondaryLabel = 'X';
+
+        function loadSeriesResults(forceRefresh) {
+            const url = '/umbraco/surface/CompetitionAdmin/GetSeriesResults?seriesId=' + seriesId
+                + (forceRefresh ? '&forceRefresh=true' : '');
+
+            // Show loading state
+            loading.style.display = 'block';
+            container.style.display = 'none';
+            errorDiv.classList.add('d-none');
+
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    loading.style.display = 'none';
+
+                    if (!data.success || !data.data) {
+                        document.getElementById('seriesResultsContainer').style.display = 'none';
+                        return;
+                    }
+
+                    const result = data.data;
+                    scoreLabel = result.scoreLabel || 'Totalt';
+                    secondaryLabel = result.secondaryLabel || 'X';
+
+                    if (!result.sections || result.sections.length === 0) {
+                        // An unsupported discipline is worth saying out loud — an empty container
+                        // reads as "no results yet" and sends the organiser looking for a data bug.
+                        if (result.unsupportedMessage) {
+                            document.getElementById('seriesResultsContainer').style.display = 'block';
+                            container.style.display = 'block';
+                            container.innerHTML = '<div class="alert alert-secondary mb-0">'
+                                + escapeHtmlSeries(result.unsupportedMessage) + '</div>';
+                        } else {
+                            document.getElementById('seriesResultsContainer').style.display = 'none';
+                        }
+                        return;
+                    }
+
+                    document.getElementById('seriesResultsContainer').style.display = 'block';
+                    container.style.display = 'block';
+                    let html = '';
+
+                    // Header
+                    html += '<div class="card border-success mb-4">';
+                    html += '<div class="card-header bg-success text-white d-flex justify-content-between align-items-start">';
+                    html += '<div>';
+                    html += '<h3 class="mb-0"><i class="bi bi-bar-chart me-2"></i>Serieresultat</h3>';
+                    html += '<small>' + escapeHtmlSeries(result.strategyName) + '</small>';
+                    html += '</div>';
+                    html += '<div class="d-flex flex-wrap gap-2 ms-2 mt-1">';
+                    // Resultatlistan för utskrift (/serieresultat/{id}) — samma utseende som tävlingarnas listor.
+                    html += '<a class="btn btn-sm btn-light" href="/serieresultat/' + seriesId + '" target="_blank" rel="noopener" title="Öppna resultatlistan för utskrift i en ny flik">';
+                    html += '<i class="bi bi-printer me-1"></i>Skriv ut resultatlistan';
+                    html += '</a>';
+                    if (isAdmin) {
+                        html += '<button class="btn btn-sm btn-outline-light" id="recalcSeriesBtn" title="Beräkna om serieresultat">';
+                        html += '<i class="bi bi-arrow-clockwise"></i> Beräkna om';
+                        html += '</button>';
+                    }
+                    html += '</div>';
+                    html += '</div>';
+                    html += '<div class="card-body p-0">';
+
+                    // Pre-build lookup of contributing shooters (per club, per class) so the Klubb section
+                    // can show "best of N" contributors without recomputing per row.
+                    const contributorsByClub = buildContributorsByClub(result.sections);
+
+                    // Render Club sections before Individual sections.
+                    const orderedSections = result.sections.slice().sort(function(a, b) {
+                        const rank = function(s) { return s.sectionType === 'Club' ? 0 : 1; };
+                        return rank(a) - rank(b);
+                    });
+
+                    orderedSections.forEach(function(section) {
+                        html += '<div class="p-3">';
+                        if (result.sections.length > 1) {
+                            html += '<h4 class="mb-3">' + escapeHtmlSeries(section.title) + '</h4>';
+                        }
+
+                        if (section.sectionType === 'Individual') {
+                            html += renderIndividualSection(section, result.competitions);
+                        } else if (section.sectionType === 'Club') {
+                            html += renderClubSection(section, result.competitions, contributorsByClub);
+                        }
+                        html += '</div>';
+                    });
+
+                    html += '</div></div>';
+                    container.innerHTML = html;
+
+                    // Attach recalculate button handler
+                    var recalcBtn = document.getElementById('recalcSeriesBtn');
+                    if (recalcBtn) {
+                        recalcBtn.addEventListener('click', function() {
+                            loadSeriesResults(true);
+                        });
+                    }
+                })
+                .catch(error => {
+                    loading.style.display = 'none';
+                    document.getElementById('seriesResultsContainer').style.display = 'none';
+                    console.error('Error loading series results:', error);
+                });
+        }
+
+        // Initial load
+        loadSeriesResults(false);
+
+        function renderIndividualSection(section, competitions) {
+            let html = '';
+            const currentMemberId = parseInt(document.body.dataset.currentMemberId || '0');
+
+            // Detect if any cell uses points different from score (placement scoring)
+            let usesPoints = false;
+            section.classStandings.forEach(function(classGroup) {
+                classGroup.rows.forEach(function(row) {
+                    row.competitionScores.forEach(function(cell) {
+                        if (cell.points !== null && cell.points !== undefined && cell.score !== null && cell.points !== cell.score) {
+                            usesPoints = true;
+                        }
+                    });
+                });
+            });
+
+            // Column widths as percentages so tables fit the container and align across classes.
+            // Numeric columns get a consistent share; name/club share the remaining space.
+            const numCompCols = competitions.length;
+            const omgPct = 7;
+            const totalPct = 9;
+            // A longer secondary heading needs more room than "X".
+            const xPct = secondaryLabel.length > 4 ? 8 : 4;
+            const rankPct = 3;
+            const numericShare = numCompCols * omgPct + totalPct + xPct + rankPct;
+            const textShare = 100 - numericShare;
+            const namePct = textShare / 2;
+            const clubPct = textShare / 2;
+
+            section.classStandings.forEach(function(classGroup) {
+                if (classGroup.rows.length === 0) return;
+
+                html += '<div class="mb-4">';
+                html += '<h5 class="p-2 rounded" style="background-color: var(--bs-tertiary-bg);">' + escapeHtmlSeries(classGroup.className) + '</h5>';
+                html += '<div class="d-none d-md-block">';
+                html += '<div class="table-responsive">';
+                html += '<table class="table table-sm table-striped table-hover mb-0 series-standings-individual" style="table-layout:fixed;width:100%;">';
+                html += '<thead><tr>';
+                html += '<th style="width:' + rankPct + '%">#</th>';
+                html += '<th style="width:' + namePct + '%">Namn</th>';
+                html += '<th style="width:' + clubPct + '%">Klubb</th>';
+                competitions.forEach(function(comp, idx) {
+                    html += '<th class="text-center" style="width:' + omgPct + '%" title="' + escapeHtmlSeries(comp.name) + '">Omg.&nbsp;' + (idx + 1) + '</th>';
+                });
+                html += '<th class="text-center" style="width:' + totalPct + '%"><strong>' + (usesPoints ? 'Poäng' : scoreLabel) + '</strong></th>';
+                html += '<th class="text-center" style="width:' + xPct + '%">' + escapeHtmlSeries(secondaryLabel) + '</th>';
+                html += '</tr></thead>';
+                html += '<tbody>';
+
+                classGroup.rows.forEach(function(row) {
+                    const isCurrentUser = row.entityId === currentMemberId;
+                    const rowClass = isCurrentUser ? ' style="background-color: rgba(13,110,253,0.1);"' : '';
+
+                    html += '<tr' + rowClass + '>';
+                    html += '<td><strong>' + row.rank + '</strong></td>';
+                    html += '<td class="series-cell-truncate" title="' + escapeHtmlSeries(row.name) + '">' + escapeHtmlSeries(row.name) + '</td>';
+                    html += '<td class="series-cell-truncate" title="' + escapeHtmlSeries(row.club) + '"><small>' + escapeHtmlSeries(row.club) + '</small></td>';
+
+                    row.competitionScores.forEach(function(cell) {
+                        if (cell.score === null || cell.score === undefined) {
+                            html += '<td class="text-center text-muted">-</td>';
+                        } else if (!cell.counting) {
+                            // Non-counting cell (bestOf) - dimmed with strikethrough
+                            if (usesPoints && cell.points !== null && cell.points !== undefined) {
+                                html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">'
+                                    + cell.score + '<br><small>' + cell.points + 'p</small></td>';
+                            } else {
+                                html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">' + cell.score + '</td>';
+                            }
+                        } else if (usesPoints && cell.points !== null && cell.points !== undefined) {
+                            // Placement scoring: show score + points below
+                            html += '<td class="text-center">' + cell.score
+                                + '<br><small class="text-success fw-bold">' + cell.points + 'p</small></td>';
+                        } else {
+                            html += '<td class="text-center">' + cell.score + '</td>';
+                        }
+                    });
+
+                    html += '<td class="text-center"><strong>' + row.totalSeriesScore + '</strong></td>';
+                    html += '<td class="text-center">' + row.totalXCount + '</td>';
+                    html += '</tr>';
+                });
+
+                html += '</tbody></table></div></div>';
+
+                // Mobile card list (visible below md breakpoint)
+                html += '<div class="d-md-none">';
+                classGroup.rows.forEach(function(row) {
+                    const isCurrentUser = row.entityId === currentMemberId;
+                    const cardStyle = isCurrentUser ? ' style="background-color: rgba(13,110,253,0.1);"' : '';
+                    const collapseId = 'mr-Indiv-' + sanitizeIdSeries(classGroup.className) + '-' + row.entityId;
+
+                    html += '<div class="series-mobile-card border rounded p-2 mb-2"' + cardStyle + '>';
+                    html += '<div class="d-flex justify-content-between align-items-start">';
+                    html += '<div class="flex-grow-1 me-2" style="min-width:0;">';
+                    html += '<div><span class="fw-bold me-1">' + row.rank + '.</span>' + escapeHtmlSeries(row.name) + '</div>';
+                    html += '<small class="text-muted">' + escapeHtmlSeries(row.club) + '</small>';
+                    html += '</div>';
+                    html += '<div class="text-end">';
+                    html += '<div class="fw-bold">' + row.totalSeriesScore + '</div>';
+                    html += '<small class="text-muted">' + row.totalXCount + ' ' + escapeHtmlSeries(secondaryLabel) + '</small>';
+                    html += '</div>';
+                    html += '</div>';
+
+                    html += '<button class="btn btn-link btn-sm p-0 mt-1" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="false" aria-controls="' + collapseId + '">';
+                    html += '<i class="bi bi-chevron-down me-1"></i>Visa omgångar';
+                    html += '</button>';
+
+                    html += '<div class="collapse" id="' + collapseId + '">';
+                    html += '<div class="series-mobile-rounds-grid">';
+                    row.competitionScores.forEach(function(cell, idx) {
+                        html += '<span><span class="label">Omg.' + (idx + 1) + '</span>' + buildMobileRoundCell(cell, usesPoints) + '</span>';
+                    });
+                    html += '</div>';
+                    html += '</div>';
+
+                    html += '</div>';
+                });
+                html += '</div>';
+
+                html += '</div>';
+            });
+
+            return html;
+        }
+
+        function renderClubSection(section, competitions, contributorsByClub) {
+            let html = '';
+
+            // Detect if any cell uses points different from score (placement scoring)
+            let usesPoints = false;
+            section.classStandings.forEach(function(classGroup) {
+                classGroup.rows.forEach(function(row) {
+                    row.competitionScores.forEach(function(cell) {
+                        if (cell.points !== null && cell.points !== undefined && cell.score !== null && cell.points !== cell.score) {
+                            usesPoints = true;
+                        }
+                    });
+                });
+            });
+
+            const numCompColsC = competitions.length;
+            const omgPctC = 7;
+            const totalPctC = 9;
+            const rankPctC = 3;
+            const clubPctC = 100 - (numCompColsC * omgPctC + totalPctC + rankPctC);
+
+            section.classStandings.forEach(function(classGroup) {
+                if (classGroup.rows.length === 0) return;
+
+                html += '<div class="mb-4">';
+                html += '<h5 class="p-2 rounded" style="background-color: var(--bs-tertiary-bg);">' + escapeHtmlSeries(classGroup.className) + '</h5>';
+                html += '<div class="d-none d-md-block">';
+                html += '<div class="table-responsive">';
+                html += '<table class="table table-sm table-striped table-hover mb-0 series-standings-club" style="table-layout:fixed;width:100%;">';
+                html += '<thead><tr>';
+                html += '<th style="width:' + rankPctC + '%">#</th>';
+                html += '<th style="width:' + clubPctC + '%">Klubb</th>';
+                competitions.forEach(function(comp, idx) {
+                    html += '<th class="text-center" style="width:' + omgPctC + '%" title="' + escapeHtmlSeries(comp.name) + '">Omg.&nbsp;' + (idx + 1) + '</th>';
+                });
+                html += '<th class="text-center" style="width:' + totalPctC + '%"><strong>' + (usesPoints ? 'Poäng' : scoreLabel) + '</strong></th>';
+                html += '</tr></thead>';
+                html += '<tbody>';
+
+                const desktopColspan = 2 + competitions.length + 1; // rank + club + per-comp + total
+
+                classGroup.rows.forEach(function(row) {
+                    const collapseDeskId = 'kc-desk-' + sanitizeIdSeries(classGroup.className) + '-' + row.entityId;
+                    const showExpander = !!contributorsByClub;
+
+                    html += '<tr>';
+                    html += '<td><strong>' + row.rank + '</strong>';
+                    if (showExpander) {
+                        html += ' <button type="button" class="series-klubb-expand-btn" data-bs-toggle="collapse" data-bs-target="#' + collapseDeskId + '" aria-expanded="false" aria-controls="' + collapseDeskId + '" title="Visa bidragande skyttar"><i class="bi bi-chevron-down"></i></button>';
+                    }
+                    html += '</td>';
+                    html += '<td class="series-cell-truncate" title="' + escapeHtmlSeries(row.name) + '">' + escapeHtmlSeries(row.name) + '</td>';
+
+                    row.competitionScores.forEach(function(cell) {
+                        if (cell.score === null || cell.score === undefined) {
+                            html += '<td class="text-center text-muted">-</td>';
+                        } else if (!cell.counting) {
+                            // Non-counting cell (bestOf) - dimmed with strikethrough
+                            if (usesPoints && cell.points !== null && cell.points !== undefined) {
+                                html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">'
+                                    + cell.score + '<br><small>' + cell.points + 'p</small></td>';
+                            } else {
+                                html += '<td class="text-center" style="opacity:0.4;text-decoration:line-through;">' + cell.score + '</td>';
+                            }
+                        } else if (usesPoints && cell.points !== null && cell.points !== undefined) {
+                            // Placement scoring: show score + points below
+                            html += '<td class="text-center">' + cell.score
+                                + '<br><small class="text-success fw-bold">' + cell.points + 'p</small></td>';
+                        } else {
+                            html += '<td class="text-center">' + cell.score + '</td>';
+                        }
+                    });
+
+                    html += '<td class="text-center"><strong>' + row.totalSeriesScore + '</strong></td>';
+                    html += '</tr>';
+
+                    // Sibling collapse row with per-round contributor breakdown (desktop only)
+                    if (showExpander) {
+                        html += '<tr>';
+                        html += '<td colspan="' + desktopColspan + '" class="p-0 border-0">';
+                        html += '<div class="collapse" id="' + collapseDeskId + '">';
+                        html += '<div class="p-3" style="background-color: var(--bs-tertiary-bg);">';
+                        html += buildKlubbRoundsBlock(row, classGroup.className, competitions, contributorsByClub, usesPoints);
+                        html += '</div>';
+                        html += '</div>';
+                        html += '</td>';
+                        html += '</tr>';
+                    }
+                });
+
+                html += '</tbody></table></div></div>';
+
+                // Mobile card list (visible below md breakpoint)
+                html += '<div class="d-md-none">';
+                classGroup.rows.forEach(function(row) {
+                    const collapseId = 'mr-Klubb-' + sanitizeIdSeries(classGroup.className) + '-' + row.entityId;
+
+                    html += '<div class="series-mobile-card border rounded p-2 mb-2">';
+                    html += '<div class="d-flex justify-content-between align-items-start">';
+                    html += '<div class="flex-grow-1 me-2" style="min-width:0;">';
+                    html += '<div><span class="fw-bold me-1">' + row.rank + '.</span>' + escapeHtmlSeries(row.name) + '</div>';
+                    html += '</div>';
+                    html += '<div class="text-end">';
+                    html += '<div class="fw-bold">' + row.totalSeriesScore + (usesPoints ? ' p' : '') + '</div>';
+                    html += '</div>';
+                    html += '</div>';
+
+                    html += '<button class="btn btn-link btn-sm p-0 mt-1" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="false" aria-controls="' + collapseId + '">';
+                    html += '<i class="bi bi-chevron-down me-1"></i>Visa omgångar';
+                    html += '</button>';
+
+                    html += '<div class="collapse" id="' + collapseId + '">';
+                    html += buildKlubbRoundsBlock(row, classGroup.className, competitions, contributorsByClub, usesPoints);
+                    html += '</div>';
+
+                    html += '</div>';
+                });
+                html += '</div>';
+
+                html += '</div>';
+            });
+
+            return html;
+        }
+
+        function sanitizeIdSeries(s) {
+            return String(s == null ? '' : s).replace(/[^a-zA-Z0-9_-]/g, '-');
+        }
+
+        function buildMobileRoundCell(cell, usesPoints) {
+            if (cell.score === null || cell.score === undefined) {
+                return '<span class="text-muted">-</span>';
+            }
+            let inner = String(cell.score);
+            if (usesPoints && cell.points !== null && cell.points !== undefined) {
+                inner += ' <small class="text-success fw-bold">(' + cell.points + 'p)</small>';
+            }
+            if (!cell.counting) {
+                return '<span class="non-counting">' + inner + '</span>';
+            }
+            return inner;
+        }
+
+        // Builds a lookup of Individual-section rows by class and by club for fast contributor lookup.
+        // Each entry is { row, className } so we can show which class a contributing score came from
+        // (a shooter may appear in multiple classes for the same competition).
+        // Returns null when the response has no Individual section.
+        function buildContributorsByClub(sections) {
+            if (!sections) return null;
+            const indSection = sections.find(function(s) { return s.sectionType === 'Individual'; });
+            if (!indSection || !indSection.classStandings) return null;
+
+            const byClass = {}; // className -> clubName -> entries[]
+            const all = {};      // clubName -> entries[]
+
+            indSection.classStandings.forEach(function(cg) {
+                const cn = cg.className || '';
+                if (!byClass[cn]) byClass[cn] = {};
+                cg.rows.forEach(function(row) {
+                    const entry = { row: row, className: cn };
+                    const club = row.club || '';
+                    if (!byClass[cn][club]) byClass[cn][club] = [];
+                    byClass[cn][club].push(entry);
+                    if (!all[club]) all[club] = [];
+                    all[club].push(entry);
+                });
+            });
+
+            return { byClass: byClass, all: all };
+        }
+
+        // Mirror of HpskSite.Helpers.ClubNameHelper.Shorten — the backend's BuildIndividualSection
+        // shortens the club name on every Individual row (e.g. "Varbergs Pistolklubb" → "Varbergs PK"),
+        // while the Klubb section keeps the raw long name. Apply the same transform on the lookup
+        // key so they line up. Order matters: longer matches first.
+        function shortenClubNameJs(name) {
+            if (!name) return name;
+            if (name.toLowerCase() === 'göteborgs pistol-och sportskk pistolsektionen') return 'GPSSK';
+            return name
+                .replace(/Pistolskytteförening/gi, 'PSF')
+                .replace(/Pistolskytteklubb/gi, 'PSK')
+                .replace(/Pistolskyttar/gi, 'PS')
+                .replace(/Pistolklubb/gi, 'PK')
+                .replace(/Handeldvapenförening/gi, 'HF')
+                .replace(/Sportskytteklubb/gi, 'SSK')
+                .replace(/Skytteklubb/gi, 'SK')
+                .replace(/Skytteförening/gi, 'SF');
+        }
+
+        // Identify contributing shooters for a Klubb cell by replicating the strategy's selection rule:
+        // take top-N from the club for that competition (by score desc, xCount desc) and accumulate
+        // until the sum equals the Klubb cell's score. Whatever fell into the prefix is the contributor set.
+        // For "Kombinerat" (groupByClass=false) Klubb sections, a shooter who shot multiple classes
+        // counts only once with their best score across classes — match the backend in BuildClubSectionCombined.
+        // Returns { contributors: entry[], matched: bool } so callers can distinguish a verified match from
+        // an inconsistency (e.g. team total doesn't equal any prefix sum, indicating data drift).
+        function findContributors(contributorsByClub, klubbClassName, clubName, competitionIdx, teamTotalScore) {
+            const empty = { contributors: [], matched: false };
+            if (!contributorsByClub) return empty;
+
+            const shortName = shortenClubNameJs(clubName);
+
+            let pool = null;
+            let isCombined = false;
+            if (klubbClassName && contributorsByClub.byClass[klubbClassName] && contributorsByClub.byClass[klubbClassName][shortName]) {
+                pool = contributorsByClub.byClass[klubbClassName][shortName];
+            } else if (contributorsByClub.all[shortName]) {
+                pool = contributorsByClub.all[shortName];
+                isCombined = true;
+            } else {
+                return empty;
+            }
+
+            // Keep only entries with a score in this competition
+            let candidates = pool.filter(function(e) {
+                const cell = e.row.competitionScores && e.row.competitionScores[competitionIdx];
+                return cell && cell.score !== null && cell.score !== undefined;
+            });
+            if (candidates.length === 0) return empty;
+
+            // Combined mode: dedupe per member, keep their best (score, xCount) for this comp.
+            // The wrapper retains className, so the surviving entry shows the class of the winning score.
+            if (isCombined) {
+                const bestByMember = new Map();
+                candidates.forEach(function(e) {
+                    const id = e.row.entityId;
+                    const cur = e.row.competitionScores[competitionIdx];
+                    const ex = bestByMember.get(id);
+                    if (!ex) { bestByMember.set(id, e); return; }
+                    const exCell = ex.row.competitionScores[competitionIdx];
+                    const curBetter = cur.score > exCell.score
+                        || (cur.score === exCell.score && (cur.xCount || 0) > (exCell.xCount || 0));
+                    if (curBetter) bestByMember.set(id, e);
+                });
+                candidates = Array.from(bestByMember.values());
+            }
+
+            // Sort top-down: score desc, xCount desc — matches strategy's selection order.
+            candidates.sort(function(a, b) {
+                const ca = a.row.competitionScores[competitionIdx];
+                const cb = b.row.competitionScores[competitionIdx];
+                if (cb.score !== ca.score) return cb.score - ca.score;
+                return (cb.xCount || 0) - (ca.xCount || 0);
+            });
+
+            if (teamTotalScore === null || teamTotalScore === undefined) {
+                return { contributors: candidates, matched: false };
+            }
+
+            // Accumulate from top until running sum equals the team total.
+            // (Use for-of, not a numeric for-loop — Razor's text-block parser misreads
+            //  the less-than operator before an identifier as the start of an HTML tag.)
+            const result = [];
+            let runningSum = 0;
+            for (const entry of candidates) {
+                result.push(entry);
+                runningSum += entry.row.competitionScores[competitionIdx].score;
+                if (runningSum === teamTotalScore) {
+                    return { contributors: result, matched: true };
+                }
+            }
+
+            // No prefix sum matched — data drift or unknown rule. Surface the inconsistency.
+            return { contributors: [], matched: false };
+        }
+
+        // Render the rounds-with-contributors block for one Klubb row. Used in both mobile collapse and desktop expander.
+        function buildKlubbRoundsBlock(row, klubbClassName, competitions, contributorsByClub, usesPoints) {
+            let html = '<div class="series-klubb-rounds">';
+            row.competitionScores.forEach(function(cell, idx) {
+                html += '<div class="series-klubb-round">';
+                html += '<div class="series-klubb-round-head">';
+                html += '<span class="label">Omg.&nbsp;' + (idx + 1) + '</span>';
+                html += '<span class="value">' + buildMobileRoundCell(cell, usesPoints) + '</span>';
+                html += '</div>';
+
+                if (cell.score !== null && cell.score !== undefined) {
+                    const result = findContributors(contributorsByClub, klubbClassName, row.name, idx, cell.score);
+                    if (result.contributors.length > 0) {
+                        html += '<div class="series-klubb-contributors">';
+                        result.contributors.forEach(function(c) {
+                            const cellRef = c.row.competitionScores[idx];
+                            let scoreText = String(cellRef.score);
+                            if (cellRef.xCount !== null && cellRef.xCount !== undefined) {
+                                scoreText += ' (' + cellRef.xCount + '×)';
+                            }
+                            // Show class only when it differs from the Klubb class (avoids redundant labels
+                            // for single-class team series where every contributor is from the same class).
+                            const showClass = c.className && c.className !== klubbClassName;
+                            html += '<div class="series-klubb-contributor">';
+                            html += '<span class="name">' + escapeHtmlSeries(c.row.name) + '</span>';
+                            html += '<span class="score">';
+                            if (showClass) {
+                                html += '<span class="cls-badge">' + escapeHtmlSeries(c.className) + '</span>';
+                            }
+                            html += scoreText;
+                            html += '</span>';
+                            html += '</div>';
+                        });
+                        html += '</div>';
+                    } else if (contributorsByClub) {
+                        // Either no individual rows for this club/class/comp, or no prefix sum matches
+                        // the team total. Either way, surface the inconsistency rather than hide it.
+                        html += '<div class="series-klubb-contributors text-muted small fst-italic">(kunde inte härleda bidragande skyttar)</div>';
+                    }
+                }
+                html += '</div>';
+            });
+            html += '</div>';
+            return html;
+        }
+
+        function escapeHtmlSeries(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    })();
+    </text>
+}
+</script>

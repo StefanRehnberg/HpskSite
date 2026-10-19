@@ -97,7 +97,7 @@ namespace HpskSite.Routing
             var store = ctx.RequestServices.GetRequiredService<ICompetitionResultStore>();
             if (store.GetMany(new[] { competition.Id }).Count == 0) return false;
             request.SetPublishedContent(competition);
-            request.SetTemplate(new Template(shortStrings, "CompetitionResult", "CompetitionResult"));
+            request.SetTemplate(new Template(shortStrings, PageViews.Result, PageViews.Result));
             return true;
         }
 
@@ -118,7 +118,7 @@ namespace HpskSite.Routing
             if (list == null) return false;
             ctx.RequestServices.GetRequiredService<HpskSite.Services.Addresses.CompetitionPageContext>().StartList = list;
             request.SetPublishedContent(competition);
-            var view = list.Kind == StartListKind.Finals ? "PrecisionFinalsStartList" : "PrecisionStartList"; // startliststore-ok: mallnamn, inte doctyp
+            var view = list.Kind == StartListKind.Finals ? PageViews.FinalsStartList : PageViews.StartList; // startliststore-ok: mallnamn, inte doctyp
             request.SetTemplate(new Template(shortStrings, view, view));
             return true;
         }
