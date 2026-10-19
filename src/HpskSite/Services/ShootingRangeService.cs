@@ -130,7 +130,7 @@ namespace HpskSite.Services
             // Delete stored document files first (App_Data) so they don't leak, then cascade every
             // child row (no FK constraints — keep this list in sync with the schema).
             var docs = await db.FetchAsync<RangeDocument>("WHERE RangeId = @0", id);
-            foreach (var d in docs) _docStorage.Delete(d.FileRef);
+            foreach (var d in docs) await _docStorage.DeleteAsync(d.FileRef);
 
             await db.ExecuteAsync(
                 "DELETE FROM ClubRangeAllocation WHERE ClubRangeLinkId IN (SELECT Id FROM ClubRangeLink WHERE RangeId = @0)", id);

@@ -30,7 +30,7 @@ namespace HpskSite.Controllers
         private readonly ILogger<AdminStatisticsController> _logger;
         private readonly DocumentService _documentService;
         private readonly IConfiguration _configuration;
-        private readonly IWebHostEnvironment _env;
+        private readonly HpskSite.Services.AiChat.AiChatLogService _chatLog;
 
         private const string CacheKey = "admin_statistics";
         private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(10);
@@ -68,7 +68,7 @@ namespace HpskSite.Controllers
             ILogger<AdminStatisticsController> logger,
             DocumentService documentService,
             IConfiguration configuration,
-            IWebHostEnvironment env,
+            HpskSite.Services.AiChat.AiChatLogService chatLog,
             HpskSite.Services.Training.ClubTrainingService trainings,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Events.IClubEventStore events,
@@ -92,7 +92,7 @@ namespace HpskSite.Controllers
             _logger = logger;
             _documentService = documentService;
             _configuration = configuration;
-            _env = env;
+            _chatLog = chatLog;
             _events = events;
         }
 
@@ -1680,29 +1680,30 @@ namespace HpskSite.Controllers
 
         private object BuildAiChatStats()
         {
-            var entries = ParseChatLogs();
+            // AI-chattens logg i databasen (skalplanen D3) — plus gamla filer som ännu inte importerats.
+            var entries = _chatLog.All();
             var now = DateTime.UtcNow;
             var thirtyDaysAgo = now.AddDays(-30);
 
             // GDPR data minimisation: chat logs are anonymous (no asker identity is stored),
             // so we report only volume + content — never "who" or "how many unique users".
             var totalMessages = entries.Count;
-            var messages30d = entries.Count(e => e.Timestamp >= thirtyDaysAgo);
+            var messages30d = entries.Count(e => e.AskedUtc >= thirtyDaysAgo);
 
             var perMonth = entries
-                .GroupBy(e => SwedishTime.FromUtc(e.Timestamp).ToString("yyyy-MM"))
+                .GroupBy(e => SwedishTime.FromUtc(e.AskedUtc).ToString("yyyy-MM"))
                 .OrderBy(g => g.Key)
                 .Select(g => new { month = g.Key, count = g.Count() })
                 .ToList();
 
             var recentEntries = entries
-                .OrderByDescending(e => e.Timestamp)
+                .OrderByDescending(e => e.AskedUtc)
                 .Take(50)
                 // `answer` is the table preview; `answerFull` backs the click-to-read dialog, so
                 // it must NOT be truncated — the whole point is reading the answer that was given.
                 .Select(e => new
                 {
-                    timestamp = SwedishTime.FromUtc(e.Timestamp).ToString("yyyy-MM-dd HH:mm"),
+                    timestamp = SwedishTime.FromUtc(e.AskedUtc).ToString("yyyy-MM-dd HH:mm"),
                     question = e.Question,
                     answer = Truncate(CollapseWhitespace(e.Answer), 200),
                     answerFull = e.Answer
@@ -1710,100 +1711,6 @@ namespace HpskSite.Controllers
                 .ToList();
 
             return new { totalMessages, messages30d, perMonth, recentEntries };
-        }
-
-        /// <summary>
-        /// Start of one logged exchange: "[2026-04-10 14:32:15]" at the beginning of a line.
-        /// </summary>
-        /// <remarks>
-        /// ⚠️ THE ENTRY BOUNDARY IS THIS HEADER, NEVER THE "---" SEPARATOR THE WRITER APPENDS.
-        /// An AI answer is Markdown and routinely contains a horizontal rule, so splitting the
-        /// file on "\n---\n" cut the answer at its FIRST rule — which usually sits right after
-        /// the opening sentence. Everything after it became a chunk with no header and was
-        /// dropped, so the stored answer was one line long and nothing said so. Reported from the
-        /// statistics page 2026-09-03, once the answer became readable in full.
-        /// </remarks>
-        private static readonly Regex ChatEntryHeaderRegex = new Regex(
-            @"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]",
-            RegexOptions.Multiline | RegexOptions.Compiled);
-
-        private List<ChatLogEntry> ParseChatLogs()
-        {
-            var entries = new List<ChatLogEntry>();
-            var logDirs = new[]
-            {
-                Path.Combine(_env.ContentRootPath, "App_Data", "AiChatLogs"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "App_Data", "AiChatLogs"),
-            };
-
-            var logDir = logDirs.FirstOrDefault(Directory.Exists);
-            if (logDir == null) return entries;
-
-            foreach (var file in Directory.GetFiles(logDir, "chat-*.log"))
-            {
-                try
-                {
-                    // Normalised to LF so the same offsets work whichever way the file was written.
-                    var content = System.IO.File.ReadAllText(file).Replace("\r\n", "\n");
-                    var headers = ChatEntryHeaderRegex.Matches(content);
-
-                    for (int i = 0; i < headers.Count; i++)
-                    {
-                        // Each entry runs from its own header to the next one — so an answer may
-                        // contain anything at all, "---" included.
-                        var start = headers[i].Index;
-                        var end = i + 1 < headers.Count ? headers[i + 1].Index : content.Length;
-                        var block = content.Substring(start, end - start);
-
-                        // We read only the timestamp out of the header; any trailing text on
-                        // legacy lines (older logs stored an email there) is deliberately ignored
-                        // so no identity reaches the app.
-                        if (!DateTime.TryParseExact(headers[i].Groups[1].Value, "yyyy-MM-dd HH:mm:ss",
-                                CultureInfo.InvariantCulture, DateTimeStyles.None, out var timestamp))
-                            continue;
-
-                        var lines = block.Split('\n').ToList();
-                        lines.RemoveAt(0); // the header line itself
-
-                        // The writer ends every entry with a "---" line. Strip exactly ONE trailing
-                        // one: an answer whose own last line is a rule keeps it.
-                        while (lines.Count > 0 && lines[^1].Trim().Length == 0) lines.RemoveAt(lines.Count - 1);
-                        if (lines.Count > 0 && lines[^1].Trim() == "---") lines.RemoveAt(lines.Count - 1);
-
-                        // The question is everything from "Q: " up to the "A: " line — a pasted
-                        // question can span several lines, and a one-line read would silently
-                        // swallow the rest of it into the answer.
-                        var answerAt = lines.FindIndex(l => l.StartsWith("A: ", StringComparison.Ordinal));
-                        var questionAt = lines.FindIndex(l => l.StartsWith("Q: ", StringComparison.Ordinal));
-
-                        var question = "";
-                        if (questionAt >= 0)
-                        {
-                            var qEnd = answerAt > questionAt ? answerAt : lines.Count;
-                            question = string.Join("\n", lines.GetRange(questionAt, qEnd - questionAt))
-                                .Substring(3).Trim();
-                        }
-
-                        // Line breaks are PRESERVED. The answer is Markdown — steps, headings and
-                        // lists — and joining it with spaces made a wall of text out of a numbered
-                        // list. Only the "A: " prefix is removed, and only where it is a prefix:
-                        // a plain Replace also ate the string wherever it appeared inside the text.
-                        var answer = "";
-                        if (answerAt >= 0)
-                        {
-                            answer = string.Join("\n", lines.GetRange(answerAt, lines.Count - answerAt))
-                                .Substring(3).Trim();
-                        }
-
-                        if (question.Length == 0 && answer.Length == 0) continue;
-
-                        entries.Add(new ChatLogEntry { Timestamp = timestamp, Question = question, Answer = answer });
-                    }
-                }
-                catch { }
-            }
-
-            return entries;
         }
 
         /// <summary>
@@ -1818,13 +1725,6 @@ namespace HpskSite.Controllers
         {
             if (string.IsNullOrEmpty(text) || text.Length <= maxLength) return text;
             return text.Substring(0, maxLength) + "...";
-        }
-
-        private class ChatLogEntry
-        {
-            public DateTime Timestamp { get; set; }
-            public string Question { get; set; } = "";
-            public string Answer { get; set; } = "";
         }
     }
 }

@@ -13,19 +13,11 @@ namespace HpskSite.Services.Staffing
             { ".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv" };
         private const long MaxBytes = 25L * 1024 * 1024; // 25 MB — a ritning/inbjudan PDF, not a video
 
-        private readonly IWebHostEnvironment _environment;
+        private readonly HpskSite.Services.Storage.IFileStore _store;
 
-        public PrepDocumentStorage(IWebHostEnvironment environment)
+        public PrepDocumentStorage(HpskSite.Services.Storage.IFileStore store)
         {
-            _environment = environment;
-        }
-
-        private string GetStorageDir()
-        {
-            var dir = Path.Combine(_environment.ContentRootPath, "App_Data", FolderName);
-            if (!Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
-            return dir;
+            _store = store;
         }
 
         public (bool Ok, string? Error) Validate(string fileName, long size)
@@ -44,30 +36,28 @@ namespace HpskSite.Services.Staffing
         {
             var ext = Path.GetExtension(originalFileName)?.ToLowerInvariant() ?? "";
             var storedFileName = $"{Guid.NewGuid():N}{ext}";
-            var path = Path.Combine(GetStorageDir(), storedFileName);
-            using var output = new FileStream(path, FileMode.Create);
-            await stream.CopyToAsync(output);
+            await _store.SaveAsync(HpskSite.Services.Storage.FileStoreAreas.PrepDocuments, storedFileName, stream);
             return storedFileName;
         }
 
-        /// <summary>Absolute path for a stored file, or null if missing. Rejects non-bare names (traversal guard).</summary>
-        public string? GetFilePath(string? storedFileName)
+        /// <summary>
+        /// Filens innehåll, eller null om den saknas. Vägrar allt som inte är ett naket filnamn
+        /// (traverseringsskydd — namnet kommer ur databasen och ser därför betrott ut).
+        /// </summary>
+        public Task<Stream?> OpenReadAsync(string? storedFileName) =>
+            IsBareName(storedFileName)
+                ? _store.OpenReadAsync(HpskSite.Services.Storage.FileStoreAreas.PrepDocuments, storedFileName!)
+                : Task.FromResult<Stream?>(null);
+
+        public async Task DeleteAsync(string? storedFileName)
         {
-            if (string.IsNullOrWhiteSpace(storedFileName)) return null;
-            if (storedFileName.Contains('/') || storedFileName.Contains('\\') || storedFileName.Contains(".."))
-                return null;
-            var path = Path.Combine(GetStorageDir(), storedFileName);
-            return File.Exists(path) ? path : null;
+            if (!IsBareName(storedFileName)) return;
+            try { await _store.DeleteAsync(HpskSite.Services.Storage.FileStoreAreas.PrepDocuments, storedFileName!); }
+            catch { /* best-effort cleanup */ }
         }
 
-        public void Delete(string? storedFileName)
-        {
-            var path = GetFilePath(storedFileName);
-            if (path != null)
-            {
-                try { File.Delete(path); } catch { /* best-effort cleanup */ }
-            }
-        }
+        private static bool IsBareName(string? name) =>
+            !string.IsNullOrWhiteSpace(name) && !name.Contains('/') && !name.Contains('\\') && !name.Contains("..");
 
         public static string ContentTypeFor(string storedFileName) =>
             Path.GetExtension(storedFileName)?.ToLowerInvariant() switch

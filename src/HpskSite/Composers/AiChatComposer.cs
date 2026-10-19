@@ -15,6 +15,8 @@ namespace HpskSite.Composers
             builder.Services.AddSingleton<KnowledgeBaseService>();
             builder.Services.AddSingleton<KnowledgeIndexService>();
             builder.Services.AddHostedService<KnowledgeIndexWarmupHostedService>();
+            builder.Services.AddSingleton<AiChatLogService>();
+            builder.Services.AddHostedService<AiChatLogImportHostedService>();
 
             builder.Services.AddHttpClient("AiChat");
             builder.Services.AddScoped<AiChatService>();

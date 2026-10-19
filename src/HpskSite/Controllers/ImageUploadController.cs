@@ -69,20 +69,15 @@ namespace HpskSite.Controllers
 
             try
             {
-                var uploadsDir = Path.Combine(_webHostEnvironment.WebRootPath, "images", "uploads");
-                Directory.CreateDirectory(uploadsDir);
-
-                // Generate unique filename preserving extension
+                // Generate unique filename preserving extension — stored through the file store
+                // (skalplanen D3); the URL /images/uploads/… is unchanged.
                 var extension = Path.GetExtension(upload.FileName)?.ToLowerInvariant() ?? ".jpg";
+                if (!HpskSite.Services.Storage.FileStoreNames.IsValidName("x" + extension)) extension = ".jpg";
                 var fileName = $"{Guid.NewGuid():N}{extension}";
-                var filePath = Path.Combine(uploadsDir, fileName);
+                await using (var stream = upload.OpenReadStream())
+                    await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Storage.IFileStore>().SaveAsync(HpskSite.Services.Storage.FileStoreAreas.Uploads, fileName, stream);
 
-                using (var stream = new FileStream(filePath, FileMode.Create))
-                {
-                    await upload.CopyToAsync(stream);
-                }
-
-                var url = $"/images/uploads/{fileName}";
+                var url = HpskSite.Services.Storage.FileStoreAreas.PublicUrl(HpskSite.Services.Storage.FileStoreAreas.Uploads, fileName);
                 _logger.LogInformation("Image uploaded: {FileName} ({Size} bytes)", fileName, upload.Length);
 
                 // CKEditor 5 expects { url: "..." }

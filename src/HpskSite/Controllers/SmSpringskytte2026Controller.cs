@@ -183,7 +183,7 @@ namespace HpskSite.Controllers
 
             try
             {
-                var root = _environment.WebRootPath;
+                var root = _environment.WebRootPath; // filestore-ok: läser PDF:er som deployas med sajten, skriver inget
                 if (string.IsNullOrEmpty(root)) return documents;
 
                 var folder = Path.Combine(root, DocumentFolder.Replace('/', Path.DirectorySeparatorChar));

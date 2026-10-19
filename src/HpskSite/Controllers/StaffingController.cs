@@ -1054,10 +1054,10 @@ namespace HpskSite.Controllers
             var link = _work.GetLink(id);
             if (link == null || string.IsNullOrEmpty(link.StoredFileName)) return NotFound();
             if (!await HasCompetitionAccessAsync(link.CompetitionId)) return Forbid();
-            var path = _docs.GetFilePath(link.StoredFileName);
-            if (path == null) return NotFound();
+            var stream = await _docs.OpenReadAsync(link.StoredFileName);
+            if (stream == null) return NotFound();
             var download = string.IsNullOrEmpty(link.OriginalFileName) ? link.StoredFileName : link.OriginalFileName;
-            return PhysicalFile(path, PrepDocumentStorage.ContentTypeFor(link.StoredFileName), download);
+            return File(stream, PrepDocumentStorage.ContentTypeFor(link.StoredFileName), download, enableRangeProcessing: true);
         }
 
         [HttpPost]
@@ -1070,7 +1070,7 @@ namespace HpskSite.Controllers
             if (!await HasCompetitionAccessAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
             var storedFile = _work.DeleteLink(request.Id, request.CompetitionId);
-            if (!string.IsNullOrEmpty(storedFile)) _docs.Delete(storedFile);
+            if (!string.IsNullOrEmpty(storedFile)) await _docs.DeleteAsync(storedFile);
             return Json(new { success = true });
         }
 

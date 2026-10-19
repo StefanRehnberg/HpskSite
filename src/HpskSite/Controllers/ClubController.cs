@@ -1727,50 +1727,12 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid file type. Only JPG, PNG, GIF and WebP allowed." });
                 }
 
-                // Find or create "Region Images" folder in Media Library
-                var regionImagesFolder = _mediaService.GetRootMedia()
-                    .FirstOrDefault(m => m.Name == "Region Images");
-
-                if (regionImagesFolder == null)
+                // Genom mediafilsystemet (skalplanen D3) — blobblagringen när den är påslagen.
+                var images = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Media.ImageMediaService>();
+                var (mediaItem, relativePath, mediaError) = await images.SaveMediaAsync(imageFile, "Region Images", "region-images", "Image");
+                if (mediaItem == null)
                 {
-                    regionImagesFolder = _mediaService.CreateMedia("Region Images", -1, "Folder");
-                    _mediaService.Save(regionImagesFolder);
-                }
-
-                // Create media item
-                string fileName = Path.GetFileName(imageFile.FileName);
-                string fileExtension = Path.GetExtension(fileName);
-                string uniqueFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{Guid.NewGuid()}{fileExtension}";
-
-                var mediaItem = _mediaService.CreateMedia(fileName, regionImagesFolder.Id, "Image");
-
-                // Save file to physical location
-                var mediaFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "media", "region-images");
-                if (!Directory.Exists(mediaFolderPath))
-                {
-                    Directory.CreateDirectory(mediaFolderPath);
-                }
-
-                var physicalFilePath = Path.Combine(mediaFolderPath, uniqueFileName);
-                using (var fileStream = new FileStream(physicalFilePath, FileMode.Create))
-                {
-                    await imageFile.CopyToAsync(fileStream);
-                }
-
-                // Set media properties
-                var relativePath = $"/media/region-images/{uniqueFileName}";
-                mediaItem.SetValue("umbracoFile", relativePath);
-                mediaItem.SetValue("umbracoExtension", fileExtension.TrimStart('.'));
-                mediaItem.SetValue("umbracoBytes", imageFile.Length.ToString());
-
-                var mediaSaveResult = _mediaService.Save(mediaItem);
-                if (!mediaSaveResult.Success)
-                {
-                    if (System.IO.File.Exists(physicalFilePath))
-                    {
-                        System.IO.File.Delete(physicalFilePath);
-                    }
-                    return Ok(new { success = false, message = "Failed to save image to media library" });
+                    return Ok(new { success = false, message = mediaError ?? "Failed to save image to media library" });
                 }
 
                 // Link media to region content property
@@ -2454,47 +2416,12 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid file type. Only JPG, PNG, GIF and WebP allowed." });
                 }
 
-                // Find or create "Event Images" folder in Media Library
-                var eventImagesFolder = _mediaService.GetRootMedia()
-                    .FirstOrDefault(m => m.Name == "Event Images");
-
-                if (eventImagesFolder == null)
+                // Genom mediafilsystemet (skalplanen D3) — blobblagringen när den är påslagen.
+                var images = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Media.ImageMediaService>();
+                var (mediaItem, relativePath, mediaError) = await images.SaveMediaAsync(imageFile, "Event Images", "event-images", "Image");
+                if (mediaItem == null)
                 {
-                    eventImagesFolder = _mediaService.CreateMedia("Event Images", -1, "Folder");
-                    _mediaService.Save(eventImagesFolder);
-                }
-
-                string fileName = Path.GetFileName(imageFile.FileName);
-                string fileExtension = Path.GetExtension(fileName);
-                string uniqueFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{Guid.NewGuid()}{fileExtension}";
-
-                var mediaItem = _mediaService.CreateMedia(fileName, eventImagesFolder.Id, "Image");
-
-                var mediaFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "media", "event-images");
-                if (!Directory.Exists(mediaFolderPath))
-                {
-                    Directory.CreateDirectory(mediaFolderPath);
-                }
-
-                var physicalFilePath = Path.Combine(mediaFolderPath, uniqueFileName);
-                using (var fileStream = new FileStream(physicalFilePath, FileMode.Create))
-                {
-                    await imageFile.CopyToAsync(fileStream);
-                }
-
-                var relativePath = $"/media/event-images/{uniqueFileName}";
-                mediaItem.SetValue("umbracoFile", relativePath);
-                mediaItem.SetValue("umbracoExtension", fileExtension.TrimStart('.'));
-                mediaItem.SetValue("umbracoBytes", imageFile.Length.ToString());
-
-                var mediaSaveResult = _mediaService.Save(mediaItem);
-                if (!mediaSaveResult.Success)
-                {
-                    if (System.IO.File.Exists(physicalFilePath))
-                    {
-                        System.IO.File.Delete(physicalFilePath);
-                    }
-                    return Ok(new { success = false, message = "Failed to save image to media library" });
+                    return Ok(new { success = false, message = mediaError ?? "Failed to save image to media library" });
                 }
 
                 // Link media to the event via UDI — genom lagringen (fas 2a).
@@ -2643,24 +2570,12 @@ namespace HpskSite.Controllers
                     return Ok(new { success = false, message = "Invalid file type. Only JPG, PNG, GIF and WebP allowed." });
                 }
 
-                // Save to event-images folder (no Umbraco media link needed, just file storage)
-                var mediaFolderPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "media", "event-images");
-                if (!Directory.Exists(mediaFolderPath))
-                {
-                    Directory.CreateDirectory(mediaFolderPath);
-                }
-
-                string fileName = Path.GetFileName(imageFile.FileName);
-                string fileExtension = Path.GetExtension(fileName);
+                // Save to event-images (no Umbraco media item, just the file) — through the media file
+                // system (skalplanen D3), so it lands in blob storage when that is switched on.
+                string fileExtension = Path.GetExtension(imageFile.FileName);
                 string uniqueFileName = $"block_{Guid.NewGuid()}{fileExtension}";
-
-                var physicalFilePath = Path.Combine(mediaFolderPath, uniqueFileName);
-                using (var fileStream = new FileStream(physicalFilePath, FileMode.Create))
-                {
-                    await imageFile.CopyToAsync(fileStream);
-                }
-
-                var relativePath = $"/media/event-images/{uniqueFileName}";
+                var mediaFiles = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Storage.MediaFiles>();
+                var relativePath = await mediaFiles.SaveAsync("event-images", uniqueFileName, imageFile);
 
                 return Ok(new
                 {

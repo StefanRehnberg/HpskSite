@@ -823,11 +823,11 @@ namespace HpskSite.Controllers
             var m = a == null ? null : _work.GetMotion(a.MotionId);
             if (m == null) return NotFound();
             if (await _access.CurrentMemberIdAsync() <= 0 || !await CanReadMotionFilesAsync(m)) return StatusCode(403);
-            var path = _documents.GetFilePath(a!.StoredFileName);
-            if (path == null) return NotFound();
+            var stream = await _documents.OpenReadAsync(a!.StoredFileName);
+            if (stream == null) return NotFound();
             var ct = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider()
                 .TryGetContentType(a.FileName, out var t) ? t : "application/octet-stream";
-            return PhysicalFile(path, ct, a.FileName);
+            return File(stream, ct, a.FileName, enableRangeProcessing: true);
         }
 
         private static List<string> ParseProposals(string? json)

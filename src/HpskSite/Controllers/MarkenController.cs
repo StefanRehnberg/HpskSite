@@ -480,9 +480,8 @@ namespace HpskSite.Controllers
                       || await CanSignOffForClubAsync(series.ClubId);
             if (!ok) return Forbid();
 
-            var path = _proofStorage.GetFilePath(series.PhotoFileRef);
-            if (path == null) return NotFound();
-            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var stream = await _proofStorage.OpenReadAsync(series.PhotoFileRef);
+            if (stream == null) return NotFound();
             return File(stream, StandardMedalProofStorage.ContentTypeFor(series.PhotoFileRef));
         }
 
@@ -766,9 +765,8 @@ namespace HpskSite.Controllers
             if (viewer == null) return Unauthorized();
             bool ok = viewer.Id == r.MemberId || await _auth.IsCurrentUserAdminAsync() || await CanSignOffForClubAsync(r.ClubId);
             if (!ok) return Forbid();
-            var path = _proofStorage.GetFilePath(r.ProofFileRef);
-            if (path == null) return NotFound();
-            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var stream = await _proofStorage.OpenReadAsync(r.ProofFileRef);
+            if (stream == null) return NotFound();
             return File(stream, StandardMedalProofStorage.ContentTypeFor(r.ProofFileRef));
         }
 
@@ -2768,9 +2766,8 @@ namespace HpskSite.Controllers
             if (viewer == null) return Unauthorized();
             bool ok = viewer.Id == e.MemberId || await _auth.IsCurrentUserAdminAsync() || await CanSignOffForClubAsync(e.ClubId);
             if (!ok) return Forbid();
-            var path = _proofStorage.GetFilePath(e.ProofFileRef);
-            if (path == null) return NotFound();
-            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var stream = await _proofStorage.OpenReadAsync(e.ProofFileRef);
+            if (stream == null) return NotFound();
             return File(stream, StandardMedalProofStorage.ContentTypeFor(e.ProofFileRef));
         }
 

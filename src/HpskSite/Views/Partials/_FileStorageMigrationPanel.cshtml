@@ -1,0 +1,107 @@
+@*
+    Skalplanen D3: flytten av befintliga filer från serverns disk till blobblagringen. Bara sajtadministratör.
+    Kopierar, raderar aldrig. Syns alltid, och säger när blobblagringen inte är påslagen.
+*@
+<div id="fsmPanel" class="mt-5">
+    @Html.AntiForgeryToken()
+    <h5 class="mb-1"><i class="bi bi-hdd-network me-2"></i>Fillagring</h5>
+    <p class="text-body-secondary mb-3" style="max-width:75ch">
+        Sajtens filer — kvitton, bevis, dokument, bilder och mediabiblioteket — kan ligga på serverns disk eller i en
+        blobblagring. När blobblagringen slås på kopierar du hit de filer som redan finns på disken. Ingenting raderas,
+        och det går att köra om: det som redan finns hoppas över.
+    </p>
+    <div class="d-flex gap-2 flex-wrap mb-2">
+        <button type="button" class="btn btn-outline-primary btn-sm" id="fsmLoad">Visa läget</button>
+        <button type="button" class="btn btn-primary btn-sm d-none" id="fsmRun">Kopiera till blobblagringen</button>
+    </div>
+    <div id="fsmOut" class="small" style="min-width:0"></div>
+</div>
+
+<script>
+(function () {
+    if (window.__fsmInit) return; window.__fsmInit = true;
+    var BASE = '/umbraco/surface/FileStorageMigration';
+    var root = document.getElementById('fsmPanel');
+    var out = document.getElementById('fsmOut');
+    var runBtn = document.getElementById('fsmRun');
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]; }); }
+    function token() { return root.querySelector('input[name="__RequestVerificationToken"]').value; }
+    function mb(b) { return (b / 1048576).toLocaleString('sv-SE', { maximumFractionDigits: 1 }) + ' MB'; }
+    function fail(r) { return (window.hpskRequestFailureMessage && window.hpskRequestFailureMessage(r.status).msg) || ('HTTP ' + r.status); }
+
+    function render(st, note) {
+        var html = note ? '<div class="mb-2">' + note + '</div>' : '';
+        if (!st.storeIsBlob && !st.mediaIsBlob) {
+            out.innerHTML = html + 'Filerna ligger på serverns disk (blobblagringen är inte påslagen). Ingenting att flytta.';
+            runBtn.classList.add('d-none');
+            return;
+        }
+        html += '<div class="mb-2">Sajtens filer: <strong>' + (st.storeIsBlob ? 'blobblagringen' : 'disken') + '</strong> · Mediabiblioteket: <strong>'
+            + (st.mediaIsBlob ? 'blobblagringen' : 'disken') + '</strong></div>';
+        html += '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Område</th><th class="text-end">Filer på disken</th><th class="text-end">Storlek</th><th class="text-end">Kvar att kopiera</th></tr></thead><tbody>';
+        var left = 0;
+        (st.areas || []).forEach(function (a) {
+            left += a.toCopy;
+            html += '<tr><td>' + esc(a.area) + (a.public ? ' <span class="text-body-secondary">(publik)</span>' : '')
+                + (a.invalid ? '<div class="text-danger">' + a.invalid + ' filnamn går inte att flytta: ' + esc((a.invalidNames || []).join(', ')) + '</div>' : '')
+                + '</td><td class="text-end">' + a.localFiles + '</td><td class="text-end">' + mb(a.localBytes) + '</td><td class="text-end'
+                + (a.toCopy ? ' fw-bold' : ' text-success') + '">' + (a.toCopy || 'klart') + '</td></tr>';
+        });
+        html += '</tbody></table></div>';
+        out.innerHTML = html;
+        runBtn.classList.toggle('d-none', left === 0);
+    }
+
+    async function load(note) {
+        out.textContent = 'Läser…';
+        try {
+            var r = await fetch(BASE + '/Preview', { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            if (!r.ok) throw new Error(fail(r));
+            var d = await r.json();
+            if (!d.success) { out.innerHTML = '<span class="text-danger">' + esc(d.message) + '</span>'; return; }
+            render(d.status, note);
+        } catch (e) { out.innerHTML = '<span class="text-danger">Läget gick inte att läsa: ' + esc(e.message) + '</span>'; }
+    }
+
+    async function run() {
+        runBtn.disabled = true;
+        var total = 0;
+        try {
+            // En omgång per anrop (servern har en tidsbudget); fortsätt tills ingenting återstår.
+            for (var round = 1; round <= 200; round++) {
+                out.insertAdjacentHTML('afterbegin', '<div class="text-body-secondary fsm-progress">Omgång ' + round + ' — ' + total + ' filer kopierade hittills…</div>');
+                var fd = new FormData(); fd.append('__RequestVerificationToken', token());
+                var r = await fetch(BASE + '/Run', { method: 'POST', body: fd, headers: { 'RequestVerificationToken': token(), 'X-Requested-With': 'XMLHttpRequest' } });
+                if (!r.ok) throw new Error(fail(r));
+                var d = await r.json();
+                var p = out.querySelector('.fsm-progress'); if (p) p.remove();
+                if (!d.result) { out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">' + esc(d.message) + '</div>'); return; }
+                total += d.result.copied;
+                if (d.result.failures && d.result.failures.length) {
+                    await load('<span class="text-danger">' + total + ' filer kopierade, men ' + d.result.failures.length + ' gick inte: '
+                        + esc(d.result.failures.slice(0, 5).join('; ')) + '</span>');
+                    return;
+                }
+                if (d.result.remaining === 0) { await load('<span class="text-success">Klart — ' + total + ' filer kopierade. Ingenting återstår.</span>'); return; }
+                if (d.result.copied === 0 && !d.result.timedOut) {
+                    await load('<span class="text-danger">' + d.result.remaining + ' filer återstår men ingen gick att kopiera i den här omgången.</span>');
+                    return;
+                }
+            }
+        } catch (e) {
+            out.insertAdjacentHTML('afterbegin', '<div class="text-danger mb-2">Avbrutet efter ' + total + ' filer: ' + esc(e.message) + '. Kör igen — det som redan kopierats hoppas över.</div>');
+        } finally { runBtn.disabled = false; }
+    }
+
+    // Bekräftelse i sidan, aldrig confirm(): ett andra tryck inom några sekunder.
+    function armed(btn, text) {
+        if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; return true; }
+        btn.dataset.label = btn.textContent; btn.dataset.armed = '1'; btn.textContent = text;
+        setTimeout(function () { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = btn.dataset.label; } }, 6000);
+        return false;
+    }
+
+    document.getElementById('fsmLoad').addEventListener('click', function () { load(); });
+    runBtn.addEventListener('click', function () { if (armed(runBtn, 'Tryck igen för att kopiera')) run(); });
+})();
+</script>

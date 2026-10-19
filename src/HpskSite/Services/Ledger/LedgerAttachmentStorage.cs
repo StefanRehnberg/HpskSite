@@ -18,7 +18,8 @@ namespace HpskSite.Services.Ledger
     /// underlaget från någon annans verifikation. Det finns därför ingen Delete-metod i den här
     /// klassen, och det är avsiktligt — makuleringen bryter KOPPLINGEN, aldrig filen.</para>
     ///
-    /// <para><b>⚠️ Filerna ligger under <c>App_Data</c>, inte i Umbraco media.</b> Publik media är
+    /// <para><b>⚠️ Filerna ligger i fillagringen (<c>IFileStore</c>, området ledger-attachments — på disk
+    /// <c>App_Data</c>), inte i Umbraco media.</b> Publik media är
     /// security-by-obscurity, och ett kvitto bär ofta personuppgifter — namn, adress, ibland ett
     /// kortnummers sista siffror. De når bara ut genom en grindad controller.</para>
     ///
@@ -29,8 +30,6 @@ namespace HpskSite.Services.Ledger
     /// </summary>
     public class LedgerAttachmentStorage
     {
-        private const string FolderName = "ledger-attachments";
-
         /// <summary>
         /// ⚠️ Medvetet SMALARE än prep-dokumenten. Ett verifikationsunderlag är ett kvitto, en
         /// faktura eller ett kontoutdrag — inte en presentation. Färre format betyder färre
@@ -42,18 +41,11 @@ namespace HpskSite.Services.Ledger
         /// <summary>15 MB — en mobilkamerabild eller en flersidig faktura, inte en video.</summary>
         private const long MaxBytes = 15L * 1024 * 1024;
 
-        private readonly IWebHostEnvironment _environment;
+        private readonly HpskSite.Services.Storage.IFileStore _store;
 
-        public LedgerAttachmentStorage(IWebHostEnvironment environment)
+        public LedgerAttachmentStorage(HpskSite.Services.Storage.IFileStore store)
         {
-            _environment = environment;
-        }
-
-        private string GetStorageDir()
-        {
-            var dir = Path.Combine(_environment.ContentRootPath, "App_Data", FolderName);
-            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-            return dir;
+            _store = store;
         }
 
         public (bool Ok, string? Error) Validate(string fileName, long size)
@@ -88,24 +80,23 @@ namespace HpskSite.Services.Ledger
             var ext = Path.GetExtension(originalFileName)?.ToLowerInvariant() ?? "";
             var storedAs = hash + ext;
 
-            var path = Path.Combine(GetStorageDir(), storedAs);
-            if (!File.Exists(path)) await File.WriteAllBytesAsync(path, bytes);
+            // CreateIfAbsent: finns filen redan rörs den inte (även i blobblagringen, villkorat på servern).
+            using (var content = new MemoryStream(bytes, writable: false))
+                await _store.CreateIfAbsentAsync(HpskSite.Services.Storage.FileStoreAreas.LedgerAttachments, storedAs, content);
 
             return (storedAs, bytes.LongLength);
         }
 
         /// <summary>
-        /// Absolut sökväg, eller null när filen saknas.
+        /// Underlagets innehåll, eller null när filen saknas.
         /// <para>⚠️ Vägrar allt som inte är ett naket filnamn — traversering skyddas här, inte hos
         /// anroparen, eftersom namnet kommer ur databasen och därmed ser betrott ut.</para>
         /// </summary>
-        public string? GetFilePath(string? storedAs)
+        public Task<Stream?> OpenReadAsync(string? storedAs)
         {
-            if (string.IsNullOrWhiteSpace(storedAs)) return null;
-            if (storedAs.Contains('/') || storedAs.Contains('\\') || storedAs.Contains("..")) return null;
-
-            var path = Path.Combine(GetStorageDir(), storedAs);
-            return File.Exists(path) ? path : null;
+            if (string.IsNullOrWhiteSpace(storedAs)) return Task.FromResult<Stream?>(null);
+            if (storedAs.Contains('/') || storedAs.Contains('\\') || storedAs.Contains("..")) return Task.FromResult<Stream?>(null);
+            return _store.OpenReadAsync(HpskSite.Services.Storage.FileStoreAreas.LedgerAttachments, storedAs);
         }
 
         public static string ContentTypeFor(string storedAs) =>

@@ -1708,6 +1708,9 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         {
             try
             {
+                // Samma behörighet som katalogens övriga skrivningar — uppladdningen saknade den.
+                if (!await IsAuthorizedForCatalog())
+                    return Json(new { success = false, message = "Du har inte behörighet." });
                 if (file == null || file.Length == 0)
                     return Json(new { success = false, message = "Ingen fil vald." });
                 if (file.Length > 5 * 1024 * 1024)
@@ -1722,17 +1725,10 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (variant == null)
                     return Json(new { success = false, message = "Varianten hittades inte." });
 
-                var dir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images", "field-targets");
-                Directory.CreateDirectory(dir);
-
-                // Use a clean filename
+                // Use a clean filename — through the file store (skalplanen D3); the URL is unchanged.
                 var fileName = $"target_{variant.TargetId}_v{variant.Id}{ext}";
-                var filePath = Path.Combine(dir, fileName);
-
-                using (var stream = new FileStream(filePath, FileMode.Create))
-                {
-                    await file.CopyToAsync(stream);
-                }
+                await using (var stream = file.OpenReadStream())
+                    await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Storage.IFileStore>().SaveAsync(HpskSite.Services.Storage.FileStoreAreas.FieldTargets, fileName, stream);
 
                 // Update variant's ImageName in DB
                 variant.ImageName = fileName;
@@ -1769,22 +1765,15 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
                 if (ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp")
                     return Json(new { success = false, message = "Endast JPG, PNG eller WebP." });
 
-                var dir = Path.Combine("wwwroot", "images", "faltskytte", competitionId.ToString());
-                var fullDir = Path.Combine(Directory.GetCurrentDirectory(), dir);
-                Directory.CreateDirectory(fullDir);
-
                 // weaponClass comes from the client — keep it from escaping the folder.
                 var wcSafe = new string((weaponClass ?? "").Where(char.IsLetterOrDigit).ToArray());
                 if (wcSafe.Length == 0) wcSafe = "x";
                 var fileName = $"st{stationNumber}_{wcSafe}_tg{groupNumber}{ext}";
-                var filePath = Path.Combine(fullDir, fileName);
+                var name = $"{competitionId}/{fileName}";
+                await using (var stream = file.OpenReadStream())
+                    await HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Storage.IFileStore>().SaveAsync(HpskSite.Services.Storage.FileStoreAreas.FaltskytteImages, name, stream);
 
-                using (var stream = new FileStream(filePath, FileMode.Create))
-                {
-                    await file.CopyToAsync(stream);
-                }
-
-                var imageUrl = $"/images/faltskytte/{competitionId}/{fileName}";
+                var imageUrl = HpskSite.Services.Storage.FileStoreAreas.PublicUrl(HpskSite.Services.Storage.FileStoreAreas.FaltskytteImages, name);
                 _logger.LogInformation("Uploaded target group image: {Url}", imageUrl);
 
                 return Json(new { success = true, imageUrl });

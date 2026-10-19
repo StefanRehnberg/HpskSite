@@ -155,13 +155,13 @@ namespace HpskSite.Services.Ledger
         }
 
         /// <summary>
-        /// Filen bakom en bilaga — sökväg, filnamn och typ.
+        /// Filen bakom en bilaga — lagrat namn, filnamn och typ.
         ///
         /// <para><b>⚠️ Slår upp via verifikationen, så utställaren alltid prövas.</b> En makulerad
         /// bilaga går fortfarande att öppna: den är räkenskapsinformation, och revisorn ska kunna
         /// se vad som kopplades bort.</para>
         /// </summary>
-        public (string? Path, string FileName, string ContentType) Resolve(
+        public (string? StoredAs, string FileName, string ContentType) Resolve(
             int issuerType, int issuerId, int attachmentId)
         {
             try
@@ -177,7 +177,7 @@ namespace HpskSite.Services.Ledger
 
                 if (row is null) return (null, "", "");
 
-                return (_storage.GetFilePath(row.StoredAs), row.FileName, row.ContentType);
+                return (row.StoredAs, row.FileName, row.ContentType);
             }
             catch (Exception ex)
             {

@@ -1148,10 +1148,9 @@ namespace HpskSite.Controllers
             var doc = await _rangeService.GetDocumentAsync(id);
             if (doc == null) return NotFound();
             if (!await _rangeService.CanManageRangeAsync(doc.RangeId, memberId)) return Forbid();
-            var path = _docStorage.GetFilePath(doc.FileRef);
-            if (path == null) return NotFound();
-            var bytes = await System.IO.File.ReadAllBytesAsync(path);
-            return File(bytes, RangeDocumentStorage.ContentTypeFor(doc.FileRef));
+            var stream = await _docStorage.OpenReadAsync(doc.FileRef);
+            if (stream == null) return NotFound();
+            return File(stream, RangeDocumentStorage.ContentTypeFor(doc.FileRef), enableRangeProcessing: true);
         }
 
         [HttpPost]
@@ -1166,7 +1165,7 @@ namespace HpskSite.Controllers
                 if (doc == null) return Json(new { success = false, message = "Dokumentet hittades inte." });
                 if (!await _rangeService.CanManageRangeAsync(doc.RangeId, memberId))
                     return Json(new { success = false, message = "Behörighet saknas." });
-                _docStorage.Delete(doc.FileRef);
+                await _docStorage.DeleteAsync(doc.FileRef);
                 await _rangeService.DeleteDocumentAsync(req.Id);
                 return Json(new { success = true });
             }

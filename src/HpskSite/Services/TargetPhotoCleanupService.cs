@@ -12,7 +12,7 @@ namespace HpskSite.Services;
 public class TargetPhotoCleanupService : IsolatedBackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IWebHostEnvironment _environment;
+    private readonly HpskSite.Services.Storage.MediaFiles _mediaFiles;
     private readonly ILogger<TargetPhotoCleanupService> _logger;
     private readonly IConfiguration _configuration;
 
@@ -21,12 +21,12 @@ public class TargetPhotoCleanupService : IsolatedBackgroundService
 
     public TargetPhotoCleanupService(
         IServiceScopeFactory scopeFactory,
-        IWebHostEnvironment environment,
+        HpskSite.Services.Storage.MediaFiles mediaFiles,
         ILogger<TargetPhotoCleanupService> logger,
         IConfiguration configuration)
     {
         _scopeFactory = scopeFactory;
-        _environment = environment;
+        _mediaFiles = mediaFiles;
         _logger = logger;
         _configuration = configuration;
     }
@@ -95,13 +95,8 @@ public class TargetPhotoCleanupService : IsolatedBackgroundService
             return;
         }
 
-        var photoDir = Path.Combine(_environment.WebRootPath, "media", "target-photos");
-        if (!Directory.Exists(photoDir))
-        {
-            _logger.LogDebug("Target photos directory does not exist, nothing to clean up");
-            scope.Complete();
-            return;
-        }
+        // Through the media file system (skalplanen D3) — the photos may live in blob storage.
+        const string photoDir = "target-photos";
 
         var totalDeleted = 0;
         var totalErrors = 0;
@@ -112,13 +107,13 @@ public class TargetPhotoCleanupService : IsolatedBackgroundService
                 break;
 
             var pattern = $"{match.MatchCode}_*.jpg";
-            var matchFiles = Directory.GetFiles(photoDir, pattern);
+            var matchFiles = _mediaFiles.List(photoDir, pattern).ToList();
 
             foreach (var file in matchFiles)
             {
                 try
                 {
-                    File.Delete(file);
+                    _mediaFiles.Delete(file);
                     totalDeleted++;
                     _logger.LogDebug("Deleted target photo: {File}", Path.GetFileName(file));
                 }

@@ -36,6 +36,7 @@ namespace HpskSite.Services.Hosting
             "MemberToken.CreatedUtc",
             "MemberToken.ExpiresUtc",
             "MemberTutorialWatch.LastWatchedUtc",
+            "AiChatLog.AskedUtc",
             "CompetitionTeamMember.JoinedAt",
             "CourseReviewers.GrantedAt",
             "DataProtectionKey.CreatedUtc",

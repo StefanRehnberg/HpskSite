@@ -707,7 +707,7 @@ namespace HpskSite.Controllers
                     // award still references it (the same list may back several medals).
                     await _ledger.ClearAwardProofRefAsync(a.Id);
                     if (await _ledger.CountAwardsUsingProofAsync(proofRef) == 0)
-                        _proofStorage.Delete(proofRef);
+                        await _proofStorage.DeleteAsync(proofRef);
                 }
             }
             catch
@@ -758,12 +758,11 @@ namespace HpskSite.Controllers
             if (!authorized)
                 return Forbid();
 
-            var path = _proofStorage.GetFilePath(award.ProofFileRef);
-            if (path == null)
+            var stream = await _proofStorage.OpenReadAsync(award.ProofFileRef);
+            if (stream == null)
                 return NotFound();
 
             var contentType = StandardMedalProofStorage.ContentTypeFor(award.ProofFileRef);
-            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             return File(stream, contentType);
         }
     }

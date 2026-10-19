@@ -1,12 +1,18 @@
+using HpskSite.Services.Storage;
 using Microsoft.AspNetCore.Http;
+using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Extensions;
 
 namespace HpskSite.Services.Media
 {
     /// <summary>
-    /// En uppladdad bild blir ett media i Umbracos mediabibliotek. Klubbens logga och banner och seriens logga
-    /// (C3-planen S7) går hit — en regel för storlek, filtyper, mapp och filnamn i stället för en kopia per yta.
+    /// En uppladdad fil blir ett media i Umbracos mediabibliotek. Klubbens logga och banner, seriens logga
+    /// (C3-planen S7), kretsens och händelsernas bilder, tävlingens inbjudan och resultatlista går hit — en
+    /// regel för mapp, filnamn och skrivväg i stället för en kopia per yta.
+    ///
+    /// <para>Filen skrivs genom <see cref="MediaFiles"/> (Umbracos mediafilsystem), så den hamnar i
+    /// blobblagringen när den är påslagen (skalplanen D3). Adressen är alltid <c>/media/{subdir}/…</c>.</para>
     /// </summary>
     public class ImageMediaService
     {
@@ -14,12 +20,12 @@ namespace HpskSite.Services.Media
         private static readonly string[] AllowedExtensions = { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
 
         private readonly IMediaService _mediaService;
-        private readonly IWebHostEnvironment _env;
+        private readonly MediaFiles _files;
 
-        public ImageMediaService(IMediaService mediaService, IWebHostEnvironment env)
+        public ImageMediaService(IMediaService mediaService, MediaFiles files)
         {
             _mediaService = mediaService;
-            _env = env;
+            _files = files;
         }
 
         /// <summary>
@@ -33,6 +39,17 @@ namespace HpskSite.Services.Media
             var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
             if (!AllowedExtensions.Contains(extension)) return (null, null, "Bara JPG, PNG, GIF och WebP går att ladda upp.");
 
+            var (media, url, error) = await SaveMediaAsync(file, folderName, subdir, "Image");
+            return media == null ? (null, null, error) : (media.GetUdi().ToString(), url, null);
+        }
+
+        /// <summary>
+        /// Sparar en fil som ett media av typen <paramref name="mediaTypeAlias"/> ("Image" eller "File") utan
+        /// egen kontroll av typ och storlek — anroparen har prövat dem. Svarar med mediet och adressen, eller ett fel.
+        /// </summary>
+        public async Task<(IMedia? Media, string? Url, string? Error)> SaveMediaAsync(
+            IFormFile file, string folderName, string subdir, string mediaTypeAlias)
+        {
             var folder = _mediaService.GetRootMedia().FirstOrDefault(m => m.Name == folderName);
             if (folder == null)
             {
@@ -41,24 +58,21 @@ namespace HpskSite.Services.Media
             }
 
             var fileName = Path.GetFileName(file.FileName);
-            var uniqueFileName = $"{Path.GetFileNameWithoutExtension(fileName)}_{Guid.NewGuid()}{extension}";
-            var physicalDir = Path.Combine(_env.ContentRootPath, "wwwroot", "media", subdir);
-            Directory.CreateDirectory(physicalDir);
-            var physicalPath = Path.Combine(physicalDir, uniqueFileName);
-            using (var stream = new FileStream(physicalPath, FileMode.Create))
-                await file.CopyToAsync(stream);
+            var extension = Path.GetExtension(fileName).ToLowerInvariant();
+            var baseName = FileStoreNames.SafeFileName(Path.GetFileNameWithoutExtension(fileName));
+            var uniqueFileName = $"{baseName}_{Guid.NewGuid()}{extension}";
 
-            var relativePath = $"/media/{subdir}/{uniqueFileName}";
-            var media = _mediaService.CreateMedia(fileName, folder.Id, "Image");
+            var relativePath = await _files.SaveAsync(subdir, uniqueFileName, file);
+            var media = _mediaService.CreateMedia(fileName, folder.Id, mediaTypeAlias);
             media.SetValue("umbracoFile", relativePath);
             media.SetValue("umbracoExtension", extension.TrimStart('.'));
             media.SetValue("umbracoBytes", file.Length.ToString());
             if (!_mediaService.Save(media).Success)
             {
-                if (File.Exists(physicalPath)) File.Delete(physicalPath);
-                return (null, null, "Bilden kunde inte sparas i mediabiblioteket.");
+                _files.DeleteByUrl(relativePath);
+                return (null, null, "Filen kunde inte sparas i mediabiblioteket.");
             }
-            return (media.GetUdi().ToString(), relativePath, null);
+            return (media, relativePath, null);
         }
     }
 }

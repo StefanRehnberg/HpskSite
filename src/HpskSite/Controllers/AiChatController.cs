@@ -17,7 +17,7 @@ namespace HpskSite.Controllers
         private readonly AiChatService _chatService;
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
-        private readonly IWebHostEnvironment _env;
+        private readonly HpskSite.Services.AiChat.AiChatLogService _chatLog;
         private readonly ILogger<AiChatController> _logger;
 
         public AiChatController(
@@ -30,7 +30,7 @@ namespace HpskSite.Controllers
             AiChatService chatService,
             IMemberManager memberManager,
             IMemberService memberService,
-            IWebHostEnvironment env,
+            HpskSite.Services.AiChat.AiChatLogService chatLog,
             ILogger<AiChatController> logger)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
@@ -38,7 +38,7 @@ namespace HpskSite.Controllers
             _chatService = chatService;
             _memberManager = memberManager;
             _memberService = memberService;
-            _env = env;
+            _chatLog = chatLog;
         }
 
         [HttpPost]
@@ -95,41 +95,9 @@ namespace HpskSite.Controllers
             return Json(new { enabled, loggedIn });
         }
 
-        private void LogChat(string question, string answer, string sources)
-        {
-            try
-            {
-                // Try multiple paths - shared hosting may have different root
-                var candidates = new[]
-                {
-                    Path.Combine(_env.ContentRootPath, "App_Data", "AiChatLogs"),
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "App_Data", "AiChatLogs"),
-                };
-
-                string? logDir = null;
-                foreach (var candidate in candidates)
-                {
-                    try
-                    {
-                        Directory.CreateDirectory(candidate);
-                        logDir = candidate;
-                        break;
-                    }
-                    catch { }
-                }
-
-                if (logDir == null) return;
-
-                var logFile = Path.Combine(logDir, $"chat-{DateTime.UtcNow:yyyy-MM}.log");
-                var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-                // "K:" = vilka stycken av kunskapsbasen frågan fick med sig. Står FÖRE "Q:", så
-                // statistikens läsare (som läser frågan från "Q:" till "A:") hoppar över den.
-                var entry = $"[{timestamp}]\nK: {sources.Replace('\n', ' ')}\nQ: {question}\nA: {answer}\n---\n";
-
-                System.IO.File.AppendAllText(logFile, entry);
-            }
-            catch { }
-        }
+        // Loggen ligger i databasen (AiChatLogService, skalplanen D3). Identiteten skickas aldrig hit.
+        private void LogChat(string question, string answer, string sources) =>
+            _chatLog.Add(question, answer, sources);
 
         private List<string> GetUserRoles(MemberIdentityUser member)
         {

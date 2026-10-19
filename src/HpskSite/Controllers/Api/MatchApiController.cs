@@ -1269,20 +1269,12 @@ namespace HpskSite.Controllers.Api
                 var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
                 var fileName = $"{code.ToUpper()}_{memberId.Value}_{seriesNumber}_{timestamp}.jpg";
 
-                // Ensure target-photos directory exists
-                var targetDir = Path.Combine(_webHostEnvironment.WebRootPath, "media", "target-photos");
-                if (!Directory.Exists(targetDir))
-                {
-                    Directory.CreateDirectory(targetDir);
-                    _logger.LogInformation("Created target-photos directory at {Path}", targetDir);
-                }
-
-                // Save file
-                var filePath = Path.Combine(targetDir, fileName);
-                await System.IO.File.WriteAllBytesAsync(filePath, resizedImage);
-
-                // Generate relative URL for storage
-                var relativeUrl = $"/media/target-photos/{fileName}";
+                // Save file — through the media file system (skalplanen D3), so it lands in blob
+                // storage when that is switched on. The URL is /media/target-photos/{fileName} either way.
+                string relativeUrl;
+                using (var photoStream = new MemoryStream(resizedImage, writable: false))
+                    relativeUrl = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Storage.MediaFiles>()
+                        .Save("target-photos", fileName, photoStream);
 
                 // Update series JSON with photo URL
                 var series = seriesList[seriesIndex];
