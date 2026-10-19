@@ -373,6 +373,17 @@ VALUES (@0, @1, @2, @3, @4, @5, @6, @7, @8, @9, @10, @11, @12, @13)",
                 nowUtc);
         }
 
+        /// <summary>
+        /// Samma arkiv för en annan sorts nod (händelserna, C3 §5.5 punkt 7): alla egenskaper, utkast och publicerat,
+        /// en gång per nod. Arkivet bär nodens alias, så sorterna hålls isär.
+        /// </summary>
+        internal static void ArchiveNode(IUmbracoDatabase db, IContent node, DateTime nowUtc)
+            => Archive(db, new NodeState
+            {
+                Id = node.Id, Alias = node.ContentType.Alias, Name = node.Name ?? "",
+                Published = node.Published, Edited = node.Edited, Trashed = node.Trashed,
+            }, node, nowUtc);
+
         private static object? ArchiveValue(object? v) => v switch
         {
             null => null,

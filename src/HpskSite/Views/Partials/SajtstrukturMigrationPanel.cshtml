@@ -37,6 +37,11 @@
                                         title="Flyttar de gamla fakturamapparna från tävlingsnoderna till fakturaarkivet. Krävs före avpubliceringen.">Fakturamapparna till arkivet</button>
                             }
                             <button type="button" class="btn btn-outline-secondary btn-sm" data-ssm="unpublish">3. Avpublicera de gamla noderna</button>
+                            @if (part.Item1 == "ev")
+                            {
+                                <button type="button" class="btn btn-outline-danger btn-sm" data-ssm="deleteNodes"
+                                        title="Arkiverar och raderar händelsenoderna för gott. Bara när varje händelse finns i tabellen. Kör utanför trafiktid.">4. Radera de gamla noderna</button>
+                            }
                             @if (part.Item1 == "comp")
                             {
                                 <button type="button" class="btn btn-outline-danger btn-sm" data-ssm="deleteNodes"
@@ -280,8 +285,12 @@
 
     function deleteStateHtml(s) {
         s = s || {};
-        var html = 'Att radera: <strong>' + (s.competitions || 0) + '</strong> tävlingsnoder · ' + (s.series || 0) + ' serienoder · '
-            + (s.emptySeasons || 0) + ' tomma årsmappar, med ' + (s.descendants || 0) + ' noder under dem.';
+        var html = s.events != null
+            ? 'Att radera: <strong>' + s.events + '</strong> händelsenoder'
+                + (s.movedToTraining ? ', varav ' + s.movedToTraining + ' flyttade till träningar' : '')
+                + (s.trashed ? ' och ' + s.trashed + ' i papperskorgen' : '') + '. Varje nod arkiveras först.'
+            : 'Att radera: <strong>' + (s.competitions || 0) + '</strong> tävlingsnoder · ' + (s.series || 0) + ' serienoder · '
+                + (s.emptySeasons || 0) + ' tomma årsmappar, med ' + (s.descendants || 0) + ' noder under dem.';
         if (s.redirectsToCopy) html += '<br>' + s.redirectsToCopy + ' gamla omdirigeringar kopieras först.';
         if ((s.blockers || []).length)
             html += '<div class="text-danger mt-1"><strong>Spärrat:</strong><ul class="mb-0">' + s.blockers.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul></div>';
@@ -355,7 +364,7 @@
                 lines(card, deleteStateHtml(d.state));
                 var s = d.state || {};
                 if ((s.blockers || []).length) return;
-                if (!s.competitions && !s.series && !s.emptySeasons) { lines(card, 'Det finns inga noder kvar att radera.'); return; }
+                if (!s.competitions && !s.series && !s.emptySeasons && !s.events) { lines(card, 'Det finns inga noder kvar att radera.'); return; }
                 armed(btn, 'Tryck igen — noderna raderas för gott');
             }).catch(function (err) { lines(card, 'Läget gick inte att läsa: ' + esc(err.message), 'text-danger'); });
         }

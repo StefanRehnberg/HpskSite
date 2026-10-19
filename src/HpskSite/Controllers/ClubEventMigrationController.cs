@@ -100,5 +100,23 @@ namespace HpskSite.Controllers
             var (done, remaining, message) = _migration.UnpublishNodes(batch);
             return Json(new { success = true, unpublished = done, remaining, message });
         }
+
+        /// <summary>Raderingens läge (C3 §5.5 punkt 7). Läser bara.</summary>
+        [HttpGet]
+        public async Task<IActionResult> DeleteNodesPreview([FromServices] HpskSite.Services.Events.ClubEventNodeDeletionService deletion)
+        {
+            if (await DenyAsync() is { } deny) return deny;
+            return Json(new { success = true, state = deletion.Preview() });
+        }
+
+        /// <summary>Arkiverar och raderar händelsenoderna för gott, en omgång (högst 20 sekunder) per anrop.</summary>
+        [HttpPost, ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteNodes(int batch,
+            [FromServices] HpskSite.Services.Events.ClubEventNodeDeletionService deletion)
+        {
+            if (await DenyAsync() is { } deny) return deny;
+            var r = deletion.Run(batch <= 0 ? 25 : batch, TimeSpan.FromSeconds(20));
+            return Json(new { success = r.Ok, deleted = r.Deleted, remaining = r.Remaining, message = r.Message, errors = r.Errors.Take(20) });
+        }
     }
 }
