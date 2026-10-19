@@ -479,7 +479,7 @@ namespace HpskSite.Controllers
             var currentYearStart = new DateTime(now.Year, 1, 1);
 
             // ── 1. Members ──────────────────────────────────────────
-            // Bara de fyra egenskaper statistiken r�knar p� (skalplanen B), i st�llet f�r hela
+            // Bara de fyra egenskaper statistiken räknar på (skalplanen B), i stället för hela
             // registret som IMember.
             var allMembers = _memberProperties.Read(new[] { "primaryClubId", "trainingStartDate", "currentTrainingLevel", "completedTrainingSteps" });
             var approvedMembers = allMembers.Where(m => m.IsApproved).ToList();
@@ -1310,7 +1310,7 @@ namespace HpskSite.Controllers
 
                     trainingStairsActiveTrainees = approvedMembers.Count(m =>
                     {
-                        // (egenskapen saknas = tomt v�rde)
+                        // (egenskapen saknas = tomt värde)
                         var val = m.Get("trainingStartDate");
                         return !string.IsNullOrEmpty(val);
                     });
@@ -1332,7 +1332,7 @@ namespace HpskSite.Controllers
 
                     foreach (var m in approvedMembers)
                     {
-                        // (egenskapen saknas = tomt v�rde)
+                        // (egenskapen saknas = tomt värde)
                         var json = m.Get("completedTrainingSteps");
                         if (string.IsNullOrEmpty(json)) continue;
                         try
