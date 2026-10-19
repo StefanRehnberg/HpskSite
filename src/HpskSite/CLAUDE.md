@@ -12096,6 +12096,18 @@ administratörer. Efter B1–B3: 0,05–0,4 s.
 - **Senast aktiv = `MemberActivityService`** (`GetAll`/`Get`, tabellen `MemberActivity`) — skrivs aldrig
   som medlemsegenskap. Middlewaren läser medlemskakan själv (`IdentityConstants.ApplicationScheme`; den
   ligger före autentiseringen i pipelinen, så `context.User` är tom där).
+- **⚠️⚠️ Det som skrivs ofta skrivs aldrig på medlemmen (skalplanen B5, 2026-10-19).** En medlemssparning
+  tar Umbracos skrivlås för medlemmar och indexerar om i Examine. Därför:
+  - **Engångskoder** (lösenordsåterställning, inloggning efter godkännande, inbjudan) =
+    `MemberTokenService` (`Issue`/`Get`/`Check`/`Clear`, tabellen `MemberToken`). Bara SHA-256 av koden
+    lagras och jämförelsen sker i konstant tid. En felaktig kod lämnar den giltiga orörd; en utgången tas bort.
+  - **Sedda filmer** = `TutorialWatchService` (`MemberTutorialWatch`, en rad per medlem och film).
+  - **Skyttetrappans framsteg** = `Training.TrainingProgressStore` (`MemberTrainingProgress`, en rad per
+    medlem) — ENDA läs- och skrivvägen. `LoadRows`/`All` för listor och statistik. Märkeskrediterade steg
+    lagras aldrig (som förut). `MemberProgress.FromMember`/`SaveToMember` finns inte längre.
+  - De gamla egenskaperna ligger kvar men läses inte. Ny tabell som bär ett medlems-id: lägg den i
+    `MemberDataPurgeService.SubjectTables`; en `…Utc`-kolumn i `StoredTimeBasis.UtcColumns`.
+  - Startkontroll: `MemberTablesSchemaGuardHostedService`. Migreringar: körordningen D5.
 - **En sökruta = `MemberDirectoryService.Search(fråga, antal, clubId?, approvedOnly, searchNames)`** —
   LIKE i SQL, sorterat på namn, klubbfiltret via `ClubMembership`. Tom fråga = de första `antal`.
 - **Få egenskaper över många medlemmar = `MemberPropertyReader.Read(alias[], ids?, approvedOnly, unapprovedOnly)`**

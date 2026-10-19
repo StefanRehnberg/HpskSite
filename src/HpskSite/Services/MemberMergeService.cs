@@ -70,7 +70,8 @@ namespace HpskSite.Services
             ("standardpistolShooterClass",  "Skytteklass standardpistol"),
             ("sportpistolShooterClass",     "Skytteklass sportpistol"),
             ("profilePictureUrl",      "Profilbild"),
-            ("trainingNotes",          "Träningsanteckningar"),
+            // trainingNotes ligger sedan skalplanen B5 i MemberTrainingProgress och flyttas med
+            // tabellkartan (MemberDataPurgeService.SubjectTables) — inte som ett fältval här.
         };
 
         private const string ClubMemberTypeAlias = "hpskClub";

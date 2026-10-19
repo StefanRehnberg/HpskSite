@@ -25,6 +25,7 @@ namespace HpskSite.Controllers
         private readonly ReplyContactResolver _replyContacts;
         private readonly ILogger<TrainingGroupController> _logger;
         private readonly HpskSite.Services.MemberDirectoryService _directory;
+        private readonly HpskSite.Services.Training.TrainingProgressStore _progressStore;
 
         public TrainingGroupController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -41,9 +42,11 @@ namespace HpskSite.Controllers
             EmailService emailService,
             ReplyContactResolver replyContacts,
             ILogger<TrainingGroupController> logger,
-            HpskSite.Services.MemberDirectoryService directory)
+            HpskSite.Services.MemberDirectoryService directory,
+            HpskSite.Services.Training.TrainingProgressStore progressStore)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _progressStore = progressStore;
             _directory = directory;
             _trainingGroupService = trainingGroupService;
             _authorizationService = authorizationService;
@@ -473,7 +476,7 @@ namespace HpskSite.Controllers
                     var member = _memberService.GetById(gm.MemberId);
                     if (member == null) continue;
 
-                    var progress = MemberProgress.FromMember(member);
+                    var progress = _progressStore.Load(member);
                     var currentLevel = TrainingDefinitions.GetLevel(progress.CurrentLevel);
 
                     memberProgress.Add(new

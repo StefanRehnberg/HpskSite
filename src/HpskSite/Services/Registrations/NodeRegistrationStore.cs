@@ -390,7 +390,7 @@ GROUP BY CASE WHEN hubType.alias = @1 OR hub.text LIKE N'%Anm%lningar%' OR hub.t
             if (fromProperty > 0) return fromProperty;
             var parent = node.ParentId > 0 ? _contentService.GetById(node.ParentId) : null;
             if (parent is null) return 0;
-            return parent.ContentType.Alias == "competition" ? parent.Id : parent.ParentId; // competitionstore-ok: nodlagringen fˆr anm‰lningar l‰ser sin egen nodstruktur
+            return parent.ContentType.Alias == "competition" ? parent.Id : parent.ParentId; // competitionstore-ok: nodlagringen f√∂r anm√§lningar l√§ser sin egen nodstruktur
         }
 
         private static RegistrationRecord Map(IContent n, int competitionId)

@@ -29,6 +29,7 @@ namespace HpskSite.Services
         private readonly ILogger<ClubComparisonService> _logger;
         private readonly MemberActivityService _activity;
         private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
+        private readonly HpskSite.Services.Training.TrainingProgressStore _progressStore;
 
         public ClubComparisonService(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -37,8 +38,10 @@ namespace HpskSite.Services
             IMemoryCache memoryCache,
             ILogger<ClubComparisonService> logger,
             MemberActivityService activity,
-            HpskSite.Services.MemberPropertyReader memberProperties)
+            HpskSite.Services.MemberPropertyReader memberProperties,
+            HpskSite.Services.Training.TrainingProgressStore progressStore)
         {
+            _progressStore = progressStore;
             _memberProperties = memberProperties;
             _activity = activity;
             _umbracoContextAccessor = umbracoContextAccessor;
@@ -103,7 +106,9 @@ namespace HpskSite.Services
             try
             {
                 // Bara huvudklubben och stegen behövs (skalplanen B), inte hela registret som IMember.
-                var allMembers = _memberProperties.Read(new[] { "primaryClubId", "completedTrainingSteps" }, approvedOnly: true);
+                var allMembers = _memberProperties.Read(new[] { "primaryClubId" }, approvedOnly: true);
+                // Trappans steg ur MemberTrainingProgress (skalplanen B5).
+                var progressRows = _progressStore.All().ToDictionary(r => r.MemberId, r => r.CompletedSteps);
                 var memberToClub = new Dictionary<int, int>(allMembers.Count);
                 var lastSeenAll = _activity.GetAll();
 
@@ -124,7 +129,7 @@ namespace HpskSite.Services
 
                     // Step completions in last 30d (parsed from completedTrainingSteps JSON,
                     // each entry has a CompletedDate string)
-                    var stepsJson = m.Get("completedTrainingSteps");
+                    var stepsJson = progressRows.GetValueOrDefault(m.Id);
                     if (!string.IsNullOrWhiteSpace(stepsJson))
                     {
                         var stepCount = CountRecentStepCompletions(stepsJson, thirtyDaysAgo);

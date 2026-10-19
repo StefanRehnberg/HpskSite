@@ -27,6 +27,7 @@ namespace HpskSite.Controllers
         private readonly TrainingBadgeCreditService _badgeCredit;
         private readonly ILogger<TrainingController> _logger;
         private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
+        private readonly HpskSite.Services.Training.TrainingProgressStore _progressStore;
         private const string ClubMemberTypeAlias = "hpskClub";
 
         public TrainingController(
@@ -45,9 +46,11 @@ namespace HpskSite.Controllers
             ReplyContactResolver replyContacts,
             TrainingBadgeCreditService badgeCredit,
             ILogger<TrainingController> logger,
-            HpskSite.Services.MemberPropertyReader memberProperties)
+            HpskSite.Services.MemberPropertyReader memberProperties,
+            HpskSite.Services.Training.TrainingProgressStore progressStore)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _progressStore = progressStore;
             _memberProperties = memberProperties;
             _memberService = memberService;
             _memberManager = memberManager;
@@ -75,12 +78,13 @@ namespace HpskSite.Controllers
 
                 // Get all active members (excluding clubs)
                 var allMembers = LoadApprovedTrainees();
+                var progressRows = _progressStore.LoadRows(allMembers.Select(m => m.Id)); // en fraga for hela listan
 
                 // Load progress for each member
                 foreach (var member in allMembers)
                 {
                     var clubName = GetMemberPrimaryClubName(member);
-                    var progress = MemberProgress.FromMember(member, clubName);
+                    var progress = HpskSite.Services.Training.TrainingProgressStore.ToProgress(progressRows.GetValueOrDefault(member.Id), member.Id, member.Name ?? "", member.Email ?? "", clubName);
 
                     // Only include members who have started training
                     if (progress.IsActive)
@@ -102,7 +106,7 @@ namespace HpskSite.Controllers
                     if (currentMemberData != null)
                     {
                         var clubName = GetMemberPrimaryClubName(currentMemberData);
-                        currentMemberProgress = MemberProgress.FromMember(currentMemberData, clubName);
+                        currentMemberProgress = _progressStore.Load(currentMemberData, clubName);
 
                         // The current member is returned as a separate object, so they need the credit
                         // applied here too - the roster pass above operates on different instances.
@@ -205,7 +209,7 @@ namespace HpskSite.Controllers
                 }
 
                 var clubName = GetMemberPrimaryClubName(member);
-                var progress = MemberProgress.FromMember(member, clubName);
+                var progress = _progressStore.Load(member, clubName);
                 await _badgeCredit.ApplyAsync(member.Id, progress);
 
                 // Get current level and step details
@@ -262,7 +266,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member not found" });
                 }
 
-                var progress = MemberProgress.FromMember(member);
+                var progress = _progressStore.Load(member);
 
                 // Check if already started
                 if (progress.IsActive)
@@ -277,8 +281,7 @@ namespace HpskSite.Controllers
                 progress.LastActivityDate = DateTime.Now;
 
                 // Save to member (the credit below is derived and deliberately not stored)
-                progress.SaveToMember(member);
-                _memberService.Save(member);
+                _progressStore.Save(progress); // skalplanen B5: en rad, ingen medlemssparning
 
                 // A member who already holds a Pistolskyttemärke does not start at Nybörjartrappa
                 // Brons - the märke IS the proof those levels are behind them. Applied after the save
@@ -331,7 +334,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Invalid step" });
                 }
 
-                var progress = MemberProgress.FromMember(member);
+                var progress = _progressStore.Load(member);
 
                 // The self-service position gate below reads CurrentLevel/CurrentStep, so a veteran's
                 // held-märke credit has to be applied before it - otherwise they are stuck on
@@ -365,8 +368,7 @@ namespace HpskSite.Controllers
                     isSelfService ? StepCompletionSources.SelfReported : StepCompletionSources.Functionary);
 
                 // Save progress
-                progress.SaveToMember(member);
-                _memberService.Save(member);
+                _progressStore.Save(progress); // skalplanen B5: en rad, ingen medlemssparning
 
                 // ⚠️ Finishing Nybörjartrappa Brons/Silver/Guld NO LONGER awards the Pistolskyttemärke
                 // (beslut 2026-10-02/03). The märke is fulfilled by validated series — 3 precision + 3
@@ -511,7 +513,7 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member not found" });
                 }
 
-                var progress = MemberProgress.FromMember(member);
+                var progress = _progressStore.Load(member);
                 await _badgeCredit.ApplyAsync(memberId, progress);
 
                 var completion = progress.GetCompletion(levelId, stepNumber);
@@ -526,8 +528,7 @@ namespace HpskSite.Controllers
                 }
 
                 progress.UncompleteStep(levelId, stepNumber);
-                progress.SaveToMember(member);
-                _memberService.Save(member);
+                _progressStore.Save(progress); // skalplanen B5: en rad, ingen medlemssparning
 
                 return Json(new {
                     success = true,
@@ -555,6 +556,7 @@ namespace HpskSite.Controllers
 
                 // Get all members with training progress
                 var allMembers = LoadApprovedTrainees();
+                var progressRows = _progressStore.LoadRows(allMembers.Select(m => m.Id)); // en fraga for hela listan
 
                 // Scope: participants/trainers see only their own training-group peers;
                 // club/regional admins + skjutledare see their clubs; site admins see everyone.
@@ -570,7 +572,7 @@ namespace HpskSite.Controllers
                 foreach (var member in allMembers)
                 {
                     if (scope != null && !scope.Contains(member.Id)) continue;
-                    var memberProgress = MemberProgress.FromMember(member);
+                    var memberProgress = HpskSite.Services.Training.TrainingProgressStore.ToProgress(progressRows.GetValueOrDefault(member.Id), member.Id, member.Name ?? "", member.Email ?? "");
                     if (memberProgress.IsActive) entries.Add((member, memberProgress));
                 }
                 await _badgeCredit.ApplyManyAsync(entries.Select(e => e.Progress));
@@ -672,7 +674,7 @@ namespace HpskSite.Controllers
         /// </summary>
         private List<IMember> LoadApprovedTrainees()
         {
-            var ids = _memberProperties.IdsWithValue("trainingStartDate", approvedOnly: true);
+            var ids = _progressStore.ActiveMemberIds();
             var result = new List<IMember>(ids.Count);
             foreach (var chunk in ids.Chunk(1000))
                 result.AddRange(_memberService.GetAllMembers(chunk).Where(m => m.ContentType.Alias != ClubMemberTypeAlias && m.IsApproved));
@@ -728,15 +730,8 @@ namespace HpskSite.Controllers
                     return Json(new { success = false, message = "Member not found" });
                 }
 
-                // Clear all training properties
-                member.SetValue("currentTrainingLevel", 1);
-                member.SetValue("currentTrainingStep", 1);
-                member.SetValue("trainingStartDate", null);
-                member.SetValue("lastTrainingActivity", null);
-                member.SetValue("trainingNotes", null);
-                member.SetValue("completedTrainingSteps", "[]");
-
-                _memberService.Save(member);
+                // Framstegen ligger i MemberTrainingProgress (skalplanen B5).
+                _progressStore.Delete(member.Id);
 
                 return Json(new { success = true, message = "Training progress reset successfully" });
             }

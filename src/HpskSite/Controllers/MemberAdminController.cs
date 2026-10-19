@@ -40,6 +40,7 @@ namespace HpskSite.Controllers
         private readonly MemberActivityService _activity;
         private readonly MemberDirectoryService _directory;
         private readonly HpskSite.Services.MemberPropertyReader _memberProperties;
+        private readonly HpskSite.Services.MemberTokenService _tokens;
 
         private const string ClubMemberTypeAlias = "hpskClub";
 
@@ -63,9 +64,11 @@ namespace HpskSite.Controllers
             IConfiguration configuration,
             MemberActivityService activity,
             MemberDirectoryService directory,
-            HpskSite.Services.MemberPropertyReader memberProperties)
+            HpskSite.Services.MemberPropertyReader memberProperties,
+            HpskSite.Services.MemberTokenService tokens)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _tokens = tokens;
             _memberProperties = memberProperties;
             _activity = activity;
             _directory = directory;
@@ -987,9 +990,7 @@ namespace HpskSite.Controllers
                             // Generate auto-login token for newly approved member
                             var autoLoginToken = Guid.NewGuid().ToString("N");
                             var tokenExpiry = DateTime.UtcNow.AddDays(7);
-                            member.SetValue("autoLoginToken", autoLoginToken);
-                            member.SetValue("autoLoginTokenExpiry", tokenExpiry.ToString("o"));
-                            _memberService.Save(member);
+                            _tokens.Issue(member.Id, MemberTokenPurpose.AutoLogin, autoLoginToken, tokenExpiry); // skalplanen B5: ingen medlemssparning
 
                             // Beskedet kommer från KLUBBEN — svaret ska dit, inte till sajtägaren.
                             await _emailService.SendApprovalNotificationAsync(
@@ -1413,9 +1414,7 @@ namespace HpskSite.Controllers
 
                 // Store token with expiry (24 hours)
                 var tokenExpiry = DateTime.UtcNow.AddHours(24);
-                member.SetValue("passwordResetToken", resetToken);
-                member.SetValue("passwordResetTokenExpiry", tokenExpiry.ToString("o"));
-                _memberService.Save(member);
+                _tokens.Issue(member.Id, MemberTokenPurpose.PasswordReset, resetToken, tokenExpiry); // skalplanen B5: ingen medlemssparning
 
                 // Send password reset email
                 var memberName = member.Name ?? $"{member.GetValue("firstName")} {member.GetValue("lastName")}".Trim();
@@ -1540,9 +1539,7 @@ namespace HpskSite.Controllers
                 // Generate auto-login token (single-use, 7-day validity)
                 var autoLoginToken = Guid.NewGuid().ToString("N"); // 32-character hex string
                 var tokenExpiry = DateTime.UtcNow.AddDays(7);
-                member.SetValue("autoLoginToken", autoLoginToken);
-                member.SetValue("autoLoginTokenExpiry", tokenExpiry.ToString("o")); // ISO 8601 format
-                _memberService.Save(member);
+                _tokens.Issue(member.Id, MemberTokenPurpose.AutoLogin, autoLoginToken, tokenExpiry); // skalplanen B5: ingen medlemssparning
                 Console.WriteLine($"[ApproveMember] Auto-login token generated and saved for: {memberId}");
 
                 // Resolve club info (needed for email and first-member check).
@@ -1751,9 +1748,7 @@ namespace HpskSite.Controllers
                 // Generate invitation token (single-use, 7-day validity)
                 var invitationToken = Guid.NewGuid().ToString("N");
                 var tokenExpiry = DateTime.UtcNow.AddDays(7);
-                member.SetValue("invitationToken", invitationToken);
-                member.SetValue("invitationTokenExpiry", tokenExpiry.ToString("o"));
-                _memberService.Save(member);
+                _tokens.Issue(member.Id, MemberTokenPurpose.Invitation, invitationToken, tokenExpiry); // skalplanen B5: ingen medlemssparning
                 Console.WriteLine($"[SendInvitation] Invitation token generated and saved for: {memberId}");
 
                 // Get member name and club name for emails

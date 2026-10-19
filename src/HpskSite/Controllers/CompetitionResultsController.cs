@@ -65,6 +65,7 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
         private readonly HpskSite.Services.StartLists.IStartListStore _startLists;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.MemberTokenService _tokens;
         public CompetitionResultsController(
             IUmbracoContextAccessor umbracoContextAccessor,
             IUmbracoDatabaseFactory umbracoDatabaseFactory,
@@ -90,9 +91,11 @@ namespace HpskSite.Controllers
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Results.ICompetitionResultStore results,
             HpskSite.Services.StartLists.IStartListStore startLists,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.MemberTokenService tokens)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _tokens = tokens;
             _registrations = registrations;
             _results = results;
             _startLists = startLists;
@@ -757,11 +760,10 @@ namespace HpskSite.Controllers
                 newMember.SetValue("firstName", firstName);
                 newMember.SetValue("lastName", lastName);
                 newMember.SetValue("primaryClubId", request.ClubId);
-                newMember.SetValue("invitationToken", invitationToken);
-                newMember.SetValue("invitationTokenExpiry", tokenExpiry.ToString("o"));
                 newMember.IsApproved = true;
                 _memberService.Save(newMember);
                 _memberService.AssignRole(newMember.Id, "Users");
+                _tokens.Issue(newMember.Id, MemberTokenPurpose.Invitation, invitationToken, tokenExpiry); // skalplanen B5
 
                 _logger.LogInformation("QuickRegisterShooter: Created member {MemberId} ({Name}) for club {ClubId}",
                     newMember.Id, fullName, request.ClubId);
