@@ -109,18 +109,28 @@ namespace HpskSite.Routing
                 return byYear.Count == 1 ? byYear[0].Id : null;
             }
 
+            // ⚠️ Ett cachat index, inte List() per förfrågan (skalplanen, mätningen 2026-10-19): förut lästes hela
+            // tävlings- och serietabellen — med alla textkolumner — vid varje adress som liknade en trädadress.
+            // Töms med adressindexet (CompetitionNavigationCaches.Invalidate), även från andra instanser.
+            (services.GetService(typeof(HpskSite.Services.Competitions.CompetitionCacheVersion))
+                as HpskSite.Services.Competitions.CompetitionCacheVersion)?.EnsureFresh();
+            var caches = services.GetService(typeof(Umbraco.Cms.Core.Cache.AppCaches)) as Umbraco.Cms.Core.Cache.AppCaches;
+            SlugIndex Build() => new(
+                competitions.List().GroupBy(c => c.UrlSegment ?? "", StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Select(c => (c.Id, c.CompetitionDate?.Year)).ToList(), StringComparer.OrdinalIgnoreCase),
+                seriesStore.List().GroupBy(s => s.UrlSegment ?? "", StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Select(s => (s.Id, s.SeriesStartDate?.Year)).ToList(), StringComparer.OrdinalIgnoreCase));
+            var index = caches?.RuntimeCache.GetCacheItem(HpskSite.Services.CompetitionNavigationCaches.SlugIndexKey, Build,
+                            HpskSite.Services.CompetitionNavigationCaches.CacheFor) ?? Build();
+
             foreach (var (slug, suffix) in new[] { (seg[^1], ""), (seg.Length >= 3 ? seg[^2] : "", seg[^1] + "/") })
             {
                 if (string.IsNullOrEmpty(slug)) continue;
-                var compId = Pick(competitions.List()
-                    .Where(c => string.Equals(c.UrlSegment, slug, StringComparison.OrdinalIgnoreCase))
-                    .Select(c => (c.Id, c.CompetitionDate?.Year)));
+                var compId = Pick(index.Competitions.TryGetValue(slug, out var comps) ? comps : Enumerable.Empty<(int, int?)>());
                 if (compId != null && (suffix == "" || IsServedChild(compId.Value, seg[^1])))
                     return (links.Url(compId.Value), suffix);
                 if (suffix != "") continue;
-                var seriesId = Pick(seriesStore.List()
-                    .Where(s => string.Equals(s.UrlSegment, slug, StringComparison.OrdinalIgnoreCase))
-                    .Select(s => (s.Id, s.SeriesStartDate?.Year)));
+                var seriesId = Pick(index.Series.TryGetValue(slug, out var ser) ? ser : Enumerable.Empty<(int, int?)>());
                 if (seriesId != null)
                 {
                     var url = links.SeriesUrl(seriesId.Value);
@@ -129,6 +139,10 @@ namespace HpskSite.Routing
             }
             return null;
         }
+
+        private sealed record SlugIndex(
+            Dictionary<string, List<(int Id, int? Year)>> Competitions,
+            Dictionary<string, List<(int Id, int? Year)>> Series);
 
         /// <summary>Umbracos standardstavning av å/ä/ö (aa/ae/oe) översatt till vår teckentabells (a/a/o).</summary>
         public static string LegacyAsciiFold(string segment) =>

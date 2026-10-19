@@ -61,7 +61,7 @@ namespace HpskSite.Services.CompetitionFees
 
                 // ⚠️ Självläkning: har tävlingen gamla fakturor men ingen rad, missade migreringen
                 // den. Den är då legacy — och det skrivs ned, så svaret aldrig kan glida.
-                if (HasLegacyInvoices(db, competitionId))
+                if (CompetitionsWithLegacyInvoices(db).Contains(competitionId))
                     return Write(db, competitionId, CompetitionPaymentModels.Legacy, "fakturor-fanns");
 
                 return CompetitionPaymentModels.Ledger;
@@ -134,22 +134,36 @@ namespace HpskSite.Services.CompetitionFees
         /// flyttas till arkivet (C3-planen F1, 2026-10-13) — utan den hade en sådan tävling tyst blivit
         /// "ledger", och raden i <c>CompetitionPaymentModel</c> är oföränderlig.
         /// </summary>
-        private static bool HasLegacyInvoices(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int competitionId)
-            => db.ExecuteScalar<int>(
-                @"SELECT COUNT(1)
-                    FROM umbracoNode i
+        /// <para>⚠️ <b>Mängden byggs med EN fråga och cachas</b> (skalplanen, mätningen 2026-10-19). Förut frågades
+        /// en tävling i taget med ett OR som prövade egenskapsdatan för varje faktura i hela sajten — två gånger per
+        /// öppning av Anmälningar för en obeslutad tävling, ~56 ms styck på 20 000-kopian. Cachen är säker: en
+        /// obeslutad tävling kan inte FÅ en gammal faktura (PaymentService vägrar utom i den gamla modellen), så
+        /// mängden kan bara bli inaktuell för tävlingar som redan är beslutade och aldrig frågas här igen.
+        /// Samma svar som den gamla frågan för alla 783 tävlingar i 20 000-kopian och alla 204 i dev.</para>
+        private static HashSet<int> CompetitionsWithLegacyInvoices(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db)
+        {
+            var cached = _legacySet;
+            if (cached != null && DateTime.UtcNow < cached.Value.Until) return cached.Value.Ids;
+            var ids = db.Fetch<int>(
+                @"SELECT hub.parentId FROM umbracoNode hub
+                    JOIN umbracoContent pc ON pc.nodeId = hub.parentId
+                    JOIN cmsContentType pct ON pct.nodeId = pc.contentTypeId AND pct.alias = 'competition'
+                    JOIN umbracoNode i ON i.parentId = hub.id AND i.trashed = 0
                     JOIN umbracoContent c ON c.nodeId = i.id
-                    JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
-                    JOIN umbracoNode hub ON hub.id = i.parentId
-                   WHERE ct.alias = 'registrationInvoice' AND i.trashed = 0
-                     AND ((hub.parentId = @0 AND EXISTS (
-                          SELECT 1 FROM umbracoContent pc JOIN cmsContentType pct ON pct.nodeId = pc.contentTypeId
-                          WHERE pc.nodeId = hub.parentId AND pct.alias = 'competition')) OR EXISTS (
-                          SELECT 1 FROM umbracoContentVersion cv
-                          JOIN umbracoPropertyData pd ON pd.versionId = cv.id
-                          JOIN cmsPropertyType pt ON pt.id = pd.propertyTypeId
-                          WHERE cv.nodeId = i.id AND cv.[current] = 1 AND pt.alias = 'competitionId' AND pd.intValue = @0))",
-                competitionId) > 0;
+                    JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId AND ct.alias = 'registrationInvoice'
+                  UNION
+                  SELECT pd.intValue FROM umbracoPropertyData pd
+                    JOIN cmsPropertyType pt ON pt.id = pd.propertyTypeId AND pt.alias = 'competitionId'
+                    JOIN umbracoContentVersion cv ON cv.id = pd.versionId AND cv.[current] = 1
+                    JOIN umbracoNode i ON i.id = cv.nodeId AND i.trashed = 0
+                    JOIN umbracoContent c ON c.nodeId = i.id
+                    JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId AND ct.alias = 'registrationInvoice'
+                   WHERE pd.intValue IS NOT NULL").ToHashSet();
+            _legacySet = (ids, DateTime.UtcNow.AddMinutes(10));
+            return ids;
+        }
+
+        private static (HashSet<int> Ids, DateTime Until)? _legacySet;
 
         /// <summary>För tester och verifiering: glöm cachen för en tävling.</summary>
         public static void Forget(int competitionId) => Decided.TryRemove(competitionId, out _);

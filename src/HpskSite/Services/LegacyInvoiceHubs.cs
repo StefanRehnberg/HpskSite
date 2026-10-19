@@ -72,22 +72,31 @@ namespace HpskSite.Services
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
             var archive = ArchiveTableExists(db);
-            var archived = archive ? $"OR h.id IN (SELECT a.HubId FROM {ArchiveTable} a WHERE a.CompetitionId = @0)" : "";
-            var archivedOrder = archive ? $"WHEN h.id IN (SELECT a.HubId FROM {ArchiveTable} a WHERE a.CompetitionId = @0) THEN 1" : "";
-            return db.Fetch<int>($@"
-SELECT h.id FROM umbracoNode h
+            var archived = archive ? $"UNION ALL SELECT a.HubId, 1 FROM {ArchiveTable} a WHERE a.CompetitionId = @0" : "";
+            // ⚠️ Tre KANDIDATKÄLLOR med UNION, inte tre villkor med OR (skalplanen, mätningen 2026-10-19). Med OR
+            // prövades fakturornas egenskapsdata för VARJE fakturamapp i hela sajten — 111 000 logiska läsningar och
+            // ~620 ms per anrop på 20 000-kopian, i varje öppning av Anmälningar. Nu söks fakturorna från sitt
+            // competitionId: 25 ms, samma svar för varje tävling i 20 000-kopian och i prod. Rangen ger samma ordning.
+            // ⚠️ Frågan MÅSTE börja med SELECT: NPoco:s Fetch lägger annars till "SELECT * FROM …" framför (en första
+            // version med ;WITH gav "Incorrect syntax near FROM" — och anmälningslistan svarade med felet).
+            return db.Fetch<int>($@"SELECT h.id FROM (
+    SELECT cand.id, MIN(cand.rnk) AS rnk FROM (
+        SELECT h.id, 0 AS rnk FROM umbracoNode h
+        JOIN umbracoContent pc ON pc.nodeId = h.parentId
+        JOIN cmsContentType pct ON pct.nodeId = pc.contentTypeId
+        WHERE h.parentId = @0 AND pct.alias = @2
+        {archived}
+        UNION ALL SELECT i.parentId, 2 FROM umbracoPropertyData pd
+            JOIN cmsPropertyType pt ON pt.id = pd.propertyTypeId AND pt.alias = 'competitionId'
+            JOIN umbracoContentVersion cv ON cv.id = pd.versionId AND cv.[current] = 1
+            JOIN umbracoNode i ON i.id = cv.nodeId AND i.trashed = 0
+            WHERE pd.intValue = @0) cand
+    GROUP BY cand.id) r
+JOIN umbracoNode h ON h.id = r.id
 JOIN umbracoContent c ON c.nodeId = h.id
 JOIN cmsContentType ct ON ct.nodeId = c.contentTypeId
-LEFT JOIN umbracoContent pc ON pc.nodeId = h.parentId
-LEFT JOIN cmsContentType pct ON pct.nodeId = pc.contentTypeId
 WHERE ct.alias = @1 AND h.trashed = 0
-  AND ((h.parentId = @0 AND pct.alias = @2) {archived} OR EXISTS (
-        SELECT 1 FROM umbracoNode i
-        JOIN umbracoContentVersion cv ON cv.nodeId = i.id AND cv.[current] = 1
-        JOIN umbracoPropertyData pd ON pd.versionId = cv.id
-        JOIN cmsPropertyType pt ON pt.id = pd.propertyTypeId
-        WHERE i.parentId = h.id AND i.trashed = 0 AND pt.alias = 'competitionId' AND pd.intValue = @0))
-ORDER BY CASE WHEN h.parentId = @0 AND pct.alias = @2 THEN 0 {archivedOrder} ELSE 2 END, h.id",
+ORDER BY r.rnk, h.id",
                 competitionId, HubAlias, CompetitionAlias);
         }
 
