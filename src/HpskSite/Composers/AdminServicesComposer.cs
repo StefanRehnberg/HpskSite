@@ -179,8 +179,6 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Events.NodeClubEventStore>();
             builder.Services.AddScoped<HpskSite.Services.Events.SqlClubEventStore>();
             builder.Services.AddScoped<HpskSite.Services.Events.SwitchingClubEventStore>();
-            builder.Services.AddScoped<HpskSite.Services.Events.ClubEventMigrationService>();
-            builder.Services.AddScoped<HpskSite.Services.Events.ClubEventNodeDeletionService>();
             // Tävling → händelse (arrangörens händelsesida kopplas till tävlingarna den beskriver).
             builder.Services.AddScoped<HpskSite.Services.Events.CompetitionEventLinkService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
@@ -241,9 +239,6 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Competitions.CompetitionPostCache>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.NodeCompetitionSeriesStore>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.SqlCompetitionSeriesStore>();
-            builder.Services.AddScoped<HpskSite.Services.Competitions.CompetitionMigrationService>();
-            builder.Services.AddScoped<HpskSite.Services.Competitions.CompetitionNodeDeletionService>();
-            builder.Services.AddScoped<HpskSite.Services.LegacyInvoiceHubArchiveService>();
             builder.Services.AddScoped<HpskSite.Services.Competitions.VirtualCompetitionNodes>();
             builder.Services.AddSingleton<HpskSite.Services.Competitions.CompetitionLinks>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
@@ -256,7 +251,6 @@ namespace HpskSite.Composers
             builder.Services.Configure<Umbraco.Cms.Web.Common.ApplicationBuilder.UmbracoPipelineOptions>(options =>
                 options.AddFilter(new Umbraco.Cms.Web.Common.ApplicationBuilder.UmbracoPipelineFilter(
                     "RequestErrors", postPipeline: app => app.UseMiddleware<HpskSite.Middleware.RequestErrorMiddleware>())));
-            builder.Services.AddScoped<HpskSite.Services.Registrations.RegistrationMigrationService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
                 HpskSite.Services.Registrations.RegistrationNodeGuard>();
             // Enda vägen in till resultatlistorna (skalplanen fas C1). Växeln väljer nod eller tabell per
@@ -267,7 +261,6 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.Results.SwitchingCompetitionResultStore>();
             builder.Services.AddScoped<HpskSite.Services.Results.ICompetitionResultStore>(
                 sp => sp.GetRequiredService<HpskSite.Services.Results.SwitchingCompetitionResultStore>());
-            builder.Services.AddScoped<HpskSite.Services.Results.CompetitionResultMigrationService>();
             // Enda vägen in till startlistorna (skalplanen fas C2). Växeln väljer nod eller tabell per
             // anrop (SiteSetting StartLists:Store) och vägrar skrivningar under frysning; ingen kod utanför
             // lagringen läser precisionStartList- eller finalsStartList-noderna.
@@ -276,7 +269,6 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<HpskSite.Services.StartLists.SwitchingStartListStore>();
             builder.Services.AddScoped<HpskSite.Services.StartLists.IStartListStore>(
                 sp => sp.GetRequiredService<HpskSite.Services.StartLists.SwitchingStartListStore>());
-            builder.Services.AddScoped<HpskSite.Services.StartLists.StartListMigrationService>();
             builder.Services.AddHostedService<HpskSite.Services.StartLists.StartListSchemaGuardHostedService>();
             builder.AddNotificationHandler<Umbraco.Cms.Core.Notifications.ContentSavingNotification,
                 HpskSite.Services.StartLists.StartListNodeGuard>();

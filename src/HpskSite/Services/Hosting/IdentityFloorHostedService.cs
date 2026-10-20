@@ -33,12 +33,12 @@ namespace HpskSite.Services.Hosting
         /// <summary>Tabellerna och deras källor. Saknas tabellen hoppas den över.</summary>
         internal static readonly (string Table, IdentityFloor.Source[] Sources)[] Tables =
         {
-            ("dbo.CompetitionRegistration", RegistrationMigrationService.IdSources),
-            ("dbo.ClubEvent", ClubEventMigrationService.IdSources),
-            ("dbo.CompetitionStartList", HpskSite.Services.StartLists.StartListMigrationService.IdSources),
-            ("dbo.CompetitionResultList", HpskSite.Services.Results.CompetitionResultMigrationService.IdSources),
-            ("dbo.Competition", HpskSite.Services.Competitions.CompetitionMigrationService.CompetitionIdSources),
-            ("dbo.CompetitionSeries", HpskSite.Services.Competitions.CompetitionMigrationService.SeriesIdSources),
+            ("dbo.CompetitionRegistration", TableIdSources.Registrations),
+            ("dbo.ClubEvent", TableIdSources.ClubEvents),
+            ("dbo.CompetitionStartList", TableIdSources.StartLists),
+            ("dbo.CompetitionResultList", TableIdSources.ResultLists),
+            ("dbo.Competition", TableIdSources.Competitions),
+            ("dbo.CompetitionSeries", TableIdSources.Series),
         };
 
         /// <summary>Kör omsättningen för alla tabeller. Returnerar (tabell, före, efter) för loggen och testerna.</summary>

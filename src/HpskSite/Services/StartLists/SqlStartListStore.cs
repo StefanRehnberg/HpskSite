@@ -16,7 +16,7 @@ namespace HpskSite.Services.StartLists
     ///
     /// <para><b>⚠️ Id:n — LAG: id-reglerna (CLAUDE.md).</b> Migrerade rader bär nodens id (IDENTITY_INSERT);
     /// identiteten fortsätter över varje startliste-id någon pekar på (<c>IdentityFloor</c> med
-    /// <c>StartListMigrationService.IdSources</c>, vid flytt, tömning och varje start). Id:n är positiva;
+    /// <c>TableIdSources.StartLists</c>, vid flytt, tömning och varje start). Id:n är positiva;
     /// "ingen lista" är 0. Att samma tal kan finnas som en nod av en annan sort är ofarligt — en lista
     /// slås bara upp här.</para>
     ///

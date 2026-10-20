@@ -216,27 +216,6 @@ namespace HpskSite.Controllers
         }
 
         /// <summary>
-        /// C3-planen §5e: avpublicerar tävlingsnoderna FÖRBI spärren (fakturamapparna, de andra lagringarna) — för att
-        /// pröva sidorna utan noder. BARA på databaskopian; i dev och prod gäller spärren.
-        /// </summary>
-        [HttpPost, ValidateAntiForgeryToken]
-        public async Task<IActionResult> UnpublishCompetitionNodesOnCopy(int batch,
-            [FromServices] HpskSite.Services.Competitions.CompetitionMigrationService migration)
-        {
-            if (!await _auth.IsCurrentUserAdminAsync()) return Refused();
-            try
-            {
-                _storeComparison.EnsureCopyDatabase();
-                var (done, remaining, message) = migration.UnpublishNodes(batch, Services.ContentService, copyOnlyIgnoreBlockers: true);
-                return JsonText(new { success = true, unpublished = done, remaining, message });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return JsonText(new { success = false, message = ex.Message });
-            }
-        }
-
-        /// <summary>
         /// C3-planen §5.6, repetitionen med "förgiftade" noder: lägger tävlings- och serienoderna i papperskorgen
         /// (med allt under dem), så att varje läsning som fortfarande går till en nod syns när sajten gås igenom.
         /// BARA i Development och bara mot kopiorna <c>Umbraco_C3</c> och <c>Umbraco_Scale</c>.

@@ -1,4 +1,4 @@
-using HpskSite.Models.Competitions;
+﻿using HpskSite.Models.Competitions;
 using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Services;
@@ -46,9 +46,6 @@ namespace HpskSite.Services.Competitions
         public IReadOnlyDictionary<int, CompetitionInfo> GetMany(IReadOnlyCollection<int> ids) => _core.GetMany(ids);
         public IReadOnlyList<CompetitionInfo> List() => _core.List(null);
         public IReadOnlyList<CompetitionInfo> ListBySeries(int seriesId) => seriesId <= 0 ? Array.Empty<CompetitionInfo>() : _core.List(seriesId);
-
-        /// <summary>Det sparade läget även i papperskorgen, och noden. Bara för flytten (§5b).</summary>
-        public (CompetitionInfo Record, IContent Node)? ReadForMigration(int id) => _core.ReadForMigration(id);
 
         /// <summary>Doktypen har egenskapen (även genom en komposition).</summary>
         public bool CanStore(string alias) =>
@@ -145,9 +142,6 @@ namespace HpskSite.Services.Competitions
 
         public CompetitionUpdateResult<CompetitionSeriesInfo> Trash(int id) => _core.Trash(id);
 
-        /// <summary>Det sparade läget även i papperskorgen, och noden. Bara för flytten (§5b).</summary>
-        public (CompetitionSeriesInfo Record, IContent Node)? ReadForMigration(int id) => _core.ReadForMigration(id);
-
         private static void Fill(CompetitionSeriesInfo s, NodeMeta m)
         {
             s.Id = m.Id; s.Key = m.Key; s.Name = m.Name; s.Version = m.Version;
@@ -203,21 +197,6 @@ namespace HpskSite.Services.Competitions
             if (id <= 0) return null;
             var node = _contentService.GetById(id);
             return node is not null && !node.Trashed && node.ContentType.Alias == _alias ? FromContent(node) : null;
-        }
-
-        /// <summary>
-        /// Läget som flyttas, och noden själv (för arkivet). BARA för flytten till tabellen (C3-planen §5b).
-        /// <b>En publicerad nod flyttas i sitt PUBLICERADE läge</b> — det är det sajten visat och sajtens redigering
-        /// skrivit (den publicerar alltid). Ett utkast före det publicerade kommer bara ur backoffice och har aldrig
-        /// synts (KM C 5361: utkastet tappade klubben och blev öppen för alla). Utkastet finns kvar i arkivet.
-        /// Opublicerade och papperskorgens noder flyttas i det sparade läget.
-        /// </summary>
-        public (T Record, IContent Node)? ReadForMigration(int id)
-        {
-            if (id <= 0) return null;
-            var node = _contentService.GetById(id);
-            if (node is null || node.ContentType.Alias != _alias) return null;
-            return (node.Published && !node.Trashed ? FromContent(node, published: true) : FromContent(node), node);
         }
 
         public IReadOnlyDictionary<int, T> GetMany(IReadOnlyCollection<int> ids)

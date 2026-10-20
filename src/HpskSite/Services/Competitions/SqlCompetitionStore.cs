@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using HpskSite.Models.Competitions;
 using HpskSite.Services.Addresses;
 using NPoco;
@@ -70,9 +70,6 @@ namespace HpskSite.Services.Competitions
 
         public CompetitionUpdateResult<CompetitionInfo> Trash(int id) => _core.Trash(id, c => c.SeriesId ?? -1);
 
-        /// <summary>Raden även när den är raderad. Bara för flytten (§5b).</summary>
-        public (CompetitionInfo Record, bool Deleted)? GetForMigration(int id) => _core.GetIncludingDeleted(id);
-
         /// <summary>
         /// Serie-id:t och trädets förälder i samma form som de flyttade raderna: i en serie är föräldern serien.
         /// </summary>
@@ -129,9 +126,6 @@ namespace HpskSite.Services.Competitions
             _core.Create(name, init, new Dictionary<string, object?>(), null);
 
         public CompetitionUpdateResult<CompetitionSeriesInfo> Trash(int id) => _core.Trash(id, s => s.ParentId);
-
-        /// <summary>Raden även när den är raderad. Bara för flytten (§5b).</summary>
-        public (CompetitionSeriesInfo Record, bool Deleted)? GetForMigration(int id) => _core.GetIncludingDeleted(id);
 
         private void SyncAddress(int id) =>
             _services.GetRequiredService<CompetitionAddressService>().SyncSeries(id);
@@ -219,18 +213,6 @@ namespace HpskSite.Services.Competitions
                 ? scope.Database.Fetch<Dictionary<string, object?>>($"SELECT * FROM {_table} WHERE [{filter.Value.Column}] = @0 AND {NotDeleted} ORDER BY SortOrder, Id", filter.Value.Value)
                 : scope.Database.Fetch<Dictionary<string, object?>>($"SELECT * FROM {_table} WHERE {NotDeleted} ORDER BY Id");
             return rows.Select(ToRecord).ToList();
-        }
-
-        /// <summary>
-        /// Raden även när den är raderad, och om den är det. BARA för flyttens jämförelse (§5b) — ingen yta får
-        /// läsa en raderad rad.
-        /// </summary>
-        public (T Record, bool Deleted)? GetIncludingDeleted(int id)
-        {
-            if (id <= 0) return null;
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var row = scope.Database.Fetch<Dictionary<string, object?>>($"SELECT * FROM {_table} WHERE Id = @0", id).FirstOrDefault();
-            return row is null ? null : (ToRecord(row), Value(row, "DeletedUtc") != null);
         }
 
         /// <summary>Finns en icke raderad rad med id:t i <paramref name="table"/> (en av de två tävlingstabellerna)?</summary>
