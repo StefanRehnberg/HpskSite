@@ -53,6 +53,12 @@ namespace HpskSite.Services.Registrations
         IReadOnlyDictionary<int, int> CountByCompetition(IReadOnlyCollection<int>? competitionIds = null);
 
         /// <summary>
+        /// Tävlingarna som har minst en anmälan registrerad av <paramref name="registeredBy"/> (exakt). En läsning för
+        /// hela sajten — statistiken frågade förut per tävling efter simuleringsseederns anmälningar.
+        /// </summary>
+        IReadOnlySet<int> CompetitionsWithRegisteredBy(string registeredBy);
+
+        /// <summary>
         /// Sparar anmälan: skapar den när <see cref="RegistrationRecord.Id"/> är 0, annars uppdateras
         /// den. Returnerar id:t. Kastar när tävlingen inte finns.
         /// </summary>

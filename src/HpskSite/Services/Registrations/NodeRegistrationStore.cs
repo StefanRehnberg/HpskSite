@@ -164,6 +164,12 @@ WHERE n.trashed = 0
             public int CompetitionId { get; set; }
         }
 
+        public IReadOnlySet<int> CompetitionsWithRegisteredBy(string registeredBy) =>
+            // Nodläget: per tävling med anmälningar, som statistiken gjorde förut.
+            CountByCompetition().Keys
+                .Where(id => List(id).Any(r => string.Equals(r.RegisteredBy, registeredBy, StringComparison.Ordinal)))
+                .ToHashSet();
+
         public IReadOnlyDictionary<int, int> CountByCompetition(IReadOnlyCollection<int>? competitionIds = null)
         {
             var result = new Dictionary<int, int>();
