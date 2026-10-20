@@ -115,7 +115,7 @@ namespace HpskSite.Controllers
             if (c == null) return Json(new { success = false, message = "Tävlingen hittades inte." });
             if (!c.Offered) return Json(new { success = false, message = "Bangranskning erbjuds för fälttävlingar på kretsnivå och högre." });
             if (c.RegionId <= 0) return Json(new { success = false, message = "Tävlingens krets går inte att avgöra. Kontrollera arrangör och krets på tävlingen." });
-            if (!c.HasStations) return Json(new { success = false, message = "Tävlingen har ingen stationsbeskrivning än. Anslut en konfiguration under Fältskytte-inställningar först." });
+            if (!c.HasStations) return Json(new { success = false, message = "Tävlingen har ingen stationsbeskrivning än. Kopiera en konfiguration till tävlingen under Fältskytte-inställningar först." });
 
             var kind = _access.ReviewerKind(c.RegionId);
             var (r, err) = _reviews.Submit(competitionId, c.RegionId, c.Route, c.StationConfig!, c.Required, kind, Clip(note, 2000), me.Id, DisplayName(me));

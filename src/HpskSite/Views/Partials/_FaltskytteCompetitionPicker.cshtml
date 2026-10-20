@@ -21,18 +21,19 @@
                 </select>
             </div>
             <button type="button" class="btn btn-primary btn-sm" id="@(prefix)faltConfigAttachBtn" onclick="faltPickerAttach('@prefix')" disabled>
-                <i class="bi bi-link me-1"></i>Anslut
+                <i class="bi bi-files me-1"></i>Kopiera till tävlingen
             </button>
             <a href="/faltkonfig" target="_blank" class="btn btn-outline-secondary btn-sm" title="Öppna konfiguratorn i ny flik">
                 <i class="bi bi-box-arrow-up-right me-1"></i>Öppna konfiguratorn
             </a>
         </div>
         <div id="@(prefix)faltConfigStatus" class="mt-2 small">
-            <span class="text-muted">Ingen konfiguration ansluten.</span>
+            <span class="text-muted">Ingen konfiguration kopierad till tävlingen.</span>
         </div>
         <div class="form-text small mt-1">
             Konfigurationer byggs på <a href="/faltkonfig" target="_blank">/faltkonfig</a>.
-            En ansluten konfiguration kopieras in i tävlingens stationsdata och kan inte ändras härifrån.
+            Tävlingen får en egen kopia av konfigurationen. Ändras konfigurationen senare följer ändringarna
+            inte med — kopiera den då igen.
         </div>
         <input type="hidden" id="@(prefix)faltStationConfigJson" name="@(prefix == "" ? "stationConfig" : (prefix == "edit_" ? "stationConfig" : ""))" value="" />
         <input type="hidden" id="@(prefix)faltAttachedConfigId" value="" />
@@ -115,7 +116,7 @@
         var configId = parseInt(sel.value);
         var cfg = (window._faltPickerCache || []).find(function(c) { return c.id === configId; });
         if (!cfg) return;
-        if (!confirm('Anslut konfigurationen "' + cfg.name + '"?\n\nDe befintliga stationsdata för denna tävling skrivs över.')) return;
+        if (!confirm('Kopiera konfigurationen "' + cfg.name + '" till tävlingen?\n\nTävlingens nuvarande stationsdata skrivs över. Senare ändringar i konfigurationen följer inte med.')) return;
 
         try {
             var resp = await fetch('/umbraco/surface/FaltskytteConfiguration/Get?id=' + configId);
@@ -176,7 +177,7 @@
                   '<button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="faltPickerConvertInline(\'' + prefix + '\')">' +
                     '<i class="bi bi-arrow-up-circle me-1"></i>Konvertera till sparad konfiguration' +
                   '</button>'
-                : '<span class="text-muted">Ingen konfiguration ansluten.</span>';
+                : '<span class="text-muted">Ingen konfiguration kopierad till tävlingen.</span>';
             return;
         }
         var secretBadge = cfg.isSecret
@@ -195,7 +196,7 @@
         // ⚠️ Stationsantalet här är KONFIGURATIONENS. För en befintlig tävling ersätts det nedan
         // med tävlingens eget antal — tävlingen bär en kopia som inte följer med när
         // konfigurationen ändras (Michael, tävling 5450: "8 stationer" i tävlingen, "6" här).
-        status.innerHTML = '<span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Ansluten</span> ' +
+        status.innerHTML = '<span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Kopierad från</span> ' +
             '<strong>' + (cfg.name || '').replace(/</g, '&lt;') + '</strong>' + secretBadge + approvalBadge +
             ' &middot; <span class="text-muted" id="' + prefix + 'faltConfigCount">' + cfg.stationCount + ' stationer</span>' +
             ' &middot; <a href="/faltkonfig/' + cfg.id + '/redigera" target="_blank">Redigera konfigurationen <i class="bi bi-box-arrow-up-right"></i></a>' +
@@ -217,8 +218,8 @@
                         ? ' Tävlingen använder fortfarande ' + d.competitionStationCount + ' stationer, konfigurationen har nu ' + d.configStationCount + '.'
                         : ' Tävlingen använder fortfarande de gamla stationsuppgifterna.';
                     staleEl.innerHTML = '<div class="alert alert-warning py-1 px-2 mt-2 mb-0 small">' +
-                        '<i class="bi bi-exclamation-triangle me-1"></i><strong>Konfigurationen har ändrats sedan den anslöts.</strong>' + diff +
-                        ' Ändringar förs inte över automatiskt. Vill du använda dem: klicka <strong>Anslut</strong> och sedan <strong>Spara</strong>.</div>';
+                        '<i class="bi bi-exclamation-triangle me-1"></i><strong>Konfigurationen har ändrats sedan den kopierades.</strong>' + diff +
+                        ' Ändringarna följer inte med av sig själva. Vill du använda dem: klicka <strong>Kopiera till tävlingen</strong> och sedan <strong>Spara</strong>.</div>';
                 }
             })
             .catch(function () { /* statusraden klarar sig utan */ });
