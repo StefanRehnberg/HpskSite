@@ -11833,6 +11833,12 @@ Underhåll på `/admin-page`. Samma steg som startlistorna: Torrkör → (frys, 
   Development, bara kopiorna) och `hpsk-verify/c3/c3-s5e-rehearsal.mjs` (arkiv/avpublicering/papperskorg genom de riktiga
   endpointsen), `c3-url-corpus.mjs` före/efter och `c3-s5e-poison-probe.mjs` (inloggade ytor). Efter rättelserna: 7 396
   adresser oförändrade, 261 sidor och 184 anrop utan fel. Kör den igen före raderingen av noderna.
+- **⭐ C3 KLART I PROD 2026-10-20.** Tävlings-, serie-, list-, resultat-, anmälnings- och händelsenoderna är raderade,
+  och dokumenttyperna `clubSimpleEvent`, `competitionSeason`, `competitionTeamRegistration`, `finalsStartList`,
+  `competitionResult`, `precisionStartList`, `competitionRegistration`, `competitionRegistrationsHub` med sina mallar är
+  borttagna. ⚠️⚠️ **Dokumenttyperna `competition` och `competitionSeries` ska STÅ KVAR** (utan noder): `VirtualCompetitionNodes`
+  bygger sidmodellen med deras `IPublishedContentType` — tas de bort ger varje tävlings- och seriesida 500. De är borttagna
+  ur `competitionsHub`s tillåtna barn.
 - **⚠️⚠️ Raderingen av noderna (§5.5 punkt 7, 2026-10-19): `CompetitionNodeDeletionService`**, Underhåll → Tävlingar
   och serier → *4. Radera de gamla noderna* (`CompetitionMigration/DeleteNodesPreview` läser, `DeleteNodes` i omgångar om
   högst 20 s). Tävlingarna först (med allt under dem), sedan serierna, sist tomma årsmappar; en nod per `Delete`, aldrig
