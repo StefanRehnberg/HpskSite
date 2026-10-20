@@ -17,10 +17,16 @@
 @{
     Layout = "Master.cshtml";
 
-    var pageTitle = Model.Value<string>("pageTitle") ?? "Tävlingar";
+    // Tomt fält är en tom sträng, inte null — "??" slog aldrig till och titeln blev " - Pistol.nu".
+    var pageTitleValue = Model.Value<string>("pageTitle");
+    var pageTitle = string.IsNullOrWhiteSpace(pageTitleValue) ? "Tävlingar" : pageTitleValue;
     var pageDescription = Model.Value<string>("pageDescription");
 
     ViewBag.Title = pageTitle;
+
+    // Listvyns rader renderas bara när de begärs (?vy=lista, hämtas av sidans skript första gången listvyn visas).
+    // Förut renderades varje tävling två gånger — som kort och som tabellrad — en tredjedel av sidan i onödan.
+    var hubListOnly = string.Equals(Context.Request.Query["vy"], "lista", StringComparison.OrdinalIgnoreCase);
 
     // Single content tree traversal for all lookups (avoids ~107 separate tree scans)
     var allContent = Model.SiteRoot().DescendantsOrSelf().ToList();
@@ -534,6 +540,7 @@
             @* Individual Competition Cards *@
             @foreach (var competition in allCompetitions)
             {
+                if (hubListOnly) { break; } // listvyns hämtning behöver bara raderna
                 try
                 {
                 // Get competition details
@@ -876,7 +883,7 @@
                         <th scope="col" style="width: 8%">Åtgärd</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="hubListBody" data-lazy="@(hubListOnly ? "0" : "1")">
                     @* Seriekorten är borta från den här sidan: en serie konkurrerade om
                        samma kortyta som tävlingarna, och dess omgångar gick inte att hitta alls.
                        Varje omgång är nu en vanlig rad med en "Del av <serien>"-länk. *@
@@ -885,6 +892,7 @@
                     @* Individual Competition Rows *@
                     @foreach (var competition in allCompetitions)
                     {
+                        if (!hubListOnly) { break; } // raderna hämtas först när listvyn visas (?vy=lista)
                         // Get competition details (reuse same logic as card view)
                         var compDate = (Posts.Of(competition).CompetitionDate ?? DateTime.MinValue);
                         var compEndDate = Posts.Of(competition).CompetitionEndDate;
@@ -1759,7 +1767,37 @@ document.addEventListener('DOMContentLoaded', function() {
         if (mapViewBtn) mapViewBtn.classList.remove('active');
 
         // Store preference in localStorage
-        localStorage.setItem('competitionsView', 'list');
+        try { localStorage.setItem('competitionsView', 'list'); } catch (e) { }
+        ensureListRows();
+    }
+
+    // Listvyns rader renderas inte med sidan (de vore en andra kopia av varje tävling) utan hämtas första gången
+    // listvyn visas: samma adress med ?vy=lista, som bara renderar raderna. Sedan filtreras och sorteras de som korten.
+    let listRowsPromise = null;
+    function ensureListRows() {
+        const body = document.getElementById('hubListBody');
+        if (!body || body.dataset.lazy !== '1') return Promise.resolve();
+        if (listRowsPromise) return listRowsPromise;
+        body.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>Hämtar listan…</td></tr>';
+        const url = new URL(window.location.href);
+        url.searchParams.set('vy', 'lista');
+        url.hash = '';
+        listRowsPromise = fetch(url.toString(), { credentials: 'same-origin' })
+            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+            .then(html => {
+                const doc = new DOMParser().parseFromString(html, 'text/html');
+                const rows = doc.getElementById('hubListBody');
+                if (!rows) throw new Error('listan saknas i svaret');
+                body.innerHTML = rows.innerHTML;
+                body.dataset.lazy = '0';
+                filterCompetitions();
+            })
+            .catch(err => {
+                listRowsPromise = null;
+                body.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Listan kunde inte hämtas (' + compEsc(err.message) + '). '
+                    + 'Försök igen, eller använd kortvyn.</td></tr>';
+            });
+        return listRowsPromise;
     }
 
     // Map view (members only — shows competitions grouped by their linked shooting range)
