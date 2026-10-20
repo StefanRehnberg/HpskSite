@@ -97,30 +97,30 @@ namespace HpskSite.Services.Ops
             var stores = new List<StoreState>
             {
                 ReadStore("Anmälningar", "dbo.CompetitionRegistration", RegistrationStoreSettings.StoreKey,
-                    RegistrationStoreSettings.WriteFreezeKey, new[] { NodeRegistrationStore.RegistrationAlias }, RegistrationMigrationService.IdSources),
+                    RegistrationStoreSettings.WriteFreezeKey, new[] { NodeRegistrationStore.RegistrationAlias }, TableIdSources.Registrations),
                 ReadStore("Händelser", "dbo.ClubEvent", ClubEventStoreSettings.StoreKey,
-                    ClubEventStoreSettings.WriteFreezeKey, new[] { "clubSimpleEvent" }, ClubEventMigrationService.IdSources),
+                    ClubEventStoreSettings.WriteFreezeKey, new[] { "clubSimpleEvent" }, TableIdSources.ClubEvents),
                 ReadStore("Startlistor", "dbo.CompetitionStartList", HpskSite.Services.StartLists.StartListStoreSettings.StoreKey,
                     HpskSite.Services.StartLists.StartListStoreSettings.WriteFreezeKey,
                     new[] { "precisionStartList", "finalsStartList" }, // startliststore-ok: bara ett antal noder i hälsokontrollen
 
-                    HpskSite.Services.StartLists.StartListMigrationService.IdSources),
+                    TableIdSources.StartLists),
                 ReadStore("Resultatlistor", "dbo.CompetitionResultList", HpskSite.Services.Results.CompetitionResultStoreSettings.StoreKey,
                     HpskSite.Services.Results.CompetitionResultStoreSettings.WriteFreezeKey,
                     new[] { "competitionResult" }, // resultstore-ok: bara ett antal noder i hälsokontrollen
 
-                    HpskSite.Services.Results.CompetitionResultMigrationService.IdSources),
+                    TableIdSources.ResultLists),
                 // C3-planen §5: tävlingarna och serierna.
                 ReadStore("Tävlingar", HpskSite.Services.Competitions.SqlCompetitionStore.Table,
                     HpskSite.Services.Competitions.CompetitionStoreSettings.StoreKey,
                     HpskSite.Services.Competitions.CompetitionStoreSettings.WriteFreezeKey,
                     new[] { HpskSite.Models.Competitions.CompetitionFieldTable.NodeAlias },
-                    HpskSite.Services.Competitions.CompetitionMigrationService.CompetitionIdSources),
+                    TableIdSources.Competitions),
                 ReadStore("Serier", HpskSite.Services.Competitions.SqlCompetitionSeriesStore.Table,
                     HpskSite.Services.Competitions.CompetitionStoreSettings.StoreKey,
                     HpskSite.Services.Competitions.CompetitionStoreSettings.WriteFreezeKey,
                     new[] { HpskSite.Models.Competitions.CompetitionSeriesFieldTable.NodeAlias },
-                    HpskSite.Services.Competitions.CompetitionMigrationService.SeriesIdSources),
+                    TableIdSources.Series),
             };
 
             var (count, noUrl, compError) = ReadCompetitions();

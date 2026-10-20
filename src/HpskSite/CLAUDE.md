@@ -50,7 +50,12 @@ en flytt. Därför gäller tre regler, för varje sort, nu och framåt:
 - Inga negativa id:n, inga startvärden "långt upp", ingen global räknare. Positiva id:n överallt, så
   `id > 0` betyder "finns".
 - Ny tabell som tar över noder → `IdentityFloor` + `IdSources` + en store + ett spärrtest mot nya noder.
-- Ny referenskolumn till en sort → lägg den i sortens `IdSources`.
+- Ny referenskolumn till en sort → lägg den i sortens lista i **`Services/Hosting/TableIdSources.cs`**.
+- ⚠️ **Flyttverktygen är BORTTAGNA (2026-10-20)** — alla sex lagringarna står på tabell i prod och noderna är
+  raderade. `RegistrationMigration`, `ClubEventMigration`, `StartListMigration`, `CompetitionResultMigration`,
+  `CompetitionMigration` (controllers + tjänster + planerare), nodraderingen, fakturaarkivets flytt och kortet
+  i Underhåll finns inte längre; avsnitten längre ned som beskriver dem är historik. `…MigrationService.IdSources`
+  i texten nedan = `TableIdSources`. Nodlagringarna och växlarna finns kvar.
 - Kända avvikelser som ska bort (2026-10-13): ~~start- och resultatlistornas negativa id:n~~ (bytta
   på branchen `skalplan-fas-c` 2026-10-13); `featuredItems` (ingen läser den längre sedan C3 F3 — doctype-
   egenskapen kan tas bort i backoffice); gamla fakturanoders
