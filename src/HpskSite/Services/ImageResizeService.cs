@@ -30,7 +30,10 @@ public class ImageResizeService
     /// <returns>Resized image as JPEG byte array</returns>
     public async Task<byte[]> ResizeImageAsync(Stream inputStream)
     {
-        using var image = await Image.LoadAsync(inputStream);
+        // Bara JPEG/PNG/GIF/WebP/BMP — en TIFF med annan filändelse avkodas inte (se SafeImageConfiguration).
+        using var image = await Image.LoadAsync(
+            new SixLabors.ImageSharp.Formats.DecoderOptions { Configuration = HpskSite.Services.Media.SafeImageConfiguration.Instance },
+            inputStream);
 
         var originalWidth = image.Width;
         var originalHeight = image.Height;
