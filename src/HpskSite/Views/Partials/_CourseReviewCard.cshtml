@@ -95,7 +95,7 @@
             + '<a href="' + esc(d.komIgangUrl) + '">Be kretsen komma igång</a></div>';
         if (!d.hasStations) {
             setState('Ingen bana än', 'bg-secondary');
-            body.innerHTML = html + '<p class="mb-0">När tävlingen har en stationsbeskrivning (Fältskytte-inställningar → anslut en konfiguration) kan banan skickas in'
+            body.innerHTML = html + '<p class="mb-0">När tävlingen har en stationsbeskrivning (Fältskytte-inställningar → kopiera en konfiguration till tävlingen) kan banan skickas in'
                 + (forb ? ' till Förbundet.' : ' till ' + esc(d.region.name) + ' för granskning.') + '</p>';
             return;
         }

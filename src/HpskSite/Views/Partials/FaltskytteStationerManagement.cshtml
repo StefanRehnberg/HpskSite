@@ -22,7 +22,7 @@
 
 @Html.AntiForgeryToken()
 
-@* Den anslutna konfigurationen har ändrats sedan den anslöts. Kopian förs medvetet aldrig över
+@* Konfigurationen har ändrats sedan den kopierades till tävlingen. Kopian förs medvetet aldrig över
    automatiskt — rutan säger bara att den skiljer sig och hur man hämtar ändringarna. *@
 <div class="alert alert-warning d-none" id="fseStnCfgStale" role="status"></div>
 
@@ -256,16 +256,16 @@
             if (!d.success || !d.attached) { box.classList.add('d-none'); return; }
             var html = '';
             if (d.configMissing) {
-                html = '<i class="bi bi-exclamation-triangle me-1"></i><strong>Konfigurationen som tävlingen anslöts till finns inte längre.</strong> '
+                html = '<i class="bi bi-exclamation-triangle me-1"></i><strong>Konfigurationen som tävlingen kopierades från finns inte längre.</strong> '
                     + 'Tävlingen använder sin sparade kopia med ' + d.competitionStationCount + ' stationer.';
             } else if (d.stale) {
-                var name = d.configName ? '"' + esc(d.configName) + '"' : 'Den anslutna konfigurationen';
+                var name = d.configName ? 'Konfigurationen "' + esc(d.configName) + '"' : 'Konfigurationen';
                 var counts = d.configStationCount !== d.competitionStationCount
                     ? ' Tävlingen använder fortfarande <strong>' + d.competitionStationCount + ' stationer</strong>, konfigurationen har nu <strong>' + d.configStationCount + '</strong>.'
                     : ' Tävlingen använder fortfarande de gamla stationsuppgifterna.';
-                html = '<i class="bi bi-exclamation-triangle me-1"></i><strong>' + name + ' har ändrats sedan den anslöts till tävlingen.</strong>' + counts
-                    + '<div class="mt-1 small">Ändringar i en konfiguration förs inte över automatiskt. Vill du använda dem: '
-                    + 'öppna <strong>Redigera tävling</strong>, välj konfigurationen, klicka <strong>Anslut</strong> och sedan <strong>Spara</strong>.</div>';
+                html = '<i class="bi bi-exclamation-triangle me-1"></i><strong>' + name + ' har ändrats sedan den kopierades till tävlingen.</strong>' + counts
+                    + '<div class="mt-1 small">Tävlingen har en egen kopia, och ändringar i konfigurationen följer inte med av sig själva. Vill du använda dem: '
+                    + 'öppna <strong>Redigera tävling</strong>, välj konfigurationen, klicka <strong>Kopiera till tävlingen</strong> och sedan <strong>Spara</strong>.</div>';
             }
             box.innerHTML = html;
             box.classList.toggle('d-none', !html);

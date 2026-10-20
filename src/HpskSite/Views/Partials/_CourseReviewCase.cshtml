@@ -46,7 +46,7 @@ if (!window.hpskRenderCourseCase) {
                 'Banan kommer från den sparade konfigurationen <strong>' + esc(a.name) + '</strong>, '
                 + (a.status === 'Approved' ? 'godkänd av banläggaren ' + esc(a.approvedBy || '') + (a.approvedAt ? ' ' + esc(String(a.approvedAt).slice(0, 10)) : '') : 'inte godkänd av en banläggare')
                 + (a.contentMatches ? '.' : ' — men tävlingens bana har ändrats efter att den anslöts.'));
-            else ok(true, 'Banan är inte ansluten till en sparad konfiguration (inget banläggargodkännande att visa).');
+            else ok(true, 'Banan är inte kopierad från en sparad konfiguration (inget banläggargodkännande att visa).');
             if (c.morker) ok(true, 'Mörkerfältskjutning — avstånd och skjuttider bedöms ett steg strängare.');
             return '<ul class="list-group list-group-flush mb-2" id="crChecklist">' + rows.join('') + '</ul>';
         }
