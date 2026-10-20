@@ -135,6 +135,10 @@
             } catch (e) { /* malformed source — keep as-is */ }
             if (fld) fld.value = jsonBlob;
             if (idFld) idFld.value = configId;
+            // Nyss ansluten, ännu inte sparad: statusraden ska då inte fråga servern om
+            // tävlingens (gamla) kopia, utan säga att tävlingen behöver sparas.
+            window._faltPickerAttachedNow = window._faltPickerAttachedNow || {};
+            window._faltPickerAttachedNow[prefix] = true;
             // Auto-sync ${prefix}numberOfSeries to the attached config's station count.
             // Only the wizard exposes this field; the edit modal doesn't (numberOfSeries
             // there was set at competition creation and shouldn't shift on re-attach).
@@ -185,10 +189,39 @@
         } else if (cfg.approvalStatus === 'PendingApproval') {
             approvalBadge = ' <span class="badge bg-warning text-dark" title="Väntar på godkännande"><i class="bi bi-hourglass-split me-1"></i>Väntar</span>';
         }
+        var attachedNow = window._faltPickerAttachedNow && window._faltPickerAttachedNow[prefix];
+        var compIdFld = document.getElementById(prefix + 'competitionId');
+        var compId = compIdFld ? parseInt(compIdFld.value, 10) : 0;
+        // ⚠️ Stationsantalet här är KONFIGURATIONENS. För en befintlig tävling ersätts det nedan
+        // med tävlingens eget antal — tävlingen bär en kopia som inte följer med när
+        // konfigurationen ändras (Michael, tävling 5450: "8 stationer" i tävlingen, "6" här).
         status.innerHTML = '<span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Ansluten</span> ' +
             '<strong>' + (cfg.name || '').replace(/</g, '&lt;') + '</strong>' + secretBadge + approvalBadge +
-            ' &middot; <span class="text-muted">' + cfg.stationCount + ' stationer</span>' +
-            ' &middot; <a href="/faltkonfig/' + cfg.id + '/redigera" target="_blank">Redigera <i class="bi bi-box-arrow-up-right"></i></a>';
+            ' &middot; <span class="text-muted" id="' + prefix + 'faltConfigCount">' + cfg.stationCount + ' stationer</span>' +
+            ' &middot; <a href="/faltkonfig/' + cfg.id + '/redigera" target="_blank">Redigera konfigurationen <i class="bi bi-box-arrow-up-right"></i></a>' +
+            '<div id="' + prefix + 'faltConfigStale"></div>';
+        var staleEl = document.getElementById(prefix + 'faltConfigStale');
+        if (attachedNow) {
+            staleEl.innerHTML = '<div class="alert alert-info py-1 px-2 mt-2 mb-0 small">Spara tävlingen för att den ska använda konfigurationen.</div>';
+            return;
+        }
+        if (!compId) return; // guiden — tävlingen finns inte än
+        fetch('/umbraco/surface/Faltskytte/GetAttachedConfigState?competitionId=' + compId)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.success || !d.attached || d.attachedConfigId !== cfg.id) return;
+                var cnt = document.getElementById(prefix + 'faltConfigCount');
+                if (cnt) cnt.textContent = 'tävlingen har ' + d.competitionStationCount + ' stationer';
+                if (d.stale) {
+                    var diff = d.configStationCount !== d.competitionStationCount
+                        ? ' Tävlingen använder fortfarande ' + d.competitionStationCount + ' stationer, konfigurationen har nu ' + d.configStationCount + '.'
+                        : ' Tävlingen använder fortfarande de gamla stationsuppgifterna.';
+                    staleEl.innerHTML = '<div class="alert alert-warning py-1 px-2 mt-2 mb-0 small">' +
+                        '<i class="bi bi-exclamation-triangle me-1"></i><strong>Konfigurationen har ändrats sedan den anslöts.</strong>' + diff +
+                        ' Ändringar förs inte över automatiskt. Vill du använda dem: klicka <strong>Anslut</strong> och sedan <strong>Spara</strong>.</div>';
+                }
+            })
+            .catch(function () { /* statusraden klarar sig utan */ });
     };
 
     // Convert the inline JSON on the current competition into a new saved
@@ -261,6 +294,7 @@
 
     // When the picker is rendered (on modal show), restore status if an id was preserved.
     window.faltPickerInit = async function(prefix) {
+        if (window._faltPickerAttachedNow) window._faltPickerAttachedNow[prefix] = false;
         await faltPickerLoadConfigs(prefix, true);
         var idFld = document.getElementById(prefix + 'faltAttachedConfigId');
         var attachedId = idFld && idFld.value ? parseInt(idFld.value) : null;
