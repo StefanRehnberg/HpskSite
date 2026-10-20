@@ -11953,8 +11953,11 @@ Läs det här innan du rör datum, NPoco eller adresser.
   gammal (adressdelar med `&` och `:`), prods var rensad. Deployen tvingar fram en ombyggnad
   (`UPDATE umbracoKeyValue SET value = 'ombyggnad-fas-e' WHERE [key] = 'UmbracoUrlGeneration'` före första
   starten), så tabellen följer dagens regler. Bygger om ~8 000 adresser på några sekunder.
-- **Säkerhetshål:** Pkcs 10.0.13 och MessagePack 3.1.12 låsta. ImageSharp 3.1.12 kvar (hålen i TIFF-kodaren och
-  histogramutjämningen, som sajten inte använder; rättningen finns bara i 4.x).
+- **Säkerhetshål:** Pkcs 10.0.13 och MessagePack 3.1.12 låsta. ImageSharp 3.1.12 kvar (rättningen finns bara i 4.x).
+  TIFF-kodaren är avstängd: **`Services/Media/SafeImageConfiguration`** (bara JPEG/PNG/GIF/WebP/BMP) används av
+  Umbracos bildmiddleware (PostConfigure), måttläsningen (DI) och `ImageResizeService`. Ny kod som avkodar en
+  uppladdad bild: `Image.LoadAsync(new DecoderOptions { Configuration = SafeImageConfiguration.Instance }, ström)`
+  — formatet känns igen på innehållet, så filändelsen skyddar inte. Test: `SafeImageConfigurationTests`.
 - Verifiering: kopian `Umbraco_U17` (dev-databasen uppgraderad), `$SP/u17run.sh`, och skyddsnätet 16 mot 17 på
   den frysta kopian (`$SP/s0capture-u17.sh`, `$SP/e-all.sh`). Sviter som läser databasen följer `HPSK_DB`.
 
