@@ -103,6 +103,14 @@ IsSubCompetition, IsCheckedIn, RegistrationDate, CreatedDate, RegisteredBy, Lega
             return result;
         }
 
+        public IReadOnlySet<int> CompetitionsWithRegisteredBy(string registeredBy)
+        {
+            using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            return scope.Database.Fetch<int>(
+                "SELECT DISTINCT CompetitionId FROM dbo.CompetitionRegistration WHERE RegisteredBy = @0", registeredBy ?? "")
+                .ToHashSet();
+        }
+
         public IReadOnlyDictionary<int, int> CountByCompetition(IReadOnlyCollection<int>? competitionIds = null)
         {
             var result = new Dictionary<int, int>();

@@ -522,15 +522,13 @@ namespace HpskSite.Controllers
             // simulation-seeded registration (the seeder tags them registeredBy="Simulering (seed)").
             // Anmälningarna via anmälningslagringen (sajtstrukturen fas 1a), en gång per tävling. Den
             // publicerade cachen såg bara de anmälningar som råkat publiceras.
-            var seededByCompetition = new Dictionary<int, bool>();
+            // EN läsning för hela sajten (förut en per tävling, ~0,3 s på 700 tävlingar).
+            var seededCompetitionIds = _registrations.CompetitionsWithRegisteredBy(SimulationSeedTag);
             bool IsExcludedCompetition(HpskSite.Models.Competitions.CompetitionInfo c)
             {
                 var cid = c.ClubId;
                 if (cid > 0 && excludedClubIds.Contains(cid)) return true;
-                if (!seededByCompetition.TryGetValue(c.Id, out var seeded))
-                    seededByCompetition[c.Id] = seeded = _registrations.List(c.Id).Any(r =>
-                        string.Equals(r.RegisteredBy, SimulationSeedTag, StringComparison.Ordinal));
-                return seeded;
+                return seededCompetitionIds.Contains(c.Id);
             }
 
             int totalMembers = approvedMembers.Count;
@@ -664,11 +662,19 @@ namespace HpskSite.Controllers
                         .Where(id => id > 0)
                         .ToHashSet();
 
+                    // Klubbarnas publicerade händelser i EN läsning (förut ListForOwner per klubb, två gånger).
+                    // Allt nedan räknar bara händelser från förrförra årets början, så äldre behövs inte.
+                    var eventsByOwner = _events.ListPublishedBetween(new DateTime(now.Year - 2, 1, 1), new DateTime(now.Year + 50, 1, 1))
+                        .GroupBy(e => e.OwnerId)
+                        .ToDictionary(g => g.Key, g => g.ToList());
+                    List<HpskSite.Models.Events.ClubEventRecord> EventsOf(int clubId) =>
+                        eventsByOwner.TryGetValue(clubId, out var list) ? list : new List<HpskSite.Models.Events.ClubEventRecord>();
+
                     var recentTrainings = _trainings.DatesByClub(threeMonthsAgo);
                     int activeClubs = allClubNodes.Count(club =>
                     {
                         if (!membersByClub.ContainsKey(club.Id)) return false;
-                        var hasRecentEvent = _events.ListForOwner(club.Id)
+                        var hasRecentEvent = EventsOf(club.Id)
                             .Any(e => e.StartsAt.HasValue && e.StartsAt.Value >= threeMonthsAgo)
                             // Fas B5: en träning är också aktivitet i klubben.
                             || (recentTrainings.TryGetValue(club.Id, out var td) && td.Count > 0);
@@ -738,7 +744,7 @@ namespace HpskSite.Controllers
 
                     // ── 3b. Club activities (events) ──────────────────
                     var allClubEvents = allClubNodes
-                        .SelectMany(club => _events.ListForOwner(club.Id)
+                        .SelectMany(club => EventsOf(club.Id)
                             .Select(e => new
                             {
                                 clubId = club.Id,

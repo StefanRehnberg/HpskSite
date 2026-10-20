@@ -88,6 +88,9 @@ namespace HpskSite.Services.Registrations
         public IReadOnlyDictionary<int, int> CountByCompetition(IReadOnlyCollection<int>? competitionIds = null)
             => Current.CountByCompetition(competitionIds);
 
+        public IReadOnlySet<int> CompetitionsWithRegisteredBy(string registeredBy)
+            => Current.CompetitionsWithRegisteredBy(registeredBy);
+
         public int Save(RegistrationRecord registration) => Writable.Save(registration);
         public bool Delete(int competitionId, int registrationId) => Writable.Delete(competitionId, registrationId);
     }
