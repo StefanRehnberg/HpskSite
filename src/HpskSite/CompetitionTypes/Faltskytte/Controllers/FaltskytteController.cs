@@ -41,6 +41,7 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
         private readonly HpskSite.Services.Registrations.ICompetitionRegistrationStore _registrations;
         private readonly HpskSite.Services.Results.ICompetitionResultStore _results;
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly FaltskytteConfigurationService _configurations;
 
         public FaltskytteController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -64,10 +65,12 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             HpskSite.Services.Kretsgranskning.CourseReviewAccess courseReviewAccess,
             HpskSite.Services.Registrations.ICompetitionRegistrationStore registrations,
             HpskSite.Services.Results.ICompetitionResultStore results,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            FaltskytteConfigurationService configurations)
             : base(umbracoContextAccessor, umbracoDatabaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
             _competitions = competitions;
+            _configurations = configurations;
             _registrations = registrations;
             _results = results;
             _contentService = contentService;
@@ -419,6 +422,49 @@ namespace HpskSite.CompetitionTypes.Faltskytte.Controllers
             catch { /* inline/legacy config without an attached id */ }
 
             return Json(new { success = true, expectedCount, attachedConfigId, stations });
+        }
+
+        /// <summary>
+        /// Har den anslutna konfigurationen ändrats sedan den anslöts? Läser bara — kopian förs
+        /// medvetet aldrig över automatiskt (se <see cref="FaltskytteAttachedConfigState"/>).
+        /// Används av Stationer-fliken och statusraden i Redigera tävling.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetAttachedConfigState(int competitionId)
+        {
+            if (!await IsAuthorizedForCompetition(competitionId))
+                return Json(new { success = false, message = "Du har inte behörighet." });
+
+            var competition = _competitions.GetSaved(competitionId);
+            if (competition == null)
+                return Json(new { success = false, message = "Tävlingen hittades inte." });
+
+            var snapshot = competition.StationConfig;
+            var competitionStations = FaltskytteAttachedConfigState.StationCount(snapshot);
+            var attachedId = FaltskytteAttachedConfigState.AttachedId(snapshot);
+            if (attachedId == null)
+                return Json(new { success = true, attached = false, competitionStationCount = competitionStations });
+
+            var config = await _configurations.GetByIdAsync(attachedId.Value);
+            if (config == null)
+                return Json(new { success = true, attached = true, attachedConfigId = attachedId, configMissing = true, competitionStationCount = competitionStations });
+
+            var viewer = await _configurations.GetCurrentMemberIdAsync();
+            var canView = await _configurations.CanViewAsync(config, viewer);
+            return Json(new
+            {
+                success = true,
+                attached = true,
+                attachedConfigId = attachedId,
+                configMissing = false,
+                // Namnet bara för den som får se konfigurationen (den kan vara hemlig).
+                configName = canView ? config.Name : null,
+                canView,
+                stale = FaltskytteAttachedConfigState.Differs(snapshot, config.JsonBlob),
+                competitionStationCount = competitionStations,
+                configStationCount = FaltskytteAttachedConfigState.StationCount(config.JsonBlob),
+                configModified = config.ModifiedDate
+            });
         }
 
         /// <summary>Saves the per-station chief assignments (JSON keyed by station number).</summary>
