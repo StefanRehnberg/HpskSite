@@ -11237,7 +11237,7 @@ läskontroll i prod: `Migrations/check-prod-sajtstruktur-2026-10-10.sql`. Svit:
   gömt varje anmälan och händelse sedan 2026-10-11). Efter avpubliceringen blir dessutom de publika sidorna
   tomma i nodläget. Dev-sviternas `--restore` skickar `force` med flit.
 - `RegistrationNodeGuard` / `ClubEventNodeGuard` vägrar NYA noder av typen när tabellen gäller.
-- **⚠️ Dev-databasen delas med `main`:** lämna aldrig dev på `table`. Sviterna
+- ⚠️ **Dev-databasen står på `table` sedan 2026-10-20, som prod, och noderna är raderade — växla aldrig tillbaka till `node`.** (Historik:) Sviterna
   `hpsk-verify/registration-migration-verify.mjs` och `club-event-migration-verify.mjs` kör hela
   fönstret; `--restore` växlar tillbaka och tömmer tabellerna.
 
@@ -12054,7 +12054,7 @@ cache, `Children()` eller SQL mot `umbracoPropertyData`. Gå genom `Services/Res
 - **Utan nod:** `CompetitionUrlContentFinder.TryServeResultPage` (snygga adresser) och
   `CompetitionResultTreeUrlFinder` (trädadresser) visar TÄVLINGEN med vyn `CompetitionResult` när lagringen
   har en lista. Vyn tar därför `Model` som antingen resultatnoden eller tävlingen.
-- ⚠️ **Dev delas med main — lämna aldrig dev på `table`.** `hpsk-verify/resultstore-mode.mjs table|node`.
+- ⚠️ **Dev-databasen står på `table` sedan 2026-10-20, som prod, och noderna är raderade — växla aldrig tillbaka till `node`.** (`hpsk-verify/resultstore-mode.mjs` är historik.)
   Sviter: `resultstore-migration-verify.mjs` (hela fönstret, 30), `resultstore-writepaths-verify.mjs`
   (23, lägesmedveten) — och resultatsviterna är gröna i båda lägena.
 
@@ -12108,7 +12108,7 @@ undantag får `startliststore-ok: <skäl>` på raden.
 - **En permanent raderad tävling** tar med sig sina rader i `CompetitionStartList` och
   `CompetitionResultList` (`CompetitionTableRowsCleanupHandler`) — startlistorna bär namn och klubbar.
   Papperskorgen rör den inte.
-- ⚠️ **Dev delas med main — lämna aldrig dev på `table`.** `hpsk-verify/startliststore-mode.mjs table|node`.
+- ⚠️ **Dev-databasen står på `table` sedan 2026-10-20, som prod, och noderna är raderade — växla aldrig tillbaka till `node`.** (`hpsk-verify/startliststore-mode.mjs` är historik.)
   Svit: `startliststore-migration-verify.mjs` (hela fönstret) — och startlistesviterna ska vara gröna i
   båda lägena.
 

@@ -48,6 +48,8 @@ document.addEventListener('DOMContentLoaded', function() {
 function initializeRegistrationModal() {
     // Initialize class availability on modal open
     const modal = document.getElementById('registrationModal');
+    // En annons (extern tävling) har ingen anmälningsdialog.
+    if (!modal) return;
     modal.addEventListener('shown.bs.modal', async function() {
         updateClassAvailability();
         updateSubmitButton();
