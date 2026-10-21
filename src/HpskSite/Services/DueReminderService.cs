@@ -88,7 +88,9 @@ namespace HpskSite.Services
                     .ToList();
                 if (due.Count == 0) continue;
 
-                List<(string Name, string Email)>? recipients = null;
+                // Registrera varje tillfälle för sig (spärren gäller per tillfälle) — skicka sedan ETT mejl med alla
+                // nyregistrerade för föreningen.
+                var claimed = new List<(int ClaimId, WheelOccurrence O)>();
                 foreach (var o in due)
                 {
                     result.Due++;
@@ -98,15 +100,18 @@ namespace HpskSite.Services
                     var claimId = TryClaim(source, key, ownerType, ownerId, o.TargetDate!.Value);
                     if (claimId == 0) continue;
                     result.Claimed++;
-
-                    recipients ??= BoardRecipients(ownerType, ownerId, orgName, orgEmail);
-                    var replyTo = ownerType == DocumentOwnerType.Club ? _reply.ForClub(ownerId) : _reply.ForRegion(ownerId);
-                    var link = $"{SiteUrl}/styrelse?type={ownerType}&id={ownerId}#vy=arshjul";
-                    var sent = await SendAll(recipients, o.Title, o.TargetDate.Value, today,
-                        "årshjulet för " + WebUtility.HtmlEncode(orgName), link, "Öppna årshjulet", replyTo);
-                    Finish(claimId, sent);
-                    Tally(result, sent, $"{orgName}: {o.Title} {o.TargetDate:yyyy-MM-dd} → {sent} av {recipients.Count}");
+                    claimed.Add((claimId, o));
                 }
+                if (claimed.Count == 0) continue;
+
+                var recipients = BoardRecipients(ownerType, ownerId, orgName, orgEmail);
+                var replyTo = ownerType == DocumentOwnerType.Club ? _reply.ForClub(ownerId) : _reply.ForRegion(ownerId);
+                var link = $"{SiteUrl}/styrelse?type={ownerType}&id={ownerId}#vy=arshjul";
+                var items = claimed.Select(c => (c.O.Title, c.O.TargetDate!.Value)).ToList();
+                var sent = await SendAll(recipients, items, today, orgName,
+                    "årshjulet för " + WebUtility.HtmlEncode(orgName), false, link, "Öppna årshjulet", replyTo);
+                foreach (var c in claimed) Finish(c.ClaimId, sent);
+                Tally(result, sent, $"{orgName}: {string.Join("; ", claimed.Select(c => $"{c.O.Title} {c.O.TargetDate:yyyy-MM-dd}"))} → {sent} av {recipients.Count}");
             }
         }
 
@@ -132,17 +137,24 @@ namespace HpskSite.Services
             try { reqs = _ranges.GetAllRangeRequirements(); }
             catch (Exception ex) { _logger.LogWarning(ex, "Påminnelser: banornas krav kunde inte läsas."); return; }
 
-            foreach (var req in reqs.Where(r => DueReminderRules.InWindow(r.Due, today)))
+            foreach (var group in reqs.Where(r => DueReminderRules.InWindow(r.Due, today)).GroupBy(r => r.RangeId))
             {
                 if (ct.IsCancellationRequested) return;
-                if (IsDemo(req.RangeName)) continue;
-                result.Due++;
-                var claimId = TryClaim(DueReminderSource.ForRangeKind(req.Kind), req.SourceId.ToString(),
-                    DueReminderSource.RangeOwner, req.RangeId, req.Due);
-                if (claimId == 0) continue;
-                result.Claimed++;
+                var rangeName = group.First().RangeName;
+                if (IsDemo(rangeName)) continue;
+                var claimed = new List<(int ClaimId, RangeRequirement Req)>();
+                foreach (var req in group)
+                {
+                    result.Due++;
+                    var claimId = TryClaim(DueReminderSource.ForRangeKind(req.Kind), req.SourceId.ToString(),
+                        DueReminderSource.RangeOwner, req.RangeId, req.Due);
+                    if (claimId == 0) continue;
+                    result.Claimed++;
+                    claimed.Add((claimId, req));
+                }
+                if (claimed.Count == 0) continue;
 
-                var (stewards, clubs) = _ranges.GetRequirementRecipients(req.RangeId);
+                var (stewards, clubs) = _ranges.GetRequirementRecipients(group.Key);
                 var recipients = new List<(string Name, string Email)>();
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var s in stewards)
@@ -158,20 +170,22 @@ namespace HpskSite.Services
                         if (seen.Add(r.Email)) recipients.Add(r);
                 }
                 var replyTo = stewards.Count > 0 ? _reply.ForMember(stewards[0]) : MailReplyTo.SiteAdmin;
-                var sent = await SendAll(recipients, req.Title, req.Due, today,
-                    "skjutbanan " + WebUtility.HtmlEncode(req.RangeName), $"{SiteUrl}{req.Url}", "Öppna banan", replyTo);
-                Finish(claimId, sent);
-                Tally(result, sent, $"{req.RangeName}: {req.Title} {req.Due:yyyy-MM-dd} → {sent} av {recipients.Count}");
+                var items = claimed.Select(c => (c.Req.Title, c.Req.Due)).ToList();
+                var sent = await SendAll(recipients, items, today, rangeName,
+                    "skjutbanan " + WebUtility.HtmlEncode(rangeName), true, $"{SiteUrl}{claimed[0].Req.Url}", "Öppna banan", replyTo);
+                foreach (var c in claimed) Finish(c.ClaimId, sent);
+                Tally(result, sent, $"{rangeName}: {string.Join("; ", claimed.Select(c => $"{c.Req.Title} {c.Req.Due:yyyy-MM-dd}"))} → {sent} av {recipients.Count}");
             }
         }
 
         // ---- Gemensamt --------------------------------------------------------------------
 
-        private async Task<int> SendAll(List<(string Name, string Email)> to, string title, DateTime due, DateTime today,
-            string fromHtml, string link, string linkLabel, MailReplyTo replyTo)
+        private async Task<int> SendAll(List<(string Name, string Email)> to, List<(string Title, DateTime Due)> items,
+            DateTime today, string where, string fromHtml, bool fromRange, string link, string linkLabel, MailReplyTo replyTo)
         {
-            var subject = DueReminderRules.Subject(title, due, today);
-            var paragraphs = DueReminderRules.Paragraphs(WebUtility.HtmlEncode(title), due, today, fromHtml);
+            var subject = DueReminderRules.Subject(items, today, where);
+            var paragraphs = DueReminderRules.Paragraphs(
+                items.Select(i => (WebUtility.HtmlEncode(i.Title), i.Due)).ToList(), today, fromHtml, fromRange);
             int sent = 0;
             foreach (var (name, email) in to)
             {
