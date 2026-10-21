@@ -112,10 +112,8 @@ namespace HpskSite.Services
 
                     try
                     {
-                        foreach (var w in _governance.GetYearWheel(ot, oid, today.Year)
-                            .Where(w => !w.Done && (w.IsOverdue || (w.TargetDate.HasValue && w.TargetDate.Value.Date <= today.AddDays(45))))
-                            .OrderBy(w => w.TargetDate ?? DateTime.MaxValue)
-                            .Take(3))
+                        // Över årsskiftet: i december ska januaris punkter synas.
+                        foreach (var w in _governance.GetDueSoon(ot, oid, today, 45).Take(3))
                         {
                             s.WheelItems.Add(new BoardHubItem
                             {

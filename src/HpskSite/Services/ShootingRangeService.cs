@@ -139,6 +139,8 @@ namespace HpskSite.Services
             await db.ExecuteAsync("DELETE FROM RangeSteward WHERE RangeId = @0", id);
             await db.ExecuteAsync("DELETE FROM RangePermit WHERE RangeId = @0", id);
             await db.ExecuteAsync("DELETE FROM RangeDocument WHERE RangeId = @0", id);
+            await db.ExecuteAsync(
+                "IF OBJECT_ID('RangeInspection', 'U') IS NOT NULL DELETE FROM RangeInspection WHERE RangeId = @0", id);
             // RangeActivitySession is created by a later migration (create-range-activity-table.sql) —
             // guard the delete so a range can still be removed on databases where it hasn't been run yet.
             await db.ExecuteAsync(
@@ -457,7 +459,141 @@ namespace HpskSite.Services
         public async Task DeleteDocumentAsync(int id)
         {
             using var db = _databaseFactory.CreateDatabase();
+            // En besiktning som hänvisade till protokollet står kvar — utan protokoll.
+            await db.ExecuteAsync(
+                "IF OBJECT_ID('RangeInspection', 'U') IS NOT NULL UPDATE RangeInspection SET DocumentId = NULL WHERE DocumentId = @0", id);
             await db.ExecuteAsync("DELETE FROM RangeDocument WHERE Id = @0", id);
+        }
+
+        // ── Besiktning (2026-10-21) ─────────────────────────────────────────────
+
+        /// <summary>Banans aktiva besiktningar, senaste först.</summary>
+        public async Task<List<RangeInspection>> GetInspectionsAsync(int rangeId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.FetchAsync<RangeInspection>(
+                "WHERE RangeId = @0 AND IsActive = 1 ORDER BY InspectedOn DESC, Id DESC", rangeId);
+        }
+
+        /// <summary>Aktiva besiktningar för flera banor på en gång (klubbarnas årshjul, påminnelserna).</summary>
+        public async Task<List<RangeInspection>> GetInspectionsForRangesAsync(IReadOnlyCollection<int> rangeIds)
+        {
+            if (rangeIds.Count == 0) return new List<RangeInspection>();
+            using var db = _databaseFactory.CreateDatabase();
+            var result = new List<RangeInspection>();
+            foreach (var chunk in rangeIds.Distinct().Chunk(1000))
+                result.AddRange(await db.FetchAsync<RangeInspection>(
+                    "WHERE RangeId IN (@0) AND IsActive = 1", chunk));
+            return result;
+        }
+
+        public async Task<RangeInspection?> GetInspectionAsync(int id)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            return await db.SingleOrDefaultAsync<RangeInspection>("WHERE Id = @0", id);
+        }
+
+        public async Task<int> AddInspectionAsync(RangeInspection inspection)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            inspection.CreatedDate = DateTime.Now;
+            inspection.IsActive = true;
+            await db.InsertAsync(inspection);
+            return inspection.Id;
+        }
+
+        /// <summary>En felregistrerad besiktning göms; historiken raderas aldrig.</summary>
+        public async Task HideInspectionAsync(int id)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            await db.ExecuteAsync("UPDATE RangeInspection SET IsActive = 0 WHERE Id = @0", id);
+        }
+
+        /// <summary>Riktad skrivning av intervallet — rör inga andra fält på banan.</summary>
+        public async Task SetInspectionIntervalAsync(int rangeId, int? intervalYears)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            await db.ExecuteAsync("UPDATE ShootingRange SET InspectionIntervalYears = @1, UpdatedAt = @2 WHERE Id = @0",
+                rangeId, intervalYears, DateTime.Now);
+        }
+
+        /// <summary>
+        /// Banornas krav för en klubbs årshjul (B2): för banor där klubben äger, hyr eller är huvudanvändare —
+        /// nästa besiktning (den senaste aktiva registreringen), tillstånd med slutdatum och dokument med
+        /// "gäller t.o.m." (utom protokoll som hör till en registrerad besiktning). Synkron med egen anslutning:
+        /// årshjulets läsare är synkrona. ⚠️ Anropas UTANFÖR årshjulets scope — inte inne i en annans transaktion.
+        /// </summary>
+        public List<RangeRequirement> GetClubRangeRequirements(int clubId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var ranges = db.Fetch<RangeNameRow>(
+                @"SELECT DISTINCT r.Id, r.Name FROM ClubRangeLink l JOIN ShootingRange r ON r.Id = l.RangeId
+                  WHERE l.ClubId = @0 AND l.RelationType IN (@1)", clubId, RangeRequirement.Relations);
+            return Requirements(db, ranges);
+        }
+
+        /// <summary>
+        /// Alla banors krav (påminnelserna, del C): varje bana med en förvaltare eller en klubb som äger, hyr eller
+        /// är huvudanvändare — de som har någon att påminna. Mottagarna bygger anroparen.
+        /// </summary>
+        public List<RangeRequirement> GetAllRangeRequirements()
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var ranges = db.Fetch<RangeNameRow>(
+                @"SELECT r.Id, r.Name FROM ShootingRange r
+                  WHERE EXISTS (SELECT 1 FROM RangeSteward s WHERE s.RangeId = r.Id)
+                     OR EXISTS (SELECT 1 FROM ClubRangeLink l WHERE l.RangeId = r.Id AND l.RelationType IN (@0))",
+                RangeRequirement.Relations);
+            return Requirements(db, ranges);
+        }
+
+        /// <summary>Banans förvaltare och de klubbar som ska påminnas om banans krav (Owner/PrimaryUser/Tenant).</summary>
+        public (List<int> StewardMemberIds, List<int> ClubIds) GetRequirementRecipients(int rangeId)
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var stewards = db.Fetch<int>("SELECT MemberId FROM RangeSteward WHERE RangeId = @0", rangeId);
+            var clubs = db.Fetch<int>("SELECT DISTINCT ClubId FROM ClubRangeLink WHERE RangeId = @0 AND RelationType IN (@1)",
+                rangeId, RangeRequirement.Relations);
+            return (stewards, clubs);
+        }
+
+        private static List<RangeRequirement> Requirements(IUmbracoDatabase db, List<RangeNameRow> ranges)
+        {
+            var result = new List<RangeRequirement>();
+            if (ranges.Count == 0) return result;
+            var ids = ranges.Select(r => r.Id).ToList();
+            var name = ranges.ToDictionary(r => r.Id, r => r.Name);
+
+            var linkedDocs = new HashSet<int>();
+            if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID('dbo.RangeInspection', 'U') IS NULL THEN 0 ELSE 1 END") == 1)
+            {
+                var insp = db.Fetch<RangeInspection>("WHERE RangeId IN (@0) AND IsActive = 1", ids);
+                foreach (var i in insp) if (i.DocumentId.HasValue) linkedDocs.Add(i.DocumentId.Value);
+                foreach (var g in insp.GroupBy(i => i.RangeId))
+                    if (RangeInspectionRules.Latest(g) is { NextDueOn: DateTime due } latest)
+                        result.Add(new RangeRequirement(RangeRequirement.Inspection, latest.Id, g.Key, name[g.Key], "Besiktning", due));
+            }
+            foreach (var p in db.Fetch<RangePermit>("WHERE RangeId IN (@0) AND ExpiryDate IS NOT NULL", ids))
+                result.Add(new RangeRequirement(RangeRequirement.Permit, p.Id, p.RangeId, name[p.RangeId], RangeLabels.Permit(p.PermitType), p.ExpiryDate!.Value));
+            foreach (var d in db.Fetch<RangeDocument>("WHERE RangeId IN (@0) AND ValidUntil IS NOT NULL", ids))
+                if (!linkedDocs.Contains(d.Id))
+                    result.Add(new RangeRequirement(RangeRequirement.Document, d.Id, d.RangeId, name[d.RangeId],
+                        string.IsNullOrWhiteSpace(d.Title) ? "Dokumentet" : d.Title, d.ValidUntil!.Value));
+            return result;
+        }
+
+        private class RangeNameRow { public int Id { get; set; } public string Name { get; set; } = ""; }
+
+        /// <summary>Saknade tabeller och kolumner för besiktningen (startkontrollen).</summary>
+        public List<string> MissingInspectionSchema()
+        {
+            using var db = _databaseFactory.CreateDatabase();
+            var missing = new List<string>();
+            if (db.ExecuteScalar<int>("SELECT CASE WHEN OBJECT_ID('dbo.RangeInspection', 'U') IS NULL THEN 0 ELSE 1 END") == 0)
+                missing.Add("RangeInspection");
+            if (db.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH('dbo.ShootingRange', 'InspectionIntervalYears') IS NULL THEN 0 ELSE 1 END") == 0)
+                missing.Add("ShootingRange.InspectionIntervalYears");
+            return missing;
         }
 
         // ── Activity ledger (Phase 3) ──────────────────────────────────────────

@@ -349,13 +349,6 @@ namespace HpskSite.Controllers
             public DateTime? CompletedDate { get; set; }
         }
 
-        private class BoardWheelRow
-        {
-            public int OwnerType { get; set; }
-            public int OwnerId { get; set; }
-            public bool Done { get; set; }
-        }
-
         private class ViaCountRow
         {
             public string? Via { get; set; }
@@ -1034,9 +1027,21 @@ namespace HpskSite.Controllers
                             var actionRows = db.Fetch<BoardActionRow>(
                                 @"SELECT OwnerType, OwnerId, Status, DueDate, CompletedDate
                                   FROM BoardMeetingActions WHERE IsActive = 1");
-                            var wheelRows = db.Fetch<BoardWheelRow>(
-                                @"SELECT OwnerType, OwnerId, Done
-                                  FROM BoardYearWheelItems WHERE IsActive = 1 AND Year = @0", curYear);
+                            // Årshjulets tillfällen är framräknade ur regler sedan 2026-10-21 — räkna dem genom
+                            // planeraren, inte som rader (ett år har inga rader förrän någon rör ett tillfälle).
+                            // Saknas regeltabellen räknas bara raderna, som förut.
+                            List<BoardWheelRule> wheelRules;
+                            try { wheelRules = db.Fetch<BoardWheelRule>("SELECT * FROM BoardWheelRule"); }
+                            catch { wheelRules = new List<BoardWheelRule>(); }
+                            var wheelSaved = db.Fetch<BoardYearWheelItem>("SELECT * FROM BoardYearWheelItems WHERE Year = @0", curYear);
+                            var wheelRows = wheelRules.Select(r => (r.OwnerType, r.OwnerId))
+                                .Concat(wheelSaved.Select(r => (r.OwnerType, r.OwnerId)))
+                                .Distinct()
+                                .SelectMany(o => BoardWheelPlanner.ForYear(
+                                    wheelRules.Where(r => r.OwnerType == o.OwnerType && r.OwnerId == o.OwnerId),
+                                    wheelSaved.Where(r => r.OwnerType == o.OwnerType && r.OwnerId == o.OwnerId),
+                                    curYear))
+                                .ToList();
                             var approvalRows = db.Fetch<ViaCountRow>(
                                 @"SELECT ISNULL(a.ApprovedVia, 'web') AS Via, COUNT(*) AS Cnt
                                   FROM BoardMeetingAttendees a

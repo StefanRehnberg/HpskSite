@@ -642,15 +642,119 @@
         if (days <= 90) return `<span class="rp-state wait">Går ut ${esc(dateStr)}</span>`;
         return `<span class="rp-state ok">Gäller t.o.m. ${esc(dateStr)}</span>`;
     }
+    // Besiktningen (2026-10-21): banans krav, registreras här en gång och visas i klubbarnas årshjul.
+    let DOSSIER = null;
+    function intervalText(n) { return !n ? null : (n === 1 ? 'Varje år' : `Vart ${n}:e år`); }
+    function nextDueState(dateStr) {
+        if (!dateStr) return '<span class="rp-help">Inte angivet</span>';
+        const days = Math.round((new Date(dateStr + 'T00:00:00') - new Date(new Date().toDateString())) / 86400000);
+        if (days < 0) return `<span class="rp-state bad">Skulle ha gjorts senast ${esc(dateStr)}</span>`;
+        if (days <= 90) return `<span class="rp-state wait">Senast ${esc(dateStr)}</span>`;
+        return `<span class="rp-state ok">Senast ${esc(dateStr)}</span>`;
+    }
+    function inspectionCard(d) {
+        const ins = d.inspections || [];
+        const latest = ins[0];
+        const docLink = x => x.documentId
+            ? `<a href="/umbraco/surface/ShootingRange/GetDocument?id=${x.documentId}" target="_blank" rel="noopener">${esc(x.documentTitle || 'Protokollet')}</a>`
+            : '<span class="rp-help">Inget protokoll</span>';
+        let h = `<div class="rp-card" id="rpInspection"><h2>Besiktning</h2>
+            <div class="row g-2 mb-2">
+                <div class="col-sm-4"><div class="small rp-help">Intervall</div><div>${intervalText(d.inspectionIntervalYears) ? esc(intervalText(d.inspectionIntervalYears)) : '<span class="rp-help">Inget angivet</span>'}</div></div>
+                <div class="col-sm-4"><div class="small rp-help">Senast besiktad</div><div>${latest ? esc(latest.inspectedOn) : '<span class="rp-help">Ingen registrerad</span>'}</div></div>
+                <div class="col-sm-4"><div class="small rp-help">Nästa besiktning</div><div id="rpInspNext">${latest ? nextDueState(latest.nextDueOn) : '<span class="rp-help">—</span>'}</div></div>
+            </div>`;
+        if (ins.length) {
+            h += `<div class="table-responsive"><table class="table align-middle rp-table mb-0"><thead><tr><th>Besiktad</th><th>Nästa senast</th><th class="d-none d-md-table-cell">Protokoll</th><th></th></tr></thead><tbody>
+                ${ins.map((x, i) => `<tr data-insp="${x.id}"><td>${esc(x.inspectedOn)}${x.notes ? `<div class="small rp-help">${esc(x.notes)}</div>` : ''}
+                    <div class="small d-md-none">${docLink(x)}</div></td>
+                    <td>${x.nextDueOn ? esc(x.nextDueOn) : '<span class="rp-help">—</span>'}</td>
+                    <td class="d-none d-md-table-cell">${docLink(x)}</td>
+                    <td class="text-end">${rowMenu([{ label: 'Ta bort…', danger: true, fn: () => deleteInspection(ins[i]) }])}</td></tr>`).join('')}
+                </tbody></table></div>`;
+        } else {
+            h += `<p class="rp-help mb-0">Ingen besiktning är registrerad. Välj <strong>Registrera en besiktning</strong> under Åtgärder — ett protokoll behövs inte, men kan kopplas om det är uppladdat.</p>`;
+        }
+        h += `<p class="small rp-help mt-2 mb-0">Nästa besiktning syns i årshjulet för klubbarna som äger, hyr eller är huvudanvändare av banan.</p>`;
+        return h + '</div>';
+    }
+    function inspectionDialog(pre) {
+        pre = pre || {};
+        const interval = DOSSIER ? DOSSIER.inspectionIntervalYears : null;
+        const protocols = (DOSSIER ? DOSSIER.documents : []).filter(x => x.docType === 'Besiktningsprotokoll' || x.id === pre.documentId);
+        formModal({
+            title: 'Registrera en besiktning', wide: false,
+            html: `<div class="row g-3">
+                <div class="col-6"><label class="form-label" for="iOn">Besiktad den</label><input class="form-control" id="iOn" value="${esc(pre.inspectedOn || '')}" autocomplete="off"></div>
+                <div class="col-6"><label class="form-label" for="iNext">Nästa besiktning senast</label><input class="form-control" id="iNext" value="${esc(pre.nextDueOn || '')}" autocomplete="off"></div>
+                <div class="col-12 form-text mt-1" id="iHint">${interval ? `Föreslås som besiktningsdagen + ${interval} år (banans intervall). Ändra om protokollet säger något annat.` : 'Banan har inget intervall angivet — skriv in nästa datum själv, eller ange intervallet under Åtgärder.'}</div>
+                <div class="col-12"><label class="form-label" for="iDoc">Protokoll</label><select class="form-select" id="iDoc">
+                    <option value="">Inget protokoll</option>${protocols.map(x => `<option value="${x.id}"${x.id === pre.documentId ? ' selected' : ''}>${esc(x.title)}${x.issuedDate ? ' (' + esc(x.issuedDate) + ')' : ''}</option>`).join('')}</select>
+                    ${protocols.length ? '' : '<div class="form-text">Inga besiktningsprotokoll är uppladdade. Det går bra att registrera besiktningen ändå.</div>'}</div>
+                <div class="col-12"><label class="form-label" for="iNotes">Anteckning (frivillig)</label><input class="form-control" id="iNotes" autocomplete="off" placeholder="Till exempel vem som besiktade"></div></div>`,
+            onOpen: b => {
+                datePick(b.querySelector('#iOn')); datePick(b.querySelector('#iNext'));
+                let nextTouched = !!pre.nextDueOn;
+                b.querySelector('#iNext').addEventListener('change', () => { nextTouched = true; });
+                const suggest = () => {
+                    const on = val(b, '#iOn');
+                    if (nextTouched || !interval || !/^\d{4}-\d{2}-\d{2}$/.test(on)) return;
+                    const d = new Date(on + 'T00:00:00'); d.setFullYear(d.getFullYear() + interval);
+                    const el = b.querySelector('#iNext');
+                    if (el._flatpickr) el._flatpickr.setDate(ymd(d), false); else el.value = ymd(d);
+                };
+                // Både inputens change (skrivet för hand) och kalenderns eget val — flatpickr skickar inte alltid change.
+                b.querySelector('#iOn').addEventListener('change', suggest);
+                const fpOn = b.querySelector('#iOn')._flatpickr;
+                if (fpOn) fpOn.config.onChange.push(() => setTimeout(suggest, 0));
+                const fpNext = b.querySelector('#iNext')._flatpickr;
+                if (fpNext) fpNext.config.onChange.push(() => { nextTouched = true; }); // setDate(…, false) ovan triggar inte
+            },
+            onOk: async b => {
+                const docId = val(b, '#iDoc');
+                const res = await post('ShootingRange/SaveInspection', {
+                    rangeId: RANGE_ID, inspectedOn: val(b, '#iOn'), nextDueOn: val(b, '#iNext'),
+                    documentId: docId ? parseInt(docId, 10) : null, notes: val(b, '#iNotes')
+                });
+                if (!res.success) return res.message || 'Besiktningen kunde inte sparas.';
+                reload('tillstand');
+                return true;
+            }
+        });
+    }
+    function intervalDialog() {
+        const cur = DOSSIER ? DOSSIER.inspectionIntervalYears : null;
+        formModal({
+            title: 'Besiktningsintervall', wide: false,
+            html: `<label class="form-label" for="iInt">Banan ska besiktas vart … år</label>
+                <input type="number" class="form-control" id="iInt" min="1" max="20" value="${cur || ''}" placeholder="Till exempel 5">
+                <div class="form-text">Lämna tomt om banan inte har något bestämt intervall. Intervallet används för att föreslå nästa besiktning.</div>`,
+            onOk: async b => {
+                const n = intOrNull(val(b, '#iInt'));
+                if (n !== null && (n < 1 || n > 20)) return 'Skriv ett antal år mellan 1 och 20.';
+                const res = await post('ShootingRange/SaveInspectionInterval', { rangeId: RANGE_ID, intervalYears: n });
+                if (!res.success) return res.message || 'Intervallet kunde inte sparas.';
+                reload('tillstand');
+                return true;
+            }
+        });
+    }
+    async function deleteInspection(x) {
+        if (!await ask('Ta bort besiktningen?', `Besiktningen ${x.inspectedOn} tas bort. Använd det om den registrerades fel; ett kopplat protokoll finns kvar bland dokumenten.`, 'Ta bort', true)) return;
+        post('ShootingRange/DeleteInspection', { id: x.id }).then(r => { if (!r.success) fail(r); else reload('tillstand'); }).catch(() => { });
+    }
     function viewTillstand() {
-        setHead('Tillstånd och dokument', 'Bara banans förvaltare ser den här delen. Banan påminner när ett tillstånd eller dokument snart går ut.');
+        setHead('Tillstånd och dokument', 'Bara banans förvaltare ser den här delen. Banan påminner när ett tillstånd, ett dokument eller nästa besiktning närmar sig.');
         setActions([
+            { label: 'Registrera en besiktning…', icon: 'bi-clipboard-check', fn: () => inspectionDialog(null) },
+            { label: 'Ändra besiktningsintervall…', icon: 'bi-arrow-repeat', fn: intervalDialog },
             { label: 'Lägg till ett tillstånd…', icon: 'bi-plus-lg', fn: () => permitDialog(null) },
             { label: 'Ladda upp ett dokument…', icon: 'bi-cloud-upload', fn: docDialog }
         ]);
         get('ShootingRange/GetDossier', { rangeId: RANGE_ID }).then(d => {
             if (!d.success) { body().innerHTML = errBox(d.message || 'Uppgifterna kunde inte hämtas.'); return; }
-            let h = '<div class="rp-card"><h2>Tillstånd</h2>';
+            DOSSIER = d;
+            let h = inspectionCard(d) + '<div class="rp-card"><h2>Tillstånd</h2>';
             h += d.permits.length ? `<div class="table-responsive"><table class="table align-middle rp-table mb-0"><thead><tr><th>Tillstånd</th><th>Giltighet</th><th class="d-none d-md-table-cell">Skott per år</th><th></th></tr></thead><tbody>
                 ${d.permits.map(p => `<tr><td><div class="fw-semibold">${esc(PERMIT[p.permitType] || p.permitType)}</div>
                     <div class="small rp-help">${esc([p.issuingAuthority, p.referenceNumber].filter(Boolean).join(' · '))}</div>
@@ -736,7 +840,16 @@
                 fd.append('issuedDate', val(b, '#dIssued')); fd.append('validUntil', val(b, '#dValid'));
                 const res = await request('/umbraco/surface/ShootingRange/UploadDocument', { method: 'POST', headers: { 'RequestVerificationToken': token() }, body: fd });
                 if (!res.success) return res.message || 'Dokumentet kunde inte laddas upp.';
-                reload('tillstand');
+                const isProtocol = val(b, '#dType') === 'Besiktningsprotokoll';
+                const pre = { inspectedOn: val(b, '#dIssued'), nextDueOn: val(b, '#dValid'), documentId: res.id };
+                // Ett besiktningsprotokoll: erbjud att registrera besiktningen med datumen ifyllda — när
+                // uppladdningsdialogen har stängts (frågan och nästa dialog använder samma modalelement).
+                const formClosed = new Promise(res => $('rpFormModal').addEventListener('hidden.bs.modal', res, { once: true }));
+                Promise.all([reload('tillstand'), formClosed]).then(async () => {
+                    if (!isProtocol) return;
+                    if (await ask('Registrera besiktningen?', 'Protokollet är uppladdat. Vill du också registrera besiktningen, så att nästa besiktning syns i påminnelserna och i klubbarnas årshjul?', 'Registrera'))
+                        inspectionDialog(pre);
+                });
                 return true;
             }
         });

@@ -34,6 +34,15 @@ namespace HpskSite.Services
             try
             {
                 using var scope = _scopeFactory.CreateScope();
+
+                // Banans besiktning (2026-10-21): NPoco skriver InspectionIntervalYears vid varje sparning av en bana.
+                var inspMissing = scope.ServiceProvider.GetRequiredService<ShootingRangeService>().MissingInspectionSchema();
+                if (inspMissing.Count > 0)
+                    _logger.LogCritical(
+                        "BANANS BESIKTNING ÄR TRASIG: {Missing} saknas i databasen. Varje sparning av en skjutbana faller. "
+                        + "Kör Migrations/create-range-inspection.sql (guardad, säker att köra om).",
+                        string.Join(", ", inspMissing));
+
                 var missing = scope.ServiceProvider.GetRequiredService<RangeCalendarService>().MissingSchema();
                 if (missing.Count == 0)
                 {
