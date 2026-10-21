@@ -19,22 +19,44 @@ namespace HpskSite.Tests
         public void Fonstret_ar_90_dagar_fore_till_30_dagar_efter(int days, bool expected, string because = "")
             => DueReminderRules.InWindow(Today.AddDays(days), Today).Should().Be(expected, because);
 
+        private static List<(string, DateTime)> One(string t, int days) => new() { (t, Today.AddDays(days)) };
+
         [Fact]
-        public void Amnesraden_sager_forsenat_nar_datumet_passerat()
+        public void Amnesraden_for_en_uppgift_namnger_den_och_sager_forsenat()
         {
-            DueReminderRules.Subject("Besiktning av Änganäs", Today.AddDays(10), Today).Should().Be("Påminnelse: Besiktning av Änganäs");
-            DueReminderRules.Subject("Besiktning av Änganäs", Today.AddDays(-1), Today).Should().Be("Försenat: Besiktning av Änganäs");
+            DueReminderRules.Subject(One("Besiktning av Änganäs", 10), Today, "Änganäs").Should().Be("Påminnelse: Besiktning av Änganäs");
+            DueReminderRules.Subject(One("Besiktning av Änganäs", -1), Today, "Änganäs").Should().Be("Försenat: Besiktning av Änganäs");
+        }
+
+        [Fact]
+        public void Flera_uppgifter_blir_ETT_mejl_med_antal_och_lista_i_datumordning()
+        {
+            var items = new List<(string, DateTime)> { ("Domänavgift", Today.AddDays(71)), ("Webbhotell", Today.AddDays(-6)), ("Mailserver", Today.AddDays(71)) };
+            DueReminderRules.Subject(items, Today, "Hallands Pistolskyttekrets")
+                .Should().Be("Försenat och kommande: 3 uppgifter för Hallands Pistolskyttekrets");
+            var p = DueReminderRules.Paragraphs(items, Today, "årshjulet för X", false);
+            p[0].Should().StartWith("Det här ska vara klart:");
+            p[0].IndexOf("Webbhotell").Should().BeLessThan(p[0].IndexOf("Domänavgift"), "datumordning, det försenade först");
+            p[0].Should().Contain("för 6 dagar sedan").And.Contain("om 71 dagar");
+            var later = new List<(string, DateTime)> { ("A", Today.AddDays(5)), ("B", Today.AddDays(6)) };
+            DueReminderRules.Subject(later, Today, "X").Should().Be("Påminnelse: 2 uppgifter för X");
+        }
+
+        [Fact]
+        public void Mejlet_sager_vad_man_gor_nar_det_ar_klart()
+        {
+            DueReminderRules.Paragraphs(One("Bokslut", 5), Today, "x", false)[1].Should().Contain("Bocka av det i årshjulet");
+            DueReminderRules.Paragraphs(One("Besiktning", 5), Today, "x", true)[1].Should().Contain("registrera det på banans sida");
         }
 
         [Fact]
         public void Texten_sager_nar_och_hur_manga_dagar()
         {
-            DueReminderRules.Paragraphs("Bokslut", Today.AddDays(90), Today, "årshjulet för X")[0]
-                .Should().Contain("senast 2027-01-19").And.Contain("om 90 dagar");
-            DueReminderRules.Paragraphs("Bokslut", Today.AddDays(1), Today, "x")[0].Should().Contain("om 1 dag").And.NotContain("dagar");
-            DueReminderRules.Paragraphs("Bokslut", Today, Today, "x")[0].Should().Contain("i dag");
-            DueReminderRules.Paragraphs("Bokslut", Today.AddDays(-5), Today, "x")[0].Should().Contain("för 5 dagar sedan");
-            DueReminderRules.Paragraphs("Bokslut", Today, Today, "skjutbanan Änganäs")[1].Should().Contain("skjutbanan Änganäs");
+            DueReminderRules.WhenText(Today.AddDays(90), Today).Should().Be("senast 2027-01-19 (om 90 dagar)");
+            DueReminderRules.WhenText(Today.AddDays(1), Today).Should().Contain("om 1 dag)");
+            DueReminderRules.WhenText(Today, Today).Should().StartWith("i dag");
+            DueReminderRules.WhenText(Today.AddDays(-5), Today).Should().Contain("för 5 dagar sedan");
+            DueReminderRules.Paragraphs(One("Bokslut", 1), Today, "skjutbanan Änganäs", true)[2].Should().Contain("skjutbanan Änganäs");
         }
 
         [Fact]

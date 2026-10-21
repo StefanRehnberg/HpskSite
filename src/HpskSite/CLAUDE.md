@@ -10960,8 +10960,13 @@ print; the UI then shows them **only the Valberedning tab** (`StyrelseScope.Valb
   (`SetWheelRemind`, hela regeln); en egen engångspunkt alltid — ⚠️ men rader utan regel med `SortOrder < 100` är
   standardpunkter som den GAMLA koden kopierade in per år och mejlar inte. Svepet läser `GetOwnOccurrences`
   (seedar inga regler). Ankeborg/Ankeland hoppas över. Länkar ur `SiteUrl`. Migrering `create-due-reminder-table.sql`
-  (A1P). Test `DueReminderRulesTests`; svit `hpsk-verify/paminnelser-verify.mjs` 20/20 (A/B utan SortOrder-regeln →
+  (A1P). Test `DueReminderRulesTests`; svit `hpsk-verify/paminnelser-verify.mjs` 21/21 (A/B utan SortOrder-regeln →
   1 röd). ⚠️ Dev kan inte skicka mejl, så `Succeeded = 0` där är korrekt.
+  **ETT mejl per förening (och per bana) och svep** (Stefans beslut 2026-10-21, efter första prodsvepet: fyra mejl
+  samtidigt till samma nio personer). Varje tillfälle registreras för sig (spärren är per tillfälle), sedan går ett
+  utskick med alla nyregistrerade i datumordning; ämnet "Påminnelse: N uppgifter för {förening}" / "Försenat och
+  kommande: …". **Mejlet säger vad man gör när det är klart** (bocka av i årshjulet; registrera på banans sida) — i
+  prod hade en betald punkt stått kvar som försenad för att ingen förstått att den skulle bockas av.
 - **Valberedning** (`BoardNominations` + `BoardRoles`): a **committee roster** at the top (RoleKeys
   `Valberedning` / `ValberedningSammankallande`, one sammankallande, non-board — managed by admins) + the
   existing posts-up-for-election + candidate nominations + formal printable förslag.

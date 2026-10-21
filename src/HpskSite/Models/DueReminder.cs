@@ -67,23 +67,48 @@ namespace HpskSite.Models
             return days <= DaysBefore && days >= -MaxDaysOverdue;
         }
 
-        public static string Subject(string title, DateTime due, DateTime today) =>
-            (due.Date < today.Date ? "Försenat: " : "Påminnelse: ") + title;
+        /// <summary>
+        /// Ämnesraden för ETT mejl per förening (eller bana) och svep (Stefans beslut 2026-10-21 — första svepet gav
+        /// fyra mejl samtidigt till samma personer). <paramref name="where"/> är föreningens eller banans namn, ren text.
+        /// </summary>
+        public static string Subject(IReadOnlyList<(string Title, DateTime Due)> items, DateTime today, string where)
+        {
+            var overdue = items.Any(i => i.Due.Date < today.Date);
+            if (items.Count == 1) return (overdue ? "Försenat: " : "Påminnelse: ") + items[0].Title;
+            return (overdue ? "Försenat och kommande: " : "Påminnelse: ") + $"{items.Count} uppgifter för {where}";
+        }
 
-        /// <summary>Mejlets stycken. <paramref name="title"/> och <paramref name="from"/> är redan HTML-kodade av
-        /// anroparen; <paramref name="from"/> är t.ex. "årshjulet för Haaplinge GoAss" eller "skjutbanan Änganäs".</summary>
-        public static List<string> Paragraphs(string title, DateTime due, DateTime today, string from)
+        /// <summary>"senast 2026-12-31 (om 71 dagar)", "i dag 2026-10-21" eller "skulle ha varit klart 2026-10-15 (för 6 dagar sedan)".</summary>
+        public static string WhenText(DateTime due, DateTime today)
         {
             var days = (due.Date - today.Date).Days;
-            var when = days < 0
-                ? $"skulle ha varit klart {due:yyyy-MM-dd} — för {-days} {(days == -1 ? "dag" : "dagar")} sedan"
-                : days == 0 ? $"ska vara klart i dag, {due:yyyy-MM-dd}"
-                : $"ska vara klart senast {due:yyyy-MM-dd} — om {days} {(days == 1 ? "dag" : "dagar")}";
-            return new List<string>
-            {
-                $"<strong>{title}</strong> {when}.",
-                $"Påminnelsen kommer från {from} på pistol.nu och skickas en gång, {DaysBefore} dagar före."
-            };
+            if (days < 0) return $"skulle ha varit klart {due:yyyy-MM-dd} (för {-days} {(days == -1 ? "dag" : "dagar")} sedan)";
+            if (days == 0) return $"i dag, {due:yyyy-MM-dd}";
+            return $"senast {due:yyyy-MM-dd} (om {days} {(days == 1 ? "dag" : "dagar")})";
+        }
+
+        /// <summary>
+        /// Mejlets stycken. Titlarna och <paramref name="fromHtml"/> är redan HTML-kodade av anroparen;
+        /// <paramref name="fromHtml"/> är t.ex. "årshjulet för Haaplinge GoAss" eller "skjutbanan Änganäs".
+        ///
+        /// <para>⚠️ Säger vad man GÖR när det är klart. Första svepet visade att ingen förstått att en betald punkt
+        /// skulle bockas av — den stod kvar som försenad.</para>
+        /// </summary>
+        public static List<string> Paragraphs(IReadOnlyList<(string Title, DateTime Due)> items, DateTime today, string fromHtml, bool fromRange)
+        {
+            var sorted = items.OrderBy(i => i.Due).ToList();
+            var list = new List<string>();
+            if (sorted.Count == 1)
+                list.Add($"<strong>{sorted[0].Title}</strong> ska vara klart {WhenText(sorted[0].Due, today)}.");
+            else
+                list.Add("Det här ska vara klart:<br>" + string.Join("<br>",
+                    sorted.Select(i => $"• <strong>{i.Title}</strong> — {WhenText(i.Due, today)}")));
+            list.Add(fromRange
+                ? "När besiktningen är gjord eller ett nytt tillstånd har kommit: registrera det på banans sida, så flyttas nästa datum och påminnelsen."
+                : (sorted.Count == 1 ? "Är det redan gjort? " : "Är något redan gjort? ")
+                  + "Bocka av det i årshjulet — då står det inte kvar som försenat, och resten av styrelsen ser att det är klart.");
+            list.Add($"Påminnelsen kommer från {fromHtml} på pistol.nu. Varje uppgift påminns det om en gång, {DaysBefore} dagar före.");
+            return list;
         }
     }
 }
