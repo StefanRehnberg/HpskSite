@@ -85,6 +85,9 @@ namespace HpskSite.Controllers
                 .ToList();
 
             ViewData["Schedules"] = all;
+            try { ViewData["PlanningMeetings"] = HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Planning.PlanningService)) is HpskSite.Services.Planning.PlanningService ps
+                ? ps.UpcomingMeetingsForMember(memberId.Value, today.AddHours(-3), today.AddDays(120)) : null; }
+            catch { /* Mitt schema klarar sig utan planeringens möten */ }
             ViewData["Mode"] = "list";
             ViewData["Title"] = "Mitt schema";
             return View("MittSchema", rootNode);

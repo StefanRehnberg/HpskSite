@@ -1,0 +1,33 @@
+@model List<HpskSite.Services.Planning.PlanningService.UpcomingMeeting>
+@using System.Globalization
+@*
+    Mitt schema: planeringarnas bokade möten (Tävlingsplaneringen P1, 2026-10-21). Egen sektion — ett
+    möte i en planering har ingen tävling, och Mitt schema är i övrigt byggt per tävling. Bara möten i
+    planeringar där medlemmen är med (PlanningService.UpcomingMeetingsForMember).
+*@
+@{
+    var sv = CultureInfo.GetCultureInfo("sv-SE");
+}
+<div class="card mb-3 border-primary-subtle" data-schedule-planning>
+    <div class="card-header fw-semibold"><i class="bi bi-diagram-3 me-2 text-primary"></i>Planeringarnas möten</div>
+    <ul class="list-group list-group-flush">
+        @foreach (var m in Model)
+        {
+            <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    @* ⚠️ Ett @ direkt efter en bokstav läses som en e-postadress — därför hela uttryck i @(…). *@
+                    <div class="small text-uppercase text-muted fw-semibold">@(m.StartsAt.ToString("dddd d MMMM 'kl.' HH:mm", sv) + (m.EndsAt.HasValue ? "–" + m.EndsAt.Value.ToString("HH:mm") : ""))</div>
+                    <div class="fw-semibold">@m.Title</div>
+                    <div class="small text-muted">@(m.PlanningName + (string.IsNullOrWhiteSpace(m.Place) ? "" : " · " + m.Place))</div>
+                </div>
+                <div class="d-flex gap-2">
+                    @if (!string.IsNullOrWhiteSpace(m.OnlineUrl) && m.OnlineUrl.StartsWith("https://"))
+                    {
+                        <a class="btn btn-sm btn-primary" href="@m.OnlineUrl" target="_blank" rel="noopener">Gå med</a>
+                    }
+                    <a class="btn btn-sm btn-outline-secondary" href="/tavlingsplanering/@m.PlanningId#vy=moten">Öppna</a>
+                </div>
+            </li>
+        }
+    </ul>
+</div>

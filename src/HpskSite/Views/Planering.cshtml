@@ -1,0 +1,185 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Tävlingsplanering";
+    var invalid = ViewData["PlanningLinkInvalid"] as bool? == true;
+    var planningId = ViewData["PlanningId"] as int? ?? 0;
+    var token = ViewData["PlanningToken"] as string ?? "";
+    var startView = ViewData["PlanningStartView"] as string ?? "";
+    var startMeeting = ViewData["PlanningStartMeeting"] as int? ?? 0;
+    var reply = ViewData["PlanningReply"] as int? ?? 0;
+}
+@*
+    En fristående planering (P1, 2026-10-21) i EKONOMINS SKAL, samma som /styrelse och /min-kurs:
+    vänsterkort med planeringens namn och min rättighet, delarna, och allt innehåll i EN kolumn.
+    Rälsen = platser, blå Åtgärder = handlingar för delen man står på, grå radmeny per rad,
+    dialoger i stället för confirm/alert/prompt. Delen står i adressen (#vy=…).
+
+    Samma sida i LÄNKLÄGE (/tavlingsplanering/svar?t=…): mejlets knappar landar här utan inloggning,
+    och varje anrop bär länken. All logik i /js/planering.js.
+*@
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+<style>
+    /* ── Skalet: samma värden som Ekonomin (.ek-page .rail), Min kurs och Styrelsen. */
+    .pl-page { padding-bottom: 5.5rem; }
+    .pl-page .pl-shell { display: flex; gap: 1.5rem; align-items: flex-start; }
+    .pl-page .pl-rail { width: 250px; flex-shrink: 0; position: sticky; top: 1rem;
+        background-color: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: 8px; }
+    .pl-page .pl-rail .pl-org { font-size: 1.1rem; font-weight: 700; padding: 6px 12px 0; overflow-wrap: anywhere; }
+    .pl-page .pl-rail .pl-role { font-size: .8rem; color: var(--bs-secondary-color); padding: 0 12px 10px; }
+    .pl-page .pl-rail a.pl-nav { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;
+        border-radius: 8px; color: var(--bs-body-color); text-decoration: none; border-left: 3px solid transparent; }
+    .pl-page .pl-rail a.pl-nav:hover { background-color: var(--bs-secondary-bg); }
+    .pl-page .pl-rail a.pl-nav.on { font-weight: 600; background-color: var(--bs-primary-bg-subtle);
+        color: var(--bs-primary-text-emphasis); border-left-color: var(--bs-primary); }
+    .pl-page .pl-rail a.pl-back { display: block; color: var(--bs-secondary-color); font-size: .9rem; padding: 6px 12px 10px;
+        margin-bottom: 6px; border-bottom: 1px solid var(--bs-border-color); text-decoration: none; }
+    .pl-page .pl-rail a.pl-back:hover { color: var(--bs-link-color); }
+    .pl-page .pl-rail .pl-count { background: var(--bs-warning); color: #1b1206; font-size: .72rem; font-weight: 700;
+        border-radius: 1rem; padding: .05rem .5rem; }
+    .pl-page .pl-main { flex: 1 1 auto; min-width: 0; font-size: 1.05rem; }
+    .pl-page .pl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .pl-page h1 { font-size: 1.7rem; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
+    .pl-page .pl-sub { color: var(--bs-secondary-color); margin-top: .15rem; }
+    @@media (max-width: 991px) {
+        .pl-page .pl-shell { flex-direction: column; }
+        .pl-page .pl-rail { width: 100%; position: static; display: flex; flex-wrap: wrap; gap: .2rem; align-items: center; }
+        .pl-page .pl-rail .pl-org, .pl-page .pl-rail .pl-role, .pl-page .pl-rail .pl-back { width: 100%; }
+        .pl-page .pl-rail a.pl-nav { border-left: 0; gap: .4rem; }
+        .pl-page .pl-rail a.pl-nav.on { border-left: 0; box-shadow: inset 0 -3px 0 var(--bs-primary); }
+        .pl-page .pl-main { width: 100%; }
+    }
+    .pl-card { background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: .75rem;
+        padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+    .pl-card > h2, .pl-cardh h2 { font-size: 1.2rem; font-weight: 700; margin: 0 0 .6rem; }
+    .pl-cardh { display: flex; justify-content: space-between; align-items: baseline; gap: .75rem; flex-wrap: wrap; margin-bottom: .6rem; }
+    .pl-cardh h2 { margin: 0; }
+    .pl-help { color: var(--bs-secondary-color); font-size: .95rem; }
+    .pl-next { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); border-radius: .5rem;
+        padding: .65rem .9rem; margin-bottom: .6rem; display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+    .pl-next .t { flex: 1; min-width: 200px; }
+    .pl-next.warn { background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); }
+    .pl-state { display: inline-flex; align-items: center; gap: .35rem; font-size: .8rem; font-weight: 600;
+        padding: .12rem .55rem; border-radius: 1rem; white-space: nowrap; }
+    .pl-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .pl-state.wait { background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); }
+    .pl-state.ok { background: var(--bs-success-bg-subtle); color: var(--bs-success-text-emphasis); }
+    .pl-state.off { background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); }
+    .pl-state.blue { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); }
+    /* Meddelandena */
+    .pl-msgs { display: flex; flex-direction: column; gap: .2rem; }
+    .pl-msg { padding: .6rem .2rem; border-top: 1px solid var(--bs-border-color); }
+    .pl-msg:first-child { border-top: 0; }
+    .pl-msg .who { font-weight: 700; }
+    .pl-msg .when { color: var(--bs-secondary-color); font-size: .85rem; }
+    .pl-msg .body { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: .15rem; }
+    .pl-msg .meta { color: var(--bs-secondary-color); font-size: .85rem; margin-top: .25rem; display: flex; gap: .8rem; flex-wrap: wrap; align-items: center; }
+    .pl-msg.unread { background: var(--bs-warning-bg-subtle); border-radius: .4rem; padding-left: .6rem; padding-right: .6rem; }
+    .pl-reply { margin: .4rem 0 0 1.6rem; padding-left: .8rem; border-left: 3px solid var(--bs-border-color); }
+    .pl-sys { color: var(--bs-secondary-color); font-size: .9rem; font-style: italic; padding: .35rem .2rem; }
+    .pl-mention { background: var(--bs-primary-bg-subtle); color: var(--bs-primary-text-emphasis); border-radius: .3rem; padding: 0 .25rem; font-weight: 600; }
+    .pl-compose { position: sticky; bottom: 0; background: var(--bs-body-bg); border-top: 1px solid var(--bs-border-color);
+        padding: .8rem 0 .2rem; margin-top: .6rem; }
+    .pl-compose textarea { font-size: 1.05rem; min-height: 5.5rem; }
+    /* Mötena */
+    .pl-opt { display: grid; grid-template-columns: minmax(10rem, 1fr) auto auto; gap: .5rem .8rem; align-items: center;
+        padding: .55rem .4rem; border-top: 1px solid var(--bs-border-color); }
+    .pl-opt:first-of-type { border-top: 0; }
+    .pl-opt.best { background: var(--bs-success-bg-subtle); border-radius: .4rem; }
+    .pl-opt .tally { font-size: .85rem; color: var(--bs-secondary-color); white-space: nowrap; }
+    .pl-ans .btn { min-width: 4.6rem; }
+    @@media (max-width: 600px) {
+        .pl-opt { grid-template-columns: 1fr; }
+        .pl-ans { display: flex; }
+        .pl-ans .btn { flex: 1 1 0; min-width: 0; }
+    }
+    .pl-person { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .6rem .2rem;
+        border-top: 1px solid var(--bs-border-color); flex-wrap: wrap; }
+    .pl-person:first-child { border-top: 0; }
+    .pl-modal .form-control, .pl-modal .form-select { font-size: 1.05rem; }
+    .pl-radio { display: block; border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .7rem .9rem; margin-bottom: .5rem; cursor: pointer; }
+    .pl-radio:has(input:checked) { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
+    @@media print { .pl-rail, .pl-noprint, .navbar, footer, #plActions, .pl-compose { display: none !important; } }
+</style>
+
+<div class="pl-page container-fluid py-4" id="plApp">
+    @Html.AntiForgeryToken()
+    @if (invalid)
+    {
+        <div class="pl-card mt-3" style="max-width:720px;">
+            <h1 class="h3">Länken fungerar inte längre</h1>
+            <p class="mb-2">Länken i mejlet har gått ut, eller så är du inte längre med i planeringen.</p>
+            <p class="pl-help mb-0">Har du ett konto på pistol.nu kan du logga in och öppna planeringen under <a href="/tavlingsplanering">Tävling → Tävlingsplanering</a>. Annars kan den som bjöd in dig skicka en ny inbjudan.</p>
+        </div>
+    }
+    else
+    {
+        <div class="pl-shell">
+            <nav class="pl-rail" aria-label="Planeringens delar">
+                <a href="/tavlingsplanering" class="pl-back" id="plBack">← Mina planeringar</a>
+                <div class="pl-org" id="plOrg">Planering</div>
+                <div class="pl-role" id="plRole"></div>
+                <div id="plRail" style="display:contents"></div>
+            </nav>
+            <div class="pl-main">
+                <div class="pl-head">
+                    <div>
+                        <h1 id="plTitle">Tävlingsplanering</h1>
+                        <div class="pl-sub" id="plSub"></div>
+                    </div>
+                    <div class="dropdown d-none pl-noprint" id="plActions">
+                        <button class="btn btn-primary shadow dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-sliders me-1"></i>Åtgärder
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" style="min-width:270px" id="plActionsList"></ul>
+                    </div>
+                </div>
+                <div id="plMsg" aria-live="polite"></div>
+                <div id="plBody"><div class="text-center py-5"><div class="spinner-border" role="status"><span class="visually-hidden">Laddar…</span></div></div></div>
+            </div>
+        </div>
+
+        <div class="modal fade pl-modal" id="plConfirmModal" tabindex="-1" aria-hidden="true" aria-labelledby="plConfirmTitle">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header"><h2 class="modal-title h5" id="plConfirmTitle"></h2>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button></div>
+                    <div class="modal-body" id="plConfirmText" style="white-space:pre-line;"></div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="plConfirmOk">OK</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal fade pl-modal" id="plFormModal" tabindex="-1" aria-hidden="true" aria-labelledby="plFormTitle">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
+                <div class="modal-content">
+                    <div class="modal-header"><h2 class="modal-title h5" id="plFormTitle"></h2>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button></div>
+                    <div class="modal-body">
+                        <div class="alert alert-danger d-none" id="plFormErr" role="alert"></div>
+                        <div id="plFormBody"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                        <button type="button" class="btn btn-primary" id="plFormOk">Spara</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            window.PL_CONFIG = {
+                id: @planningId,
+                token: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(token)),
+                startView: @Html.Raw(System.Text.Json.JsonSerializer.Serialize(startView)),
+                startMeeting: @startMeeting,
+                reply: @reply
+            };
+        </script>
+        <script src="~/js/planering.js" asp-append-version="true"></script>
+    }
+</div>

@@ -134,6 +134,13 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<BoardWorkNotifier>();
             builder.Services.AddHostedService<BoardWorkSchemaGuardHostedService>();
 
+            // Tävlingsplaneringen, P1 (2026-10-21): planeringen, deltagarna, meddelandena och mötena.
+            builder.Services.AddScoped<HpskSite.Services.Planning.PlanningService>();
+            builder.Services.AddSingleton<HpskSite.Services.Planning.PlanningLinkService>();
+            builder.Services.AddScoped<HpskSite.Services.Planning.PlanningNotifier>();
+            builder.Services.AddHostedService<HpskSite.Services.Planning.PlanningNotificationHostedService>();
+            builder.Services.AddHostedService<HpskSite.Services.Planning.PlanningSchemaGuardHostedService>();
+
             // Årshjulets och banornas påminnelser 90 dagar före (2026-10-21, plan del C).
             // Run create-due-reminder-table.sql FÖRE deploy.
             builder.Services.AddScoped<DueReminderService>();

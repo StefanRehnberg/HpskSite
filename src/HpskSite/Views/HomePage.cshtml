@@ -10,6 +10,7 @@
 @inject HpskSite.Services.StaffHubService StaffHub
 @inject HpskSite.Services.Schedule.ScheduleHubService ScheduleHub
 @inject HpskSite.Services.Training.TrainingCourseService CourseService
+@inject HpskSite.Services.Planning.PlanningService PlanningSvc
 @{
     Layout = "Master.cshtml";
     var sv = new CultureInfo("sv-SE");
@@ -62,6 +63,8 @@
     // "Din kurs"-korten (UX-omgången 2026-10-06). Tom lista = inget kort. ⚠️ Ingen explicit
     // generisk typ här — en vinkelparentes tolkas som en HTML-tagg och spräcker vyn. Medlem 0 ger tom lista.
     var myCourseCards = CourseService.HomeCardsFor(0, DateTime.Today);
+    // Tävlingsplaneringen (P1): bara planeringar där något väntar. Medlem 0 ger tom lista.
+    var myPlanningCards = PlanningSvc.HomeCards(0);
     if (isLoggedIn)
     {
         var member = MemberService.GetByEmail(cm!.Email ?? "");
@@ -84,6 +87,7 @@
             staff = StaffHub.GetSummary(member.Id);
             schedule = ScheduleHub.GetSummary(member.Id);
             myCourseCards = CourseService.HomeCardsFor(member.Id, DateTime.Today);
+            try { myPlanningCards = PlanningSvc.HomeCards(member.Id); } catch { /* startsidan klarar sig utan kortet */ }
         }
     }
 
@@ -303,6 +307,10 @@ else
     *@
     @* "Din kurs" — nästa kurstillfälle för den som går eller leder en kurs. Före "Ditt schema":
        kursen är veckans återkommande åtagande, tävlingsschemat det enstaka. *@
+    @if (myPlanningCards.Count > 0)
+    {
+        @await Html.PartialAsync("_PlanningCard", myPlanningCards)
+    }
     @if (myCourseCards.Count > 0)
     {
         @await Html.PartialAsync("_MyCourseCard", myCourseCards)

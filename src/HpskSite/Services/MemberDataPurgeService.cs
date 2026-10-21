@@ -161,6 +161,11 @@ namespace HpskSite.Services
                 "DisplayName = N'Borttagen medlem', Phone = NULL, Email = NULL, OriginalName = NULL, HasAdminAccess = 0"),
             ("WorkArea",        "ResponsibleMemberId", "ResponsibleName = NULL"),
             ("WorkItem",        "AssignedMemberId",    "AssignedName = NULL"),
+            // Tävlingsplaneringen (2026-10-21): deltagarraden står kvar så att meddelandena behåller
+            // en författare, men tappar namnet och gästadressen. Svar, röster och läsmarkering pekar på
+            // deltagaren (PlanningMember.Id), aldrig på medlemmen — de behöver ingen egen rad här.
+            ("PlanningMember",  "MemberId",
+                "DisplayName = N'Borttagen medlem', GuestEmail = NULL, RemovedAt = ISNULL(RemovedAt, GETDATE())"),
         };
 
         /// <summary>

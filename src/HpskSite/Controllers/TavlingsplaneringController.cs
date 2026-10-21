@@ -34,6 +34,8 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Schedule.CompetitionAgendaService _agenda;
 
         private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Planning.PlanningService _planningService;
+        private readonly HpskSite.Services.Planning.PlanningLinkService _links;
 
         public TavlingsplaneringController(
             IUmbracoContextAccessor umbracoContextAccessor,
@@ -44,8 +46,12 @@ namespace HpskSite.Controllers
             WorkBreakdownService work,
             StaffingGridService grid,
             HpskSite.Services.Schedule.CompetitionAgendaService agenda,
-            HpskSite.Services.Competitions.ICompetitionStore competitions)
+            HpskSite.Services.Competitions.ICompetitionStore competitions,
+            HpskSite.Services.Planning.PlanningService planningService,
+            HpskSite.Services.Planning.PlanningLinkService links)
         {
+            _planningService = planningService;
+            _links = links;
             _competitions = competitions;
             _umbracoContextAccessor = umbracoContextAccessor;
             _memberManager = memberManager;
@@ -69,7 +75,10 @@ namespace HpskSite.Controllers
 
             var currentMember = await _memberManager.GetCurrentMemberAsync();
             if (currentMember?.Email == null)
-                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/tavlingsplanering?c={c}")}");
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString(c > 0 ? $"/tavlingsplanering?c={c}" : "/tavlingsplanering")}");
+
+            // Utan tävling: de fristående planeringarna (P1, 2026-10-21) — "Mina planeringar".
+            if (c <= 0) return View("TavlingsplaneringHub", rootNode);
 
             var competition = c > 0 ? _competitions.Get(c) : null;
             var isCompetition = competition != null;
@@ -82,6 +91,75 @@ namespace HpskSite.Controllers
             ViewData["CanAccess"] = isCompetition && await HasCompetitionAccessAsync(c);
 
             return View("Tavlingsplanering", rootNode);
+        }
+
+        /// <summary>
+        /// En fristående planering (P1, 2026-10-21): /tavlingsplanering/{id}. Behörigheten prövas av
+        /// API:t (PlanningController) — sidan är bara skalet; den som inte är med får "finns inte".
+        /// </summary>
+        [HttpGet("{id:int}")]
+        public async Task<IActionResult> Planning(int id)
+        {
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                return StatusCode(500, "Umbraco-kontext saknas.");
+            var rootNode = ctx.Content.GetAtRoot().FirstOrDefault();
+            if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
+            var currentMember = await _memberManager.GetCurrentMemberAsync();
+            if (currentMember?.Email == null)
+                return Redirect($"/login-register/?tab=login&returnUrl={Uri.EscapeDataString($"/tavlingsplanering/{id}")}");
+            ViewData["PlanningId"] = id;
+            ViewData["PlanningToken"] = "";
+            return View("Planering", rootNode);
+        }
+
+        /// <summary>
+        /// Mejlets knappar (Svara, Svara på tiderna, Öppna planeringen) landar här, UTAN inloggning
+        /// (Stefan 2026-10-21). Den signerade länken är deltagarens nyckel; gästen har ingen annan väg
+        /// in. Sidan är samma planeringssida, i länkläge — varje anrop bär länken.
+        /// </summary>
+        [HttpGet("svar")]
+        public IActionResult Svar(string? t, string? a, int? m)
+        {
+            if (!_umbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null)
+                return StatusCode(500, "Umbraco-kontext saknas.");
+            var rootNode = ctx.Content.GetAtRoot().FirstOrDefault();
+            if (rootNode == null) return StatusCode(500, "Ingen rotnod hittades.");
+            var target = _links.ParseMail(t);
+            var row = target == null ? null : _planningService.Participant(target.PlanningId, target.ParticipantId);
+            var planning = target == null ? null : _planningService.Get(target.PlanningId);
+            if (target == null || row == null || !row.IsActive || planning == null)
+            {
+                ViewData["PlanningLinkInvalid"] = true;
+                return View("Planering", rootNode);
+            }
+            _planningService.TouchSeen(row.Id);
+            ViewData["PlanningId"] = target.PlanningId;
+            ViewData["PlanningToken"] = t;
+            ViewData["PlanningStartView"] = a switch { "svara" => "meddelanden", "rosta" => "moten", "notiser" => "notiser", _ => "oversikt" };
+            ViewData["PlanningStartMeeting"] = m ?? 0;
+            ViewData["PlanningReply"] = a == "svara" ? (m ?? 0) : 0;
+            return View("Planering", rootNode);
+        }
+
+        /// <summary>
+        /// Planeringens möten som kalenderprenumeration. Länken är evig (en kalender som slutar
+        /// uppdateras är värre än ingen) men prövar deltagandet vid varje hämtning — en borttagen
+        /// deltagare får en tom kalender.
+        /// </summary>
+        [HttpGet("kalender.ics")]
+        public IActionResult Kalender(string? t)
+        {
+            var target = _links.ParseIcs(t);
+            var row = target == null ? null : _planningService.Participant(target.PlanningId, target.ParticipantId);
+            var planning = target == null ? null : _planningService.Get(target.PlanningId);
+            var meetings = row is { IsActive: true } && planning != null
+                ? _planningService.ScheduledFor(planning.Id)
+                : new System.Collections.Generic.List<HpskSite.Models.Planning.PlanningMeetingRow>();
+            var name = planning?.Name ?? "Planering";
+            var ics = HpskSite.Services.Planning.PlanningIcsBuilder.Build(name, meetings,
+                $"{_links.SiteUrl}/tavlingsplanering/{planning?.Id ?? 0}", DateTime.Now);
+            Response.Headers["Cache-Control"] = "no-store";
+            return File(System.Text.Encoding.UTF8.GetBytes(ics), "text/calendar; charset=utf-8", "planering.ics");
         }
 
         /// <summary>Printable "vem gör vad"-blad — roster (Bemanning) + prep (Förberedelser) on one sheet.</summary>

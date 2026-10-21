@@ -8,6 +8,7 @@
     var mode = ViewData["Mode"]?.ToString() ?? "list";
     var single = ViewData["Schedule"] as MySchedule;
     var all = ViewData["Schedules"] as List<MySchedule> ?? new List<MySchedule>();
+    var planningMeetings = ViewData["PlanningMeetings"] as List<HpskSite.Services.Planning.PlanningService.UpcomingMeeting> ?? new List<HpskSite.Services.Planning.PlanningService.UpcomingMeeting>();
 }
 
 <div class="container mt-4 mb-5">
@@ -89,7 +90,11 @@
             vad som händer runt omkring. Allt i tidsordning.
         </p>
 
-        @if (all.Count == 0)
+        @if (planningMeetings.Count > 0)
+        {
+            @await Html.PartialAsync("_PlanningMeetingsSchedule", planningMeetings)
+        }
+        @if (all.Count == 0 && planningMeetings.Count == 0)
         {
             <div class="card">
                 <div class="card-body">

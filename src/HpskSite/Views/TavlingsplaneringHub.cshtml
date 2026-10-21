@@ -1,0 +1,154 @@
+@inherits Umbraco.Cms.Web.Common.Views.UmbracoViewPage
+@{
+    Layout = "Master.cshtml";
+    ViewBag.Title = "Tävlingsplanering";
+}
+@*
+    Tävling → Tävlingsplanering (P1, 2026-10-21): "Mina planeringar" och "Ny planering".
+    Adminlistans förlaga (Träningar): rubrik + förklarande rad, blå knapp, lista med en rad per
+    planering och det som väntar på mig. Planeringar som hör till en tävling nås fortfarande från
+    tävlingens knapp Planering (/tavlingsplanering?c=…).
+*@
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sv.js"></script>
+<style>
+    .plh-page { font-size: 1.05rem; padding-bottom: 5rem; }
+    .plh-row { display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap;
+        padding: .85rem 1rem; border: 1px solid var(--bs-border-color); border-radius: .6rem; margin-bottom: .6rem;
+        text-decoration: none; color: var(--bs-body-color); background: var(--bs-body-bg); }
+    .plh-row:hover { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
+    .plh-row .nm { font-weight: 700; font-size: 1.1rem; overflow-wrap: anywhere; }
+    .plh-row .meta { color: var(--bs-secondary-color); font-size: .9rem; }
+    .plh-badge { background: var(--bs-warning); color: #1b1206; font-weight: 700; font-size: .8rem; border-radius: 1rem; padding: .1rem .55rem; white-space: nowrap; }
+    .plh-kind { display: block; border: 1px solid var(--bs-border-color); border-radius: .6rem; padding: .8rem 1rem; margin-bottom: .5rem; cursor: pointer; }
+    .plh-kind:has(input:checked) { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
+    .plh-help { color: var(--bs-secondary-color); font-size: .95rem; }
+</style>
+
+<div class="plh-page container py-4" style="max-width: 960px;">
+    @Html.AntiForgeryToken()
+    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-2">
+        <div>
+            <h1 class="h2 mb-1"><i class="bi bi-diagram-3 me-2 text-primary"></i>Tävlingsplanering</h1>
+            <p class="plh-help mb-0">Planera en tävling långt innan den finns — SM, kretsmästerskap eller klubbens egen tävling. Bjud in de som ska vara med, skriv till varandra och hitta en tid för mötena, i stället för långa mejltrådar.</p>
+        </div>
+        <button class="btn btn-primary shadow" id="plhNew"><i class="bi bi-plus-lg me-1"></i>Ny planering</button>
+    </div>
+    <div id="plhMsg" class="mt-3"></div>
+    <div id="plhList" class="mt-3"><div class="text-center py-5"><div class="spinner-border"></div></div></div>
+</div>
+
+<div class="modal fade" id="plhModal" tabindex="-1" aria-hidden="true" aria-labelledby="plhModalTitle">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header"><h2 class="modal-title h5" id="plhModalTitle">Ny planering</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Stäng"></button></div>
+            <div class="modal-body">
+                <div class="alert alert-danger d-none" id="plhErr" role="alert"></div>
+                <div class="mb-3"><label class="form-label fw-semibold" for="plhName">Vad ska ni planera?</label>
+                    <input id="plhName" class="form-control" maxlength="200" placeholder="Till exempel: SM 2028 eller Magnumträffen 2027"></div>
+                <div class="mb-2 fw-semibold">Vilket slags planering?</div>
+                <label class="plh-kind"><input type="radio" name="plhKind" value="Planeringsgrupp" class="form-check-input me-2" checked>
+                    <b>En grupp som ska komma överens</b><div class="plh-help small ms-4">Till exempel representanterna från landsdelens kretsar inför ett SM — var, när, vem gör vad.</div></label>
+                <label class="plh-kind"><input type="radio" name="plhKind" value="Klubbtavling" class="form-check-input me-2">
+                    <b>Klubbens egen tävling</b><div class="plh-help small ms-4">En fälttävling eller precisionstävling som klubben arrangerar.</div></label>
+                <label class="plh-kind"><input type="radio" name="plhKind" value="Kretsmasterskap" class="form-check-input me-2">
+                    <b>Kretsmästerskap</b><div class="plh-help small ms-4">Kretsen arrangerar, ofta med hjälp av en klubb.</div></label>
+                <label class="plh-kind"><input type="radio" name="plhKind" value="SmVecka" class="form-check-input me-2">
+                    <b>SM-vecka med flera kretsar</b><div class="plh-help small ms-4">En krets arrangerar med hjälp av landsdelens övriga kretsar.</div></label>
+                <div class="row g-2 mt-2 mb-3">
+                    <div class="col-12"><label class="form-label" for="plhTarget">Ungefär när och var (valfritt)</label>
+                        <input id="plhTarget" class="form-control" maxlength="200" placeholder="Till exempel: augusti 2028, Skillingaryd?"></div>
+                    <div class="col-sm-6"><label class="form-label" for="plhStart">Första dagen, om den är bestämd</label><input id="plhStart" class="form-control" placeholder="åååå-mm-dd"></div>
+                    <div class="col-sm-6"><label class="form-label" for="plhEnd">Sista dagen</label><input id="plhEnd" class="form-control" placeholder="åååå-mm-dd"></div>
+                </div>
+                <div class="mb-2"><label class="form-label fw-semibold" for="plhOwner">Hör planeringen till en förening?</label>
+                    <select id="plhOwner" class="form-select"><option value="">Nej — bara vi som är med</option></select></div>
+                <div class="form-check mb-1 d-none" id="plhVisWrap"><input class="form-check-input" type="checkbox" id="plhVis" checked>
+                    <label class="form-check-label" for="plhVis">Föreningens styrelse och administratörer får se planeringen (inte meddelandena)</label></div>
+                <p class="plh-help small mt-3 mb-0">Du blir den som <i>kan ändra allt</i>. Sedan bjuder du in de andra.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Avbryt</button>
+                <button type="button" class="btn btn-primary" id="plhCreate">Skapa planeringen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const $ = id => document.getElementById(id);
+    const esc = s => (s === null || s === undefined) ? '' : s.toString().replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+    const tok = () => document.querySelector('input[name="__RequestVerificationToken"]').value;
+    async function req(url, opts) {
+        const r = await fetch(url, opts);
+        if (!r.ok) throw new Error(window.hpskRequestFailureMessage ? window.hpskRequestFailureMessage(r.status) : 'Något gick fel (' + r.status + ').');
+        return r.json();
+    }
+    const fmt = s => { if (!s) return ''; const d = new Date(s.replace(' ', 'T')); return isNaN(d) ? s : d.toLocaleString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+    let data = null;
+
+    function row(p) {
+        const waits = [];
+        if (p.votesOwed) waits.push(`<span class="plh-badge">Svara på ${p.votesOwed === 1 ? 'en mötestid' : p.votesOwed + ' möten'}</span>`);
+        if (p.unread) waits.push(`<span class="plh-badge">${p.unread} ${p.unread === 1 ? 'nytt meddelande' : 'nya meddelanden'}</span>`);
+        return `<a class="plh-row" href="/tavlingsplanering/${p.id}">
+            <div><div class="nm">${esc(p.name)}</div>
+            <div class="meta">${esc(p.targetText || p.kindLabel)} · ${esc(p.accessLabel)}${p.status === 'Archived' ? ' · arkiverad' : ''}
+            ${p.nextMeetingAt ? ' · nästa möte ' + esc(fmt(p.nextMeetingAt)) : ''}</div></div>
+            <div class="d-flex gap-2 flex-wrap">${waits.join('')}</div></a>`;
+    }
+    function render() {
+        const html = [];
+        if (!data.plannings.length) {
+            html.push(`<div class="border rounded-3 p-4 text-center"><p class="mb-2" style="font-size:1.15rem">Du är inte med i någon planering ännu.</p>
+                <p class="plh-help">Skapa en med <b>Ny planering</b>, eller vänta på en inbjudan — den kommer med mejl.</p></div>`);
+        } else {
+            const active = data.plannings.filter(p => p.status !== 'Archived'), arch = data.plannings.filter(p => p.status === 'Archived');
+            html.push(active.map(row).join(''));
+            if (arch.length) html.push(`<details class="mt-3"><summary class="plh-help">Arkiverade (${arch.length})</summary><div class="mt-2">${arch.map(row).join('')}</div></details>`);
+        }
+        if (data.orgPlannings && data.orgPlannings.length) {
+            html.push(`<h2 class="h5 mt-4">Föreningens planeringar</h2><p class="plh-help">Du sitter i styrelsen och kan läsa de här planeringarna (inte meddelandena).</p>`);
+            html.push(data.orgPlannings.map(p => `<a class="plh-row" href="/tavlingsplanering/${p.id}"><div><div class="nm">${esc(p.name)}</div>
+                <div class="meta">${esc(p.org)}${p.targetText ? ' · ' + esc(p.targetText) : ''}</div></div></a>`).join(''));
+        }
+        $('plhList').innerHTML = html.join('');
+        const sel = $('plhOwner');
+        sel.innerHTML = '<option value="">Nej — bara vi som är med</option>' + (data.orgOptions || []).map(o =>
+            `<option value="${o.type}-${o.id}">${esc(o.kind)}: ${esc(o.name)}</option>`).join('');
+    }
+    async function load() {
+        try {
+            data = await req('/umbraco/surface/Planning/MyPlannings');
+            if (!data.success) { $('plhList').innerHTML = `<p class="text-danger">${esc(data.message)}</p>`; return; }
+            render();
+        } catch (e) { $('plhList').innerHTML = `<p class="text-danger">${esc(e.message)}</p>`; }
+    }
+    $('plhOwner').addEventListener('change', () => $('plhVisWrap').classList.toggle('d-none', !$('plhOwner').value));
+    $('plhNew').addEventListener('click', () => {
+        $('plhErr').classList.add('d-none');
+        const m = bootstrap.Modal.getOrCreateInstance($('plhModal')); m.show();
+        $('plhModal').addEventListener('shown.bs.modal', () => $('plhName').focus(), { once: true });
+    });
+    if (window.flatpickr) ['plhStart', 'plhEnd'].forEach(id => window.flatpickr($(id), { locale: 'sv', dateFormat: 'Y-m-d', allowInput: true }));
+    $('plhCreate').addEventListener('click', async () => {
+        const btn = $('plhCreate'); btn.disabled = true;
+        try {
+            const owner = $('plhOwner').value;
+            const kind = document.querySelector('input[name="plhKind"]:checked').value;
+            const body = new URLSearchParams({ name: $('plhName').value, kind, owner, targetText: $('plhTarget').value,
+                targetStart: $('plhStart').value.trim(), targetEnd: $('plhEnd').value.trim(),
+                visibility: owner && $('plhVis').checked ? 'OwnerOrg' : 'Invited' });
+            const r = await req('/umbraco/surface/Planning/Create', { method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': tok() }, body: body.toString() });
+            if (!r.success) { $('plhErr').textContent = r.message; $('plhErr').classList.remove('d-none'); return; }
+            location.href = r.url + '#vy=oversikt';
+        } catch (e) { $('plhErr').textContent = e.message; $('plhErr').classList.remove('d-none'); }
+        finally { btn.disabled = false; }
+    });
+    load();
+})();
+</script>

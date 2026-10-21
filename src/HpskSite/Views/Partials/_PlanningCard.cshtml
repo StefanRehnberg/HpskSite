@@ -1,0 +1,38 @@
+@model List<HpskSite.Services.Planning.PlanningService.MyPlanning>
+@using System.Globalization
+@*
+    "Planeringar" på startsidan (Tävlingsplaneringen P1, 2026-10-21): visas bara när något väntar —
+    ett tidsförslag att svara på, olästa meddelanden, eller ett möte inom en vecka. Datan byggs i
+    HomePage-vyns toppblock (PlanningService.HomeCards); inga kodblock i den vyns markup.
+*@
+@{
+    var sv = CultureInfo.GetCultureInfo("sv-SE");
+}
+<div class="card mb-4 border-primary-subtle" data-home-planning>
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span class="fw-semibold"><i class="bi bi-diagram-3 me-2 text-primary"></i>Planeringar</span>
+        <a class="small" href="/tavlingsplanering">Alla planeringar</a>
+    </div>
+    <div class="list-group list-group-flush">
+        @foreach (var p in Model)
+        {
+            <a class="list-group-item list-group-item-action py-3" href="/tavlingsplanering/@p.PlanningId#vy=@(p.VotesOwed > 0 ? "moten" : p.Unread > 0 ? "meddelanden" : "moten")">
+                <div class="fw-semibold">@p.Name</div>
+                <div class="small">
+                    @if (p.VotesOwed > 0)
+                    {
+                        <span class="badge bg-warning text-dark me-1">Svara på tiderna</span>
+                    }
+                    @if (p.Unread > 0)
+                    {
+                        <span class="badge bg-warning text-dark me-1">@p.Unread @(p.Unread == 1 ? "nytt meddelande" : "nya meddelanden")</span>
+                    }
+                    @if (p.NextMeetingAt.HasValue)
+                    {
+                        <span class="text-muted"><i class="bi bi-calendar-event me-1"></i>@p.NextMeetingTitle, @p.NextMeetingAt.Value.ToString("dddd d MMMM 'kl.' HH:mm", sv)</span>
+                    }
+                </div>
+            </a>
+        }
+    </div>
+</div>

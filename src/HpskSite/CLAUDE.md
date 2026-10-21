@@ -12312,6 +12312,58 @@ administratörer. Efter B1–B3: 0,05–0,4 s.
 - Migreringar: `create-member-activity-table.sql` (K2, FÖRE deploy) och
   `backfill-clubmembership-from-club-properties.sql` med `@Apply = 1` (K3, efter deploy).
 
+## ⚠️⚠️ Fristående tävlingsplanering, P1 (branch `tavlingsplanering`, 2026-10-21)
+
+Plan: `notes/tavlingsplanering-fristaende-plan-2026-10-21.md` (v3 + beslut 9.2 ändrat) och expertgruppens
+`…-utvardering-v3.md`. Stefans beslut 2026-10-21: var och en ställer in sina notiser, **förval ett mejl om
+dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post till den som inte är skytt;
+**"Meddelanden"** och **"Deltar"**; **alla i planeringen** skapar och bokar möten; allt i P1 på en gång.
+
+- **Ytorna:** Tävling → **Tävlingsplanering** (`/tavlingsplanering`, `TavlingsplaneringHub.cshtml`, "Mina
+  planeringar" + Ny planering). En planering = `/tavlingsplanering/{id}` (`Planering.cshtml` +
+  `wwwroot/js/planering.js`, Ekonomins skal: Översikt · Meddelanden · Möten · Deltagare · Mina notiser ·
+  Inställningar, `#vy=`). Mejlens knappar → `/tavlingsplanering/svar?t=…&a=svara|rosta|oppna|notiser`
+  (samma sida i **länkläge**, varje anrop bär `t`). Kalender: `/tavlingsplanering/kalender.ics?t=`.
+  Startsidan: kortet *Planeringar* (`_PlanningCard`, bara när något väntar). Mitt schema: *Planeringarnas
+  möten* (`_PlanningMeetingsSchedule`, egen sektion — Mitt schema är i övrigt per tävling).
+  `/tavlingsplanering?c=` (tävlingens förberedelser och bemanning) är oförändrad.
+- **API:** `PlanningController` (surface). **Två sätt att vara inloggad:** sessionen, eller `t` = signerad
+  mejllänk (`PlanningLinkService`, purpose `Planning.Mail.v1`, 60 dagar; kalenderns `Planning.Ics.v1` är
+  evig men prövar deltagandet vid varje hämtning). **Byt aldrig en purpose-sträng.** Den som inte får läsa
+  får "finns inte", aldrig "nekad". Pollningen (`Version`) svarar 200 `{ok:false}`.
+- **⚠️⚠️ NYCKELN ÄR DELTAGAREN (`PlanningMember.Id`), aldrig medlemmen.** Meddelanden, omnämnanden,
+  läsmärket, röster och notisloggen pekar på deltagaren; en **gäst** har `MemberId = NULL` och bara
+  `GuestEmail`. Därför bär bara `PlanningMember.MemberId` en medlem — den ligger i
+  `MemberDataPurgeService.AssignmentColumns` (raden står kvar som "Borttagen medlem", meddelandena behåller
+  författaren) och följer med en sammanslagning.
+- **Behörigheten = `PlanningAccess`** (rena regler, `PlanningRulesTests`): Kan ändra allt / Kan ändra /
+  Deltar. **En mejllänk ändrar aldrig planeringen** (`ViaLink`). Föreningens styrelse/administratörer
+  (`Visibility = OwnerOrg`, via `BoardWorkAccess.CanAccessBoardWorkAsync`) läser innehållet men **aldrig
+  meddelandena**. Ingen underförstådd rätt för sajtadmin (som vapenregistret). Den sista med Kan ändra allt
+  kan inte tas bort eller sänkas. Varje id prövas mot planeringen (`WHERE Id = @0 AND PlanningId = @1`).
+- **Notiserna = `PlanningNotifier` + `PlanningNotifyRules`** (matrisen står i klassens kommentar). Varje
+  utskick **registreras i `PlanningNotifyLog` FÖRE** utskicket (`INSERT … WHERE NOT EXISTS` + unikt index),
+  `Succeeded` = FAKTISKT skickat. Svepet `PlanningNotificationHostedService` (var 5:e min, `MayRunScheduled`,
+  av med `SiteSetting Planning:Notifications = off`): kvällsmejlet från kl. 18 (en per deltagare och dag,
+  `LastDigestMessageId`), timpushen (villkorad UPDATE på `LastPushAt`), mötespåminnelser dagen innan (mejl)
+  och en timme före (push) med mötets starttid i nyckeln (ett flyttat möte påminns igen), påminnelse om
+  svarsfristen. Sajtadmin: `Planning/RunSweepNow?asOf=` (prov utan att vänta till kvällen). Direkta notiser
+  (inbjudan, omnämnande, mötesförfrågan, bokat, flyttat, inställt) skickas av controllern EFTER skrivningen.
+  Pushens text bär aldrig meddelandets innehåll. Sajtadmin får gästens länk i svaret (`supportLink`).
+- **Kalenderfilen = `PlanningIcsBuilder`:** `UID planning-meeting-{id}@pistol.nu`, `SEQUENCE` (höjs vid
+  ombokning och inställt), `TZID=Europe/Stockholm`, `METHOD:PUBLISH`, `URL` escapas inte. Möteslänken:
+  bara `https://` (`PlanningService.IsSafeUrl`).
+- **⚠️ `@@ROWCOUNT` i en NPoco-sats blir parametern `@ROWCOUNT`** ("@@" är ett escapat "@"). Skriv
+  `IF EXISTS … UPDATE … ELSE INSERT`.
+- All tid är svensk tid (`…At`, `DateTime.Now`) — inga `…Utc`-kolumner.
+- **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (12 tabeller, filtrerade index ⇒
+  `QUOTED_IDENTIFIER ON`, sista raden `SELECT @@TRANCOUNT;`). Körd i dev 2026-10-21, **EJ i prod**.
+  Startkontroll: `PlanningSchemaGuardHostedService`. `PlanningLink` skapas tom (P2).
+- **Ej byggt i P1:** dokument (fråga 7), delar och milstolpar (P3), förberedelsernas och bemanningens
+  flytt (P2/P2b), kopiera planeringen (P3), SignalR. Dev kan inte skicka mejl — loggraderna står på 0.
+- Svit: `hpsk-verify/tavlingsplanering-p1-verify.mjs` 79/79 (`HPSK_BASE=https://localhost:44390`; A/B utan
+  planeringsspärren i röstningen → 1 röd). Fildeploy av KB `tavlingsplanering-fristaende.md`.
+
 ## Migrations (DISABLED)
 The `/Migrations` folder contains disabled database schemas for direct competition result storage. The system now uses Umbraco Document Types and Content Service instead. Migrations can be safely ignored unless reverting to database-backed storage.
 
