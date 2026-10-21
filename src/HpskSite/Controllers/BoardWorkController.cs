@@ -117,7 +117,7 @@ namespace HpskSite.Controllers
                     mine = a.AssignedToMemberId == me,
                     dueDate = a.DueDate.HasValue ? D(a.DueDate.Value) : null
                 }),
-                wheel = wheel.Select(w => new { w.Id, w.Title, w.IsOverdue, targetDate = w.TargetDate.HasValue ? D(w.TargetDate.Value) : null })
+                wheel = wheel.Select(w => new { w.Key, w.Title, w.IsOverdue, targetDate = w.TargetDate.HasValue ? D(w.TargetDate.Value) : null })
             });
         }
 

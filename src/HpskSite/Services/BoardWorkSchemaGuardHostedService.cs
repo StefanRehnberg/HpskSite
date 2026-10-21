@@ -34,6 +34,16 @@ namespace HpskSite.Services
             try
             {
                 using var scope = _scopeFactory.CreateScope();
+
+                // Årshjulets regler (2026-10-21): NPoco skriver RuleId vid varje sparning av en årshjulsrad, så
+                // utan kolumnen faller varje avbockning — och utan tabellen varje läsning av årshjulet.
+                var wheelMissing = scope.ServiceProvider.GetRequiredService<BoardGovernanceService>().MissingWheelSchema();
+                if (wheelMissing.Count > 0)
+                    _logger.LogCritical(
+                        "ÅRSHJULET ÄR TRASIGT: {Missing} saknas i databasen. Årshjulet, startsidans styrelsekort och "
+                        + "kallelsens avbockning faller. Kör Migrations/create-board-wheel-rules.sql (guardad, säker att köra om).",
+                        string.Join(", ", wheelMissing));
+
                 var missing = scope.ServiceProvider.GetRequiredService<BoardWorkService>().MissingSchema();
                 if (missing.Count == 0)
                 {

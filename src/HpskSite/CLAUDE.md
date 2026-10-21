@@ -7943,6 +7943,30 @@ Test: `RangeCalendarRulesTests` 27 (A/B: kant-i-kant som krock + vallar som allt
 Svit: `hpsk-verify/range-calendar-verify.mjs` (skapar och städar egna `ZZB`-poster på bana 13, som
 klubb 2604 och 3215 delar).
 
+### Banans besiktning och banans krav i klubbens årshjul (2026-10-21, plan del B)
+
+- **`ShootingRange.InspectionIntervalYears`** (hela år, null = inget; inget förval) och **`RangeInspection`**
+  (InspectedOn, NextDueOn, DocumentId, Notes, `IsActive` — en felregistrering göms, raderas aldrig). **Ingen fil
+  krävs.** Den senaste aktiva raden avgör nästa (`RangeInspectionRules.Latest`); förslaget = besiktningsdagen +
+  intervallet (`SuggestNextDue`). Endpoints `SaveInspection`, `DeleteInspection`, `SaveInspectionInterval` (samma
+  grind som tillstånden, borttagningen prövas mot besiktningens bana); `GetDossier` bär intervall + historik.
+- Ytan: kortet **Besiktning** först på Tillstånd och dokument; ett uppladdat **Besiktningsprotokoll** erbjuder
+  "Registrera besiktningen?" med datumen ifyllda och protokollet valt. ⚠️ Förslaget lyssnar på flatpickrs
+  `onChange` (inputens `change` kommer inte alltid). ⚠️ Följdfrågan väntar på att uppladdningsdialogen stängts —
+  samma modalelement återanvänds.
+- `RangeTodoRules`: "ska besiktas vart N:e år, men ingen besiktning är registrerad" och "Besiktning: nästa senast …"
+  (90 dagar). Startsidans `RangeHubService` påminner också. **Ett protokoll som hör till en registrerad besiktning
+  varnar inte en gång till som dokument** (gäller båda).
+- **B2:** klubbar med `ClubRangeLink.RelationType` Owner/PrimaryUser/Tenant (`RangeRequirement.Relations` — INTE
+  User, Stefans beslut 2026-10-21) ser i årshjulet nästa besiktning, tillstånd med slutdatum och dokument med
+  "gäller t.o.m." som **skrivskyddade** tillfällen `range:{inspection|permit|document}:{id}` ("Från banan",
+  Öppna banan). `ShootingRangeService.GetClubRangeRequirements` (synkron, egen anslutning) läses UTANFÖR årshjulets
+  scope; ett fel loggas och utelämnar kraven. `WheelKey.Parse` vägrar nyckeln → inga skrivningar. Med i
+  `GetDueSoon` (även passerade från tidigare år), "Kommande längre fram" och årsväljaren; aldrig i kallelsens matchning.
+- Migrering `create-range-inspection.sql` (A1R i körordningen, FÖRE deploy — NPoco skriver intervallkolumnen vid
+  varje sparning av en bana). Startkontroll i `RangeCalendarSchemaGuardHostedService`. Test `RangeInspectionRulesTests`;
+  svit `hpsk-verify/bana-besiktning-verify.mjs` 28/28 (bana 13: 3215 PrimaryUser ja, 2604 User nej).
+
 ### Banans egen sida och katalogen (2026-10-11, omgjord)
 
 Modalen över kartan på `/skjutbanor` (sex flikar, gick inte att länka till, gröna knappar, råa värden
@@ -10898,11 +10922,46 @@ print; the UI then shows them **only the Valberedning tab** (`StyrelseScope.Valb
 - **Roles & terms** (`BoardRoleService`): `ElectedDate`/`TermEndsDate`/`TermYears` on `BoardRoles`;
   "mandat som går ut" view. Valberedning helpers: `IsValberedningOf` / `IsOnAnyValberedning` /
   `GetValberedningMembershipsForMember` (RoleKey ∈ `BoardRoleDefinitions.ValberedningRoleKeys`, NOT gated on IsBoardMember).
-- **Årshjul** (`BoardGovernanceService`, `BoardYearWheelItems`): per-year checklist seeded from
+- **Årshjul** (`BoardGovernanceService`, `BoardYearWheelItems`, `BoardWheelRule`): standard items from
   `BoardYearWheelTemplate` (bokslut+årsredovisning / **årsredovisning i MAP (31/1)** / verksamhetsberättelse /
   revision / kallelse / årsmöte / konstituering / budget / medlemsrapportering — NO LOK-stöd item; pistol.nu
-  has no LOK-stöd support), target dates, in-place done-toggle, overdue highlight, **per-item inline edit**
-  (`svWheelEdit`/`svWheelSave` → existing `UpdateWheelItem`). Template change seeds NEW year-wheels only.
+  has no LOK-stöd support). ⚠️⚠️ **Omgjort 2026-10-21 (plan `notes/arshjul-aterkommande-plan-2026-10-14.md`,
+  steg A1): regel + tillfälle.** En `BoardWheelRule` (månad/dag, `IntervalYears` ≥ 1, `FirstYear`, `LastYear`,
+  `TemplateKey`, `Remind`) räknar fram tillfällena; **`BoardWheelPlanner`** (rena funktioner, `BoardWheelPlannerTests`)
+  är ENDA regeln — `ForYear`, `Next`, `DueSoon`, `KallelseTarget`. Ett tillfälle sparas som `BoardYearWheelItems`-rad
+  med `RuleId` först när någon bockar av/ändrar/tar bort (upsert under UPDLOCK mot det filtrerade unika indexet
+  `(RuleId, Year)`); `IsActive = 0` på en sådan = gravsten (året överhoppat). `RuleId` null = engångspunkt och
+  historik. **Läsning skriver ingenting** utom EN gång per ägare: standardpunkterna som regler (`EnsureRules`,
+  spärr = någon regelrad finns, även inaktiv; `FirstYear` = max(senaste sparade år + 1, i år)).
+  Tillfällena pekas ut med **nyckeln** `item:{id}` / `rule:{regel}:{år}` (`WheelKey`), aldrig ett id utan sort.
+  **Året kommer ur datumet** vid tillägg (buggen: en punkt daterad 2030 hamnade på väljarens år); en engångspunkt
+  flyttar år när datumet ändras; ett regeltillfälle ändras bara för sitt år (datumet måste ligga i det året).
+  Kallelsen bockar på `TemplateKey = kallelse`, äldre rader på titeln. Startsidan läser `GetDueSoon` över
+  årsskiftet. Statistiken räknar tillfällen genom planeraren. Startkontroll i `BoardWorkSchemaGuardHostedService`.
+  Migrering `create-board-wheel-rules.sql` (A1W i körordningen). Svit: `hpsk-verify/arshjul-aterkommande-verify.mjs`
+  66/66 (A/B mot HEAD: avbryter vid ytan; borttagning "kommande" som "bara året" → 2 röda).
+  **A2 (samma dag):** Ändra/Ta bort ett återkommande tillfälle frågar *Bara {år}* / *{år} och kommande år*
+  (`scope=following` → `UpdateWheelFollowing` / `RemoveWheelFollowing`): året regeln börjar ändras på plats,
+  annars DELAS regeln (gamla `LastYear = år−1`, ny från året med samma `TemplateKey`, `Remind`, ordning); sparade
+  senare år följer med när nya regeln slår till, annars tas de bort utom avbockade (historik). Intervall 0 =
+  slutar återkomma, året blir engångspunkt; en engångspunkt kan bli återkommande. Borttagning från regelns första år
+  = regeln inaktiv (kommer inte tillbaka). Kortet **Kommande längre fram** (`BoardWheelPlanner.Upcoming`: nästa
+  tillfälle för regler med intervall ≥ 2 och kommande engångspunkter), årsväljaren tar med dem, plus **Gå till år**.
+  Radmenyn visas för alla som når årshjulet (förut bara `CAN_MANAGE` = administratörer, fast servern och
+  Lägg till-formuläret släppte in hela styrelsen). B (banans besiktning) står under Skjutbanor.
+  **C — påminnelser 90 dagar före (samma dag):** `DueReminderService` + `DueReminderHostedService` (var 12:e timme,
+  start 6 min, `MayRunScheduled`), sajtadmin `BoardGovernance/RunDueRemindersNow`. Logg `DueReminder`, unik på
+  (Source, SourceKey, OwnerType, OwnerId, **DueDate**) — flyttat datum = ny påminnelse; claim-then-send med
+  `WHERE NOT EXISTS`, `Succeeded`/`RecipientCount` = FAKTISKT skickat. Fönster 90 dagar före till 30 efter
+  (`DueReminderRules`). Årshjulet → styrelsens ledamöter (`boardOnly`), annars föreningens kontaktadress; Reply-To
+  `ForClub`/`ForRegion`. Banans krav → förvaltarna + styrelsen i Owner/PrimaryUser/Tenant-klubbarna, Reply-To
+  första förvaltaren, EN gång via banan (aldrig också som punkt i klubbarnas årshjul). **`Remind`:** regelns val
+  (av för de årliga standardpunkterna, på för egna och intervall ≥ 2, Stefans beslut), togglas i Ändra-dialogen
+  (`SetWheelRemind`, hela regeln); en egen engångspunkt alltid — ⚠️ men rader utan regel med `SortOrder < 100` är
+  standardpunkter som den GAMLA koden kopierade in per år och mejlar inte. Svepet läser `GetOwnOccurrences`
+  (seedar inga regler). Ankeborg/Ankeland hoppas över. Länkar ur `SiteUrl`. Migrering `create-due-reminder-table.sql`
+  (A1P). Test `DueReminderRulesTests`; svit `hpsk-verify/paminnelser-verify.mjs` 20/20 (A/B utan SortOrder-regeln →
+  1 röd). ⚠️ Dev kan inte skicka mejl, så `Succeeded = 0` där är korrekt.
 - **Valberedning** (`BoardNominations` + `BoardRoles`): a **committee roster** at the top (RoleKeys
   `Valberedning` / `ValberedningSammankallande`, one sammankallande, non-board — managed by admins) + the
   existing posts-up-for-election + candidate nominations + formal printable förslag.

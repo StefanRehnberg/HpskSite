@@ -265,13 +265,9 @@ namespace HpskSite.Controllers
 
         private void TryTickKallelseInWheel(BoardMeeting m)
         {
-            try
-            {
-                var items = _gov.GetYearWheel(m.OwnerType, m.OwnerId, m.MeetingDate.Year);
-                var item = items.FirstOrDefault(i => !i.Done && i.Title.Contains("Kallelse", StringComparison.OrdinalIgnoreCase));
-                if (item != null) _gov.SetWheelDone(item.Id, true);
-            }
-            catch { /* best effort */ }
+            // Standardpunktens nyckel, inte titeln (se TickKallelse).
+            try { _gov.TickKallelse(m.OwnerType, m.OwnerId, m.MeetingDate.Year); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Kallelsen för möte {Id} kunde inte bockas av i årshjulet.", m.Id); }
         }
 
         // ---- Auth -----------------------------------------------------------

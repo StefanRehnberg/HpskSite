@@ -115,6 +115,13 @@ namespace HpskSite.Models
         /// </summary>
         public int? DefaultShotCount { get; set; }
 
+        /// <summary>
+        /// Hur ofta banan ska besiktas, i hela år (2026-10-21). Sätts av förvaltaren — inget förval, eftersom
+        /// intervallet beror på banan och myndighetens beslut. Null = inget intervall angivet. Se
+        /// <see cref="RangeInspection"/>.
+        /// </summary>
+        public int? InspectionIntervalYears { get; set; }
+
         /// <summary>'Active' | 'Inactive' | 'Decommissioned' | 'UnclaimedSeed'.</summary>
         public string Status { get; set; } = RangeConstants.StatusUnclaimedSeed;
         /// <summary>'Osm' | 'Manual' | 'Municipal' | 'Claimed'.</summary>
@@ -252,6 +259,91 @@ namespace HpskSite.Models
         public DateTime? ValidUntil { get; set; }
         public int? UploadedByMemberId { get; set; }
         public DateTime UploadedAt { get; set; } = DateTime.Now;
+    }
+
+    /// <summary>
+    /// En genomförd besiktning av banan (2026-10-21, plan notes/arshjul-aterkommande-plan-2026-10-14.md del B).
+    ///
+    /// <para><b>Besiktningen är banans krav, inte föreningens</b> — den gäller alla klubbar som använder banan och
+    /// förvaltaren äger den. Den registreras därför här, en gång, och VISAS i klubbarnas årshjul (B2).</para>
+    ///
+    /// <para><b>Den senaste aktiva raden avgör nästa besiktning.</b> Historiken står kvar; en felregistrerad rad
+    /// göms (<see cref="IsActive"/>), raderas aldrig. <b>Ingen fil krävs</b> — den som inte har protokollet
+    /// inskannat ska ändå kunna säga "nästa besiktning 2030". <see cref="DocumentId"/> pekar på ett uppladdat
+    /// besiktningsprotokoll när det finns.</para>
+    /// </summary>
+    [TableName("RangeInspection")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class RangeInspection
+    {
+        public int Id { get; set; }
+        public int RangeId { get; set; }
+        public DateTime InspectedOn { get; set; }
+        /// <summary>Föreslås som besiktningsdagen + banans intervall; går att ändra (protokollet kan säga annat).</summary>
+        public DateTime? NextDueOn { get; set; }
+        public int? DocumentId { get; set; }
+        public string? Notes { get; set; }
+        public bool IsActive { get; set; } = true;
+        public int? CreatedBy { get; set; }
+        public DateTime CreatedDate { get; set; } = DateTime.Now;
+    }
+
+    /// <summary>
+    /// Ett krav från en bana som visas i klubbens årshjul (B2): nästa besiktning, ett tillstånd eller ett
+    /// dokument som går ut. Sorten (<see cref="Kind"/>) följer id:t överallt — <c>range:{sort}:{id}</c>.
+    /// </summary>
+    public sealed record RangeRequirement(string Kind, int SourceId, int RangeId, string RangeName, string Label, DateTime Due)
+    {
+        public const string Inspection = "inspection";
+        public const string Permit = "permit";
+        public const string Document = "document";
+
+        /// <summary>Klubbens relationer till banan som ger kraven i årshjulet (Stefans beslut 2026-10-21):
+        /// den som äger, hyr eller är huvudanvändare — inte den som bara skjuter där (<c>User</c>).</summary>
+        public static readonly string[] Relations =
+            { RangeConstants.RelationOwner, RangeConstants.RelationPrimaryUser, RangeConstants.RelationTenant };
+
+        public string Title => Kind switch
+        {
+            Inspection => $"Besiktning av {RangeName}",
+            _ => $"{Label} för {RangeName} går ut"
+        };
+
+        public string Url => $"/skjutbana/{RangeId}#vy=tillstand";
+    }
+
+    public static class RangeLabels
+    {
+        public static string Permit(string? type) => type switch
+        {
+            RangeConstants.PermitPolice => "Polistillståndet",
+            RangeConstants.PermitEnvC => "Miljöanmälan",
+            RangeConstants.PermitEnvB => "Miljötillståndet",
+            _ => "Tillståndet"
+        };
+    }
+
+    /// <summary>Besiktningens regler som rena funktioner (<c>RangeInspectionRulesTests</c>).</summary>
+    public static class RangeInspectionRules
+    {
+        public const int MaxIntervalYears = 20;
+
+        /// <summary>Förslaget på nästa besiktning: besiktningsdagen plus intervallet; inget intervall = inget förslag.</summary>
+        public static DateTime? SuggestNextDue(DateTime inspectedOn, int? intervalYears) =>
+            intervalYears is >= 1 ? inspectedOn.Date.AddYears(intervalYears.Value) : null;
+
+        /// <summary>Den besiktning som avgör nästa: senast besiktade aktiva, vid samma dag den senast registrerade.</summary>
+        public static RangeInspection? Latest(IEnumerable<RangeInspection> inspections) =>
+            inspections.Where(i => i.IsActive).OrderByDescending(i => i.InspectedOn).ThenByDescending(i => i.Id).FirstOrDefault();
+
+        /// <summary>Fel i en registrering, eller null.</summary>
+        public static string? Validate(DateTime inspectedOn, DateTime? nextDueOn, DateTime today)
+        {
+            if (inspectedOn.Date > today.Date) return "Besiktningsdagen kan inte ligga i framtiden.";
+            if (nextDueOn.HasValue && nextDueOn.Value.Date <= inspectedOn.Date)
+                return "Nästa besiktning måste ligga efter besiktningsdagen.";
+            return null;
+        }
     }
 
     /// <summary>

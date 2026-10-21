@@ -76,8 +76,28 @@ namespace HpskSite.Services
                                 Url = $"/skjutbana/{r.Id}#vy=tillstand"
                             });
 
+                    // Besiktningen: den senaste registreringens "nästa senast". Ett protokoll som hör till en
+                    // registrerad besiktning påminner genom den, inte en gång till.
+                    var linkedDocs = new HashSet<int>();
+                    try
+                    {
+                        var insp = await _ranges.GetInspectionsAsync(r.Id);
+                        foreach (var i in insp) if (i.DocumentId.HasValue) linkedDocs.Add(i.DocumentId.Value);
+                        var latest = RangeInspectionRules.Latest(insp);
+                        if (latest?.NextDueOn is DateTime due && due.Date <= horizon)
+                            s.Reminders.Add(new RangeReminderItem
+                            {
+                                RangeName = r.Name,
+                                Label = "Besiktning",
+                                Due = due,
+                                Overdue = due.Date < today,
+                                Url = $"/skjutbana/{r.Id}#vy=tillstand"
+                            });
+                    }
+                    catch { /* tabellen saknas före migreringen — startkontrollen larmar */ }
+
                     foreach (var d in await _ranges.GetDocumentsAsync(r.Id))
-                        if (d.ValidUntil.HasValue && d.ValidUntil.Value.Date <= horizon)
+                        if (!linkedDocs.Contains(d.Id) && d.ValidUntil.HasValue && d.ValidUntil.Value.Date <= horizon)
                             s.Reminders.Add(new RangeReminderItem
                             {
                                 RangeName = r.Name,

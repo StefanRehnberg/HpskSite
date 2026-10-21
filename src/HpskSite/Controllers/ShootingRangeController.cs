@@ -915,9 +915,24 @@ namespace HpskSite.Controllers
 
                 var permits = await _rangeService.GetPermitsAsync(rangeId);
                 var docs = await _rangeService.GetDocumentsAsync(rangeId);
+                var range = await _rangeService.GetByIdAsync(rangeId);
+                List<RangeInspection> inspections;
+                try { inspections = await _rangeService.GetInspectionsAsync(rangeId); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Besiktningarna kunde inte läsas för bana {RangeId}", rangeId); inspections = new(); }
+                var docTitle = docs.ToDictionary(d => d.Id, d => d.Title);
                 return Json(new
                 {
                     success = true,
+                    inspectionIntervalYears = range?.InspectionIntervalYears,
+                    inspections = inspections.Select(i => new
+                    {
+                        id = i.Id,
+                        inspectedOn = i.InspectedOn.ToString("yyyy-MM-dd"),
+                        nextDueOn = i.NextDueOn?.ToString("yyyy-MM-dd"),
+                        documentId = i.DocumentId,
+                        documentTitle = i.DocumentId.HasValue && docTitle.TryGetValue(i.DocumentId.Value, out var t) ? t : null,
+                        notes = i.Notes
+                    }).ToList(),
                     permits = permits.Select(p => new
                     {
                         id = p.Id,
@@ -975,12 +990,23 @@ namespace HpskSite.Controllers
                 try { shots = (await _rangeService.GetSessionsForYearAsync(rangeId, DateTime.Today.Year)).Sum(s => s.ShotCount); }
                 catch (Exception ex) { _logger.LogWarning(ex, "Årets skott kunde inte läsas för bana {RangeId}", rangeId); }
 
+                List<RangeInspection> inspections;
+                try { inspections = await _rangeService.GetInspectionsAsync(rangeId); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Besiktningarna kunde inte läsas för bana {RangeId}", rangeId); inspections = new(); }
+                var latest = RangeInspectionRules.Latest(inspections);
+                // Ett protokoll som hör till en registrerad besiktning varnas genom besiktningen, inte en gång till.
+                var linkedDocIds = inspections.Where(x => x.DocumentId.HasValue).Select(x => x.DocumentId!.Value).ToHashSet();
+
                 var windows = permits.SelectMany(p => ParseWindowRecords(p.AllowedWindows)).ToList();
                 var input = new RangeTodoInput
                 {
                     Today = DateTime.Today,
                     Permits = permits.Select(p => new RangeTodoDated(PermitLabel(p.PermitType), p.ExpiryDate, p.MaxShotsPerYear)).ToList(),
-                    Documents = docs.Select(d => new RangeTodoDatedDoc(string.IsNullOrWhiteSpace(d.Title) ? DocLabel(d.DocType) : d.Title, d.ValidUntil)).ToList(),
+                    Documents = docs.Where(d => !linkedDocIds.Contains(d.Id))
+                        .Select(d => new RangeTodoDatedDoc(string.IsNullOrWhiteSpace(d.Title) ? DocLabel(d.DocType) : d.Title, d.ValidUntil)).ToList(),
+                    InspectionIntervalYears = range.InspectionIntervalYears,
+                    HasInspection = latest != null,
+                    NextInspectionDue = latest?.NextDueOn,
                     Clubs = links.GroupBy(l => l.ClubId).Select(g => new RangeTodoClub(
                         _clubService.GetClubNameById(g.Key) ?? $"Klubb {g.Key}",
                         allocs.Count(a => g.Any(l => l.Id == a.ClubRangeLinkId)))).ToList(),
@@ -1015,13 +1041,7 @@ namespace HpskSite.Controllers
                     yield return new RangeTodoWindow(w.Day, s, e);
         }
 
-        private static string PermitLabel(string? type) => type switch
-        {
-            RangeConstants.PermitPolice => "Polistillståndet",
-            RangeConstants.PermitEnvC => "Miljöanmälan",
-            RangeConstants.PermitEnvB => "Miljötillståndet",
-            _ => "Tillståndet"
-        };
+        private static string PermitLabel(string? type) => RangeLabels.Permit(type);
 
         private static string DocLabel(string? type) => type switch
         {
@@ -1076,6 +1096,95 @@ namespace HpskSite.Controllers
             {
                 _logger.LogError(ex, "Error saving permit");
                 return Json(new { success = false, message = "Fel: " + ex.Message });
+            }
+        }
+
+        // ── Besiktning (2026-10-21) — förvaltare och sajtadmin, samma grind som tillstånden ──
+
+        /// <summary>Registrera en besiktning. Ingen fil krävs; ett protokoll som redan laddats upp kan kopplas.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveInspection([FromBody] SaveInspectionRequest req)
+        {
+            try
+            {
+                var memberId = await _rangeService.GetCurrentMemberIdAsync();
+                if (memberId == null) return Json(new { success = false, message = "Inloggning krävs." });
+                if (!await _rangeService.CanManageRangeAsync(req.RangeId, memberId))
+                    return Json(new { success = false, message = "Behörighet saknas." });
+                var inspected = ParseDate(req.InspectedOn);
+                if (inspected == null) return Json(new { success = false, message = "Ange vilken dag banan besiktades." });
+                var next = ParseDate(req.NextDueOn);
+                if (!string.IsNullOrWhiteSpace(req.NextDueOn) && next == null)
+                    return Json(new { success = false, message = "Datumet för nästa besiktning går inte att läsa." });
+                var error = RangeInspectionRules.Validate(inspected.Value, next, DateTime.Today);
+                if (error != null) return Json(new { success = false, message = error });
+                if (req.DocumentId is > 0)
+                {
+                    var doc = await _rangeService.GetDocumentAsync(req.DocumentId.Value);
+                    if (doc == null || doc.RangeId != req.RangeId)
+                        return Json(new { success = false, message = "Protokollet hör inte till den här banan." });
+                }
+                var id = await _rangeService.AddInspectionAsync(new RangeInspection
+                {
+                    RangeId = req.RangeId, InspectedOn = inspected.Value, NextDueOn = next,
+                    DocumentId = req.DocumentId is > 0 ? req.DocumentId : null,
+                    Notes = string.IsNullOrWhiteSpace(req.Notes) ? null : req.Notes.Trim(),
+                    CreatedBy = memberId
+                });
+                return Json(new { success = true, id });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving inspection for range {RangeId}", req.RangeId);
+                return Json(new { success = false, message = "Besiktningen kunde inte sparas." });
+            }
+        }
+
+        /// <summary>Ta bort en felregistrerad besiktning (göms, raderas inte).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteInspection([FromBody] IdOnlyRequest req)
+        {
+            try
+            {
+                var memberId = await _rangeService.GetCurrentMemberIdAsync();
+                if (memberId == null) return Json(new { success = false, message = "Inloggning krävs." });
+                var x = await _rangeService.GetInspectionAsync(req.Id);
+                if (x == null) return Json(new { success = false, message = "Besiktningen hittades inte." });
+                // Behörigheten prövas mot BESIKTNINGENS bana, aldrig ett id klienten skickar.
+                if (!await _rangeService.CanManageRangeAsync(x.RangeId, memberId))
+                    return Json(new { success = false, message = "Behörighet saknas." });
+                await _rangeService.HideInspectionAsync(req.Id);
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting inspection {Id}", req.Id);
+                return Json(new { success = false, message = "Besiktningen kunde inte tas bort." });
+            }
+        }
+
+        /// <summary>Banans besiktningsintervall i hela år; tomt = inget intervall.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveInspectionInterval([FromBody] InspectionIntervalRequest req)
+        {
+            try
+            {
+                var memberId = await _rangeService.GetCurrentMemberIdAsync();
+                if (memberId == null) return Json(new { success = false, message = "Inloggning krävs." });
+                if (!await _rangeService.CanManageRangeAsync(req.RangeId, memberId))
+                    return Json(new { success = false, message = "Behörighet saknas." });
+                if (req.IntervalYears.HasValue && (req.IntervalYears < 1 || req.IntervalYears > RangeInspectionRules.MaxIntervalYears))
+                    return Json(new { success = false, message = $"Intervallet måste vara mellan 1 och {RangeInspectionRules.MaxIntervalYears} år." });
+                await _rangeService.SetInspectionIntervalAsync(req.RangeId, req.IntervalYears);
+                return Json(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving inspection interval for range {RangeId}", req.RangeId);
+                return Json(new { success = false, message = "Intervallet kunde inte sparas." });
             }
         }
 
@@ -1678,6 +1787,15 @@ namespace HpskSite.Controllers
         public class LinkIdRequest { public int LinkId { get; set; } }
         public class IdRangeRequest { public int Id { get; set; } public int RangeId { get; set; } }
         public class IdOnlyRequest { public int Id { get; set; } }
+        public class SaveInspectionRequest
+        {
+            public int RangeId { get; set; }
+            public string? InspectedOn { get; set; }
+            public string? NextDueOn { get; set; }
+            public int? DocumentId { get; set; }
+            public string? Notes { get; set; }
+        }
+        public class InspectionIntervalRequest { public int RangeId { get; set; } public int? IntervalYears { get; set; } }
         public class StewardRequest { public int RangeId { get; set; } public int MemberId { get; set; } }
         public class SetCompetitionRangeRequest { public int CompetitionId { get; set; } public int RangeId { get; set; } }
 

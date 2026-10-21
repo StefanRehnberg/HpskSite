@@ -55,52 +55,118 @@ namespace HpskSite.Controllers
         {
             if (!await CanAccessBoardWork(ownerType, ownerId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
+            if (year < 1900 || year > 2999) return Json(new { success = false, message = "Ogiltigt år." });
             var items = _gov.GetYearWheel(ownerType, ownerId, year);
             var years = BuildYearOptions(_gov.GetWheelYears(ownerType, ownerId), year);
-            return Json(new { success = true, data = items.Select(WheelDto), years });
+            var upcoming = _gov.GetUpcoming(ownerType, ownerId, year);
+            return Json(new { success = true, data = items.Select(WheelDto), years, upcoming = upcoming.Select(WheelDto) });
         }
+
+        // Varje tillfälle pekas ut med sin nyckel (item:{id} eller rule:{regel}:{år}), aldrig ett nummer utan
+        // sort — ett framräknat tillfälle har inget id förrän någon rör det.
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SetWheelDone(int itemId, bool done)
+        public async Task<IActionResult> SetWheelDone(string key, string? done)
         {
-            var ot = _gov.GetWheelItem(itemId);
-            if (ot == null || !await CanAccessBoardWork(ot.OwnerType, ot.OwnerId))
-                return Json(new { success = false, message = "Åtkomst nekad" });
-            return Json(new { success = _gov.SetWheelDone(itemId, done) });
+            var k = WheelKey.Parse(key);
+            if (k == null || !await CanAccessWheel(k)) return Json(new { success = false, message = "Åtkomst nekad" });
+            var (itemId, error) = _gov.SetWheelDone(k, IsTrue(done));
+            return Json(error == null
+                ? new { success = true, data = new { key = WheelKey.ForItem(itemId) } }
+                : (object)new { success = false, message = error });
         }
 
+        /// <summary>
+        /// <paramref name="year"/> = året som visas; punkten hamnar på DATUMETS år. <paramref name="intervalYears"/>
+        /// 0 = en gång, 1 = varje år, N = vart N:e år. Svaret säger vilket år punkten hamnade på.
+        /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AddWheelItem(int ownerType, int ownerId, int year, string title, string? targetDate)
+        public async Task<IActionResult> AddWheelItem(int ownerType, int ownerId, int year, string title, string? targetDate, int intervalYears = 0)
         {
             if (!await CanAccessBoardWork(ownerType, ownerId))
                 return Json(new { success = false, message = "Åtkomst nekad" });
             if (string.IsNullOrWhiteSpace(title))
-                return Json(new { success = false, message = "Rubrik krävs" });
-            var it = _gov.AddWheelItem(ownerType, ownerId, year, title, ParseDate(targetDate));
-            return Json(new { success = true, data = new { it.Id } });
+                return Json(new { success = false, message = "Skriv vad som ska göras." });
+            var date = ParseDate(targetDate);
+            if (!string.IsNullOrWhiteSpace(targetDate) && date == null)
+                return Json(new { success = false, message = "Datumet går inte att läsa. Välj det i kalendern." });
+            var meId = await GetCurrentMemberId();
+            var (landed, error) = _gov.AddWheelItem(ownerType, ownerId, year, title.Trim(), date, intervalYears, meId > 0 ? meId : null);
+            return Json(error == null
+                ? new { success = true, data = new { year = landed } }
+                : (object)new { success = false, message = error });
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> UpdateWheelItem(int itemId, string title, string? targetDate)
+        /// <param name="scope"><c>year</c> (standard) = bara tillfällets år; <c>following</c> = det här och kommande
+        /// år, och då gäller <paramref name="intervalYears"/> (0 = återkommer inte längre).</param>
+        public async Task<IActionResult> UpdateWheelItem(string key, string title, string? targetDate, string? scope = null, int? intervalYears = null)
         {
-            var it = _gov.GetWheelItem(itemId);
-            if (it == null || !await CanAccessBoardWork(it.OwnerType, it.OwnerId))
-                return Json(new { success = false, message = "Åtkomst nekad" });
-            return Json(new { success = _gov.UpdateWheelItem(itemId, title, ParseDate(targetDate)) });
+            var k = WheelKey.Parse(key);
+            if (k == null || !await CanAccessWheel(k)) return Json(new { success = false, message = "Åtkomst nekad" });
+            if (string.IsNullOrWhiteSpace(title)) return Json(new { success = false, message = "Uppgiften måste ha en text." });
+            var date = ParseDate(targetDate);
+            if (!string.IsNullOrWhiteSpace(targetDate) && date == null)
+                return Json(new { success = false, message = "Datumet går inte att läsa. Välj det i kalendern." });
+            if (scope == "following" && !intervalYears.HasValue)
+                return Json(new { success = false, message = "Ange hur ofta uppgiften återkommer." });
+            var meId = await GetCurrentMemberId();
+            var (year, error) = scope == "following"
+                ? _gov.UpdateWheelFollowing(k, title.Trim(), date, intervalYears!.Value, meId > 0 ? meId : null)
+                : _gov.UpdateWheelItem(k, title.Trim(), date);
+            return Json(error == null
+                ? new { success = true, data = new { year } }
+                : (object)new { success = false, message = error });
         }
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> RemoveWheelItem(int itemId)
+        public async Task<IActionResult> RemoveWheelItem(string key, string? scope = null)
         {
-            var it = _gov.GetWheelItem(itemId);
-            if (it == null || !await CanAccessBoardWork(it.OwnerType, it.OwnerId))
-                return Json(new { success = false, message = "Åtkomst nekad" });
-            return Json(new { success = _gov.RemoveWheelItem(itemId) });
+            var k = WheelKey.Parse(key);
+            if (k == null || !await CanAccessWheel(k)) return Json(new { success = false, message = "Åtkomst nekad" });
+            var error = scope == "following" ? _gov.RemoveWheelFollowing(k) : _gov.RemoveWheelItem(k);
+            return Json(error == null ? new { success = true } : (object)new { success = false, message = error });
         }
+
+        /// <summary>
+        /// Sajtadmin: kör påminnelsesvepet nu (supportväg, och så går flödet att verifiera utan att vänta 12 timmar).
+        /// Samma tjänst och samma spärr som bakgrundstjänsten — ett andra anrop skickar ingenting nytt.
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RunDueRemindersNow([FromServices] DueReminderService reminders)
+        {
+            if (!await _auth.IsCurrentUserAdminAsync()) return Json(new { success = false, message = "Åtkomst nekad" });
+            var missing = reminders.MissingSchema();
+            if (missing.Count > 0) return Json(new { success = false, message = "Saknas i databasen: " + string.Join(", ", missing) });
+            var r = await reminders.RunAsync(DateTime.Today);
+            return Json(new { success = true, data = new { r.Due, r.Claimed, r.Sent, r.NotSent, lines = r.Lines } });
+        }
+
+        /// <summary>Mejlpåminnelse 90 dagar före, på eller av, för ett återkommande tillfälles regel.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetWheelRemind(string key, string? remind)
+        {
+            var k = WheelKey.Parse(key);
+            if (k == null || !await CanAccessWheel(k)) return Json(new { success = false, message = "Åtkomst nekad" });
+            var error = _gov.SetWheelRemind(k, IsTrue(remind));
+            return Json(error == null ? new { success = true } : (object)new { success = false, message = error });
+        }
+
+        private async Task<bool> CanAccessWheel(WheelKey key)
+        {
+            var owner = _gov.ResolveWheelOwner(key);
+            return owner.HasValue && await CanAccessBoardWork(owner.Value.OwnerType, owner.Value.OwnerId);
+        }
+
+        // "1"/"true"/"on" — ASP.NET Cores bool-bindning tar inte "1", och klienten skickar en kryssrutas läge.
+        private static bool IsTrue(string? v) =>
+            v != null && (v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase) || v.Equals("on", StringComparison.OrdinalIgnoreCase));
 
         // ---- Valberedning ---------------------------------------------------
 
@@ -181,9 +247,10 @@ namespace HpskSite.Controllers
 
         // ---- DTOs + auth ----------------------------------------------------
 
-        private static object WheelDto(BoardYearWheelItem i) => new
+        private static object WheelDto(WheelOccurrence i) => new
         {
-            i.Id, i.Title, i.Done, i.IsOverdue,
+            i.Key, i.Title, i.Done, i.IsOverdue, i.Year, i.IntervalYears, i.NextYear, i.FromRange, i.RangeName, i.Url, i.Remind,
+            isTemplate = !string.IsNullOrEmpty(i.TemplateKey),
             targetDate = i.TargetDate?.ToString("yyyy-MM-dd")
         };
 

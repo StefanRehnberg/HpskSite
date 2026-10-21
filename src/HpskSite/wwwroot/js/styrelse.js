@@ -1904,59 +1904,203 @@
     // =====================================================================
     //  ÅRSHJUL
     // =====================================================================
+    // Tillfällena pekas ut med sin nyckel (item:{id} eller rule:{regel}:{år}) — ett återkommande tillfälle
+    // har inget id förrän någon rör det. Knapparna bär bara ett INDEX i svWheelItems, aldrig användartext.
     let svWheelYear = null, svWheelItems = [];
+    function wheelRecurText(it) {
+        if (!it.intervalYears) return '';
+        if (it.intervalYears === 1) return 'varje år'; // nästa år är självklart
+        const every = `vart ${it.intervalYears}:e år`;
+        return it.nextYear ? `${every} · nästa ${it.nextYear}` : every;
+    }
+    function goWheelYear(y) { svWheelYear = y; viewArshjul(); }
     function viewArshjul() {
         const y = svWheelYear || new Date().getFullYear();
-        setHead('Årshjul ' + y, 'Föreningens årliga uppgifter. Bocka av när de är klara. Standarduppgifterna fylls i automatiskt och går att ändra.');
+        setHead('Årshjul ' + y, 'Föreningens uppgifter under året. Bocka av när de är klara. Standarduppgifterna återkommer varje år och går att ändra; egna uppgifter kan återkomma varje år eller vart några år.');
         get('BoardGovernance', 'GetYearWheel', Object.assign(OWN(), { year: y })).then(r => {
             if (!r.success) { body().innerHTML = errBox(r.message || 'Årshjulet kunde inte hämtas.'); return; }
             svWheelYear = y; svWheelItems = r.data || [];
             const years = r.years || [y]; if (!years.includes(svWheelYear)) years.unshift(svWheelYear);
-            let h = `<div class="d-flex flex-wrap gap-2 align-items-center mb-2 sv-help"><label class="d-flex align-items-center gap-2 mb-0">Visa år
-                <select id="whYear" class="form-select form-select-sm" style="width:auto;">${years.map(yy => `<option ${yy == svWheelYear ? 'selected' : ''}>${yy}</option>`).join('')}</select></label></div><div class="sv-card">`;
-            svWheelItems.forEach(it => {
+            years.sort((a, b) => b - a);
+            const upcoming = r.upcoming || [];
+            let h = '';
+            // Kommande längre fram — en uppgift fem år bort får inte bara finnas på sitt år.
+            if (upcoming.length) {
+                h += `<div class="sv-card mb-3" id="whUpcoming"><h2 class="h6 mb-2">Kommande längre fram</h2>` + upcoming.map(u => {
+                    const rec = wheelRecurText(u);
+                    return `<div class="sv-person"><span>${esc(u.title)}<span class="sv-help"> · ${u.targetDate ? esc(svDate(u.targetDate)) : u.year}</span>
+                        ${rec ? `<span class="d-block small sv-help"><i class="bi bi-arrow-repeat" aria-hidden="true"></i> ${esc(rec)}</span>` : ''}
+                        ${u.fromRange ? '<span class="d-block small sv-help"><i class="bi bi-bullseye" aria-hidden="true"></i> Från banan</span>' : ''}</span>
+                        <a href="#" class="btn btn-sm btn-outline-secondary text-nowrap" data-wh-go="${u.year}">Visa ${u.year}</a></div>`;
+                }).join('') + `</div>`;
+            }
+            h += `<div class="d-flex flex-wrap gap-2 align-items-center mb-2 sv-help"><label class="d-flex align-items-center gap-2 mb-0">Visa år
+                <select id="whYear" class="form-select form-select-sm" style="width:auto;">${years.map(yy => `<option ${yy == svWheelYear ? 'selected' : ''}>${yy}</option>`).join('')}</select></label>
+                <span class="d-flex align-items-center gap-1"><label for="whGoYear" class="mb-0">eller gå till</label>
+                <input type="number" id="whGoYear" class="form-control form-control-sm" min="2000" max="2100" placeholder="År" style="width:6rem;">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="whGoBtn">Gå</button></span></div><div class="sv-card" data-wh-year="${y}">`;
+            if (!svWheelItems.length) h += `<p class="sv-help mb-2">Inga uppgifter ${y}.</p>`;
+            svWheelItems.forEach((it, i) => {
                 const dt = it.targetDate ? `<span class="${it.isOverdue ? 'text-danger' : 'sv-help'}"> · ${esc(svDate(it.targetDate))}${it.isOverdue ? ' (försenat)' : ''}</span>` : '';
-                h += `<div class="sv-person" id="svWheel_${it.id}"><label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;">
-                    <input type="checkbox" class="form-check-input sv-check" data-wh-done="${it.id}" ${it.done ? 'checked' : ''}>
-                    <span class="svWheelText ${it.done ? 'text-decoration-line-through sv-help' : ''}">${esc(it.title)}${dt}</span></label>
-                    ${CAN_MANAGE ? rowMenu([{ label: 'Ändra…', fn: () => wheelEdit(it) }, { divider: true }, { label: 'Ta bort…', danger: true, fn: () => wheelRemove(it) }]) : ''}</div>`;
+                if (it.fromRange) {
+                    // Banans krav: skrivskyddat. Det bockas av genom att banan uppdateras — en bock här vore en andra sanning.
+                    h += `<div class="sv-person" data-wh-row="${i}" data-wh-range><span class="d-flex align-items-center gap-2">
+                        <i class="bi bi-bullseye text-secondary" aria-hidden="true" style="width:1.1rem;"></i>
+                        <span><span class="svWheelText">${esc(it.title)}${dt}</span>
+                        <span class="d-block small sv-help">Från banan — hanteras på banans sida</span></span></span>
+                        <a class="btn btn-sm btn-outline-secondary text-nowrap" href="${esc(it.url)}">Öppna banan</a></div>`;
+                    return;
+                }
+                const rec = wheelRecurText(it);
+                h += `<div class="sv-person" data-wh-row="${i}"><label class="d-flex align-items-center gap-2 mb-0" style="cursor:pointer;">
+                    <input type="checkbox" class="form-check-input sv-check" data-wh-done="${i}" ${it.done ? 'checked' : ''}>
+                    <span><span class="svWheelText ${it.done ? 'text-decoration-line-through sv-help' : ''}">${esc(it.title)}${dt}</span>
+                    ${rec ? `<span class="d-block small sv-help" data-wh-recur><i class="bi bi-arrow-repeat" aria-hidden="true"></i> ${esc(rec)}${it.remind ? ' · <i class="bi bi-bell" aria-hidden="true"></i> påminnelse' : ''}</span>` : ''}</span></label>
+                    ${rowMenu([{ label: 'Ändra…', fn: () => wheelEdit(it) }, { divider: true }, { label: 'Ta bort…', danger: true, fn: () => wheelRemove(it) }])}</div>`;
             });
-            h += `<div class="row g-2 mt-2" style="max-width:640px;"><div class="col-12 col-md-7"><input type="text" id="whNewTitle" class="form-control" placeholder="Lägg till egen uppgift…" aria-label="Ny uppgift"></div>
-                <div class="col-6 col-md-3"><input type="text" id="whNewDate" class="form-control" placeholder="Datum" aria-label="Datum"></div>
-                <div class="col-6 col-md-2"><button type="button" class="btn btn-outline-primary w-100" id="whAdd">Lägg till</button></div></div></div>`;
+            h += `<div class="row g-2 mt-2 align-items-end" style="max-width:820px;">
+                <div class="col-12 col-md-5"><label class="sv-label" for="whNewTitle">Ny uppgift</label><input type="text" id="whNewTitle" class="form-control" placeholder="Till exempel Besiktning av banan" autocomplete="off"></div>
+                <div class="col-12 col-sm-6 col-md-2"><label class="sv-label" for="whNewDate">Datum</label><input type="text" id="whNewDate" class="form-control" placeholder="Frivilligt" autocomplete="off"></div>
+                <div class="col-12 col-sm-6 col-md-3"><label class="sv-label" for="whNewRecur">Återkommer</label>
+                    <div class="d-flex gap-1"><select id="whNewRecur" class="form-select">
+                        <option value="0">Bara en gång</option><option value="1">Varje år</option><option value="n">Vart … år</option></select>
+                    <input type="number" id="whNewInterval" class="form-control d-none" min="2" max="50" value="5" style="width:5rem;" aria-label="Antal år mellan gångerna"></div></div>
+                <div class="col-12 col-md-2"><button type="button" class="btn btn-outline-primary w-100" id="whAdd">Lägg till</button></div>
+                <div class="col-12 sv-help small" id="whNewHint">Har uppgiften ett datum hamnar den på det årets årshjul.</div></div></div>`;
             body().innerHTML = h;
             datePick($('whNewDate'), false);
-            $('whYear').addEventListener('change', e => { svWheelYear = parseInt(e.target.value, 10); viewArshjul(); });
+            $('whYear').addEventListener('change', e => goWheelYear(parseInt(e.target.value, 10)));
+            const goTyped = () => {
+                const v = parseInt($('whGoYear').value, 10);
+                if (!(v >= 2000 && v <= 2100)) { showMsg('Skriv ett årtal, till exempel 2030.', 'warning'); return; }
+                goWheelYear(v);
+            };
+            $('whGoBtn').addEventListener('click', goTyped);
+            $('whGoYear').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); goTyped(); } });
+            body().querySelectorAll('[data-wh-go]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); goWheelYear(parseInt(a.dataset.whGo, 10)); }));
+            $('whNewRecur').addEventListener('change', e => $('whNewInterval').classList.toggle('d-none', e.target.value !== 'n'));
             body().querySelectorAll('[data-wh-done]').forEach(cb => cb.addEventListener('change', () => {
-                const id = parseInt(cb.dataset.whDone, 10), done = cb.checked;
-                post('BoardGovernance', 'SetWheelDone', { itemId: id, done }).then(rr => {
-                    if (!rr.success) { cb.checked = !done; return; }
-                    const t = $('svWheel_' + id)?.querySelector('.svWheelText');
+                const it = svWheelItems[parseInt(cb.dataset.whDone, 10)], done = cb.checked;
+                if (!it) return;
+                post('BoardGovernance', 'SetWheelDone', { key: it.key, done: done ? '1' : '0' }).then(rr => {
+                    if (!rr.success) { cb.checked = !done; failMsg(rr, 'Det gick inte att spara.'); return; }
+                    if (rr.data && rr.data.key) it.key = rr.data.key; // tillfället är sparat nu
+                    it.done = done;
+                    const t = cb.closest('[data-wh-row]')?.querySelector('.svWheelText');
                     if (t) { t.classList.toggle('text-decoration-line-through', done); t.classList.toggle('sv-help', done); }
-                });
+                }).catch(() => { cb.checked = !done; });
             }));
-            $('whAdd').addEventListener('click', () => {
-                const title = $('whNewTitle').value.trim(); if (!title) return;
-                post('BoardGovernance', 'AddWheelItem', Object.assign(OWN(), { year: svWheelYear, title, targetDate: $('whNewDate').value || '' })).then(rr => { if (rr.success) viewArshjul(); else failMsg(rr); });
-            });
+            $('whAdd').addEventListener('click', wheelAdd);
         }).catch(() => body().innerHTML = errBox('Årshjulet kunde inte hämtas.'));
     }
+    function wheelAdd() {
+        const title = $('whNewTitle').value.trim();
+        if (!title) { showMsg('Skriv vad som ska göras.', 'warning'); $('whNewTitle').focus(); return; }
+        const recur = $('whNewRecur').value;
+        const interval = recur === 'n' ? parseInt($('whNewInterval').value, 10) : parseInt(recur, 10);
+        if (recur === 'n' && !(interval >= 2 && interval <= 50)) { showMsg('Skriv hur många år det är mellan gångerna (2–50).', 'warning'); return; }
+        const shown = svWheelYear;
+        post('BoardGovernance', 'AddWheelItem', Object.assign(OWN(), { year: shown, title, targetDate: $('whNewDate').value || '', intervalYears: String(interval) }))
+            .then(rr => {
+                if (!rr.success) { failMsg(rr); return; }
+                const landed = rr.data && rr.data.year;
+                if (landed && landed !== shown) {
+                    // Annars ser det ut som att uppgiften försvann.
+                    const recurTxt = interval === 0 ? '' : (interval === 1 ? ' och återkommer varje år' : ` och återkommer vart ${interval}:e år`);
+                    showMsg(`<strong>${esc(title)}</strong> ligger på ${landed}${recurTxt}. <a href="#" id="svWheelGoYear" data-year="${landed}">Visa ${landed}</a>`, 'success', true);
+                    $('svWheelGoYear')?.addEventListener('click', e => { e.preventDefault(); showMsg(''); goWheelYear(landed); });
+                }
+                viewArshjul();
+            });
+    }
+    // "Återkommer"-väljaren i dialogerna: 0 = en gång, 1 = varje år, annars antal år.
+    function recurPickerHtml(prefix, interval) {
+        const n = interval >= 2;
+        return `<label class="sv-label" for="${prefix}Recur">Återkommer</label>
+            <div class="d-flex gap-1 mb-1"><select id="${prefix}Recur" class="form-select">
+                <option value="0" ${!interval ? 'selected' : ''}>Bara en gång</option>
+                <option value="1" ${interval === 1 ? 'selected' : ''}>Varje år</option>
+                <option value="n" ${n ? 'selected' : ''}>Vart … år</option></select>
+            <input type="number" id="${prefix}Interval" class="form-control ${n ? '' : 'd-none'}" min="2" max="50" value="${n ? interval : 5}" style="width:5rem;" aria-label="Antal år mellan gångerna"></div>`;
+    }
+    function recurPickerWire(prefix) {
+        $(prefix + 'Recur').addEventListener('change', e => $(prefix + 'Interval').classList.toggle('d-none', e.target.value !== 'n'));
+    }
+    function recurPickerValue(prefix) {
+        const v = $(prefix + 'Recur').value;
+        if (v !== 'n') return parseInt(v, 10);
+        const n = parseInt($(prefix + 'Interval').value, 10);
+        return n >= 2 && n <= 50 ? n : null;
+    }
     function wheelEdit(it) {
+        const recurring = !!it.intervalYears;
+        // Ett återkommande tillfälle: bara året eller året och framåt. En engångspunkt kan bli återkommande.
+        const scopeHtml = recurring ? `<fieldset class="mt-3"><legend class="sv-label mb-1">Ändringen gäller</legend>
+                <div class="form-check"><input class="form-check-input" type="radio" name="weScope" id="weScopeYear" value="year" checked>
+                    <label class="form-check-label" for="weScopeYear">Bara ${it.year}</label></div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="weScope" id="weScopeFollowing" value="following">
+                    <label class="form-check-label" for="weScopeFollowing">${it.year} och kommande år</label></div></fieldset>
+                <div id="weRecurBox" class="mt-2 d-none">${recurPickerHtml('we', it.intervalYears)}
+                    <p class="sv-help small mb-0">Åren före ${it.year} behåller sin uppgift som den var.</p></div>`
+            : `<div class="mt-3">${recurPickerHtml('we', 0)}</div>
+               <p class="sv-help small mb-0">Byter du till ett datum ett annat år flyttas uppgiften dit.</p>`;
         formModal({
             title: 'Ändra uppgiften', wide: false,
-            html: `<label class="sv-label" for="weTitle">Uppgift</label><input type="text" id="weTitle" class="form-control mb-3" value="${esc(it.title)}">
-                <label class="sv-label" for="weDate">Datum (frivilligt)</label><input type="text" id="weDate" class="form-control" value="${esc(it.targetDate || '')}">`,
-            onOpen: () => datePick($('weDate'), false),
+            html: `<label class="sv-label" for="weTitle">Uppgift</label><input type="text" id="weTitle" class="form-control mb-3" value="${esc(it.title)}" autocomplete="off">
+                <label class="sv-label" for="weDate">Datum (frivilligt)</label><input type="text" id="weDate" class="form-control" value="${esc(it.targetDate || '')}" autocomplete="off">
+                ${recurring ? `<p class="sv-help small mt-2 mb-0"><i class="bi bi-arrow-repeat" aria-hidden="true"></i> Återkommer ${esc(wheelRecurText(it))}.</p>
+                    <div class="form-check mt-2"><input class="form-check-input" type="checkbox" id="weRemind" ${it.remind ? 'checked' : ''}>
+                    <label class="form-check-label" for="weRemind">Mejla styrelsen en påminnelse 90 dagar före <span class="sv-help">(gäller alla år)</span></label></div>`
+                  : `<p class="sv-help small mt-2 mb-0"><i class="bi bi-bell" aria-hidden="true"></i> Har uppgiften ett datum får styrelsen en påminnelse med e-post 90 dagar före.</p>`}
+                ${scopeHtml}`,
+            onOpen: () => {
+                datePick($('weDate'), false);
+                recurPickerWire('we');
+                if (recurring) document.querySelectorAll('input[name="weScope"]').forEach(r => r.addEventListener('change', () =>
+                    $('weRecurBox').classList.toggle('d-none', !$('weScopeFollowing').checked)));
+            },
             onOk: () => {
                 const title = $('weTitle').value.trim(); if (!title) return Promise.resolve('Uppgiften måste ha en text.');
-                return post('BoardGovernance', 'UpdateWheelItem', { itemId: it.id, title, targetDate: $('weDate').value || '' })
-                    .then(r => { if (!r.success) return r.message || 'Uppgiften kunde inte sparas.'; viewArshjul(); return true; });
+                const interval = recurPickerValue('we');
+                if (interval === null) return Promise.resolve('Skriv hur många år det är mellan gångerna (2–50).');
+                const following = recurring ? $('weScopeFollowing').checked : interval > 0;
+                const params = { key: it.key, title, targetDate: $('weDate').value || '' };
+                if (following) Object.assign(params, { scope: 'following', intervalYears: String(interval) });
+                // Påminnelsen hör till regeln (alla år) — sparas för sig, före en eventuell delning.
+                const remindEl = $('weRemind');
+                const remindFirst = recurring && remindEl && remindEl.checked !== !!it.remind
+                    ? post('BoardGovernance', 'SetWheelRemind', { key: it.key, remind: remindEl.checked ? '1' : '0' })
+                    : Promise.resolve({ success: true });
+                return remindFirst.then(rr => rr.success ? post('BoardGovernance', 'UpdateWheelItem', params) : rr)
+                    .then(r => {
+                        if (!r.success) return r.message || 'Uppgiften kunde inte sparas.';
+                        const landed = r.data && r.data.year;
+                        if (landed && landed !== svWheelYear) {
+                            showMsg(`<strong>${esc(title)}</strong> ligger nu på ${landed}. <a href="#" id="svWheelGoYear">Visa ${landed}</a>`, 'success', true);
+                            $('svWheelGoYear')?.addEventListener('click', e => { e.preventDefault(); showMsg(''); goWheelYear(landed); });
+                        }
+                        viewArshjul(); return true;
+                    });
             }
         });
     }
     async function wheelRemove(it) {
-        if (!await svConfirm('Ta bort uppgiften?', `${it.title} tas bort från årshjulet.`, 'Ta bort', true)) return;
-        post('BoardGovernance', 'RemoveWheelItem', { itemId: it.id }).then(r => { if (r.success) viewArshjul(); });
+        if (!it.intervalYears) {
+            if (!await svConfirm('Ta bort uppgiften?', `${it.title} tas bort från årshjulet.`, 'Ta bort', true)) return;
+            post('BoardGovernance', 'RemoveWheelItem', { key: it.key }).then(r => { if (r.success) viewArshjul(); else failMsg(r); });
+            return;
+        }
+        formModal({
+            title: 'Ta bort uppgiften', wide: false, okLabel: 'Ta bort', okClass: 'btn-danger',
+            html: `<p class="mb-2"><strong>${esc(it.title)}</strong> återkommer ${esc(wheelRecurText(it))}.</p>
+                <fieldset><legend class="sv-label mb-1">Ta bort</legend>
+                <div class="form-check"><input class="form-check-input" type="radio" name="wrScope" id="wrScopeYear" value="year" checked>
+                    <label class="form-check-label" for="wrScopeYear">Bara ${it.year} — uppgiften finns kvar övriga år</label></div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="wrScope" id="wrScopeFollowing" value="following">
+                    <label class="form-check-label" for="wrScopeFollowing">${it.year} och kommande år — åren före står kvar</label></div></fieldset>`,
+            onOk: () => post('BoardGovernance', 'RemoveWheelItem', { key: it.key, scope: $('wrScopeFollowing').checked ? 'following' : 'year' })
+                .then(r => { if (!r.success) return r.message || 'Uppgiften kunde inte tas bort.'; viewArshjul(); return true; })
+        });
     }
 
     // =====================================================================

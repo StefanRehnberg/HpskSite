@@ -123,6 +123,14 @@ namespace HpskSite.Models
         public int SortOrder { get; set; }
         public bool IsActive { get; set; } = true;
 
+        /// <summary>
+        /// Null = en engångspunkt (och all historik från före reglerna). Satt = ett SPARAT tillfälle av
+        /// regeln för året — skapas först när någon bockar av, ändrar eller hoppar över just det året.
+        /// <c>IsActive = 0</c> på ett sådant är en gravsten: regeln säger att tillfället finns, men året är
+        /// överhoppat. Unikt per (RuleId, Year) i databasen.
+        /// </summary>
+        public int? RuleId { get; set; }
+
         [Ignore]
         public bool IsOverdue => !Done && TargetDate.HasValue && TargetDate.Value.Date < DateTime.Today;
     }

@@ -29,6 +29,21 @@ namespace HpskSite.Models
             foreach (var d in i.Documents)
                 Expiry(list, today, d.Label, d.ValidUntil, "tillstand");
 
+            // ── Besiktningen ──────────────────────────────────────────────────
+            if (i.InspectionIntervalYears is >= 1 && !i.HasInspection)
+                list.Add(new RangeTodoItem(RangeTodoItem.Warn,
+                    $"Banan ska besiktas {(i.InspectionIntervalYears == 1 ? "varje år" : $"vart {i.InspectionIntervalYears}:e år")}, men ingen besiktning är registrerad.", "tillstand"));
+            if (i.NextInspectionDue.HasValue)
+            {
+                var d = i.NextInspectionDue.Value.Date;
+                var days = (d - today).Days;
+                if (days < 0)
+                    list.Add(new RangeTodoItem(RangeTodoItem.Danger, $"Besiktningen skulle ha gjorts senast {d:yyyy-MM-dd}.", "tillstand"));
+                else if (days <= WarningDays)
+                    list.Add(new RangeTodoItem(RangeTodoItem.Warn,
+                        $"Besiktning: nästa senast {d:yyyy-MM-dd} (om {days} {(days == 1 ? "dag" : "dagar")}).", "tillstand"));
+            }
+
             // ── Skottaket ─────────────────────────────────────────────────────
             var cap = i.Permits.Where(p => p.MaxShotsPerYear is > 0).Select(p => p.MaxShotsPerYear!.Value).DefaultIfEmpty(0).Min();
             if (i.Permits.Count > 0 && cap == 0)
@@ -98,6 +113,12 @@ namespace HpskSite.Models
         public bool HasSkjutbanechef { get; set; }
         public bool HasPosition { get; set; }
         public int SectionCount { get; set; }
+        /// <summary>Banans besiktningsintervall (null = inget angivet).</summary>
+        public int? InspectionIntervalYears { get; set; }
+        /// <summary>Finns någon aktiv besiktning registrerad?</summary>
+        public bool HasInspection { get; set; }
+        /// <summary>Den senaste besiktningens "nästa senast".</summary>
+        public DateTime? NextInspectionDue { get; set; }
     }
 
     public record RangeTodoDated(string Label, DateTime? ExpiryDate, int? MaxShotsPerYear);

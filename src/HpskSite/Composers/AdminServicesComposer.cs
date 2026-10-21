@@ -134,6 +134,11 @@ namespace HpskSite.Composers
             builder.Services.AddScoped<BoardWorkNotifier>();
             builder.Services.AddHostedService<BoardWorkSchemaGuardHostedService>();
 
+            // Årshjulets och banornas påminnelser 90 dagar före (2026-10-21, plan del C).
+            // Run create-due-reminder-table.sql FÖRE deploy.
+            builder.Services.AddScoped<DueReminderService>();
+            builder.Services.AddHostedService<DueReminderHostedService>();
+
             // Tracks each club's electronic acceptance of the Personuppgiftsbiträdesavtal (DPA).
             // Backed by the ClubDpaAcceptance table — run create-club-dpa-acceptance-table.sql.
             builder.Services.AddScoped<DpaAcceptanceService>();
