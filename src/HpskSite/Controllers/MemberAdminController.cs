@@ -1200,7 +1200,10 @@ namespace HpskSite.Controllers
                     }
 
                     _memberService.Delete(member);
-                    return Json(new { success = true, message = $"Member deleted successfully ({purge.TotalRowsDeleted} kopplade rader raderade)" });
+                    var anonymized = purge.TotalRowsAnonymized > 0
+                        ? $", {purge.TotalRowsAnonymized} uppdrag i tävlingars planering avidentifierade"
+                        : "";
+                    return Json(new { success = true, message = $"Member deleted successfully ({purge.TotalRowsDeleted} kopplade rader raderade{anonymized})" });
                 }
                 return Json(new { success = false, message = "Member not found" });
             }

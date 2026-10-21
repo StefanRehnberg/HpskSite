@@ -108,12 +108,25 @@ namespace HpskSite.Services.Staffing
             return scope.Database.SingleOrDefault<WorkLink>("SELECT * FROM WorkLink WHERE Id = @0", id);
         }
 
+        /// <summary>Returns 0 when the område or uppgift the link points at belongs to another competition.</summary>
         public int SaveLink(WorkLink link)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            var db = scope.Database;
+            if (link.WorkAreaId is > 0 && !AreaBelongs(db, link.WorkAreaId.Value, link.CompetitionId)) return 0;
+            if (link.WorkItemId is > 0 && !ItemBelongs(db, link.WorkItemId.Value, link.CompetitionId)) return 0;
             if (link.CreatedDate == default) link.CreatedDate = DateTime.UtcNow;
-            return Convert.ToInt32(scope.Database.Insert(link));
+            return Convert.ToInt32(db.Insert(link));
         }
+
+        // Varje rad som pekas ut med ett id utifrån prövas mot tävlingen anropet gäller. Behörigheten
+        // prövas bara för den tävlingen, så en rad i en annan tävling får aldrig gå att läsa, ändra eller
+        // hänga något på genom ett id (rättat 2026-10-21 — förut flyttade en sparning raden hit).
+        private static bool AreaBelongs(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int areaId, int competitionId)
+            => db.ExecuteScalar<int>("SELECT COUNT(1) FROM WorkArea WHERE Id = @0 AND CompetitionId = @1", areaId, competitionId) > 0;
+
+        private static bool ItemBelongs(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int itemId, int competitionId)
+            => db.ExecuteScalar<int>("SELECT COUNT(1) FROM WorkItem WHERE Id = @0 AND CompetitionId = @1", itemId, competitionId) > 0;
 
         /// <summary>Delete a link row and return its stored file name (if any) so the caller can remove the file.</summary>
         public string? DeleteLink(int id, int competitionId)
@@ -195,6 +208,7 @@ namespace HpskSite.Services.Staffing
 
         // ---- WorkArea writes ----
 
+        /// <summary>Returns 0 when <c>req.Id</c> is not an område in <c>req.CompetitionId</c>.</summary>
         public int SaveArea(SaveWorkAreaRequest req, int byMemberId)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
@@ -202,8 +216,10 @@ namespace HpskSite.Services.Staffing
             WorkArea row;
             if (req.Id > 0)
             {
-                row = db.SingleOrDefault<WorkArea>("SELECT * FROM WorkArea WHERE Id = @0", req.Id)
-                      ?? new WorkArea { CompetitionId = req.CompetitionId, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
+                var existing = db.SingleOrDefault<WorkArea>(
+                    "SELECT * FROM WorkArea WHERE Id = @0 AND CompetitionId = @1", req.Id, req.CompetitionId);
+                if (existing == null) return 0;
+                row = existing;
             }
             else
             {
@@ -237,17 +253,22 @@ namespace HpskSite.Services.Staffing
 
         // ---- WorkItem writes ----
 
+        /// <summary>Returns 0 when <c>req.Id</c> is not an uppgift in <c>req.CompetitionId</c>, or when
+        /// <c>req.WorkAreaId</c> is an område in another competition.</summary>
         public int SaveItem(SaveWorkItemRequest req, int byMemberId, string? byName = null)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
+            if (!AreaBelongs(db, req.WorkAreaId, req.CompetitionId)) return 0;
             WorkItem row;
             string? oldStatus = null;
             if (req.Id > 0)
             {
-                row = db.SingleOrDefault<WorkItem>("SELECT * FROM WorkItem WHERE Id = @0", req.Id)
-                      ?? new WorkItem { CompetitionId = req.CompetitionId, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
-                if (row.Id > 0) oldStatus = row.Status;
+                var existing = db.SingleOrDefault<WorkItem>(
+                    "SELECT * FROM WorkItem WHERE Id = @0 AND CompetitionId = @1", req.Id, req.CompetitionId);
+                if (existing == null) return 0;
+                row = existing;
+                oldStatus = row.Status;
             }
             else
             {
@@ -333,9 +354,11 @@ namespace HpskSite.Services.Staffing
         }
 
         /// <summary>Add a person-written comment to an item's thread. Returns the new row id.</summary>
+        /// <summary>Returns 0 when the uppgift belongs to another competition.</summary>
         public int AddComment(int competitionId, int itemId, string body, int byMemberId, string? byName)
         {
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
+            if (!ItemBelongs(scope.Database, itemId, competitionId)) return 0;
             return Convert.ToInt32(scope.Database.Insert(new WorkItemComment
             {
                 CompetitionId = competitionId,

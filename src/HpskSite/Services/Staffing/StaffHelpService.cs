@@ -32,8 +32,13 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
             StaffHelpSlot row;
             if (req.Id > 0)
-                row = db.SingleOrDefault<StaffHelpSlot>("SELECT * FROM StaffHelpSlot WHERE Id = @0", req.Id)
-                      ?? new StaffHelpSlot { CompetitionId = req.CompetitionId, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
+            {
+                // Bara ett pass i den här tävlingen — ett id utifrån får aldrig flytta en annan tävlings pass hit.
+                var existing = db.SingleOrDefault<StaffHelpSlot>(
+                    "SELECT * FROM StaffHelpSlot WHERE Id = @0 AND CompetitionId = @1", req.Id, req.CompetitionId);
+                if (existing == null) return 0;
+                row = existing;
+            }
             else
             {
                 var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM StaffHelpSlot WHERE CompetitionId = @0", req.CompetitionId) ?? 0;

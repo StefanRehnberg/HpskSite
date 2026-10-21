@@ -510,7 +510,14 @@ namespace HpskSite.Services
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
 
-            foreach (var (table, column) in MemberDataPurgeService.SubjectTables)
+            // Funktionärsuppdrag och ansvar i en tävlings planering pekar på medlemmen utan att vara
+            // medlemmens egna rader (gallringen tar bort personuppgifterna och lämnar raden). Vid en
+            // sammanslagning flyttas de på samma sätt som SubjectTables, annars tappar kontot som blir
+            // kvar sina uppdrag (tillagt 2026-10-21).
+            var moveTargets = MemberDataPurgeService.SubjectTables
+                .Concat(MemberDataPurgeService.AssignmentColumns.Select(a => (a.Table, Column: a.MemberColumn)));
+
+            foreach (var (table, column) in moveTargets)
             {
                 if (string.Equals(table, "ClubMembership", StringComparison.OrdinalIgnoreCase)) continue;
 
@@ -675,14 +682,17 @@ namespace HpskSite.Services
             using var scope = _scopeProvider.CreateScope(autoComplete: true);
             var db = scope.Database;
 
-            foreach (var (table, column) in MemberDataPurgeService.SubjectTables)
+            var countTargets = MemberDataPurgeService.SubjectTables
+                .Concat(MemberDataPurgeService.AssignmentColumns.Select(a => (a.Table, Column: a.MemberColumn)));
+
+            foreach (var (table, column) in countTargets)
             {
                 try
                 {
                     var exists = db.ExecuteScalar<int>($"SELECT CASE WHEN OBJECT_ID('dbo.{table}','U') IS NULL THEN 0 ELSE 1 END");
                     if (exists == 0) continue;
                     var n = db.ExecuteScalar<int>($"SELECT COUNT(*) FROM [{table}] WHERE [{column}] = @0", memberId);
-                    if (n > 0) counts[table] = n;
+                    if (n > 0) counts[table] = counts.TryGetValue(table, out var prev) ? prev + n : n;
                 }
                 catch
                 {

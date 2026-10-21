@@ -1131,10 +1131,14 @@
         var shift = a.shiftLabel ? '<span class="badge bg-light text-dark border"><i class="bi bi-clock me-1"></i>' + esc(a.shiftLabel) + '</span>' : '';
         var pass = a.passLabel ? '<span class="badge bg-primary-subtle text-primary-emphasis border"><i class="bi bi-calendar2-week me-1"></i>' + esc(a.passLabel) + '</span>' : '';
         var phone = a.phone ? ' <a class="btn btn-sm btn-outline-success" href="tel:' + esc(a.phone) + '" title="Ring ' + esc(a.displayName) + '"><i class="bi bi-telephone"></i></a>' : '';
-        var nameEsc = esc(a.displayName).replace(/'/g, "\\'");
+        // esc() räcker inte i en JS-sträng i ett attribut ('&#39;' avkodas till ' innan JavaScript läser
+        // det — ett namn som O'Brien avslutade strängen, rättat 2026-10-21). URL-kodat + avkodat i anropet
+        // med webbläsarens decodeURIComponent (ett onclick når inte funktionerna i det här blocket), så
+        // stfNotify/stfDelete får klartext som från övriga anropsställen.
+        var nameEsc = keyArg(a.displayName);
         // Same rule as the person row: Ring stays a one-tap link, the rest is one menu.
         var notifyItem = (a.memberId || a.email)
-            ? '<li><button class="dropdown-item" type="button" onclick="stfNotify(' + a.id + ',\'' + nameEsc + '\')"><i class="bi bi-envelope me-2 text-primary"></i>Bjud in / notifiera (e-post + push)</button></li>'
+            ? '<li><button class="dropdown-item" type="button" onclick="stfNotify(' + a.id + ',decodeURIComponent(\'' + nameEsc + '\'))"><i class="bi bi-envelope me-2 text-primary"></i>Bjud in / notifiera (e-post + push)</button></li>'
             : '';
         // External (non-member) helper: offer a copyable accept/decline link to send manually (SMS etc.).
         var linkItem = (!a.memberId && !a.readOnly)
@@ -1158,7 +1162,7 @@
                 + linkItem
                 + '<li><button class="dropdown-item" type="button" onclick="stfEdit(' + a.id + ')"><i class="bi bi-pencil me-2 text-primary"></i>Redigera uppdraget</button></li>'
                 + '<li><hr class="dropdown-divider"></li>'
-                + '<li><button class="dropdown-item text-danger" type="button" onclick="stfDelete(' + a.id + ',\'' + nameEsc + '\')"><i class="bi bi-trash me-2"></i>Ta bort uppdraget</button></li>'
+                + '<li><button class="dropdown-item text-danger" type="button" onclick="stfDelete(' + a.id + ',decodeURIComponent(\'' + nameEsc + '\'))"><i class="bi bi-trash me-2"></i>Ta bort uppdraget</button></li>'
                 + '</ul></div>' + phone);
         return '<div class="d-flex justify-content-between align-items-start border-top py-2 gap-2" style="border-color:var(--bs-border-color)">'
             + '<div class="flex-grow-1">'

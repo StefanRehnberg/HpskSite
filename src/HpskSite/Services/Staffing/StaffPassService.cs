@@ -36,8 +36,13 @@ namespace HpskSite.Services.Staffing
             var db = scope.Database;
             StaffPass row;
             if (req.Id > 0)
-                row = db.SingleOrDefault<StaffPass>("SELECT * FROM StaffPass WHERE Id = @0", req.Id)
-                      ?? new StaffPass { CompetitionId = req.CompetitionId, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
+            {
+                // Bara ett pass i den här tävlingen — ett id utifrån får aldrig flytta en annan tävlings pass hit.
+                var existing = db.SingleOrDefault<StaffPass>(
+                    "SELECT * FROM StaffPass WHERE Id = @0 AND CompetitionId = @1", req.Id, req.CompetitionId);
+                if (existing == null) return 0;
+                row = existing;
+            }
             else
             {
                 var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM StaffPass WHERE CompetitionId = @0", req.CompetitionId) ?? 0;

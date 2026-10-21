@@ -89,8 +89,9 @@ namespace HpskSite.Services.Staffing
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Staffing: roster app-access lookup failed for competition {CompetitionId}", competitionId);
-                return false;
+                // En grind som inte kunde fråga svarar nej, men det får aldrig vara tyst: ett databasfel
+                // här låser ute kassören och sekretariatet på tävlingsdagen. Samma väg som övriga grindar.
+                return HpskSite.Services.Ops.OpsSignals.AuthGateFailed(_logger, ex, "HasRosterAdminAccess", $"{competitionId}/{memberId}");
             }
         }
 
@@ -259,8 +260,14 @@ namespace HpskSite.Services.Staffing
                 StaffAssignment row;
                 if (req.Id > 0)
                 {
-                    row = db.SingleOrDefault<StaffAssignment>("SELECT * FROM StaffAssignment WHERE Id = @0", req.Id)
-                          ?? new StaffAssignment { CompetitionId = req.CompetitionId, CreatedDate = now, AssignedByMemberId = assignedByMemberId };
+                    // Bara en rad i den här tävlingen. Behörigheten prövas för req.CompetitionId, så en rad i en
+                    // annan tävling får aldrig hittas här — förut skrevs dess tävling över med anropets, alltså
+                    // kunde personal på en tävling flytta en annan tävlings tävlingsledare till sin egen
+                    // (rättat 2026-10-21). Ett okänt id skapar inte heller en ny rad längre.
+                    var existing = db.SingleOrDefault<StaffAssignment>(
+                        "SELECT * FROM StaffAssignment WHERE Id = @0 AND CompetitionId = @1", req.Id, req.CompetitionId);
+                    if (existing == null) return 0;
+                    row = existing;
                 }
                 else
                 {
@@ -285,6 +292,9 @@ namespace HpskSite.Services.Staffing
                 // A timed row already carries its day; DayDate only speaks for untimed ("heldag") rows,
                 // so keeping both would let them drift apart.
                 row.DayDate = row.StartsAt != null ? null : ParseDate(req.DayDate);
+                if (req.PassId is > 0 && db.ExecuteScalar<int>(
+                        "SELECT COUNT(1) FROM StaffPass WHERE Id = @0 AND CompetitionId = @1", req.PassId, req.CompetitionId) == 0)
+                    return 0;   // ett pass i en annan tävling
                 row.PassId = req.PassId is > 0 ? req.PassId : null;
                 row.IsResponsible = req.IsResponsible;
                 // App access is role-agnostic (a Kassa- or Sekretariatsansvarig needs the same management

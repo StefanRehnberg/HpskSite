@@ -305,6 +305,11 @@
     var SCOPE_KEY_LABEL = { Station: 'Station nr', Skjutlag: 'Skjutlag nr', Klass: 'Klass', Patrull: 'Patrull nr', Bana: 'Bana' };
 
     function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    // Text som ska in i en JS-sträng i ett onclick-attribut. esc() räcker INTE där: '&#39;' avkodas till
+    // ett citattecken inne i attributet innan JavaScript läser det, så en titel med ' i avslutade strängen
+    // och kunde köra kod (rättat 2026-10-21). URL-kodning innehåller varken ' " < > eller &.
+    function jsArg(s) { return encodeURIComponent(s == null ? '' : String(s)).replace(/'/g, '%27'); }
+    function fromArg(a) { try { return decodeURIComponent(a); } catch (e) { return a; } }
     function q(id) { return document.getElementById(id); }
     function fmtKr(n) { return (Math.round(Number(n) || 0)).toLocaleString('sv-SE') + ' kr'; }
     // Budget/utfall chip for an item or an område sum. Shows budget, and utfall when set.
@@ -465,7 +470,7 @@
             + '<span class="d-flex gap-1">'
             + '<button type="button" class="btn btn-sm btn-outline-primary" onclick="wbOpenItem(' + a.id + ',0)"><i class="bi bi-plus-lg me-1"></i>Uppgift</button>'
             + '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="wbOpenArea(' + a.id + ')" title="Redigera område"><i class="bi bi-pencil"></i></button>'
-            + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="wbDeleteArea(' + a.id + ',\'' + esc(a.name).replace(/'/g, "\\'") + '\')" title="Ta bort område"><i class="bi bi-trash"></i></button>'
+            + '<button type="button" class="btn btn-sm btn-outline-danger" onclick="wbDeleteArea(' + a.id + ',\'' + jsArg(a.name) + '\')" title="Ta bort område"><i class="bi bi-trash"></i></button>'
             + '</span>'
             + '</div>'
             + '<div class="card-body py-2">'
@@ -484,7 +489,7 @@
         var titleCls = done ? 'text-decoration-line-through text-muted' : '';
         var links = (i.links && i.links.length) ? ('<div class="mt-1 ms-4">' + linkChips(i.links) + '</div>') : '';
         var blockLine = blockedByLine(i);
-        var titleEsc = esc(i.title).replace(/'/g, "\\'");
+        var titleEsc = jsArg(i.title);
         // Five icon-only buttons per uppgift, on a list that runs to dozens of rows. One menu
         // instead — and the comment COUNT moves up into the badge line, because that is
         // information about the task, not an action, and it must stay readable at a glance.
@@ -672,6 +677,7 @@
     };
 
     window.wbDeleteArea = async function (id, name) {
+        name = fromArg(name);
         if (!confirm('Ta bort området "' + name + '" och alla dess uppgifter?')) return;
         var d = await post('/umbraco/surface/Staffing/DeleteWorkArea', { id: id, competitionId: compId });
         if (d.success) await load(); else alert(d.message || 'Kunde inte ta bort.');
@@ -731,6 +737,7 @@
     };
 
     window.wbDeleteItem = async function (id, title) {
+        title = fromArg(title);
         if (!confirm('Ta bort uppgiften "' + title + '"?')) return;
         var d = await post('/umbraco/surface/Staffing/DeleteWorkItem', { id: id, competitionId: compId });
         if (d.success) await load(); else alert(d.message || 'Kunde inte ta bort.');
@@ -784,7 +791,7 @@
         if (templates.length) {
             html += '<li><hr class="dropdown-divider"></li><li><h6 class="dropdown-header">Klubbens/kretsens mallar</h6></li>';
             html += templates.map(function (t) {
-                return '<li><button class="dropdown-item" type="button" onclick="wbSeedTemplate(' + t.id + ',\'' + esc(t.name).replace(/'/g, "\\'") + '\')">' + esc(t.name) + ' <span class="text-muted small">· ' + t.areaCount + ' områden</span></button></li>';
+                return '<li><button class="dropdown-item" type="button" onclick="wbSeedTemplate(' + t.id + ',\'' + jsArg(t.name) + '\')">' + esc(t.name) + ' <span class="text-muted small">· ' + t.areaCount + ' områden</span></button></li>';
             }).join('');
         }
         html += '<li><hr class="dropdown-divider"></li>'
@@ -794,6 +801,7 @@
     }
 
     window.wbSeedTemplate = async function (id, name) {
+        name = fromArg(name);
         if (!confirm('Fyll i förberedelser från mallen "' + name + '"? Områden med samma namn hoppas över.')) return;
         var d = await post('/umbraco/surface/Staffing/SeedPrepTemplate', { competitionId: compId, templateId: id });
         if (d.success) await load(); else alert(d.message || 'Kunde inte fylla i mallen.');
@@ -818,7 +826,7 @@
         if (!host) return;
         if (!templates.length) { host.innerHTML = '<div class="text-muted small fst-italic">Inga sparade mallar ännu.</div>'; return; }
         host.innerHTML = templates.map(function (t) {
-            var nm = esc(t.name).replace(/'/g, "\\'");
+            var nm = jsArg(t.name);
             return '<div class="d-flex justify-content-between align-items-center border rounded px-2 py-2 mb-2">'
                 + '<div><span class="fw-semibold">' + esc(t.name) + '</span> <span class="badge bg-light text-dark border">' + (t.ownerType === 'Region' ? 'Krets' : 'Klubb') + '</span>'
                 + '<div class="text-muted small">' + t.areaCount + ' områden · ' + t.itemCount + ' uppgifter' + (t.staffRowCount ? ' · ' + t.staffRowCount + ' rollrader' : '') + '</div></div>'
@@ -830,6 +838,7 @@
     }
 
     window.wbDeleteTemplate = async function (id, name) {
+        name = fromArg(name);
         if (!confirm('Ta bort mallen "' + name + '"?')) return;
         var d = await post('/umbraco/surface/Staffing/DeleteTemplate', { competitionId: compId, templateId: id });
         if (d.success) { await loadTemplates(); renderTemplateList(); } else alert(d.message || 'Kunde inte ta bort.');
@@ -906,6 +915,7 @@
 
     // ---- notiser & påminnelser ----
     window.wbNotifyItem = async function (id, title) {
+        title = fromArg(title);
         if (!confirm('Skicka en påminnelse till den tilldelade medlemmen för "' + title + '"?')) return;
         var d = await post('/umbraco/surface/Staffing/NotifyWorkItem', { id: id, competitionId: compId });
         if (d.success) {
@@ -925,6 +935,7 @@
 
     // ---- tråd: kommentarer/logg + beroenden ----
     window.wbOpenThread = function (itemId, title) {
+        title = fromArg(title);
         if (!threadModal) threadModal = new bootstrap.Modal(q('wbThreadModal'));
         q('wbThreadItemId').value = itemId;
         q('wbThreadTitle').textContent = title || 'Uppgift';

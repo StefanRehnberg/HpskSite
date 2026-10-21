@@ -119,6 +119,13 @@ namespace HpskSite.Services
             // ── Lånevapenbokningar (subject = medlemmen som lånar) ──
             ("FirearmBooking",               "MemberId"),
 
+            // ── Tävlingsplanering: funktionärens EGNA uppgifter (anmälan till pass, tillgänglighet) ──
+            // Uppdragen i bemanningen och ansvaret i förberedelserna står INTE här — de hör till
+            // arrangörens planering och får inte försvinna. De ligger i AssignmentColumns nedan, där
+            // gallringen tar bort personuppgifterna men lämnar raden (tillagt 2026-10-21).
+            ("StaffAvailability",            "MemberId"),
+            ("StaffHelpSignup",              "MemberId"),
+
             // ── Kursen (fas D): anteckningar och registrerade serier om deltagaren ──
             // AuthorMemberId/RecordedByMemberId är aktörer och räknas inte.
             ("TrainingCourseNote",           "MemberId"),
@@ -136,6 +143,24 @@ namespace HpskSite.Services
             ("CourseTestAccess",             "MemberId"),
             ("CourseTestResults",            "MemberId"),
             ("CourseReviewers",              "MemberId"),
+        };
+
+        /// <summary>
+        /// Rader som PEKAR på medlemmen men tillhör någon annan — ett funktionärsuppdrag i en tävlings
+        /// bemanning, ansvaret för ett område eller en uppgift i förberedelserna. Vid gallring tas
+        /// personuppgifterna bort (medlemmen och de denormaliserade namnen/kontaktuppgifterna) och raden
+        /// står kvar, eftersom arrangörens planering inte får tappa en rad för att en medlem gallras. Vid en
+        /// sammanslagning flyttas medlemskolumnen till kontot som blir kvar, precis som SubjectTables.
+        /// <para>ClearSql är resten av SET-satsen vid gallring (efter att medlemskolumnen satts till NULL).</para>
+        /// </summary>
+        public static (string Table, string MemberColumn, string ClearSql)[] AssignmentColumns => _assignmentColumns;
+
+        private static readonly (string Table, string MemberColumn, string ClearSql)[] _assignmentColumns = new[]
+        {
+            ("StaffAssignment", "MemberId",
+                "DisplayName = N'Borttagen medlem', Phone = NULL, Email = NULL, OriginalName = NULL, HasAdminAccess = 0"),
+            ("WorkArea",        "ResponsibleMemberId", "ResponsibleName = NULL"),
+            ("WorkItem",        "AssignedMemberId",    "AssignedName = NULL"),
         };
 
         /// <summary>
@@ -171,6 +196,26 @@ namespace HpskSite.Services
                 }
             }
 
+            foreach (var (table, column, clearSql) in _assignmentColumns)
+            {
+                try
+                {
+                    var cleared = db.Execute(
+                        $"IF OBJECT_ID('dbo.{table}','U') IS NOT NULL UPDATE [{table}] SET [{column}] = NULL, {clearSql} WHERE [{column}] = @0",
+                        memberId);
+
+                    if (cleared > 0)
+                    {
+                        result.Anonymized[table] = cleared;
+                        result.TotalRowsAnonymized += cleared;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add($"{table}: {ex.Message}");
+                }
+            }
+
             return result;
         }
     }
@@ -185,6 +230,12 @@ namespace HpskSite.Services
 
         /// <summary>Per-table deleted-row counts (only tables that deleted &gt; 0 rows appear).</summary>
         public Dictionary<string, int> Deleted = new();
+
+        /// <summary>Rows kept but stripped of the member's personal data (<see cref="MemberDataPurgeService.AssignmentColumns"/>).</summary>
+        public int TotalRowsAnonymized;
+
+        /// <summary>Per-table anonymized-row counts.</summary>
+        public Dictionary<string, int> Anonymized = new();
 
         /// <summary>"Table: message" for any table whose delete threw (the rest still ran).</summary>
         public List<string> Errors = new();

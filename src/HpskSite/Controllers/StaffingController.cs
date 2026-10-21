@@ -28,6 +28,11 @@ namespace HpskSite.Controllers
     /// </summary>
     public class StaffingController : SurfaceController
     {
+        /// <summary>Svaret när ett id utifrån pekar på en rad (eller ett område, en uppgift, ett pass) i en
+        /// annan tävling än den anropet gäller. Behörigheten prövas bara för anropets tävling.</summary>
+        internal const string NotInCompetitionMessage =
+            "Raden hittades inte i den här tävlingen. Ladda om sidan och försök igen.";
+
         private readonly IMemberManager _memberManager;
         private readonly IMemberService _memberService;
         private readonly IUmbracoContextAccessor _umbracoContextAccessor;
@@ -348,6 +353,7 @@ namespace HpskSite.Controllers
             try
             {
                 var id = _staffing.Save(request, viewer.Id);
+                if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
                 return Json(new { success = true, id });
             }
             catch (Exception ex)
@@ -466,6 +472,7 @@ namespace HpskSite.Controllers
                 request.ResponsibleName = MemberDisplayName(request.ResponsibleMemberId.Value);
 
             var id = _work.SaveArea(request, viewer.Id);
+            if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
             return Json(new { success = true, id });
         }
 
@@ -497,6 +504,7 @@ namespace HpskSite.Controllers
                 request.AssignedName = MemberDisplayName(request.AssignedMemberId.Value);
 
             var id = _work.SaveItem(request, viewer.Id, viewer.Name);
+            if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
             return Json(new { success = true, id });
         }
 
@@ -560,6 +568,7 @@ namespace HpskSite.Controllers
             var body = request.Body.Trim();
             if (body.Length > 4000) body = body.Substring(0, 4000);
             var id = _work.AddComment(request.CompetitionId, request.WorkItemId, body, viewer.Id, viewer.Name);
+            if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
             return Json(new { success = true, id });
         }
 
@@ -712,6 +721,7 @@ namespace HpskSite.Controllers
             if (!await HasCompetitionAccessAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
             var id = _pass.SavePass(request, viewer.Id);
+            if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
             return Json(new { success = true, id });
         }
 
@@ -806,6 +816,7 @@ namespace HpskSite.Controllers
             if (!await HasCompetitionAccessAsync(request.CompetitionId))
                 return Json(new { success = false, message = "Ingen behörighet" });
             var id = _help.SaveSlot(request, viewer.Id);
+            if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
             return Json(new { success = true, id });
         }
 
@@ -1016,6 +1027,7 @@ namespace HpskSite.Controllers
                 Url = url,
                 CreatedByMemberId = viewer.Id,
             });
+            if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
             return Json(new { success = true, id });
         }
 
@@ -1045,6 +1057,12 @@ namespace HpskSite.Controllers
                 OriginalFileName = file.FileName,
                 CreatedByMemberId = viewer.Id,
             });
+            if (id == 0)
+            {
+                // Ingen rad pekar på filen — ta bort den igen, annars ligger den kvar i lagringen för alltid.
+                await _docs.DeleteAsync(stored);
+                return Json(new { success = false, message = NotInCompetitionMessage });
+            }
             return Json(new { success = true, id });
         }
 
