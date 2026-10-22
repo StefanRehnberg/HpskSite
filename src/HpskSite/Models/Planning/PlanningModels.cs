@@ -13,6 +13,11 @@ namespace HpskSite.Models.Planning
     // ============================================================================================
 
     /// <summary>Planeringens slag. Lagras som text — byt aldrig en befintlig sträng.</summary>
+    /// <summary>
+    /// Vad planeringen gäller. ⚠️ Ett SLAG, aldrig ett SKEDE (Stefan 2026-10-22): "Planeringsgrupp" erbjuds
+    /// inte längre — varje planering börjar som en grupp som ska komma överens, så valet passade in på
+    /// alla de andra. Värdet finns kvar för rader som redan bär det (och i databasens CHECK).
+    /// </summary>
     public static class PlanningKind
     {
         public const string Group = "Planeringsgrupp";
@@ -29,10 +34,10 @@ namespace HpskSite.Models.Planning
         public static string Label(string? v) => Normalize(v) switch
         {
             ClubCompetition => "Klubbens tävling",
-            RegionChampionship => "Kretsmästerskap",
-            SmWeek => "SM-vecka med flera kretsar",
+            RegionChampionship => "Kretsens tävling",
+            SmWeek => "SM eller landsdelsmästerskap",
             Other => "Annat",
-            _ => "Planeringsgrupp",
+            _ => "Planering",
         };
     }
 

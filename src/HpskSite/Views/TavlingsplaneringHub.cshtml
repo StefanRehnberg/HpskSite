@@ -48,15 +48,22 @@
                 <div class="alert alert-danger d-none" id="plhErr" role="alert"></div>
                 <div class="mb-3"><label class="form-label fw-semibold" for="plhName">Vad ska ni planera?</label>
                     <input id="plhName" class="form-control" maxlength="200" placeholder="Till exempel: SM 2028 eller Magnumträffen 2027"></div>
-                <div class="mb-2 fw-semibold">Vilket slags planering?</div>
-                <label class="plh-kind"><input type="radio" name="plhKind" value="Planeringsgrupp" class="form-check-input me-2" checked>
-                    <b>En grupp som ska komma överens</b><div class="plh-help small ms-4">Till exempel representanterna från landsdelens kretsar inför ett SM — var, när, vem gör vad.</div></label>
+                @*
+                    ⚠️ Frågan gäller VAD som planeras, aldrig i vilket skede (Stefan 2026-10-22). Ett första val
+                    "En grupp som ska komma överens" passade in på alla de andra — varje planering börjar så —
+                    och dess exempel ("inför ett SM") krockade med SM-valet längre ned. Lägg inte tillbaka ett
+                    skede som ett slag. Inget är förvalt: valet ska vara medvetet.
+                *@
+                <div class="mb-1 fw-semibold">Vad gäller planeringen?</div>
+                <div class="plh-help small mb-2">Det går bra att börja långt innan tävlingen finns — även när ni ännu inte vet var eller när.</div>
                 <label class="plh-kind"><input type="radio" name="plhKind" value="Klubbtavling" class="form-check-input me-2">
-                    <b>Klubbens egen tävling</b><div class="plh-help small ms-4">En fälttävling eller precisionstävling som klubben arrangerar.</div></label>
+                    <b>En tävling som klubben arrangerar</b><div class="plh-help small ms-4">Till exempel klubbens fälttävling eller klubbmästerskap.</div></label>
                 <label class="plh-kind"><input type="radio" name="plhKind" value="Kretsmasterskap" class="form-check-input me-2">
-                    <b>Kretsmästerskap</b><div class="plh-help small ms-4">Kretsen arrangerar, ofta med hjälp av en klubb.</div></label>
+                    <b>En tävling som kretsen arrangerar</b><div class="plh-help small ms-4">Till exempel ett kretsmästerskap, ofta med hjälp av en klubb.</div></label>
                 <label class="plh-kind"><input type="radio" name="plhKind" value="SmVecka" class="form-check-input me-2">
-                    <b>SM-vecka med flera kretsar</b><div class="plh-help small ms-4">En krets arrangerar med hjälp av landsdelens övriga kretsar.</div></label>
+                    <b>SM eller landsdelsmästerskap</b><div class="plh-help small ms-4">Flera kretsar arrangerar tillsammans, ofta med planering som börjar år i förväg.</div></label>
+                <label class="plh-kind"><input type="radio" name="plhKind" value="Annat" class="form-check-input me-2">
+                    <b>Något annat</b><div class="plh-help small ms-4">Till exempel en träff, ett läger eller en kurs.</div></label>
                 <div class="row g-2 mt-2 mb-3">
                     <div class="col-12"><label class="form-label" for="plhTarget">Ungefär när och var (valfritt)</label>
                         <input id="plhTarget" class="form-control" maxlength="200" placeholder="Till exempel: augusti 2028, Skillingaryd?"></div>
@@ -138,15 +145,17 @@
         const btn = $('plhCreate'); btn.disabled = true;
         try {
             const owner = $('plhOwner').value;
-            const kind = document.querySelector('input[name="plhKind"]:checked').value;
+            const picked = document.querySelector('input[name="plhKind"]:checked');
+            if (!picked) { $('plhErr').textContent = 'Välj vad planeringen gäller.'; $('plhErr').classList.remove('d-none'); $('plhErr').scrollIntoView({ block: 'nearest' }); return; }
+            const kind = picked.value;
             const body = new URLSearchParams({ name: $('plhName').value, kind, owner, targetText: $('plhTarget').value,
                 targetStart: $('plhStart').value.trim(), targetEnd: $('plhEnd').value.trim(),
                 visibility: owner && $('plhVis').checked ? 'OwnerOrg' : 'Invited' });
             const r = await req('/umbraco/surface/Planning/Create', { method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'RequestVerificationToken': tok() }, body: body.toString() });
-            if (!r.success) { $('plhErr').textContent = r.message; $('plhErr').classList.remove('d-none'); return; }
+            if (!r.success) { $('plhErr').textContent = r.message; $('plhErr').classList.remove('d-none'); $('plhErr').scrollIntoView({ block: 'nearest' }); return; }
             location.href = r.url + '#vy=oversikt';
-        } catch (e) { $('plhErr').textContent = e.message; $('plhErr').classList.remove('d-none'); }
+        } catch (e) { $('plhErr').textContent = e.message; $('plhErr').classList.remove('d-none'); $('plhErr').scrollIntoView({ block: 'nearest' }); }
         finally { btn.disabled = false; }
     });
     load();
