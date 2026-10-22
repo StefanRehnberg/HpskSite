@@ -117,19 +117,21 @@ namespace HpskSite.Services.Planning
         }
 
         public string? Update(int planningId, string name, string? targetText, DateTime? start, DateTime? end,
-            string visibility, int byMemberId)
+            int? ownerType, int? ownerId, string visibility, int byMemberId)
         {
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
             var p = db.SingleOrDefault<PlanningRow>("SELECT * FROM Planning WHERE Id = @0 AND DeletedAt IS NULL", planningId);
             if (p == null) return "Planeringen finns inte.";
-            var err = Validate(name, start, end, p.OwnerType, p.OwnerId, visibility);
+            var err = Validate(name, start, end, ownerType, ownerId, visibility);
             if (err != null) return err;
             var renamed = !string.Equals(p.Name, name.Trim(), StringComparison.Ordinal);
             p.Name = name.Trim();
             p.TargetText = Clean(targetText, 200);
             p.TargetStart = start?.Date;
             p.TargetEnd = end?.Date;
+            p.OwnerType = ownerType;
+            p.OwnerId = ownerType.HasValue ? ownerId : null;
             p.Visibility = visibility;
             p.UpdatedAt = Now;
             p.UpdatedBy = byMemberId;

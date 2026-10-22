@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Logging;
+using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Security;
 using Umbraco.Cms.Core.Services;
@@ -150,12 +151,16 @@ namespace HpskSite.Controllers
             try
             {
                 if (type == DocumentOwnerType.Club) return _clubs.GetClubNameById(id!.Value) ?? "";
-                if (UmbracoContextAccessor.TryGetUmbracoContext(out var ctx))
-                    return ctx.Content?.GetById(id!.Value)?.Name ?? "";
+                if (UmbracoContextAccessor.TryGetUmbracoContext(out var ctx) && ctx.Content?.GetById(id!.Value) is { } n)
+                    return RegionName(n);
             }
             catch { /* namnet är bara text på skärmen */ }
             return "";
         }
+
+        /// <summary>Kretsens visningsnamn: nodnamnen saknar å/ä/ö ("Jonkoping"), egenskapen regionName har dem.</summary>
+        private static string RegionName(IPublishedContent r) =>
+            r.Value<string>("regionName") is { Length: > 0 } n ? n : r.Name ?? "";
 
         private string Represents(PlanningMemberRow r) =>
             r.RepresentsClubId > 0 ? OrgName(DocumentOwnerType.Club, r.RepresentsClubId)
@@ -201,35 +206,72 @@ namespace HpskSite.Controllers
             });
         }
 
-        /// <summary>Föreningarna en ny planering kan höra till: medlemmens klubbar och deras kretsar.</summary>
-        private List<object> OrgOptions(int memberId)
+        /// <summary>
+        /// Föreningarna vars styrelse kan få läsa planeringen: medlemmens klubbar, medlemmens kretsar och
+        /// ALLA kretsar i samma landsdel (Stefan 2026-10-22: ett SM har en hel landsdel inblandad, och
+        /// huvudarrangören är ofta en annan krets än ens egen). Landsdelen själv har ingen styrelse i
+        /// pistol.nu och kan därför inte väljas.
+        /// </summary>
+        private sealed record Org(int Type, int Id, string Name, string Kind, bool Own);
+
+        private List<Org>? _orgCache;
+        private List<Org> OrgChoices(int memberId)
         {
-            var list = new List<object>();
+            if (_orgCache != null) return _orgCache;
+            var list = new List<Org>();
             try
             {
                 var m = _memberService.GetById(memberId);
                 var clubs = _memberClubs.GetAllClubIds(m);
-                var regions = new HashSet<int>();
+                var myRegions = new HashSet<int>();
                 foreach (var c in clubs)
                 {
-                    list.Add(new { type = DocumentOwnerType.Club, id = c, name = OrgName(DocumentOwnerType.Club, c), kind = "Klubb" });
+                    list.Add(new Org(DocumentOwnerType.Club, c, OrgName(DocumentOwnerType.Club, c), "Klubb", true));
                     var r = _board.RegionIdForClub(c);
-                    if (r > 0) regions.Add(r);
+                    if (r > 0) myRegions.Add(r);
                 }
-                foreach (var r in regions)
-                    list.Add(new { type = DocumentOwnerType.Region, id = r, name = OrgName(DocumentOwnerType.Region, r), kind = "Krets" });
+                var all = AllRegions();
+                var areas = all.Where(r => myRegions.Contains(r.Id) && !string.IsNullOrWhiteSpace(r.Area))
+                    .Select(r => r.Area!.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (var r in all.Where(r => myRegions.Contains(r.Id) || (r.Area != null && areas.Contains(r.Area.Trim())))
+                             .OrderByDescending(r => myRegions.Contains(r.Id)).ThenBy(r => r.Name, StringComparer.Create(Sv, false)))
+                    list.Add(new Org(DocumentOwnerType.Region, r.Id, r.Name, "Krets", myRegions.Contains(r.Id)));
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Planering: medlemmens föreningar kunde inte läsas."); }
+            return _orgCache = list;
+        }
+
+        private List<(int Id, string Name, string? Area)> AllRegions()
+        {
+            var list = new List<(int, string, string?)>();
+            if (!UmbracoContextAccessor.TryGetUmbracoContext(out var ctx) || ctx.Content == null) return list;
+            var root = ctx.Content.GetAtRoot().FirstOrDefault();
+            if (root == null) return list;
+            foreach (var r in root.Children.Where(c => c.ContentType.Alias == "regionalPage"))
+                list.Add((r.Id, RegionName(r), r.Value<string>("area")));
             return list;
         }
 
-        private bool OrgAllowed(int memberId, int ownerType, int ownerId)
+        private List<object> OrgOptions(int memberId, int? currentType = null, int? currentId = null)
         {
-            var m = _memberService.GetById(memberId);
-            var clubs = _memberClubs.GetAllClubIds(m);
-            if (ownerType == DocumentOwnerType.Club) return clubs.Contains(ownerId);
-            if (ownerType == DocumentOwnerType.Region) return clubs.Any(c => _board.RegionIdForClub(c) == ownerId);
-            return false;
+            var list = OrgChoices(memberId).Select(o => (object)new { type = o.Type, id = o.Id, name = o.Name, kind = o.Kind, own = o.Own }).ToList();
+            // Den nuvarande föreningen ska alltid gå att se och behålla, även om den valts av någon annan.
+            if (currentId > 0 && !OrgChoices(memberId).Any(o => o.Type == currentType && o.Id == currentId))
+                list.Insert(0, new { type = currentType, id = currentId, name = OrgName(currentType, currentId), kind = currentType == DocumentOwnerType.Club ? "Klubb" : "Krets", own = false });
+            return list;
+        }
+
+        private bool OrgAllowed(int memberId, int ownerType, int ownerId) =>
+            OrgChoices(memberId).Any(o => o.Type == ownerType && o.Id == ownerId);
+
+        private static (bool Ok, int? Type, int? Id) ParseOwner(string? owner)
+        {
+            var v = (owner ?? "").Trim();
+            if (v.Length == 0) return (true, null, null);
+            var parts = v.Split('-');
+            if (parts.Length == 2 && int.TryParse(parts[0], out var a) && int.TryParse(parts[1], out var b) && b > 0 && a is 0 or 1)
+                return (true, a, b);
+            return (false, null, null);
         }
 
         [HttpPost]
@@ -239,14 +281,11 @@ namespace HpskSite.Controllers
         {
             var me = await MemberIdAsync();
             if (me <= 0) return No("Logga in först.");
-            int? ot = null, oi = null;
-            var parts = (owner ?? "").Split('-');
-            if (parts.Length == 2 && int.TryParse(parts[0], out var a) && int.TryParse(parts[1], out var b) && b > 0)
-            {
-                if (!OrgAllowed(me, a, b)) return No("Du kan bara knyta planeringen till en klubb du är medlem i, eller dess krets.");
-                ot = a; oi = b;
-            }
-            var vis = visibility == PlanningVisibility.OwnerOrg && ot.HasValue ? PlanningVisibility.OwnerOrg : PlanningVisibility.Invited;
+            var (okOwner, ot, oi) = ParseOwner(owner);
+            if (!okOwner || (oi > 0 && !OrgAllowed(me, ot!.Value, oi!.Value)))
+                return No("Välj en av dina klubbar, din krets eller en krets i samma landsdel.");
+            // Föreningen finns för EN sak: att dess styrelse får läsa planeringen. Vald förening = läsrätt.
+            var vis = ot.HasValue ? PlanningVisibility.OwnerOrg : PlanningVisibility.Invited;
             var start = ParseDate(targetStart);
             var end = ParseDate(targetEnd);
             var err = PlanningService.Validate(name, start, end, ot, oi, vis);
@@ -255,7 +294,7 @@ namespace HpskSite.Controllers
             var member = _memberService.GetById(me);
             var display = MemberDisplayName(member);
             var primary = _memberClubs.GetPrimaryClubId(member);
-            var (pid, _) = _planning.Create(new PlanningService.CreateInput(name, kind ?? PlanningKind.Group, ot, oi, targetText,
+            var (pid, _) = _planning.Create(new PlanningService.CreateInput(name, PlanningKind.Normalize(kind), ot, oi, targetText,
                 start, end, vis, me, display, primary > 0 ? primary : null, null));
             return Ok(new { success = true, id = pid, url = $"/tavlingsplanering/{pid}" });
         }
@@ -315,6 +354,7 @@ namespace HpskSite.Controllers
                     guestEmail = meCanManage && p.IsGuest ? p.GuestEmail : null,
                     isMe = p.Id == c.ParticipantId,
                 }),
+                orgOptions = PlanningAccess.CanManagePlanning(c) ? OrgOptions(x.MemberId, x.Planning.OwnerType, x.Planning.OwnerId) : null,
                 notifyModes = PlanningNotifyMode.Values.Select(v => new { value = v, label = PlanningNotifyMode.Label(v), help = PlanningNotifyMode.Help(v) }),
                 version = _planning.Version(id),
             });
@@ -331,18 +371,28 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Update(int id, string name, string? targetText, string? targetStart, string? targetEnd, string? visibility)
+        public async Task<IActionResult> Update(int id, string name, string? targetText, string? targetStart, string? targetEnd, string? owner)
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
             if (!PlanningAccess.CanEditPlanning(x.Caller)) return No("Du kan inte ändra planeringen.");
-            var vis = x.Planning.Visibility;
-            if (!string.IsNullOrEmpty(visibility) && visibility != vis)
+            int? ot = x.Planning.OwnerType, oi = x.Planning.OwnerId;
+            // ⚠️ Modellbindningen gör "" till null — "ingen förening" känns igen på att fältet skickades.
+            if (owner != null || (Request.HasFormContentType && Request.Form.ContainsKey("owner")))
             {
-                if (!PlanningAccess.CanManagePlanning(x.Caller)) return No("Bara den som kan ändra allt ändrar vem som ser planeringen.");
-                vis = visibility == PlanningVisibility.OwnerOrg ? PlanningVisibility.OwnerOrg : PlanningVisibility.Invited;
+                var (okOwner, nt, ni) = ParseOwner(owner);
+                if (!okOwner) return No("Okänd förening.");
+                var changed = nt != ot || ni != oi;
+                if (changed)
+                {
+                    if (!PlanningAccess.CanManagePlanning(x.Caller)) return No("Bara den som kan ändra allt ändrar vem som får läsa planeringen.");
+                    if (ni > 0 && !OrgAllowed(x.MemberId, nt!.Value, ni!.Value))
+                        return No("Välj en av dina klubbar, din krets eller en krets i samma landsdel.");
+                    ot = nt; oi = ni;
+                }
             }
-            var err = _planning.Update(id, name, targetText, ParseDate(targetStart), ParseDate(targetEnd), vis, x.MemberId);
+            var vis = ot.HasValue ? PlanningVisibility.OwnerOrg : PlanningVisibility.Invited;
+            var err = _planning.Update(id, name, targetText, ParseDate(targetStart), ParseDate(targetEnd), ot, oi, vis, x.MemberId);
             return err == null ? Ok() : No(err);
         }
 
@@ -414,8 +464,10 @@ namespace HpskSite.Controllers
 
         /// <summary>
         /// Bjud in någon som saknar konto (Stefan 2026-10-21: i undantagsfall — någon i planeringen är
-        /// inte skytt). Finns ett konto med adressen läggs medlemmen till i stället, så att samma
-        /// person aldrig blir två deltagare.
+        /// inte skytt).
+        /// <para><b>⚠️ Hör adressen till en medlem VÄGRAS inbjudan</b> (Stefan 2026-10-22) och svaret säger att
+        /// hen ska bjudas in på vanligt sätt — via medlemssökningen. En gäst är för den som inte har något
+        /// konto; samma person ska aldrig bli både gäst och medlem, och en medlem ska delta med sitt konto.</para>
         /// </summary>
         [HttpPost]
         [ValidateAntiForgeryToken]
@@ -430,20 +482,22 @@ namespace HpskSite.Controllers
             if ((name ?? "").Trim().Length == 0) return No("Skriv personens namn.");
 
             var existing = _memberService.GetByEmail(addr);
-            PlanningService.AddResult r;
-            bool asMember = existing != null && existing.IsApproved;
-            if (asMember)
-                r = _planning.AddParticipant(id, existing!.Id, MemberDisplayName(existing), null, acc,
-                    _memberClubs.GetPrimaryClubId(existing) is var pc && pc > 0 ? pc : null, null, null, x.MemberId);
-            else
-                r = _planning.AddParticipant(id, 0, name!, addr, acc, null, null, representsText, x.MemberId);
+            if (existing != null)
+                return Json(new
+                {
+                    success = false, isMember = true,
+                    message = existing.IsApproved
+                        ? "Adressen hör till en medlem på pistol.nu. Bjud in hen på vanligt sätt: välj Bjud in en medlem och sök på namnet. Då deltar hen med sitt eget konto."
+                        : "Adressen hör till ett konto på pistol.nu som ännu inte är godkänt av klubben. När kontot är godkänt bjuder du in hen på vanligt sätt: Bjud in en medlem och sök på namnet.",
+                });
+            var r = _planning.AddParticipant(id, 0, name!, addr, acc, null, null, representsText, x.MemberId);
             if (r.Error != null) return No(r.Error);
             var mailed = false;
             if (r.Created || r.Reactivated) mailed = await _notify.InviteAsync(id, r.ParticipantId, x.Caller.Participant, false);
             // Supportvägen (som kretsgranskningens caseLinks): sajtadministratören får gästens länk i svaret,
             // så att den går att lämna vidare när mejlet inte når fram — och så att flödet går att pröva utan SMTP.
-            var supportLink = !asMember && await _auth.IsCurrentUserAdminAsync() ? _links.MailUrl(r.ParticipantId, id, "oppna") : null;
-            return Ok(new { success = true, participantId = r.ParticipantId, asMember, alreadyIn = !r.Created && !r.Reactivated, mailed, supportLink });
+            var supportLink = await _auth.IsCurrentUserAdminAsync() ? _links.MailUrl(r.ParticipantId, id, "oppna") : null;
+            return Ok(new { success = true, participantId = r.ParticipantId, alreadyIn = !r.Created && !r.Reactivated, mailed, supportLink });
         }
 
         [HttpPost]

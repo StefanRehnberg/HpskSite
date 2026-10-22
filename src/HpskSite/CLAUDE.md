@@ -12341,6 +12341,15 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   (`Visibility = OwnerOrg`, via `BoardWorkAccess.CanAccessBoardWorkAsync`) läser innehållet men **aldrig
   meddelandena**. Ingen underförstådd rätt för sajtadmin (som vapenregistret). Den sista med Kan ändra allt
   kan inte tas bort eller sänkas. Varje id prövas mot planeringen (`WHERE Id = @0 AND PlanningId = @1`).
+- **⚠️ Föreningen (`OwnerType/OwnerId`) finns för EN sak: att dess styrelse får läsa** (Stefan 2026-10-22).
+  Vald förening ⇔ `Visibility = OwnerOrg` — inget separat val. Valen (`OrgChoices`): medlemmens klubbar,
+  kretsar och **alla kretsar i samma landsdel** (regionalPage-egenskapen `area`; ett SM har en hel landsdel
+  inblandad). Landsdelen själv har ingen styrelse och kan inte väljas. Kan bytas i Inställningar (bara Kan
+  ändra allt); `Update` känner igen "ingen förening" på att fältet `owner` skickades (bindningen gör "" till
+  null). Kretsnamn = egenskapen `regionName` (nodnamnen saknar å/ä/ö). **Planeringens slag frågas inte
+  längre** — valet ändrade ingenting; nya rader får `Planeringsgrupp`.
+- **Bjud in med e-post vägrar en medlems adress** (`isMember`, Stefan 2026-10-22): medlemmen bjuds in på
+  vanligt sätt och deltar med sitt konto — aldrig som gäst, och aldrig tyst omvandlad.
 - **Notiserna = `PlanningNotifier` + `PlanningNotifyRules`** (matrisen står i klassens kommentar). Varje
   utskick **registreras i `PlanningNotifyLog` FÖRE** utskicket (`INSERT … WHERE NOT EXISTS` + unikt index),
   `Succeeded` = FAKTISKT skickat. Svepet `PlanningNotificationHostedService` (var 5:e min, `MayRunScheduled`,

@@ -132,7 +132,11 @@
     function formModal({ title, html, okLabel, okClass, onOpen, onOk, wide }) {
         const m = $('plFormModal');
         $('plFormTitle').textContent = title;
-        $('plFormBody').innerHTML = html;
+        // Ny kropp varje gång: lyssnare från förra dialogen får inte leva kvar (bytet medlem ⇄ e-post).
+        const oldBody = $('plFormBody'), fresh = oldBody.cloneNode(false);
+        oldBody.replaceWith(fresh);
+        fresh.innerHTML = html;
+        const wasOpen = m.classList.contains('show');
         const err = $('plFormErr'); err.classList.add('d-none'); err.textContent = '';
         const ok = $('plFormOk');
         ok.textContent = okLabel || 'Spara';
@@ -151,6 +155,7 @@
                 err.textContent = (e && e.message) || 'Det gick inte att spara.'; err.classList.remove('d-none');
             } finally { ok.disabled = false; }
         };
+        if (wasOpen) { if (onOpen) onOpen(fresh); return modal; }
         modal.show();
         if (onOpen) m.addEventListener('shown.bs.modal', function h() { m.removeEventListener('shown.bs.modal', h); onOpen($('plFormBody')); });
         return modal;
@@ -248,7 +253,7 @@
         const parts = [];
         if (p.targetText) parts.push(esc(p.targetText));
         else if (p.targetStart) parts.push(esc(p.targetStart) + (p.targetEnd && p.targetEnd !== p.targetStart ? '–' + esc(p.targetEnd) : ''));
-        parts.push(esc(p.kindLabel));
+        if (p.ownerName) parts.push(esc(p.ownerName));
         if (p.status === 'Archived') parts.push('<span class="pl-state off">Arkiverad</span>');
         return parts.join(' · ');
     }
@@ -772,7 +777,10 @@
                 <input id="ivQ" class="form-control mb-2" placeholder="Till exempel Anna Svensson" autocomplete="off">
                 <div class="mb-3"><label class="form-label" for="ivAccess">Rätt i planeringen</label>${accessSelect('Participant', 'ivAccess')}</div>
                 <div id="ivHits" class="pl-help">Skriv minst två bokstäver.</div>
-                <p class="pl-help small mt-3 mb-0">Den du bjuder in får ett mejl med en länk. Saknar personen konto: välj <i>Bjud in med e-post</i> i stället.</p>`,
+                <div class="border-top mt-3 pt-3">
+                    <p class="pl-help small mb-2">Den du bjuder in får ett mejl med en länk. Är personen inte skytt och saknar konto på pistol.nu — till exempel någon från kommunen eller banan — bjuder du in hen med e-post.</p>
+                    <button type="button" class="btn btn-outline-secondary" data-iv-email="1"><i class="bi bi-envelope me-1"></i>Bjud in med e-post i stället</button>
+                </div>`,
             onOpen: body => {
                 const q = body.querySelector('#ivQ'); q.focus();
                 q.addEventListener('input', () => {
@@ -785,10 +793,11 @@
                         body.querySelector('#ivHits').innerHTML = r.members.length ? r.members.map(m =>
                             `<div class="pl-person"><div><b>${esc(m.name)}</b><div class="small">${esc(m.club)}</div></div>
                             ${m.alreadyIn ? '<span class="pl-state ok">Är med</span>' : `<button type="button" class="btn btn-primary btn-sm" data-iv-add="${m.memberId}">Bjud in</button>`}</div>`).join('')
-                            : 'Ingen medlem hittades. Saknar personen konto kan du bjuda in med e-post.';
+                            : 'Ingen medlem hittades. Saknar personen konto kan du bjuda in med e-post (knappen nedan).';
                     }, 250);
                 });
                 body.addEventListener('click', async ev => {
+                    if (ev.target.closest('[data-iv-email]')) { openInviteEmail(); return; }
                     const b = ev.target.closest('[data-iv-add]'); if (!b) return;
                     b.disabled = true;
                     const r = await post('AddMember', { memberId: b.dataset.ivAdd, access: body.querySelector('#ivAccess').value });
@@ -802,17 +811,20 @@
     function openInviteEmail() {
         formModal({
             title: 'Bjud in med e-post', okLabel: 'Skicka inbjudan',
-            html: `<p class="pl-help">För den som inte är skytt och saknar konto, till exempel någon från kommunen eller banan. Hen deltar via länkarna i mejlen och behöver inget lösenord.</p>
+            html: `<p class="pl-help">För den som inte är skytt och saknar konto, till exempel någon från kommunen eller banan. Hen deltar via länkarna i mejlen och behöver inget lösenord.
+                Är personen medlem på pistol.nu bjuder du in hen med <button type="button" class="btn btn-link p-0 align-baseline" data-ie-member="1">Bjud in en medlem</button> i stället.</p>
                 <div class="mb-3"><label class="form-label" for="ieName">Namn</label><input id="ieName" class="form-control" maxlength="200"></div>
                 <div class="mb-3"><label class="form-label" for="ieEmail">E-post</label><input id="ieEmail" class="form-control" type="email" inputmode="email" autocomplete="off"></div>
                 <div class="mb-3"><label class="form-label" for="ieRep">Företräder (valfritt)</label><input id="ieRep" class="form-control" maxlength="200" placeholder="Till exempel Gislaveds kommun"></div>
                 <div class="mb-1"><label class="form-label" for="ieAccess">Rätt i planeringen</label>${accessSelect('Participant', 'ieAccess')}</div>`,
+            onOpen: body => body.addEventListener('click', ev => { if (ev.target.closest('[data-ie-member]')) openInvite(); }),
             onOk: async body => {
                 const r = await post('InviteByEmail', { name: body.querySelector('#ieName').value, email: body.querySelector('#ieEmail').value,
                     access: body.querySelector('#ieAccess').value, representsText: body.querySelector('#ieRep').value });
+                // En medlems adress vägras (Stefan 2026-10-22): hen bjuds in på vanligt sätt, med sitt konto.
                 if (!r.success) return r.message;
                 await reloadPeople();
-                showMsg(r.alreadyIn ? 'Personen är redan med.' : (r.asMember ? 'Adressen hörde till en medlem — hen är inbjuden med sitt konto.' : 'Inbjudan är skickad.')
+                showMsg((r.alreadyIn ? 'Personen är redan med.' : 'Inbjudan är skickad.')
                     + (!r.alreadyIn && !r.mailed ? ' Men mejlet kunde inte skickas — kontrollera adressen och försök igen under Deltagare.' : ''), r.mailed || r.alreadyIn ? 'success' : 'warning');
                 return true;
             }
@@ -880,6 +892,16 @@
     }
 
     // ================================================================ Inställningar
+    /** Föreningsväljaren: mina klubbar, och kretsarna i min landsdel (egna först). */
+    function orgSelect(id, current) {
+        const opts = S.orgOptions || [];
+        const group = (label, list) => list.length ? `<optgroup label="${esc(label)}">${list.map(o => {
+            const v = o.type + '-' + o.id;
+            return `<option value="${v}"${v === current ? ' selected' : ''}>${esc(o.name)}${o.kind === 'Krets' && o.own ? ' (din krets)' : ''}</option>`;
+        }).join('')}</optgroup>` : '';
+        return `<select class="form-select" id="${id}"><option value=""${current ? '' : ' selected'}>Nej, bara de som är inbjudna</option>
+            ${group('Klubbar', opts.filter(o => o.kind === 'Klubb'))}${group('Kretsar i landsdelen', opts.filter(o => o.kind === 'Krets'))}</select>`;
+    }
     function viewSettings() {
         setHead('Inställningar', esc(S.planning.name));
         const p = S.planning;
@@ -894,17 +916,17 @@
                 <input id="stTarget" class="form-control" maxlength="200" value="${esc(p.targetText || '')}" placeholder="Till exempel: augusti 2028, Skillingaryd?"></div>
             <div class="row g-2 mb-3"><div class="col-sm-6"><label class="form-label" for="stStart">Första dagen (om den är bestämd)</label><input id="stStart" class="form-control" value="${esc(p.targetStart || '')}"></div>
                 <div class="col-sm-6"><label class="form-label" for="stEnd">Sista dagen</label><input id="stEnd" class="form-control" value="${esc(p.targetEnd || '')}"></div></div>
-            ${p.ownerId ? `<div class="mb-3"><div class="form-label fw-semibold">Vem ser planeringen?</div>
-                <label class="pl-radio"><input type="radio" name="stVis" value="Invited" class="form-check-input me-2"${p.visibility === 'Invited' ? ' checked' : ''}${S.me.canManage ? '' : ' disabled'}>
-                    <b>Bara de som är med</b></label>
-                <label class="pl-radio"><input type="radio" name="stVis" value="OwnerOrg" class="form-check-input me-2"${p.visibility === 'OwnerOrg' ? ' checked' : ''}${S.me.canManage ? '' : ' disabled'}>
-                    <b>Även ${esc(p.ownerName)}s styrelse och administratörer</b><div class="pl-help small ms-4">De ser deltagarna och mötena, men inte meddelandena.</div></label></div>` : ''}
+            <div class="mb-3"><label class="form-label fw-semibold" for="stOwner">Ska en förenings styrelse kunna läsa planeringen?</label>
+                ${S.me.canManage && S.orgOptions ? orgSelect('stOwner', p.ownerId ? p.ownerType + '-' + p.ownerId : '')
+                    : `<div>${p.ownerId ? esc(p.ownerName) + 's styrelse och administratörer kan läsa planeringen.' : 'Nej, bara de som är inbjudna.'}</div>`}
+                <div class="pl-help small mt-1">Styrelsen och föreningens administratörer ser deltagarna och mötena, men aldrig meddelandena. Vilka som är med påverkas inte — alla bjuds in oavsett krets.
+                    Huvudarrangören bestäms ofta efter några möten; föreningen kan bytas när som helst.</div></div>
             <button class="btn btn-primary" id="stSave">Spara</button> <span id="stSaved" class="pl-help ms-2"></span></div>`;
         datePicker($('stStart')); datePicker($('stEnd'));
         $('stSave').onclick = async () => {
-            const vis = document.querySelector('input[name="stVis"]:checked');
-            const r = await post('Update', { name: $('stName').value, targetText: $('stTarget').value, targetStart: $('stStart').value.trim(),
-                targetEnd: $('stEnd').value.trim(), visibility: vis ? vis.value : p.visibility });
+            const params = { name: $('stName').value, targetText: $('stTarget').value, targetStart: $('stStart').value.trim(), targetEnd: $('stEnd').value.trim() };
+            if ($('stOwner')) params.owner = $('stOwner').value;
+            const r = await post('Update', params);
             if (!r.success) { failMsg(r); return; }
             await reloadPeople(); renderRail(); setHead('Inställningar', esc(S.planning.name)); $('stSaved').textContent = 'Sparat.';
         };

@@ -12,11 +12,10 @@ namespace HpskSite.Models.Planning
     //  ⚠️ Svar, röster och läsmarkering pekar på DELTAGAREN (PlanningMember.Id), aldrig på medlemmen.
     // ============================================================================================
 
-    /// <summary>Planeringens slag. Lagras som text — byt aldrig en befintlig sträng.</summary>
     /// <summary>
-    /// Vad planeringen gäller. ⚠️ Ett SLAG, aldrig ett SKEDE (Stefan 2026-10-22): "Planeringsgrupp" erbjuds
-    /// inte längre — varje planering börjar som en grupp som ska komma överens, så valet passade in på
-    /// alla de andra. Värdet finns kvar för rader som redan bär det (och i databasens CHECK).
+    /// Planeringens slag. Lagras som text — byt aldrig en befintlig sträng. ⚠️ Frågas inte längre
+    /// (Stefan 2026-10-22): valet ändrade ingenting, så nya planeringar får <see cref="Group"/>. Kolumnen
+    /// står kvar för den dag ett slag faktiskt styr något (t.ex. mallar för SM).
     /// </summary>
     public static class PlanningKind
     {
