@@ -17,7 +17,7 @@ namespace HpskSite.Services.Planning
     /// skickas av <see cref="PlanningNotifier"/> EFTER att scopet stängts (en egen anslutning eller ett
     /// utskick inne i någon annans scope har låst prod förut).</para>
     /// </summary>
-    public class PlanningService
+    public partial class PlanningService
     {
         public const int MaxBodyLength = 4000;
         public const int MaxOptions = 8;
@@ -42,6 +42,7 @@ namespace HpskSite.Services.Planning
             "Planning", "PlanningActivity", "PlanningPart", "PlanningMember", "PlanningMessage",
             "PlanningMessageMention", "PlanningMessageRead", "PlanningMeeting", "PlanningMeetingOption",
             "PlanningMeetingVote", "PlanningNotifyLog", "PlanningLink", "PlanningRequest",
+            "PlanningTask", "PlanningTaskEvent", "PlanningMeetingTopic", "PlanningRole",
         };
 
         /// <summary>Tabeller som saknas. Kastar om databasen inte går att fråga — "vet inte" är inget svar.</summary>

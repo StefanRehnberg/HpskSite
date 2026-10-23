@@ -125,7 +125,7 @@ namespace HpskSite.Services.Planning
         /// <summary>Planeringens sida för den här mottagaren: medlemmen loggar in, gästen kommer in med sin länk.</summary>
         internal string OpenUrl(Recipient r, int planningId, string view = "oversikt") =>
             r.Row.IsGuest
-                ? _links.MailUrl(r.Pid, planningId, "oppna")
+                ? _links.MailUrl(r.Pid, planningId, view == "uppgifter" ? "uppgifter" : "oppna")
                 : $"{_links.SiteUrl}/tavlingsplanering/{planningId}#vy={view}";
 
         // =====================================================================================
@@ -391,6 +391,50 @@ namespace HpskSite.Services.Planning
             }
         }
 
+        /// <summary>
+        /// Någon har fått en uppgift (Stefan 2026-10-23). Mejl direkt — utom för den som stängt av notiserna —
+        /// med en knapp till uppgifterna, där hen säger hur det går. Returnerar om mejlet gick iväg.
+        /// </summary>
+        public async Task<bool> TaskAssignedAsync(int planningId, int taskId, int assigneeParticipantId, PlanningMemberRow? by)
+        {
+            var p = _planning.Get(planningId);
+            var task = _planning.GetTask(planningId, taskId);
+            var who = _planning.Participant(planningId, assigneeParticipantId);
+            if (p == null || task == null || who == null || !who.IsActive) return false;
+            if (!PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) return false;
+            var r = ResolveRecipient(who);
+            if (r == null) return false;
+            var byName = by?.DisplayName ?? "Någon";
+            var inner = new StringBuilder();
+            inner.Append($"<p>{H(byName)} har gett dig en uppgift i planeringen:</p>");
+            inner.Append($"<p style=\"font-size:18px\"><b>{H(task.Title)}</b></p>");
+            if (task.DueDate.HasValue) inner.Append($"<p>Senast {H(task.DueDate.Value.ToString("d MMMM yyyy", Sv))}.</p>");
+            if (!string.IsNullOrWhiteSpace(task.Description)) inner.Append($"<p style=\"white-space:pre-wrap\">{H(task.Description)}</p>");
+            inner.Append($"<p>{Button("Visa mina uppgifter", OpenUrl(r, planningId, "uppgifter"))}</p>");
+            inner.Append("<p style=\"color:#555\">Där säger du hur långt du kommit — <i>Pågår</i>, <i>Behöver hjälp</i> eller "
+                + "<i>Klar att pröva</i> — och skriver gärna en rad. Om uppgiften är utförd bestämmer ni sedan på ett möte.</p>");
+            // DueAt = utskicksdagen: får hen samma uppgift igen en annan dag (bytt och tillbaka) går ett nytt mejl.
+            return await SendMail(r, planningId, "task-assigned", "task", taskId, DateTime.Today,
+                $"Ny uppgift: {task.Title}", Page(r.Name, p.Name, inner.ToString(), NotifyFooter(r, planningId)), ReplyToFor(by, p.Name));
+        }
+
+        /// <summary>Mottagarens öppna uppgifter, som rader i ett mejl.</summary>
+        private string OpenTasksBlock(Recipient r, int planningId)
+        {
+            var mine = _planning.Tasks(planningId)
+                .Where(t => t.AssigneeParticipantId == r.Pid && PlanningTaskStatus.IsOpen(t.Status))
+                .OrderBy(t => t.DueDate ?? DateTime.MaxValue).ToList();
+            if (mine.Count == 0) return "";
+            var sb = new StringBuilder();
+            sb.Append($"<p style=\"margin-top:18px\"><b>{(mine.Count == 1 ? "Din uppgift" : $"Dina {mine.Count} uppgifter")}</b> — berätta hur det går, så slipper ni gå igenom allt på mötet:</p><ul>");
+            foreach (var t in mine.Take(15))
+                sb.Append($"<li>{H(t.Title)} <span style=\"color:#555\">({H(PlanningTaskStatus.Label(t.Status))}"
+                    + (t.DueDate.HasValue ? $", senast {H(t.DueDate.Value.ToString("d MMM", Sv))}" : "") + ")</span></li>");
+            sb.Append("</ul>");
+            sb.Append($"<p>{Button("Berätta hur det går", OpenUrl(r, planningId, "uppgifter"))}</p>");
+            return sb.ToString();
+        }
+
         public async Task MeetingCancelledAsync(int planningId, int meetingId)
         {
             var p = _planning.Get(planningId);
@@ -537,7 +581,8 @@ namespace HpskSite.Services.Planning
                     var inner = $"<p>Påminnelse: mötet <b>{H(m.Title)}</b> är <b>{H(when)}</b>.</p>"
                         + (string.IsNullOrWhiteSpace(m.Place) ? "" : $"<p>Plats: {H(m.Place)}</p>")
                         + (string.IsNullOrWhiteSpace(m.OnlineUrl) ? "" : $"<p>{Button("Gå med i mötet", m.OnlineUrl!)}</p>")
-                        + $"<p>{Button("Öppna planeringen", OpenUrl(r, p.Id, "moten"), false)}</p>";
+                        + $"<p>{Button("Öppna planeringen", OpenUrl(r, p.Id, "moten"), false)}</p>"
+                        + OpenTasksBlock(r, p.Id);
                     if (await SendMail(r, p.Id, "meeting-d1", "meeting", m.Id, m.StartsAt,
                             $"I morgon: {m.Title}", Page(r.Name, p.Name, inner, NotifyFooter(r, p.Id)), MailReplyTo.NoReply)) n++;
                 }

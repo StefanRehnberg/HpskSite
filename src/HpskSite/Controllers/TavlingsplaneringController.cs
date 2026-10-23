@@ -135,7 +135,7 @@ namespace HpskSite.Controllers
             _planningService.TouchSeen(row.Id);
             ViewData["PlanningId"] = target.PlanningId;
             ViewData["PlanningToken"] = t;
-            ViewData["PlanningStartView"] = a switch { "svara" => "meddelanden", "rosta" => "moten", "notiser" => "notiser", "lamna" => "deltagare", _ => "oversikt" };
+            ViewData["PlanningStartView"] = a switch { "svara" => "meddelanden", "rosta" => "moten", "notiser" => "notiser", "lamna" => "deltagare", "uppgifter" => "uppgifter", _ => "oversikt" };
             // "Lämna planeringen" i inbjudan: sidan frågar direkt (inbjudningstaket, Stefan 2026-10-23).
             ViewData["PlanningLeave"] = a == "lamna";
             ViewData["PlanningStartMeeting"] = m ?? 0;

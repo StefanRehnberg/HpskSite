@@ -357,4 +357,138 @@ namespace HpskSite.Models.Planning
         public DateTime AnsweredAt { get; set; }
         public bool ViaEmail { get; set; }
     }
+
+    // ============================================================================================
+    //  Uppgifter, mötets punkter och roller (Stefan 2026-10-23, skissen
+    //  https://claude.ai/artifact/ThReUw38FM6kAi7R7JnU1T).
+    //
+    //  ⚠️ Mötet är en AVSTÄMNING, inte ett styrelsemöte: inga faser, ingen kallelse, ingen närvaro,
+    //  inget protokoll att justera. "Att prata om" är punkter vem som helst lägger till, och
+    //  "Hur går det med uppgifterna?" är en stående del som läses ur uppgifterna — den lagras inte.
+    //  ⚠️ En roll säger vad man ANSVARAR för. Den ger inga rättigheter — det gör nivån.
+    // ============================================================================================
+
+    /// <summary>
+    /// En uppgifts läge. Lagras som text — byt aldrig en befintlig sträng. Den som har uppgiften sätter
+    /// de fyra första; <see cref="Done"/> sätts på ett möte eller av den sammankallande.
+    /// </summary>
+    public static class PlanningTaskStatus
+    {
+        public const string NotStarted = "NotStarted";
+        public const string InProgress = "InProgress";
+        public const string NeedsHelp = "NeedsHelp";
+        public const string ReadyForReview = "ReadyForReview";
+        public const string Done = "Done";
+
+        /// <summary>De lägen den som har uppgiften själv får sätta, i ordning.</summary>
+        public static readonly string[] AssigneeSettable = { NotStarted, InProgress, NeedsHelp, ReadyForReview };
+        public static readonly string[] All = { NotStarted, InProgress, NeedsHelp, ReadyForReview, Done };
+
+        public static string? Normalize(string? v) =>
+            Array.Find(All, k => string.Equals(k, (v ?? "").Trim(), StringComparison.OrdinalIgnoreCase));
+
+        public static string Label(string? v) => v switch
+        {
+            InProgress => "Pågår",
+            NeedsHelp => "Behöver hjälp",
+            ReadyForReview => "Klar att pröva",
+            Done => "Utförd",
+            _ => "Ej påbörjad",
+        };
+
+        public static bool IsOpen(string? v) => v != Done;
+    }
+
+    [TableName("PlanningTask")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class PlanningTaskRow
+    {
+        public int Id { get; set; }
+        public int PlanningId { get; set; }
+        public string Title { get; set; } = "";
+        public string? Description { get; set; }
+        /// <summary>Deltagaren (PlanningMember.Id) — aldrig medlemmen. Null = ingen ansvarig än.</summary>
+        public int? AssigneeParticipantId { get; set; }
+        public DateTime? DueDate { get; set; }
+        public string Status { get; set; } = PlanningTaskStatus.NotStarted;
+        /// <summary>Den ansvariges senaste rad om hur det går (visas på mötet).</summary>
+        public string? LatestReport { get; set; }
+        public DateTime? LatestReportAt { get; set; }
+        public int? LatestReportBy { get; set; }
+        /// <summary>Mötet uppgiften kom från, om den skapades på ett möte.</summary>
+        public int? FromMeetingId { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public int CreatedBy { get; set; }             // deltagare
+        public DateTime UpdatedAt { get; set; }
+        public DateTime? DoneAt { get; set; }
+        public int? DoneBy { get; set; }               // deltagare
+        /// <summary>Mötet där den beslutades utförd. Null = av den sammankallande mellan mötena.</summary>
+        public int? DoneAtMeetingId { get; set; }
+        /// <summary>Läget före Utförd — så att "Ångra" lägger tillbaka det.</summary>
+        public string? StatusBeforeDone { get; set; }
+        public DateTime? DeletedAt { get; set; }
+    }
+
+    /// <summary>Uppgiftens historik: lägen, rapporter och beslut. Raderas aldrig.</summary>
+    public static class PlanningTaskEventKind
+    {
+        public const string Created = "Created";
+        public const string Edited = "Edited";
+        public const string Status = "Status";
+        public const string Report = "Report";
+        public const string Done = "Done";
+        public const string Undone = "Undone";
+        public const string Continued = "Continued";
+        public const string Removed = "Removed";
+    }
+
+    [TableName("PlanningTaskEvent")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class PlanningTaskEventRow
+    {
+        public int Id { get; set; }
+        public int PlanningId { get; set; }
+        public int TaskId { get; set; }
+        public string Kind { get; set; } = PlanningTaskEventKind.Status;
+        public string? OldStatus { get; set; }
+        public string? NewStatus { get; set; }
+        public string? Note { get; set; }
+        public int? MeetingId { get; set; }
+        public int? ParticipantId { get; set; }        // den som gjorde det
+        public bool ViaEmail { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+
+    /// <summary>"Att prata om" på ett möte — en rad, vem som helst i planeringen lägger till.</summary>
+    [TableName("PlanningMeetingTopic")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class PlanningMeetingTopicRow
+    {
+        public int Id { get; set; }
+        public int PlanningId { get; set; }
+        public int PlanningMeetingId { get; set; }
+        public string Text { get; set; } = "";
+        public int AddedBy { get; set; }               // deltagare
+        public DateTime AddedAt { get; set; }
+        public int SortOrder { get; set; }
+        public DateTime? DeletedAt { get; set; }
+    }
+
+    /// <summary>En roll i planeringen. En person kan ha flera; en borttagen står kvar i historiken.</summary>
+    [TableName("PlanningRole")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class PlanningRoleRow
+    {
+        public int Id { get; set; }
+        public int PlanningId { get; set; }
+        public int ParticipantId { get; set; }
+        /// <summary>Nyckeln i bemanningens rollkatalog när namnet kommer därifrån, annars null (egen text).</summary>
+        public string? RoleKey { get; set; }
+        public string Name { get; set; } = "";
+        public DateTime AddedAt { get; set; }
+        public int AddedBy { get; set; }               // deltagare
+        public DateTime? RemovedAt { get; set; }
+        public int? RemovedBy { get; set; }
+        [Ignore] public bool IsActive => RemovedAt == null;
+    }
 }

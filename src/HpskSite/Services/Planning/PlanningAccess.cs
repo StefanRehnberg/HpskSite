@@ -78,6 +78,41 @@ namespace HpskSite.Services.Planning
         public static bool CanEditMeeting(PlanningCaller c, PlanningMeetingRow m) =>
             CanUseMeetings(c) && (m.CreatedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
 
+        // ---------------------------------------------------------------- uppgifter, punkter, roller
+        // (Stefan 2026-10-23) Uppgifter fördelas på mötena av dem som deltar; den som har uppgiften säger
+        // själv hur långt hen kommit; om den är UTFÖRD bestämmer mötet — eller den sammankallande.
+
+        /// <summary>Skapa en uppgift: Deltar och uppåt (det är så det går till på ett möte).</summary>
+        public static bool CanCreateTasks(PlanningCaller c) => CanWriteMessages(c);
+
+        /// <summary>Ändra en uppgifts innehåll, ansvarig och datum, eller ta bort den: den som skapade den, eller Kan ändra och uppåt.</summary>
+        public static bool CanEditTask(PlanningCaller c, PlanningTaskRow t) =>
+            c.IsParticipant && (t.CreatedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+
+        /// <summary>
+        /// Ändra läget (fram till Klar att pröva) och skriva hur det går: den som har uppgiften — även den
+        /// som följer — eller Kan ändra och uppåt.
+        /// </summary>
+        public static bool CanReportOnTask(PlanningCaller c, PlanningTaskRow t) =>
+            c.IsParticipant && (t.AssigneeParticipantId == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+
+        /// <summary>
+        /// Besluta Utförd / Fortsätter / ångra. På ett pågående möte: alla som deltar (mötet beslutar).
+        /// Mellan mötena: bara den sammankallande.
+        /// </summary>
+        public static bool CanDecideTask(PlanningCaller c, bool atCurrentMeeting) =>
+            atCurrentMeeting ? CanUseMeetings(c) : CanManagePlanning(c);
+
+        /// <summary>Lägga till något att prata om på ett möte: Deltar och uppåt.</summary>
+        public static bool CanAddTopic(PlanningCaller c) => CanUseMeetings(c);
+
+        /// <summary>Ta bort en punkt: den som lade till den, eller Kan ändra och uppåt.</summary>
+        public static bool CanRemoveTopic(PlanningCaller c, PlanningMeetingTopicRow t) =>
+            c.IsParticipant && (t.AddedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+
+        /// <summary>Ge och ta bort roller: den sammankallande (som nivån och vad man företräder).</summary>
+        public static bool CanManageRoles(PlanningCaller c) => CanManagePlanning(c);
+
         /// <summary>Redigera eller ta bort ett meddelande: bara författaren.</summary>
         public static bool CanEditMessage(PlanningCaller c, PlanningMessageRow m) =>
             c.IsParticipant && m.Kind == "Message" && m.ParticipantId == c.ParticipantId && m.DeletedAt == null;

@@ -12397,14 +12397,42 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
 - **⚠️ `@@ROWCOUNT` i en NPoco-sats blir parametern `@ROWCOUNT`** ("@@" är ett escapat "@"). Skriv
   `IF EXISTS … UPDATE … ELSE INSERT`.
 - All tid är svensk tid (`…At`, `DateTime.Now`) — inga `…Utc`-kolumner.
-- **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (13 tabeller inkl. `PlanningRequest` och
-  `Planning.ListedForMembers` — NPoco skriver alla kolumner, så de MÅSTE finnas; filtrerade index ⇒
-  `QUOTED_IDENTIFIER ON`, sista raden `SELECT @@TRANCOUNT;`). Körd i dev 2026-10-21, **EJ i prod**.
+- **Möten, uppgifter och roller (Stefan 2026-10-23, skissen ThReUw38FM6kAi7R7JnU1T).** ⚠️ Mötet är en
+  INFORMELL avstämning — inga faser, ingen kallelse, närvaro eller justering (det är styrelsens möten).
+  - **Möteslistan** = styrelsemötenas form (När · Möte · Läge · Uppgifter · Åtgärder, "Visa tidigare
+    möten"). En rad öppnar **mötessidan** `#vy=mote&id=N`: *Att prata om* (`PlanningMeetingTopic`, alla
+    som deltar lägger till), *Hur går det med uppgifterna?* (kommer med av sig självt:
+    `PlanningTaskRules.ForMeeting` = öppna + de som blev utförda PÅ mötet), *Anteckningar och vem gör vad*
+    (anteckningarna sparas vid blur — `flushNotes()` före varje knapp, annars äter omritningen texten).
+  - **Uppgifter = egna tabeller `PlanningTask` + `PlanningTaskEvent`** (historik, varje skrivning
+    `UPDLOCK` + händelse + `Bump`), INTE tävlingens `WorkItem` (CompetitionId NOT NULL, tävlingens lägen) —
+    P2 flyttar förberedelserna HIT. Lägen (`PlanningTaskStatus`): Ej påbörjad → Pågår → Behöver hjälp →
+    Klar att pröva → **Utförd**. Den som har uppgiften (även Följer) sätter de fyra första och skriver
+    hur det går (`ReportTask`, även via mejllänk). **Utförd/Fortsätter/Ångra (`DecideTask`) = mötet:** alla
+    som deltar, men bara på ett **pågående möte** (`MeetingIsCurrent`: bokat, från 12 h före start till
+    14 dagar efter slut) — mellan mötena bara den sammankallande (felet förklarar varför). Fortsätter:
+    Klar att pröva → Pågår (+ ev. nytt datum). Ny ansvarig får mejl (`TaskAssignedAsync`, aldrig sig
+    själv, respekterar Av); mötespåminnelsen dagen innan bär mottagarens öppna uppgifter. Gästlänk
+    `a=uppgifter` → fliken Uppgifter med filtret "Mina".
+  - **Roller = `PlanningRole`** (flera per person, `SetRoles` ersätter mängden; borttagna får `RemovedAt`
+    = historik). ⚠️ **Roller ger INGA rättigheter** — det gör bara nivån. Förslag ur bemanningens
+    `FunctionaryRoles` (alla tre grenar) + planeringens egna; `RoleKey` = katalognyckeln, annars null.
+    Bara den sammankallande ger roller. "Under tävlingen"-kolumnen kommer med bemanningen (P2b/P4).
+  - Regler: `PlanningAccess.CanCreateTasks/CanEditTask/CanReportOnTask/CanDecideTask/CanAddTopic/
+    CanRemoveTopic/CanManageRoles`; rena funktioner i `PlanningTaskRules` (`PlanningTaskRulesTests`, 17).
+    Ändpunkter i `PlanningController.Tasks.cs` (`Tasks`, `TaskHistory`, `CreateTask`, `UpdateTask`,
+    `ReportTask`, `DecideTask`, `RemoveTask`, `AddTopic`, `RemoveTopic`, `SetRoles`).
+- **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (17 tabeller inkl. `PlanningRequest`,
+  `Planning.ListedForMembers` och de fyra ovan; för en DB som redan har de 13: `alter-planning-tasks-topics-roles.sql`
+  — NPoco skriver alla kolumner, så de MÅSTE finnas; filtrerade index ⇒
+  `QUOTED_IDENTIFIER ON`, sista raden `SELECT @@TRANCOUNT;`). Körd i dev 2026-10-21/23, **EJ i prod**.
   Startkontroll: `PlanningSchemaGuardHostedService`. `PlanningLink` skapas tom (P2).
 - **Ej byggt i P1:** dokument (fråga 7), delar och milstolpar (P3), förberedelsernas och bemanningens
   flytt (P2/P2b), kopiera planeringen (P3), SignalR. Dev kan inte skicka mejl — loggraderna står på 0.
-- Svit: `hpsk-verify/tavlingsplanering-p1-verify.mjs` 133/133 (`HPSK_BASE=https://localhost:44390`; A/B:
-  röstspärren, olistad förfrågan, inbjudningstaket och godkännarvakten fäller var sin). Fildeploy av KB `tavlingsplanering-fristaende.md`.
+- Sviter (`HPSK_BASE=https://localhost:44390`): `hpsk-verify/tavlingsplanering-p1-verify.mjs` 142/142 (A/B:
+  röstspärren, olistad förfrågan, inbjudningstaket och godkännarvakten fäller var sin) och
+  `tavlingsplanering-uppgifter-verify.mjs` 66/66 (A/B: beslut utan pågående möte + Utförd via rapport fäller 5).
+  Fildeploy av KB `tavlingsplanering-fristaende.md`.
 
 ## Migrations (DISABLED)
 The `/Migrations` folder contains disabled database schemas for direct competition result storage. The system now uses Umbraco Document Types and Content Service instead. Migrations can be safely ignored unless reverting to database-backed storage.

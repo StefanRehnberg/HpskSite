@@ -171,7 +171,10 @@
     let S = null;          // Get-svaret
     let MSG = null;        // Messages-svaret
     let MEET = null;       // Meetings-svaret
+    let TASKS = null;      // Tasks-svaret
     let version = 0;
+    let showPastMeetings = false;        // Möteslistans "Visa tidigare möten"
+    let tkQuery = '', tkFilter = '';     // Uppgifternas sök och filter (lever över omritningar)
     let view = '';
     let replyTo = CFG.reply || 0;
     let pplQuery = '', pplFilter = '';   // Deltagarlistans sök och filter (lever över omritningar)
@@ -186,19 +189,29 @@
         { key: 'oversikt', label: 'Översikt' },
         { key: 'meddelanden', label: 'Meddelanden', need: s => s.me.canReadMessages },
         { key: 'moten', label: 'Möten' },
+        { key: 'uppgifter', label: 'Uppgifter' },
         { key: 'deltagare', label: 'Deltagare' },
         { key: 'notiser', label: 'Mina notiser', need: s => s.me.isParticipant },
         { key: 'installningar', label: 'Inställningar', need: s => s.me.canEdit },
     ];
 
-    function hashView() {
-        const h = new URLSearchParams((location.hash || '').replace(/^#/, ''));
-        return h.get('vy') || '';
-    }
+    function hashParams() { return new URLSearchParams((location.hash || '').replace(/^#/, '')); }
+    function hashView() { return hashParams().get('vy') || ''; }
     function go(v) {
         if (location.hash !== '#vy=' + v) history.pushState(null, '', '#vy=' + v);
         render(v);
     }
+    // Ett möte har en egen sida (#vy=mote&id=N) — rälsen visar Möten.
+    function goMeeting(id) {
+        const h = '#vy=mote&id=' + id;
+        if (location.hash !== h) history.pushState(null, '', h);
+        render('mote');
+    }
+    document.addEventListener('click', e => {
+        const a = e.target.closest('[data-pl-open-meeting]'); if (!a) return;
+        if (e.target.closest('.dropdown')) return; // radens Åtgärder öppnar sin meny, inte mötet
+        e.preventDefault(); goMeeting(parseInt(a.dataset.plOpenMeeting, 10));
+    });
     window.addEventListener('hashchange', () => render(hashView() || 'oversikt'));
     window.addEventListener('popstate', () => render(hashView() || 'oversikt'));
     document.addEventListener('click', e => {
@@ -220,16 +233,23 @@
         $('plOrg').textContent = s.planning.name;
         $('plRole').textContent = s.me.accessLabel || '';
         if (TOKEN) { const b = $('plBack'); b.textContent = '← Till startsidan'; b.href = '/'; }
-        const counts = { meddelanden: unreadCount(), moten: votesOwed(), deltagare: s.me.pendingRequests || 0 };
+        const counts = { meddelanden: unreadCount(), moten: votesOwed(), uppgifter: myOpenTasks(), deltagare: s.me.pendingRequests || 0 };
+        const here = view === 'mote' ? 'moten' : view;
         $('plRail').innerHTML = VIEWS.filter(v => !v.need || v.need(s)).map(v =>
-            `<a href="#vy=${v.key}" class="pl-nav${v.key === view ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
+            `<a href="#vy=${v.key}" class="pl-nav${v.key === here ? ' on' : ''}" data-pl-go="${v.key}">${esc(v.label)}`
             + (counts[v.key] ? `<span class="pl-count" title="${counts[v.key]} väntar">${counts[v.key]}</span>` : '') + '</a>').join('');
     }
 
+    function myOpenTasks() {
+        if (!TASKS) return S ? (S.me.openTasks || 0) : 0;
+        return TASKS.tasks.filter(t => t.mine && t.status !== 'Done').length;
+    }
+
     async function loadAll() {
-        const [s, m] = await Promise.all([get('Get'), get('Meetings')]);
+        const [s, m, tk] = await Promise.all([get('Get'), get('Meetings'), get('Tasks')]);
         if (!s.success) { renderMissing(s.message); return false; }
         S = s; MEET = m.success ? m : { meetings: [] };
+        TASKS = tk.success ? tk : { tasks: [], statuses: [], canCreate: false, canDecide: false };
         version = s.version;
         if (S.me.canReadMessages) {
             const mm = await get('Messages');
@@ -247,12 +267,13 @@
 
     function render(v) {
         if (!S) return;
-        const allowed = VIEWS.filter(x => !x.need || x.need(S)).map(x => x.key);
+        const allowed = VIEWS.filter(x => !x.need || x.need(S)).map(x => x.key).concat(['mote']);
         view = allowed.includes(v) ? v : 'oversikt';
+        if (view === 'mote' && !MEET.meetings.some(m => m.id === parseInt(hashParams().get('id'), 10))) view = 'moten';
         rowFns = [];
         renderRail();
-        ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, deltagare: viewPeople,
-           notiser: viewNotify, installningar: viewSettings })[view]();
+        ({ oversikt: viewOverview, meddelanden: viewMessages, moten: viewMeetings, mote: () => viewMeeting(parseInt(hashParams().get('id'), 10)),
+           uppgifter: viewTasks, deltagare: viewPeople, notiser: viewNotify, installningar: viewSettings })[view]();
     }
 
     function subLine() {
@@ -296,13 +317,16 @@
         const unread = unreadCount();
         if (unread) steps.push(`<div class="pl-next"><div class="t"><b>${unread === 1 ? 'Ett nytt meddelande' : unread + ' nya meddelanden'}</b></div>
             <a class="btn btn-primary" href="#vy=meddelanden" data-pl-go="meddelanden">Läs</a></div>`);
+        const myTasks = myOpenTasks();
+        if (myTasks) steps.push(`<div class="pl-next"><div class="t"><b>${myTasks === 1 ? 'Du har en uppgift' : `Du har ${myTasks} uppgifter`}</b> — berätta hur det går.</div>
+            <a class="btn btn-primary" href="#vy=uppgifter" data-pl-go="uppgifter">Dina uppgifter</a></div>`);
         const upcoming = (MEET ? MEET.meetings : []).filter(m => m.status === 'Scheduled' && parseDT(m.endsAt || m.startsAt) >= new Date())
             .sort((a, b) => parseDT(a.startsAt) - parseDT(b.startsAt));
         if (upcoming.length) {
             const m = upcoming[0];
             steps.push(`<div class="pl-next"><div class="t"><b>Nästa möte:</b> ${esc(m.title)} — ${esc(span(m.startsAt, m.endsAt))}</div>
                 ${m.onlineUrl ? `<a class="btn btn-outline-primary" href="${esc(m.onlineUrl)}" target="_blank" rel="noopener">Gå med</a>` : ''}
-                <a class="btn btn-outline-primary" href="#vy=moten" data-pl-go="moten">Visa</a></div>`);
+                <a class="btn btn-outline-primary" href="#vy=mote&id=${m.id}" data-pl-open-meeting="${m.id}">Visa</a></div>`);
         }
         html.push(`<div class="pl-card"><h2>Nästa steg</h2>${steps.join('') || '<p class="pl-help mb-0">Inget väntar på dig just nu.</p>'}</div>`);
 
@@ -331,7 +355,7 @@
     }
     document.addEventListener('click', e => {
         const b = e.target.closest('[data-pl-meet]'); if (!b) return;
-        e.preventDefault(); CFG.startMeeting = parseInt(b.dataset.plMeet, 10); go('moten');
+        e.preventDefault(); goMeeting(parseInt(b.dataset.plMeet, 10));
     });
     document.addEventListener('click', e => { if (e.target.closest('[data-pl-invite]')) { e.preventDefault(); openInvite(); } });
     document.addEventListener('click', e => { if (e.target.closest('[data-pl-newmeet]')) { e.preventDefault(); openNewMeeting(); } });
@@ -507,68 +531,202 @@
             ${canUse ? `<div><button type="button" class="btn btn-sm btn-outline-primary" data-pl-book="${m.id}:${o.id}">Boka</button></div>` : '<div></div>'}
         </div>`;
     }
-    function meetingCard(m) {
-        const canUse = MEET.canUse;
-        const menu = m.canEdit && m.status !== 'Cancelled' ? rowMenu([
-            { label: 'Ändra mötet…', fn: () => openEditMeeting(m) },
-            m.status === 'Proposed' && { label: 'Lägg till en tid…', fn: () => openAddOption(m) },
-            m.status === 'Scheduled' && { label: 'Flytta till en annan tid…', fn: () => openBookOwn(m) },
-            { divider: true },
-            m.status === 'Scheduled'
-                ? { label: 'Ställ in mötet', danger: true, fn: () => cancelMeeting(m) }
-                : { label: 'Ta bort mötet', danger: true, fn: () => deleteMeeting(m) },
-        ]) : '';
-        const h = [`<div class="pl-card" id="plMeet${m.id}"><div class="pl-cardh"><h2>${esc(m.title)}</h2><div class="d-flex gap-2 align-items-center">${meetingState(m)}${menu}</div></div>`];
-        if (m.status === 'Proposed') {
-            h.push(`<p class="pl-help">${esc(m.createdBy)} föreslår de här tiderna. ${canUse ? 'Tryck på det som gäller för dig för varje tid.' : ''}
-                ${m.voteDeadline ? 'Svara senast ' + esc(m.voteDeadline) + '.' : ''}</p>`);
-            h.push(m.options.map(o => optionRow(m, o)).join(''));
-            if (m.notAnswered && m.notAnswered.length) {
-                h.push(`<div class="mt-3 pl-help">Har inte svarat: ${m.notAnswered.map(p => esc(p.name)).join(', ')}
-                    ${canUse ? `<button class="btn btn-link btn-sm p-0 ms-2 align-baseline" data-pl-remind="${m.id}">Påminn dem</button>` : ''}</div>`);
-            }
-            if (canUse && m.bestOptionId) {
-                const b = m.options.find(o => o.id === m.bestOptionId);
-                h.push(`<div class="pl-next mt-3"><div class="t">Flest kan <b>${esc(span(b.startsAt, b.endsAt))}</b>. Den som bokar bestämmer — alla får ett mejl med tiden och länken.</div>
-                    <button class="btn btn-primary" data-pl-book="${m.id}:${b.id}">Boka den tiden</button></div>`);
-            }
+    // Möten: en lista i styrelsens form, och ett möte = en AVSTÄMNING på en egen sida (Stefan 2026-10-23,
+    // skissen https://claude.ai/artifact/ThReUw38FM6kAi7R7JnU1T). ⚠️ Inga faser, ingen kallelse, ingen
+    // närvaro, inget protokoll att justera — ett planeringsmöte är informellt.
+    function rerender() { render(view); }
+    function isPastMeeting(m) { return m.status === 'Cancelled' || (m.status === 'Scheduled' && parseDT(m.endsAt || m.startsAt) < new Date()); }
+    function fmtDay(s) {
+        const p = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || ''); if (!p) return s || '';
+        return new Date(+p[1], +p[2] - 1, +p[3]).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+    }
+    function firstName(n) { return (n || '').split(' ')[0]; }
+    function meetingMenuItems(m, onPage) {
+        if (m.status === 'Cancelled') return [!onPage && { label: 'Öppna mötet', fn: () => goMeeting(m.id) }];
+        return [
+            !onPage && { label: 'Öppna mötet', fn: () => goMeeting(m.id) },
+            m.status === 'Scheduled' && S.me.icsUrl && { label: 'Lägg i min kalender', icon: 'bi-calendar-plus', fn: () => { location.href = S.me.icsUrl; } },
+            m.canEdit && { label: 'Ändra mötet…', icon: 'bi-pencil', fn: () => openEditMeeting(m) },
+            m.canEdit && m.status === 'Proposed' && { label: 'Lägg till en tid…', icon: 'bi-plus-lg', fn: () => openAddOption(m) },
+            m.canEdit && m.status === 'Scheduled' && { label: 'Flytta till en annan tid…', icon: 'bi-arrow-left-right', fn: () => openBookOwn(m) },
+            m.canEdit && { divider: true },
+            m.canEdit && (m.status === 'Scheduled'
+                ? { label: 'Ställ in mötet…', icon: 'bi-x-circle', danger: true, fn: () => cancelMeeting(m) }
+                : { label: 'Ta bort mötet…', icon: 'bi-trash', danger: true, fn: () => deleteMeeting(m) }),
+        ];
+    }
+    function openTaskCounts() {
+        const open = TASKS.tasks.filter(t => t.status !== 'Done');
+        return { open: open.length, ready: open.filter(t => t.status === 'ReadyForReview').length };
+    }
+    function viewMeetings() {
+        if (CFG.startMeeting) { // länken ur ett mejl pekar på ett möte
+            const id = CFG.startMeeting; CFG.startMeeting = 0;
+            if (MEET.meetings.some(m => m.id === id)) { goMeeting(id); return; }
+        }
+        setHead('Möten', esc(S.planning.name));
+        setActions(MEET.canUse ? [{ label: 'Föreslå ett möte…', icon: 'bi-calendar-plus', fn: openNewMeeting }] : []);
+        const all = MEET.meetings.slice();
+        const coming = all.filter(m => !isPastMeeting(m))
+            .sort((a, b) => (a.status === 'Proposed' ? 0 : 1) - (b.status === 'Proposed' ? 0 : 1) || (parseDT(a.startsAt) || 0) - (parseDT(b.startsAt) || 0));
+        const past = all.filter(isPastMeeting).sort((a, b) => (parseDT(b.startsAt) || 0) - (parseDT(a.startsAt) || 0));
+        const shown = showPastMeetings ? coming.concat(past) : coming;
+        const tc = openTaskCounts();
+        const nextBooked = coming.find(m => m.status === 'Scheduled');
+        const html = [`<p class="pl-help">Planeringens möten är avstämningar: vad ska vi prata om, hur går det med uppgifterna, vem gör vad nu. Ingen kallelse och inget protokoll att justera.</p>`];
+        if (!all.length) {
+            html.push(`<div class="pl-card"><p class="mb-2">Inga möten ännu.</p>
+                ${MEET.canUse ? '<button class="btn btn-primary" data-pl-newmeet="1"><i class="bi bi-calendar-plus me-1"></i>Föreslå ett möte</button>' : ''}
+                <p class="pl-help mt-2 mb-0">Föreslå några tider — alla svarar vilka som passar, direkt ur mejlet, och sedan bokar ni den tid som passar flest.</p></div>`);
         } else {
-            if (m.startsAt) h.push(`<p class="mb-1" style="font-size:1.15rem"><b>${esc(span(m.startsAt, m.endsAt))}</b></p>`);
-            if (m.place) h.push(`<p class="mb-1"><i class="bi bi-geo-alt me-1"></i>${esc(m.place)}</p>`);
-            if (m.status === 'Scheduled') {
-                const acts = [];
-                if (m.onlineUrl) acts.push(`<a class="btn btn-primary" href="${esc(m.onlineUrl)}" target="_blank" rel="noopener"><i class="bi bi-camera-video me-1"></i>Gå med i mötet</a>`);
-                if (S.me.icsUrl) acts.push(`<a class="btn btn-outline-secondary" href="${esc(S.me.icsUrl)}"><i class="bi bi-calendar-plus me-1"></i>Lägg i kalendern</a>`);
-                if (acts.length) h.push(`<div class="d-flex flex-wrap gap-2 my-2">${acts.join('')}</div>`);
-                if (m.bookedBy) h.push(`<p class="pl-help mb-2">Bokat av ${esc(m.bookedBy)}.</p>`);
+            html.push(`<div class="d-flex flex-wrap gap-3 align-items-center mb-2 pl-help">
+                ${past.length ? `<label class="d-flex align-items-center gap-2 mb-0"><input type="checkbox" class="form-check-input" id="plPastToggle"${showPastMeetings ? ' checked' : ''}> Visa tidigare möten (${past.length})</label>` : ''}
+                <span class="ms-auto">${shown.length === all.length ? `${all.length} ${all.length === 1 ? 'möte' : 'möten'}` : `${shown.length} av ${all.length} möten`}</span></div>`);
+            if (!shown.length) html.push(`<div class="pl-card"><p class="pl-help mb-0">Inga kommande möten. Kryssa i <i>Visa tidigare möten</i> för att se dem${MEET.canUse ? ', eller föreslå ett nytt under Åtgärder' : ''}.</p></div>`);
+            else {
+                const rows = shown.map(m => {
+                    const answered = m.answeredCount || 0, waiting = (m.notAnswered || []).length;
+                    const state = meetingState(m) + (m.status === 'Proposed' ? `<div class="pl-help small mt-1">${answered} av ${answered + waiting} har svarat</div>` : '');
+                    const topics = (m.topics || []).length;
+                    const sub = [m.onlineUrl ? 'Online' : '', m.place || '', topics ? `${topics} ${topics === 1 ? 'sak' : 'saker'} att prata om` : '']
+                        .filter(Boolean).map(esc).join(' · ');
+                    const when = m.status === 'Proposed' ? '<span class="pl-help">Tiden inte bestämd</span>' : esc(fmtShort(m.startsAt));
+                    const tasksCell = (m === nextBooked || m.isCurrent) && tc.open
+                        ? `<b>${tc.open} öppna</b>${tc.ready ? `<div class="pl-help small">${tc.ready} klar att pröva</div>` : ''}` : '<span class="pl-help">—</span>';
+                    return `<tr class="pl-rowlink${isPastMeeting(m) ? ' pl-past' : ''}" data-pl-open-meeting="${m.id}">
+                        <td class="d-none d-sm-table-cell text-nowrap">${when}</td>
+                        <td><a href="#vy=mote&id=${m.id}" class="fw-semibold text-decoration-none" data-pl-open-meeting="${m.id}">${esc(m.title)}</a>
+                            <div class="d-sm-none small">${when}</div>${sub ? `<div class="pl-help small">${sub}</div>` : ''}</td>
+                        <td>${state}</td>
+                        <td class="d-none d-md-table-cell">${tasksCell}</td>
+                        <td class="text-end">${rowMenu(meetingMenuItems(m, false))}</td></tr>`;
+                }).join('');
+                html.push(`<div class="pl-card p-0"><div class="table-responsive"><table class="table align-middle mb-0 pl-mtg">
+                    <thead><tr><th class="d-none d-sm-table-cell ps-3">När</th><th>Möte</th><th>Läge</th><th class="d-none d-md-table-cell">Uppgifter</th><th></th></tr></thead>
+                    <tbody>${rows}</tbody></table></div></div>`);
             }
         }
-        if (m.agenda) h.push(`<div class="mt-2"><div class="fw-semibold">Dagordning</div><div style="white-space:pre-wrap">${esc(m.agenda)}</div></div>`);
-        if (m.status === 'Scheduled' && canUse) {
-            h.push(`<div class="mt-3"><label class="form-label fw-semibold" for="plNotes${m.id}">Anteckningar från mötet</label>
-                <textarea class="form-control" id="plNotes${m.id}" rows="3" data-pl-notes="${m.id}" placeholder="Vad bestämdes? Vem gör vad?">${esc(m.notes || '')}</textarea>
-                <div class="pl-help small mt-1" id="plNotesSaved${m.id}">Sparas när du lämnar rutan.</div></div>`);
-        } else if (m.notes) {
-            h.push(`<div class="mt-2"><div class="fw-semibold">Anteckningar</div><div style="white-space:pre-wrap">${esc(m.notes)}</div></div>`);
+        if (S.me.icsUrl) html.push(`<p class="pl-help pl-noprint mt-3">Planeringens bokade möten kan ligga i din egen kalender och följa med om de flyttas:
+            <a href="${esc(S.me.icsUrl)}">lägg till kalendern</a>.</p>`);
+        $('plBody').innerHTML = html.join('');
+        $('plPastToggle')?.addEventListener('change', e => { showPastMeetings = e.target.checked; viewMeetings(); });
+    }
+
+    function proposalHtml(m) {
+        const canUse = MEET.canUse;
+        const h = [`<div class="pl-card"><h2>Vilka tider passar?</h2>
+            <p class="pl-help">${esc(m.createdBy)} föreslår de här tiderna. ${canUse ? 'Tryck på det som gäller för dig för varje tid.' : ''}
+            ${m.voteDeadline ? 'Svara senast ' + esc(m.voteDeadline) + '.' : ''}</p>`];
+        h.push(m.options.map(o => optionRow(m, o)).join(''));
+        if (m.notAnswered && m.notAnswered.length) {
+            h.push(`<div class="mt-3 pl-help">Har inte svarat: ${m.notAnswered.map(p => esc(p.name)).join(', ')}
+                ${canUse ? `<button class="btn btn-link btn-sm p-0 ms-2 align-baseline" data-pl-remind="${m.id}">Påminn dem</button>` : ''}</div>`);
+        }
+        if (canUse && m.bestOptionId) {
+            const b = m.options.find(o => o.id === m.bestOptionId);
+            h.push(`<div class="pl-next mt-3"><div class="t">Flest kan <b>${esc(span(b.startsAt, b.endsAt))}</b>. Den som bokar bestämmer — alla får ett mejl med tiden och länken.</div>
+                <button class="btn btn-primary" data-pl-book="${m.id}:${b.id}">Boka den tiden</button></div>`);
         }
         h.push('</div>');
         return h.join('');
     }
-    function viewMeetings() {
-        setHead('Möten', esc(S.planning.name));
-        setActions(MEET.canUse ? [{ label: 'Föreslå ett möte…', icon: 'bi-calendar-plus', fn: openNewMeeting }] : []);
-        const list = MEET.meetings.slice();
-        const order = m => m.status === 'Proposed' ? 0 : m.status === 'Scheduled' && parseDT(m.endsAt || m.startsAt) >= new Date() ? 1 : 2;
-        list.sort((a, b) => order(a) - order(b) || (parseDT(a.startsAt) || 0) - (parseDT(b.startsAt) || 0));
-        const html = [];
-        if (!list.length) html.push(`<div class="pl-card"><p class="mb-2">Inga möten ännu.</p>
-            ${MEET.canUse ? '<button class="btn btn-primary" data-pl-newmeet="1"><i class="bi bi-calendar-plus me-1"></i>Föreslå ett möte</button>' : ''}
-            <p class="pl-help mt-2 mb-0">Föreslå några tider — alla svarar vilka som passar, direkt ur mejlet, och sedan bokar ni den tid som passar flest.</p></div>`);
-        list.forEach(m => html.push(meetingCard(m)));
-        if (S.me.icsUrl) html.push(`<p class="pl-help pl-noprint">Planeringens bokade möten kan ligga i din egen kalender och följa med om de flyttas:
-            <a href="${esc(S.me.icsUrl)}">lägg till kalendern</a>.</p>`);
-        $('plBody').innerHTML = html.join('');
-        if (CFG.startMeeting) { $('plMeet' + CFG.startMeeting)?.scrollIntoView({ block: 'start' }); CFG.startMeeting = 0; }
+
+    function tasksForMeeting(m) {
+        const order = { ReadyForReview: 0, NeedsHelp: 1, InProgress: 2, NotStarted: 3 };
+        return TASKS.tasks.filter(t => t.status !== 'Done' || t.doneAtMeetingId === m.id)
+            .sort((a, b) => (a.status === 'Done') - (b.status === 'Done') || (order[a.status] ?? 9) - (order[b.status] ?? 9)
+                || (a.due || '9999').localeCompare(b.due || '9999') || a.id - b.id);
+    }
+    function meetingTaskRow(m, t) {
+        if (t.status === 'Done') {
+            return `<div class="pl-tkdone"><span><b>${esc(t.title)}</b>${t.assignee ? ' · ' + esc(t.assignee) : ''}</span>
+                <span class="small">Utförd — bestämt på mötet${m.canDecideTasks ? ` · <button type="button" class="btn btn-link btn-sm p-0 align-baseline pl-tkundo" data-tk-undo="${t.id}" data-tk-meeting="${m.id}">Ångra</button>` : ''}</span></div>`;
+        }
+        const ready = t.status === 'ReadyForReview';
+        let side = '';
+        if (m.canDecideTasks && m.isCurrent) {
+            side = `<div class="d-flex gap-2 flex-shrink-0">
+                <button type="button" class="btn ${ready ? 'btn-success' : 'btn-outline-success'}" data-tk-done="${t.id}" data-tk-meeting="${m.id}">Klar ✓</button>
+                <button type="button" class="btn btn-outline-secondary" data-tk-continue="${t.id}" data-tk-meeting="${m.id}">Fortsätter</button></div>`;
+        } else if (t.mine && t.canReport) {
+            side = `<div class="flex-shrink-0"><button type="button" class="btn btn-outline-primary btn-sm" data-tk-report="${t.id}">Berätta hur det går…</button></div>`;
+        }
+        return `<div class="pl-tkrow"><div class="flex-grow-1" style="min-width:0">
+                <div class="d-flex gap-2 align-items-center flex-wrap"><b>${esc(t.title)}</b>${tkChip(t)}</div>
+                <div class="pl-help small">${esc(t.assignee || 'Ingen ansvarig än')}${t.due ? ' · senast ' + esc(fmtDay(t.due)) : ''}${t.overdue ? ' · <span class="text-danger">försenad</span>' : ''}</div>
+                ${t.report ? `<div class="mt-1">”${esc(t.report)}” <span class="pl-help small">— ${esc(firstName(t.reportBy))}, ${esc(fmtShort(t.reportAt))}</span></div>`
+                    : '<div class="mt-1 pl-help small">Inget skrivet än.</div>'}
+            </div>${side}</div>`;
+    }
+
+    function viewMeeting(id) {
+        const m = MEET.meetings.find(x => x.id === id);
+        const meta = [];
+        if (m.status === 'Proposed') meta.push('Tiden inte bestämd');
+        else if (m.startsAt) meta.push(esc(span(m.startsAt, m.endsAt)));
+        if (m.place) meta.push(esc(m.place)); else if (m.onlineUrl) meta.push('Online');
+        setHead(m.title, meta.join(' · ') + ' ' + meetingState(m));
+        setActions(meetingMenuItems(m, true));
+        const h = [`<a href="#vy=moten" data-pl-go="moten" class="d-inline-block mb-2 small">← Alla möten</a>`];
+        if (m.status === 'Cancelled') h.push('<div class="alert alert-secondary">Mötet är inställt.</div>');
+        if (m.status === 'Scheduled') {
+            const acts = [];
+            if (m.onlineUrl) acts.push(`<a class="btn btn-primary" href="${esc(m.onlineUrl)}" target="_blank" rel="noopener"><i class="bi bi-camera-video me-1"></i>Anslut till mötet</a>`);
+            if (S.me.icsUrl) acts.push(`<a class="btn btn-outline-secondary" href="${esc(S.me.icsUrl)}"><i class="bi bi-calendar-plus me-1"></i>Lägg i kalendern</a>`);
+            if (acts.length || m.bookedBy) h.push(`<div class="d-flex flex-wrap gap-2 align-items-center mb-3">${acts.join('')}${m.bookedBy ? `<span class="pl-help small">Bokat av ${esc(m.bookedBy)}.</span>` : ''}</div>`);
+        }
+        if (m.status === 'Proposed') h.push(proposalHtml(m));
+
+        // Att prata om
+        const canTalk = MEET.canUse && m.status !== 'Cancelled';
+        const topics = m.topics || [];
+        h.push(`<div class="pl-card"><h2>Att prata om</h2>
+            <p class="pl-help">Alla i planeringen kan lägga till något före mötet. Ingen dagordning att godkänna.</p>
+            ${topics.length ? `<div class="pl-topics">${topics.map(tp => `<div class="pl-topic"><span>${esc(tp.text)}</span>
+                <span class="d-flex align-items-center gap-2 flex-shrink-0"><span class="pl-help small">${esc(tp.by)}</span>
+                ${tp.canRemove ? `<button type="button" class="btn btn-sm btn-link text-secondary p-0" data-topic-del="${tp.id}" title="Ta bort punkten" aria-label="Ta bort punkten">✕</button>` : ''}</span></div>`).join('')}</div>`
+                : '<p class="pl-help mb-2">Inget ännu.</p>'}
+            ${canTalk ? `<div class="d-flex gap-2 mt-2 flex-wrap"><input type="text" class="form-control" style="flex:1 1 260px" id="plTopic${m.id}" maxlength="500"
+                placeholder="Något du vill ta upp…" aria-label="Något att prata om" data-topic-input="${m.id}">
+                <button type="button" class="btn btn-outline-primary" data-topic-add="${m.id}">Lägg till</button></div>` : ''}
+            ${m.agenda ? `<div class="mt-3"><div class="fw-semibold">Dagordning</div><div style="white-space:pre-wrap">${esc(m.agenda)}</div></div>` : ''}
+            </div>`);
+
+        // Hur går det med uppgifterna?
+        const list = tasksForMeeting(m);
+        let lead;
+        if (m.status === 'Cancelled') lead = 'Mötet är inställt — uppgifterna tas upp på nästa möte.';
+        else if (m.isCurrent && m.canDecideTasks) lead = 'Kommer med på varje möte av sig själv. Var och en har skrivit hur det går — här bestämmer ni om en uppgift är klar eller fortsätter.';
+        else if (isPastMeeting(m)) lead = 'Mötet är avslutat. Uppgifterna som fortfarande är öppna kommer upp på nästa möte.';
+        else lead = 'Kommer med på varje möte av sig själv. Under mötet trycker ni <i>Klar ✓</i> eller <i>Fortsätter</i> här. Fram till dess säger var och en själv hur det går under Uppgifter.';
+        h.push(`<div class="pl-card"><h2>Hur går det med uppgifterna?</h2><p class="pl-help">${lead}</p>
+            ${list.length ? list.map(t => meetingTaskRow(m, t)).join('') : '<p class="pl-help mb-0">Inga öppna uppgifter.</p>'}</div>`);
+
+        // Anteckningar och vem gör vad
+        const fromHere = TASKS.tasks.filter(t => t.fromMeetingId === m.id);
+        const notesHtml = m.status === 'Scheduled' && MEET.canUse
+            ? `<label class="visually-hidden" for="plNotes${m.id}">Anteckningar</label>
+               <textarea class="form-control" id="plNotes${m.id}" rows="5" data-pl-notes="${m.id}" placeholder="Vad pratade ni om? Vad bestämdes?">${esc(m.notes || '')}</textarea>
+               <div class="pl-help small mt-1" id="plNotesSaved${m.id}">Sparas när du lämnar rutan.</div>`
+            : (m.notes ? `<div style="white-space:pre-wrap">${esc(m.notes)}</div>` : '<p class="pl-help mb-0">Inga anteckningar.</p>');
+        const people = S.participants.slice().sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+        const addForm = TASKS.canCreate && m.status !== 'Cancelled' ? `<div class="row g-2 mt-1 align-items-end">
+                <div class="col-md-5"><label class="form-label small mb-0" for="ntTitle${m.id}">Vad ska göras?</label>
+                    <input type="text" class="form-control" id="ntTitle${m.id}" maxlength="300" data-nt-title="${m.id}"></div>
+                <div class="col-md-3 col-7"><label class="form-label small mb-0" for="ntWho${m.id}">Vem?</label>
+                    <select class="form-select" id="ntWho${m.id}"><option value="">Ingen ännu</option>${people.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>
+                <div class="col-md-2 col-5"><label class="form-label small mb-0" for="ntDue${m.id}">Senast</label>
+                    <input type="text" class="form-control" id="ntDue${m.id}" placeholder="valfritt" data-nt-due="${m.id}"></div>
+                <div class="col-md-2"><button type="button" class="btn btn-primary w-100" data-tk-add="${m.id}">+ Lägg till</button></div></div>
+                <p class="pl-help small mt-2 mb-0">Den som får en uppgift får ett mejl. Uppgiften hamnar under Uppgifter och kommer upp på nästa möte.</p>` : '';
+        h.push(`<div class="pl-card"><h2>Anteckningar och vem gör vad</h2>
+            ${m.status === 'Scheduled' && MEET.canUse ? '<p class="pl-help">Skriv fritt. Anteckningarna sparas av sig själva och syns för alla i planeringen.</p>' : ''}
+            ${notesHtml}
+            ${fromHere.length || addForm ? '<div class="fw-semibold mt-3">Nya uppgifter från mötet</div>' : ''}
+            ${fromHere.map(t => `<div class="pl-tknew"><span><b>${esc(t.title)}</b>${t.assignee ? ' · ' + esc(t.assignee) : ''}${t.due ? ' · senast ' + esc(fmtDay(t.due)) : ''}</span>${tkChip(t)}</div>`).join('')}
+            ${addForm}</div>`);
+        $('plBody').innerHTML = `<div id="plMeet${m.id}">${h.join('')}</div>`;
+        const due = $('ntDue' + m.id); if (due) datePicker(due);
     }
     document.addEventListener('click', async e => {
         const b = e.target.closest('[data-pl-vote]'); if (!b) return;
@@ -577,7 +735,7 @@
         try {
             const r = await post('Vote', { meetingId: mid, answers: oid + ':' + ans });
             if (!r.success) { failMsg(r); return; }
-            await reloadMeetings(); viewMeetings();
+            await reloadMeetings(); rerender();
             showMsg('Ditt svar är sparat.', 'success');
         } catch (er) { failMsg(er); } finally { b.disabled = false; }
     });
@@ -591,7 +749,7 @@
             `${m.title}\n${span(o.startsAt, o.endsAt)}\n\nAlla som är med får ett mejl med tiden${m.onlineUrl ? ', länken' : ''} och en knapp för kalendern.`, again ? 'Flytta' : 'Boka')) return;
         const r = await post('Book', { meetingId: mid, optionId: oid });
         if (!r.success) { failMsg(r); return; }
-        await reloadMeetings(); viewMeetings(); showMsg('Mötet är bokat och alla har fått ett mejl.', 'success');
+        await reloadMeetings(); rerender(); showMsg('Mötet är bokat och alla har fått ett mejl.', 'success');
     });
     document.addEventListener('click', async e => {
         const b = e.target.closest('[data-pl-remind]'); if (!b) return;
@@ -603,15 +761,32 @@
                 : 'Ingen påminnelse gick iväg — de har redan fått en i dag, har stängt av notiserna, eller så kunde mejlet inte skickas.', r.reached ? 'success' : 'warning');
         } catch (er) { failMsg(er); } finally { b.disabled = false; }
     });
-    document.addEventListener('focusout', async e => {
-        const ta = e.target.closest('[data-pl-notes]'); if (!ta) return;
-        const m = MEET.meetings.find(x => x.id === parseInt(ta.dataset.plNotes, 10)); if (!m) return;
-        if ((m.notes || '') === ta.value) return;
-        const r = await post('UpdateMeeting', { meetingId: m.id, title: m.title, place: m.place || '', onlineUrl: m.onlineUrl || '',
-            agenda: m.agenda || '', notes: ta.value, voteDeadline: m.voteDeadline || '' });
-        const note = $('plNotesSaved' + m.id);
-        if (r.success) { m.notes = ta.value; if (note) note.textContent = 'Sparat.'; }
-        else if (note) note.textContent = r.message || 'Det gick inte att spara.';
+    // Anteckningarna sparas när rutan lämnas — och innan en knapp på mötessidan ritar om den.
+    // En pågående sparning delas, så att rutan aldrig sparas två gånger samtidigt.
+    const notesSaving = new Map();
+    function saveNotes(ta) {
+        const m = MEET.meetings.find(x => x.id === parseInt(ta.dataset.plNotes, 10)); if (!m) return Promise.resolve();
+        const value = ta.value;
+        if ((m.notes || '') === value) return notesSaving.get(m.id) || Promise.resolve();
+        const prev = notesSaving.get(m.id);
+        if (prev && prev.value === value) return prev;
+        const p = (async () => {
+            const r = await post('UpdateMeeting', { meetingId: m.id, title: m.title, place: m.place || '', onlineUrl: m.onlineUrl || '',
+                agenda: m.agenda || '', notes: value, voteDeadline: m.voteDeadline || '' });
+            const note = $('plNotesSaved' + m.id);
+            if (r.success) { m.notes = value; if (note) note.textContent = 'Sparat.'; }
+            else if (note) note.textContent = r.message || 'Det gick inte att spara.';
+        })().finally(() => { if (notesSaving.get(m.id) === p) notesSaving.delete(m.id); });
+        p.value = value;
+        notesSaving.set(m.id, p);
+        return p;
+    }
+    async function flushNotes() {
+        const ta = $('plBody').querySelector('[data-pl-notes]');
+        if (ta) { try { await saveNotes(ta); } catch (e) { /* visas under rutan */ } }
+    }
+    document.addEventListener('focusout', e => {
+        const ta = e.target.closest('[data-pl-notes]'); if (ta) saveNotes(ta);
     });
     async function reloadMeetings() { const m = await get('Meetings'); if (m.success) MEET = m; }
 
@@ -679,7 +854,7 @@
                     place: body.querySelector('#nmPlace').value.trim(), agenda: body.querySelector('#nmAgenda').value
                 });
                 if (!r.success) return r.message;
-                await reloadMeetings(); CFG.startMeeting = r.meetingId; go('moten');
+                await reloadMeetings(); goMeeting(r.meetingId);
                 showMsg(r.booked ? 'Mötet är bokat. Alla har fått ett mejl med tiden.' : 'Förslaget är skickat. Alla har fått ett mejl och kan svara direkt.', 'success');
                 return true;
             }
@@ -696,7 +871,7 @@
                 const [a, b] = options[0].split('|');
                 const r = await post('AddOption', { meetingId: m.id, start: a, end: b });
                 if (!r.success) return r.message;
-                await reloadMeetings(); viewMeetings(); return true;
+                await reloadMeetings(); rerender(); return true;
             }
         });
     }
@@ -711,7 +886,7 @@
                 const [a, b] = options[0].split('|');
                 const r = await post('Book', { meetingId: m.id, start: a, end: b });
                 if (!r.success) return r.message;
-                await reloadMeetings(); viewMeetings(); showMsg('Mötet är flyttat och alla har fått ett mejl.', 'success'); return true;
+                await reloadMeetings(); rerender(); showMsg('Mötet är flyttat och alla har fått ett mejl.', 'success'); return true;
             }
         });
     }
@@ -731,7 +906,7 @@
                     voteDeadline: body.querySelector('#emDeadline') ? body.querySelector('#emDeadline').value : (m.voteDeadline || '')
                 });
                 if (!r.success) return r.message;
-                await reloadMeetings(); viewMeetings(); return true;
+                await reloadMeetings(); rerender(); return true;
             }
         });
     }
@@ -739,13 +914,297 @@
         if (!await plConfirm('Ställ in mötet?', `${m.title}\n${span(m.startsAt, m.endsAt)}\n\nAlla får ett mejl om att mötet är inställt, och det stryks i kalendrarna.`, 'Ställ in', true)) return;
         const r = await post('CancelMeeting', { meetingId: m.id });
         if (!r.success) { failMsg(r); return; }
-        await reloadMeetings(); viewMeetings();
+        await reloadMeetings(); rerender();
     }
     async function deleteMeeting(m) {
         if (!await plConfirm('Ta bort mötet?', `${m.title}\n\nTiderna och svaren tas bort.`, 'Ta bort', true)) return;
         const r = await post('DeleteMeeting', { meetingId: m.id });
         if (!r.success) { failMsg(r); return; }
-        await reloadMeetings(); viewMeetings();
+        await reloadMeetings(); rerender();
+    }
+
+    // ================================================================ Uppgifter
+    // Lägena: Ej påbörjad → Pågår → Behöver hjälp → Klar att pröva → Utförd. Den som har uppgiften sätter de
+    // fyra första; Utförd bestäms på ett möte, eller av den sammankallande (servern prövar båda).
+    const TK_CLASS = { NotStarted: 'ns', InProgress: 'ip', NeedsHelp: 'nh', ReadyForReview: 'rr', Done: 'dn' };
+    function tkChip(t) { return `<span class="pl-tk pl-tk-${TK_CLASS[t.status] || 'ns'}">${esc(t.statusLabel)}</span>`; }
+    async function reloadTasks() { const r = await get('Tasks'); if (r.success) TASKS = r; }
+    function findTask(id) { return TASKS.tasks.find(t => t.id === id); }
+
+    function viewTasks() {
+        setHead('Uppgifter', esc(S.planning.name));
+        setActions([TASKS.canCreate && { label: 'Ny uppgift…', icon: 'bi-plus-lg', fn: () => openTaskEdit(null) }]);
+        const all = TASKS.tasks;
+        const n = {
+            open: all.filter(t => t.status !== 'Done').length,
+            mine: all.filter(t => t.mine && t.status !== 'Done').length,
+            help: all.filter(t => t.status === 'NeedsHelp').length,
+            ready: all.filter(t => t.status === 'ReadyForReview').length,
+            done: all.filter(t => t.status === 'Done').length,
+        };
+        if (!tkFilter) tkFilter = TOKEN && n.mine ? 'mine' : 'open';
+        const order = { ReadyForReview: 0, NeedsHelp: 1, InProgress: 2, NotStarted: 3 };
+        const html = [`<p class="pl-help">Vem gör vad. De flesta uppgifter kommer från mötena, men du kan lägga till en här också.
+            Den som har uppgiften ändrar själv hur långt hen kommit; om den är utförd bestämmer ni på ett möte, eller den sammankallande.</p>`];
+        if (!all.length) {
+            html.push(`<div class="pl-card"><p class="mb-2">Inga uppgifter ännu.</p>
+                <p class="pl-help mb-0">Uppgifter fördelas oftast på ett möte: under <i>Anteckningar och vem gör vad</i> skriver ni vad som ska göras och vem som gör det.
+                ${TASKS.canCreate ? 'Du kan också lägga till en här, under Åtgärder.' : ''}</p></div>`);
+        } else {
+            const opt = (v, label) => `<option value="${v}"${v === tkFilter ? ' selected' : ''}>${esc(label)}</option>`;
+            html.push(`<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                <input type="search" class="form-control form-control-sm" id="tkQ" placeholder="Sök på uppgift eller namn" style="max-width:20rem" value="${esc(tkQuery)}">
+                <select class="form-select form-select-sm" id="tkFilter" aria-label="Visa" style="max-width:16rem">
+                    ${opt('open', `Öppna (${n.open})`)}${opt('mine', `Mina (${n.mine})`)}${opt('help', `Behöver hjälp (${n.help})`)}
+                    ${opt('ready', `Klar att pröva (${n.ready})`)}${opt('done', `Utförda (${n.done})`)}${opt('all', `Alla (${all.length})`)}
+                </select><span class="ms-auto pl-help small" id="tkCount"></span></div>
+                <div class="pl-card p-0"><div class="table-responsive"><table class="table align-middle mb-0 pl-tktable">
+                <thead><tr><th class="ps-3">Uppgift</th><th class="d-none d-md-table-cell">Vem</th><th class="d-none d-md-table-cell">Senast</th>
+                    <th class="d-none d-sm-table-cell">Läge</th><th class="d-none d-lg-table-cell">Senaste raden</th><th></th></tr></thead>
+                <tbody id="tkRows"></tbody></table></div></div>`);
+        }
+        html.push(`<div class="pl-card mt-3"><h2>Lägena</h2><div class="d-flex gap-2 flex-wrap align-items-center">
+            ${['NotStarted', 'InProgress', 'NeedsHelp', 'ReadyForReview', 'Done'].map(s => tkChip({ status: s, statusLabel: (TASKS.statuses.find(x => x.value === s) || {}).label || s })).join(' → ')}</div>
+            <p class="pl-help mb-0 mt-2">Den som har uppgiften sätter de fyra första. Utförd sätts på ett möte eller av den sammankallande.</p></div>`);
+        $('plBody').innerHTML = html.join('');
+        if (!all.length) return;
+        const renderRows = () => {
+            const q = tkQuery.trim().toLowerCase();
+            const rows = all.filter(t =>
+                (tkFilter === 'all' || (tkFilter === 'open' && t.status !== 'Done') || (tkFilter === 'mine' && t.mine && t.status !== 'Done')
+                    || (tkFilter === 'help' && t.status === 'NeedsHelp') || (tkFilter === 'ready' && t.status === 'ReadyForReview')
+                    || (tkFilter === 'done' && t.status === 'Done'))
+                && (!q || [t.title, t.assignee, t.report].some(v => (v || '').toLowerCase().includes(q))))
+                .sort((a, b) => (a.status === 'Done') - (b.status === 'Done') || (order[a.status] ?? 9) - (order[b.status] ?? 9)
+                    || (a.due || '9999').localeCompare(b.due || '9999') || (b.doneAt || '').localeCompare(a.doneAt || '') || a.id - b.id);
+            rowFns = [];
+            $('tkRows').innerHTML = rows.length ? rows.map(t => {
+                const open = t.status !== 'Done';
+                const menu = rowMenu([
+                    t.canReport && open && { label: 'Ändra läge och skriv hur det går…', fn: () => openReport(t) },
+                    t.canEdit && { label: 'Ändra uppgiften…', fn: () => openTaskEdit(t) },
+                    TASKS.canDecide && open && { label: 'Markera som utförd…', fn: () => decideOutsideMeeting(t) },
+                    TASKS.canDecide && !open && { label: 'Ångra utförd', fn: () => undoDone(t, 0) },
+                    { label: 'Visa historiken', fn: () => openHistory(t) },
+                    t.canEdit && { divider: true },
+                    t.canEdit && { label: 'Ta bort…', danger: true, fn: () => removeTask(t) },
+                ]);
+                const origin = t.fromMeeting ? `Från mötet ${esc(t.fromMeeting)}` : `Tillagd av ${esc(t.createdBy)}`;
+                const done = !open ? `<div class="small text-success">Utförd ${esc(fmtShort(t.doneAt))}${t.doneAtMeeting ? ' på mötet ' + esc(t.doneAtMeeting) : t.doneBy ? ' — ' + esc(t.doneBy) : ''}</div>` : '';
+                return `<tr class="${t.mine && open ? 'pl-tkmine' : ''}"><td class="ps-3"><b>${esc(t.title)}</b><div class="pl-help small">${origin}</div>${done}
+                        <div class="d-sm-none mt-1">${tkChip(t)}</div>
+                        <div class="d-md-none small mt-1">${esc(t.assignee || 'Ingen ansvarig än')}${t.due ? ' · senast ' + esc(fmtDay(t.due)) : ''}</div></td>
+                    <td class="d-none d-md-table-cell">${t.assignee ? esc(t.assignee) : '<span class="pl-help">Ingen än</span>'}</td>
+                    <td class="d-none d-md-table-cell text-nowrap">${t.due ? esc(fmtDay(t.due)) + (t.overdue ? ' <span class="text-danger small">försenad</span>' : '') : '<span class="pl-help">—</span>'}</td>
+                    <td class="d-none d-sm-table-cell">${tkChip(t)}</td>
+                    <td class="d-none d-lg-table-cell small">${t.report ? esc(t.report.length > 60 ? t.report.slice(0, 60) + '…' : t.report) : '<span class="pl-help">—</span>'}</td>
+                    <td class="text-end">${menu}</td></tr>`;
+            }).join('') : '<tr><td colspan="6" class="pl-help ps-3">Ingen uppgift matchar.</td></tr>';
+            $('tkCount').textContent = rows.length === 1 ? '1 uppgift' : `${rows.length} uppgifter`;
+        };
+        renderRows();
+        $('tkQ').addEventListener('input', e => { tkQuery = e.target.value; renderRows(); });
+        $('tkFilter').addEventListener('change', e => { tkFilter = e.target.value; renderRows(); });
+    }
+
+    function peopleOptions(cur) {
+        return '<option value="">Ingen ännu</option>' + S.participants.slice().sort((a, b) => a.name.localeCompare(b.name, 'sv'))
+            .map(p => `<option value="${p.id}"${p.id === cur ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
+    }
+    function openTaskEdit(t) {
+        formModal({
+            title: t ? 'Ändra uppgiften' : 'Ny uppgift', okLabel: t ? 'Spara' : 'Lägg till', wide: false,
+            html: `<div class="mb-3"><label class="form-label fw-semibold" for="teTitle">Vad ska göras?</label>
+                    <input id="teTitle" class="form-control" maxlength="300" value="${esc(t ? t.title : '')}"></div>
+                <div class="mb-3"><label class="form-label" for="teWho">Vem gör det?</label><select id="teWho" class="form-select">${peopleOptions(t ? t.assigneeId : null)}</select></div>
+                <div class="mb-3"><label class="form-label" for="teDue">Klart senast (valfritt)</label><input id="teDue" class="form-control" value="${esc(t ? t.due : '')}" placeholder="åååå-mm-dd"></div>
+                <div class="mb-1"><label class="form-label" for="teDesc">Mer om uppgiften (valfritt)</label><textarea id="teDesc" class="form-control" rows="3" maxlength="4000">${esc(t ? t.description || '' : '')}</textarea></div>
+                ${t ? '' : '<p class="pl-help small mt-2 mb-0">Den som får uppgiften får ett mejl.</p>'}`,
+            onOpen: body => { datePicker(body.querySelector('#teDue')); body.querySelector('#teTitle').focus(); },
+            onOk: async body => {
+                const p = { title: body.querySelector('#teTitle').value, assignee: body.querySelector('#teWho').value,
+                    due: body.querySelector('#teDue').value.trim(), description: body.querySelector('#teDesc').value };
+                const r = t ? await post('UpdateTask', Object.assign({ taskId: t.id }, p)) : await post('CreateTask', p);
+                if (!r.success) return r.message;
+                await reloadTasks(); rerender();
+                if (r.mailed) showMsg('Den som fick uppgiften har fått ett mejl.', 'success');
+                return true;
+            }
+        });
+    }
+    function openReport(t) {
+        const opts = (TASKS.statuses || []).filter(s => s.assignee);
+        let chosen = t.status;
+        formModal({
+            title: t.title, okLabel: 'Spara', wide: false,
+            html: `<p class="pl-help">${t.due ? 'Senast ' + esc(fmtDay(t.due)) + (t.fromMeeting ? ' · ' : '') : ''}${t.fromMeeting ? 'Från mötet ' + esc(t.fromMeeting) : ''}</p>
+                <div class="fw-semibold mb-2">Hur långt har du kommit?</div>
+                <div class="pl-statgrid" role="group" aria-label="Läge">${opts.map(s =>
+                    `<button type="button" class="btn pl-statbtn${s.value === chosen ? ' on' : ''}" data-st="${s.value}" aria-pressed="${s.value === chosen}">${s.value === chosen ? '✓ ' : ''}${esc(s.label)}</button>`).join('')}</div>
+                <label class="form-label fw-semibold mt-3" for="rpText">Hur går det? (valfritt)</label>
+                <textarea id="rpText" class="form-control" rows="3" maxlength="2000">${esc(t.report || '')}</textarea>
+                <p class="pl-help small mt-2 mb-0">Om den är utförd bestämmer ni på mötet.</p>`,
+            onOpen: body => body.addEventListener('click', e => {
+                const b = e.target.closest('[data-st]'); if (!b) return;
+                chosen = b.dataset.st;
+                body.querySelectorAll('[data-st]').forEach(x => {
+                    const on = x.dataset.st === chosen;
+                    x.classList.toggle('on', on); x.setAttribute('aria-pressed', on);
+                    const lbl = (opts.find(s => s.value === x.dataset.st) || {}).label || '';
+                    x.textContent = (on ? '✓ ' : '') + lbl;
+                });
+            }),
+            onOk: async body => {
+                const text = body.querySelector('#rpText').value.trim();
+                const report = text === (t.report || '').trim() ? '' : text;
+                const status = chosen !== t.status ? chosen : '';
+                if (!report && !status) return true;
+                const r = await post('ReportTask', { taskId: t.id, status, report });
+                if (!r.success) return r.message;
+                await reloadTasks(); rerender(); showMsg('Sparat.', 'success');
+                return true;
+            }
+        });
+    }
+    async function decideOutsideMeeting(t) {
+        if (!await plConfirm('Markera som utförd?', `${t.title}\n\nDet står att du beslutade det, inte ett möte.`, 'Utförd')) return;
+        const r = await post('DecideTask', { taskId: t.id, decision: 'done' });
+        if (!r.success) { failMsg(r); return; }
+        await reloadTasks(); rerender();
+    }
+    async function undoDone(t, meetingId) {
+        const r = await post('DecideTask', { taskId: t.id, decision: 'undo', meetingId: meetingId || '' });
+        if (!r.success) { failMsg(r); return; }
+        await reloadTasks(); rerender();
+    }
+    async function removeTask(t) {
+        if (!await plConfirm('Ta bort uppgiften?', t.title, 'Ta bort', true)) return;
+        const r = await post('RemoveTask', { taskId: t.id });
+        if (!r.success) { failMsg(r); return; }
+        await reloadTasks(); rerender();
+    }
+    const TK_EVENT = {
+        Created: e => 'lade till uppgiften', Edited: e => e.note || 'ändrade uppgiften',
+        Status: e => `ändrade läget till ${e.newStatus}` + (e.note ? `: ”${e.note}”` : ''),
+        Report: e => `skrev: ”${e.note}”`, Done: e => 'Utförd' + (e.meeting ? ` — på mötet ${e.meeting}` : ''),
+        Undone: e => 'ångrade Utförd', Continued: e => 'Fortsätter' + (e.meeting ? ` (mötet ${e.meeting})` : '') + (e.note ? ` — ${e.note}` : ''),
+        Removed: e => 'tog bort uppgiften',
+    };
+    async function openHistory(t) {
+        const r = await get('TaskHistory', { taskId: t.id });
+        if (!r.success) { failMsg(r); return; }
+        formModal({
+            title: t.title, wide: false, cancelLabel: 'Stäng',
+            html: r.events.length ? `<ul class="list-unstyled mb-0">${r.events.map(e =>
+                `<li class="py-2 border-top"><div class="pl-help small">${esc(fmtShort(e.at))} · ${esc(e.who)}${e.viaEmail ? ' (ur mejlet)' : ''}</div>
+                 <div>${esc((TK_EVENT[e.kind] || (() => e.kind))(e))}</div></li>`).join('')}</ul>` : '<p class="pl-help mb-0">Ingen historik.</p>',
+        });
+    }
+
+    // Mötessidans knappar: Klar ✓ / Fortsätter / Ångra / Berätta hur det går / Lägg till / punkterna.
+    document.addEventListener('click', async e => {
+        const b = e.target.closest('[data-tk-done],[data-tk-continue],[data-tk-undo],[data-tk-report],[data-tk-add],[data-topic-add],[data-topic-del]');
+        if (!b) return;
+        const meetingId = parseInt(b.dataset.tkMeeting || b.dataset.tkAdd || b.dataset.topicAdd || '0', 10);
+        try {
+            // Sidan ritas om efter varje knapp — det som just skrivits i anteckningarna sparas först.
+            await flushNotes();
+            if (b.dataset.tkDone) {
+                b.disabled = true;
+                const r = await post('DecideTask', { taskId: b.dataset.tkDone, decision: 'done', meetingId });
+                if (!r.success) { failMsg(r); b.disabled = false; return; }
+                await reloadTasks(); rerender();
+            } else if (b.dataset.tkContinue) {
+                const t = findTask(parseInt(b.dataset.tkContinue, 10)); if (!t) return;
+                formModal({
+                    title: 'Fortsätter: ' + t.title, okLabel: 'Fortsätter', wide: false,
+                    html: `<p>Uppgiften är inte klar och står kvar till nästa möte.</p>
+                        <label class="form-label" for="ctDue">Ny sista dag (valfritt)</label>
+                        <input id="ctDue" class="form-control" value="${esc(t.due || '')}" placeholder="åååå-mm-dd">`,
+                    onOpen: body => datePicker(body.querySelector('#ctDue')),
+                    onOk: async body => {
+                        const nd = body.querySelector('#ctDue').value.trim();
+                        const r = await post('DecideTask', { taskId: t.id, decision: 'continue', meetingId, newDue: nd !== (t.due || '') ? nd : '' });
+                        if (!r.success) return r.message;
+                        await reloadTasks(); rerender(); return true;
+                    }
+                });
+            } else if (b.dataset.tkUndo) {
+                const t = findTask(parseInt(b.dataset.tkUndo, 10)); if (t) await undoDone(t, meetingId);
+            } else if (b.dataset.tkReport) {
+                const t = findTask(parseInt(b.dataset.tkReport, 10)); if (t) openReport(t);
+            } else if (b.dataset.tkAdd) {
+                const title = $('ntTitle' + meetingId).value.trim();
+                if (!title) { $('ntTitle' + meetingId).focus(); return; }
+                b.disabled = true;
+                const r = await post('CreateTask', { title, assignee: $('ntWho' + meetingId).value, due: $('ntDue' + meetingId).value.trim(), meetingId });
+                b.disabled = false;
+                if (!r.success) { failMsg(r); return; }
+                await reloadTasks(); rerender();
+                $('ntTitle' + meetingId)?.focus();
+                if (r.mailed) showMsg('Uppgiften är tillagd och den som fick den har fått ett mejl.', 'success');
+            } else if (b.dataset.topicAdd) {
+                const inp = $('plTopic' + meetingId); const text = inp ? inp.value.trim() : '';
+                if (!text) { inp?.focus(); return; }
+                b.disabled = true;
+                const r = await post('AddTopic', { meetingId, text });
+                b.disabled = false;
+                if (!r.success) { failMsg(r); return; }
+                await reloadMeetings(); rerender(); $('plTopic' + meetingId)?.focus();
+            } else if (b.dataset.topicDel) {
+                const r = await post('RemoveTopic', { topicId: b.dataset.topicDel });
+                if (!r.success) { failMsg(r); return; }
+                await reloadMeetings(); rerender();
+            }
+        } catch (er) { failMsg(er); b.disabled = false; }
+    });
+    // Enter i "Något att prata om" och "Vad ska göras?" lägger till.
+    document.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        const ti = e.target.closest('[data-topic-input]');
+        if (ti) { e.preventDefault(); document.querySelector(`[data-topic-add="${ti.dataset.topicInput}"]`)?.click(); return; }
+        const nt = e.target.closest('[data-nt-title]');
+        if (nt) { e.preventDefault(); document.querySelector(`[data-tk-add="${nt.dataset.ntTitle}"]`)?.click(); }
+    });
+
+    // ================================================================ Roller
+    function openRoles(p) {
+        let roles = (p.roles || []).slice();
+        const sugg = S.roleSuggestions || [];
+        const chips = () => roles.length
+            ? roles.map((r, i) => `<span class="pl-role">${esc(r)} <button type="button" class="btn btn-link btn-sm p-0 text-reset" data-role-del="${i}" aria-label="Ta bort ${esc(r)}">✕</button></span>`).join(' ')
+            : '<span class="pl-help">Inga roller än.</span>';
+        formModal({
+            title: 'Roller: ' + p.name, okLabel: 'Spara', wide: false,
+            html: `<p class="pl-help">En roll säger vad personen ansvarar för — den ger inga rättigheter (det gör nivån). En person kan ha flera.</p>
+                <div id="rlChips" class="d-flex gap-2 flex-wrap mb-3">${chips()}</div>
+                <div class="d-flex gap-2"><input type="text" class="form-control" id="rlNew" list="rlList" maxlength="100" placeholder="Välj eller skriv en roll — t.ex. Kassör" aria-label="Ny roll">
+                    <button type="button" class="btn btn-outline-primary" id="rlAdd">Lägg till</button></div>
+                <datalist id="rlList">${sugg.map(s => `<option value="${esc(s)}"></option>`).join('')}</datalist>
+                <p class="pl-help small mt-2 mb-0">Förslagen kommer från samma lista som bemanningens roller, så "Banansvarig" betyder samma sak i planeringen och på tävlingen.</p>`,
+            onOpen: body => {
+                const add = () => {
+                    const v = body.querySelector('#rlNew').value.trim();
+                    if (v && !roles.some(r => r.toLowerCase() === v.toLowerCase())) roles.push(v);
+                    body.querySelector('#rlNew').value = ''; body.querySelector('#rlChips').innerHTML = chips();
+                    body.querySelector('#rlNew').focus();
+                };
+                body.querySelector('#rlAdd').onclick = add;
+                body.querySelector('#rlNew').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+                body.addEventListener('click', e => {
+                    const d = e.target.closest('[data-role-del]'); if (!d) return;
+                    roles.splice(parseInt(d.dataset.roleDel, 10), 1); body.querySelector('#rlChips').innerHTML = chips();
+                });
+                body.querySelector('#rlNew').focus();
+            },
+            onOk: async body => {
+                const pending = body.querySelector('#rlNew').value.trim();
+                if (pending && !roles.some(r => r.toLowerCase() === pending.toLowerCase())) roles.push(pending);
+                const r = await post('SetRoles', { participantId: p.id, roles: roles.join('\n') });
+                if (!r.success) return r.message;
+                await reloadPeople(); rerender(); return true;
+            }
+        });
     }
 
     // ================================================================ Deltagare
@@ -814,9 +1273,11 @@
         if (pplFilter.startsWith('r:') && !reps.includes(pplFilter.slice(2))) pplFilter = '';
         const rowFor = p => {
             const mgr = S.me.canManage;
-            const menu = p.isMe ? rowMenu([{ label: 'Ändra vad jag företräder…', fn: () => openEditParticipant(p) }]) : rowMenu([
+            const menu = p.isMe ? rowMenu([{ label: 'Ändra vad jag företräder…', fn: () => openEditParticipant(p) },
+                    S.me.canManageRoles && { label: 'Roller…', fn: () => openRoles(p) }]) : rowMenu([
                 S.me.isParticipant && { label: 'Kontaktuppgifter…', fn: () => openContact(p) },
                 mgr && S.me.isParticipant && { divider: true },
+                S.me.canManageRoles && { label: 'Roller…', fn: () => openRoles(p) },
                 mgr && { label: 'Ändra nivå och vad hen företräder…', fn: () => openEditParticipant(p) },
                 mgr && { label: 'Byt ut mot någon annan…', fn: () => openReplace(p) },
                 mgr && p.isGuest && { label: 'Skicka inbjudan igen', fn: () => resend(p) },
@@ -826,26 +1287,31 @@
             const guest = p.isGuest ? ` <span class="badge rounded-pill text-bg-light border" title="Har inget konto — deltar via länkarna i mejlen">Gäst</span>` : '';
             const seen = p.lastSeen ? esc(fmtShort(p.lastSeen)) : (p.inviteSent ? 'Inbjuden ' + esc(fmtShort(p.inviteSent)) + ', har inte öppnat än' : 'Har inte öppnat än');
             const rep = p.represents ? esc(p.represents) : '<span class="pl-help">—</span>';
+            const roleChips = (p.roles || []).map(r => `<span class="pl-role">${esc(r)}</span>`).join(' ');
+            const tasks = p.openTasks ? `<a href="#vy=uppgifter" data-pl-go="uppgifter" class="small">${p.openTasks === 1 ? '1 öppen uppgift' : p.openTasks + ' öppna uppgifter'}</a>` : '';
             return `<tr><td><b>${esc(p.name)}</b>${p.isMe ? ' (du)' : ''}${guest}
                     ${p.guestEmail ? `<div class="pl-help small">${esc(p.guestEmail)}</div>` : ''}
                     <div class="d-sm-none mt-1">${levelBadge(p)}</div>
-                    <div class="d-md-none small mt-1">${p.represents ? 'Företräder ' + esc(p.represents) + ' · ' : ''}${p.lastSeen ? 'Senast inne ' : ''}${seen}</div></td>
+                    ${roleChips ? `<div class="d-lg-none mt-1 d-flex gap-1 flex-wrap">${roleChips}</div>` : ''}
+                    <div class="d-md-none small mt-1">${p.represents ? 'Företräder ' + esc(p.represents) + ' · ' : ''}${p.lastSeen ? 'Senast inne ' : ''}${seen}</div>
+                    ${tasks ? `<div class="mt-1">${tasks}</div>` : ''}</td>
                 <td class="d-none d-md-table-cell">${rep}</td>
                 <td class="d-none d-sm-table-cell">${levelBadge(p)}</td>
+                <td class="d-none d-lg-table-cell">${roleChips ? `<div class="d-flex gap-1 flex-wrap">${roleChips}</div>` : '<span class="pl-help">—</span>'}</td>
                 <td class="d-none d-md-table-cell small">${seen}</td>
                 <td class="text-end">${menu}</td></tr>`;
         };
         const shown = () => {
             const q = pplQuery.trim().toLowerCase();
             return S.participants.filter(p =>
-                (!q || [p.name, p.represents, p.guestEmail].some(v => (v || '').toLowerCase().includes(q)))
+                (!q || [p.name, p.represents, p.guestEmail, (p.roles || []).join(' ')].some(v => (v || '').toLowerCase().includes(q)))
                 && (!pplFilter || (pplFilter === 'guest' ? p.isGuest : pplFilter.startsWith('r:') ? (p.represents || '') === pplFilter.slice(2) : p.access === pplFilter)))
                 .sort((a, b) => (LEVEL_RANK[b.access] || 0) - (LEVEL_RANK[a.access] || 0) || a.name.localeCompare(b.name, 'sv'));
         };
         const renderRows = () => {
             const rows = shown();
             $('plPplRows').innerHTML = rows.length ? rows.map(rowFor).join('')
-                : '<tr><td colspan="5" class="pl-help">Ingen deltagare matchar.</td></tr>';
+                : '<tr><td colspan="6" class="pl-help">Ingen deltagare matchar.</td></tr>';
             $('plPplCount').textContent = rows.length === S.participants.length
                 ? `${rows.length} deltagare`
                 : `${rows.length} av ${S.participants.length}`;
@@ -861,17 +1327,18 @@
                 ${reps.length > 1 ? `<optgroup label="Företräder">${reps.map(r => opt('r:' + r, `${r || 'Inget särskilt'} (${count(p => (p.represents || '') === r)})`)).join('')}</optgroup>` : ''}
             </select>`;
         const list = `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-                <input type="search" class="form-control form-control-sm" id="plPplQ" placeholder="Sök på namn eller vad man företräder" style="max-width:20rem" value="${esc(pplQuery)}">
+                <input type="search" class="form-control form-control-sm" id="plPplQ" placeholder="Sök på namn, roll eller vad man företräder" style="max-width:20rem" value="${esc(pplQuery)}">
                 ${filter}<span class="ms-auto pl-help small" id="plPplCount"></span></div>
             <div class="table-responsive"><table class="table align-middle mb-0 pl-ppl"><thead><tr>
-                <th>Namn</th><th class="d-none d-md-table-cell">Företräder</th><th class="d-none d-sm-table-cell">Nivå</th><th class="d-none d-md-table-cell">Senast inne</th><th></th>
+                <th>Namn</th><th class="d-none d-md-table-cell">Företräder</th><th class="d-none d-sm-table-cell">Nivå</th><th class="d-none d-lg-table-cell">Roller</th><th class="d-none d-md-table-cell">Senast inne</th><th></th>
             </tr></thead><tbody id="plPplRows"></tbody></table></div>`;
         const warn = S.me.canManage && conveners.length === 1 && S.participants.length > 1
             ? `<div class="alert alert-warning d-flex gap-2 align-items-start"><i class="bi bi-exclamation-triangle mt-1"></i>
                 <div>Det finns bara en <b>sammankallande</b>${conveners[0].isMe ? ' — du' : ''}. Utse gärna en till, så att gruppen inte står utan om hen blir sjuk eller slutar:
                 välj <i>Ändra nivå</i> på personen.</div></div>` : '';
         $('plBody').innerHTML = `<div id="plReqs"></div>${warn}<div class="pl-card"><p class="pl-help">Du bjuder in <b>medlemmar</b> genom att söka på namnet — ingen behöver känna till någon annans e-postadress.
-            Den som inte är skytt (t.ex. någon från kommunen eller markägaren) bjuds in med e-post och deltar via länkarna i mejlen.</p>${list}</div>
+            Den som inte är skytt (t.ex. någon från kommunen eller markägaren) bjuds in med e-post och deltar via länkarna i mejlen.
+            <b>Nivån</b> styr vad man får göra på sidan; <b>rollerna</b> säger vad man ansvarar för och ger inga rättigheter.</p>${list}</div>
             <div class="pl-card"><h2>Nivåerna</h2><ul class="mb-0">${(S.accessLevels || []).slice().reverse().map(l =>
                 `<li class="mb-1">${levelBadge({ access: l.value, accessLabel: l.label })} — ${esc(l.help)}</li>`).join('')}</ul></div>`;
         renderRows();
@@ -1250,11 +1717,13 @@
             if (v.version !== version) {
                 version = v.version;
                 const typing = view === 'meddelanden' && $('plText') && document.activeElement === $('plText');
-                await Promise.all([reloadPeople(), reloadMeetings(), S.me.canReadMessages ? reloadMessages() : Promise.resolve()]);
+                await Promise.all([reloadPeople(), reloadMeetings(), reloadTasks(), S.me.canReadMessages ? reloadMessages() : Promise.resolve()]);
                 version = S.version;
+                // Ett fält någon skriver i ritas aldrig om (anteckningar, punkter, nya uppgifter, sök).
+                const editing = document.activeElement && $('plBody').contains(document.activeElement)
+                    && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
                 if (view === 'meddelanden' && $('plThread')) refreshThreadOnly();          // skrivrutan rörs inte
-                else if (view === 'moten' && !document.querySelector('[data-pl-notes]:focus')) viewMeetings();
-                else if (!typing && view !== 'installningar' && !document.querySelector('.modal.show')) render(view);
+                else if (!typing && !editing && view !== 'installningar' && !document.querySelector('.modal.show')) render(view);
                 else renderRail();
             }
         } catch (e) { /* tyst: nästa varv försöker igen */ }

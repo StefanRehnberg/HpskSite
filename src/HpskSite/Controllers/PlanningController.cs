@@ -36,7 +36,7 @@ namespace HpskSite.Controllers
     ///
     /// <para><b>⚠️ Notiserna skickas EFTER skrivningen</b>, när dess scope är stängt.</para>
     /// </summary>
-    public class PlanningController : SurfaceController
+    public partial class PlanningController : SurfaceController
     {
         private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
         private static readonly CultureInfo Sv = CultureInfo.GetCultureInfo("sv-SE");
@@ -288,6 +288,8 @@ namespace HpskSite.Controllers
             if (c.IsParticipant) _planning.TouchSeen(c.ParticipantId);
             var people = _planning.Participants(id);
             var meCanManage = PlanningAccess.CanManageParticipants(c);
+            var roles = _planning.Roles(id).ToLookup(r => r.ParticipantId);
+            var tasks = _planning.Tasks(id);
             return Json(new
             {
                 success = true,
@@ -310,6 +312,9 @@ namespace HpskSite.Controllers
                     pendingRequests = PlanningAccess.CanManagePlanning(c) ? _planning.PendingCounts(new[] { id }).GetValueOrDefault(id) : 0,
                     icsUrl = PlanningAccess.CanUseMeetings(c) ? _links.IcsUrl(c.ParticipantId, id, Request.PublicBase()) : null,
                     pushConfigured = _pushInfo.IsConfigured,
+                    canManageRoles = PlanningAccess.CanManageRoles(c),
+                    canCreateTasks = PlanningAccess.CanCreateTasks(c),
+                    openTasks = c.IsParticipant ? tasks.Count(tk => tk.AssigneeParticipantId == c.ParticipantId && PlanningTaskStatus.IsOpen(tk.Status)) : 0,
                 },
                 participants = people.Select(p => new
                 {
@@ -322,7 +327,11 @@ namespace HpskSite.Controllers
                     isMe = p.Id == c.ParticipantId,
                     // Klubbarna personen kan företräda: bara för den som får ändra raden.
                     clubChoices = (meCanManage || p.Id == c.ParticipantId) && p.MemberId > 0 ? ClubChoices(p.MemberId.Value) : null,
+                    roles = roles[p.Id].Select(r => r.Name),
+                    openTasks = tasks.Count(tk => tk.AssigneeParticipantId == p.Id && PlanningTaskStatus.IsOpen(tk.Status)),
                 }),
+                // Förslagen när en roll ges: bemanningens katalog + planeringens vanliga ansvar. Egen text går alltid.
+                roleSuggestions = PlanningTaskRules.RoleSuggestions().Select(r => r.Name),
                 // Nivåerna med förklaringar — texten finns bara i PlanningAccessLevel.Help.
                 accessLevels = PlanningAccessLevel.All.Select(a => new
                 {
@@ -893,12 +902,15 @@ namespace HpskSite.Controllers
             var names = _planning.Participants(id, includeRemoved: true).ToDictionary(p => p.Id, p => p.DisplayName);
             var me = x.Caller.ParticipantId;
             var showNotes = x.Caller.IsParticipant;
+            var topics = _planning.Topics(id, ids).ToLookup(tp => tp.PlanningMeetingId);
+            var now = DateTime.Now;
             return Json(new
             {
                 success = true,
                 canUse = PlanningAccess.CanUseMeetings(x.Caller),
                 meetings = meetings.Select(m =>
                 {
+                    var current = PlanningTaskRules.MeetingIsCurrent(m, now);
                     var opts = options[m.Id].OrderBy(o => o.StartsAt).ToList();
                     var vs = votes[m.Id].ToList();
                     var voters = vs.Select(v => v.ParticipantId).ToHashSet();
@@ -920,6 +932,14 @@ namespace HpskSite.Controllers
                         notAnswered = m.Status == PlanningMeetingStatus.Proposed
                             ? people.Where(p => PlanningAccess.IsCalledToMeetings(p) && !voters.Contains(p.Id)).Select(p => new { id = p.Id, name = p.DisplayName }) : null,
                         answeredCount = voters.Count,
+                        // Avstämningen (Stefan 2026-10-23): "Att prata om" och om mötet beslutar om uppgifterna nu.
+                        isCurrent = current,
+                        canDecideTasks = PlanningAccess.CanDecideTask(x.Caller, current),
+                        topics = topics[m.Id].Select(tp => new
+                        {
+                            id = tp.Id, text = tp.Text, by = names.GetValueOrDefault(tp.AddedBy, "Någon"), at = DT(tp.AddedAt),
+                            canRemove = PlanningAccess.CanRemoveTopic(x.Caller, tp),
+                        }),
                     };
                 }),
             });
