@@ -1143,7 +1143,13 @@ namespace HpskSite.Controllers
                 var data = me?.Email == null ? null : _memberService.GetByEmail(me.Email);
                 var (linked, err) = apps.LinkCompetition(appId, competitionId, data?.Id ?? 0, data?.Name ?? "");
                 cal?.Invalidate();
-                return linked == null ? err : null;
+                if (linked == null) return err;
+                // P3 steg F (beslut 9.7): en ansökan ur en planering kopplar den nya tävlingen till planeringen.
+                if (a.PlanningId > 0
+                    && HttpContext.RequestServices.GetService(typeof(HpskSite.Services.Planning.PlanningApplicationLink)) is HpskSite.Services.Planning.PlanningApplicationLink pl
+                    && pl.LinkCompetition(a.PlanningId.Value, competitionId, data?.Id ?? 0) is { } planErr)
+                    return "Tävlingen är skapad och kopplad till ansökan, men inte till planeringen: " + planErr;
+                return null;
             }
             catch (Exception ex) when (ex is not HpskSite.Services.Competitions.CompetitionWriteFrozenException)
             {

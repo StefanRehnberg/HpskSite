@@ -335,6 +335,7 @@
             // Hela planen på papper: bemanning, förberedelser och (när planeringen är kopplad) dagsprogrammet.
             S.me.canEdit && !TOKEN && { label: 'Skriv ut hela planen', icon: 'bi-printer',
                 fn: () => window.open('/tavlingsplanering/blad?p=' + S.planning.id + '&vy=allt', '_blank', 'noopener') },
+            S.planning.application && S.planning.application.id === 0 && { label: 'Sök om tävlingen hos kretsen…', icon: 'bi-send', fn: openApplication },
         ] : []);
         const p = S;
         const html = [];
@@ -391,6 +392,17 @@
                     <li>Skriv det första meddelandet under <a href="#vy=meddelanden" data-pl-go="meddelanden">Meddelanden</a>. Alla får ett mejl på kvällen med det som är nytt.</li>
                 </ol></div>`);
         }
+        // Ansökan till kretsen (P3 steg F): ett utkast i klubbens ansökningar, eller läget för den som finns.
+        const app = p.planning.application;
+        if (app && app.id > 0) html.push(`<div class="pl-card" id="plAppCard"><div class="pl-cardh"><h2>Ansökan till kretsen</h2>
+                ${app.url ? `<a href="${esc(app.url)}">Klubbens tävlingsansökningar</a>` : ''}</div>
+            <div><b>${esc(app.name)}</b> <span class="pl-state ${app.status === 'Beviljad' ? 'ok' : app.status === 'Avslagen' ? 'off' : 'wait'}">${esc(app.statusLabel)}</span></div>
+            <div class="pl-help small">${esc([app.club, app.date ? fmtDay(app.date) : ''].filter(Boolean).join(' · '))}</div>
+            <p class="pl-help small mb-0 mt-1">${app.status === 'Utkast' ? 'Utkastet skickas in till kretsen under klubbens tävlingar.'
+                : 'När tävlingen skapas ur ansökan kopplas den till den här planeringen.'}</p></div>`);
+        else if (app && app.id === 0) html.push(`<div class="pl-card" id="plAppCard"><h2>Ska tävlingen sökas hos kretsen?</h2>
+            <p class="mb-2">En kretstävling, landsdelstävling eller nationell tävling söks hos kretsen. Gör ett utkast härifrån — namn, gren och datum fylls i från planeringen — och skicka in det under klubbens tävlingar.</p>
+            <button class="btn btn-outline-primary" data-pl-apply="1"><i class="bi bi-send me-1"></i>Sök om tävlingen…</button></div>`);
         // Milstolparna: de viktiga datumen, först de som är kvar.
         const ms = ((TASKS && TASKS.tasks) || []).filter(t => t.isMilestone)
             .sort((a, b) => ((a.status === 'Done') - (b.status === 'Done')) || String(a.due || '9999').localeCompare(String(b.due || '9999')));
@@ -419,6 +431,53 @@
         e.preventDefault(); goMeeting(parseInt(b.dataset.plMeet, 10));
     });
     document.addEventListener('click', e => { if (e.target.closest('[data-pl-invite]')) { e.preventDefault(); openInvite(); } });
+    document.addEventListener('click', e => { if (e.target.closest('[data-pl-apply]')) { e.preventDefault(); openApplication(); } });
+
+    // Ansökan ur planeringen (P3 steg F, beslut 9.7): ett UTKAST i klubbens vanliga tävlingsansökningar.
+    function openApplication() {
+        const p = S.planning, a = p.application;
+        if (!a || a.id !== 0) return;
+        const discs = p.disciplines || [];
+        formModal({
+            title: 'Sök om tävlingen hos kretsen', okLabel: 'Gör ett utkast', wide: false,
+            html: `<p class="pl-help small">Utkastet hamnar under klubbens tävlingar, där du kontrollerar det och skickar in det till kretsen.
+                    När tävlingen sedan skapas ur ansökan kopplas den till den här planeringen.</p>
+                ${a.clubs.length > 1 ? `<label class="form-label" for="apClub">Klubben som söker</label>
+                    <select id="apClub" class="form-select mb-3">${a.clubs.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>`
+                    : `<p class="mb-3">Klubben som söker: <b>${esc(a.clubs[0].name)}</b></p>`}
+                <label class="form-label" for="apName">Tävlingens namn</label>
+                <input id="apName" class="form-control mb-3" maxlength="200" value="${esc(p.name)}">
+                <div class="row g-2 mb-3"><div class="col-sm-6"><label class="form-label" for="apLevel">Nivå</label>
+                    <select id="apLevel" class="form-select">${a.levels.map(l => `<option value="${esc(l.value)}">${esc(l.label)}</option>`).join('')}</select></div>
+                    <div class="col-sm-6"><label class="form-label" for="apDisc">Gren</label>
+                    <select id="apDisc" class="form-select">${discs.map(d => `<option value="${esc(d.id)}"${d.id === p.disciplineKey ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select></div></div>
+                <div class="row g-2 mb-3"><div class="col-sm-6"><label class="form-label" for="apDate">Tävlingsdag</label><input id="apDate" class="form-control" value="${esc(p.targetStart || '')}" placeholder="ÅÅÅÅ-MM-DD"></div>
+                    <div class="col-sm-6"><label class="form-label" for="apEnd">Sista dagen (om flera)</label><input id="apEnd" class="form-control" value="${esc(p.targetEnd && p.targetEnd !== p.targetStart ? p.targetEnd : '')}" placeholder="ÅÅÅÅ-MM-DD"></div></div>
+                <label class="form-label" for="apPlace">Plats (valfritt)</label>
+                <input id="apPlace" class="form-control" maxlength="200" value="${esc(p.targetText || '')}">`,
+            onOpen: body => { datePicker(body.querySelector('#apDate')); datePicker(body.querySelector('#apEnd')); },
+            onOk: async body => {
+                const clubId = body.querySelector('#apClub') ? parseInt(body.querySelector('#apClub').value, 10) : a.clubs[0].id;
+                const req = {
+                    clubId, planningId: p.id, level: body.querySelector('#apLevel').value, discipline: body.querySelector('#apDisc').value,
+                    name: body.querySelector('#apName').value.trim(), competitionDate: body.querySelector('#apDate').value.trim(),
+                    endDate: body.querySelector('#apEnd').value.trim() || null, place: body.querySelector('#apPlace').value.trim() || null, submit: '0',
+                };
+                if (!req.name) return 'Skriv tävlingens namn.';
+                if (!req.competitionDate) return 'Välj tävlingsdagen.';
+                const r = await req2('/umbraco/surface/CompetitionApplication/SaveApplication', req);
+                if (!r.success) return r.message || 'Utkastet kunde inte sparas.';
+                await reloadPeople(); render(view);
+                const u = S.planning.application && S.planning.application.url;
+                showMsg('Utkastet till ansökan är sparat. ' + (u ? `<a href="${esc(u)}">Gå till klubbens tävlingar</a> och skicka in det till kretsen.` : 'Skicka in det under klubbens tävlingar.'), 'success');
+                return true;
+            }
+        });
+    }
+    // JSON-anrop till en annan kontroller (ansökan): samma felhantering som req().
+    function req2(url, body) {
+        return req(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token() }, body: JSON.stringify(body) });
+    }
     document.addEventListener('click', e => { if (e.target.closest('[data-pl-newmeet]')) { e.preventDefault(); openNewMeeting(); } });
 
     // ================================================================ Meddelanden

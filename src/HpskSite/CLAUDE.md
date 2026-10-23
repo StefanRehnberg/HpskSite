@@ -12610,6 +12610,17 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   personpanelen (rullgardinen "Ställer upp för") och Mer → **Per förening…** (stänger en öppen sidopanel först).
   Underlag när ett överskott delas — själva fördelningen (fråga 15) är inte byggd. Svit p3 129/129 (A/B: valprövningen
   + skrivningen på alla rader → 3 röda).
+- **P3 steg F, ansökan ur planeringen (beslut 9.7, 2026-10-23):** planeringen gör ett UTKAST i klubbens vanliga
+  tävlingsansökningar (`CompetitionApplication.PlanningId`, migrering `add-planningid-to-competition-application.sql`,
+  körordning P3e) — ingen andra blankett; själva ansökan skickas in under klubbens tävlingar, med kretsens regler.
+  `SaveApplication` med `planningId` (bara vid en NY ansökan): den som skickar måste kunna ändra planeringen, planeringen
+  får inte vara kopplad, och bara en ansökan i taget (`PlanningApplicationLink.ForPlanning` = senaste icke-återkallade).
+  Klubbarna som erbjuds = de som någon i planeringen företräder OCH som den som frågar administrerar (`ApplicationJsonAsync`,
+  inte alla klubbar en sajtadmin når). ⚠️ **Kopplingen görs på servern** i `CompetitionAdminController.LinkApplicationIfAny`:
+  när tävlingen skapas ur ansökan kopplas den också till planeringen (`PlanningApplicationLink.LinkCompetition` =
+  `LinkToCompetition` + speglarna + tävlingsdagarna); går det inte svarar skapandet med en `applicationNote`. Ytor: kortet
+  på Översikt (`#plAppCard`: frågan, eller ansökans läge + länk till `klubbens url#clubAdmin/competitions`) och Åtgärder →
+  *Sök om tävlingen hos kretsen…*. Svit p3 144/144 (A/B: planeringsspärren + kopplingen → 4 röda).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

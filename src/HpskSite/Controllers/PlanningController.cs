@@ -362,6 +362,8 @@ namespace HpskSite.Controllers
                     staffingUrl = $"/tavlingsplanering/{x.Planning.Id}/bemanning",
                     // Dagsprogrammet hör till tävlingen — en del i planeringen när den är kopplad.
                     agendaUrl = _planning.LinkFor(x.Planning.Id) != null ? $"/tavlingsplanering/{x.Planning.Id}/dagsprogram" : "",
+                    // P3 steg F: ansökan till kretsen ur planeringen (ett utkast i klubbens ansökningar).
+                    application = await ApplicationJsonAsync(x.Planning.Id, c),
                 },
                 me = new
                 {

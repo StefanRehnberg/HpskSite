@@ -184,6 +184,8 @@ namespace HpskSite.Controllers
             public string? Note { get; set; }
             /// <summary>"1" = skicka in direkt. Sträng, eftersom "1" inte binder till bool.</summary>
             public string? Submit { get; set; }
+            /// <summary>P3 steg F: planeringen ansökan startas ur. Bara vid en ny ansökan; den som skickar måste kunna ändra planeringen.</summary>
+            public int? PlanningId { get; set; }
         }
 
         [HttpPost]
@@ -240,6 +242,21 @@ namespace HpskSite.Controllers
             }
             else
             {
+                if (req.PlanningId > 0)
+                {
+                    // Ansökan ur planeringen (beslut 9.7): bara den som kan ändra planeringen, bara en planering som inte
+                    // redan är kopplad, och bara en ansökan i taget per planering.
+                    var plans = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Planning.PlanningService>();
+                    var link = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Planning.PlanningApplicationLink>();
+                    var pid = req.PlanningId.Value;
+                    var participant = plans.ParticipantForMember(pid, me.Id);
+                    if (plans.Get(pid) == null || !HpskSite.Services.Planning.PlanningAccess.CanEditPlanning(new HpskSite.Services.Planning.PlanningCaller(participant is { IsActive: true } ? participant : null, false)))
+                        return Json(new { success = false, message = "Ansökan kan bara startas ur en planering du kan ändra." });
+                    if (plans.LinkFor(pid) != null) return Json(new { success = false, message = "Planeringen är redan kopplad till en tävling." });
+                    if (link.ForPlanning(pid) is { } prev)
+                        return Json(new { success = false, message = $"Planeringen har redan en ansökan ({CompetitionApplicationStatus.Label(prev.Status).ToLowerInvariant()}). Ändra den under klubbens tävlingar." });
+                    draft.PlanningId = pid;
+                }
                 (saved, err) = _apps.Create(draft, req.Submit == "1", me.Id, DisplayName(me));
                 justSubmitted = saved?.Status == CompetitionApplicationStatus.Inskickad;
             }

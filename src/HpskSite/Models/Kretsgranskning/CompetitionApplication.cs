@@ -52,6 +52,9 @@ namespace HpskSite.Models.Kretsgranskning
         public DateTime? ForbundetDecisionDate { get; set; }
         public DateTime? SentToForbundetAt { get; set; }
         public int? CompetitionId { get; set; }
+        /// <summary>P3 steg F (beslut 9.7): planeringen ansökan startades ur. När tävlingen skapas ur ansökan kopplas
+        /// den till planeringen (om ingen av dem redan är kopplad).</summary>
+        public int? PlanningId { get; set; }
         public string? Channel { get; set; }
         public string? LinkSentTo { get; set; }
         public string? DeciderName { get; set; }

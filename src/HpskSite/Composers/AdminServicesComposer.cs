@@ -136,6 +136,7 @@ namespace HpskSite.Composers
 
             // Tävlingsplaneringen, P1 (2026-10-21): planeringen, deltagarna, meddelandena och mötena.
             builder.Services.AddScoped<HpskSite.Services.Planning.PlanningService>();
+            builder.Services.AddScoped<HpskSite.Services.Planning.PlanningApplicationLink>();
             builder.Services.AddSingleton<HpskSite.Services.Planning.PlanningLinkService>();
             builder.Services.AddScoped<HpskSite.Services.Planning.PlanningNotifier>();
             builder.Services.AddHostedService<HpskSite.Services.Planning.PlanningNotificationHostedService>();
