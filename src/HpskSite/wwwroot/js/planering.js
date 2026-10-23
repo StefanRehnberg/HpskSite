@@ -216,7 +216,9 @@
     window.addEventListener('popstate', () => render(hashView() || 'oversikt'));
     document.addEventListener('click', e => {
         const a = e.target.closest('[data-pl-go]'); if (!a) return;
-        e.preventDefault(); go(a.dataset.plGo);
+        e.preventDefault();
+        if (a.dataset.plFilter) tkFilter = a.dataset.plFilter;
+        go(a.dataset.plGo);
     });
 
     function unreadCount() {
@@ -282,6 +284,8 @@
         if (p.targetText) parts.push(esc(p.targetText));
         else if (p.targetStart) parts.push(esc(p.targetStart) + (p.targetEnd && p.targetEnd !== p.targetStart ? '–' + esc(p.targetEnd) : ''));
         if (p.status === 'Archived') parts.push('<span class="pl-state off">Arkiverad</span>');
+        if (p.competition) parts.push(`Tävlingen <a href="${esc(p.competition.url)}">${esc(p.competition.name)}</a>`
+            + (TOKEN ? '' : ` · <a href="${esc(p.competition.planningUrl)}">Bemanning och dagsprogram</a>`));
         return parts.join(' · ');
     }
 
@@ -320,6 +324,12 @@
         const myTasks = myOpenTasks();
         if (myTasks) steps.push(`<div class="pl-next"><div class="t"><b>${myTasks === 1 ? 'Du har en uppgift' : `Du har ${myTasks} uppgifter`}</b> — berätta hur det går.</div>
             <a class="btn btn-primary" href="#vy=uppgifter" data-pl-go="uppgifter">Dina uppgifter</a></div>`);
+        const late = TASKS ? TASKS.tasks.filter(t => t.overdue).length : 0;
+        if (late && p.me.canEdit) steps.push(`<div class="pl-next warn"><div class="t"><b>${late === 1 ? 'En uppgift är försenad' : `${late} uppgifter är försenade`}</b></div>
+            <a class="btn btn-outline-primary" href="#vy=uppgifter" data-pl-go="uppgifter" data-pl-filter="overdue">Visa</a></div>`);
+        if (TASKS && !TASKS.tasks.length && p.planning.competition && p.me.canEdit)
+            steps.push(`<div class="pl-next"><div class="t"><b>Lägg in förberedelserna</b> — börja med en mall för tävlingens storlek.</div>
+                <a class="btn btn-primary" href="#vy=uppgifter" data-pl-go="uppgifter">Uppgifter</a></div>`);
         const upcoming = (MEET ? MEET.meetings : []).filter(m => m.status === 'Scheduled' && parseDT(m.endsAt || m.startsAt) >= new Date())
             .sort((a, b) => parseDT(a.startsAt) - parseDT(b.startsAt));
         if (upcoming.length) {
@@ -926,114 +936,302 @@
     // ================================================================ Uppgifter
     // Lägena: Ej påbörjad → Pågår → Behöver hjälp → Klar att pröva → Utförd. Den som har uppgiften sätter de
     // fyra första; Utförd bestäms på ett möte, eller av den sammankallande (servern prövar båda).
+    // P2 (2026-10-23): tävlingens förberedelser bor här — områden, mallar, kretsens checklista, stationer,
+    // dokument och kommentarer. I tävlingens egen planering ("Utförd beslutas på mötena" av) bockar den
+    // ansvarige och Kan ändra av direkt.
     const TK_CLASS = { NotStarted: 'ns', InProgress: 'ip', NeedsHelp: 'nh', ReadyForReview: 'rr', Done: 'dn' };
     function tkChip(t) { return `<span class="pl-tk pl-tk-${TK_CLASS[t.status] || 'ns'}">${esc(t.statusLabel)}</span>`; }
     async function reloadTasks() { const r = await get('Tasks'); if (r.success) TASKS = r; }
     function findTask(id) { return TASKS.tasks.find(t => t.id === id); }
+    function areaById(id) { return (TASKS.areas || []).find(a => a.id === id); }
+    function competition() { return S && S.planning ? S.planning.competition : null; }
+    function canDaysBefore() { return !!(competition() || S.planning.targetStart); }
+    function daysWord() { return TASKS.anchorIsCompetition ? 'före tävlingen' : 'före planeringens första dag'; }
+    function dueText(t) {
+        if (t.dueDaysBefore != null) return (t.due ? fmtDay(t.due) + ' ' : '') + `<span class="pl-help small">(${t.dueDaysBefore} d ${esc(daysWord())})</span>`;
+        return t.due ? esc(fmtDay(t.due)) : '';
+    }
+    function kr(v) { return v == null ? '' : Number(v).toLocaleString('sv-SE') + ' kr'; }
+    function docsOf(kind, id) { return (TASKS.documents || []).filter(d => kind === 'task' ? d.taskId === id : kind === 'area' ? d.areaId === id && !d.taskId : !d.taskId && !d.areaId); }
+    function postForm(action, fd) {
+        fd.append('id', ID);
+        if (TOKEN) fd.append('t', TOKEN);
+        return req('/umbraco/surface/Planning/' + action, { method: 'POST', headers: { 'RequestVerificationToken': token() }, body: fd });
+    }
 
     function viewTasks() {
         setHead('Uppgifter', esc(S.planning.name));
-        setActions([TASKS.canCreate && { label: 'Ny uppgift…', icon: 'bi-plus-lg', fn: () => openTaskEdit(null) }]);
-        const all = TASKS.tasks;
+        const c = competition(), all = TASKS.tasks;
+        const overdue = all.filter(t => t.overdue).length;
+        const fill = TASKS.canManageAreas || (TASKS.canCreate && !TOKEN);
+        setActions([
+            TASKS.canCreate && { label: 'Ny uppgift…', icon: 'bi-plus-lg', fn: () => openTaskEdit(null) },
+            TASKS.canManageAreas && { label: 'Nytt område…', icon: 'bi-folder-plus', fn: () => openArea(null) },
+            fill && { header: 'Fyll i' },
+            TASKS.canManageAreas && { label: 'Fyll i från en mall…', icon: 'bi-magic', fn: openTemplate },
+            TASKS.canManageAreas && c && { label: 'Kretsens checklista…', icon: 'bi-list-check', fn: openKretsChecklist },
+            TASKS.canManageAreas && c && c.isFalt && c.stationCount > 0 && { label: `En uppgift per station (${c.stationCount})`, icon: 'bi-signpost-split', fn: seedStations },
+            TASKS.canCreate && !TOKEN && { label: 'Klistra in från ett kalkylark…', icon: 'bi-clipboard', fn: () => openPaste(null) },
+            { header: 'Dela och följ upp' },
+            TASKS.canAddDocument && { label: 'Lägg till dokument eller länk…', icon: 'bi-paperclip', fn: () => openDocAdd({}) },
+            TASKS.canManageAreas && overdue > 0 && { label: `Påminn dem med försenade uppgifter (${overdue})`, icon: 'bi-bell', fn: remindOverdue },
+            !TOKEN && c && { label: c.isFalt ? 'Materiellista för stationerna' : 'Materielberäkning…', icon: 'bi-box-seam',
+                fn: () => c.isFalt ? window.open('/faltskytte/materiel/' + c.id, '_blank', 'noopener') : openMateriel(c) },
+            !TOKEN && { label: 'Hämta som kalkylark (CSV)', icon: 'bi-filetype-csv', fn: () => { location.href = '/umbraco/surface/Planning/ExportTasks?id=' + ID; } },
+            { label: 'Skriv ut', icon: 'bi-printer', fn: () => window.print() },
+        ]);
         const n = {
             open: all.filter(t => t.status !== 'Done').length,
             mine: all.filter(t => t.mine && t.status !== 'Done').length,
             help: all.filter(t => t.status === 'NeedsHelp').length,
             ready: all.filter(t => t.status === 'ReadyForReview').length,
+            overdue,
             done: all.filter(t => t.status === 'Done').length,
         };
         if (!tkFilter) tkFilter = TOKEN && n.mine ? 'mine' : 'open';
-        const order = { ReadyForReview: 0, NeedsHelp: 1, InProgress: 2, NotStarted: 3 };
-        const html = [`<p class="pl-help">Vem gör vad. De flesta uppgifter kommer från mötena, men du kan lägga till en här också.
-            Den som har uppgiften ändrar själv hur långt hen kommit; om den är utförd bestämmer ni på ett möte, eller den sammankallande.</p>`];
+        const html = [];
+        if (c) html.push(`<div class="pl-card pl-comp d-flex flex-wrap gap-2 align-items-center">
+            <i class="bi bi-trophy text-secondary"></i><div class="flex-grow-1">Tävlingen <a href="${esc(c.url)}">${esc(c.name)}</a>${c.date ? ' · ' + esc(fmtDay(c.date)) : ''}</div>
+            ${TOKEN ? '' : `<a class="btn btn-sm btn-outline-secondary" href="${esc(c.planningUrl)}">Bemanning och dagsprogram</a>`}</div>`);
+        html.push(`<p class="pl-help">Vem gör vad, och till när. ${TASKS.doneAtMeetingsOnly
+            ? 'Den som har uppgiften ändrar själv hur långt hen kommit; om den är utförd bestämmer ni på ett möte, eller den sammankallande.'
+            : 'Den som har uppgiften ändrar själv hur långt hen kommit och bockar av den när den är klar.'}</p>`);
         if (!all.length) {
-            html.push(`<div class="pl-card"><p class="mb-2">Inga uppgifter ännu.</p>
-                <p class="pl-help mb-0">Uppgifter fördelas oftast på ett möte: under <i>Anteckningar och vem gör vad</i> skriver ni vad som ska göras och vem som gör det.
-                ${TASKS.canCreate ? 'Du kan också lägga till en här, under Åtgärder.' : ''}</p></div>`);
+            html.push(`<div class="pl-card"><p class="mb-2"><b>Inga uppgifter ännu.</b></p>
+                ${TASKS.canManageAreas ? `<p class="mb-3">Börja med en färdig lista för tävlingens storlek — den går att ändra efteråt.</p>
+                    <button class="btn btn-primary" data-tk-template="1"><i class="bi bi-magic me-1"></i>Fyll i från en mall…</button>` : ''}
+                <p class="pl-help mb-0 mt-3">Uppgifter fördelas också på mötena: under <i>Anteckningar och vem gör vad</i> skriver ni vad som ska göras och vem som gör det.</p></div>`);
         } else {
             const opt = (v, label) => `<option value="${v}"${v === tkFilter ? ' selected' : ''}>${esc(label)}</option>`;
-            html.push(`<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+            html.push(`<div class="d-flex flex-wrap gap-2 align-items-center mb-2 pl-noprint">
                 <input type="search" class="form-control form-control-sm" id="tkQ" placeholder="Sök på uppgift eller namn" style="max-width:20rem" value="${esc(tkQuery)}">
                 <select class="form-select form-select-sm" id="tkFilter" aria-label="Visa" style="max-width:16rem">
-                    ${opt('open', `Öppna (${n.open})`)}${opt('mine', `Mina (${n.mine})`)}${opt('help', `Behöver hjälp (${n.help})`)}
-                    ${opt('ready', `Klar att pröva (${n.ready})`)}${opt('done', `Utförda (${n.done})`)}${opt('all', `Alla (${all.length})`)}
+                    ${opt('open', `Öppna (${n.open})`)}${opt('mine', `Mina (${n.mine})`)}${opt('overdue', `Försenade (${n.overdue})`)}
+                    ${opt('help', `Behöver hjälp (${n.help})`)}${opt('ready', `Klar att pröva (${n.ready})`)}${opt('done', `Utförda (${n.done})`)}${opt('all', `Alla (${all.length})`)}
                 </select><span class="ms-auto pl-help small" id="tkCount"></span></div>
                 <div class="pl-card p-0"><div class="table-responsive"><table class="table align-middle mb-0 pl-tktable">
                 <thead><tr><th class="ps-3">Uppgift</th><th class="d-none d-md-table-cell">Vem</th><th class="d-none d-md-table-cell">Senast</th>
-                    <th class="d-none d-sm-table-cell">Läge</th><th class="d-none d-lg-table-cell">Senaste raden</th><th></th></tr></thead>
+                    <th class="d-none d-sm-table-cell">Läge</th><th class="d-none d-lg-table-cell">Senaste raden</th><th class="pl-noprint"></th></tr></thead>
                 <tbody id="tkRows"></tbody></table></div></div>`);
         }
+        const planDocs = TASKS.documents || [];
+        if (planDocs.length || TASKS.canAddDocument) html.push(`<div class="pl-card mt-3"><div class="pl-cardh"><h2>Dokument och länkar</h2>
+            ${TASKS.canAddDocument ? '<button class="btn btn-sm btn-outline-secondary pl-noprint" data-tk-doc-add="1">Lägg till…</button>' : ''}</div>
+            ${planDocs.length ? `<ul class="list-unstyled mb-0">${planDocs.map(docLine).join('')}</ul>` : '<p class="pl-help mb-0">Inbjudan, ansökan, ritningar, bokningar — lägg dem här så hittar alla dem.</p>'}</div>`);
         html.push(`<div class="pl-card mt-3"><h2>Lägena</h2><div class="d-flex gap-2 flex-wrap align-items-center">
             ${['NotStarted', 'InProgress', 'NeedsHelp', 'ReadyForReview', 'Done'].map(s => tkChip({ status: s, statusLabel: (TASKS.statuses.find(x => x.value === s) || {}).label || s })).join(' → ')}</div>
-            <p class="pl-help mb-0 mt-2">Den som har uppgiften sätter de fyra första. Utförd sätts på ett möte eller av den sammankallande.</p></div>`);
+            <p class="pl-help mb-0 mt-2">${TASKS.doneAtMeetingsOnly
+                ? 'Den som har uppgiften sätter de fyra första. Utförd sätts på ett möte eller av den sammankallande.'
+                : 'Den som har uppgiften sätter läget och bockar av den som utförd. Den sammankallande kan ändra det under Inställningar.'}</p></div>`);
         $('plBody').innerHTML = html.join('');
         if (!all.length) return;
-        const renderRows = () => {
-            const q = tkQuery.trim().toLowerCase();
-            const rows = all.filter(t =>
-                (tkFilter === 'all' || (tkFilter === 'open' && t.status !== 'Done') || (tkFilter === 'mine' && t.mine && t.status !== 'Done')
-                    || (tkFilter === 'help' && t.status === 'NeedsHelp') || (tkFilter === 'ready' && t.status === 'ReadyForReview')
-                    || (tkFilter === 'done' && t.status === 'Done'))
-                && (!q || [t.title, t.assignee, t.report].some(v => (v || '').toLowerCase().includes(q))))
-                .sort((a, b) => (a.status === 'Done') - (b.status === 'Done') || (order[a.status] ?? 9) - (order[b.status] ?? 9)
-                    || (a.due || '9999').localeCompare(b.due || '9999') || (b.doneAt || '').localeCompare(a.doneAt || '') || a.id - b.id);
-            rowFns = [];
-            $('tkRows').innerHTML = rows.length ? rows.map(t => {
-                const open = t.status !== 'Done';
-                const menu = rowMenu([
-                    t.canReport && open && { label: 'Ändra läge och skriv hur det går…', fn: () => openReport(t) },
-                    t.canEdit && { label: 'Ändra uppgiften…', fn: () => openTaskEdit(t) },
-                    TASKS.canDecide && open && { label: 'Markera som utförd…', fn: () => decideOutsideMeeting(t) },
-                    TASKS.canDecide && !open && { label: 'Ångra utförd', fn: () => undoDone(t, 0) },
-                    { label: 'Visa historiken', fn: () => openHistory(t) },
-                    t.canEdit && { divider: true },
-                    t.canEdit && { label: 'Ta bort…', danger: true, fn: () => removeTask(t) },
-                ]);
-                const origin = t.fromMeeting ? `Från mötet ${esc(t.fromMeeting)}` : `Tillagd av ${esc(t.createdBy)}`;
-                const done = !open ? `<div class="small text-success">Utförd ${esc(fmtShort(t.doneAt))}${t.doneAtMeeting ? ' på mötet ' + esc(t.doneAtMeeting) : t.doneBy ? ' — ' + esc(t.doneBy) : ''}</div>` : '';
-                return `<tr class="${t.mine && open ? 'pl-tkmine' : ''}"><td class="ps-3"><b>${esc(t.title)}</b><div class="pl-help small">${origin}</div>${done}
-                        <div class="d-sm-none mt-1">${tkChip(t)}</div>
-                        <div class="d-md-none small mt-1">${esc(t.assignee || 'Ingen ansvarig än')}${t.due ? ' · senast ' + esc(fmtDay(t.due)) : ''}</div></td>
-                    <td class="d-none d-md-table-cell">${t.assignee ? esc(t.assignee) : '<span class="pl-help">Ingen än</span>'}</td>
-                    <td class="d-none d-md-table-cell text-nowrap">${t.due ? esc(fmtDay(t.due)) + (t.overdue ? ' <span class="text-danger small">försenad</span>' : '') : '<span class="pl-help">—</span>'}</td>
-                    <td class="d-none d-sm-table-cell">${tkChip(t)}</td>
-                    <td class="d-none d-lg-table-cell small">${t.report ? esc(t.report.length > 60 ? t.report.slice(0, 60) + '…' : t.report) : '<span class="pl-help">—</span>'}</td>
-                    <td class="text-end">${menu}</td></tr>`;
-            }).join('') : '<tr><td colspan="6" class="pl-help ps-3">Ingen uppgift matchar.</td></tr>';
-            $('tkCount').textContent = rows.length === 1 ? '1 uppgift' : `${rows.length} uppgifter`;
-        };
-        renderRows();
-        $('tkQ').addEventListener('input', e => { tkQuery = e.target.value; renderRows(); });
-        $('tkFilter').addEventListener('change', e => { tkFilter = e.target.value; renderRows(); });
+        renderTaskRows();
+        $('tkQ').addEventListener('input', e => { tkQuery = e.target.value; renderTaskRows(); });
+        $('tkFilter').addEventListener('change', e => { tkFilter = e.target.value; renderTaskRows(); });
+    }
+
+    function docLine(d) {
+        const where = d.taskId ? (findTask(d.taskId) || {}).title : d.areaId ? (areaById(d.areaId) || {}).name : '';
+        const rm = d.canRemove ? `<button type="button" class="btn btn-sm btn-link text-danger p-0 ms-2 pl-noprint" data-tk-doc-del="${d.id}" aria-label="Ta bort ${esc(d.title)}">Ta bort</button>` : '';
+        return `<li class="py-1"><i class="bi ${d.isFile ? 'bi-file-earmark' : 'bi-link-45deg'} me-1 text-secondary"></i>
+            <a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a>
+            ${where ? `<span class="pl-help small"> · ${esc(where)}</span>` : ''}${d.addedBy ? `<span class="pl-help small"> · ${esc(d.addedBy)}</span>` : ''}${rm}</li>`;
+    }
+
+    function taskMatches(t, q) {
+        const f = tkFilter;
+        const okF = f === 'all' || (f === 'open' && t.status !== 'Done') || (f === 'mine' && t.mine && t.status !== 'Done')
+            || (f === 'help' && t.status === 'NeedsHelp') || (f === 'ready' && t.status === 'ReadyForReview')
+            || (f === 'overdue' && t.overdue) || (f === 'done' && t.status === 'Done');
+        const area = t.areaId ? (areaById(t.areaId) || {}).name : '';
+        return okF && (!q || [t.title, t.assignee, t.report, area].some(v => (v || '').toLowerCase().includes(q)));
+    }
+    function taskRow(t) {
+        const open = t.status !== 'Done';
+        const decide = open && (t.canDecide || TASKS.canDecide);
+        const menu = rowMenu([
+            t.canReport && open && { label: 'Ändra läge och skriv hur det går…', fn: () => openReport(t) },
+            t.canDecide && open && { label: 'Utförd ✓', fn: () => markDone(t) },
+            t.canEdit && { label: 'Ändra uppgiften…', fn: () => openTaskEdit(t) },
+            { label: `Kommentarer och dokument${t.comments ? ' (' + t.comments + ')' : ''}…`, fn: () => openThread(t) },
+            !t.canDecide && TASKS.canDecide && open && { label: 'Markera som utförd…', fn: () => decideOutsideMeeting(t) },
+            (t.canDecide || TASKS.canDecide) && !open && { label: 'Ångra utförd', fn: () => undoDone(t, 0) },
+            { label: 'Visa historiken', fn: () => openHistory(t) },
+            t.canEdit && { divider: true },
+            t.canEdit && { label: 'Ta bort…', danger: true, fn: () => removeTask(t) },
+        ]);
+        const origin = t.fromMeeting ? `Från mötet ${esc(t.fromMeeting)}` : t.source === 'Imported' ? 'Från tävlingens förberedelser' : t.source === 'Template' ? 'Från mallen' : t.source === 'KretsChecklist' ? 'Kretsens checklista' : `Tillagd av ${esc(t.createdBy)}`;
+        const done = !open ? `<div class="small text-success">Utförd ${esc(fmtShort(t.doneAt))}${t.doneAtMeeting ? ' på mötet ' + esc(t.doneAtMeeting) : t.doneBy ? ' — ' + esc(t.doneBy) : ''}</div>` : '';
+        const extra = [];
+        if (t.scopeType) extra.push(t.stationUrl ? `<a href="${esc(t.stationUrl)}">${esc(t.scopeType)} ${esc(t.scopeKey || '')}</a>` : esc(t.scopeType + ' ' + (t.scopeKey || '')));
+        if (t.estimatedCost != null) extra.push(esc(kr(t.estimatedCost)));
+        const docs = docsOf('task', t.id).length;
+        if (t.comments || docs) extra.push(`<button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-tk-thread="${t.id}">`
+            + [t.comments ? `${t.comments} kommentar${t.comments === 1 ? '' : 'er'}` : '', docs ? `${docs} dokument` : ''].filter(Boolean).join(', ') + '</button>');
+        // Bara på EGNA uppgifter — på varje rad blev det brus. Övriga bockas av via radens Åtgärder.
+        const quick = decide && t.canDecide && t.mine ?`<button type="button" class="btn btn-sm btn-outline-success ms-2 pl-noprint" data-tk-quickdone="${t.id}" title="Markera som utförd">Klar ✓</button>` : '';
+        return `<tr class="${t.mine && open ? 'pl-tkmine' : ''}${open ? '' : ' pl-tkdonerow'}"><td class="ps-3"><b>${esc(t.title)}</b>${quick}<div class="pl-help small">${origin}${extra.length ? ' · ' + extra.join(' · ') : ''}</div>${done}
+                <div class="d-sm-none mt-1">${tkChip(t)}</div>
+                <div class="d-md-none small mt-1">${esc(t.assignee || 'Ingen ansvarig än')}${t.due ? ' · senast ' + esc(fmtDay(t.due)) : ''}${t.overdue ? ' <span class="text-danger">försenad</span>' : ''}</div></td>
+            <td class="d-none d-md-table-cell">${t.assignee ? esc(t.assignee) : '<span class="pl-help">Ingen än</span>'}</td>
+            <td class="d-none d-md-table-cell text-nowrap">${t.due || t.dueDaysBefore != null ? dueText(t) + (t.overdue ? ' <span class="text-danger small">försenad</span>' : '') : '<span class="pl-help">—</span>'}</td>
+            <td class="d-none d-sm-table-cell">${tkChip(t)}</td>
+            <td class="d-none d-lg-table-cell small">${t.report ? esc(t.report.length > 60 ? t.report.slice(0, 60) + '…' : t.report) : '<span class="pl-help">—</span>'}</td>
+            <td class="text-end pl-noprint">${menu}</td></tr>`;
+    }
+    function renderTaskRows() {
+        const q = tkQuery.trim().toLowerCase();
+        const order = { ReadyForReview: 0, NeedsHelp: 1, InProgress: 2, NotStarted: 3 };
+        const sortRows = rows => rows.sort((a, b) => (a.status === 'Done') - (b.status === 'Done') || a.sortOrder - b.sortOrder
+            || (order[a.status] ?? 9) - (order[b.status] ?? 9) || (a.due || '9999').localeCompare(b.due || '9999') || a.id - b.id);
+        const rows = TASKS.tasks.filter(t => taskMatches(t, q));
+        rowFns = [];
+        const parts = [];
+        const areas = TASKS.areas || [];
+        const groups = areas.map(a => ({ area: a, rows: sortRows(rows.filter(t => t.areaId === a.id)) }));
+        groups.push({ area: null, rows: sortRows(rows.filter(t => !t.areaId || !areaById(t.areaId))) });
+        const searching = q || tkFilter !== 'open';
+        groups.forEach(g => {
+            if (g.area) {
+                const allIn = TASKS.tasks.filter(t => t.areaId === g.area.id);
+                if (searching && !g.rows.length) return;
+                const openN = allIn.filter(t => t.status !== 'Done').length;
+                const menu = TASKS.canManageAreas ? rowMenu([
+                    TASKS.canCreate && { label: 'Ny uppgift i området…', fn: () => openTaskEdit(null, g.area.id) },
+                    { label: 'Ändra området…', fn: () => openArea(g.area) },
+                    { label: 'Flytta upp', fn: () => moveArea(g.area, -1) },
+                    { label: 'Flytta ner', fn: () => moveArea(g.area, 1) },
+                    TASKS.canAddDocument && { label: 'Lägg till dokument…', fn: () => openDocAdd({ areaId: g.area.id }) },
+                    { divider: true },
+                    { label: 'Ta bort området…', danger: true, fn: () => deleteArea(g.area) },
+                ]) : '';
+                parts.push(`<tr class="pl-areah"><td colspan="6" class="ps-3"><div class="d-flex flex-wrap align-items-center gap-2">
+                    <b>${esc(g.area.name)}</b>${g.area.responsible ? `<span class="pl-help small">Ansvarig: ${esc(g.area.responsible)}</span>` : ''}
+                    <span class="ms-auto pl-help small">${openN === 0 && allIn.length ? 'allt utfört' : openN + ' öppna'}</span>${menu}</div></td></tr>`);
+                parts.push(g.rows.length ? g.rows.map(taskRow).join('') : `<tr><td colspan="6" class="pl-help ps-4 small">Inga uppgifter i området ännu.</td></tr>`);
+            } else if (g.rows.length) {
+                if (areas.length) parts.push(`<tr class="pl-areah"><td colspan="6" class="ps-3"><b>Utan område</b></td></tr>`);
+                parts.push(g.rows.map(taskRow).join(''));
+            }
+        });
+        $('tkRows').innerHTML = parts.join('') || '<tr><td colspan="6" class="pl-help ps-3">Ingen uppgift matchar.</td></tr>';
+        $('tkCount').textContent = rows.length === 1 ? '1 uppgift' : `${rows.length} uppgifter`;
     }
 
     function peopleOptions(cur) {
         return '<option value="">Ingen ännu</option>' + S.participants.slice().sort((a, b) => a.name.localeCompare(b.name, 'sv'))
             .map(p => `<option value="${p.id}"${p.id === cur ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
     }
-    function openTaskEdit(t) {
+    function areaOptions(cur) {
+        return '<option value="">Utan område</option>' + (TASKS.areas || [])
+            .map(a => `<option value="${a.id}"${a.id === cur ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
+    }
+    // Vem: en deltagare, en medlem som inte är med (läggs till som Deltar), eller ett fritt namn.
+    function whoField(t) {
+        const free = t && !t.assigneeId && t.assigneeName;
+        return `<label class="form-label" for="teWho">Vem gör det?</label>
+            <select id="teWho" class="form-select">${peopleOptions(t ? t.assigneeId : null)}
+                ${TOKEN ? '' : '<option value="__member">Någon som inte är med i planeringen…</option>'}
+                <option value="__name"${free ? ' selected' : ''}>Skriv ett namn (t.ex. en sektion eller ett företag)…</option></select>
+            <div id="teMemberBox" class="mt-2 d-none"><input id="teMemberQ" class="form-control" placeholder="Sök på medlemmens namn" autocomplete="off">
+                <div id="teMemberHits" class="list-group mt-1"></div><input type="hidden" id="teMemberId">
+                <div class="pl-help small mt-1">Den du väljer läggs till i planeringen som <i>Deltar</i> och får ett mejl om uppgiften.</div></div>
+            <div id="teNameBox" class="mt-2${free ? '' : ' d-none'}"><input id="teName" class="form-control" maxlength="200" value="${esc(free ? t.assigneeName : '')}" placeholder="Till exempel Ungdomssektionen"></div>`;
+    }
+    function wireWho(body) {
+        const sel = body.querySelector('#teWho');
+        const sync = () => {
+            body.querySelector('#teMemberBox').classList.toggle('d-none', sel.value !== '__member');
+            body.querySelector('#teNameBox').classList.toggle('d-none', sel.value !== '__name');
+            if (sel.value === '__member') body.querySelector('#teMemberQ').focus();
+        };
+        sel.addEventListener('change', sync);
+        let seq = 0;
+        body.querySelector('#teMemberQ')?.addEventListener('input', async e => {
+            const q = e.target.value.trim(), my = ++seq;
+            const hits = body.querySelector('#teMemberHits');
+            if (q.length < 2) { hits.innerHTML = ''; return; }
+            const r = await get('SearchMembers', { q });
+            if (my !== seq || !r.success) return;
+            hits.innerHTML = r.members.length ? r.members.map(m => `<button type="button" class="list-group-item list-group-item-action" data-pick-member="${m.memberId}">
+                ${esc(m.name)}${m.club ? ` <span class="pl-help small">${esc(m.club)}</span>` : ''}${m.alreadyIn ? ' <span class="badge text-bg-light border">med</span>' : ''}</button>`).join('')
+                : '<div class="pl-help small p-2">Ingen träff.</div>';
+        });
+        body.addEventListener('click', e => {
+            const b = e.target.closest('[data-pick-member]'); if (!b) return;
+            body.querySelector('#teMemberId').value = b.dataset.pickMember;
+            body.querySelectorAll('[data-pick-member]').forEach(x => x.classList.toggle('active', x === b));
+        });
+    }
+    function whoParams(body) {
+        const v = body.querySelector('#teWho').value;
+        if (v === '__member') return { assignee: '', assigneeMemberId: body.querySelector('#teMemberId').value, assigneeName: '' };
+        if (v === '__name') return { assignee: '', assigneeMemberId: '', assigneeName: body.querySelector('#teName').value.trim() };
+        return { assignee: v, assigneeMemberId: '', assigneeName: '' };
+    }
+    function openTaskEdit(t, presetArea) {
+        const c = competition();
+        const days = t ? t.dueDaysBefore != null : false;
+        const showDays = canDaysBefore() || days;
+        const showScope = !!c || (t && t.scopeType);
+        const scopeOpts = '<option value="">—</option>' + (TASKS.scopeTypes || []).map(s => `<option${t && t.scopeType === s ? ' selected' : ''}>${esc(s)}</option>`).join('');
         formModal({
             title: t ? 'Ändra uppgiften' : 'Ny uppgift', okLabel: t ? 'Spara' : 'Lägg till', wide: false,
             html: `<div class="mb-3"><label class="form-label fw-semibold" for="teTitle">Vad ska göras?</label>
                     <input id="teTitle" class="form-control" maxlength="300" value="${esc(t ? t.title : '')}"></div>
-                <div class="mb-3"><label class="form-label" for="teWho">Vem gör det?</label><select id="teWho" class="form-select">${peopleOptions(t ? t.assigneeId : null)}</select></div>
-                <div class="mb-3"><label class="form-label" for="teDue">Klart senast (valfritt)</label><input id="teDue" class="form-control" value="${esc(t ? t.due : '')}" placeholder="åååå-mm-dd"></div>
-                <div class="mb-1"><label class="form-label" for="teDesc">Mer om uppgiften (valfritt)</label><textarea id="teDesc" class="form-control" rows="3" maxlength="4000">${esc(t ? t.description || '' : '')}</textarea></div>
+                ${(TASKS.areas || []).length ? `<div class="mb-3"><label class="form-label" for="teArea">Område</label><select id="teArea" class="form-select">${areaOptions(t ? t.areaId : presetArea || null)}</select></div>` : ''}
+                <div class="mb-3">${whoField(t)}</div>
+                <div class="mb-3"><div class="form-label">Klart senast (valfritt)</div>
+                    ${showDays ? `<div class="btn-group mb-2" role="group" aria-label="Sista dag som">
+                        <input type="radio" class="btn-check" name="teDueMode" id="teDueDate" value="date"${days ? '' : ' checked'}><label class="btn btn-outline-secondary btn-sm" for="teDueDate">Ett datum</label>
+                        <input type="radio" class="btn-check" name="teDueMode" id="teDueDays" value="days"${days ? ' checked' : ''}><label class="btn btn-outline-secondary btn-sm" for="teDueDays">Dagar ${esc(daysWord())}</label></div>` : ''}
+                    <div id="teDueDateBox"${days ? ' class="d-none"' : ''}><input id="teDue" class="form-control" value="${esc(t && !days ? t.due : '')}" placeholder="åååå-mm-dd"></div>
+                    <div id="teDueDaysBox" class="${days ? '' : 'd-none'}"><div class="input-group" style="max-width:16rem"><input id="teDays" type="number" min="0" max="1000" class="form-control" value="${days ? t.dueDaysBefore : ''}">
+                        <span class="input-group-text">dagar ${esc(daysWord())}</span></div>
+                        <div class="pl-help small mt-1">${TASKS.anchor ? 'Datumet följer med om dagen flyttas.' : 'Datumet räknas fram när dagen är bestämd.'}</div></div></div>
+                <details class="mb-1"${t && (t.description || t.scopeType || t.estimatedCost != null) ? ' open' : ''}><summary class="mb-2">Mer om uppgiften</summary>
+                    <div class="mb-3"><label class="form-label" for="teDesc">Beskrivning</label><textarea id="teDesc" class="form-control" rows="3" maxlength="4000">${esc(t ? t.description || '' : '')}</textarea></div>
+                    ${showScope ? `<div class="row g-2 mb-3"><div class="col-6"><label class="form-label" for="teScope">Gäller</label><select id="teScope" class="form-select">${scopeOpts}</select></div>
+                        <div class="col-6"><label class="form-label" for="teScopeKey">Nummer</label><input id="teScopeKey" class="form-control" maxlength="100" value="${esc(t ? t.scopeKey || '' : '')}" placeholder="t.ex. 3"></div></div>` : ''}
+                    <div class="mb-1"><label class="form-label" for="teCost">Uppskattning (kr)</label><input id="teCost" class="form-control" inputmode="decimal" style="max-width:12rem" value="${t && t.estimatedCost != null ? esc(t.estimatedCost) : ''}">
+                        <div class="pl-help small">Vad ni räknar med att det kostar. Utfallet kommer ur bokföringen.</div></div></details>
                 ${t ? '' : '<p class="pl-help small mt-2 mb-0">Den som får uppgiften får ett mejl.</p>'}`,
-            onOpen: body => { datePicker(body.querySelector('#teDue')); body.querySelector('#teTitle').focus(); },
+            onOpen: body => {
+                datePicker(body.querySelector('#teDue'));
+                wireWho(body);
+                body.querySelectorAll('[name=teDueMode]').forEach(r => r.addEventListener('change', () => {
+                    const d = body.querySelector('#teDueDays').checked;
+                    body.querySelector('#teDueDateBox').classList.toggle('d-none', d);
+                    body.querySelector('#teDueDaysBox').classList.toggle('d-none', !d);
+                }));
+                body.querySelector('#teTitle').focus();
+            },
             onOk: async body => {
-                const p = { title: body.querySelector('#teTitle').value, assignee: body.querySelector('#teWho').value,
-                    due: body.querySelector('#teDue').value.trim(), description: body.querySelector('#teDesc').value };
+                const daysMode = !!body.querySelector('#teDueDays') && body.querySelector('#teDueDays').checked;
+                const w = whoParams(body);
+                if (body.querySelector('#teWho').value === '__member' && !w.assigneeMemberId) return 'Sök fram och välj medlemmen först.';
+                const p = Object.assign({
+                    title: body.querySelector('#teTitle').value,
+                    due: daysMode ? '' : body.querySelector('#teDue').value.trim(),
+                    dueDaysBefore: daysMode ? body.querySelector('#teDays').value.trim() : '',
+                    areaId: body.querySelector('#teArea') ? body.querySelector('#teArea').value : (t ? t.areaId || '' : presetArea || ''),
+                    description: body.querySelector('#teDesc').value,
+                    scopeType: body.querySelector('#teScope') ? body.querySelector('#teScope').value : (t ? t.scopeType || '' : ''),
+                    scopeKey: body.querySelector('#teScopeKey') ? body.querySelector('#teScopeKey').value : (t ? t.scopeKey || '' : ''),
+                    estimatedCost: body.querySelector('#teCost').value.trim(),
+                }, w);
+                if (daysMode && p.dueDaysBefore === '') return 'Skriv hur många dagar före.';
                 const r = t ? await post('UpdateTask', Object.assign({ taskId: t.id }, p)) : await post('CreateTask', p);
                 if (!r.success) return r.message;
-                await reloadTasks(); rerender();
+                await Promise.all([reloadTasks(), w.assigneeMemberId ? reloadPeople() : Promise.resolve()]);
+                rerender();
                 if (r.mailed) showMsg('Den som fick uppgiften har fått ett mejl.', 'success');
                 return true;
             }
         });
     }
     function openReport(t) {
-        const opts = (TASKS.statuses || []).filter(s => s.assignee);
+        const opts = (TASKS.statuses || []).filter(s => s.assignee || (s.value === 'Done' && t.canDecide));
         let chosen = t.status;
         formModal({
             title: t.title, okLabel: 'Spara', wide: false,
@@ -1043,7 +1241,7 @@
                     `<button type="button" class="btn pl-statbtn${s.value === chosen ? ' on' : ''}" data-st="${s.value}" aria-pressed="${s.value === chosen}">${s.value === chosen ? '✓ ' : ''}${esc(s.label)}</button>`).join('')}</div>
                 <label class="form-label fw-semibold mt-3" for="rpText">Hur går det? (valfritt)</label>
                 <textarea id="rpText" class="form-control" rows="3" maxlength="2000">${esc(t.report || '')}</textarea>
-                <p class="pl-help small mt-2 mb-0">Om den är utförd bestämmer ni på mötet.</p>`,
+                <p class="pl-help small mt-2 mb-0">${t.canDecide ? 'Är den klar trycker du Utförd.' : 'Om den är utförd bestämmer ni på mötet.'}</p>`,
             onOpen: body => body.addEventListener('click', e => {
                 const b = e.target.closest('[data-st]'); if (!b) return;
                 chosen = b.dataset.st;
@@ -1066,11 +1264,14 @@
             }
         });
     }
-    async function decideOutsideMeeting(t) {
-        if (!await plConfirm('Markera som utförd?', `${t.title}\n\nDet står att du beslutade det, inte ett möte.`, 'Utförd')) return;
+    async function markDone(t) {
         const r = await post('DecideTask', { taskId: t.id, decision: 'done' });
         if (!r.success) { failMsg(r); return; }
         await reloadTasks(); rerender();
+    }
+    async function decideOutsideMeeting(t) {
+        if (!await plConfirm('Markera som utförd?', `${t.title}\n\nDet står att du beslutade det, inte ett möte.`, 'Utförd')) return;
+        await markDone(t);
     }
     async function undoDone(t, meetingId) {
         const r = await post('DecideTask', { taskId: t.id, decision: 'undo', meetingId: meetingId || '' });
@@ -1084,11 +1285,11 @@
         await reloadTasks(); rerender();
     }
     const TK_EVENT = {
-        Created: e => 'lade till uppgiften', Edited: e => e.note || 'ändrade uppgiften',
+        Created: e => e.note ? 'lade till uppgiften — ' + e.note : 'lade till uppgiften', Edited: e => e.note || 'ändrade uppgiften',
         Status: e => `ändrade läget till ${e.newStatus}` + (e.note ? `: ”${e.note}”` : ''),
         Report: e => `skrev: ”${e.note}”`, Done: e => 'Utförd' + (e.meeting ? ` — på mötet ${e.meeting}` : ''),
         Undone: e => 'ångrade Utförd', Continued: e => 'Fortsätter' + (e.meeting ? ` (mötet ${e.meeting})` : '') + (e.note ? ` — ${e.note}` : ''),
-        Removed: e => 'tog bort uppgiften',
+        Removed: e => 'tog bort uppgiften', Comment: e => `kommenterade: ”${e.note}”`,
     };
     async function openHistory(t) {
         const r = await get('TaskHistory', { taskId: t.id });
@@ -1100,6 +1301,240 @@
                  <div>${esc((TK_EVENT[e.kind] || (() => e.kind))(e))}</div></li>`).join('')}</ul>` : '<p class="pl-help mb-0">Ingen historik.</p>',
         });
     }
+    // Kommentarer och dokument på en uppgift. Dialogen ritas om på plats när något läggs till.
+    async function openThread(t, keepOpen) {
+        const r = await get('TaskHistory', { taskId: t.id });
+        if (!r.success) { failMsg(r); return; }
+        const fresh = findTask(t.id) || t;
+        const comments = r.events.filter(e => e.kind === 'Comment' || e.kind === 'Report');
+        const docs = docsOf('task', t.id);
+        const canComment = S.me.canWrite || fresh.mine;
+        formModal({
+            title: fresh.title, wide: false, cancelLabel: 'Stäng',
+            html: `${fresh.description ? `<p style="white-space:pre-wrap">${esc(fresh.description)}</p>` : ''}
+                <h3 class="h6">Kommentarer</h3>
+                ${comments.length ? `<ul class="list-unstyled">${comments.map(e => `<li class="py-2 border-top"><div class="pl-help small">${esc(fmtShort(e.at))} · ${esc(e.who)}</div>
+                    <div style="white-space:pre-wrap">${esc(e.note)}</div></li>`).join('')}</ul>` : '<p class="pl-help">Inga kommentarer ännu.</p>'}
+                ${canComment ? `<label class="form-label" for="thText">Skriv en kommentar</label><textarea id="thText" class="form-control" rows="3" maxlength="4000"></textarea>
+                    <button type="button" class="btn btn-primary btn-sm mt-2" id="thSend">Skicka</button>` : ''}
+                <h3 class="h6 mt-4">Dokument och länkar</h3>
+                ${docs.length ? `<ul class="list-unstyled">${docs.map(docLine).join('')}</ul>` : '<p class="pl-help">Inga dokument.</p>'}
+                ${TASKS.canAddDocument ? `<button type="button" class="btn btn-outline-secondary btn-sm" data-tk-doc-add-task="${t.id}">Lägg till dokument eller länk…</button>` : ''}`,
+            onOpen: body => {
+                body.querySelector('#thSend')?.addEventListener('click', async e => {
+                    const text = body.querySelector('#thText').value.trim();
+                    if (!text) { body.querySelector('#thText').focus(); return; }
+                    e.target.disabled = true;
+                    const res = await post('AddTaskComment', { taskId: t.id, text });
+                    e.target.disabled = false;
+                    if (!res.success) { failMsg(res); return; }
+                    await reloadTasks(); rerender(); openThread(t, true);
+                });
+            },
+        });
+    }
+
+    // ---------------------------------------------------------------- områden
+    function openArea(a) {
+        formModal({
+            title: a ? 'Ändra området' : 'Nytt område', okLabel: a ? 'Spara' : 'Lägg till', wide: false,
+            html: `<div class="mb-3"><label class="form-label fw-semibold" for="arName">Områdets namn</label>
+                    <input id="arName" class="form-control" maxlength="200" value="${esc(a ? a.name : '')}" placeholder="Till exempel Materiel, Banor eller Servering"></div>
+                <div class="mb-2"><label class="form-label" for="arResp">Ansvarig (valfritt)</label>
+                    <select id="arResp" class="form-select">${peopleOptions(a ? a.responsibleId : null)}<option value="__name"${a && !a.responsibleId && a.responsibleName ? ' selected' : ''}>Skriv ett namn…</option></select>
+                    <input id="arRespName" class="form-control mt-2${a && !a.responsibleId && a.responsibleName ? '' : ' d-none'}" maxlength="200" value="${esc(a && !a.responsibleId ? a.responsibleName || '' : '')}"></div>`,
+            onOpen: body => {
+                const sel = body.querySelector('#arResp');
+                sel.addEventListener('change', () => body.querySelector('#arRespName').classList.toggle('d-none', sel.value !== '__name'));
+                body.querySelector('#arName').focus();
+            },
+            onOk: async body => {
+                const v = body.querySelector('#arResp').value;
+                const r = await post('SaveArea', { areaId: a ? a.id : 0, name: body.querySelector('#arName').value,
+                    responsibleId: v === '__name' ? '' : v, responsibleName: v === '__name' ? body.querySelector('#arRespName').value : '' });
+                if (!r.success) return r.message;
+                await reloadTasks(); rerender(); return true;
+            }
+        });
+    }
+    async function moveArea(a, dir) {
+        const r = await post('MoveArea', { areaId: a.id, direction: dir });
+        if (!r.success) { failMsg(r); return; }
+        await reloadTasks(); rerender();
+    }
+    async function deleteArea(a) {
+        const n = TASKS.tasks.filter(t => t.areaId === a.id).length;
+        if (!await plConfirm('Ta bort området?', `${a.name}\n\n${n ? `De ${n} uppgifterna står kvar, utan område.` : 'Området har inga uppgifter.'}`, 'Ta bort', true)) return;
+        const r = await post('DeleteArea', { areaId: a.id });
+        if (!r.success) { failMsg(r); return; }
+        await reloadTasks(); rerender();
+    }
+
+    // ---------------------------------------------------------------- mall, checklista, stationer, inklistring
+    function openTemplate() {
+        const c = competition();
+        const discOpt = c ? '' : `<div class="mb-3"><label class="form-label" for="tmDisc">Gren</label><select id="tmDisc" class="form-select">
+            <option value="Precision">Precision</option><option value="Faltskytte">Fältskytte</option><option value="Springskytte">Springskytte</option></select></div>`;
+        formModal({
+            title: 'Fyll i från en mall', okLabel: 'Fyll i', wide: false,
+            html: `<p>Mallen lägger till de vanliga områdena och uppgifterna för en tävling av den storleken${c ? ' i tävlingens gren' : ''}.
+                    Sista dagarna räknas ${esc(daysWord())}. Ett område som redan finns rörs inte.</p>
+                ${discOpt}
+                <div class="mb-1">${[['klubb', 'Klubbtävling'], ['krets', 'Kretstävling'], ['sm', 'Mästerskap (SM eller landsdel)']].map(([v, l], i) =>
+                    `<div class="form-check"><input class="form-check-input" type="radio" name="tmSize" id="tm${v}" value="${v}"${i === 0 ? ' checked' : ''}><label class="form-check-label" for="tm${v}">${esc(l)}</label></div>`).join('')}</div>`,
+            onOk: async body => {
+                const size = body.querySelector('[name=tmSize]:checked').value;
+                const r = await post('SeedTemplate', { size, discipline: body.querySelector('#tmDisc') ? body.querySelector('#tmDisc').value : '' });
+                if (!r.success) return r.message;
+                await reloadTasks(); rerender();
+                showMsg(r.tasks ? `${r.areas} områden och ${r.tasks} uppgifter lades till.` : 'Mallens områden fanns redan — ingenting lades till.', r.tasks ? 'success' : 'info');
+                return true;
+            }
+        });
+    }
+    async function openKretsChecklist() {
+        const r = await get('KretsChecklist');
+        if (!r.success) { failMsg(r); return; }
+        if (!r.available) {
+            formModal({ title: 'Kretsens checklista', wide: false, cancelLabel: 'Stäng',
+                html: '<p class="mb-0">Kretsen har ingen checklista för den här tävlingen.</p>' });
+            return;
+        }
+        const items = r.pending || [];
+        formModal({
+            title: 'Kretsens checklista — ' + r.regionName, okLabel: 'Spara valen', wide: true,
+            html: `<p>Det här vill kretsen att arrangören gör. Välj för varje punkt: lägg in den som en uppgift, eller <i>Behövs inte</i>.
+                    ${r.added || r.dismissed ? `<span class="pl-help">Tidigare: ${r.added} inlagda, ${r.dismissed} bortvalda.</span>` : ''}</p>
+                ${items.length ? `<div class="table-responsive"><table class="table align-middle"><tbody>${items.map(p => `<tr><td><b>${esc(p.title)}</b>
+                    ${p.description ? `<div class="pl-help small">${esc(p.description)}</div>` : ''}${p.daysBefore != null ? `<div class="pl-help small">${p.daysBefore} dagar före tävlingen</div>` : ''}</td>
+                    <td style="width:12rem"><select class="form-select form-select-sm" data-kc="${p.id}"><option value="add">Lägg in</option><option value="dismiss">Behövs inte</option><option value="">Bestäm senare</option></select></td></tr>`).join('')}</tbody></table></div>`
+                : '<p class="pl-help mb-0">Alla kretsens punkter är redan hanterade.</p>'}`,
+            onOk: items.length && r.canApply ? async body => {
+                const add = [], dismiss = [];
+                body.querySelectorAll('[data-kc]').forEach(s => { if (s.value === 'add') add.push(s.dataset.kc); else if (s.value === 'dismiss') dismiss.push(s.dataset.kc); });
+                if (!add.length && !dismiss.length) return true;
+                const res = await post('ApplyKretsChecklist', { add: add.join(','), dismiss: dismiss.join(',') });
+                if (!res.success) return res.message;
+                await reloadTasks(); rerender();
+                showMsg(`${res.added} uppgifter lades till${res.dismissed ? `, ${res.dismissed} punkter valdes bort` : ''}.`, 'success');
+                return true;
+            } : null,
+        });
+    }
+    async function seedStations() {
+        const c = competition();
+        if (!await plConfirm('En uppgift per station?', `"Bygg station 1" … "Bygg station ${c.stationCount}" läggs i området Stationsbygge. Stationer som redan har en uppgift hoppas över.`, 'Lägg till')) return;
+        const r = await post('SeedStations', {});
+        if (!r.success) { failMsg(r); return; }
+        await reloadTasks(); rerender();
+        showMsg(r.added ? `${r.added} uppgifter lades till.` : 'Alla stationer har redan en uppgift.', r.added ? 'success' : 'info');
+    }
+    function openPaste(presetArea) {
+        let ready = false;
+        formModal({
+            title: 'Klistra in uppgifter', okLabel: 'Visa hur det blir', wide: true,
+            html: `<p>Markera raderna i kalkylarket och klistra in dem här. En uppgift per rad: <b>uppgift</b>, <b>vem</b> och <b>sista dag</b> i var sin kolumn — de två sista får vara tomma.</p>
+                ${(TASKS.areas || []).length ? `<div class="mb-2"><label class="form-label" for="psArea">Område</label><select id="psArea" class="form-select" style="max-width:20rem">${areaOptions(presetArea)}</select></div>` : ''}
+                <textarea id="psText" class="form-control font-monospace" rows="8" placeholder="Beställ tavlor&#9;Kalle Andersson&#9;2027-05-01"></textarea>
+                <div id="psPreview" class="mt-3"></div>`,
+            onOpen: body => body.querySelector('#psText').addEventListener('input', () => { ready = false; $('plFormOk').textContent = 'Visa hur det blir'; body.querySelector('#psPreview').innerHTML = ''; }),
+            onOk: async body => {
+                const params = { text: body.querySelector('#psText').value, areaId: body.querySelector('#psArea') ? body.querySelector('#psArea').value : '' };
+                if (!ready) {
+                    const r = await post('PasteTasks', params);
+                    body.querySelector('#psPreview').innerHTML = (r.rows || []).length ? `<table class="table table-sm"><thead><tr><th>Uppgift</th><th>Vem</th><th>Sista dag</th></tr></thead><tbody>${r.rows.map(x =>
+                        `<tr class="${x.error ? 'table-danger' : ''}"><td>${esc(x.title)}${x.error ? `<div class="small text-danger">${esc(x.error)}</div>` : ''}</td>
+                        <td>${esc(x.who || '')}${x.who && !x.matched ? ' <span class="pl-help small">(skrivs som namn)</span>' : ''}</td><td>${esc(x.due || '')}</td></tr>`).join('')}</tbody></table>` : '';
+                    if (!r.success) return r.message;
+                    ready = true; $('plFormOk').textContent = `Lägg in ${r.rows.length} uppgifter`;
+                    return false;
+                }
+                const r = await post('PasteTasks', Object.assign({ apply: '1' }, params));
+                if (!r.success) return r.message;
+                await reloadTasks(); rerender(); showMsg(`${r.added} uppgifter lades till.`, 'success');
+                return true;
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------- dokument
+    function openDocAdd(where) {
+        formModal({
+            title: 'Lägg till dokument eller länk', okLabel: 'Lägg till', wide: false,
+            html: `<div class="btn-group mb-3" role="group" aria-label="Sort">
+                    <input type="radio" class="btn-check" name="dcKind" id="dcLink" value="link" checked><label class="btn btn-outline-secondary btn-sm" for="dcLink">Länk</label>
+                    <input type="radio" class="btn-check" name="dcKind" id="dcFile" value="file"><label class="btn btn-outline-secondary btn-sm" for="dcFile">Fil</label></div>
+                <div class="mb-3"><label class="form-label" for="dcTitle">Namn (valfritt)</label><input id="dcTitle" class="form-control" maxlength="200" placeholder="Till exempel Inbjudan eller Banritning"></div>
+                <div id="dcLinkBox"><label class="form-label" for="dcUrl">Länk</label><input id="dcUrl" class="form-control" placeholder="https://"></div>
+                <div id="dcFileBox" class="d-none"><label class="form-label" for="dcFileIn">Fil</label><input id="dcFileIn" type="file" class="form-control">
+                    <div class="pl-help small mt-1">PDF, bild, Word, Excel, PowerPoint eller text, högst 25 MB.</div></div>`,
+            onOpen: body => body.querySelectorAll('[name=dcKind]').forEach(r => r.addEventListener('change', () => {
+                const file = body.querySelector('#dcFile').checked;
+                body.querySelector('#dcLinkBox').classList.toggle('d-none', file);
+                body.querySelector('#dcFileBox').classList.toggle('d-none', !file);
+            })),
+            onOk: async body => {
+                const title = body.querySelector('#dcTitle').value;
+                let r;
+                if (body.querySelector('#dcFile').checked) {
+                    const f = body.querySelector('#dcFileIn').files[0];
+                    if (!f) return 'Välj en fil.';
+                    const fd = new FormData();
+                    fd.append('file', f); fd.append('title', title);
+                    if (where.areaId) fd.append('areaId', where.areaId);
+                    if (where.taskId) fd.append('taskId', where.taskId);
+                    r = await postForm('UploadDocument', fd);
+                } else {
+                    r = await post('AddDocumentLink', { title, url: body.querySelector('#dcUrl').value.trim(), areaId: where.areaId || '', taskId: where.taskId || '' });
+                }
+                if (!r.success) return r.message;
+                await reloadTasks(); rerender();
+                if (where.taskId) { const t = findTask(where.taskId); if (t) { openThread(t, true); return false; } }
+                return true;
+            }
+        });
+    }
+    async function removeDoc(id) {
+        const d = (TASKS.documents || []).find(x => x.id === id); if (!d) return;
+        if (!await plConfirm('Ta bort dokumentet?', d.title, 'Ta bort', true)) return;
+        const r = await post('RemoveDocument', { documentId: id });
+        if (!r.success) { failMsg(r); return; }
+        await reloadTasks(); rerender();
+    }
+    // Materielberäkningen räknas ur tävlingens anmälningar (bemanningens tjänst, tävlingens behörighet).
+    async function openMateriel(c) {
+        let html;
+        try {
+            const r = await req('/umbraco/surface/Staffing/GetMaterielEstimate?competitionId=' + c.id, { headers: { 'Accept': 'application/json' } });
+            if (!r.success) html = `<div class="alert alert-warning mb-0">${esc(r.message || 'Beräkningen kunde inte göras.')}</div>`;
+            else html = `<p class="pl-help">En <b>uppskattning</b> utifrån ${r.participantCount} deltagare, ${r.startCount} starter och ${r.classCount} klasser${r.series > 0 ? `, ${r.series} serier` : ''}. Justera innan ni beställer.</p>
+                <div class="table-responsive"><table class="table table-sm"><thead><tr><th>Kategori</th><th>Materiel</th><th class="text-end">Antal</th><th>Underlag</th></tr></thead><tbody>
+                ${(r.rows || []).map(x => `<tr><td>${esc(x.category)}</td><td>${esc(x.item)}</td><td class="text-end">${x.quantity != null ? esc(x.quantity + (x.unit ? ' ' + x.unit : '')) : '<span class="pl-help">efter behov</span>'}</td>
+                    <td class="pl-help small">${esc(x.basis)}</td></tr>`).join('') || '<tr><td colspan="4" class="pl-help">Inga poster.</td></tr>'}</tbody></table></div>`;
+        } catch (e) { html = `<div class="alert alert-warning mb-0">${esc(e.message)}</div>`; }
+        formModal({ title: 'Materielberäkning', wide: true, cancelLabel: 'Stäng', html });
+    }
+    async function remindOverdue() {
+        const people = new Set(TASKS.tasks.filter(t => t.overdue && t.assigneeId).map(t => t.assigneeId)).size;
+        if (!people) { showMsg('Ingen av de försenade uppgifterna har en ansvarig i planeringen att påminna.', 'info'); return; }
+        if (!await plConfirm('Påminn om försenade uppgifter?', `${people === 1 ? 'En person' : people + ' personer'} får ett mejl med sina försenade uppgifter. Ett mejl per person och dag.`, 'Skicka')) return;
+        const r = await post('RemindOverdue', {});
+        if (!r.success) { failMsg(r); return; }
+        showMsg(r.sent === r.people ? `${r.sent} ${r.sent === 1 ? 'person har' : 'personer har'} fått en påminnelse.`
+            : `${r.sent} av ${r.people} fick en påminnelse. Inte nådda: ${esc((r.failed || []).join(', ')) || 'de som redan påmints i dag eller stängt av notiserna'}.`, r.sent ? 'success' : 'warning');
+    }
+    document.addEventListener('click', e => {
+        const tq = e.target.closest('[data-tk-quickdone]');
+        if (tq) { const t = findTask(parseInt(tq.dataset.tkQuickdone, 10)); if (t) { tq.disabled = true; markDone(t); } return; }
+        const th = e.target.closest('[data-tk-thread]');
+        if (th) { const t = findTask(parseInt(th.dataset.tkThread, 10)); if (t) openThread(t); return; }
+        if (e.target.closest('[data-tk-template]')) { openTemplate(); return; }
+        if (e.target.closest('[data-tk-doc-add]')) { openDocAdd({}); return; }
+        const dt = e.target.closest('[data-tk-doc-add-task]');
+        if (dt) { openDocAdd({ taskId: parseInt(dt.dataset.tkDocAddTask, 10) }); return; }
+        const dd = e.target.closest('[data-tk-doc-del]');
+        if (dd) { removeDoc(parseInt(dd.dataset.tkDocDel, 10)); }
+    });
 
     // Mötessidans knappar: Klar ✓ / Fortsätter / Ångra / Berätta hur det går / Lägg till / punkterna.
     document.addEventListener('click', async e => {
@@ -1284,7 +1719,8 @@
                 mgr && { divider: true },
                 mgr && { label: 'Ta bort ur planeringen', danger: true, fn: () => removePerson(p) },
             ]);
-            const guest = p.isGuest ? ` <span class="badge rounded-pill text-bg-light border" title="Har inget konto — deltar via länkarna i mejlen">Gäst</span>` : '';
+            const guest = (p.isGuest ? ` <span class="badge rounded-pill text-bg-light border" title="Har inget konto — deltar via länkarna i mejlen">Gäst</span>` : '')
+                + (p.viaCompetition ? ` <span class="badge rounded-pill text-bg-light border" title="Har tillgång till tävlingen och kom in utan inbjudan. Ändrar du personens nivå blir hen en vanlig deltagare.">via tävlingen</span>` : '');
             const seen = p.lastSeen ? esc(fmtShort(p.lastSeen)) : (p.inviteSent ? 'Inbjuden ' + esc(fmtShort(p.inviteSent)) + ', har inte öppnat än' : 'Har inte öppnat än');
             const rep = p.represents ? esc(p.represents) : '<span class="pl-help">—</span>';
             const roleChips = (p.roles || []).map(r => `<span class="pl-role">${esc(r)}</span>`).join(' ');
@@ -1682,8 +2118,30 @@
                 <label class="form-check-label fw-semibold" for="stListed">Visa planeringen för alla medlemmar, så att de kan be om att få vara med</label>
                 <div class="pl-help small">Då ser alla inloggade medlemmar namnet, ungefär när och var, och vem som är sammankallande — men inget av innehållet.
                     Den som ber om att få vara med kommer in först när du har godkänt. Avstängt: bara de inbjudna vet att planeringen finns.</div></div>` : ''}
-            <button class="btn btn-primary" id="stSave">Spara</button> <span id="stSaved" class="pl-help ms-2"></span></div>`;
+            <button class="btn btn-primary" id="stSave">Spara</button> <span id="stSaved" class="pl-help ms-2"></span></div>
+            ${S.me.canManage ? `<div class="pl-card" style="max-width:720px"><h2>Uppgifterna</h2>
+                <div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" id="stDoneMeet"${p.doneAtMeetingsOnly ? ' checked' : ''}>
+                <label class="form-check-label fw-semibold" for="stDoneMeet">Om en uppgift är utförd beslutas på mötena</label>
+                <div class="pl-help small">På: den som har uppgiften säger <i>Klar att pröva</i>, och mötet (eller du som sammankallande) bestämmer att den är utförd.
+                    Av: den som har uppgiften, och den som kan ändra planeringen, bockar av den direkt — bra när en person planerar en klubbtävling ensam.</div></div>
+                <span id="stDoneSaved" class="pl-help small"></span></div>` : ''}
+            ${p.competition ? `<div class="pl-card" style="max-width:720px"><h2>Tävlingen</h2>
+                <p class="mb-2">Planeringen hör till <a href="${esc(p.competition.url)}">${esc(p.competition.name)}</a>. Den som har tillgång till tävlingen — tävlingsledning,
+                    klubbens administratörer och skjutledare, kretsens administratörer — kommer in med nivån <i>Kan ändra</i> utan att bjudas in.</p>
+                ${S.me.canLinkCompetition ? '<button class="btn btn-outline-danger btn-sm" id="stUnlink">Koppla loss från tävlingen…</button>' : ''}</div>` : ''}`;
         datePicker($('stStart')); datePicker($('stEnd'));
+        $('stDoneMeet')?.addEventListener('change', async e => {
+            const r = await post('SetDoneAtMeetingsOnly', { value: e.target.checked ? '1' : '0' });
+            if (!r.success) { failMsg(r); e.target.checked = !e.target.checked; return; }
+            S.planning.doneAtMeetingsOnly = e.target.checked;
+            await reloadTasks(); $('stDoneSaved').textContent = 'Sparat.';
+        });
+        $('stUnlink')?.addEventListener('click', async () => {
+            if (!await plConfirm('Koppla loss från tävlingen?', 'Uppgifterna står kvar. De som bara var med genom tävlingen kommer inte längre in, och förberedelserna syns inte längre på tävlingens sida.', 'Koppla loss', true)) return;
+            const r = await post('UnlinkCompetition', {});
+            if (!r.success) { failMsg(r); return; }
+            await reloadPeople(); render('installningar');
+        });
         $('stSave').onclick = async () => {
             const params = { name: $('stName').value, targetText: $('stTarget').value, targetStart: $('stStart').value.trim(), targetEnd: $('stEnd').value.trim() };
             if ($('stListed')) params.listed = $('stListed').checked ? '1' : '0';

@@ -177,61 +177,19 @@ namespace HpskSite.Services.Kretsgranskning
         private class AppliedRow { public int ChecklistItemId { get; set; } public bool Added { get; set; } }
 
         /// <summary>
-        /// Lägger in de valda punkterna i tävlingens förberedelser, under ett område med kretsens
-        /// namn, och registrerar <paramref name="dismissIds"/> som bortvalda (de erbjuds inte igen).
-        /// Bara VÄNTANDE punkter som gäller tävlingen rörs — ett id ur en annan krets eller en redan
-        /// hanterad punkt ignoreras. Idempotent: en punkt läggs aldrig in två gånger.
+        /// P2: registrerar arrangörens val — uppgifterna själva läggs i tävlingens PLANERING
+        /// (<c>PlanningService.AddChecklistTasks</c>), inte längre i förberedelserna. Bara väntande punkter
+        /// som gäller tävlingen rörs.
         /// </summary>
-        public (int Added, int Dismissed) Apply(int competitionId, IEnumerable<int> addIds, IEnumerable<int> dismissIds, int actorId)
+        public void MarkHandled(int competitionId, IEnumerable<int> addedIds, IEnumerable<int> dismissedIds, int actorId)
         {
             var cl = ForCompetition(competitionId);
-            if (cl == null) return (0, 0);
-            var add = addIds.ToHashSet();
-            var dismiss = dismissIds.Where(i => !add.Contains(i)).ToHashSet();
-            var toAdd = cl.Pending.Where(p => add.Contains(p.Id)).ToList();
-            var toDismiss = cl.Pending.Where(p => dismiss.Contains(p.Id)).ToList();
-            if (toAdd.Count == 0 && toDismiss.Count == 0) return (0, 0);
-
-            var compDate = _competitions.GetSaved(competitionId)?.CompetitionDate;
-            if (compDate is { Year: <= 1900 }) compDate = null;
-
+            if (cl == null) return;
+            var pending = cl.Pending.Select(p => p.Id).ToHashSet();
             using var scope = _scopeProvider.CreateScope();
-            var db = scope.Database;
-            int added = 0;
-            if (toAdd.Count > 0)
-            {
-                var areaName = "Kretsens checklista — " + cl.RegionName;
-                var area = db.FirstOrDefault<WorkArea>("SELECT * FROM WorkArea WHERE CompetitionId = @0 AND Name = @1", competitionId, areaName);
-                if (area == null)
-                {
-                    area = new WorkArea
-                    {
-                        CompetitionId = competitionId, Name = areaName, CreatedByMemberId = actorId, CreatedDate = DateTime.UtcNow,
-                        SortOrder = db.ExecuteScalar<int>("SELECT ISNULL(MAX(SortOrder), 0) + 1 FROM WorkArea WHERE CompetitionId = @0", competitionId)
-                    };
-                    db.Insert(area);
-                }
-                var existing = db.Fetch<string>("SELECT ScopeKey FROM WorkItem WHERE CompetitionId = @0 AND ScopeType = @1", competitionId, ChecklistScopeType).ToHashSet();
-                var sort = db.ExecuteScalar<int>("SELECT ISNULL(MAX(SortOrder), 0) FROM WorkItem WHERE WorkAreaId = @0", area.Id);
-                foreach (var p in toAdd)
-                {
-                    if (!existing.Contains(p.Id.ToString()))
-                    {
-                        db.Insert(new WorkItem
-                        {
-                            CompetitionId = competitionId, WorkAreaId = area.Id, Title = p.Title, Description = p.Description,
-                            DueDate = compDate != null && p.DaysBeforeComp != null ? compDate.Value.Date.AddDays(-p.DaysBeforeComp.Value) : null,
-                            Status = WorkItemStatus.Planerad, ScopeType = ChecklistScopeType, ScopeKey = p.Id.ToString(),
-                            SortOrder = ++sort, CreatedByMemberId = actorId, CreatedDate = DateTime.UtcNow, ModifiedDate = DateTime.UtcNow
-                        });
-                        added++;
-                    }
-                    Mark(db, competitionId, p.Id, true, actorId);
-                }
-            }
-            foreach (var p in toDismiss) Mark(db, competitionId, p.Id, false, actorId);
+            foreach (var id in addedIds.Where(pending.Contains)) Mark(scope.Database, competitionId, id, true, actorId);
+            foreach (var id in dismissedIds.Where(pending.Contains)) Mark(scope.Database, competitionId, id, false, actorId);
             scope.Complete();
-            return (added, toDismiss.Count);
         }
 
         private static void Mark(IDatabase db, int competitionId, int itemId, bool added, int actorId) =>

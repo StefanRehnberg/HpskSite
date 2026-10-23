@@ -154,6 +154,11 @@ namespace HpskSite.Models.Planning
         public string Status { get; set; } = "Active";
         /// <summary>Den sammankallandes val: planeringen syns i listan för alla medlemmar, som kan be om att få vara med.</summary>
         public bool ListedForMembers { get; set; }
+        /// <summary>
+        /// "Utförd beslutas på mötena" (Stefan 2026-10-23). PÅ för en namngiven planering; AV för en tävlings
+        /// egen planering, där den ansvarige och Kan ändra bockar av direkt. C#-standarden måste vara PÅ.
+        /// </summary>
+        public bool DoneAtMeetingsOnly { get; set; } = true;
         public int? CopiedFromPlanningId { get; set; }
         public int? SeededFromCompetitionId { get; set; }
         public DateTime CreatedAt { get; set; }
@@ -199,6 +204,11 @@ namespace HpskSite.Models.Planning
         public DateTime? LastSeenAt { get; set; }
         public DateTime? RemovedAt { get; set; }
         public int? RemovedBy { get; set; }
+        /// <summary>
+        /// Kom in genom tävlingens behörighet (tävlingsledning, klubbadmin, skjutledare, kretsadmin) — inte
+        /// inbjuden. Raden gäller bara så länge personen har den behörigheten; prövas vid varje anrop.
+        /// </summary>
+        public bool ViaCompetition { get; set; }
 
         [Ignore] public bool IsGuest => !(MemberId > 0);
         [Ignore] public bool IsActive => RemovedAt == null;
@@ -427,6 +437,27 @@ namespace HpskSite.Models.Planning
         /// <summary>Läget före Utförd — så att "Ångra" lägger tillbaka det.</summary>
         public string? StatusBeforeDone { get; set; }
         public DateTime? DeletedAt { get; set; }
+
+        // ---- P2: det förberedelserna hade ----
+        /// <summary>Området (PlanningArea.Id). Null = utan område.</summary>
+        public int? AreaId { get; set; }
+        /// <summary>Fritt namn när ingen deltagare har uppgiften ("Ungdomssektionen").</summary>
+        public string? AssigneeName { get; set; }
+        /// <summary>
+        /// "N dagar före": sista dagen räknas från den kopplade tävlingens dag, annars från planeringens
+        /// startdag, och följer med om dagen flyttas. Null = <see cref="DueDate"/> gäller.
+        /// </summary>
+        public int? DueDaysBefore { get; set; }
+        /// <summary>Station, Skjutlag, Klass, Patrull eller Bana.</summary>
+        public string? ScopeType { get; set; }
+        public string? ScopeKey { get; set; }
+        /// <summary>Vad den beräknas kosta. Utfallet kommer ur bokföringen.</summary>
+        public decimal? EstimatedCost { get; set; }
+        public int SortOrder { get; set; }
+        /// <summary>Template, KretsChecklist, Station eller Paste — var uppgiften kom ifrån.</summary>
+        public string? SourceKind { get; set; }
+        public string? SourceKey { get; set; }
+        public int? ImportedFromWorkItemId { get; set; }
     }
 
     /// <summary>Uppgiftens historik: lägen, rapporter och beslut. Raderas aldrig.</summary>
@@ -440,6 +471,8 @@ namespace HpskSite.Models.Planning
         public const string Undone = "Undone";
         public const string Continued = "Continued";
         public const string Removed = "Removed";
+        /// <summary>En kommentar på uppgiften (P2). Texten i <c>Note</c>.</summary>
+        public const string Comment = "Comment";
     }
 
     [TableName("PlanningTaskEvent")]
@@ -490,5 +523,74 @@ namespace HpskSite.Models.Planning
         public DateTime? RemovedAt { get; set; }
         public int? RemovedBy { get; set; }
         [Ignore] public bool IsActive => RemovedAt == null;
+    }
+
+    // ============================================================================================
+    //  P2 (2026-10-23): områden, dokument och kopplingen till en tävling.
+    //  Se notes/tavlingsplanering-p2-plan-2026-10-23.md.
+    // ============================================================================================
+
+    /// <summary>Ett område (Materiel, Banor, Servering …). Inte samma sak som en del (gren) i P3.</summary>
+    [TableName("PlanningArea")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class PlanningAreaRow
+    {
+        public int Id { get; set; }
+        public int PlanningId { get; set; }
+        public string Name { get; set; } = "";
+        public int? ResponsibleParticipantId { get; set; }
+        public string? ResponsibleName { get; set; }
+        public int SortOrder { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public int CreatedBy { get; set; }
+        public DateTime? DeletedAt { get; set; }
+        public int? ImportedFromWorkAreaId { get; set; }
+    }
+
+    /// <summary>En länk eller en fil, för planeringen, ett område eller en uppgift.</summary>
+    [TableName("PlanningDocument")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class PlanningDocumentRow
+    {
+        public int Id { get; set; }
+        public int PlanningId { get; set; }
+        public int? AreaId { get; set; }
+        public int? TaskId { get; set; }
+        public string Title { get; set; } = "";
+        public string? Url { get; set; }
+        public string? StoredFileName { get; set; }
+        public string? OriginalFileName { get; set; }
+        public DateTime AddedAt { get; set; }
+        public int AddedBy { get; set; }
+        public DateTime? DeletedAt { get; set; }
+        public int? ImportedFromWorkLinkId { get; set; }
+        [Ignore] public bool IsFile => !string.IsNullOrEmpty(StoredFileName);
+    }
+
+    /// <summary>
+    /// Kopplingen planering ↔ tävling. En planering per tävling (unikt index på TargetKind + TargetId).
+    /// TargetKind är alltid "competition" — tävlingarnas id-golv läser kolumnen.
+    /// </summary>
+    [TableName("PlanningLink")]
+    [PrimaryKey("Id", AutoIncrement = true)]
+    public class PlanningLinkRow
+    {
+        public const string Competition = "competition"; // competitionstore-ok: kopplingens sort (TargetKind), inte doktypens alias
+        public int Id { get; set; }
+        public int PlanningId { get; set; }
+        public int PlanningPartId { get; set; }
+        public string TargetKind { get; set; } = Competition;
+        public int TargetId { get; set; }
+        public DateTime LinkedAt { get; set; }
+        public int LinkedBy { get; set; }
+    }
+
+    /// <summary>Var en uppgift kom ifrån.</summary>
+    public static class PlanningTaskSource
+    {
+        public const string Template = "Template";
+        public const string KretsChecklist = "KretsChecklist";
+        public const string Station = "Station";
+        public const string Paste = "Paste";
     }
 }

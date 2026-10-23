@@ -53,6 +53,10 @@ namespace HpskSite.Controllers
         private readonly AdminAuthorizationService _auth;
         private readonly HpskSite.Services.Notifications.WebPushService _pushInfo;
         private readonly ILogger<PlanningController> _logger;
+        private readonly HpskSite.Services.Competitions.ICompetitionStore _competitions;
+        private readonly HpskSite.Services.Competitions.CompetitionLinks _competitionLinks;
+        private readonly HpskSite.Services.Kretsgranskning.KretsPlanningService _kretsPlanning;
+        private readonly HpskSite.Services.Staffing.PrepDocumentStorage _docs;
 
         public PlanningController(
             IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
@@ -61,9 +65,15 @@ namespace HpskSite.Controllers
             PlanningService planning, PlanningNotifier notify, PlanningLinkService links,
             IMemberManager memberManager, IMemberService memberService,
             MemberClubService memberClubs, BoardWorkAccess board, MemberDirectoryService directory, ClubService clubs,
-            AdminAuthorizationService auth, HpskSite.Services.Notifications.WebPushService pushInfo, ILogger<PlanningController> logger)
+            AdminAuthorizationService auth, HpskSite.Services.Notifications.WebPushService pushInfo, ILogger<PlanningController> logger,
+            HpskSite.Services.Competitions.ICompetitionStore competitions, HpskSite.Services.Competitions.CompetitionLinks competitionLinks,
+            HpskSite.Services.Kretsgranskning.KretsPlanningService kretsPlanning, HpskSite.Services.Staffing.PrepDocumentStorage docs)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _competitions = competitions;
+            _competitionLinks = competitionLinks;
+            _kretsPlanning = kretsPlanning;
+            _docs = docs;
             _planning = planning;
             _notify = notify;
             _links = links;
@@ -108,15 +118,40 @@ namespace HpskSite.Controllers
                 if (target == null || target.PlanningId != planningId) return null;
                 var row = _planning.Participant(planningId, target.ParticipantId);
                 if (row == null || !row.IsActive) return null;
+                // ⚠️ En rad som kom via tävlingen prövas om vid nästa inloggade besök (då tas den bort om
+                // behörigheten är borta). Mejllänken kan inte pröva tävlingens behörighet åt någon annan än
+                // den inloggade, och den gäller högst 60 dagar.
                 return new Ctx(p, new PlanningCaller(row, true), row.MemberId ?? 0);
             }
 
             var me = await MemberIdAsync();
             if (me <= 0) return null;
             var participant = _planning.ParticipantForMember(planningId, me);
+            participant = await ApplyCompetitionAccessAsync(planningId, me, participant);
             var c = new PlanningCaller(participant is { IsActive: true } ? participant : null, false);
             if (!PlanningAccess.CanReadContent(c)) return null;
             return new Ctx(p, c, me);
+        }
+
+        /// <summary>
+        /// Tillgång via kopplingen (Stefan 2026-10-23): den som har tillgång till den kopplade tävlingen
+        /// (tävlingsledning, klubbadmin, skjutledare, kretsadmin, sajtadmin) är Kan ändra utan inbjudan. En rad
+        /// som bara fanns genom tävlingen tas bort när behörigheten är borta.
+        /// </summary>
+        private async Task<PlanningMemberRow?> ApplyCompetitionAccessAsync(int planningId, int memberId, PlanningMemberRow? participant)
+        {
+            if (participant is { IsActive: true } && !participant.ViaCompetition) return participant;
+            var link = _planning.LinkFor(planningId);
+            var hasAccess = link != null && await _auth.HasCompetitionStaffAccessAsync(link.TargetId);
+            if (participant is { IsActive: true })
+            {
+                if (hasAccess) return participant;
+                _planning.DropCompetitionParticipant(planningId, participant.Id);
+                return null;
+            }
+            if (!hasAccess) return participant;
+            var m = _memberService.GetById(memberId);
+            return _planning.EnsureCompetitionParticipant(planningId, memberId, MemberDisplayName(m)) ?? participant;
         }
 
         private IActionResult Missing() => Json(new { success = false, missing = true, message = "Planeringen finns inte, eller så är du inte med i den." });
@@ -299,6 +334,8 @@ namespace HpskSite.Controllers
                     targetText = x.Planning.TargetText, targetStart = D(x.Planning.TargetStart), targetEnd = D(x.Planning.TargetEnd),
                     status = x.Planning.Status, listed = x.Planning.ListedForMembers,
                     createdAt = D(x.Planning.CreatedAt),
+                    doneAtMeetingsOnly = x.Planning.DoneAtMeetingsOnly,
+                    competition = CompetitionJson(x.Planning.Id),
                 },
                 me = new
                 {
@@ -314,6 +351,10 @@ namespace HpskSite.Controllers
                     pushConfigured = _pushInfo.IsConfigured,
                     canManageRoles = PlanningAccess.CanManageRoles(c),
                     canCreateTasks = PlanningAccess.CanCreateTasks(c),
+                    canManageAreas = PlanningAccess.CanManageAreas(c),
+                    canAddDocument = PlanningAccess.CanAddDocument(c),
+                    canLinkCompetition = PlanningAccess.CanLinkCompetition(c),
+                    viaCompetition = c.Participant?.ViaCompetition ?? false,
                     openTasks = c.IsParticipant ? tasks.Count(tk => tk.AssigneeParticipantId == c.ParticipantId && PlanningTaskStatus.IsOpen(tk.Status)) : 0,
                 },
                 participants = people.Select(p => new
@@ -328,6 +369,7 @@ namespace HpskSite.Controllers
                     // Klubbarna personen kan företräda: bara för den som får ändra raden.
                     clubChoices = (meCanManage || p.Id == c.ParticipantId) && p.MemberId > 0 ? ClubChoices(p.MemberId.Value) : null,
                     roles = roles[p.Id].Select(r => r.Name),
+                    viaCompetition = p.ViaCompetition,
                     openTasks = tasks.Count(tk => tk.AssigneeParticipantId == p.Id && PlanningTaskStatus.IsOpen(tk.Status)),
                 }),
                 // Förslagen när en roll ges: bemanningens katalog + planeringens vanliga ansvar. Egen text går alltid.
@@ -398,7 +440,9 @@ namespace HpskSite.Controllers
         {
             var x = await ResolveAsync(id, null);
             if (x == null) return Missing();
-            if (!PlanningAccess.CanInvite(x.Caller)) return No("Du kan inte bjuda in.");
+            // Sökningen används också när en uppgift ges till någon som inte är med (hen läggs då till som Deltar).
+            if (!PlanningAccess.CanInvite(x.Caller) && !(PlanningAccess.CanCreateTasks(x.Caller) && !x.Caller.ViaLink))
+                return No("Du kan inte bjuda in.");
             var query = (q ?? "").Trim();
             if (query.Length < 2) return Json(new { success = true, members = Array.Empty<object>() });
             var inPlanning = _planning.Participants(id).Where(p => p.MemberId > 0).Select(p => p.MemberId!.Value).ToHashSet();

@@ -40,8 +40,6 @@ namespace HpskSite.Controllers
         private readonly ClubService _clubService;
         private readonly StaffingService _staffing;
         private readonly CompetitionPeopleService _people;
-        private readonly WorkBreakdownService _work;
-        private readonly StaffingTemplateService _templates;
         private readonly MaterielEstimateService _materiel;
         private readonly StaffingSignupService _signup;
         private readonly StaffRequestService _request;
@@ -51,7 +49,6 @@ namespace HpskSite.Controllers
         private readonly StaffDayService _days;
         private readonly PersonMatchService _match;
         private readonly StaffingGridService _grid;
-        private readonly PrepDocumentStorage _docs;
         private readonly HpskSite.Services.Schedule.CompetitionAgendaService _agenda;
         private readonly EmailService _email;
         private readonly WebPushService _webPush;
@@ -74,8 +71,6 @@ namespace HpskSite.Controllers
             ClubService clubService,
             StaffingService staffing,
             CompetitionPeopleService people,
-            WorkBreakdownService work,
-            StaffingTemplateService templates,
             MaterielEstimateService materiel,
             StaffingSignupService signup,
             StaffRequestService request,
@@ -85,7 +80,6 @@ namespace HpskSite.Controllers
             StaffDayService days,
             PersonMatchService match,
             StaffingGridService grid,
-            PrepDocumentStorage docs,
             HpskSite.Services.Schedule.CompetitionAgendaService agenda,
             EmailService email,
             WebPushService webPush,
@@ -104,8 +98,6 @@ namespace HpskSite.Controllers
             _clubService = clubService;
             _staffing = staffing;
             _people = people;
-            _work = work;
-            _templates = templates;
             _materiel = materiel;
             _signup = signup;
             _request = request;
@@ -115,7 +107,6 @@ namespace HpskSite.Controllers
             _days = days;
             _match = match;
             _grid = grid;
-            _docs = docs;
             _agenda = agenda;
             _email = email;
             _webPush = webPush;
@@ -418,242 +409,7 @@ namespace HpskSite.Controllers
 
         // ======================= Förberedelser (work-breakdown) =======================
 
-        [HttpGet]
-        public async Task<IActionResult> GetWorkBreakdown(int competitionId)
-        {
-            if (!await HasCompetitionAccessAsync(competitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            var wb = _work.Build(competitionId, canEdit: true);
-
-            // Enrich with competition context (date anchoring + Fält station-seed availability).
-            var discipline = GetDiscipline(competitionId);
-            var (compDate, daysUntil) = GetCompDate(competitionId);
-            wb.Discipline = discipline;
-            wb.CompDate = compDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-            wb.DaysUntilComp = daysUntil;
-            wb.StationSeed = GetStationSeed(competitionId, discipline);
-
-            // Tävlingsledning READ-THROUGH. The roster owns who leads the competition (those rows are what
-            // mirror into competitionManagers). Förberedelser used to carry a *second*, unconnected copy of
-            // the same fact — a "Tävlingsledning" område whose "Utse tävlingsledare"-task sat unassigned
-            // even after a Tävlingsledare had been appointed in Bemanning. It now reads the roster instead
-            // of owning anything, so there is one answer to "who leads this competition".
-            var leadership = new List<CompetitionPersonAssignment>();
-            try { leadership = _people.Build(competitionId, discipline, canEdit: false, includePrep: false).Leadership; }
-            catch (Exception ex) { _logger.LogWarning(ex, "Prep: leadership read-through failed for {CompetitionId}", competitionId); }
-
-            return Json(new
-            {
-                success = true,
-                canEdit = wb.CanEdit,
-                discipline = wb.Discipline,
-                compDate = wb.CompDate,
-                daysUntilComp = wb.DaysUntilComp,
-                stationSeed = wb.StationSeed,
-                totalEstimatedCost = wb.TotalEstimatedCost,
-                compLinks = wb.CompLinks,
-                areas = wb.Areas,
-                leadership,
-            });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SaveWorkArea([FromBody] SaveWorkAreaRequest request)
-        {
-            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.Name))
-                return Json(new { success = false, message = "Ange ett namn på området." });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-
-            if (request.ResponsibleMemberId is > 0 && string.IsNullOrWhiteSpace(request.ResponsibleName))
-                request.ResponsibleName = MemberDisplayName(request.ResponsibleMemberId.Value);
-
-            var id = _work.SaveArea(request, viewer.Id);
-            if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
-            return Json(new { success = true, id });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DeleteWorkArea([FromBody] DeleteWorkRequest request)
-        {
-            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            _work.DeleteArea(request.Id, request.CompetitionId);
-            return Json(new { success = true });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SaveWorkItem([FromBody] SaveWorkItemRequest request)
-        {
-            if (request == null || request.CompetitionId <= 0 || request.WorkAreaId <= 0 || string.IsNullOrWhiteSpace(request.Title))
-                return Json(new { success = false, message = "Ange en uppgift." });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-
-            if (request.AssignedMemberId is > 0 && string.IsNullOrWhiteSpace(request.AssignedName))
-                request.AssignedName = MemberDisplayName(request.AssignedMemberId.Value);
-
-            var id = _work.SaveItem(request, viewer.Id, viewer.Name);
-            if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
-            return Json(new { success = true, id });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DeleteWorkItem([FromBody] DeleteWorkRequest request)
-        {
-            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            _work.DeleteItem(request.Id, request.CompetitionId);
-            return Json(new { success = true });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SetWorkItemStatus([FromBody] SaveWorkItemRequest request)
-        {
-            if (request == null || request.Id <= 0 || request.CompetitionId <= 0)
-                return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            _work.SetItemStatus(request.Id, request.CompetitionId, request.Status ?? WorkItemStatus.Planerad, viewer.Id, viewer.Name);
-            return Json(new { success = true });
-        }
-
         // ======================= Kommentarer / logg + beroenden (uppgift-tråd) =======================
-
-        [HttpGet]
-        public async Task<IActionResult> GetWorkItemThread(int competitionId, int workItemId)
-        {
-            if (!await HasCompetitionAccessAsync(competitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            var t = _work.GetThread(competitionId, workItemId, canEdit: true);
-            return Json(new
-            {
-                success = t.Success,
-                message = t.Message,
-                canEdit = t.CanEdit,
-                title = t.Title,
-                comments = t.Comments,
-                blockedBy = t.BlockedBy,
-                candidates = t.Candidates,
-            });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AddWorkItemComment([FromBody] AddWorkItemCommentRequest request)
-        {
-            if (request == null || request.CompetitionId <= 0 || request.WorkItemId <= 0 || string.IsNullOrWhiteSpace(request.Body))
-                return Json(new { success = false, message = "Skriv en kommentar." });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            var body = request.Body.Trim();
-            if (body.Length > 4000) body = body.Substring(0, 4000);
-            var id = _work.AddComment(request.CompetitionId, request.WorkItemId, body, viewer.Id, viewer.Name);
-            if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
-            return Json(new { success = true, id });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DeleteWorkItemComment([FromBody] DeleteWorkRequest request)
-        {
-            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            _work.DeleteComment(request.Id, request.CompetitionId);
-            return Json(new { success = true });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> AddWorkItemDependency([FromBody] WorkItemDependencyRequest request)
-        {
-            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            var (ok, msg) = _work.AddDependency(request.CompetitionId, request.WorkItemId, request.BlockedByItemId, viewer.Id);
-            return Json(new { success = ok, message = msg });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> RemoveWorkItemDependency([FromBody] WorkItemDependencyRequest request)
-        {
-            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            _work.RemoveDependency(request.Id, request.CompetitionId);
-            return Json(new { success = true });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SeedPrepTemplate([FromBody] SeedPrepTemplateRequest request)
-        {
-            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            var discipline = GetDiscipline(request.CompetitionId);
-            var (compDate, _) = GetCompDate(request.CompetitionId);
-            var added = request.TemplateId > 0
-                ? _templates.SeedFromTemplate(request.CompetitionId, request.TemplateId, compDate, viewer.Id)
-                : _work.SeedTemplate(request.CompetitionId, request.Size, discipline, compDate, viewer.Id);
-            return Json(new { success = true, added });
-        }
-
-        /// <summary>
-        /// Kretsens arrangörschecklista (fas 4): punkterna som gäller tävlingen och som arrangören
-        /// ännu inte tagit ställning till. Läser bara — ingenting läggs in förrän arrangören väljer.
-        /// </summary>
-        [HttpGet]
-        public async Task<IActionResult> GetKretsChecklist(int competitionId)
-        {
-            if (!await HasCompetitionAccessAsync(competitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            var cl = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Kretsgranskning.KretsPlanningService>().ForCompetition(competitionId);
-            if (cl == null) return Json(new { success = true, has = false });
-            return Json(new
-            {
-                success = true,
-                has = true,
-                regionName = cl.RegionName,
-                added = cl.Added,
-                dismissed = cl.Dismissed,
-                pending = cl.Pending.Select(p => new
-                {
-                    p.Id, p.Title, p.Description, p.DaysBeforeComp,
-                    whenLabel = p.DaysBeforeComp == null ? "" : p.DaysBeforeComp == 0 ? "på tävlingsdagen"
-                        : p.DaysBeforeComp > 0 ? $"{p.DaysBeforeComp} dagar före" : $"{-p.DaysBeforeComp} dagar efter"
-                })
-            });
-        }
 
         public class ApplyKretsChecklistRequest
         {
@@ -661,23 +417,6 @@ namespace HpskSite.Controllers
             public List<int>? AddIds { get; set; }
             /// <summary>Punkter som inte behövs för tävlingen — registreras som bortvalda och erbjuds inte igen.</summary>
             public List<int>? DismissIds { get; set; }
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> ApplyKretsChecklist([FromBody] ApplyKretsChecklistRequest request)
-        {
-            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            var (added, dismissed) = HttpContext.RequestServices.GetRequiredService<HpskSite.Services.Kretsgranskning.KretsPlanningService>()
-                .Apply(request.CompetitionId, request.AddIds ?? new List<int>(), request.DismissIds ?? new List<int>(), viewer.Id);
-            var parts = new List<string>();
-            if (added > 0) parts.Add($"{added} {(added == 1 ? "uppgift" : "uppgifter")} från kretsens checklista lades in");
-            if (dismissed > 0) parts.Add($"{dismissed} {(dismissed == 1 ? "punkt" : "punkter")} valdes bort och visas inte igen");
-            return Json(new { success = true, added, dismissed, message = parts.Count == 0 ? "Ingenting ändrades." : string.Join(", ", parts) + "." });
         }
 
         /// <summary>Discipline-aware materiel-quantity estimate from participant/class/series counts.</summary>
@@ -943,154 +682,7 @@ namespace HpskSite.Controllers
 
         // ---- Phase 1.5: editable per-club/region planning templates ----
 
-        [HttpGet]
-        public async Task<IActionResult> ListTemplates(int competitionId)
-        {
-            if (!await HasCompetitionAccessAsync(competitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            var templates = _templates.GetForCompetition(competitionId, GetDiscipline(competitionId), canManage: true);
-            return Json(new { success = true, templates });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SaveAsTemplate([FromBody] SaveAsTemplateRequest request)
-        {
-            if (request == null || request.CompetitionId <= 0 || string.IsNullOrWhiteSpace(request.Name))
-                return Json(new { success = false, message = "Ange ett namn på mallen." });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            var id = _templates.SaveSnapshot(request.CompetitionId, request.Name, request.OwnerType, viewer.Id);
-            return Json(new { success = true, id });
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DeleteTemplate([FromBody] DeleteTemplateRequest request)
-        {
-            if (request == null || request.TemplateId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            // Only allow deleting a template that belongs to this competition's club/region.
-            var owned = _templates.GetForCompetition(request.CompetitionId, GetDiscipline(request.CompetitionId), canManage: true)
-                .Any(t => t.Id == request.TemplateId);
-            if (!owned) return Json(new { success = false, message = "Mallen tillhör inte den här tävlingens klubb/krets." });
-            _templates.Delete(request.TemplateId);
-            return Json(new { success = true });
-        }
-
-        /// <summary>Auto-seed one "Bygg station N" uppgift per configured station (Fältskytte).</summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SeedStationTasks([FromBody] SeedStationTasksRequest request)
-        {
-            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            var seed = GetStationSeed(request.CompetitionId, GetDiscipline(request.CompetitionId));
-            if (seed == null || !seed.Available)
-                return Json(new { success = false, message = "Ingen stationskonfiguration hittades." });
-            var added = _work.SeedStationTasks(request.CompetitionId, seed.StationCount, viewer.Id);
-            return Json(new { success = true, added });
-        }
-
         // ======================= Dokument & länkar (WorkLink) =======================
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> SaveWorkLink([FromBody] SaveWorkLinkRequest request)
-        {
-            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            if (string.IsNullOrWhiteSpace(request.Url)) return Json(new { success = false, message = "Ange en länk (URL)." });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-
-            var url = request.Url.Trim();
-            if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                url = "https://" + url;
-            var title = string.IsNullOrWhiteSpace(request.Title) ? url : request.Title.Trim();
-
-            var id = _work.SaveLink(new WorkLink
-            {
-                CompetitionId = request.CompetitionId,
-                WorkAreaId = request.WorkAreaId is > 0 ? request.WorkAreaId : null,
-                WorkItemId = request.WorkItemId is > 0 ? request.WorkItemId : null,
-                Title = title.Length > 200 ? title.Substring(0, 200) : title,
-                Url = url,
-                CreatedByMemberId = viewer.Id,
-            });
-            if (id == 0) return Json(new { success = false, message = NotInCompetitionMessage });
-            return Json(new { success = true, id });
-        }
-
-        [HttpPost]
-        public async Task<IActionResult> UploadWorkDocument(int competitionId, int? workAreaId, int? workItemId, string? title, IFormFile? file)
-        {
-            if (competitionId <= 0 || file == null) return Json(new { success = false, message = "Ingen fil vald." });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(competitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-
-            var (ok, err) = _docs.Validate(file.FileName, file.Length);
-            if (!ok) return Json(new { success = false, message = err });
-
-            string stored;
-            using (var s = file.OpenReadStream()) stored = await _docs.SaveAsync(s, file.FileName);
-            var display = string.IsNullOrWhiteSpace(title) ? file.FileName : title.Trim();
-
-            var id = _work.SaveLink(new WorkLink
-            {
-                CompetitionId = competitionId,
-                WorkAreaId = workAreaId is > 0 ? workAreaId : null,
-                WorkItemId = workItemId is > 0 ? workItemId : null,
-                Title = display.Length > 200 ? display.Substring(0, 200) : display,
-                StoredFileName = stored,
-                OriginalFileName = file.FileName,
-                CreatedByMemberId = viewer.Id,
-            });
-            if (id == 0)
-            {
-                // Ingen rad pekar på filen — ta bort den igen, annars ligger den kvar i lagringen för alltid.
-                await _docs.DeleteAsync(stored);
-                return Json(new { success = false, message = NotInCompetitionMessage });
-            }
-            return Json(new { success = true, id });
-        }
-
-        [HttpGet]
-        public async Task<IActionResult> DownloadWorkDocument(int id)
-        {
-            var link = _work.GetLink(id);
-            if (link == null || string.IsNullOrEmpty(link.StoredFileName)) return NotFound();
-            if (!await HasCompetitionAccessAsync(link.CompetitionId)) return Forbid();
-            var stream = await _docs.OpenReadAsync(link.StoredFileName);
-            if (stream == null) return NotFound();
-            var download = string.IsNullOrEmpty(link.OriginalFileName) ? link.StoredFileName : link.OriginalFileName;
-            return File(stream, PrepDocumentStorage.ContentTypeFor(link.StoredFileName), download, enableRangeProcessing: true);
-        }
-
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DeleteWorkLink([FromBody] DeleteWorkRequest request)
-        {
-            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            var storedFile = _work.DeleteLink(request.Id, request.CompetitionId);
-            if (!string.IsNullOrEmpty(storedFile)) await _docs.DeleteAsync(storedFile);
-            return Json(new { success = true });
-        }
 
         // ======================= Notiser & påminnelser (P2) =======================
 
@@ -1158,95 +750,7 @@ namespace HpskSite.Controllers
             return Json(new { success = true, url, token });
         }
 
-        /// <summary>Notify the member assigned to an uppgift about the task + deadline; log it to the thread.</summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> NotifyWorkItem([FromBody] DeleteWorkRequest request)
-        {
-            if (request == null || request.Id <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            var it = _work.GetItem(request.Id);
-            if (it == null) return Json(new { success = false, message = "Uppgiften hittades inte." });
-            if (!await HasCompetitionAccessAsync(it.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-            if (it.AssignedMemberId is not > 0)
-                return Json(new { success = false, message = "Uppgiften har ingen tilldelad medlem att notifiera." });
-
-            var meta = GetCompMeta(it.CompetitionId);
-            var due = it.DueDate.HasValue ? it.DueDate.Value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : null;
-            var subject = $"Uppgift: {it.Title} – {meta.Name}";
-            var body = $"Du är ansvarig för uppgiften <strong>{System.Net.WebUtility.HtmlEncode(it.Title)}</strong> inför <strong>{System.Net.WebUtility.HtmlEncode(meta.Name)}</strong>."
-                + (due != null ? $" Senast: <strong>{due}</strong>." : "");
-            var html = NotifyEmailHtml(body, "Öppna planeringen", meta.Url, viewer.Name);
-            var (email, push) = await NotifyMemberAsync(it.AssignedMemberId.Value, subject, html, "Uppgift",
-                it.Title + (due != null ? " · senast " + due : ""), meta.Url);
-
-            _work.LogAudit(it.CompetitionId, it.Id, $"Påminnelse skickad till {it.AssignedName ?? "tilldelad medlem"}", viewer.Id, viewer.Name);
-            if (!email && push == 0)
-                return Json(new { success = false, message = "Kunde inte skicka — medlemmen saknar e-post och push-prenumeration." });
-            return Json(new { success = true, email, push });
-        }
-
-        /// <summary>Nudge everyone with an overdue uppgift — one grouped reminder per member. Logs each item.</summary>
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> RemindOverdue([FromBody] SeedStationTasksRequest request)
-        {
-            if (request == null || request.CompetitionId <= 0) return Json(new { success = false, message = "Ogiltig förfrågan" });
-            var viewer = await ResolveViewerAsync();
-            if (viewer == null) return Json(new { success = false, message = "Inte inloggad" });
-            if (!await HasCompetitionAccessAsync(request.CompetitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-
-            var wb = _work.Build(request.CompetitionId, canEdit: true);
-            var overdue = wb.Areas.SelectMany(a => a.Items).Where(i => i.IsOverdue && i.AssignedMemberId is > 0).ToList();
-            if (overdue.Count == 0)
-                return Json(new { success = true, notified = 0, items = 0, message = "Inga försenade uppgifter med tilldelad medlem." });
-
-            var meta = GetCompMeta(request.CompetitionId);
-            int notified = 0, sentItems = 0;
-            foreach (var g in overdue.GroupBy(i => i.AssignedMemberId!.Value))
-            {
-                var list = g.ToList();
-                var rows = string.Join("", list.Select(i =>
-                    $"<li>{System.Net.WebUtility.HtmlEncode(i.Title)}{(i.DueDate != null ? $" — senast {System.Net.WebUtility.HtmlEncode(i.DueDate)}" : "")}</li>"));
-                var html = NotifyEmailHtml(
-                    $"Du har <strong>{list.Count}</strong> försenad(e) uppgift(er) inför <strong>{System.Net.WebUtility.HtmlEncode(meta.Name)}</strong>:<ul>{rows}</ul>",
-                    "Öppna planeringen", meta.Url, viewer.Name);
-                var (email, push) = await NotifyMemberAsync(g.Key, $"Påminnelse: försenade uppgifter – {meta.Name}", html,
-                    "Försenade uppgifter", $"{list.Count} uppgift(er) på {meta.Name}", meta.Url);
-                if (email || push > 0) notified++;
-                foreach (var i in list) { _work.LogAudit(request.CompetitionId, i.Id, "Påminnelse skickad (försenad)", viewer.Id, viewer.Name); sentItems++; }
-            }
-            return Json(new { success = true, notified, items = sentItems });
-        }
-
         // ======================= Shared: member picker =======================
-
-        /// <summary>
-        /// The competition's OWN crew, for the "föreslagna" block that now heads every member picker here.
-        /// Prep owners used to be picked out of a site-wide member search with no reference to the roster,
-        /// which is how a person could own half the preparation without ever appearing in the crew list.
-        /// </summary>
-        [HttpGet]
-        public async Task<IActionResult> GetCrewCandidates(int competitionId)
-        {
-            if (!await HasCompetitionAccessAsync(competitionId))
-                return Json(new { success = false, message = "Ingen behörighet" });
-
-            var candidates = _people.Candidates(competitionId, GetDiscipline(competitionId)).Select(p => new
-            {
-                memberId = p.MemberId,
-                memberName = p.DisplayName,
-                clubName = p.ClubName,
-                phone = p.Phone,
-                roleSummary = string.Join(" · ", p.RoleLabels),
-                state = p.State,
-                prepOpenCount = p.PrepOpenCount,
-            });
-            return Json(new { success = true, members = candidates });
-        }
 
         [HttpGet]
         public async Task<IActionResult> SearchMembers(int competitionId, string query)

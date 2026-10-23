@@ -103,6 +103,35 @@ namespace HpskSite.Services.Planning
         public static bool CanDecideTask(PlanningCaller c, bool atCurrentMeeting) =>
             atCurrentMeeting ? CanUseMeetings(c) : CanManagePlanning(c);
 
+        /// <summary>
+        /// P2: samma beslut med planeringens val "Utförd beslutas på mötena". Är valet AV (tävlingens egen
+        /// planering) får den ansvarige och Kan ändra markera Utförd direkt, även utanför ett möte.
+        /// </summary>
+        public static bool CanDecideTask(PlanningCaller c, bool atCurrentMeeting, PlanningRow p, PlanningTaskRow? t)
+        {
+            if (atCurrentMeeting) return CanUseMeetings(c);
+            if (p.DoneAtMeetingsOnly) return CanManagePlanning(c);
+            return AtLeast(c, PlanningAccessLevel.Editor)
+                || (t != null && c.IsParticipant && t.AssigneeParticipantId == c.ParticipantId);
+        }
+
+        /// <summary>Områden, mallar, kretsens checklista och stationer: Kan ändra och uppåt (inte via mejllänk).</summary>
+        public static bool CanManageAreas(PlanningCaller c) => CanEditPlanning(c);
+
+        /// <summary>Kommentera en uppgift: Deltar och uppåt, och den som har uppgiften.</summary>
+        public static bool CanCommentOnTask(PlanningCaller c, PlanningTaskRow t) =>
+            CanWriteMessages(c) || (c.IsParticipant && t.AssigneeParticipantId == c.ParticipantId);
+
+        /// <summary>Lägga till ett dokument eller en länk: Deltar och uppåt, inloggad.</summary>
+        public static bool CanAddDocument(PlanningCaller c) => CanWriteMessages(c) && !c.ViaLink;
+
+        /// <summary>Ta bort ett dokument: den som lade till det, eller Kan ändra och uppåt.</summary>
+        public static bool CanRemoveDocument(PlanningCaller c, PlanningDocumentRow d) =>
+            c.IsParticipant && !c.ViaLink && (d.AddedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+
+        /// <summary>Koppla och koppla loss en tävling: den sammankallande (plus tävlingens redigerare, prövas av anroparen).</summary>
+        public static bool CanLinkCompetition(PlanningCaller c) => CanManagePlanning(c);
+
         /// <summary>Lägga till något att prata om på ett möte: Deltar och uppåt.</summary>
         public static bool CanAddTopic(PlanningCaller c) => CanUseMeetings(c);
 

@@ -23,43 +23,7 @@
 @* container-fluid, som /competitionmanagement. Rutnätet vill ha varenda pixel: varje sparad bildpunkt
    är en dagkolumn till som ryms utan att man behöver scrolla i sidled. *@
 <div class="container-fluid mt-4 mb-5">
-    @* One line by default, expandable, and dismissible for the session. The full-height version ate 40%
-       of the first screen and opened with "en massa testdata" — which reads as "don't trust this with my
-       SM" to the exact person we most want using it. The offer to help is still here, just not shouted. *@
-    <div class="alert alert-warning border-warning py-2 mb-3" role="alert" id="planBeta" style="display:none">
-        <div class="d-flex align-items-center gap-2 flex-wrap">
-            <i class="bi bi-cone-striped flex-shrink-0"></i>
-            <span class="small flex-grow-1">
-                <strong>Beta.</strong> Tävlingsplaneringen byggs fortfarande — hör gärna av dig om något
-                saknas eller krånglar.
-                <a href="#" class="ms-1" data-bs-toggle="collapse" data-bs-target="#planBetaMore">Mer</a>
-            </span>
-            <button type="button" class="btn-close btn-sm" aria-label="Dölj" onclick="planBetaDismiss()"></button>
-        </div>
-        <div class="collapse mt-2 small" id="planBetaMore">
-            Har du erfarenhet av <strong>större tävlingar</strong> (krets- eller SM-nivå)? Testa att planera
-            en tänkt tävling — bygg förberedelselistan, lägg upp bemanningen och kör igenom upprop och
-            materiel — och berätta vad som <em>saknas</em>, vad som är <em>krångligt</em> och vad som blir
-            <em>fel</em>. Använd knappen <strong>Rapportera fel</strong> nere till höger. Din återkoppling
-            avgör vad vi bygger härnäst. 🙏
-        </div>
-    </div>
-    <script>
-        // Dismissed for this browser, not forever-for-everyone: a returning organiser shouldn't have to
-        // read a construction sign every time they open their plan.
-        (function () {
-            var el = document.getElementById('planBeta');
-            if (!el) return;
-            try { if (localStorage.getItem('hpsk_plan_beta_hidden') !== '1') el.style.display = ''; }
-            catch (e) { el.style.display = ''; }
-        })();
-        function planBetaDismiss() {
-            var el = document.getElementById('planBeta');
-            if (el) el.style.display = 'none';
-            try { localStorage.setItem('hpsk_plan_beta_hidden', '1'); } catch (e) { }
-        }
-    </script>
-
+    @* Beta-rutan är borttagen (beslut 9.12, Stefan 2026-10-21). *@
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
         <div>
             <h1><i class="bi bi-clipboard-check me-2"></i>Planering</h1>
@@ -120,7 +84,8 @@
 
         <div class="tab-content" id="planeringPillContent">
             <div class="tab-pane fade show active" id="plan-forberedelser" role="tabpanel">
-                @await Html.PartialAsync("_WorkBreakdown", childVd)
+                @* P2 (2026-10-23): förberedelserna görs i tävlingens planering — kortet leder dit. *@
+                @await Html.PartialAsync("_CompetitionPlanningCard", childVd)
             </div>
             <div class="tab-pane fade" id="plan-bemanning" role="tabpanel">
                 @await Html.PartialAsync("_StaffingRoster", childVd)

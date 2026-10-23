@@ -422,8 +422,8 @@ namespace HpskSite.Composers
             // THE GRID: roles x days. One builder for the screen AND the printout - the printable sheet
             // used to render its own role-grouped list, so paper looked nothing like the plan on screen.
             builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingGridService>();
-            // Phase 1.5: editable per-club/region planning templates. Run create-staffing-template-table.sql.
-            builder.Services.AddScoped<HpskSite.Services.Staffing.StaffingTemplateService>();
+            // (StaffingTemplateService borttagen 2026-10-23: ytan låg i den gamla förberedelselistan. P3:s
+            // "Kopiera planeringen" ersätter de sparade mallarna; tabellen StaffingTemplate står kvar, tom.)
             // Materiel-quantity estimate (general Beställningslista from participant/class/series counts).
             builder.Services.AddScoped<HpskSite.Services.Staffing.MaterielEstimateService>();
             // Phase 3: sourcing scope + member self-sign-up. Run create-staffing-source-scope-table.sql.

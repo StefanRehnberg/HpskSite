@@ -43,6 +43,7 @@ namespace HpskSite.Services.Planning
             "PlanningMessageMention", "PlanningMessageRead", "PlanningMeeting", "PlanningMeetingOption",
             "PlanningMeetingVote", "PlanningNotifyLog", "PlanningLink", "PlanningRequest",
             "PlanningTask", "PlanningTaskEvent", "PlanningMeetingTopic", "PlanningRole",
+            "PlanningArea", "PlanningDocument",
         };
 
         /// <summary>Tabeller som saknas. Kastar om databasen inte går att fråga — "vet inte" är inget svar.</summary>
@@ -54,6 +55,10 @@ namespace HpskSite.Services.Planning
             // NPoco skriver kolumnen vid varje sparning av en planering — utan den faller allt.
             if (!missing.Contains("Planning") && s.Database.ExecuteScalar<int>("SELECT CASE WHEN COL_LENGTH('dbo.Planning','ListedForMembers') IS NULL THEN 0 ELSE 1 END") == 0)
                 missing.Add("Planning.ListedForMembers");
+            // P2: kolumnerna som NPoco skriver vid varje sparning (alter-planning-p2-tasks.sql).
+            foreach (var (table, col) in new[] { ("Planning", "DoneAtMeetingsOnly"), ("PlanningMember", "ViaCompetition"), ("PlanningTask", "ImportedFromWorkItemId") })
+                if (!missing.Contains(table) && s.Database.ExecuteScalar<int>($"SELECT CASE WHEN COL_LENGTH('dbo.{table}','{col}') IS NULL THEN 0 ELSE 1 END") == 0)
+                    missing.Add(table + "." + col);
             return missing;
         }
 
@@ -268,6 +273,9 @@ namespace HpskSite.Services.Planning
             row.RepresentsClubId = repClubId;
             row.RepresentsRegionId = repClubId > 0 ? null : repRegionId;
             row.RepresentsText = Clean(repText, 200);
+            // Den sammankallande har tagit ställning till personen: hen är nu en vanlig deltagare, inte
+            // längre med bara genom tävlingens behörighet.
+            row.ViaCompetition = false;
             db.Update(row);
             Bump(db, planningId);
             return null;

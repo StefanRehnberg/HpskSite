@@ -66,24 +66,46 @@ namespace HpskSite.Services.Planning
 
         public sealed record TaskResult(int TaskId, string? Error, int? NewAssignee = null);
 
-        /// <summary>En ny uppgift, på ett möte eller fristående.</summary>
-        public TaskResult CreateTask(int planningId, int byParticipantId, string title, string? description,
-            int? assignee, DateTime? due, int? fromMeetingId)
+        /// <summary>
+        /// Uppgiftens innehåll. Ansvarig = en deltagare ELLER ett fritt namn. Sista dag = ett datum ELLER
+        /// "N dagar före" (<see cref="DueDaysBefore"/>), som räknas från <c>anchor</c>.
+        /// </summary>
+        public sealed record TaskInput(string Title, string? Description, int? Assignee, string? AssigneeName,
+            DateTime? Due, int? DueDaysBefore, int? AreaId, string? ScopeType, string? ScopeKey, decimal? EstimatedCost);
+
+        private static string? ValidateInput(TaskInput i)
         {
-            var err = PlanningTaskRules.ValidateTitle(title);
+            var err = PlanningTaskRules.ValidateTitle(i.Title) ?? PlanningTaskRules.ValidateDaysBefore(i.DueDaysBefore);
+            if (err != null) return err;
+            if (i.EstimatedCost is < 0 or > 100_000_000m) return "Ange en uppskattning mellan 0 och 100 000 000 kr.";
+            var st = Clean(i.ScopeType, 20);
+            if (st != null && !PlanningTaskRules.ScopeTypes.Contains(st)) return "Okänd koppling.";
+            return null;
+        }
+
+        /// <summary>En ny uppgift, på ett möte eller fristående.</summary>
+        public TaskResult CreateTask(int planningId, int byParticipantId, TaskInput i, int? fromMeetingId, DateTime? anchor)
+        {
+            var err = ValidateInput(i);
             if (err != null) return new TaskResult(0, err);
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
             var db = s.Database;
-            err = AssigneeError(db, planningId, assignee);
+            err = AssigneeError(db, planningId, i.Assignee) ?? AreaError(db, planningId, i.AreaId);
             if (err != null) return new TaskResult(0, err);
             if (fromMeetingId > 0 && db.ExecuteScalar<int>("SELECT COUNT(*) FROM PlanningMeeting WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL",
                     fromMeetingId, planningId) != 1)
                 return new TaskResult(0, "Mötet finns inte.");
+            var area = i.AreaId > 0 ? i.AreaId : null;
             var t = new PlanningTaskRow
             {
-                PlanningId = planningId, Title = title.Trim(), Description = Clean(description, 4000),
-                AssigneeParticipantId = assignee > 0 ? assignee : null, DueDate = due?.Date,
+                PlanningId = planningId, Title = i.Title.Trim(), Description = Clean(i.Description, 4000),
+                AssigneeParticipantId = i.Assignee > 0 ? i.Assignee : null,
+                AssigneeName = i.Assignee > 0 ? null : Clean(i.AssigneeName, 200),
+                DueDaysBefore = i.DueDaysBefore,
+                DueDate = i.DueDaysBefore.HasValue ? PlanningTaskRules.DueFromDaysBefore(i.DueDaysBefore, anchor) : i.Due?.Date,
+                AreaId = area, ScopeType = Clean(i.ScopeType, 20), ScopeKey = Clean(i.ScopeType, 20) == null ? null : Clean(i.ScopeKey, 100),
+                EstimatedCost = i.EstimatedCost, SortOrder = NextTaskSort(db, planningId, area) + 1,
                 Status = PlanningTaskStatus.NotStarted, FromMeetingId = fromMeetingId > 0 ? fromMeetingId : null,
                 CreatedAt = now, CreatedBy = byParticipantId, UpdatedAt = now,
             };
@@ -94,10 +116,9 @@ namespace HpskSite.Services.Planning
         }
 
         /// <summary>Ändrar uppgiftens innehåll. <see cref="TaskResult.NewAssignee"/> sätts när ansvarig BYTTS (då aviseras hen).</summary>
-        public TaskResult UpdateTask(int planningId, int taskId, int byParticipantId, string title, string? description,
-            int? assignee, DateTime? due)
+        public TaskResult UpdateTask(int planningId, int taskId, int byParticipantId, TaskInput i, DateTime? anchor)
         {
-            var err = PlanningTaskRules.ValidateTitle(title);
+            var err = ValidateInput(i);
             if (err != null) return new TaskResult(taskId, err);
             var now = Now;
             using var s = _scopes.CreateScope(autoComplete: true);
@@ -105,20 +126,35 @@ namespace HpskSite.Services.Planning
             var t = db.SingleOrDefault<PlanningTaskRow>(
                 "SELECT * FROM PlanningTask WITH (UPDLOCK) WHERE Id = @0 AND PlanningId = @1 AND DeletedAt IS NULL", taskId, planningId);
             if (t == null) return new TaskResult(taskId, "Uppgiften finns inte.");
-            err = AssigneeError(db, planningId, assignee);
+            err = AssigneeError(db, planningId, i.Assignee) ?? AreaError(db, planningId, i.AreaId);
             if (err != null) return new TaskResult(taskId, err);
-            var newAssignee = assignee > 0 ? assignee : null;
+            var newAssignee = i.Assignee > 0 ? i.Assignee : null;
+            var newName = newAssignee.HasValue ? null : Clean(i.AssigneeName, 200);
+            var newDue = i.DueDaysBefore.HasValue ? PlanningTaskRules.DueFromDaysBefore(i.DueDaysBefore, anchor) : i.Due?.Date;
+            var newArea = i.AreaId > 0 ? i.AreaId : null;
+            var newScope = Clean(i.ScopeType, 20);
+            var newKey = newScope == null ? null : Clean(i.ScopeKey, 100);
             var changed = new List<string>();
-            if (t.Title != title.Trim()) changed.Add("rubriken");
-            if ((t.Description ?? "") != (Clean(description, 4000) ?? "")) changed.Add("beskrivningen");
-            if (t.AssigneeParticipantId != newAssignee) changed.Add("vem som har den");
-            if (t.DueDate != due?.Date) changed.Add("sista dagen");
+            if (t.Title != i.Title.Trim()) changed.Add("rubriken");
+            if ((t.Description ?? "") != (Clean(i.Description, 4000) ?? "")) changed.Add("beskrivningen");
+            if (t.AssigneeParticipantId != newAssignee || (t.AssigneeName ?? "") != (newName ?? "")) changed.Add("vem som har den");
+            if (t.DueDate != newDue || t.DueDaysBefore != i.DueDaysBefore) changed.Add("sista dagen");
+            if (t.AreaId != newArea) changed.Add("området");
+            if ((t.ScopeType ?? "") != (newScope ?? "") || (t.ScopeKey ?? "") != (newKey ?? "")) changed.Add("kopplingen");
+            if (t.EstimatedCost != i.EstimatedCost) changed.Add("uppskattningen");
             if (changed.Count == 0) return new TaskResult(taskId, null);
             var reassigned = t.AssigneeParticipantId != newAssignee && newAssignee.HasValue;
-            t.Title = title.Trim();
-            t.Description = Clean(description, 4000);
+            if (t.AreaId != newArea) t.SortOrder = NextTaskSort(db, planningId, newArea) + 1;
+            t.Title = i.Title.Trim();
+            t.Description = Clean(i.Description, 4000);
             t.AssigneeParticipantId = newAssignee;
-            t.DueDate = due?.Date;
+            t.AssigneeName = newName;
+            t.DueDaysBefore = i.DueDaysBefore;
+            t.DueDate = newDue;
+            t.AreaId = newArea;
+            t.ScopeType = newScope;
+            t.ScopeKey = newKey;
+            t.EstimatedCost = i.EstimatedCost;
             t.UpdatedAt = now;
             db.Update(t);
             TaskEvent(db, t, PlanningTaskEventKind.Edited, byParticipantId, null, null, "Ändrade " + string.Join(", ", changed) + ".", null, false, now);

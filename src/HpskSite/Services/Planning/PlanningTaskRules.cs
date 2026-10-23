@@ -102,6 +102,68 @@ namespace HpskSite.Services.Planning
             return null;
         }
 
+        // ---------------------------------------------------------------- P2: sista dag, koppling, inklistring
+
+        /// <summary>Det en uppgift kan kopplas till (som förberedelserna). "Station N" länkar till Fältkonfiguratorn.</summary>
+        public static readonly string[] ScopeTypes = { "Station", "Skjutlag", "Klass", "Patrull", "Bana" };
+
+        /// <summary>Längsta "dagar före" som går att ange (ett SM planeras två år i förväg).</summary>
+        public const int MaxDaysBefore = 1000;
+
+        /// <summary>Sista dagen ur "N dagar före" och ankaret (tävlingens dag, annars planeringens startdag).</summary>
+        public static DateTime? DueFromDaysBefore(int? daysBefore, DateTime? anchor) =>
+            daysBefore.HasValue && anchor.HasValue && anchor.Value.Year > 1900 ? anchor.Value.Date.AddDays(-daysBefore.Value) : null;
+
+        /// <summary>Ankaret för "dagar före": den kopplade tävlingens dag, annars planeringens startdag.</summary>
+        public static DateTime? Anchor(DateTime? competitionDate, DateTime? planningStart) =>
+            competitionDate is { Year: > 1900 } c ? c.Date : planningStart is { Year: > 1900 } p ? p.Date : null;
+
+        public static string? ValidateDaysBefore(int? days) =>
+            days is < 0 or > MaxDaysBefore ? $"Ange mellan 0 och {MaxDaysBefore} dagar före." : null;
+
+        /// <summary>Hur många dagar före sista dagen den ansvarige påminns.</summary>
+        public const int DueReminderDays = 3;
+
+        /// <summary>Påminnelsefönstret: från tre dagar före sista dagen till och med sista dagen.</summary>
+        public static bool DueReminderWindow(DateTime due, DateTime today) =>
+            today.Date >= due.Date.AddDays(-DueReminderDays) && today.Date <= due.Date;
+
+        /// <summary>Har sista dagen passerat för en öppen uppgift?</summary>
+        public static bool IsOverdue(PlanningTaskRow t, DateTime today) =>
+            t.DueDate.HasValue && t.DueDate.Value.Date < today.Date && PlanningTaskStatus.IsOpen(t.Status);
+
+        public sealed record PasteRow(string Title, string? Who, DateTime? Due, string? Error);
+
+        /// <summary>
+        /// En rad per uppgift, inklistrad ur ett kalkylark: <c>uppgift ⇥ vem ⇥ datum</c> (tabb eller semikolon).
+        /// Tomma rader hoppas över. Ett datum som inte går att läsa ger ett fel på raden — hela inklistringen
+        /// stoppas av anroparen, eftersom en halvt inläst lista är svår att rätta.
+        /// </summary>
+        public static List<PasteRow> ParsePaste(string? text)
+        {
+            var rows = new List<PasteRow>();
+            foreach (var raw in (text ?? "").Replace("\r", "").Split('\n'))
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var parts = raw.Contains('\t') ? raw.Split('\t') : raw.Split(';');
+                var title = parts[0].Trim();
+                var who = parts.Length > 1 ? parts[1].Trim() : null;
+                var dueText = parts.Length > 2 ? parts[2].Trim() : null;
+                if (title.Length == 0) { rows.Add(new PasteRow("", who, null, "Raden saknar uppgift.")); continue; }
+                if (title.Length > MaxTitle) title = title.Substring(0, MaxTitle);
+                DateTime? due = null;
+                string? err = null;
+                if (!string.IsNullOrEmpty(dueText))
+                {
+                    if (DateTime.TryParseExact(dueText, new[] { "yyyy-MM-dd", "yyyy-M-d", "d/M/yyyy", "d.M.yyyy", "yyyyMMdd" },
+                            System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var d)) due = d.Date;
+                    else err = $"\"{dueText}\" är inget datum (skriv t.ex. 2027-05-14).";
+                }
+                rows.Add(new PasteRow(title, string.IsNullOrEmpty(who) ? null : who, due, err));
+            }
+            return rows;
+        }
+
         /// <summary>Rensar en rollista: trimmar, tar bort tomma och dubbletter, kapar längd och antal.</summary>
         public static List<string> CleanRoleNames(IEnumerable<string>? names)
         {

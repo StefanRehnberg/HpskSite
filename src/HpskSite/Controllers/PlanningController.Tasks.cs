@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using HpskSite.Models.Planning;
@@ -16,12 +17,19 @@ namespace HpskSite.Controllers
     public partial class PlanningController
     {
         private object TaskJson(PlanningTaskRow t, PlanningCaller c, IReadOnlyDictionary<int, string> names,
-            IReadOnlyDictionary<int, PlanningMeetingRow> meetings, DateTime now) => new
+            IReadOnlyDictionary<int, PlanningMeetingRow> meetings, DateTime now, PlanningRow? planning = null,
+            IReadOnlyDictionary<int, int>? comments = null, int? stationConfigId = null) => new
         {
             id = t.Id, title = t.Title, description = t.Description,
             assigneeId = t.AssigneeParticipantId,
-            assignee = t.AssigneeParticipantId.HasValue ? names.GetValueOrDefault(t.AssigneeParticipantId.Value, "Har lämnat planeringen") : null,
-            due = D(t.DueDate), overdue = t.DueDate.HasValue && t.DueDate.Value.Date < now.Date && PlanningTaskStatus.IsOpen(t.Status),
+            assignee = t.AssigneeParticipantId.HasValue ? names.GetValueOrDefault(t.AssigneeParticipantId.Value, "Har lämnat planeringen") : t.AssigneeName,
+            assigneeName = t.AssigneeName,
+            due = D(t.DueDate), overdue = PlanningTaskRules.IsOverdue(t, now), dueDaysBefore = t.DueDaysBefore,
+            areaId = t.AreaId, scopeType = t.ScopeType, scopeKey = t.ScopeKey, estimatedCost = t.EstimatedCost,
+            sortOrder = t.SortOrder, source = t.ImportedFromWorkItemId.HasValue ? "Imported" : t.SourceKind,
+            stationUrl = t.ScopeType == "Station" && stationConfigId > 0 ? $"/faltkonfig/{stationConfigId}/redigera" : null,
+            comments = comments?.GetValueOrDefault(t.Id) ?? 0,
+            canDecide = planning != null && !planning.DoneAtMeetingsOnly && PlanningAccess.CanDecideTask(c, false, planning, t),
             status = t.Status, statusLabel = PlanningTaskStatus.Label(t.Status),
             report = t.LatestReport, reportAt = DT(t.LatestReportAt),
             reportBy = t.LatestReportBy.HasValue ? names.GetValueOrDefault(t.LatestReportBy.Value, "Någon") : null,
@@ -43,16 +51,34 @@ namespace HpskSite.Controllers
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             var now = DateTime.Now;
+            var comp = LinkedCompetition(id);
+            // "N dagar före" följer tävlingens (eller planeringens) dag om den flyttats.
+            _planning.RealignRelativeDueDates(id, AnchorFor(x.Planning, comp));
             var names = _planning.Participants(id, includeRemoved: true).ToDictionary(p => p.Id, p => p.DisplayName);
             var meetings = _planning.Meetings(id).ToDictionary(m => m.Id);
             var tasks = _planning.Tasks(id);
+            var comments = _planning.CommentCounts(id);
+            var cfg = StationConfigId(comp);
+            var anchor = AnchorFor(x.Planning, comp);
             return Json(new
             {
                 success = true,
                 canCreate = PlanningAccess.CanCreateTasks(x.Caller),
-                canDecide = PlanningAccess.CanDecideTask(x.Caller, atCurrentMeeting: false),
+                canDecide = PlanningAccess.CanDecideTask(x.Caller, false, x.Planning, null),
+                canManageAreas = PlanningAccess.CanManageAreas(x.Caller),
+                canAddDocument = PlanningAccess.CanAddDocument(x.Caller),
+                doneAtMeetingsOnly = x.Planning.DoneAtMeetingsOnly,
+                anchor = D(anchor), anchorIsCompetition = comp?.CompetitionDate is { Year: > 1900 },
+                scopeTypes = PlanningTaskRules.ScopeTypes,
                 statuses = PlanningTaskStatus.All.Select(s => new { value = s, label = PlanningTaskStatus.Label(s), assignee = PlanningTaskStatus.AssigneeSettable.Contains(s) }),
-                tasks = tasks.Select(tk => TaskJson(tk, x.Caller, names, meetings, now)),
+                areas = _planning.Areas(id).Select(a => new
+                {
+                    id = a.Id, name = a.Name, responsibleId = a.ResponsibleParticipantId,
+                    responsible = a.ResponsibleParticipantId.HasValue ? names.GetValueOrDefault(a.ResponsibleParticipantId.Value, "Har lämnat planeringen") : a.ResponsibleName,
+                    responsibleName = a.ResponsibleName,
+                }),
+                documents = _planning.Documents(id).Select(d => DocJson(d, x.Caller, names, t)),
+                tasks = tasks.OrderBy(tk => tk.SortOrder).ThenBy(tk => tk.Id).Select(tk => TaskJson(tk, x.Caller, names, meetings, now, x.Planning, comments, cfg)),
             });
         }
 
@@ -81,12 +107,15 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> CreateTask(int id, string title, string? description, int? assignee, string? due, int? meetingId, string? t)
+        public async Task<IActionResult> CreateTask(int id, string title, string? description, int? assignee, string? due, int? meetingId, string? t,
+            int? assigneeMemberId, string? assigneeName, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost)
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             if (!PlanningAccess.CanCreateTasks(x.Caller)) return No("Bara den som deltar lägger till uppgifter.");
-            var r = _planning.CreateTask(id, x.Caller.ParticipantId, title, description, assignee, ParseDate(due), meetingId);
+            var (input, err) = await TaskInputAsync(x, title, description, assignee, assigneeMemberId, assigneeName, due, dueDaysBefore, areaId, scopeType, scopeKey, estimatedCost);
+            if (err != null) return No(err);
+            var r = _planning.CreateTask(id, x.Caller.ParticipantId, input!, meetingId, AnchorFor(x.Planning, LinkedCompetition(id)));
             if (r.Error != null) return No(r.Error);
             var mailed = await NotifyAssignedAsync(id, r.TaskId, r.NewAssignee, x.Caller);
             return Ok(new { success = true, taskId = r.TaskId, mailed });
@@ -94,14 +123,17 @@ namespace HpskSite.Controllers
 
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> UpdateTask(int id, int taskId, string title, string? description, int? assignee, string? due, string? t)
+        public async Task<IActionResult> UpdateTask(int id, int taskId, string title, string? description, int? assignee, string? due, string? t,
+            int? assigneeMemberId, string? assigneeName, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost)
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
             var task = _planning.GetTask(id, taskId);
             if (task == null) return No("Uppgiften finns inte.");
             if (!PlanningAccess.CanEditTask(x.Caller, task)) return No("Uppgiften ändras av den som lade till den, eller av den som kan ändra planeringen.");
-            var r = _planning.UpdateTask(id, taskId, x.Caller.ParticipantId, title, description, assignee, ParseDate(due));
+            var (input, err) = await TaskInputAsync(x, title, description, assignee, assigneeMemberId, assigneeName, due, dueDaysBefore, areaId, scopeType, scopeKey, estimatedCost);
+            if (err != null) return No(err);
+            var r = _planning.UpdateTask(id, taskId, x.Caller.ParticipantId, input!, AnchorFor(x.Planning, LinkedCompetition(id)));
             if (r.Error != null) return No(r.Error);
             var mailed = await NotifyAssignedAsync(id, taskId, r.NewAssignee, x.Caller);
             return Ok(new { success = true, mailed });
@@ -117,6 +149,15 @@ namespace HpskSite.Controllers
             var task = _planning.GetTask(id, taskId);
             if (task == null) return No("Uppgiften finns inte.");
             if (!PlanningAccess.CanReportOnTask(x.Caller, task)) return No("Det är den som har uppgiften som säger hur det går.");
+            if (PlanningTaskStatus.Normalize(status) == PlanningTaskStatus.Done)
+            {
+                // Tävlingens egen planering ("Utförd beslutas på mötena" av): den ansvarige bockar av själv.
+                if (!PlanningAccess.CanDecideTask(x.Caller, false, x.Planning, task))
+                    return No("Om uppgiften är utförd bestämmer ni på ett möte, eller den sammankallande.");
+                var e1 = string.IsNullOrWhiteSpace(report) ? null : _planning.ReportOnTask(id, taskId, x.Caller.ParticipantId, null, report, x.Caller.ViaLink);
+                var e2 = e1 ?? _planning.DecideTask(id, taskId, x.Caller.ParticipantId, true, null, null);
+                return e2 == null ? Ok() : No(e2);
+            }
             var err = _planning.ReportOnTask(id, taskId, x.Caller.ParticipantId, string.IsNullOrWhiteSpace(status) ? null : status, report, x.Caller.ViaLink);
             return err == null ? Ok() : No(err);
         }
@@ -131,11 +172,12 @@ namespace HpskSite.Controllers
         {
             var x = await ResolveAsync(id, t);
             if (x == null) return Missing();
-            if (_planning.GetTask(id, taskId) == null) return No("Uppgiften finns inte.");
+            var task = _planning.GetTask(id, taskId);
+            if (task == null) return No("Uppgiften finns inte.");
             var m = meetingId > 0 ? _planning.Meeting(id, meetingId!.Value) : null;
             if (meetingId > 0 && m == null) return No("Mötet finns inte.");
             var atMeeting = PlanningTaskRules.MeetingIsCurrent(m, DateTime.Now);
-            if (!PlanningAccess.CanDecideTask(x.Caller, atMeeting))
+            if (!PlanningAccess.CanDecideTask(x.Caller, atMeeting, x.Planning, task))
                 return No(meetingId > 0 && !atMeeting
                     ? "Mötet pågår inte nu. Om en uppgift är utförd bestämmer ni på mötet — eller den sammankallande."
                     : "Om en uppgift är utförd bestäms på ett möte, eller av den sammankallande.");
@@ -161,6 +203,46 @@ namespace HpskSite.Controllers
             if (!PlanningAccess.CanEditTask(x.Caller, task)) return No("Uppgiften tas bort av den som lade till den, eller av den som kan ändra planeringen.");
             var err = _planning.RemoveTask(id, taskId, x.Caller.ParticipantId);
             return err == null ? Ok() : No(err);
+        }
+
+        /// <summary>
+        /// Formulärets fält som en <see cref="PlanningService.TaskInput"/>. En medlem som får uppgiften men inte är
+        /// med läggs till som Deltar (Stefan 2026-10-23), inom inbjudningstaket.
+        /// </summary>
+        private Task<(PlanningService.TaskInput? Input, string? Error)> TaskInputAsync(Ctx x, string title, string? description, int? assignee,
+            int? assigneeMemberId, string? assigneeName, string? due, int? dueDaysBefore, int? areaId, string? scopeType, string? scopeKey, string? estimatedCost)
+        {
+            int? pid = assignee > 0 ? assignee : null;
+            if (pid == null && assigneeMemberId > 0)
+            {
+                if (x.Caller.ViaLink) return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Logga in för att ge uppgiften till någon som inte är med."));
+                var m = _memberService.GetById(assigneeMemberId.Value);
+                if (m == null || !m.IsApproved) return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Medlemmen finns inte."));
+                if (_planning.ParticipantForMember(x.Planning.Id, m.Id) is not { IsActive: true } && _planning.InvitesLastDay(x.Planning.Id) >= PlanningInviteRules.MaxPerDay)
+                    return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, PlanningInviteRules.LimitMessage));
+                pid = _planning.EnsureParticipantForMember(x.Planning.Id, m.Id, MemberDisplayName(m), x.MemberId);
+                if (!(pid > 0)) return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Personen kunde inte läggas till i planeringen."));
+            }
+            decimal? cost = null;
+            var costText = (estimatedCost ?? "").Trim().Replace(" ", "").Replace(",", ".");
+            if (costText.Length > 0)
+            {
+                if (!decimal.TryParse(costText, NumberStyles.Number, Inv, out var c)) return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Skriv uppskattningen som ett belopp i kronor."));
+                cost = c;
+            }
+            var dueDate = ParseDate(due);
+            if (!string.IsNullOrWhiteSpace(due) && dueDate == null && dueDaysBefore == null)
+                return Task.FromResult<(PlanningService.TaskInput?, string?)>((null, "Skriv sista dagen som ett datum, till exempel 2027-05-14."));
+            return Task.FromResult<(PlanningService.TaskInput?, string?)>((new PlanningService.TaskInput(title, description, pid,
+                pid == null ? assigneeName : null, dueDaysBefore.HasValue ? null : dueDate, dueDaysBefore, areaId, scopeType, scopeKey, cost), null));
+        }
+
+        /// <summary>Fältkonfigurationen tävlingen är ansluten till — "Station N" länkar dit.</summary>
+        private static int? StationConfigId(HpskSite.Models.Competitions.CompetitionInfo? comp)
+        {
+            if (comp == null || string.IsNullOrWhiteSpace(comp.StationConfig)) return null;
+            try { return Newtonsoft.Json.Linq.JObject.Parse(comp.StationConfig).Value<int?>("_attachedConfigId"); }
+            catch { return null; }
         }
 
         /// <summary>Mejl till den som fått uppgiften — inte till den som gav sig själv den.</summary>

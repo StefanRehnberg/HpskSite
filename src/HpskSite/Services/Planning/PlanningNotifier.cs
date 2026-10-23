@@ -418,6 +418,73 @@ namespace HpskSite.Services.Planning
                 $"Ny uppgift: {task.Title}", Page(r.Name, p.Name, inner.ToString(), NotifyFooter(r, planningId)), ReplyToFor(by, p.Name));
         }
 
+        /// <summary>
+        /// "Påminn försenade" (P2): ett mejl till personen med HENS försenade uppgifter — en gång om dagen och
+        /// person, hur många gånger knappen än trycks. Returnerar om mejlet gick iväg.
+        /// </summary>
+        public async Task<bool> OverdueReminderAsync(int planningId, int participantId, List<int> taskIds, PlanningMemberRow? by)
+        {
+            var p = _planning.Get(planningId);
+            var who = _planning.Participant(planningId, participantId);
+            if (p == null || who == null || !who.IsActive || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) return false;
+            var r = ResolveRecipient(who);
+            if (r == null) return false;
+            var tasks = _planning.Tasks(planningId).Where(t => taskIds.Contains(t.Id)).OrderBy(t => t.DueDate ?? DateTime.MaxValue).ToList();
+            if (tasks.Count == 0) return false;
+            var inner = new StringBuilder();
+            inner.Append($"<p>{H(by?.DisplayName ?? "Någon")} påminner om {(tasks.Count == 1 ? "en uppgift" : $"{tasks.Count} uppgifter")} där sista dagen har passerat:</p><ul>");
+            foreach (var t in tasks.Take(20))
+                inner.Append($"<li><b>{H(t.Title)}</b> <span style=\"color:#555\">(senast {H(t.DueDate?.ToString("d MMM", Sv))}, {H(PlanningTaskStatus.Label(t.Status))})</span></li>");
+            inner.Append("</ul>");
+            inner.Append($"<p>{Button("Berätta hur det går", OpenUrl(r, planningId, "uppgifter"))}</p>");
+            inner.Append("<p style=\"color:#555\">Är något klart, eller behöver du hjälp? Säg det i planeringen, så vet de andra.</p>");
+            return await SendMail(r, planningId, "task-overdue", "day", PlanningNotifyRules.DayKey(DateTime.Now), null,
+                $"Påminnelse: {(tasks.Count == 1 ? tasks[0].Title : $"{tasks.Count} försenade uppgifter")}",
+                Page(r.Name, p.Name, inner.ToString(), NotifyFooter(r, planningId)), ReplyToFor(by, p.Name));
+        }
+
+        /// <summary>
+        /// Svepets påminnelse om sista dagen (P2): de egna öppna uppgifter vars sista dag är inom tre dagar, i ETT
+        /// mejl per person. Varje uppgift registreras för sig (claim-then-send med sista dagen i nyckeln), så samma
+        /// uppgift påminns en gång — och igen om sista dagen flyttas.
+        /// </summary>
+        private async Task<int> DueRemindersAsync(PlanningRow p, List<PlanningMemberRow> people, DateTime now)
+        {
+            var today = now.Date;
+            var due = _planning.Tasks(p.Id)
+                .Where(t => t.AssigneeParticipantId > 0 && t.DueDate.HasValue && PlanningTaskStatus.IsOpen(t.Status)
+                            && PlanningTaskRules.DueReminderWindow(t.DueDate.Value, today))
+                .GroupBy(t => t.AssigneeParticipantId!.Value).ToList();
+            var sent = 0;
+            foreach (var g in due)
+            {
+                var who = people.FirstOrDefault(x => x.Id == g.Key);
+                if (who == null || !PlanningNotifyRules.GetsMeetingMail(who.NotifyMode)) continue;
+                var r = ResolveRecipient(who);
+                if (r == null) continue;
+                var claimed = new List<(PlanningTaskRow Task, int ClaimId)>();
+                foreach (var t in g)
+                {
+                    var id = Claim(p.Id, r.Pid, "task-due", "mail", "task", t.Id, t.DueDate, null);
+                    if (id != null) claimed.Add((t, id.Value));
+                }
+                if (claimed.Count == 0) continue;
+                var inner = new StringBuilder();
+                inner.Append($"<p>{(claimed.Count == 1 ? "En uppgift du har" : $"{claimed.Count} uppgifter du har")} ska vara klar snart:</p><ul>");
+                foreach (var (t, _) in claimed.OrderBy(c => c.Task.DueDate))
+                    inner.Append($"<li><b>{H(t.Title)}</b> <span style=\"color:#555\">(senast {H(t.DueDate!.Value.ToString("dddd d MMMM", Sv))})</span></li>");
+                inner.Append("</ul>");
+                inner.Append($"<p>{Button("Berätta hur det går", OpenUrl(r, p.Id, "uppgifter"))}</p>");
+                var owner = people.FirstOrDefault(x => x.Access == PlanningAccessLevel.Owner);
+                var ok = await _email.SendPlanningMailAsync(r.Email,
+                    claimed.Count == 1 ? $"Snart sista dag: {claimed[0].Task.Title}" : $"{p.Name}: {claimed.Count} uppgifter snart sista dag",
+                    Page(r.Name, p.Name, inner.ToString(), NotifyFooter(r, p.Id)), ReplyToFor(owner, p.Name));
+                foreach (var (_, id) in claimed) Done(id, ok);
+                if (ok) sent++;
+            }
+            return sent;
+        }
+
         /// <summary>Mottagarens öppna uppgifter, som rader i ett mejl.</summary>
         private string OpenTasksBlock(Recipient r, int planningId)
         {
@@ -457,11 +524,11 @@ namespace HpskSite.Services.Planning
         //  Svepet (körs av PlanningNotificationHostedService)
         // =====================================================================================
 
-        public sealed record SweepResult(int Digests, int Pushes, int MeetingReminders, int VoteReminders);
+        public sealed record SweepResult(int Digests, int Pushes, int MeetingReminders, int VoteReminders, int DueReminders = 0);
 
         public async Task<SweepResult> SweepAsync(DateTime now)
         {
-            int digests = 0, pushes = 0, meetingRem = 0, voteRem = 0;
+            int digests = 0, pushes = 0, meetingRem = 0, voteRem = 0, dueRem = 0;
             List<int> active;
             using (var s = _scopes.CreateScope(autoComplete: true))
                 active = s.Database.Fetch<int>("SELECT Id FROM Planning WHERE DeletedAt IS NULL AND Status = N'Active'");
@@ -519,13 +586,16 @@ namespace HpskSite.Services.Planning
                             voteRem += await RemindNonVotersAsync(planningId, m.Id, manual: false);
                         }
                     }
+
+                    // Uppgifterna: tre dagar före sista dagen (P2)
+                    dueRem += await DueRemindersAsync(p, people, now);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Planering {PlanningId}: svepet föll för planeringen.", planningId);
                 }
             }
-            return new SweepResult(digests, pushes, meetingRem, voteRem);
+            return new SweepResult(digests, pushes, meetingRem, voteRem, dueRem);
         }
 
         /// <summary>Spärren för timpushen: villkorad UPDATE, 1 rad = vi fick den.</summary>

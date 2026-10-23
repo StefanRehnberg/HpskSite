@@ -12422,7 +12422,49 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
     CanRemoveTopic/CanManageRoles`; rena funktioner i `PlanningTaskRules` (`PlanningTaskRulesTests`, 17).
     Ändpunkter i `PlanningController.Tasks.cs` (`Tasks`, `TaskHistory`, `CreateTask`, `UpdateTask`,
     `ReportTask`, `DecideTask`, `RemoveTask`, `AddTopic`, `RemoveTopic`, `SetRoles`).
-- **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (17 tabeller inkl. `PlanningRequest`,
+- **⚠️⚠️ P2 (Stefan 2026-10-23): förberedelserna BOR I PLANERINGEN** — plan
+  `notes/tavlingsplanering-p2-plan-2026-10-23.md`. Förberedelserna var beta, så ingen försiktig övergång:
+  EN uppgiftsmodell (`PlanningTask`), och den gamla listan (`_WorkBreakdown.cshtml`, ~25 ändpunkter i
+  `StaffingController`, `StaffingTemplateService`) är BORTTAGEN. De gamla tabellerna står kvar orörda.
+  - **Tävlingens sida** `/tavlingsplanering?c=` → fliken Förberedelser = kortet `_CompetitionPlanningCard`
+    (`Planning/CompetitionState`, läser bara): finns planeringen → läget + *Öppna förberedelserna*; annars
+    *Starta tävlingens planering* (`StartForCompetition` → `PlanningService.CreateForCompetition`, som i SAMMA
+    transaktion skapar planeringen, kopplingen (`PlanningLink`) och FLYTTAR IN tävlingens WorkArea/WorkItem/
+    WorkLink/WorkItemComment — idempotent via `ImportedFrom…Id`) eller *Koppla en egen planering*
+    (`LinkCompetition`: Sammankallande OCH `CanEditCompetitionAsync`). En planering per tävling, en tävling per
+    planering (tills delarna finns, P3).
+  - **Tillgång via kopplingen** (`PlanningController.ApplyCompetitionAccessAsync`): den som har
+    `HasCompetitionStaffAccessAsync` på den kopplade tävlingen får en rad `ViaCompetition = 1`, Kan ändra,
+    notisläge *Bara när någon nämner mig*. Prövas om vid varje inloggat anrop — tappad behörighet = raden tas
+    bort. ⚠️ Mejllänken kan inte pröva om (gäller högst 60 dagar). Ändrar den sammankallande nivån blir
+    personen en vanlig deltagare. Koppla loss tar bort alla `ViaCompetition`-rader.
+  - **`Planning.DoneAtMeetingsOnly`**: PÅ för en namngiven planering, AV för tävlingens egen — då bockar den
+    ansvarige och Kan ändra av direkt (`PlanningAccess.CanDecideTask(c, atMeeting, planning, task)`; Utförd i
+    `ReportTask` går till `DecideTask`). Den sammankallande ändrar under Inställningar.
+  - **Uppgiften** fick `AreaId` (`PlanningArea`, områden med ansvarig), `AssigneeName` (fritt namn),
+    `DueDaysBefore` ("N dagar före" — `DueDate` materialiseras ur ankaret = tävlingens dag, annars planeringens
+    första dag, och räknas om när uppgifterna läses: `RealignRelativeDueDates`), `ScopeType/ScopeKey`
+    (Station N länkar till Fältkonfiguratorn), `EstimatedCost`, `SortOrder`, `SourceKind/SourceKey`.
+    Kommentarer = `PlanningTaskEvent` Kind `Comment`. Dokument och filer = `PlanningDocument` (filen i
+    `PrepDocumentStorage`, `DownloadDocument` grindas av planeringen). Beroenden togs INTE med (0 använda).
+  - En uppgift till en medlem som inte är med → läggs till som Deltar (`EnsureParticipantForMember`, inom
+    inbjudningstaket). `SearchMembers` öppen för den som skapar uppgifter.
+  - **Fylla i:** standardmallen (`PrepTemplates` i `WorkBreakdownService.cs`, `SeedTemplate`, gren ur tävlingen
+    eller vald), kretsens checklista (`KretsChecklist`/`ApplyKretsChecklist` → `AddChecklistTasks` +
+    `KretsPlanningService.MarkHandled`; `RegionChecklistApplied` står kvar per tävling), en uppgift per station
+    (`SeedStations`, kopplad fälttävling), inklistring ur kalkylark (`PasteTasks`, förhandsvisning först, ett
+    oläsligt datum stoppar allt — `PlanningTaskRules.ParsePaste`). CSV: `ExportTasks`. Materielberäkningen
+    och fältets materiellista nås från Uppgifters Åtgärder.
+  - **Påminnelser:** *Påminn försenade* (`RemindOverdue`, ett mejl per person och dag, kind `task-overdue`)
+    och svepet tre dagar före sista dagen (`DueRemindersAsync`, kind `task-due`, ett mejl per person, varje
+    uppgift registrerad med sista dagen i nyckeln).
+  - **`WorkBreakdownService` är en LÄSADAPTER** över tävlingens planering i den gamla formen — läses av
+    bemanningens personlista (`CompetitionPeopleService`) och utskriftsbladet. Den skriver ingenting.
+  - Test: `PlanningPrepRulesTests`. Svit: `hpsk-verify/tavlingsplanering-p2-verify.mjs` 86/86 (fixturer 2576
+    och 5312; avbryter om de redan har en planering; A/B utan `DoneAtMeetingsOnly`-grenen och utan att
+    tappad behörighet tar bort raden → 4 röda).
+- **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (19 tabeller med P2; dev: även
+  `alter-planning-p2-tasks.sql`) (17 tabeller inkl. `PlanningRequest`,
   `Planning.ListedForMembers` och de fyra ovan; för en DB som redan har de 13: `alter-planning-tasks-topics-roles.sql`
   — NPoco skriver alla kolumner, så de MÅSTE finnas; filtrerade index ⇒
   `QUOTED_IDENTIFIER ON`, sista raden `SELECT @@TRANCOUNT;`). Körd i dev 2026-10-21/23, **EJ i prod**.

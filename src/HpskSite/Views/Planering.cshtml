@@ -120,6 +120,11 @@
     .pl-tkdone .pl-tkundo { color: inherit; text-decoration: underline; }
     .pl-tknew { display: flex; justify-content: space-between; gap: .75rem; flex-wrap: wrap; align-items: center; padding: .5rem 0; border-bottom: 1px solid var(--bs-border-color); }
     .pl-tktable tr.pl-tkmine > td:first-child { box-shadow: inset 3px 0 0 var(--bs-primary); }
+    /* P2: områdenas rubrikrader och tävlingsraden */
+    .pl-tktable tr.pl-areah > td { background: var(--bs-tertiary-bg); border-top: 2px solid var(--bs-border-color); padding-top: .55rem; padding-bottom: .55rem; }
+    .pl-tktable tr.pl-tkdonerow > td { color: var(--bs-secondary-color); }
+    .pl-tktable tr.pl-tkdonerow b { font-weight: 600; text-decoration: line-through; text-decoration-color: var(--bs-border-color); }
+    .pl-comp { padding-top: .7rem; padding-bottom: .7rem; }
     .pl-topic { display: flex; justify-content: space-between; gap: .75rem; padding: .55rem 0; border-top: 1px solid var(--bs-border-color); }
     .pl-topics .pl-topic:first-child { border-top: 0; }
     .pl-role { display: inline-block; font-size: .8rem; padding: .1rem .6rem; border-radius: 1rem;

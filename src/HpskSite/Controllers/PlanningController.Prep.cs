@@ -1,0 +1,429 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using HpskSite.Models.Competitions;
+using HpskSite.Models.Planning;
+using HpskSite.Services.Planning;
+using HpskSite.Services.Staffing;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+
+namespace HpskSite.Controllers
+{
+    /// <summary>
+    /// P2 (Stefan 2026-10-23): förberedelserna i planeringen — kopplingen till tävlingen, tävlingens egen
+    /// planering, områden, dokument, kommentarer, mallar, kretsens checklista, stationer, inklistring,
+    /// utskrift/CSV och påminnelse om försenade. Se notes/tavlingsplanering-p2-plan-2026-10-23.md.
+    /// </summary>
+    public partial class PlanningController
+    {
+        // =====================================================================================
+        //  Tävlingen planeringen hör till
+        // =====================================================================================
+
+        private CompetitionInfo? LinkedCompetition(int planningId)
+        {
+            var link = _planning.LinkFor(planningId);
+            return link == null ? null : _competitions.GetSaved(link.TargetId);
+        }
+
+        /// <summary>Ankaret för "dagar före": den kopplade tävlingens dag, annars planeringens startdag.</summary>
+        private DateTime? AnchorFor(PlanningRow p, CompetitionInfo? comp) =>
+            PlanningTaskRules.Anchor(comp?.CompetitionDate, p.TargetStart);
+
+        private object? CompetitionJson(int planningId)
+        {
+            var link = _planning.LinkFor(planningId);
+            if (link == null) return null;
+            var comp = _competitions.GetSaved(link.TargetId);
+            if (comp == null) return new { id = link.TargetId, name = "Tävlingen finns inte längre", url = "", date = "", typeId = "", planningUrl = "", isFalt = false };
+            var type = comp.TypeId ?? "";
+            return new
+            {
+                id = comp.Id, name = comp.DisplayName, url = _competitionLinks.Url(comp.Id),
+                date = D(comp.CompetitionDate), endDate = D(comp.CompetitionEndDate), typeId = type,
+                planningUrl = $"/tavlingsplanering?c={comp.Id}",
+                manageUrl = $"/competitionmanagement?competitionId={comp.Id}",
+                isFalt = type is "Faltskytte" or "MagnumFalt",
+                stationCount = type is "Faltskytte" or "MagnumFalt" ? comp.NumberOfSeriesOrStations : 0,
+            };
+        }
+
+        /// <summary>
+        /// Kortet på tävlingens sida (<c>/tavlingsplanering?c=</c>): finns tävlingens planering, och vilka egna
+        /// planeringar kan kopplas? Läser bara — ingenting skapas när sidan visas.
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> CompetitionState(int competitionId)
+        {
+            var me = await MemberIdAsync();
+            if (me <= 0) return No("Logga in först.");
+            if (!await _auth.HasCompetitionStaffAccessAsync(competitionId)) return No("Du har inte behörighet att planera den här tävlingen.");
+            var comp = _competitions.GetSaved(competitionId);
+            if (comp == null) return No("Tävlingen finns inte.");
+            var p = _planning.ForCompetition(competitionId);
+            object? planning = null;
+            if (p != null)
+            {
+                var tasks = _planning.Tasks(p.Id);
+                var today = DateTime.Today;
+                planning = new
+                {
+                    id = p.Id, name = p.Name, url = $"/tavlingsplanering/{p.Id}#vy=uppgifter",
+                    open = tasks.Count(t => PlanningTaskStatus.IsOpen(t.Status)),
+                    overdue = tasks.Count(t => PlanningTaskRules.IsOverdue(t, today)),
+                    done = tasks.Count(t => t.Status == PlanningTaskStatus.Done),
+                    total = tasks.Count,
+                };
+            }
+            // Egna planeringar som kan kopplas: där jag är Sammankallande och som inte redan är kopplade.
+            var mine = _planning.ForMember(me).Where(m => m.Access == PlanningAccessLevel.Owner && m.Status == "Active").ToList();
+            var linked = _planning.LinkedCompetitions(mine.Select(m => m.PlanningId));
+            var canEdit = await _auth.CanEditCompetitionAsync(competitionId);
+            return Json(new
+            {
+                success = true,
+                competition = new { id = comp.Id, name = comp.DisplayName, date = D(comp.CompetitionDate) },
+                planning,
+                oldPrepCount = p == null ? _planning.OldPrepCount(competitionId) : 0,
+                canLink = canEdit && p == null,
+                linkable = p == null && canEdit
+                    ? mine.Where(m => !linked.ContainsKey(m.PlanningId)).Select(m => new { id = m.PlanningId, name = m.Name })
+                    : Enumerable.Empty<object>(),
+            });
+        }
+
+        /// <summary>Startar tävlingens egen planering och flyttar in de gamla förberedelserna.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> StartForCompetition(int competitionId)
+        {
+            var me = await MemberIdAsync();
+            if (me <= 0) return No("Logga in först.");
+            if (!await _auth.HasCompetitionStaffAccessAsync(competitionId)) return No("Du har inte behörighet att planera den här tävlingen.");
+            var comp = _competitions.GetSaved(competitionId);
+            if (comp == null) return No("Tävlingen finns inte.");
+            var member = _memberService.GetById(me);
+            var primary = _memberClubs.GetPrimaryClubId(member);
+            var r = _planning.CreateForCompetition(new PlanningService.CompetitionPlanningInput(competitionId, comp.DisplayName,
+                    comp.CompetitionDate, comp.CompetitionEndDate ?? comp.CompetitionDate, me, MemberDisplayName(member),
+                    comp.ClubId > 0 ? comp.ClubId : (primary > 0 ? primary : null), null),
+                new PlanningService.WorkBreakdownImport(mid => MemberDisplayName(_memberService.GetById(mid))));
+            if (r.Error != null) return No(r.Error);
+            return Ok(new { success = true, id = r.PlanningId, created = r.Created, imported = r.ImportedTasks, url = $"/tavlingsplanering/{r.PlanningId}#vy=uppgifter" });
+        }
+
+        /// <summary>Kopplar en egen planering till tävlingen (Sammankallande OCH tävlingens redigerare, beslut 9.3).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> LinkCompetition(int id, int competitionId)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanLinkCompetition(x.Caller)) return No("Planeringen kopplas av den sammankallande.");
+            if (_competitions.GetSaved(competitionId) == null) return No("Tävlingen finns inte.");
+            if (!await _auth.CanEditCompetitionAsync(competitionId)) return No("Du behöver kunna redigera tävlingen för att koppla planeringen till den.");
+            var err = _planning.LinkToCompetition(id, competitionId, x.MemberId);
+            return err == null ? Ok(new { success = true, url = $"/tavlingsplanering/{id}#vy=uppgifter" }) : No(err);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UnlinkCompetition(int id)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanLinkCompetition(x.Caller)) return No("Planeringen kopplas loss av den sammankallande.");
+            var link = _planning.LinkFor(id);
+            if (link == null) return No("Planeringen är inte kopplad till någon tävling.");
+            if (!await _auth.CanEditCompetitionAsync(link.TargetId)) return No("Du behöver kunna redigera tävlingen för att koppla loss planeringen.");
+            var err = _planning.Unlink(id, x.MemberId);
+            return err == null ? Ok() : No(err);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SetDoneAtMeetingsOnly(int id, string? value)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManagePlanning(x.Caller)) return No("Det väljer den sammankallande.");
+            _planning.SetDoneAtMeetingsOnly(id, value == "1" || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase), x.MemberId);
+            return Ok();
+        }
+
+        // =====================================================================================
+        //  Områden
+        // =====================================================================================
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveArea(int id, int areaId, string name, int? responsibleId, string? responsibleName)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Områdena ändras av den som kan ändra planeringen.");
+            var r = _planning.SaveArea(id, areaId, name, responsibleId, responsibleName, x.Caller.ParticipantId);
+            return r.Error == null ? Ok(new { success = true, areaId = r.AreaId }) : No(r.Error);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteArea(int id, int areaId)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Områdena ändras av den som kan ändra planeringen.");
+            var err = _planning.DeleteArea(id, areaId);
+            return err == null ? Ok() : No(err);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> MoveArea(int id, int areaId, int direction)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Områdena ändras av den som kan ändra planeringen.");
+            var err = _planning.MoveArea(id, areaId, direction);
+            return err == null ? Ok() : No(err);
+        }
+
+        // =====================================================================================
+        //  Kommentarer
+        // =====================================================================================
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddTaskComment(int id, int taskId, string text, string? t)
+        {
+            var x = await ResolveAsync(id, t);
+            if (x == null) return Missing();
+            var task = _planning.GetTask(id, taskId);
+            if (task == null) return No("Uppgiften finns inte.");
+            if (!PlanningAccess.CanCommentOnTask(x.Caller, task)) return No("Bara den som deltar kommenterar.");
+            var err = _planning.AddTaskComment(id, taskId, x.Caller.ParticipantId, text, x.Caller.ViaLink);
+            return err == null ? Ok() : No(err);
+        }
+
+        // =====================================================================================
+        //  Dokument och länkar
+        // =====================================================================================
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> AddDocumentLink(int id, string? title, string url, int? areaId, int? taskId)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanAddDocument(x.Caller)) return No("Bara den som deltar lägger till dokument.");
+            var r = _planning.AddDocument(id, x.Caller.ParticipantId, new PlanningService.DocumentInput(title, url, null, null, areaId, taskId));
+            return r.Error == null ? Ok(new { success = true, documentId = r.Id }) : No(r.Error);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        [RequestSizeLimit(26L * 1024 * 1024)]
+        public async Task<IActionResult> UploadDocument(int id, string? title, int? areaId, int? taskId, IFormFile? file)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanAddDocument(x.Caller)) return No("Bara den som deltar lägger till dokument.");
+            if (file == null) return No("Välj en fil.");
+            var (ok, error) = _docs.Validate(file.FileName, file.Length);
+            if (!ok) return No(error ?? "Filen kan inte laddas upp.");
+            string stored;
+            await using (var stream = file.OpenReadStream()) stored = await _docs.SaveAsync(stream, file.FileName);
+            var r = _planning.AddDocument(id, x.Caller.ParticipantId, new PlanningService.DocumentInput(title, null, stored, file.FileName, areaId, taskId));
+            if (r.Error != null) { await _docs.DeleteAsync(stored); return No(r.Error); }
+            return Ok(new { success = true, documentId = r.Id });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> DownloadDocument(int id, int documentId, string? t)
+        {
+            var x = await ResolveAsync(id, t);
+            if (x == null) return NotFound();
+            var d = _planning.Document(id, documentId);
+            if (d == null || !d.IsFile) return NotFound();
+            var stream = await _docs.OpenReadAsync(d.StoredFileName);
+            if (stream == null) return NotFound();
+            var name = string.IsNullOrWhiteSpace(d.OriginalFileName) ? d.StoredFileName! : d.OriginalFileName!;
+            return File(stream, PrepDocumentStorage.ContentTypeFor(d.StoredFileName!), name, enableRangeProcessing: true);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemoveDocument(int id, int documentId)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            var d = _planning.Document(id, documentId);
+            if (d == null) return No("Dokumentet finns inte.");
+            if (!PlanningAccess.CanRemoveDocument(x.Caller, d)) return No("Dokumentet tas bort av den som lade till det, eller av den som kan ändra planeringen.");
+            var err = _planning.RemoveDocument(id, documentId);
+            return err == null ? Ok() : No(err);
+        }
+
+        private object DocJson(PlanningDocumentRow d, PlanningCaller c, IReadOnlyDictionary<int, string> names, string? t) => new
+        {
+            id = d.Id, title = d.Title, areaId = d.AreaId, taskId = d.TaskId, isFile = d.IsFile,
+            url = d.IsFile ? $"/umbraco/surface/Planning/DownloadDocument?id={d.PlanningId}&documentId={d.Id}" + (string.IsNullOrEmpty(t) ? "" : "&t=" + Uri.EscapeDataString(t)) : d.Url,
+            fileName = d.OriginalFileName, addedBy = d.AddedBy > 0 ? names.GetValueOrDefault(d.AddedBy, "Någon") : "", addedAt = D(d.AddedAt),
+            canRemove = PlanningAccess.CanRemoveDocument(c, d),
+        };
+
+        // =====================================================================================
+        //  Mallar, kretsens checklista, stationer, inklistring
+        // =====================================================================================
+
+        /// <summary>Fyller i från en standardmall (klubb, krets eller sm) för tävlingens gren.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SeedTemplate(int id, string size, string? discipline)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Mallen fylls i av den som kan ändra planeringen.");
+            var comp = LinkedCompetition(id);
+            var disc = comp?.TypeId ?? discipline;
+            var (areas, tasks) = _planning.SeedTemplate(id, PrepTemplates.For(disc, size), AnchorFor(x.Planning, comp), x.Caller.ParticipantId);
+            return Ok(new { success = true, areas, tasks });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> KretsChecklist(int id)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            var link = _planning.LinkFor(id);
+            if (link == null) return Ok(new { success = true, available = false });
+            var cl = _kretsPlanning.ForCompetition(link.TargetId);
+            if (cl == null) return Ok(new { success = true, available = false });
+            return Ok(new
+            {
+                success = true, available = true, regionName = cl.RegionName, added = cl.Added, dismissed = cl.Dismissed,
+                canApply = PlanningAccess.CanManageAreas(x.Caller),
+                pending = cl.Pending.Select(p => new { id = p.Id, title = p.Title, description = p.Description, daysBefore = p.DaysBeforeComp }),
+            });
+        }
+
+        /// <summary>Lägger in valda punkter som uppgifter och registrerar de bortvalda.</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ApplyKretsChecklist(int id, string? add, string? dismiss)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Kretsens punkter läggs in av den som kan ändra planeringen.");
+            var link = _planning.LinkFor(id);
+            if (link == null) return No("Planeringen är inte kopplad till någon tävling.");
+            var cl = _kretsPlanning.ForCompetition(link.TargetId);
+            if (cl == null) return No("Kretsen har ingen checklista för den här tävlingen.");
+            var addIds = Ids(add).ToHashSet();
+            var dismissIds = Ids(dismiss).Where(i => !addIds.Contains(i)).ToList();
+            var chosen = cl.Pending.Where(p => addIds.Contains(p.Id))
+                .Select(p => new PlanningService.ChecklistTask(p.Id, p.Title, p.Description, p.DaysBeforeComp)).ToList();
+            var comp = _competitions.GetSaved(link.TargetId);
+            // Uppgifterna först (idempotent på punktens id), sedan markeringen — fallerar markeringen erbjuds
+            // punkten igen men läggs inte in två gånger.
+            var added = _planning.AddChecklistTasks(id, "Kretsens checklista — " + cl.RegionName, chosen, AnchorFor(x.Planning, comp), x.Caller.ParticipantId);
+            _kretsPlanning.MarkHandled(link.TargetId, chosen.Select(c => c.ChecklistItemId), dismissIds, x.MemberId);
+            return Ok(new { success = true, added, dismissed = dismissIds.Count });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SeedStations(int id)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Stationerna läggs in av den som kan ändra planeringen.");
+            var comp = LinkedCompetition(id);
+            if (comp == null || comp.TypeId is not ("Faltskytte" or "MagnumFalt")) return No("Stationerna finns bara för en kopplad fälttävling.");
+            if (comp.NumberOfSeriesOrStations <= 0) return No("Tävlingen har inga stationer angivna.");
+            var added = _planning.SeedStationTasks(id, comp.NumberOfSeriesOrStations, x.Caller.ParticipantId);
+            return Ok(new { success = true, added });
+        }
+
+        /// <summary>
+        /// Klistra in från ett kalkylark. <paramref name="apply"/> = "1" lägger in; annars förhandsvisas raderna.
+        /// En rad som inte går att läsa stoppar allt (en halvt inläst lista är svår att rätta).
+        /// </summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> PasteTasks(int id, string? text, int? areaId, string? apply)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanCreateTasks(x.Caller) || x.Caller.ViaLink) return No("Bara den som deltar lägger till uppgifter.");
+            var rows = PlanningTaskRules.ParsePaste(text);
+            if (rows.Count == 0) return No("Klistra in minst en rad.");
+            if (rows.Count > PlanningService.MaxPasteRows) return No($"Högst {PlanningService.MaxPasteRows} rader åt gången.");
+            var people = _planning.Participants(id);
+            int? Match(string? who)
+            {
+                if (string.IsNullOrWhiteSpace(who)) return null;
+                var hit = people.Where(p => string.Equals(p.DisplayName.Trim(), who.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+                return hit.Count == 1 ? hit[0].Id : null;
+            }
+            var preview = rows.Select(r => new
+            {
+                title = r.Title, who = r.Who, due = D(r.Due), error = r.Error,
+                assigneeId = Match(r.Who), matched = Match(r.Who) != null,
+            }).ToList();
+            var errors = preview.Where(p => p.error != null).Select(p => p.error!).ToList();
+            if (apply != "1" || errors.Count > 0)
+                return Ok(new { success = errors.Count == 0, rows = preview, errors, message = errors.Count > 0 ? "Rätta raderna först: " + string.Join(" ", errors.Take(3)) : null });
+            var n = _planning.AddPastedTasks(id, areaId, rows.Select(r => new PlanningService.PastedTask(r.Title, Match(r.Who), Match(r.Who) == null ? r.Who : null, r.Due)), x.Caller.ParticipantId);
+            return Ok(new { success = true, added = n });
+        }
+
+        /// <summary>Uppgifterna som CSV (semikolon, UTF-8 med BOM — öppnas rätt i Excel).</summary>
+        [HttpGet]
+        public async Task<IActionResult> ExportTasks(int id)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return NotFound();
+            var names = _planning.Participants(id, includeRemoved: true).ToDictionary(p => p.Id, p => p.DisplayName);
+            var areas = _planning.Areas(id).ToDictionary(a => a.Id, a => a.Name);
+            static string Q(string? v) => "\"" + (v ?? "").Replace("\"", "\"\"") + "\"";
+            var sb = new StringBuilder();
+            sb.AppendLine("Område;Uppgift;Ansvarig;Sista dag;Läge;Senaste raden;Uppskattning (kr)");
+            foreach (var t in _planning.Tasks(id).OrderBy(t => t.AreaId.HasValue ? 0 : 1).ThenBy(t => t.AreaId).ThenBy(t => t.SortOrder))
+                sb.AppendLine(string.Join(";",
+                    Q(t.AreaId.HasValue ? areas.GetValueOrDefault(t.AreaId.Value, "") : ""), Q(t.Title),
+                    Q(t.AssigneeParticipantId.HasValue ? names.GetValueOrDefault(t.AssigneeParticipantId.Value, "") : t.AssigneeName),
+                    Q(D(t.DueDate)), Q(PlanningTaskStatus.Label(t.Status)), Q(t.LatestReport),
+                    Q(t.EstimatedCost?.ToString("0", CultureInfo.InvariantCulture))));
+            var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+            return File(bytes, "text/csv; charset=utf-8", "uppgifter.csv");
+        }
+
+        /// <summary>Ett mejl till var och en som har försenade uppgifter (EN per person, inte per uppgift).</summary>
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RemindOverdue(int id)
+        {
+            var x = await ResolveAsync(id, null);
+            if (x == null) return Missing();
+            if (!PlanningAccess.CanManageAreas(x.Caller)) return No("Påminnelsen skickas av den som kan ändra planeringen.");
+            var today = DateTime.Today;
+            var byPerson = _planning.Tasks(id).Where(t => PlanningTaskRules.IsOverdue(t, today) && t.AssigneeParticipantId > 0)
+                .GroupBy(t => t.AssigneeParticipantId!.Value).ToList();
+            if (byPerson.Count == 0) return Ok(new { success = true, people = 0, sent = 0, message = "Ingen har försenade uppgifter." });
+            var sent = 0;
+            var failed = new List<string>();
+            foreach (var g in byPerson)
+            {
+                try { if (await _notify.OverdueReminderAsync(id, g.Key, g.Select(t => t.Id).ToList(), x.Caller.Participant)) sent++; else failed.Add(_planning.Participant(id, g.Key)?.DisplayName ?? "Någon"); }
+                catch (Exception ex) { _logger.LogError(ex, "Planering {Id}: påminnelse till deltagare {P} misslyckades.", id, g.Key); failed.Add(_planning.Participant(id, g.Key)?.DisplayName ?? "Någon"); }
+            }
+            return Ok(new { success = true, people = byPerson.Count, sent, failed });
+        }
+    }
+}

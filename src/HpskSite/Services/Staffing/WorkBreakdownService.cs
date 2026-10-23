@@ -1,566 +1,89 @@
 ﻿using System.Globalization;
+using HpskSite.Models.Planning;
 using HpskSite.Models.Staffing;
-using Umbraco.Cms.Infrastructure.Scoping;
+using HpskSite.Services.Planning;
 
 namespace HpskSite.Services.Staffing
 {
     /// <summary>
-    /// Data layer for the preparation work-breakdown (Förberedelser): områden (WorkArea) + uppgifter
-    /// (WorkItem). Competition-scoped; per-område progress + overdue are computed on read. Independent
-    /// of start lists — pure planning. Authorization is the controller's job.
+    /// ⚠️ P2 (Stefan 2026-10-23): förberedelserna bor i tävlingens PLANERING (<see cref="PlanningService"/>).
+    /// Den här klassen är bara en LÄSADAPTER som visar planeringens områden och uppgifter i den gamla formen
+    /// (<see cref="WorkBreakdownResponse"/>), för de två ytor som läser den: bemanningens personlista
+    /// ("Förberedelser"-personerna, <see cref="CompetitionPeopleService"/>) och utskriftsbladet
+    /// (/tavlingsplanering/blad). Den skriver ingenting, och de gamla tabellerna (WorkArea, WorkItem …) läses
+    /// inte längre — de flyttas in när tävlingens planering startas. Mallarna (<see cref="PrepTemplates"/>) står
+    /// kvar här och fylls i genom planeringen.
     /// </summary>
     public class WorkBreakdownService
     {
-        private readonly IScopeProvider _scopeProvider;
+        private readonly PlanningService _planning;
 
-        public WorkBreakdownService(IScopeProvider scopeProvider)
+        public WorkBreakdownService(PlanningService planning)
         {
-            _scopeProvider = scopeProvider;
+            _planning = planning;
         }
 
+        /// <summary>Tävlingens planering i förberedelsernas form. Tom när tävlingen saknar planering.</summary>
         public WorkBreakdownResponse Build(int competitionId, bool canEdit)
         {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var areas = db.Fetch<WorkArea>(
-                "SELECT * FROM WorkArea WHERE CompetitionId = @0 ORDER BY SortOrder, Id", competitionId);
-            var items = db.Fetch<WorkItem>(
-                "SELECT * FROM WorkItem WHERE CompetitionId = @0 ORDER BY SortOrder, Id", competitionId);
-            var links = db.Fetch<WorkLink>(
-                "SELECT * FROM WorkLink WHERE CompetitionId = @0 ORDER BY Id", competitionId);
+            var resp = new WorkBreakdownResponse { CanEdit = false };
+            var p = _planning.ForCompetition(competitionId);
+            if (p == null) return resp;
 
-            var comments = db.Fetch<WorkItemComment>(
-                "SELECT * FROM WorkItemComment WHERE CompetitionId = @0", competitionId);
-            var deps = db.Fetch<WorkItemDependency>(
-                "SELECT * FROM WorkItemDependency WHERE CompetitionId = @0", competitionId);
-
-            var today = DateTime.UtcNow.Date;
-            var itemsByArea = items.GroupBy(i => i.WorkAreaId).ToDictionary(g => g.Key, g => g.ToList());
-            var itemById = items.ToDictionary(i => i.Id);
-            var linksByItem = links.Where(l => l.WorkItemId.HasValue).GroupBy(l => l.WorkItemId!.Value).ToDictionary(g => g.Key, g => g.ToList());
-            var linksByArea = links.Where(l => l.WorkAreaId.HasValue && !l.WorkItemId.HasValue).GroupBy(l => l.WorkAreaId!.Value).ToDictionary(g => g.Key, g => g.ToList());
-            var commentCount = comments.Where(c => string.Equals(c.Kind, WorkCommentKind.Comment, StringComparison.OrdinalIgnoreCase))
-                .GroupBy(c => c.WorkItemId).ToDictionary(g => g.Key, g => g.Count());
-            var depsByItem = deps.GroupBy(d => d.WorkItemId).ToDictionary(g => g.Key, g => g.ToList());
-
-            var resp = new WorkBreakdownResponse { CanEdit = canEdit };
-            // Competition-level documents (no område, no uppgift) — where the big docs live.
-            resp.CompLinks = links.Where(l => !l.WorkAreaId.HasValue && !l.WorkItemId.HasValue).Select(ToLinkView).ToList();
-
-            foreach (var a in areas)
+            var people = _planning.Participants(p.Id, includeRemoved: true).ToDictionary(x => x.Id);
+            var tasks = _planning.Tasks(p.Id);
+            var docs = _planning.Documents(p.Id);
+            var today = DateTime.Today;
+            (int? MemberId, string? Name) Who(int? pid, string? free) =>
+                pid.HasValue && people.TryGetValue(pid.Value, out var row) ? (row.MemberId, row.DisplayName) : (null, free);
+            WorkLinkView Link(PlanningDocumentRow d) => new()
             {
-                itemsByArea.TryGetValue(a.Id, out var areaItems);
-                areaItems ??= new List<WorkItem>();
-                var views = areaItems.Select(i =>
+                Id = d.Id, WorkAreaId = d.AreaId, WorkItemId = d.TaskId, Title = d.Title, IsFile = d.IsFile,
+                Url = d.IsFile ? $"/umbraco/surface/Planning/DownloadDocument?id={p.Id}&documentId={d.Id}" : d.Url,
+            };
+            WorkItemView Item(PlanningTaskRow t, int areaId)
+            {
+                var (mid, name) = Who(t.AssigneeParticipantId, t.AssigneeName);
+                return new WorkItemView
                 {
-                    var v = ToView(i, today);
-                    if (linksByItem.TryGetValue(i.Id, out var il)) v.Links = il.Select(ToLinkView).ToList();
-                    v.CommentCount = commentCount.TryGetValue(i.Id, out var cc) ? cc : 0;
-                    if (depsByItem.TryGetValue(i.Id, out var dl))
-                    {
-                        foreach (var dep in dl)
-                        {
-                            itemById.TryGetValue(dep.BlockedByItemId, out var b);
-                            var done = b != null && string.Equals(b.Status, WorkItemStatus.Klar, StringComparison.OrdinalIgnoreCase);
-                            v.BlockedBy.Add(new WorkItemBlockerView
-                            {
-                                DependencyId = dep.Id,
-                                ItemId = dep.BlockedByItemId,
-                                Title = b?.Title ?? $"#{dep.BlockedByItemId}",
-                                Status = b?.Status ?? "",
-                                Done = done,
-                            });
-                        }
-                        v.IsBlocked = v.BlockedBy.Any(x => !x.Done);
-                    }
-                    return v;
-                }).ToList();
-                resp.Areas.Add(new WorkAreaView
-                {
-                    Id = a.Id,
-                    Name = a.Name,
-                    ResponsibleMemberId = a.ResponsibleMemberId,
-                    ResponsibleName = a.ResponsibleName,
-                    SortOrder = a.SortOrder,
-                    Items = views,
-                    Links = linksByArea.TryGetValue(a.Id, out var al) ? al.Select(ToLinkView).ToList() : new(),
-                    TotalCount = views.Count,
-                    DoneCount = views.Count(v => string.Equals(v.Status, WorkItemStatus.Klar, StringComparison.OrdinalIgnoreCase)),
-                    OverdueCount = views.Count(v => v.IsOverdue),
-                    EstimatedCostSum = views.Sum(v => v.EstimatedCost ?? 0m),
-                });
+                    Id = t.Id, WorkAreaId = areaId, Title = t.Title, Description = t.Description,
+                    AssignedMemberId = mid, AssignedName = name,
+                    DueDate = t.DueDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    Status = LegacyStatus(t.Status), ScopeType = t.ScopeType, ScopeKey = t.ScopeKey,
+                    IsOverdue = PlanningTaskRules.IsOverdue(t, today), EstimatedCost = t.EstimatedCost, SortOrder = t.SortOrder,
+                    Links = docs.Where(d => d.TaskId == t.Id).Select(Link).ToList(),
+                };
             }
+            WorkAreaView Area(int id, string name, int? respPid, string? respName, int sort, List<PlanningTaskRow> items)
+            {
+                var (mid, rname) = Who(respPid, respName);
+                var views = items.OrderBy(t => t.SortOrder).ThenBy(t => t.Id).Select(t => Item(t, id)).ToList();
+                return new WorkAreaView
+                {
+                    Id = id, Name = name, ResponsibleMemberId = mid, ResponsibleName = rname, SortOrder = sort, Items = views,
+                    Links = id > 0 ? docs.Where(d => d.AreaId == id && d.TaskId == null).Select(Link).ToList() : new(),
+                    TotalCount = views.Count, DoneCount = views.Count(v => v.Status == WorkItemStatus.Klar),
+                    OverdueCount = views.Count(v => v.IsOverdue), EstimatedCostSum = views.Sum(v => v.EstimatedCost ?? 0m),
+                };
+            }
+
+            var areas = _planning.Areas(p.Id);
+            var areaIds = areas.Select(a => a.Id).ToHashSet();
+            foreach (var a in areas)
+                resp.Areas.Add(Area(a.Id, a.Name, a.ResponsibleParticipantId, a.ResponsibleName, a.SortOrder, tasks.Where(t => t.AreaId == a.Id).ToList()));
+            var loose = tasks.Where(t => !t.AreaId.HasValue || !areaIds.Contains(t.AreaId.Value)).ToList();
+            if (loose.Count > 0) resp.Areas.Add(Area(0, "Utan område", null, null, int.MaxValue, loose));
+            resp.CompLinks = docs.Where(d => d.AreaId == null && d.TaskId == null).Select(Link).ToList();
             resp.TotalEstimatedCost = resp.Areas.Sum(a => a.EstimatedCostSum);
             return resp;
         }
 
-        // ---- WorkLink (documents & links) ----
-
-        public List<WorkLink> GetLinks(int competitionId)
+        /// <summary>Planeringens läge i förberedelsernas ord (de läsare som finns kvar känner de orden).</summary>
+        public static string LegacyStatus(string? status) => status switch
         {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.Fetch<WorkLink>("SELECT * FROM WorkLink WHERE CompetitionId = @0 ORDER BY Id", competitionId);
-        }
-
-        public WorkLink? GetLink(int id)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.SingleOrDefault<WorkLink>("SELECT * FROM WorkLink WHERE Id = @0", id);
-        }
-
-        /// <summary>Returns 0 when the område or uppgift the link points at belongs to another competition.</summary>
-        public int SaveLink(WorkLink link)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            if (link.WorkAreaId is > 0 && !AreaBelongs(db, link.WorkAreaId.Value, link.CompetitionId)) return 0;
-            if (link.WorkItemId is > 0 && !ItemBelongs(db, link.WorkItemId.Value, link.CompetitionId)) return 0;
-            if (link.CreatedDate == default) link.CreatedDate = DateTime.UtcNow;
-            return Convert.ToInt32(db.Insert(link));
-        }
-
-        // Varje rad som pekas ut med ett id utifrån prövas mot tävlingen anropet gäller. Behörigheten
-        // prövas bara för den tävlingen, så en rad i en annan tävling får aldrig gå att läsa, ändra eller
-        // hänga något på genom ett id (rättat 2026-10-21 — förut flyttade en sparning raden hit).
-        private static bool AreaBelongs(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int areaId, int competitionId)
-            => db.ExecuteScalar<int>("SELECT COUNT(1) FROM WorkArea WHERE Id = @0 AND CompetitionId = @1", areaId, competitionId) > 0;
-
-        private static bool ItemBelongs(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int itemId, int competitionId)
-            => db.ExecuteScalar<int>("SELECT COUNT(1) FROM WorkItem WHERE Id = @0 AND CompetitionId = @1", itemId, competitionId) > 0;
-
-        /// <summary>Delete a link row and return its stored file name (if any) so the caller can remove the file.</summary>
-        public string? DeleteLink(int id, int competitionId)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var row = db.SingleOrDefault<WorkLink>("SELECT * FROM WorkLink WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
-            if (row == null) return null;
-            db.Execute("DELETE FROM WorkLink WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
-            return row.StoredFileName;
-        }
-
-        private static WorkLinkView ToLinkView(WorkLink l)
-        {
-            var isFile = !string.IsNullOrEmpty(l.StoredFileName);
-            return new WorkLinkView
-            {
-                Id = l.Id,
-                WorkAreaId = l.WorkAreaId,
-                WorkItemId = l.WorkItemId,
-                Title = l.Title,
-                // For a stored file, hand the client the authorized download route; for a link, the raw URL.
-                Url = isFile ? $"/umbraco/surface/Staffing/DownloadWorkDocument?id={l.Id}" : l.Url,
-                IsFile = isFile,
-            };
-        }
-
-        /// <summary>
-        /// Auto-seed one "Bygg station N" uppgift per configured station (Fältskytte), under a
-        /// "Stationsbygge" område, each scoped Station:N (→ Fältkonfigurator). Idempotent: skips a
-        /// station that already has a Station:N-scoped task. Returns how many were created.
-        /// </summary>
-        public int SeedStationTasks(int competitionId, int stationCount, int byMemberId)
-        {
-            if (stationCount <= 0) return 0;
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-
-            var area = db.SingleOrDefault<WorkArea>(
-                "SELECT * FROM WorkArea WHERE CompetitionId = @0 AND Name = @1", competitionId, "Stationsbygge");
-            if (area == null)
-            {
-                var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM WorkArea WHERE CompetitionId = @0", competitionId) ?? 0;
-                area = new WorkArea { CompetitionId = competitionId, Name = "Stationsbygge", SortOrder = maxSort + 1, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
-                area.Id = Convert.ToInt32(db.Insert(area));
-            }
-
-            var existing = db.Fetch<WorkItem>(
-                "SELECT * FROM WorkItem WHERE CompetitionId = @0 AND ScopeType = @1", competitionId, "Station");
-            var haveStations = existing.Where(i => int.TryParse(i.ScopeKey, out _)).Select(i => i.ScopeKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            int added = 0, sort = existing.Count;
-            for (int n = 1; n <= stationCount; n++)
-            {
-                if (haveStations.Contains(n.ToString())) continue;
-                db.Insert(new WorkItem
-                {
-                    CompetitionId = competitionId,
-                    WorkAreaId = area.Id,
-                    Title = $"Bygg station {n}",
-                    Status = WorkItemStatus.Planerad,
-                    ScopeType = "Station",
-                    ScopeKey = n.ToString(),
-                    SortOrder = ++sort,
-                    CreatedByMemberId = byMemberId,
-                    CreatedDate = DateTime.UtcNow,
-                    ModifiedDate = DateTime.UtcNow,
-                });
-                added++;
-            }
-            return added;
-        }
-
-        public WorkItem? GetItem(int id)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            return scope.Database.SingleOrDefault<WorkItem>("SELECT * FROM WorkItem WHERE Id = @0", id);
-        }
-
-        // ---- WorkArea writes ----
-
-        /// <summary>Returns 0 when <c>req.Id</c> is not an område in <c>req.CompetitionId</c>.</summary>
-        public int SaveArea(SaveWorkAreaRequest req, int byMemberId)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            WorkArea row;
-            if (req.Id > 0)
-            {
-                var existing = db.SingleOrDefault<WorkArea>(
-                    "SELECT * FROM WorkArea WHERE Id = @0 AND CompetitionId = @1", req.Id, req.CompetitionId);
-                if (existing == null) return 0;
-                row = existing;
-            }
-            else
-            {
-                var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM WorkArea WHERE CompetitionId = @0", req.CompetitionId) ?? 0;
-                row = new WorkArea { CompetitionId = req.CompetitionId, SortOrder = maxSort + 1, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
-            }
-            row.CompetitionId = req.CompetitionId;
-            row.Name = (req.Name ?? "").Trim();
-            row.ResponsibleMemberId = req.ResponsibleMemberId is > 0 ? req.ResponsibleMemberId : null;
-            row.ResponsibleName = string.IsNullOrWhiteSpace(req.ResponsibleName) ? null : req.ResponsibleName.Trim();
-
-            if (row.Id > 0) db.Update(row);
-            else row.Id = Convert.ToInt32(db.Insert(row));
-            return row.Id;
-        }
-
-        public void DeleteArea(int id, int competitionId)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            // Clean up comments + dependencies of the område's items before dropping the items themselves.
-            var itemIds = db.Fetch<int>("SELECT Id FROM WorkItem WHERE WorkAreaId = @0 AND CompetitionId = @1", id, competitionId);
-            if (itemIds.Count > 0)
-            {
-                db.Execute("DELETE FROM WorkItemComment WHERE CompetitionId = @0 AND WorkItemId IN (@1)", competitionId, itemIds);
-                db.Execute("DELETE FROM WorkItemDependency WHERE CompetitionId = @0 AND (WorkItemId IN (@1) OR BlockedByItemId IN (@1))", competitionId, itemIds);
-            }
-            db.Execute("DELETE FROM WorkItem WHERE WorkAreaId = @0 AND CompetitionId = @1", id, competitionId);
-            db.Execute("DELETE FROM WorkArea WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
-        }
-
-        // ---- WorkItem writes ----
-
-        /// <summary>Returns 0 when <c>req.Id</c> is not an uppgift in <c>req.CompetitionId</c>, or when
-        /// <c>req.WorkAreaId</c> is an område in another competition.</summary>
-        public int SaveItem(SaveWorkItemRequest req, int byMemberId, string? byName = null)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            if (!AreaBelongs(db, req.WorkAreaId, req.CompetitionId)) return 0;
-            WorkItem row;
-            string? oldStatus = null;
-            if (req.Id > 0)
-            {
-                var existing = db.SingleOrDefault<WorkItem>(
-                    "SELECT * FROM WorkItem WHERE Id = @0 AND CompetitionId = @1", req.Id, req.CompetitionId);
-                if (existing == null) return 0;
-                row = existing;
-                oldStatus = row.Status;
-            }
-            else
-            {
-                var maxSort = db.ExecuteScalar<int?>("SELECT MAX(SortOrder) FROM WorkItem WHERE WorkAreaId = @0", req.WorkAreaId) ?? 0;
-                row = new WorkItem { CompetitionId = req.CompetitionId, SortOrder = maxSort + 1, CreatedByMemberId = byMemberId, CreatedDate = DateTime.UtcNow };
-            }
-            row.CompetitionId = req.CompetitionId;
-            row.WorkAreaId = req.WorkAreaId;
-            row.Title = (req.Title ?? "").Trim();
-            row.Description = string.IsNullOrWhiteSpace(req.Description) ? null : req.Description.Trim();
-            row.AssignedMemberId = req.AssignedMemberId is > 0 ? req.AssignedMemberId : null;
-            row.AssignedName = string.IsNullOrWhiteSpace(req.AssignedName) ? null : req.AssignedName.Trim();
-            row.DueDate = ParseDate(req.DueDate);
-            row.Status = NormalizeStatus(req.Status);
-            row.ScopeType = string.IsNullOrWhiteSpace(req.ScopeType) ? null : req.ScopeType.Trim();
-            row.ScopeKey = string.IsNullOrWhiteSpace(req.ScopeKey) ? null : req.ScopeKey.Trim();
-            row.EstimatedCost = req.EstimatedCost is >= 0 ? req.EstimatedCost : null;
-            row.ModifiedDate = DateTime.UtcNow;
-
-            if (row.Id > 0) db.Update(row);
-            else row.Id = Convert.ToInt32(db.Insert(row));
-
-            // Audit the status transition (who-marked-done trail) when an existing item's status changed.
-            if (oldStatus != null && !string.Equals(oldStatus, row.Status, StringComparison.OrdinalIgnoreCase))
-                InsertAudit(db, req.CompetitionId, row.Id, StatusAuditText(row.Status), byMemberId, byName);
-
-            return row.Id;
-        }
-
-        public void DeleteItem(int id, int competitionId)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            db.Execute("DELETE FROM WorkItemComment WHERE WorkItemId = @0 AND CompetitionId = @1", id, competitionId);
-            db.Execute("DELETE FROM WorkItemDependency WHERE (WorkItemId = @0 OR BlockedByItemId = @0) AND CompetitionId = @1", id, competitionId);
-            db.Execute("DELETE FROM WorkItem WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
-        }
-
-        /// <summary>Quick status toggle from the checkbox (Planerad/Klar) without opening the editor.
-        /// Logs an audit entry to the item's thread (the who-marked-done trail) when the status changes.</summary>
-        public void SetItemStatus(int id, int competitionId, string status, int byMemberId = 0, string? byName = null)
-        {
-            var newStatus = NormalizeStatus(status);
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var row = db.SingleOrDefault<WorkItem>("SELECT * FROM WorkItem WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
-            if (row == null) return;
-            if (string.Equals(row.Status, newStatus, StringComparison.OrdinalIgnoreCase)) return;  // no change
-            db.Execute("UPDATE WorkItem SET Status = @0, ModifiedDate = @1 WHERE Id = @2 AND CompetitionId = @3",
-                newStatus, DateTime.UtcNow, id, competitionId);
-            InsertAudit(db, competitionId, id, StatusAuditText(newStatus), byMemberId, byName);
-        }
-
-        // ---- comments / audit thread + dependencies (P2 coordination) ----
-
-        private static string StatusAuditText(string status) => status switch
-        {
-            WorkItemStatus.Klar => "Markerade uppgiften som klar",
-            WorkItemStatus.Pagar => "Satte status till Pågår",
-            WorkItemStatus.Blockerad => "Satte status till Blockerad",
-            _ => "Satte status till Planerad",
-        };
-
-        private static void InsertAudit(Umbraco.Cms.Infrastructure.Persistence.IUmbracoDatabase db, int competitionId, int itemId, string body, int byMemberId, string? byName)
-        {
-            db.Insert(new WorkItemComment
-            {
-                CompetitionId = competitionId,
-                WorkItemId = itemId,
-                Kind = WorkCommentKind.Audit,
-                Body = body,
-                AuthorMemberId = byMemberId,
-                AuthorName = byName,
-                CreatedDate = DateTime.UtcNow,
-            });
-        }
-
-        /// <summary>Append a system audit line to an item's thread (used by status changes + notify/remind).</summary>
-        public void LogAudit(int competitionId, int itemId, string body, int byMemberId, string? byName)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            InsertAudit(scope.Database, competitionId, itemId, body, byMemberId, byName);
-        }
-
-        /// <summary>Add a person-written comment to an item's thread. Returns the new row id.</summary>
-        /// <summary>Returns 0 when the uppgift belongs to another competition.</summary>
-        public int AddComment(int competitionId, int itemId, string body, int byMemberId, string? byName)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            if (!ItemBelongs(scope.Database, itemId, competitionId)) return 0;
-            return Convert.ToInt32(scope.Database.Insert(new WorkItemComment
-            {
-                CompetitionId = competitionId,
-                WorkItemId = itemId,
-                Kind = WorkCommentKind.Comment,
-                Body = body,
-                AuthorMemberId = byMemberId,
-                AuthorName = byName,
-                CreatedDate = DateTime.UtcNow,
-            }));
-        }
-
-        public void DeleteComment(int id, int competitionId)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            scope.Database.Execute("DELETE FROM WorkItemComment WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
-        }
-
-        /// <summary>The full thread for one uppgift: comments+audit (chronological), current blockers, and
-        /// candidate items that can be added as blockers (other items in the comp, excluding cycles).</summary>
-        public WorkItemThreadResponse GetThread(int competitionId, int itemId, bool canEdit)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var item = db.SingleOrDefault<WorkItem>("SELECT * FROM WorkItem WHERE Id = @0 AND CompetitionId = @1", itemId, competitionId);
-            if (item == null) return new WorkItemThreadResponse { Success = false, Message = "Uppgiften hittades inte." };
-
-            var resp = new WorkItemThreadResponse { CanEdit = canEdit, Title = item.Title };
-
-            var comments = db.Fetch<WorkItemComment>(
-                "SELECT * FROM WorkItemComment WHERE WorkItemId = @0 ORDER BY CreatedDate, Id", itemId);
-            resp.Comments = comments.Select(c => new WorkItemCommentView
-            {
-                Id = c.Id,
-                Kind = c.Kind,
-                Body = c.Body,
-                AuthorMemberId = c.AuthorMemberId,
-                AuthorName = c.AuthorName,
-                CreatedDate = c.CreatedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.GetCultureInfo("sv-SE")),
-            }).ToList();
-
-            var allItems = db.Fetch<WorkItem>("SELECT * FROM WorkItem WHERE CompetitionId = @0", competitionId);
-            var byId = allItems.ToDictionary(i => i.Id);
-            var deps = db.Fetch<WorkItemDependency>("SELECT * FROM WorkItemDependency WHERE WorkItemId = @0", itemId);
-            resp.BlockedBy = deps.Select(d =>
-            {
-                byId.TryGetValue(d.BlockedByItemId, out var b);
-                return new WorkItemBlockerView
-                {
-                    DependencyId = d.Id,
-                    ItemId = d.BlockedByItemId,
-                    Title = b?.Title ?? $"#{d.BlockedByItemId}",
-                    Status = b?.Status ?? "",
-                    Done = b != null && string.Equals(b.Status, WorkItemStatus.Klar, StringComparison.OrdinalIgnoreCase),
-                };
-            }).ToList();
-
-            // Candidates = other items not already a blocker and not directly blocked BY this item (cycle guard).
-            var reverse = db.Fetch<WorkItemDependency>("SELECT * FROM WorkItemDependency WHERE BlockedByItemId = @0", itemId)
-                .Select(d => d.WorkItemId).ToHashSet();
-            var existingBlockers = deps.Select(d => d.BlockedByItemId).ToHashSet();
-            var areaNames = db.Fetch<WorkArea>("SELECT * FROM WorkArea WHERE CompetitionId = @0", competitionId)
-                .ToDictionary(a => a.Id, a => a.Name);
-            resp.Candidates = allItems
-                .Where(i => i.Id != itemId && !existingBlockers.Contains(i.Id) && !reverse.Contains(i.Id))
-                .OrderBy(i => i.SortOrder).ThenBy(i => i.Id)
-                .Select(i => new CandidateItem { Id = i.Id, Title = i.Title, Area = areaNames.TryGetValue(i.WorkAreaId, out var n) ? n : "" })
-                .ToList();
-            return resp;
-        }
-
-        /// <summary>Add a "blockeras av" dependency. Guards against self- and direct reciprocal cycles.</summary>
-        public (bool Ok, string? Message) AddDependency(int competitionId, int itemId, int blockedByItemId, int byMemberId)
-        {
-            if (itemId <= 0 || blockedByItemId <= 0) return (false, "Ogiltig uppgift.");
-            if (itemId == blockedByItemId) return (false, "En uppgift kan inte blockeras av sig själv.");
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var both = db.Fetch<WorkItem>("SELECT * FROM WorkItem WHERE CompetitionId = @0 AND Id IN (@1, @2)", competitionId, itemId, blockedByItemId);
-            if (both.Count < 2) return (false, "Uppgiften hittades inte.");
-            // Direct reciprocal (blockedBy is already blocked by this item) → would be a cycle.
-            var reverse = db.ExecuteScalar<int>("SELECT COUNT(*) FROM WorkItemDependency WHERE WorkItemId = @0 AND BlockedByItemId = @1", blockedByItemId, itemId);
-            if (reverse > 0) return (false, "Det skulle skapa en cirkulär koppling.");
-            var dup = db.ExecuteScalar<int>("SELECT COUNT(*) FROM WorkItemDependency WHERE WorkItemId = @0 AND BlockedByItemId = @1", itemId, blockedByItemId);
-            if (dup > 0) return (true, null);  // already there — idempotent
-            db.Insert(new WorkItemDependency
-            {
-                CompetitionId = competitionId,
-                WorkItemId = itemId,
-                BlockedByItemId = blockedByItemId,
-                CreatedByMemberId = byMemberId,
-                CreatedDate = DateTime.UtcNow,
-            });
-            return (true, null);
-        }
-
-        public void RemoveDependency(int id, int competitionId)
-        {
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            scope.Database.Execute("DELETE FROM WorkItemDependency WHERE Id = @0 AND CompetitionId = @1", id, competitionId);
-        }
-
-        /// <summary>
-        /// Seed the built-in prep template (områden + default uppgifter) for a competition, sized
-        /// klubb/krets/sm. Only adds områden that don't already exist by name — safe to run on a
-        /// competition that already has some structure.
-        /// </summary>
-        /// <summary>
-        /// Seed the built-in prep template (områden + default uppgifter) for a competition, tailored by
-        /// discipline (Fält / Springskytte / Precision) and sized klubb/krets/sm. When a competition date
-        /// is known, each uppgift's DueDate is anchored relative to it (e.g. "6 v. före"). Only adds områden
-        /// that don't already exist by name — safe to run on a competition that already has some structure.
-        /// </summary>
-        public int SeedTemplate(int competitionId, string? size, string? discipline, DateTime? compDate, int byMemberId)
-            => SeedAreas(competitionId, PrepTemplates.For(discipline, size), compDate, byMemberId);
-
-        /// <summary>Seed a list of områden + uppgifter (skip områden already present by name), anchoring each
-        /// uppgift's DueDate to compDate − DaysBeforeComp. Shared by the built-in size templates and the
-        /// editable per-club/region StaffingTemplate seeding. Returns how many områden were created.</summary>
-        internal int SeedAreas(int competitionId, List<PrepArea> template, DateTime? compDate, int byMemberId)
-        {
-            int added = 0;
-            using var scope = _scopeProvider.CreateScope(autoComplete: true);
-            var db = scope.Database;
-            var existingAreas = db.Fetch<WorkArea>("SELECT * FROM WorkArea WHERE CompetitionId = @0", competitionId);
-            var existingNames = existingAreas.Select(a => a.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var maxSort = existingAreas.Count == 0 ? 0 : existingAreas.Max(a => a.SortOrder);
-
-            foreach (var areaDef in template)
-            {
-                if (existingNames.Contains(areaDef.Area)) continue;
-                var area = new WorkArea
-                {
-                    CompetitionId = competitionId,
-                    Name = areaDef.Area,
-                    SortOrder = ++maxSort,
-                    CreatedByMemberId = byMemberId,
-                    CreatedDate = DateTime.UtcNow,
-                };
-                area.Id = Convert.ToInt32(db.Insert(area));
-                added++;
-                int sort = 0;
-                foreach (var item in areaDef.Items)
-                {
-                    DateTime? due = (compDate.HasValue && item.DaysBeforeComp.HasValue)
-                        ? compDate.Value.Date.AddDays(-item.DaysBeforeComp.Value)
-                        : (DateTime?)null;
-                    db.Insert(new WorkItem
-                    {
-                        CompetitionId = competitionId,
-                        WorkAreaId = area.Id,
-                        Title = item.Title,
-                        DueDate = due,
-                        Status = WorkItemStatus.Planerad,
-                        SortOrder = ++sort,
-                        CreatedByMemberId = byMemberId,
-                        CreatedDate = DateTime.UtcNow,
-                        ModifiedDate = DateTime.UtcNow,
-                    });
-                }
-            }
-            return added;
-        }
-
-        // ---- helpers ----
-
-        private static WorkItemView ToView(WorkItem i, DateTime today)
-        {
-            bool overdue = i.DueDate.HasValue
-                && i.DueDate.Value.Date < today
-                && !string.Equals(i.Status, WorkItemStatus.Klar, StringComparison.OrdinalIgnoreCase);
-            return new WorkItemView
-            {
-                Id = i.Id,
-                WorkAreaId = i.WorkAreaId,
-                Title = i.Title,
-                Description = i.Description,
-                AssignedMemberId = i.AssignedMemberId,
-                AssignedName = i.AssignedName,
-                DueDate = i.DueDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                Status = i.Status,
-                ScopeType = i.ScopeType,
-                ScopeKey = i.ScopeKey,
-                IsOverdue = overdue,
-                EstimatedCost = i.EstimatedCost,
-                SortOrder = i.SortOrder,
-            };
-        }
-
-        private static DateTime? ParseDate(string? s)
-        {
-            if (string.IsNullOrWhiteSpace(s)) return null;
-            if (DateTime.TryParse(s, CultureInfo.GetCultureInfo("sv-SE"), DateTimeStyles.None, out var dt)) return dt.Date;
-            if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out dt)) return dt.Date;
-            return null;
-        }
-
-        private static string NormalizeStatus(string? s) => s switch
-        {
-            WorkItemStatus.Pagar => WorkItemStatus.Pagar,
-            WorkItemStatus.Blockerad => WorkItemStatus.Blockerad,
-            WorkItemStatus.Klar => WorkItemStatus.Klar,
+            PlanningTaskStatus.Done => WorkItemStatus.Klar,
+            PlanningTaskStatus.InProgress or PlanningTaskStatus.ReadyForReview => WorkItemStatus.Pagar,
+            PlanningTaskStatus.NeedsHelp => WorkItemStatus.Blockerad,
             _ => WorkItemStatus.Planerad,
         };
     }
