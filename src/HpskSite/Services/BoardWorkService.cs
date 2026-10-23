@@ -114,6 +114,10 @@ namespace HpskSite.Services
         public Placement? GetIssuePlacement(int issueId) =>
             GetPlacements("IssueId", new[] { issueId }).GetValueOrDefault(issueId);
 
+        /// <summary>Placeringarna för flera ärenden i en fråga (tävlingsplaneringens förslag).</summary>
+        public Dictionary<int, Placement> GetIssuePlacements(IEnumerable<int> issueIds) =>
+            GetPlacements("IssueId", issueIds);
+
         public Placement? GetMotionPlacement(int motionId) =>
             GetPlacements("MotionId", new[] { motionId }).GetValueOrDefault(motionId);
 

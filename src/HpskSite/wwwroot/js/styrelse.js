@@ -725,7 +725,8 @@
 
     function itemSource(it) {
         if (it.issue) {
-            const src = it.issue.sourceKind === 'Motion' ? 'Från motionerna' : it.issue.sourceKind === 'Skrivelse' ? 'Inkommen skrivelse' : 'Anmält av ' + esc(it.issue.submittedBy);
+            const src = it.issue.sourceKind === 'Motion' ? 'Från motionerna' : it.issue.sourceKind === 'Skrivelse' ? 'Inkommen skrivelse'
+                : it.issue.sourceKind === 'Planering' ? 'Från tävlingsplaneringen, skickat av ' + esc(it.issue.submittedBy) : 'Anmält av ' + esc(it.issue.submittedBy);
             return `<div class="sv-src">${src} · ${esc(it.issue.kindLabel)}</div>${it.issue.body ? `<div class="sv-src" style="white-space:pre-wrap;">${esc(it.issue.body)}</div>` : ''}`;
         }
         if (it.motion) {
@@ -1301,7 +1302,7 @@
                     <div class="table-responsive"><table class="table sv-table align-middle mb-0 bg-transparent"><thead><tr><th>Ärende</th><th class="d-none d-md-table-cell">Anmält av</th><th class="d-none d-md-table-cell">Önskat möte</th><th class="text-end"></th></tr></thead><tbody>`;
                 waiting.forEach(i => {
                     h += `<tr><td><strong>${esc(i.title)}</strong><div class="sv-help">${esc(i.kindLabel)} · ${esc(svDate(i.submittedDate))}<span class="d-md-none"> · ${esc(i.submittedBy)}</span></div></td>
-                        <td class="d-none d-md-table-cell">${esc(i.sourceKind === 'Skrivelse' ? 'Inkommen skrivelse' : i.sourceKind === 'Motion' ? 'Motionerna' : i.submittedBy)}</td>
+                        <td class="d-none d-md-table-cell">${esc(i.sourceKind === 'Skrivelse' ? 'Inkommen skrivelse' : i.sourceKind === 'Motion' ? 'Motionerna' : i.sourceKind === 'Planering' ? 'Planeringen (' + i.submittedBy + ')' : i.submittedBy)}</td>
                         <td class="d-none d-md-table-cell">${esc(i.wishMeeting ? svDate(i.wishMeeting.slice(-10)) : 'Nästa möte')}</td>
                         <td class="text-end text-nowrap"><button type="button" class="btn btn-sm btn-primary" data-place="${i.id}">Placera…</button>
                         ${rowMenu([{ label: 'Visa ärendet', fn: () => issueDetail(i) }, { label: 'Ändra…', fn: () => issueDialog(i) }, { divider: true }, { label: 'Avvisa…', danger: true, fn: () => rejectDialog(i) }])}</td></tr>`;

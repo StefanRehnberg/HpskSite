@@ -44,6 +44,7 @@ namespace HpskSite.Services.Planning
             "PlanningMeetingVote", "PlanningNotifyLog", "PlanningLink", "PlanningRequest",
             "PlanningTask", "PlanningTaskEvent", "PlanningMeetingTopic", "PlanningRole",
             "PlanningArea", "PlanningDocument", "PlanningDocumentCategory", "PlanningDocumentRef",
+            "PlanningDecision", "PlanningDecisionResponse",
         };
 
         /// <summary>Tabeller som saknas. Kastar om databasen inte går att fråga — "vet inte" är inget svar.</summary>

@@ -165,6 +165,21 @@ namespace HpskSite.Services.Planning
         /// <summary>Ge och ta bort roller: den sammankallande (som nivån och vad man företräder).</summary>
         public static bool CanManageRoles(PlanningCaller c) => CanManagePlanning(c);
 
+        // ---------------------------------------------------------------- förslag och beslut (P3)
+
+        /// <summary>Lägga fram ett förslag: Deltar och uppåt.</summary>
+        public static bool CanProposeDecision(PlanningCaller c) => CanWriteMessages(c);
+
+        /// <summary>Svara Vi kan / Vi kan inte: de som kallas till mötena (Deltar och uppåt), även via mejllänken.</summary>
+        public static bool CanRespondToDecision(PlanningCaller c) => CanUseMeetings(c);
+
+        /// <summary>Ändra eller dra tillbaka ett öppet förslag: den som lade fram det, eller Kan ändra och uppåt.</summary>
+        public static bool CanEditDecision(PlanningCaller c, PlanningDecisionRow d) =>
+            c.IsParticipant && d.IsOpen && (d.ProposedBy == c.ParticipantId || AtLeast(c, PlanningAccessLevel.Editor));
+
+        /// <summary>Registrera eller ångra beslutet, och skicka förslaget till en styrelse: Kan ändra och uppåt, inloggad.</summary>
+        public static bool CanDecideDecision(PlanningCaller c) => CanEditPlanning(c);
+
         /// <summary>Redigera eller ta bort ett meddelande: bara författaren.</summary>
         public static bool CanEditMessage(PlanningCaller c, PlanningMessageRow m) =>
             c.IsParticipant && m.Kind == "Message" && m.ParticipantId == c.ParticipantId && m.DeletedAt == null;

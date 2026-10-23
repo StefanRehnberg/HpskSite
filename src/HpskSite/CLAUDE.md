@@ -12565,6 +12565,20 @@ dagen**; svara och rösta ur mejlet **utan inloggning**; inbjudan per e-post til
   (`MarkSentToForbundet` + systemmeddelande). Uppgifter: filtret Milstolpar, flaggan på raden; Översikt: kortet
   Milstolpar. Svit `hpsk-verify/tavlingsplanering-p3-verify.mjs` 25/25 (A/B: mallens flagga + uppdateringens
   "behåll" fäller 6).
+- **P3 steg B, förslag och beslut (2026-10-23):** `PlanningDecision` + `PlanningDecisionResponse` (migrering
+  `create-planning-decisions.sql`, körordning P3b), `PlanningService.Decisions.cs`, `PlanningController.Decisions.cs`,
+  regler i `PlanningDecisionRules` + `PlanningAccess.CanProposeDecision/CanRespondToDecision/CanEditDecision/CanDecideDecision`.
+  Rälsposten **Förslag och beslut** (`#vy=beslut`). Deltar och uppåt lägger fram och svarar *Vi kan / Vi kan inte*
+  + kommentar (en rad per deltagare; via mejllänken också). ⚠️ Svaren raderas inte när förslaget ändras — de
+  märks "svarade före ändringen" (`AnsweredBeforeEdit`). Kan ändra registrerar beslutet (arbetsgruppens eller en
+  namngiven styrelses; kan ångras) och skickar förslaget till **styrelsen i en klubb eller krets som någon i
+  planeringen företräder** (`BoardTargets`, fri text räknas inte): `BoardWorkService.CreateIssue` med källan
+  `BoardIssueSources.Planning` ("Planering", `SourceRefId` = förslaget), underlaget bär bakgrunden + svaren,
+  `BoardWorkNotifier.IssueSubmittedAsync` aviserar sekreterare/ordförande; avsändaren (inloggad medlem) får
+  styrelsens besked. ⚠️ Styrelsens läge lagras inte på förslaget — det läses ur ärendekön (`GetIssuePlacements`):
+  väntar / på dagordningen / behandlat (+ styrelsens beslut) / avvisat. Medan ärendet ligger hos styrelsen får
+  förslaget inte ändras, dras tillbaka eller skickas igen (`IsAtBoard`). Varje händelse ger en systemrad.
+  Svit `tavlingsplanering-p3-verify.mjs` 63/63 (A/B: målföreningens prövning + dubbelutskicket → 5 röda).
 - **Migrering `Migrations/create-planning-tables.sql` FÖRE deployen** (21 tabeller med dokumentarkivet och
   `Planning.DisciplineKey`; dev: även `alter-planning-p2-tasks.sql`), **och `alter-staffing-planning-p2b.sql`**
   (bemanningens `PlanningId`) (17 tabeller inkl. `PlanningRequest`,

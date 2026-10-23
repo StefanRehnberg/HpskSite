@@ -61,6 +61,8 @@ namespace HpskSite.Controllers
         private readonly HpskSite.Services.Staffing.StaffingService _staffing;
         private readonly HpskSite.Services.Staffing.StaffDayService _staffDays;
         private readonly HpskSite.Services.SiteSettings.SiteSettingService _siteSettings;
+        private readonly BoardWorkService _boardWork;
+        private readonly BoardWorkNotifier _boardNotify;
 
         public PlanningController(
             IUmbracoContextAccessor umbracoContextAccessor, IUmbracoDatabaseFactory databaseFactory,
@@ -74,9 +76,12 @@ namespace HpskSite.Controllers
             HpskSite.Services.Kretsgranskning.KretsPlanningService kretsPlanning, HpskSite.Services.Staffing.PrepDocumentStorage docs,
             Microsoft.Extensions.Options.IOptions<HpskSite.Models.Configuration.DocumentArchiveOptions> archiveOptions,
             HpskSite.Services.Staffing.StaffingService staffing, HpskSite.Services.Staffing.StaffDayService staffDays,
-            HpskSite.Services.SiteSettings.SiteSettingService siteSettings)
+            HpskSite.Services.SiteSettings.SiteSettingService siteSettings,
+            BoardWorkService boardWork, BoardWorkNotifier boardNotify)
             : base(umbracoContextAccessor, databaseFactory, services, appCaches, profilingLogger, publishedUrlProvider)
         {
+            _boardWork = boardWork;
+            _boardNotify = boardNotify;
             _staffing = staffing;
             _staffDays = staffDays;
             _siteSettings = siteSettings;

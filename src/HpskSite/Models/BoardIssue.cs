@@ -68,6 +68,8 @@ namespace HpskSite.Models
         public const string Member = "Ledamot";
         public const string Motion = "Motion";
         public const string Letter = "Skrivelse";
+        /// <summary>Ett förslag ur en tävlingsplanering (P3, 2026-10-23); <c>SourceRefId</c> = förslagets id.</summary>
+        public const string Planning = "Planering";
     }
 
     public static class BoardIssueClosed
