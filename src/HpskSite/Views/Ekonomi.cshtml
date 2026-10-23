@@ -879,7 +879,7 @@
                             }
                             function hpskReqMsg(status) {
                                 return typeof window.hpskRequestFailureMessage === 'function'
-                                    ? window.hpskRequestFailureMessage(status) : 'Något gick fel (' + status + ').';
+                                    ? window.hpskRequestFailureMessage(status).msg : 'Något gick fel (' + status + ').';
                             }
                             function say(ok, text) {
                                 var m = $('legacyPostMsg');
